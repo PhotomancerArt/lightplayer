@@ -134,7 +134,8 @@ pub fn run(
                     Disposition::ExpectFailure(AnnotationKind::Unsupported) => {
                         unsupported_count += 1;
                     }
-                    Disposition::ExpectFailure(AnnotationKind::Unimplemented) => {
+                    Disposition::ExpectFailure(AnnotationKind::Unimplemented)
+                    | Disposition::ExpectFailure(AnnotationKind::Broken) => {
                         unimplemented_count += 1;
                     }
                     Disposition::ExpectSuccess => compile_failed_lines.push(directive.line_number),

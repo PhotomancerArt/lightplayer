@@ -99,6 +99,8 @@ pub enum AnnotationKind {
     Unimplemented,
     /// Not applicable on this target — by design, not a bug (e.g. NaN on Q32, backend gap).
     Unsupported,
+    /// Known broken — test is expected to fail due to a known bug.
+    Broken,
 }
 
 /// Per-directive annotation: exact canonical target name (e.g. `wasm.q32`).
@@ -139,6 +141,7 @@ pub fn directive_disposition(directive_annotations: &[Annotation], target: &Targ
                 AnnotationKind::Unimplemented => {
                     Disposition::ExpectFailure(AnnotationKind::Unimplemented)
                 }
+                AnnotationKind::Broken => Disposition::ExpectFailure(AnnotationKind::Broken),
             };
         }
     }

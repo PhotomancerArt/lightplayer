@@ -65,8 +65,14 @@ pub fn run_test_file_with_line_filter(
     let mut overall_result = Ok(());
 
     for target in targets {
-        let (result, stats, unexpected_pass, failed_lines, compile_failed) =
-            run_detail::run(test_file, path, line_filter, output_mode, target, suppress_rerun)?;
+        let (result, stats, unexpected_pass, failed_lines, compile_failed) = run_detail::run(
+            test_file,
+            path,
+            line_filter,
+            output_mode,
+            target,
+            suppress_rerun,
+        )?;
 
         let target_name = target.name();
         compile_failed_by_target.insert(target_name.clone(), compile_failed);

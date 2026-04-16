@@ -41,8 +41,9 @@ fn parse_annotation_kind(s: &str, line_number: usize) -> Result<AnnotationKind> 
     match s.trim() {
         "unimplemented" => Ok(AnnotationKind::Unimplemented),
         "unsupported" => Ok(AnnotationKind::Unsupported),
+        "broken" => Ok(AnnotationKind::Broken),
         other => Err(anyhow!(
-            "line {line_number}: invalid annotation kind '{other}', expected unimplemented or unsupported"
+            "line {line_number}: invalid annotation kind '{other}', expected unimplemented, unsupported, or broken"
         )),
     }
 }
@@ -67,6 +68,15 @@ mod tests {
             .unwrap();
         assert!(matches!(ann.kind, AnnotationKind::Unsupported));
         assert_eq!(ann.target, "rv32c.q32");
+    }
+
+    #[test]
+    fn test_parse_broken_target() {
+        let ann = parse_annotation_line("// @broken(wasm.q32)", 3)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(ann.kind, AnnotationKind::Broken));
+        assert_eq!(ann.target, "wasm.q32");
     }
 
     #[test]

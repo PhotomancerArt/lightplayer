@@ -7,6 +7,7 @@
 
 pub mod colors;
 pub mod discovery;
+pub mod mutation;
 pub mod output_mode;
 pub mod parse;
 pub mod runner;
@@ -25,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
+use crate::mutation::{MutationAction, MutationPlan};
 use crate::parse::RunDirective;
 use crate::targets::{
     AnnotationKind, DEFAULT_TARGETS, Disposition, Target, directive_disposition,
@@ -38,26 +40,25 @@ fn directive_has_unimplemented_for(directive: &RunDirective, for_target: &Target
         .any(|a| a.kind == AnnotationKind::Unimplemented && a.applies_to(for_target))
 }
 
-/// Adds `// @unimplemented(target)` before each failing `// run:` (or before each expect-success
-/// run when the whole file failed to compile).
+/// Plans annotation additions for a file based on test failures.
 ///
-/// When `only_if_unimplemented_for` is `Some(baseline)`, only directives that already carry
-/// `@unimplemented(<baseline>)` are considered (used to duplicate baseline markers onto a new
-/// backend without touching unrelated failures).
-/// Returns how many marker operations were applied (0 if already annotated).
-fn mark_unimplemented_expectations_for_file(
+/// Returns a Vec of MutationAction to add annotations (e.g., `// @unimplemented(target)`)
+/// before failing `// run:` lines.
+fn plan_mark_annotations_for_file(
     path: &Path,
     failed_lines: &[usize],
     compile_failed: bool,
     target: &Target,
     only_if_unimplemented_for: Option<&Target>,
-) -> anyhow::Result<usize> {
-    let ann = format!("// @unimplemented({})", target.name());
-    let mut n = 0;
+    annotation_kind: &str,
+) -> anyhow::Result<Vec<MutationAction>> {
+    let ann = format!("// @{}({})", annotation_kind, target.name());
+    let mut actions = Vec::new();
+
+    let u = util::file_update::FileUpdate::new(path);
 
     if compile_failed {
         let tf = crate::parse::parse_test_file(path)?;
-        let u = util::file_update::FileUpdate::new(path);
         let mut lines_to_mark: Vec<usize> = tf
             .run_directives
             .iter()
@@ -79,10 +80,13 @@ fn mark_unimplemented_expectations_for_file(
             if u.per_directive_unimplemented_present(line, target)? {
                 continue;
             }
-            u.add_annotation(line, &ann)?;
-            n += 1;
+            actions.push(MutationAction::AddAnnotation {
+                path: path.to_path_buf(),
+                line,
+                annotation: ann.clone(),
+            });
         }
-        return Ok(n);
+        return Ok(actions);
     }
 
     let tf = if only_if_unimplemented_for.is_some() {
@@ -91,7 +95,6 @@ fn mark_unimplemented_expectations_for_file(
         None
     };
 
-    let u = util::file_update::FileUpdate::new(path);
     let mut sorted: Vec<usize> = failed_lines.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
@@ -107,10 +110,50 @@ fn mark_unimplemented_expectations_for_file(
         if u.per_directive_unimplemented_present(line, target)? {
             continue;
         }
-        u.add_annotation(line, &ann)?;
-        n += 1;
+        actions.push(MutationAction::AddAnnotation {
+            path: path.to_path_buf(),
+            line,
+            annotation: ann.clone(),
+        });
     }
-    Ok(n)
+    Ok(actions)
+}
+
+/// Plans annotation removals for unexpected passes.
+fn plan_unexpected_pass_fixes(
+    path: &Path,
+    unexpected_pass_by_target: &BTreeMap<String, Vec<usize>>,
+) -> Vec<MutationAction> {
+    let mut actions = Vec::new();
+
+    let mut events: Vec<(usize, &str)> = Vec::new();
+    for (target_name, lines) in unexpected_pass_by_target {
+        for &ln in lines {
+            events.push((ln, target_name.as_str()));
+        }
+    }
+    events.sort_by_key(|(ln, _)| *ln);
+
+    let mut i = 0;
+    while i < events.len() {
+        let line = events[i].0;
+        let mut group: Vec<&str> = Vec::new();
+        while i < events.len() && events[i].0 == line {
+            group.push(events[i].1);
+            i += 1;
+        }
+        group.sort_unstable();
+        group.dedup();
+        for tn in group {
+            actions.push(MutationAction::RemoveAnnotation {
+                path: path.to_path_buf(),
+                line,
+                target_name: tn.to_string(),
+            });
+        }
+    }
+
+    actions
 }
 
 /// Run a single filetest.
@@ -309,9 +352,17 @@ struct FileSpec {
 /// `fix_xfail` enables automatic removal of `[expect-fail]` markers from tests that pass.
 /// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
 ///
-/// `mark_unimplemented` adds `// @unimplemented(target)` before failing `// run:` lines (mirrors `--fix` for the
-/// opposite workflow). Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Applies per active
-/// target when multiple are selected. With `--yes`, skips the interactive confirmation.
+/// `mark_unimplemented` adds `// @unimplemented(target)` before failing `// run:` lines.
+/// Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Applies per active target.
+///
+/// `mark_unsupported` adds `// @unsupported(target)` before failing `// run:` lines.
+/// Use `--mark-unsupported`. Applies per active target.
+///
+/// `mark_broken` adds `// @broken(target)` before failing `// run:` lines.
+/// Use `--mark-broken`. Applies per active target.
+///
+/// `assume_yes` skips the interactive confirmation before applying mutations.
+/// Pass `--assume-yes` to skip confirmation.
 ///
 /// `mark_unimplemented_if_baseline` (or `LP_MARK_UNIMPLEMENTED_IF_BASELINE=<target>`) restricts
 /// marking to directives that already have `@unimplemented(<baseline>)`, so you can copy baseline
@@ -321,7 +372,9 @@ pub fn run(
     files: &[String],
     fix_xfail: bool,
     mark_unimplemented: bool,
-    mark_unimplemented_yes: bool,
+    mark_unsupported: bool,
+    mark_broken: bool,
+    assume_yes: bool,
     mark_unimplemented_if_baseline: Option<String>,
     target_spec: Option<&str>,
     output_override: Option<OutputMode>,
@@ -351,38 +404,19 @@ pub fn run(
         None => None,
     };
 
-    let mark_mode_active = mark_unimplemented_plain || baseline_for_dup.is_some();
+    let mark_mode_active =
+        mark_unimplemented_plain || mark_unsupported || mark_broken || baseline_for_dup.is_some();
 
-    if mark_mode_active && !mark_unimplemented_yes {
-        let warn = if baseline_for_dup.is_some() {
-            format!(
-                "WARNING: This will add // @unimplemented(<active-target>) only before failing // run: lines that already carry // @unimplemented({}).",
-                baseline_for_dup.expect("baseline").name()
-            )
+    let mark_annotation_kind: Option<&str> =
+        if mark_unimplemented_plain || baseline_for_dup.is_some() {
+            Some("unimplemented")
+        } else if mark_unsupported {
+            Some("unsupported")
+        } else if mark_broken {
+            Some("broken")
         } else {
-            "WARNING: This will add // @unimplemented(<target>) before failing // run: lines."
-                .to_string()
+            None
         };
-        println!("\n{}", colors::colorize(&warn, colors::RED));
-        println!(
-            "{}",
-            colors::colorize(
-                "Use only when establishing a milestone baseline. Commit before running.",
-                colors::YELLOW
-            )
-        );
-        print!("\nType 'yes' to confirm: ");
-        use std::io::Write;
-        std::io::stdout().flush()?;
-
-        let mut confirmation = String::new();
-        std::io::stdin().read_line(&mut confirmation)?;
-        if confirmation.trim() != "yes" {
-            anyhow::bail!(
-                "Cancelled. Type 'yes' exactly to confirm, or pass --yes to skip this prompt."
-            );
-        }
-    }
     let active_targets: Vec<&Target> = if let Some(spec) = target_spec {
         parse_target_filters(spec).map_err(anyhow::Error::msg)?
     } else {
@@ -664,8 +698,46 @@ pub fn run(
                 )
             );
 
+            // Build mutation plan for single file
+            let mut plan = MutationPlan::new();
+
             if fix_xfail && !unexpected_pass_by_target.is_empty() {
-                apply_unexpected_pass_fixes(&spec.path, &unexpected_pass_by_target);
+                plan.extend(plan_unexpected_pass_fixes(
+                    &spec.path,
+                    &unexpected_pass_by_target,
+                ));
+            }
+
+            if let Some(kind) = mark_annotation_kind {
+                for t in &active_targets {
+                    let tn = t.name();
+                    let failed_lines = failed_lines_by_target
+                        .get(&tn)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                    if compile_failed_t || !failed_lines.is_empty() {
+                        plan.extend(plan_mark_annotations_for_file(
+                            &spec.path,
+                            failed_lines,
+                            compile_failed_t,
+                            t,
+                            baseline_for_dup,
+                            kind,
+                        )?);
+                    }
+                }
+            }
+
+            // Preview, confirm, apply mutations
+            if !plan.is_empty() {
+                plan.preview(&filetests_dir);
+                if !assume_yes {
+                    if !plan.confirm_with_user()? {
+                        anyhow::bail!("Cancelled. Pass --assume-yes to skip this prompt.");
+                    }
+                }
+                plan.apply(&filetests_dir)?;
             }
 
             return Ok(());
@@ -804,23 +876,17 @@ pub fn run(
                     eprintln!("\n{e}");
                 }
             }
-            if stats.unexpected_pass > 0 {
-                if fix_xfail {
-                    apply_unexpected_pass_fixes(&spec.path, &unexpected_pass_by_target);
-                    anyhow::bail!(
-                        "{} test case(s) marked [expect-fail] are now passing. Markers removed.",
-                        stats.unexpected_pass
-                    );
-                } else {
-                    anyhow::bail!(
-                        "{} test case(s) marked [expect-fail] are now passing.\nTo fix: rerun tests with LP_FIX_XFAIL=1 or --fix flag to automatically remove markers.",
-                        stats.unexpected_pass
-                    );
-                }
+            // Build mutation plan for single file failure case
+            let mut plan = MutationPlan::new();
+
+            if fix_xfail && !unexpected_pass_by_target.is_empty() {
+                plan.extend(plan_unexpected_pass_fixes(
+                    &spec.path,
+                    &unexpected_pass_by_target,
+                ));
             }
-            if mark_mode_active {
-                let mut total_marks = 0usize;
-                let mut any_needs_mark = false;
+
+            if let Some(kind) = mark_annotation_kind {
                 for t in &active_targets {
                     let tn = t.name();
                     let failed_lines = failed_lines_by_target
@@ -829,31 +895,36 @@ pub fn run(
                         .unwrap_or(&[]);
                     let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
                     if compile_failed_t || !failed_lines.is_empty() {
-                        any_needs_mark = true;
-                        total_marks += mark_unimplemented_expectations_for_file(
+                        plan.extend(plan_mark_annotations_for_file(
                             &spec.path,
                             failed_lines,
                             compile_failed_t,
                             t,
                             baseline_for_dup,
-                        )?;
+                            kind,
+                        )?);
                     }
                 }
-                if total_marks > 0 {
-                    println!(
-                        "\n{}",
-                        colors::colorize(
-                            "Marked baseline @unimplemented. Re-run filetests to verify green.",
-                            colors::GREEN
-                        )
-                    );
-                    return Ok(());
+            }
+
+            // Preview, confirm, apply mutations
+            if !plan.is_empty() {
+                plan.preview(&filetests_dir);
+                if !assume_yes {
+                    if !plan.confirm_with_user()? {
+                        anyhow::bail!("Cancelled. Pass --assume-yes to skip this prompt.");
+                    }
                 }
-                if any_needs_mark {
-                    anyhow::bail!(
-                        "--mark-unimplemented: failures remain but no new markers were added (already annotated?)"
-                    );
-                }
+                plan.apply(&filetests_dir)?;
+                return Ok(());
+            }
+
+            // No mutations to apply - report error
+            if stats.unexpected_pass > 0 {
+                anyhow::bail!(
+                    "{} test case(s) marked [expect-fail] are now passing.\nTo fix: rerun tests with LP_FIX_XFAIL=1 or --fix flag to automatically remove markers.",
+                    stats.unexpected_pass
+                );
             }
             anyhow::bail!("1 test file(s) failed");
         }
@@ -1253,25 +1324,24 @@ pub fn run(
         }
     }
 
+    // Build mutation plan for multi-file
+    let mut plan = MutationPlan::new();
+
+    // Fix: remove annotations for unexpected passes
     if fix_xfail {
         for test in &tests {
             if !test.unexpected_pass_by_target.is_empty() {
-                apply_unexpected_pass_fixes(&test.spec.path, &test.unexpected_pass_by_target);
+                plan.extend(plan_unexpected_pass_fixes(
+                    &test.spec.path,
+                    &test.unexpected_pass_by_target,
+                ));
             }
         }
     }
 
-    if mark_mode_active && unexpected_pass_test_cases > 0 {
-        anyhow::bail!(
-            "cannot use --mark-unimplemented when there are unexpected passes; use --fix first"
-        );
-    }
-
-    if mark_mode_active {
-        let mut total_marks = 0usize;
-        let mut files_marked = std::collections::BTreeSet::new();
+    // Mark: add annotations for failures
+    if let Some(kind) = mark_annotation_kind {
         for test in &tests {
-            let mut file_had_mark = false;
             for t in &active_targets {
                 let tn = t.name();
                 let failed_lines = test
@@ -1280,55 +1350,21 @@ pub fn run(
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]);
                 let compile_failed_t = *test.compile_failed_by_target.get(&tn).unwrap_or(&false);
-                if !compile_failed_t && failed_lines.is_empty() {
-                    continue;
+                if compile_failed_t || !failed_lines.is_empty() {
+                    plan.extend(plan_mark_annotations_for_file(
+                        &test.spec.path,
+                        failed_lines,
+                        compile_failed_t,
+                        t,
+                        baseline_for_dup,
+                        kind,
+                    )?);
                 }
-                let marks = mark_unimplemented_expectations_for_file(
-                    &test.spec.path,
-                    failed_lines,
-                    compile_failed_t,
-                    t,
-                    baseline_for_dup,
-                )?;
-                if marks > 0 {
-                    file_had_mark = true;
-                }
-                total_marks += marks;
-            }
-            if file_had_mark {
-                files_marked.insert(relative_path(&test.spec.path, &filetests_dir));
             }
         }
-        if total_marks > 0 {
-            println!(
-                "\n{}",
-                colors::colorize(
-                    &format!(
-                        "Applied {total_marks} @unimplemented marker(s) across {} file(s)",
-                        files_marked.len()
-                    ),
-                    colors::GREEN,
-                )
-            );
-            println!(
-                "{}",
-                colors::colorize("Re-run filetests to verify green.", colors::GREEN)
-            );
-            return Ok(());
-        }
-        if failed > 0 {
-            anyhow::bail!(
-                "--mark-unimplemented: failures found but no new markers were added (already annotated?)"
-            );
-        }
-        println!(
-            "\n{}",
-            colors::colorize("No failing tests needed marking.", colors::YELLOW)
-        );
-        return Ok(());
     }
 
-    // Print results summary (skipped in mark mode above)
+    // Always print results summary
     println!(
         "\n{}",
         format_results_summary(
@@ -1346,20 +1382,25 @@ pub fn run(
         )
     );
 
-    // Exit with error if there are unexpected failures or unexpected passes
-    if failed > 0 {
+    // Preview, confirm, apply mutations
+    if !plan.is_empty() {
+        plan.preview(&filetests_dir);
+        if !assume_yes {
+            if !plan.confirm_with_user()? {
+                anyhow::bail!("Cancelled. Pass --assume-yes to skip this prompt.");
+            }
+        }
+        plan.apply(&filetests_dir)?;
+    }
+
+    // Exit with error if there are unexpected failures (without mutations to apply)
+    if failed > 0 && plan.is_empty() {
         anyhow::bail!("{failed} test file(s) failed");
     }
-    if unexpected_pass_test_cases > 0 {
-        if fix_xfail {
-            anyhow::bail!(
-                "{unexpected_pass_test_cases} test case(s) marked [expect-fail] are now passing. Markers removed."
-            );
-        } else {
-            anyhow::bail!(
-                "{unexpected_pass_test_cases} test case(s) marked [expect-fail] are now passing.\nTo fix: rerun tests with LP_FIX_XFAIL=1 or --fix flag to automatically remove markers."
-            );
-        }
+    if unexpected_pass_test_cases > 0 && plan.is_empty() {
+        anyhow::bail!(
+            "{unexpected_pass_test_cases} test case(s) marked [expect-fail] are now passing.\nTo fix: rerun tests with LP_FIX_XFAIL=1 or --fix flag to automatically remove markers."
+        );
     }
 
     Ok(())
@@ -1502,41 +1543,6 @@ fn print_filetest_status_line(
     println!("{body}");
     use std::io::Write;
     let _ = std::io::stdout().flush();
-}
-
-fn apply_unexpected_pass_fixes(
-    path: &Path,
-    unexpected_pass_by_target: &BTreeMap<String, Vec<usize>>,
-) {
-    let file_update = util::file_update::FileUpdate::new(path);
-
-    let mut events: Vec<(usize, &str)> = Vec::new();
-    for (target_name, lines) in unexpected_pass_by_target {
-        for &ln in lines {
-            events.push((ln, target_name.as_str()));
-        }
-    }
-    events.sort_by_key(|(ln, _)| *ln);
-
-    let mut i = 0;
-    while i < events.len() {
-        let line = events[i].0;
-        let mut group: Vec<&str> = Vec::new();
-        while i < events.len() && events[i].0 == line {
-            group.push(events[i].1);
-            i += 1;
-        }
-        group.sort_unstable();
-        group.dedup();
-        for tn in group {
-            let Ok(target) = Target::from_name(tn) else {
-                continue;
-            };
-            if let Err(e) = file_update.remove_annotation_matching_target(line, target) {
-                eprintln!("Warning: failed to remove annotation from line {line}: {e}");
-            }
-        }
-    }
 }
 
 /// Per-target compile-fail counts for the summary table (single-file: 0 or 1 per target).
@@ -1926,9 +1932,11 @@ fn format_results_summary(
         result.push_str(&summary);
         if unexpected_pass_count > 0 {
             let removal_msg = if fix_enabled {
-                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented removed.")
+                format!("\n{unexpected_pass_count} tests newly pass.")
             } else {
-                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented not removed.")
+                format!(
+                    "\n{unexpected_pass_count} tests newly pass. Run with --fix to remove stale annotations."
+                )
             };
             result.push_str(&removal_msg);
         }
@@ -1952,9 +1960,11 @@ fn format_results_summary(
         result.push_str(&summary);
         if unexpected_pass_count > 0 {
             let removal_msg = if fix_enabled {
-                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented removed.")
+                format!("\n{unexpected_pass_count} tests newly pass.")
             } else {
-                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented not removed.")
+                format!(
+                    "\n{unexpected_pass_count} tests newly pass. Run with --fix to remove stale annotations."
+                )
             };
             result.push_str(&removal_msg);
         }

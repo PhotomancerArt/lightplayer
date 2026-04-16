@@ -71,7 +71,8 @@ pub fn record_result(
             stats.unexpected_pass += 1;
             unexpected_pass_lines.push(line_number);
         }
-        (Disposition::ExpectFailure(AnnotationKind::Unimplemented), false) => {
+        (Disposition::ExpectFailure(AnnotationKind::Unimplemented), false)
+        | (Disposition::ExpectFailure(AnnotationKind::Broken), false) => {
             stats.unimplemented += 1;
         }
         (Disposition::ExpectSuccess, true) => {

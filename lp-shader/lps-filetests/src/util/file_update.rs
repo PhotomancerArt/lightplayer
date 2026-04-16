@@ -275,11 +275,12 @@ impl FileUpdate {
 
     /// Like [`Self::remove_annotation`], but removes only `// @` lines that apply to `target`.
     /// Other annotations immediately above the same `// run:` are preserved.
+    /// Returns `true` if any annotation was actually removed.
     pub fn remove_annotation_matching_target(
         &self,
         line_number: usize,
         target: &Target,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         assert!(line_number > self.last_update.get());
         self.last_update.set(line_number);
 
@@ -315,7 +316,7 @@ impl FileUpdate {
         }
 
         if indices_to_remove.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
         let skip: std::collections::HashSet<usize> = indices_to_remove.iter().copied().collect();
@@ -351,7 +352,92 @@ impl FileUpdate {
             .set(self.line_diff.get() + (new_line_count as isize - old_line_count as isize));
 
         fs::write(&self.path, new_test)?;
-        Ok(())
+        Ok(true)
+    }
+
+    /// Like [`Self::remove_annotation_matching_target`], but removes annotations for multiple targets
+    /// in a single pass. This is needed when the same `// run:` line has multiple `@unimplemented`
+    /// annotations (e.g., for wasm.q32, rv32c.q32, rv32n.q32) that all need to be removed.
+    /// Returns the number of annotations removed.
+    pub fn remove_annotations_matching_targets(
+        &self,
+        line_number: usize,
+        targets: &[&Target],
+    ) -> Result<usize> {
+        assert!(line_number > self.last_update.get());
+        self.last_update.set(line_number);
+
+        let old_test = fs::read_to_string(&self.path)?;
+        let all_lines: Vec<&str> = old_test.lines().collect();
+        let run_line_idx = (((line_number - 1) as isize) + self.line_diff.get()).max(0) as usize;
+
+        if run_line_idx >= all_lines.len() {
+            bail!("line {line_number} out of range");
+        }
+
+        let run_line = all_lines[run_line_idx];
+        if !run_line.trim().starts_with("// run:") {
+            bail!("line {line_number} is not a run directive");
+        }
+
+        let target_names: std::collections::HashSet<String> =
+            targets.iter().map(|t| t.name().to_string()).collect();
+        let mut indices_to_remove: Vec<usize> = Vec::new();
+        let mut j = run_line_idx;
+        while j > 0 {
+            j -= 1;
+            let line = all_lines[j];
+            let prev = line.trim();
+            if prev.starts_with("// @") {
+                if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1) {
+                    if target_names.contains(ann.target.as_str()) {
+                        indices_to_remove.push(j);
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        if indices_to_remove.is_empty() {
+            return Ok(0);
+        }
+
+        let skip: std::collections::HashSet<usize> =
+            indices_to_remove.iter().copied().collect();
+
+        let mut new_test = String::new();
+        for (i, line) in all_lines.iter().enumerate() {
+            if skip.contains(&i) {
+                continue;
+            }
+            if i == run_line_idx {
+                let trimmed = line.trim();
+                let updated = if trimmed.ends_with("[expect-fail]") {
+                    let without = trimmed.strip_suffix("[expect-fail]").unwrap().trim_end();
+                    let indent = line
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .collect::<String>();
+                    format!("{indent}{without}")
+                } else {
+                    (*line).to_string()
+                };
+                new_test.push_str(&updated);
+                new_test.push('\n');
+            } else {
+                new_test.push_str(line);
+                new_test.push('\n');
+            }
+        }
+
+        let old_line_count = all_lines.len();
+        let new_line_count = new_test.lines().count();
+        self.line_diff
+            .set(self.line_diff.get() + (new_line_count as isize - old_line_count as isize));
+
+        fs::write(&self.path, new_test)?;
+        Ok(indices_to_remove.len())
     }
 
     /// Remove `[expect-fail]` marker from a `// run:` line.
