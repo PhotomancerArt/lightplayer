@@ -38,6 +38,7 @@ members = [
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc", "lp-shader/lps-q32",
+    "lpfx/lpfx",
 ]
 resolver = "2"
 
@@ -72,6 +73,7 @@ default-members = [
     "lp-riscv/lp-riscv-elf",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-filetests-app",
+    "lpfx/lpfx",
 ]
 [workspace.package]
 version = "40.0.0"
@@ -137,6 +139,7 @@ object = { version = "0.37.3", default-features = false, features = ['read_core'
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 

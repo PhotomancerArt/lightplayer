@@ -3882,6 +3882,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpfx"
+version = "40.0.0"
+dependencies = [
+ "lps-frontend",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "lpir"
 version = "40.0.0"
 dependencies = [
