@@ -14,9 +14,6 @@ mat2 test_type_matrix_mat2() {
     return global_mat2;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 mat3 test_type_matrix_mat3() {
@@ -27,9 +24,6 @@ mat3 test_type_matrix_mat3() {
     return global_mat3;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_mat3() ~= mat3(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)
 
 mat4 test_type_matrix_mat4() {
@@ -41,9 +35,6 @@ mat4 test_type_matrix_mat4() {
     return global_mat4;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_mat4() ~= mat4(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
 
 mat2 test_type_matrix_identity() {
@@ -52,9 +43,6 @@ mat2 test_type_matrix_identity() {
     return global_mat2;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_identity() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 mat3 test_type_matrix_identity_3() {
@@ -63,9 +51,6 @@ mat3 test_type_matrix_identity_3() {
     return global_mat3;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_identity_3() ~= mat3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 mat4 test_type_matrix_identity_4() {
@@ -74,9 +59,6 @@ mat4 test_type_matrix_identity_4() {
     return global_mat4;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_identity_4() ~= mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
 mat2 test_type_matrix_operations() {
@@ -86,9 +68,6 @@ mat2 test_type_matrix_operations() {
     return global_mat2;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_operations() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 mat3 test_type_matrix_multiplication() {
@@ -100,9 +79,6 @@ mat3 test_type_matrix_multiplication() {
     return global_mat3 * other;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_multiplication() ~= mat3(2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0)
 
 vec2 test_type_matrix_vector_multiply() {
@@ -112,9 +88,6 @@ vec2 test_type_matrix_vector_multiply() {
     return global_mat2 * v;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_vector_multiply() ~= vec2(4.0, 6.0)
 
 vec3 test_type_matrix_vector_multiply_3() {
@@ -124,9 +97,6 @@ vec3 test_type_matrix_vector_multiply_3() {
     return global_mat3 * v;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_vector_multiply_3() ~= vec3(2.0, 3.0, 4.0)
 
 vec4 test_type_matrix_vector_multiply_4() {
@@ -136,7 +106,4 @@ vec4 test_type_matrix_vector_multiply_4() {
     return global_mat4 * v;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_type_matrix_vector_multiply_4() ~= vec4(1.0, 2.0, 3.0, 4.0)

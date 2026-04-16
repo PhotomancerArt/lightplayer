@@ -29,7 +29,6 @@ float test_call_order_left_to_right() {
 
 // @unimplemented(jit.q32)
 // @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_call_order_left_to_right() ~= 6.0
 
 float increment_counter() {
@@ -50,9 +49,6 @@ float test_call_order_exactly_once() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_call_order_exactly_once() ~= 3.0
 
 float side_effect_func(float x) {
@@ -76,9 +72,6 @@ float test_call_order_side_effects() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_call_order_side_effects() ~= 29.0
 
 vec2 make_vec2(float x, float y) {
@@ -100,9 +93,6 @@ vec2 test_call_order_vector_args() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_call_order_vector_args() ~= vec2(8.0, 10.0)
 
 float complex_arg(float base) {
@@ -125,9 +115,6 @@ float test_call_order_complex_expression() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_call_order_complex_expression() ~= 9.0
 
 float record_value(float val) {
@@ -154,8 +141,5 @@ float test_call_order_mixed_types() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_call_order_mixed_types() ~= 45.14
 

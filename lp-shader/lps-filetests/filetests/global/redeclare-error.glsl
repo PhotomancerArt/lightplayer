@@ -49,7 +49,6 @@ float test_redeclare_error_scoping() {
     return valid_global;  // Returns 99.0, not 42.0
 }
 
-// @unimplemented(wasm.q32)
 // run: test_redeclare_error_scoping() ~= 99.0
 
 float test_redeclare_error_global_unchanged() {

@@ -44,7 +44,6 @@ void test_edge_empty_declaration_unused() {
     temp = temp + normal_float;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_edge_empty_declaration_unused() == 0.0
 
 float test_edge_empty_declaration_scope() {
@@ -58,5 +57,4 @@ float test_edge_empty_declaration_scope() {
     return normal_float;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_edge_empty_declaration_scope() ~= 100.0

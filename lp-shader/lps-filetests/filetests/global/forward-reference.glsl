@@ -12,9 +12,6 @@ float test_forward_reference_use_before_declare() {
     return global_after_function + 10.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_forward_reference_use_before_declare() ~= 10.0
 
 // Global declaration comes after function definition
@@ -39,9 +36,6 @@ vec2 test_forward_reference_vec() {
     return global_vec_after + vec2(1.0, 1.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_forward_reference_vec() ~= vec2(1.0, 1.0)
 
 mat3 test_forward_reference_mat() {

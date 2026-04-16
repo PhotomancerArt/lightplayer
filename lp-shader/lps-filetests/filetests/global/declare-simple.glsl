@@ -57,7 +57,6 @@ vec3 test_declare_simple_vec3() {
     return global_vec3;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_declare_simple_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_declare_simple_vec4() {
@@ -67,9 +66,6 @@ vec4 test_declare_simple_vec4() {
     return global_vec4;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_declare_simple_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_declare_simple_mat2() {
@@ -79,9 +75,6 @@ mat2 test_declare_simple_mat2() {
     return global_mat2;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_declare_simple_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 float test_declare_simple_multiple() {
@@ -95,7 +88,4 @@ float test_declare_simple_multiple() {
     return a + b + c;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_declare_simple_multiple() ~= 60.0
