@@ -430,8 +430,7 @@ mod tests {
 
         assert_eq!(
             actual_normalized, expected_normalized,
-            "Allocation output mismatch\nInput:\n{}\nActual:\n{}",
-            input, actual_normalized
+            "Allocation output mismatch\nInput:\n{input}\nActual:\n{actual_normalized}",
         );
     }
 

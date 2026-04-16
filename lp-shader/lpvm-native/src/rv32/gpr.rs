@@ -136,7 +136,7 @@ mod tests {
     fn test_reg_name_roundtrip() {
         for i in 0..32u8 {
             let name = reg_name(i);
-            assert_eq!(parse_reg(name), Ok(i), "Roundtrip failed for {}", i);
+            assert_eq!(parse_reg(name), Ok(i), "Roundtrip failed for {i}");
         }
     }
 }

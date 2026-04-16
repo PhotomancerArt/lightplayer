@@ -401,8 +401,7 @@ mod tests {
         for i in 0..7 {
             assert!(
                 matches!(locs[1 + i], ArgLoc::Reg(_)),
-                "expected reg for word {}",
-                i
+                "expected reg for word {i}",
             );
         }
         assert!(matches!(locs[8], ArgLoc::Stack { .. }));

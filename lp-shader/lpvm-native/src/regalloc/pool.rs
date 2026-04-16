@@ -199,7 +199,7 @@ mod tests {
         // Fill all allocatable registers
         for i in 0..ALLOC_POOL.len() {
             let (_preg, evicted) = pool.alloc(VReg(i as u16));
-            assert!(evicted.is_none(), "should not evict on {}th alloc", i);
+            assert!(evicted.is_none(), "should not evict on {i}th alloc");
         }
 
         // Next alloc should evict LRU (first one allocated)

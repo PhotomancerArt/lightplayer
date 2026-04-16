@@ -213,6 +213,6 @@ mod tests {
         );
 
         let result = emit_lowered(&lowered, &abi);
-        assert!(result.is_ok(), "emit_lowered should succeed: {:?}", result);
+        assert!(result.is_ok(), "emit_lowered should succeed: {result:?}");
     }
 }

@@ -1913,8 +1913,7 @@ mod tests {
         let root_node = &lowered.region_tree.nodes[root_id as usize];
         assert!(
             matches!(root_node, Region::Linear { .. }),
-            "Expected Linear region for simple function, got {:?}",
-            root_node
+            "Expected Linear region for simple function, got {root_node:?}",
         );
 
         // The linear region should cover the main VInsts (IConst32 + Ret + Br)

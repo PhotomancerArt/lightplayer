@@ -1258,8 +1258,7 @@ mod tests {
         let v2_def_alloc = output.operand_alloc(2, 0);
         assert!(
             v2_def_alloc.is_stack(),
-            "v2 def should be Stack, got {:?}",
-            v2_def_alloc
+            "v2 def should be Stack, got {v2_def_alloc:?}",
         );
 
         // There must be an After(3) reload edit: Stack → Reg
@@ -1275,25 +1274,24 @@ mod tests {
         });
         assert!(
             has_after3_reload,
-            "expected After(3) reload edit (stack→reg), got edits: {:?}",
-            output.edits
+            "expected After(3) reload edit (stack→reg), got edits: {edits:?}",
+            edits = output.edits,
         );
 
         // v2's use at inst 4 must be Reg (reloaded)
         let v2_use_at_4 = output.operand_alloc(4, 2); // def=0, use0=1, use1=2
         assert!(
             v2_use_at_4.is_reg(),
-            "v2 use at inst 4 should be Reg, got {:?}",
-            v2_use_at_4
+            "v2 use at inst 4 should be Reg, got {v2_use_at_4:?}",
         );
 
         // Edits must be sorted
         for w in output.edits.windows(2) {
             assert!(
                 w[0].0 <= w[1].0,
-                "edits not sorted: {:?} > {:?}",
-                w[0],
-                w[1]
+                "edits not sorted: {a:?} > {b:?}",
+                a = w[0],
+                b = w[1],
             );
         }
     }

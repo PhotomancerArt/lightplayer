@@ -81,7 +81,7 @@ impl AllocTestBuilder {
         if self.abi_params > 0 {
             let params: Vec<FnParam> = (0..self.abi_params)
                 .map(|i| FnParam {
-                    name: alloc::format!("arg{}", i),
+                    name: alloc::format!("arg{i}"),
                     ty: LpsType::Int,
                     qualifier: ParamQualifier::In,
                 })
@@ -121,7 +121,7 @@ impl AllocTestBuilder {
         };
 
         let output = walk_linear_with_pool(&vinsts, &vreg_pool, &func_abi, pool)
-            .unwrap_or_else(|e| panic!("Allocation failed: {:?}", e));
+            .unwrap_or_else(|e| panic!("Allocation failed: {e:?}"));
 
         crate::regalloc::verify::verify_alloc(&vinsts, &vreg_pool, &output, &func_abi);
 
@@ -137,7 +137,7 @@ impl AllocTestBuilder {
         let input = input.trim();
 
         let (vinsts, symbols, vreg_pool) =
-            vinst::parse(input).unwrap_or_else(|e| panic!("Failed to parse VInst input: {:?}", e));
+            vinst::parse(input).unwrap_or_else(|e| panic!("Failed to parse VInst input: {e:?}"));
 
         self.run_vinst_inner(vinsts, vreg_pool, symbols)
     }
@@ -154,24 +154,24 @@ impl AllocTestBuilder {
     ) -> AllocTestResult {
         let args_s = arg_iregs
             .iter()
-            .map(|n| format!("i{}", n))
+            .map(|n| format!("i{n}"))
             .collect::<Vec<_>>()
             .join(", ");
         let line = if ret_iregs.is_empty() {
-            format!("Call {} ({})", callee, args_s)
+            format!("Call {callee} ({args_s})")
         } else if ret_iregs.len() == 1 {
-            format!("i{} = Call {} ({})", ret_iregs[0], callee, args_s)
+            format!("i{r} = Call {callee} ({args_s})", r = ret_iregs[0],)
         } else {
             let rets_s = ret_iregs
                 .iter()
-                .map(|n| format!("i{}", n))
+                .map(|n| format!("i{n}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("({}) = Call {} ({})", rets_s, callee, args_s)
+            format!("({rets_s}) = Call {callee} ({args_s})")
         };
 
         let (mut vinsts, symbols, vreg_pool) =
-            vinst::parse(&line).unwrap_or_else(|e| panic!("run_call parse: {:?}", e));
+            vinst::parse(&line).unwrap_or_else(|e| panic!("run_call parse: {e:?}"));
         for inst in &mut vinsts {
             if let VInst::Call {
                 callee_uses_sret: flag,
@@ -199,8 +199,7 @@ impl AllocTestResult {
 
         assert_eq!(
             actual_normalized, expected_normalized,
-            "Allocation output mismatch\n\nActual:\n{}\n\nExpected:\n{}",
-            actual_normalized, expected_normalized
+            "Allocation output mismatch\n\nActual:\n{actual_normalized}\n\nExpected:\n{expected_normalized}",
         );
         self
     }
