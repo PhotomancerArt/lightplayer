@@ -1,17 +1,16 @@
 #!/bin/bash
-# Build lp-glsl-builtins-emu-app executable with aggressive optimizations
+# Build lps-builtins-emu-app executable with aggressive optimizations
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LIGHTPLAYER_DIR="$WORKSPACE_ROOT/lp-glsl"
-BUILTINS_APP="$LIGHTPLAYER_DIR/apps/lp-glsl-builtins-emu-app"
+LIGHTPLAYER_DIR="$WORKSPACE_ROOT/lp-shader"
 TARGET="riscv32imac-unknown-none-elf"
 OUTPUT_DIR="$WORKSPACE_ROOT/target/$TARGET/release"
-BINARY="$OUTPUT_DIR/lp-glsl-builtins-emu-app"
-BUILTINS_SRC_DIR="$LIGHTPLAYER_DIR/crates/lp-glsl-builtins/src/builtins"
-BUILTIN_GEN_DIR="$LIGHTPLAYER_DIR/apps/lp-glsl-builtin-gen-app"
+BINARY="$OUTPUT_DIR/lps-builtins-emu-app"
+BUILTINS_SRC_DIR="$LIGHTPLAYER_DIR/lps-builtins/src/builtins"
+BUILTIN_GEN_DIR="$LIGHTPLAYER_DIR/lps-builtins-gen-app"
 HASH_FILE="$WORKSPACE_ROOT/.builtins-source-hash"
 
 # Compute hash of all builtin source files and generator
@@ -45,10 +44,10 @@ current_hash=$(compute_source_hash)
 stored_hash=$(get_stored_hash)
 
 if [ "$current_hash" != "$stored_hash" ]; then
-  echo "Building lp-glsl-builtins-emu-app for $TARGET with aggressive optimizations..."
+  echo "Building lps-builtins-emu-app for $TARGET with aggressive optimizations..."
   echo "Generating builtin boilerplate..."
   cd "$LIGHTPLAYER_DIR"
-  cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl-builtins-gen-app/Cargo.toml
+  cargo run --bin lps-builtins-gen-app --manifest-path lps-builtins-gen-app/Cargo.toml
   store_hash "$current_hash"
 else
   echo "Builtins source unchanged, skipping code generation..."
@@ -75,9 +74,9 @@ RUSTFLAGS="-C opt-level=1 \
            -C codegen-units=1" \
   cargo build \
   --target $TARGET \
-  --package lp-glsl-builtins-emu-app \
+  --package lps-builtins-emu-app \
   --release \
-  --bin lp-glsl-builtins-emu-app
+  --bin lps-builtins-emu-app
 
 # Count symbols
 LP_SYMBOLS=$(nm "$BINARY" 2>/dev/null | grep "__lp_" | wc -l | xargs)
@@ -85,4 +84,4 @@ LP_SYMBOLS=$(nm "$BINARY" 2>/dev/null | grep "__lp_" | wc -l | xargs)
 # Output formatted results
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
-echo -e "${GREEN}lp-glsl-builtins-emu-app:${NC} built with $LP_SYMBOLS built-ins"
+echo -e "${GREEN}lps-builtins-emu-app:${NC} built with $LP_SYMBOLS built-ins"

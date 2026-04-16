@@ -55,7 +55,7 @@ vec3 hsv_to_rgb(float h, float s, float v) {
     return rgb;
 }
 
-vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     // Center of texture
     vec2 center = outputSize * 0.5;
     

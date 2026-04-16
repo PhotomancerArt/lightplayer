@@ -1,0 +1,78 @@
+=== Heap Trace Summary ===
+Project: 2026.01.21-03.01.12-test-project | Frames: 10 | Events: 32132
+Heap: 320 KB starting at 0x80000000
+
+--- Overview ---
+  Alloc:   12,389 events  (1,857,181 bytes)
+  Dealloc: 12,231 events  (1,838,504 bytes)
+  Realloc: 7,512 events
+  Final free: 309,003 bytes (94.3% of heap)
+
+--- Peak Usage (lowest free) ---
+  Free: 149,250 bytes at ic=35,937,413
+  Event: alloc 88 bytes
+  Stack: _RNvMNtCsd1wDEdPRyDw_18lp_riscv_emu_guest9allocatorNtB2_17TrackingAllocator11trace_event <- _RNvNtCslbIHz96fkp3_14lpvm_native4emit15emit_lowered_ex <- _RNvNtCslbIHz96fkp3_14lpvm_native7compile14compile_module <- _RNvXs_NtNtCslbIHz96fkp3_14lpvm_native6rt_jit6engineNtB4_15NativeJitEngineNtNtCscqzOlUbs9VP_4lpvm6engine10LpvmEngine7compile
+
+--- Allocations at Peak (178,430 bytes tracked, 178,430 bytes used, 1512 allocs) ---
+  91,200    48 allocs  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCslbIHz96fkp3_14lpvm_native
+  28,152    36 allocs  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsfp6hpy07ZJc_4lpir
+   8,830   392 allocs  _RNvNvNtCs4o8UUba1pD9_5alloc3fmt6format12format_inner
+   6,496     1 allocs  _RNvNtCseuHzPn7yJqk_6fw_emu11server_loop15run_server_loop
+   6,324     4 allocs  _RNvNtCslbIHz96fkp3_14lpvm_native7compile14compile_module
+   4,885    76 allocs  _RNvXs4_NtCs4o8UUba1pD9_5alloc6stringNtB5_6StringNtNtCsEBEPLuxzrO_4core5clone5Clone5clone
+   4,630     7 allocs  _RNvXs0_NtNtCs3AKaAUruxb1_9lp_shared2fs9lp_fs_memNtB5_10LpFsMemoryNtNtB7_5lp_fs4LpFs10write_file
+   3,984   226 allocs  _RNvMNtNtCslbIHz96fkp3_14lpvm_native4rv324emitNtB2_11EmitContext10emit_vinst
+   3,674   379 allocs  _RNvMNtNtCslbIHz96fkp3_14lpvm_native8fa_alloc4walkNtB2_9WalkState11walk_region
+   3,366     1 allocs  _RNvXs0_NtNtCs3AKaAUruxb1_9lp_shared2fs9lp_fs_memNtB5_10LpFsMemoryNtNtB7_5lp_fs4LpFs9read_file
+   3,272    17 allocs  _RNvMsi_NtNtNtCs4o8UUba1pD9_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtBb_6string6StringjE6insertCslbIHz96fkp3_14lpvm_native
+   2,185   108 allocs  _RNvMNtNtCs5SjqJMxRDkL_9lp_engine3gfx10native_jitNtB2_17NativeJitGraphics3new
+   2,048     1 allocs  _RNvXs_NtNtNtCs5SjqJMxRDkL_9lp_engine5nodes7texture7runtimeNtB4_14TextureRuntimeNtB8_11NodeRuntime4init
+   2,048     1 allocs  _RNvMNtNtCs3AKaAUruxb1_9lp_shared4util7textureNtB2_7Texture3new
+   1,154    10 allocs  _RNvNtCslbIHz96fkp3_14lpvm_native4emit15emit_lowered_ex
+     848     1 allocs  _RNvMs6_NtNtNtNtCs4o8UUba1pD9_5alloc11collections5btree3map5entryINtB5_11VacantEntryNtNtNtCskUHMcHzAFio_8lp_model5nodes6handle10NodeHandleNtNtNtCs5SjqJMxRDkL_9lp_engine7project7runtime9NodeEntryE6insertB2h_
+     837    39 allocs  _RNvNtCsatnuRe9AeOF_12lps_frontend5lower5lower
+     768     1 allocs  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsatnuRe9AeOF_12lps_frontend
+     658    14 allocs  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCskUHMcHzAFio_8lp_model
+     472     2 allocs  _RINvMsa_NtCs3zR7YyDSylb_9hashbrown3rawNtB6_13RawTableInner22fallible_with_capacityNtNtNtB6_5alloc5inner6GlobalECs3AKaAUruxb1_9lp_shared
+
+--- Live Allocations (unfreed at end of trace) ---
+  18,677 bytes in 158 allocations
+
+  6,496     1 allocs  _RNvNtCseuHzPn7yJqk_6fw_emu11server_loop15run_server_loop <- _lp_main
+  4,630     7 allocs  _RNvXs0_NtNtCs3AKaAUruxb1_9lp_shared2fs9lp_fs_memNtB5_10LpFsMemoryNtNtB7_5lp_fs4LpFs10write_file <- _RNvNtCs5mNyzZETfY8_9lp_server8handlers21handle_client_message
+  3,272    17 allocs  _RNvMsi_NtNtNtCs4o8UUba1pD9_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtBb_6string6StringjE6insertCslbIHz96fkp3_14lpvm_native <- _RNvMNtNtCs5SjqJMxRDkL_9lp_engine3gfx10native_jitNtB2_17NativeJitGraphics3new
+  2,185   108 allocs  _RNvMNtNtCs5SjqJMxRDkL_9lp_engine3gfx10native_jitNtB2_17NativeJitGraphics3new <- _lp_main
+    459     7 allocs  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCskUHMcHzAFio_8lp_model <- _RINvNvMs2_NtCs4o8UUba1pD9_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECskUHMcHzAFio_8lp_model
+    459     7 allocs  _RNvXs4_NtCs4o8UUba1pD9_5alloc6stringNtB5_6StringNtNtCsEBEPLuxzrO_4core5clone5Clone5clone <- _RNvXs0_NtNtCs3AKaAUruxb1_9lp_shared2fs9lp_fs_memNtB5_10LpFsMemoryNtNtB7_5lp_fs4LpFs10write_file
+    456     1 allocs  _RINvMsa_NtCs3zR7YyDSylb_9hashbrown3rawNtB6_13RawTableInner22fallible_with_capacityNtNtNtB6_5alloc5inner6GlobalECs5mNyzZETfY8_9lp_server <- _RINvMs6_NtCs3zR7YyDSylb_9hashbrown3rawINtB6_8RawTableTNtNtNtCskUHMcHzAFio_8lp_model7project6handle13ProjectHandleNtNtCs5mNyzZETfY8_9lp_server7project7ProjectEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_B1N_NtNtCsfeyGxhVbGO5_8foldhash4fast11RandomStateE0EB1R_
+    268     1 allocs  _RINvMsa_NtCs3zR7YyDSylb_9hashbrown3rawNtB6_13RawTableInner22fallible_with_capacityNtNtNtB6_5alloc5inner6GlobalECs3AKaAUruxb1_9lp_shared <- _RINvMs6_NtCs3zR7YyDSylb_9hashbrown3rawINtB6_8RawTableTNtNtCskUHMcHzAFio_8lp_model4path9LpPathBufTNtNtNtCs3AKaAUruxb1_9lp_shared2fs8fs_event9FsVersionNtB1z_10ChangeTypeEEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_B1w_NtNtCsfeyGxhVbGO5_8foldhash4fast11RandomStateE0EB1D_
+    204     1 allocs  _RINvMsa_NtCs3zR7YyDSylb_9hashbrown3rawNtB6_13RawTableInner22fallible_with_capacityNtNtNtB6_5alloc5inner6GlobalECs3AKaAUruxb1_9lp_shared <- _RINvMs6_NtCs3zR7YyDSylb_9hashbrown3rawINtB6_8RawTableTNtNtCskUHMcHzAFio_8lp_model4path9LpPathBufINtNtCs4o8UUba1pD9_5alloc3vec3VechEEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_B1w_NtNtCsfeyGxhVbGO5_8foldhash4fast11RandomStateE0ECs3AKaAUruxb1_9lp_shared
+    112     4 allocs  _RNvNtCs4o8UUba1pD9_5alloc5boxed14box_new_uninit <- _lp_main
+     72     1 allocs  _RINvMsa_NtCs3zR7YyDSylb_9hashbrown3rawNtB6_13RawTableInner22fallible_with_capacityNtNtNtB6_5alloc5inner6GlobalECs5mNyzZETfY8_9lp_server <- _RINvMs6_NtCs3zR7YyDSylb_9hashbrown3rawINtB6_8RawTableTNtNtCs4o8UUba1pD9_5alloc6string6StringNtNtNtCskUHMcHzAFio_8lp_model7project6handle13ProjectHandleEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_B1s_NtNtCsfeyGxhVbGO5_8foldhash4fast11RandomStateE0ECs5mNyzZETfY8_9lp_server
+     40     1 allocs  _RNvMNtNtCs3AKaAUruxb1_9lp_shared2fs9lp_fs_memNtB2_10LpFsMemory3new <- _lp_main
+     16     1 allocs  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCseuHzPn7yJqk_6fw_emu <- _RNvMs3_NtCs4o8UUba1pD9_5alloc7raw_vecINtB5_6RawVecNtNtNtCs3AKaAUruxb1_9lp_shared6output8provider19OutputChannelHandleE8grow_oneCseuHzPn7yJqk_6fw_emu
+      8     1 allocs  _RNvNtCskUHMcHzAFio_8lp_model4path9normalize <- _RNvMNtCs5mNyzZETfY8_9lp_server6serverNtB2_8LpServer3new
+
+--- Allocation Hotspots (by total bytes allocated) ---
+  766,659  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_
+  416,960  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCslbIHz96fkp3_14lpvm_native
+  215,760  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsbN5iNe0hfEg_4naga
+   80,956  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs5SjqJMxRDkL_9lp_engine
+   56,284  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsfp6hpy07ZJc_4lpir
+   36,422  _RNvNtCseuHzPn7yJqk_6fw_emu11server_loop15run_server_loop
+   28,796  _RNvNvNtCs4o8UUba1pD9_5alloc3fmt6format12format_inner
+   22,108  _RNvXs_NtNtNtCs5SjqJMxRDkL_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render
+   19,796  _RNvNtCslbIHz96fkp3_14lpvm_native7compile14compile_module
+   18,479  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsatnuRe9AeOF_12lps_frontend
+   15,687  _RNvNtCsatnuRe9AeOF_12lps_frontend5lower5lower
+   14,684  _RINvMsa_NtCsiK20WoEmgaV_9hashbrown3rawNtB6_13RawTableInner22fallible_with_capacityNtNtNtB6_5alloc5inner6GlobalECsbN5iNe0hfEg_4naga
+   11,594  _RNvMNtNtCslbIHz96fkp3_14lpvm_native8fa_alloc4walkNtB2_9WalkState11walk_region
+   11,027  _RNvXs4_NtCs4o8UUba1pD9_5alloc6stringNtB5_6StringNtNtCsEBEPLuxzrO_4core5clone5Clone5clone
+    8,420  _RNvNtNtNtCsbN5iNe0hfEg_4naga4proc9overloads7regular9make_rule
+    8,148  _RNvXs0_NtNtCs5SjqJMxRDkL_9lp_engine3gfx10native_jitNtB5_17NativeJitGraphicsNtNtB7_6lp_gfx10LpGraphics14compile_shader
+    7,840  _RINvNvXs0_NtNtNtCs4o8UUba1pD9_5alloc11collections5btree3mapINtB8_8BTreeMappppENtNtCsEBEPLuxzrO_4core5clone5Clone5clone13clone_subtreeNtNtBe_6string6StringNtNtCsfp6hpy07ZJc_4lpir5types9CalleeRefNtNtBe_5alloc6GlobalECsatnuRe9AeOF_12lps_frontend
+    7,680  _RINvNtNtNtCsEBEPLuxzrO_4core4iter8adapters7flatten17and_then_or_clearINtB2_7FlatMapINtNtNtB8_5array4iter8IntoIterNtNtCsbN5iNe0hfEg_4naga2ir9TypeInnerKj4_EANtNtNtNtB1R_4proc9overloads4rule4Rulej2_NCNCNvNtB2x_12mathfunction3mix00EB2t_NvYB15_NtNtNtB6_6traits8iterator8Iterator4nextEB1R_
+    7,392  _RNvNtCslbIHz96fkp3_14lpvm_native4emit15emit_lowered_ex
+    6,080  _RNvMs4_NtCs4o8UUba1pD9_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs5mNyzZETfY8_9lp_server
+Report written to traces/2026-04-14T17-19-12--examples-mem-profile--lpvm-fa3/report.txt
+traces/2026-04-14T17-19-12--examples-mem-profile--lpvm-fa3

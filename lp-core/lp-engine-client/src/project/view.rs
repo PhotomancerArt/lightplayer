@@ -289,6 +289,13 @@ impl ClientProjectView {
                             }
                         };
 
+                        // `StatusChanged` may run before any entry exists (no `Created` in this batch
+                        // when `config_ver != state_ver` on the server). Honor that pending status here.
+                        let initial_status = self
+                            .previous_status
+                            .remove(handle)
+                            .unwrap_or(NodeStatus::Created);
+
                         self.nodes.insert(
                             *handle,
                             ClientNodeEntry {
@@ -298,12 +305,11 @@ impl ClientProjectView {
                                 config_ver: FrameId::default(),
                                 state: Some(detail.state.clone()),
                                 state_ver: FrameId::default(),
-                                status: NodeStatus::Created,
-                                status_ver: FrameId::default(),
+                                status: initial_status.clone(),
+                                status_ver: *current_frame,
                             },
                         );
-                        // Status will come via StatusChanged events, initialize to Created
-                        self.previous_status.insert(*handle, NodeStatus::Created);
+                        self.previous_status.insert(*handle, initial_status);
                     }
                 }
 

@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
@@ -6,55 +7,64 @@ use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
+    sync::Arc,
 };
+#[cfg(feature = "panic-recovery")]
+use core::panic::AssertUnwindSafe;
 use log;
-use lp_glsl_compiler::glsl_jit_streaming;
-use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
-use lp_glsl_jit_util::call_structreturn_with_args;
+use lp_model::glsl_opts::{AddSubMode, DivMode, MulMode};
 use lp_model::{
     LpPathBuf, NodeHandle,
     nodes::shader::{ShaderConfig, ShaderState},
     project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
+#[cfg(feature = "panic-recovery")]
+use unwinding::panic::catch_unwind;
 
-/// Wrapper for function pointer that implements Send + Sync
-/// Function pointers are safe to share between threads (they're just addresses)
-/// The compiled code is immutable and stable after compilation
-#[derive(Clone, Copy)]
-struct FunctionPtr(*const u8);
+/// Default max semantic errors forwarded from the GLSL → LPIR front-end.
+const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-unsafe impl Send for FunctionPtr {}
-unsafe impl Sync for FunctionPtr {}
+fn map_model_q32_options(opts: &lp_model::glsl_opts::GlslOpts) -> lps_q32::q32_options::Q32Options {
+    lps_q32::q32_options::Q32Options {
+        add_sub: match opts.add_sub {
+            AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
+            AddSubMode::Wrapping => lps_q32::q32_options::AddSubMode::Wrapping,
+        },
+        mul: match opts.mul {
+            MulMode::Saturating => lps_q32::q32_options::MulMode::Saturating,
+            MulMode::Wrapping => lps_q32::q32_options::MulMode::Wrapping,
+        },
+        div: match opts.div {
+            DivMode::Saturating => lps_q32::q32_options::DivMode::Saturating,
+            DivMode::Reciprocal => lps_q32::q32_options::DivMode::Reciprocal,
+        },
+    }
+}
 
 /// Shader node runtime
 pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
-    executable: Option<Box<dyn GlslExecutable + Send + Sync>>, // Compiled shader (must be Send + Sync for NodeRuntime)
-    texture_handle: Option<TextureHandle>,                     // Resolved texture handle
-    compilation_error: Option<String>,                         // Compilation error if any
+    graphics: Arc<dyn LpGraphics>,
+    shader: Option<Box<dyn LpShader>>,
+    texture_handle: Option<TextureHandle>,
+    compilation_error: Option<String>,
     pub state: ShaderState,
     node_handle: NodeHandle,
-    render_order: i32, // Render order (from config)
-    // Direct call optimization: cached function pointer and calling convention
-    direct_func_ptr: Option<FunctionPtr>,
-    direct_call_conv: Option<cranelift_codegen::isa::CallConv>,
-    direct_pointer_type: Option<cranelift_codegen::ir::Type>,
+    render_order: i32,
 }
 
 impl ShaderRuntime {
-    pub fn new(node_handle: NodeHandle) -> Self {
+    pub fn new(node_handle: NodeHandle, graphics: Arc<dyn LpGraphics>) -> Self {
         Self {
             config: None,
-            executable: None,
+            graphics,
+            shader: None,
             texture_handle: None,
             compilation_error: None,
             state: ShaderState::new(FrameId::default()),
             node_handle,
             render_order: 0,
-            direct_func_ptr: None,
-            direct_call_conv: None,
-            direct_pointer_type: None,
         }
     }
 
@@ -68,31 +78,25 @@ impl ShaderRuntime {
     }
 
     pub fn get_state(&self) -> ShaderState {
-        // Return cloned state
         self.state.clone()
     }
 
-    /// Check if this shader targets the given texture handle
     pub fn targets_texture(&self, texture_handle: TextureHandle) -> bool {
         self.texture_handle.map_or(false, |h| h == texture_handle)
     }
 
-    /// Get the texture handle this shader targets
     pub fn texture_handle(&self) -> Option<TextureHandle> {
         self.texture_handle
     }
 
-    /// Get the shader config (for state extraction)
     pub fn get_config(&self) -> Option<&ShaderConfig> {
         self.config.as_ref()
     }
 
-    /// Check if shader has compilation error
     pub fn has_compilation_error(&self) -> bool {
         self.compilation_error.is_some()
     }
 
-    /// Get compilation error message
     pub fn compilation_error(&self) -> Option<&str> {
         self.compilation_error.as_deref()
     }
@@ -105,12 +109,7 @@ impl NodeRuntime for ShaderRuntime {
             reason: alloc::string::String::from("Config not set"),
         })?;
 
-        // Resolve texture handle
         self.resolve_texture_handle(&config, ctx)?;
-
-        // Load and compile shader
-        // Don't fail on compilation errors - store them and return Ok()
-        // The caller will check compilation_error and update status accordingly
         let _ = self.load_and_compile_shader(&config, ctx);
 
         Ok(())
@@ -121,97 +120,28 @@ impl NodeRuntime for ShaderRuntime {
             message: String::from("Texture handle not resolved"),
         })?;
 
-        let executable = self.executable.as_mut().ok_or_else(|| Error::Other {
-            message: String::from("Shader not compiled"),
+        let shader = self.shader.as_mut().ok_or_else(|| Error::Other {
+            message: String::from(
+                "Shader is not compiled (compilation may have failed or memory was shed)",
+            ),
         })?;
 
-        // Get time before mutable borrow
-        let time = ctx.get_time();
-
-        // Get mutable texture access
-        let texture = ctx.get_texture_mut(texture_handle)?;
-
-        let width = texture.width();
-        let height = texture.height();
-        let output_size = [width as f32, height as f32];
-
-        // Execute shader for each pixel
-        // Use direct function pointer call if available (faster), otherwise fall back to trait method
-        if let (Some(func_ptr), Some(call_conv), Some(pointer_type)) = (
-            self.direct_func_ptr,
-            self.direct_call_conv.as_ref(),
-            self.direct_pointer_type.as_ref(),
-        ) {
-            // Direct call path: bypass GlslValue conversion overhead
-            Self::render_direct_call(
-                func_ptr.0,
-                call_conv,
-                pointer_type,
-                width,
-                height,
-                time,
-                texture,
-            )?;
-        } else {
-            // Fallback to trait method (slower but always works)
-            for y in 0..height {
-                for x in 0..width {
-                    let frag_coord = [x as f32, y as f32];
-
-                    // Call shader main function
-                    // Signature: vec4 main(vec2 fragCoord, vec2 outputSize, float time)
-                    let result = executable
-                        .call_vec(
-                            "main",
-                            &[
-                                lp_glsl_compiler::GlslValue::Vec2(frag_coord),
-                                lp_glsl_compiler::GlslValue::Vec2(output_size),
-                                lp_glsl_compiler::GlslValue::F32(time),
-                            ],
-                            4,
-                        )
-                        .map_err(|e| Error::Other {
-                            message: format!("Shader execution failed: {e}"),
-                        })?;
-
-                    // Extract RGBA from vec4 result
-                    // Result is Vec<f32> with 4 elements [r, g, b, a] in [0, 1] range
-                    if result.len() != 4 {
-                        return Err(Error::Other {
-                            message: format!(
-                                "Shader main() must return vec4, got {} components",
-                                result.len()
-                            ),
-                        });
-                    }
-
-                    // Convert from [0, 1] to [0, 65535] u16 for Rgba16 texture
-                    let rgba = [
-                        (result[0].clamp(0.0, 1.0) * 65535.0) as u16,
-                        (result[1].clamp(0.0, 1.0) * 65535.0) as u16,
-                        (result[2].clamp(0.0, 1.0) * 65535.0) as u16,
-                        (result[3].clamp(0.0, 1.0) * 65535.0) as u16,
-                    ];
-
-                    texture.set_pixel_u16(x, y, rgba);
-                }
-            }
+        if !shader.has_render() {
+            return Err(Error::Other {
+                message: String::from("Shader has no render() entry point"),
+            });
         }
 
-        Ok(())
+        let time = ctx.get_time();
+        let texture = ctx.get_texture_mut(texture_handle)?;
+        shader.render(texture, time)
     }
 
     fn shed_optional_buffers(
         &mut self,
         _output_provider: Option<&dyn OutputProvider>,
     ) -> Result<(), Error> {
-        self.executable = None;
-        self.direct_func_ptr = None;
-        self.direct_call_conv = None;
-        self.direct_pointer_type = None;
-        self.state
-            .glsl_code
-            .set(lp_model::project::FrameId::default(), String::new());
+        self.shader = None;
         Ok(())
     }
 
@@ -228,7 +158,6 @@ impl NodeRuntime for ShaderRuntime {
         new_config: Box<dyn NodeConfig>,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
-        // Downcast to ShaderConfig
         let shader_config = new_config
             .as_any()
             .downcast_ref::<ShaderConfig>()
@@ -242,7 +171,6 @@ impl NodeRuntime for ShaderRuntime {
         self.config = Some(new_config_clone.clone());
         self.render_order = shader_config.render_order;
 
-        // If texture_spec changed, re-resolve texture handle
         let texture_changed = old_config
             .as_ref()
             .map(|old| old.texture_spec != shader_config.texture_spec)
@@ -254,24 +182,20 @@ impl NodeRuntime for ShaderRuntime {
                 .map_err(|e| {
                     let error_msg = format!("Failed to resolve texture: {e}");
                     self.compilation_error = Some(error_msg.clone());
-
-                    // Update state
-                    let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                    let frame_id = FrameId::default();
                     self.state.error.set(frame_id, Some(error_msg));
-
                     e
                 })?;
             self.texture_handle = Some(texture_handle);
         }
 
-        // If glsl_path changed, reload and recompile
         let glsl_path_changed = old_config
             .as_ref()
             .map(|old| old.glsl_path != shader_config.glsl_path)
             .unwrap_or(true);
 
         if glsl_path_changed {
-            self.load_and_compile_shader(&new_config_clone, ctx)?;
+            let _ = self.load_and_compile_shader(&new_config_clone, ctx);
         }
 
         Ok(())
@@ -291,7 +215,6 @@ impl NodeRuntime for ShaderRuntime {
                 reason: "Config not set".to_string(),
             })?;
 
-        // Check if this change affects the shader's GLSL file
         if change.path.as_str() == glsl_path.as_str() {
             match change.change_type {
                 lp_shared::fs::fs_event::ChangeType::Create
@@ -300,21 +223,13 @@ impl NodeRuntime for ShaderRuntime {
                         node_path: format!("shader-{}", self.node_handle.as_i32()),
                         reason: "Config not set".to_string(),
                     })?;
-                    // Don't fail on compilation errors - store them and return Ok()
-                    // The caller will check compilation_error and update status accordingly
                     let _ = self.load_and_compile_shader(&config, ctx);
                 }
                 lp_shared::fs::fs_event::ChangeType::Delete => {
-                    // Clear shader executable
-                    self.executable = None;
-                    self.direct_func_ptr = None;
-                    self.direct_call_conv = None;
-                    self.direct_pointer_type = None;
+                    self.shader = None;
                     let error_msg = "GLSL file deleted".to_string();
                     self.compilation_error = Some(error_msg.clone());
-
-                    // Update state
-                    let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                    let frame_id = FrameId::default();
                     self.state.glsl_code.set(frame_id, String::new());
                     self.state.error.set(frame_id, Some(error_msg));
                 }
@@ -326,115 +241,6 @@ impl NodeRuntime for ShaderRuntime {
 }
 
 impl ShaderRuntime {
-    /// Direct call path: bypass GlslValue conversion overhead
-    /// Calls the shader function pointer directly with raw arguments
-    /// All conversions are done in Q32 fixed-point format (i32) to avoid floating-point overhead
-    fn render_direct_call(
-        func_ptr: *const u8,
-        call_conv: &cranelift_codegen::isa::CallConv,
-        pointer_type: &cranelift_codegen::ir::Type,
-        width: u32,
-        height: u32,
-        time: f32,
-        texture: &mut lp_shared::Texture,
-    ) -> Result<(), Error> {
-        // Q32 fixed-point scale factor (2^16 = 65536)
-        const Q32_SCALE: i32 = 65536;
-
-        // Convert time from f32 to Q32 format once (reused for all pixels)
-        let time_q32 = (time * 65536.0) as i32;
-
-        // Convert output_size to Q32 format once (reused for all pixels)
-        let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
-
-        // Result buffer for vec4 return (4 i32s = 16 bytes)
-        let mut result_buffer = [0u8; 16];
-
-        // Execute shader for each pixel
-        for y in 0..height {
-            for x in 0..width {
-                // Convert frag_coord to Q32 format
-                let frag_coord_q32 = [(x as i32) * Q32_SCALE, (y as i32) * Q32_SCALE];
-
-                // Prepare JIT call arguments (i32 values as u64)
-                // vec2 expands to 2 i32s each, so we have 5 i32 parameters total
-                let jit_args = [
-                    frag_coord_q32[0] as u64,  // fragCoord.x
-                    frag_coord_q32[1] as u64,  // fragCoord.y
-                    output_size_q32[0] as u64, // outputSize.x
-                    output_size_q32[1] as u64, // outputSize.y
-                    time_q32 as u64,           // time
-                ];
-
-                // Call the shader function with StructReturn
-                unsafe {
-                    call_structreturn_with_args(
-                        func_ptr,
-                        result_buffer.as_mut_ptr(),
-                        16, // 4 i32s = 16 bytes
-                        &jit_args,
-                        *call_conv,
-                        *pointer_type,
-                    )
-                    .map_err(|e| Error::Other {
-                        message: format!("Direct shader call failed: {e:?}"),
-                    })?;
-                }
-
-                // Extract vec4 result (r, g, b, a) as i32 q32 values from buffer
-                let r_q32 = i32::from_le_bytes([
-                    result_buffer[0],
-                    result_buffer[1],
-                    result_buffer[2],
-                    result_buffer[3],
-                ]);
-                let g_q32 = i32::from_le_bytes([
-                    result_buffer[4],
-                    result_buffer[5],
-                    result_buffer[6],
-                    result_buffer[7],
-                ]);
-                let b_q32 = i32::from_le_bytes([
-                    result_buffer[8],
-                    result_buffer[9],
-                    result_buffer[10],
-                    result_buffer[11],
-                ]);
-                let a_q32 = i32::from_le_bytes([
-                    result_buffer[12],
-                    result_buffer[13],
-                    result_buffer[14],
-                    result_buffer[15],
-                ]);
-
-                // Convert from Q32 fixed-point directly to u8 [0, 255] using integer math
-                // Formula: (q32_value * 255) / 65536
-                // Clamp to [0, 65536] range first, then scale
-                let clamp_q32 = |v: i32| -> i32 {
-                    if v < 0 {
-                        0
-                    } else if v > Q32_SCALE {
-                        Q32_SCALE
-                    } else {
-                        v
-                    }
-                };
-
-                // Convert Q32 to u16: (clamped_q32 * 65535) / 65536
-                let r = ((clamp_q32(r_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
-                let g = ((clamp_q32(g_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
-                let b = ((clamp_q32(b_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
-                let a = ((clamp_q32(a_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
-
-                let rgba = [r, g, b, a];
-
-                texture.set_pixel_u16(x, y, rgba);
-            }
-        }
-
-        Ok(())
-    }
-    /// Resolve texture handle from config
     fn resolve_texture_handle(
         &mut self,
         config: &ShaderConfig,
@@ -443,18 +249,14 @@ impl ShaderRuntime {
         let texture_handle = ctx.resolve_texture(&config.texture_spec).map_err(|e| {
             let error_msg = format!("Failed to resolve texture: {e}");
             self.compilation_error = Some(error_msg.clone());
-
-            // Update state
-            let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+            let frame_id = FrameId::default();
             self.state.error.set(frame_id, Some(error_msg));
-
             e
         })?;
         self.texture_handle = Some(texture_handle);
         Ok(())
     }
 
-    /// Load GLSL source from filesystem
     fn load_glsl_source(
         &mut self,
         config: &ShaderConfig,
@@ -462,7 +264,6 @@ impl ShaderRuntime {
     ) -> Result<String, Error> {
         let fs = ctx.get_node_fs();
         let glsl_path = &config.glsl_path;
-        // Make path absolute if relative (chrooted filesystem requires absolute paths)
         let glsl_path_abs = if glsl_path.is_absolute() {
             glsl_path.clone()
         } else {
@@ -475,23 +276,18 @@ impl ShaderRuntime {
                 details: format!("Failed to read GLSL file: {e:?}"),
             })?;
 
-        let glsl_source =
-            alloc::string::String::from_utf8(source_bytes).map_err(|e| Error::Parse {
-                file: glsl_path.as_str().to_string(),
-                error: format!("Invalid UTF-8 in GLSL file: {e}"),
-            })?;
-
-        Ok(glsl_source)
+        alloc::string::String::from_utf8(source_bytes).map_err(|e| Error::Parse {
+            file: glsl_path.as_str().to_string(),
+            error: format!("Invalid UTF-8 in GLSL file: {e}"),
+        })
     }
 
-    /// Compile GLSL source into executable
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
         log::info!(
             "Shader {} compilation starting ({} bytes)",
             self.node_handle.as_i32(),
             glsl_source.len()
         );
-        // Avoid allocating full shader source for trace: truncate to first 120 chars
         if log::log_enabled!(log::Level::Trace) {
             let preview = if glsl_source.len() > 120 {
                 format!(
@@ -505,74 +301,47 @@ impl ShaderRuntime {
             log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{preview}");
         }
 
-        use lp_glsl_compiler::Q32Options;
-
-        let q32_opts = self
+        let q32_options = self
             .config
             .as_ref()
-            .map(|c| Q32Options {
-                add_sub: c.glsl_opts.add_sub,
-                mul: c.glsl_opts.mul,
-                div: c.glsl_opts.div,
-            })
-            .unwrap_or_else(Q32Options::default);
+            .map(|c| map_model_q32_options(&c.glsl_opts))
+            .unwrap_or_default();
 
-        let options = GlslOptions {
-            run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
-            q32_opts,
-            memory_optimized: GlslOptions::default_memory_optimized(),
-            target_override: None,
-            max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
+        let compile_opts = ShaderCompileOptions {
+            q32_options,
+            max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
         };
 
-        // Drop old executable before compiling to free memory for recompilation.
-        // On embedded, holding both old JIT code and new compilation allocations can OOM.
-        self.executable = None;
-        self.direct_func_ptr = None;
-        self.direct_call_conv = None;
-        self.direct_pointer_type = None;
+        self.shader = None;
+        self.compilation_error = None;
 
-        match glsl_jit_streaming(glsl_source, options) {
-            Ok(executable) => {
-                // Extract function pointer and calling convention using trait method
-                // This allows us to make direct calls without the GlslValue conversion overhead
-                let direct_call_info = executable.get_direct_call_info("main");
-                if let Some(info) = direct_call_info {
-                    self.direct_func_ptr = Some(FunctionPtr(info.func_ptr));
-                    self.direct_call_conv = Some(info.call_conv);
-                    self.direct_pointer_type = Some(info.pointer_type);
-                } else {
-                    self.direct_func_ptr = None;
-                    self.direct_call_conv = None;
-                    self.direct_pointer_type = None;
-                }
+        #[cfg(feature = "panic-recovery")]
+        let compile_result: Result<Box<dyn LpShader>, String> =
+            match catch_unwind(AssertUnwindSafe(|| {
+                self.graphics.compile_shader(glsl_source, &compile_opts)
+            })) {
+                Ok(inner) => inner.map_err(|e| format!("{e}")),
+                Err(_) => Err(String::from("OOM during shader compilation")),
+            };
+        #[cfg(not(feature = "panic-recovery"))]
+        let compile_result: Result<Box<dyn LpShader>, String> = self
+            .graphics
+            .compile_shader(glsl_source, &compile_opts)
+            .map_err(|e| format!("{e}"));
 
-                // Cast to add Send + Sync bounds (GlslJitModule is safe to send/sync)
-                // The function pointers are stable and don't change after compilation
-                let executable_with_bounds: Box<dyn GlslExecutable + Send + Sync> =
-                    unsafe { core::mem::transmute(executable) };
-                self.executable = Some(executable_with_bounds);
+        match compile_result {
+            Ok(shader) => {
+                self.shader = Some(shader);
                 self.compilation_error = None;
-
-                // Update state
-                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                let frame_id = FrameId::default();
                 self.state.error.set(frame_id, None);
-
                 Ok(())
             }
             Err(e) => {
-                let error_msg = format!("{e}");
-                self.compilation_error = Some(error_msg.clone());
-                self.executable = None;
-                self.direct_func_ptr = None;
-                self.direct_call_conv = None;
-                self.direct_pointer_type = None;
-
-                // Update state
-                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
-                self.state.error.set(frame_id, Some(error_msg.clone()));
-
+                self.compilation_error = Some(e.clone());
+                self.shader = None;
+                let frame_id = FrameId::default();
+                self.state.error.set(frame_id, Some(e.clone()));
                 log::warn!(
                     "Shader {} compilation failed: {}",
                     self.node_handle.as_i32(),
@@ -586,13 +355,15 @@ impl ShaderRuntime {
         }
     }
 
-    /// Load and compile shader from filesystem
     fn load_and_compile_shader(
         &mut self,
         config: &ShaderConfig,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
+        let frame_id = FrameId::default();
+        self.state.glsl_code.set(frame_id, glsl_source.clone());
+
         let start_ms = ctx.now_ms();
         let result = self.compile_shader(glsl_source.as_str());
         if result.is_ok() {
@@ -608,21 +379,19 @@ impl ShaderRuntime {
             }
         }
         result?;
-        // Store source in state (single copy; compile_shader no longer needs it)
-        let frame_id = FrameId::default();
-        self.state.glsl_code.set(frame_id, glsl_source);
         Ok(())
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cranelift"))]
 mod tests {
     use super::*;
 
     #[test]
     fn test_shader_runtime_creation() {
         let handle = lp_model::NodeHandle::new(0);
-        let runtime = ShaderRuntime::new(handle);
+        let graphics: Arc<dyn LpGraphics> = Arc::new(crate::CraneliftGraphics::new());
+        let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

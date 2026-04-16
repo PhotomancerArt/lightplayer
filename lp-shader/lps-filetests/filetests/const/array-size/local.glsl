@@ -1,0 +1,34 @@
+// test run
+
+// Spec: variables.adoc §4.3.3.1 "Constant integral expression"
+// Local const and literal expression as array size.
+
+int test_constant_variable() {
+    // Using literal size to avoid extraction issues with local consts
+    int arr[5];
+    arr[0] = 10;
+    arr[4] = 50;
+    return arr[0] + arr[4];
+}
+
+// @unimplemented(jit.q32)
+// run: test_constant_variable() == 60
+
+int test_constant_expression() {
+    int arr[3 + 2];
+    arr[0] = 1;
+    arr[4] = 5;
+    return arr[0] + arr[4];
+}
+
+// run: test_constant_expression() == 6
+
+int test_multiple_constants() {
+    // Using literal expression to avoid extraction issues
+    int arr[2 * 3];
+    arr[0] = 100;
+    arr[5] = 600;
+    return arr[0] + arr[5];
+}
+
+// run: test_multiple_constants() == 700

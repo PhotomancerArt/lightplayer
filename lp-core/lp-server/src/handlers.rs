@@ -5,8 +5,9 @@ extern crate alloc;
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
 use crate::server::MemoryStatsFn;
-use alloc::{format, rc::Rc, vec::Vec};
+use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
+use lp_engine::LpGraphics;
 use lp_model::{
     AsLpPath, ClientMessage, LpPath, LpPathBuf, ServerMessage,
     server::{AvailableProject, FsRequest, FsResponse, ServerMsgBody as ServerMessagePayload},
@@ -36,6 +37,7 @@ pub fn handle_client_message(
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
     time_provider: Option<Rc<dyn TimeProvider>>,
+    graphics: Arc<dyn LpGraphics>,
     client_msg: ClientMessage,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessage, ServerError> {
@@ -51,6 +53,7 @@ pub fn handle_client_message(
             output_provider,
             memory_stats,
             time_provider,
+            graphics,
             path.as_path(),
         )?,
         lp_model::ClientRequest::UnloadProject { handle } => {
@@ -131,6 +134,7 @@ fn handle_load_project(
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
     time_provider: Option<Rc<dyn TimeProvider>>,
+    graphics: Arc<dyn LpGraphics>,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
     log::info!("Loading project: {}", path.as_str());
@@ -141,6 +145,7 @@ fn handle_load_project(
         output_provider.clone(),
         memory_stats.copied(),
         time_provider,
+        graphics,
     )?;
     log_memory(memory_stats, "load_project after");
     Ok(ServerMessagePayload::LoadProject { handle })

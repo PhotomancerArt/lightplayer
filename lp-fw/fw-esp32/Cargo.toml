@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server"]
+default = ["esp32c6", "server", "native-jit"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -21,18 +21,28 @@ server = [
     "lp-shared",
     "ser-write-json",
 ]  # Enable server dependencies (lp-server, lp-shared, lp-model)
+# RV32 native JIT shaders (`lpvm-native` `rt_jit`); default for on-device testing
+native-jit = ["lp-server/native-jit"]
+# Cranelift JIT for shaders (comparison); use `--no-default-features --features esp32c6,server,cranelift`
+cranelift = [
+    "lp-server/cranelift",
+    "lp-server/cranelift-optimizer",
+    "lp-server/cranelift-verifier",
+]
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
+test_oom = []   # Allocate until OOM, verify catch_unwind recovers (for panic recovery validation)
 
 [dependencies]
+unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 embassy-executor = "0.9.1"
 embassy-time = "0.4.0"
 embassy-sync = "0.7.2"
-esp-backtrace = { version = "0.18.1", features = ["panic-handler", "println"] }
+esp-backtrace = { version = "0.18.1", features = ["println"] }
 esp-bootloader-esp-idf = { version = "0.2.0" }
 esp-hal = { version = "1.0.0", features = ["log-04", "unstable"] }
 esp-rtos = { version = "0.2.0", features = ["embassy", "log-04"] }
@@ -40,25 +50,14 @@ esp-println = { version = "0.16.1", default-features = false, features = ["esp32
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
-# Note: cranelift-optimizer and cranelift-verifier features are intentionally NOT enabled to reduce binary size
-# This saves ~166-219 KB by disabling unused Cranelift optimizer and verifier code
-lp-server = { path = "../../lp-core/lp-server", default-features = false, optional = true }
+# Graphics backend: enable `native-jit` (default) or `cranelift` via features — do not pin `cranelift` here
+lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"], optional = true }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
 lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true, features = ["ser-write-json"] }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
-lp-engine = { path = "../../lp-core/lp-engine", default-features = false, optional = true }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 
-# Dependencies for optional GLSL compilation features
-lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false, features = ["core"], optional = true }
-lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false, optional = true }
-lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", optional = true }
-cranelift-codegen = { workspace = true, features = ["riscv32"], optional = true }
-cranelift-frontend = { workspace = true, features = ["core"], optional = true }
-cranelift-module = { workspace = true, features = ["core"], optional = true }
-cranelift-control = { workspace = true, optional = true }
-target-lexicon = { workspace = true, optional = true }
 smart-leds = "0.3"
 embassy-futures = "0.1"
 embedded-io-async = "0.6"

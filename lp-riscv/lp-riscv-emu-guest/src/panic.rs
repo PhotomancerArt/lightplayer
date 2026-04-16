@@ -36,20 +36,17 @@ fn panic_syscall(
     ebreak()
 }
 
-/// Panic handler
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    // Create a buffer for the panic message
+/// Format panic info and report to host via syscall. Used by both panic handlers.
+fn report_panic_to_host(info: &core::panic::PanicInfo) -> ! {
     let mut panic_msg_buf = [0u8; 256];
     let mut cursor = 0;
 
-    // Format the panic message into our buffer
     struct BufWriter<'a> {
         buf: &'a mut [u8],
         cursor: &'a mut usize,
     }
 
-    impl<'a> Write for BufWriter<'a> {
+    impl Write for BufWriter<'_> {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
             let bytes = s.as_bytes();
             let remaining = self.buf.len() - *self.cursor;
@@ -67,10 +64,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         cursor: &mut cursor,
     };
 
-    // Try to format the full panic info
     let _ = write!(writer, "{}", info.message());
 
-    // If message is empty, use default message
     if cursor == 0 {
         let default_msg = b"panic occurred (no message)";
         let to_copy = default_msg.len().min(panic_msg_buf.len());
@@ -78,20 +73,44 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         cursor = to_copy;
     }
 
-    // Try to extract location info
-    // Note: In no_std, location() may return None if location tracking is disabled
-    // or if the panic was created without location info
-    // The file name from Location is a string literal in the binary, so the pointer is valid
     let (file_ptr, file_len, line) = if let Some(loc) = info.location() {
         let file = loc.file();
-        // file() returns &str which points to a string literal in the binary
-        // This pointer is valid for the lifetime of the program
         let file_bytes = file.as_bytes();
         (file_bytes.as_ptr(), file_bytes.len(), loc.line())
     } else {
         (null(), 0, 0)
     };
 
-    // Report panic to host with the message
     panic_syscall(panic_msg_buf.as_ptr(), cursor, file_ptr, file_len, line);
+}
+
+/// Panic handler: build PanicPayload, attempt unwinding, fall back to host report.
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    extern crate alloc;
+    use core::fmt::Write;
+
+    let message = {
+        let mut buf = alloc::string::String::new();
+        let _ = write!(buf, "{}", info.message());
+        if buf.is_empty() {
+            alloc::string::String::from("panic occurred (no message)")
+        } else {
+            buf
+        }
+    };
+    let (file, line) = if let Some(loc) = info.location() {
+        (
+            Some(alloc::string::String::from(loc.file())),
+            Some(loc.line()),
+        )
+    } else {
+        (None, None)
+    };
+
+    let payload = lp_shared::backtrace::PanicPayload::new(message, file, line);
+    let _code = unwinding::panic::begin_panic(alloc::boxed::Box::new(payload));
+
+    // begin_panic returned — no catch_unwind on stack. Fall back to host report.
+    report_panic_to_host(info);
 }

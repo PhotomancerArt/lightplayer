@@ -3,9 +3,13 @@
 # Variables
 
 rv32_target := "riscv32imac-unknown-none-elf"
-rv32_packages := "esp32-glsl-jit lp-glsl-builtins-emu-app"
+rv32_packages := "lps-builtins-emu-app"
 rv32_firmware_packages := "fw-esp32"
-lp_glsl_dir := "lp-glsl"
+
+# fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
+
+fw_esp32_profile := "release-esp32"
+lps_dir := "lp-shader"
 
 # Default recipe - show available commands
 default:
@@ -26,7 +30,92 @@ install-rv32-target:
 
 # Generate builtin boilerplate code
 generate-builtins:
-    cargo run --bin lp-glsl-builtins-gen-app -p lp-glsl-builtins-gen-app
+    cargo run --bin lps-builtins-gen-app -p lps-builtins-gen-app
+
+# Ensure wasm32-unknown-unknown target is installed (web-demo, lps-builtins-wasm for filetests, etc.)
+
+wasm32_target := "wasm32-unknown-unknown"
+
+install-wasm32-target:
+    @if ! rustup target list --installed | grep -q "^{{ wasm32_target }}$"; then \
+        echo "Installing target {{ wasm32_target }}..."; \
+        rustup target add {{ wasm32_target }}; \
+    else \
+        echo "Target {{ wasm32_target }} already installed"; \
+    fi
+
+# ============================================================================
+# Web demo (GLSL compiler in browser)
+# ============================================================================
+
+# Build web-demo WASM (single `web_demo.wasm`: lpvm-wasm + `lps-builtins` linked in) and wasm-bindgen glue into www/
+web-demo-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building web-demo for wasm32..."
+    cargo build -p web-demo --target wasm32-unknown-unknown --release
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating JS glue (wasm-bindgen)..."
+    wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
+        --out-dir lp-app/web-demo/www/pkg --target web
+    mkdir -p lp-app/web-demo/www
+    cp examples/basic/src/rainbow.shader/main.glsl lp-app/web-demo/www/rainbow-default.glsl
+    echo "Artifacts: lp-app/web-demo/www/ (index.html, pkg/)"
+
+# Build and serve the web demo (installs miniserve via cargo if missing)
+web-demo: web-demo-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v miniserve >/dev/null 2>&1; then
+        echo "miniserve not found; installing with cargo install miniserve..."
+        cargo install miniserve
+    fi
+    echo "Serving http://127.0.0.1:2812 (Ctrl+C to stop)"
+    miniserve --index index.html -p 2812 lp-app/web-demo/www/
+
+# Deploy web demo to gh-pages branch
+web-demo-deploy: web-demo-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    www="lp-app/web-demo/www"
+    branch="gh-pages"
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT
+
+    # Copy built artifacts to temp dir
+    cp "$www/index.html" "$tmp_dir/"
+    cp "$www/rainbow-default.glsl" "$tmp_dir/"
+    cp -r "$www/pkg" "$tmp_dir/pkg"
+
+    # Create/update gh-pages as orphan branch
+    if git rev-parse --verify "$branch" >/dev/null 2>&1; then
+        git worktree add --force "$tmp_dir/wt" "$branch"
+    else
+        git worktree add --force --orphan -b "$branch" "$tmp_dir/wt"
+    fi
+
+    # Sync files into worktree
+    cp "$tmp_dir/index.html" "$tmp_dir/wt/"
+    cp "$tmp_dir/rainbow-default.glsl" "$tmp_dir/wt/"
+    rm -rf "$tmp_dir/wt/pkg"
+    cp -r "$tmp_dir/pkg" "$tmp_dir/wt/pkg"
+
+    # Commit and push
+    cd "$tmp_dir/wt"
+    git add -A
+    url="https://light-player.github.io/lightplayer/"
+    if git diff --cached --quiet; then
+        echo "No changes to deploy. $url"
+    else
+        git commit -m "deploy: web-demo $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        git push origin "$branch"
+        echo "Deployed to $branch: $url"
+    fi
+    cd -
+    git worktree remove --force "$tmp_dir/wt"
 
 # ============================================================================
 # Build commands - Workspace-wide
@@ -38,18 +127,13 @@ build-host:
 build-host-release:
     cargo build --release
 
-build-rv32: install-rv32-target build-rv32-jit-test build-fw-esp32 build-rv32-emu-guest-test-app
+build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32 build-rv32-emu-guest-test-app
 
 build-rv32-release: build-rv32
 
-# riscv32: jit-test
-build-rv32-jit-test: install-rv32-target
-    cargo build --target {{ rv32_target }} -p lp-glsl-builtins-emu-app --release
-    cd lp-glsl/esp32-glsl-jit && cargo build --target {{ rv32_target }} --release --features esp32c6
-
-# riscv32: fw-esp32
+# riscv32: fw-esp32 (uses release-esp32 profile: nightly + panic=unwind for OOM recovery)
 build-fw-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
+    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6
 
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
@@ -57,17 +141,17 @@ build-rv32-emu-guest-test-app: install-rv32-target
 
 # riscv32: fw-emu (firmware that runs in RISC-V emulator)
 build-fw-emu: install-rv32-target
-    cargo build --target {{ rv32_target }} -p fw-emu
+    cargo build --target {{ rv32_target }} -p fw-emu --release
 
-# CI build: host + rv32 builtins + emu-guest. Skips esp32-glsl-jit and fw-esp32
+# CI build: host + rv32 builtins + emu-guest. Skips fw-esp32
 
-# (they need ESP32 linker symbols / toolchain not available on generic runners)
+# (needs ESP32 linker symbols / toolchain not always available on generic runners)
 [parallel]
 build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
 
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
-    cargo build --target {{ rv32_target }} -p lp-glsl-builtins-emu-app --release
+    cargo build --target {{ rv32_target }} -p lps-builtins-emu-app --release
 
 [parallel]
 build: build-host build-rv32
@@ -86,14 +170,14 @@ build-app-release:
     cargo build --release --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
 
 # ============================================================================
-# Build commands - lp-glsl only
+# Build commands - lps only
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo build --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 build-glsl-release:
-    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo build --release --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Formatting
@@ -112,17 +196,13 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-glsl-builtins-emu-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32 clippy-rv32-emu-guest-test-app
-
-# riscv32: jit-test clippy
-clippy-rv32-jit-test: install-rv32-target
-    cd lp-glsl/esp32-glsl-jit && cargo clippy --target {{ rv32_target }} --release --features esp32c6 -- --no-deps -D warnings
+clippy-rv32: install-rv32-target clippy-fw-esp32 clippy-rv32-emu-guest-test-app
 
 # riscv32: fw-esp32 clippy
 clippy-fw-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo clippy --target {{ rv32_target }} --release --features esp32c6 -- --no-deps -D warnings
+    cd lp-fw/fw-esp32 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6 -- --no-deps -D warnings
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
@@ -162,14 +242,14 @@ clippy-app-fix:
                  --package lp-model
 
 # ============================================================================
-# Linting - lp-glsl only
+# Linting - lps only
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app -- --no-deps -D warnings
+    cargo clippy --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo clippy --fix --allow-dirty --allow-staged --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -192,14 +272,16 @@ test-app:
     cargo test --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
 
 # ============================================================================
-# Testing - lp-glsl only
+# Testing - lps only
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh
+    scripts/glsl-filetests.sh --target wasm.q32
+    scripts/glsl-filetests.sh --target rv32.q32c
 
 # ============================================================================
 # CI and validation
@@ -209,16 +291,18 @@ test-glsl-filetests:
 check: fmt-check clippy
 
 # Run build before test so lp-riscv-emu guest_app_tests can find the prebuilt binary.
+
 # (test would otherwise race with build and may fail with "Binary not found")
 [parallel]
 ci: check build-then-test
+
 build-then-test: build test
 
 # lp-app specific CI
 [parallel]
 ci-app: fmt-check clippy-app build-app test-app
 
-# lp-glsl specific CI
+# lps specific CI
 [parallel]
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
@@ -233,7 +317,7 @@ fci-app:
     @just clippy-app-fix
     @just ci-app
 
-# Fix code issues then run CI for lp-glsl (sequential, not parallel)
+# Fix code issues then run CI for lps (sequential, not parallel)
 fci-glsl:
     @just fmt
     @just clippy-glsl-fix
@@ -249,7 +333,7 @@ clean:
 
 # Clean everything including target directories
 clean-all: clean
-    rm -rf {{ lp_glsl_dir }}/target
+    rm -rf {{ lps_dir }}/target
 
 # ============================================================================
 # Git workflows
@@ -274,28 +358,35 @@ demo example="basic":
     cd lp-cli && cargo run -- dev ../examples/{{ example }}
 
 # Run firmware on ESP32-C6 device
+# Path to fw-esp32 ELF (release-esp32 profile)
+
+fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 
 # Requires: ESP32-C6 device connected via USB
 demo-esp32c6-host: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
-    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6 --partition-table partitions.csv
+    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6
+    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
-demo-esp32c6-standalone: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6 --partition-table partitions.csv
+demo-esp32c6-standalone: build-fw-esp32
+    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
 
 # Run firmware on ESP32-C6 device using the test_rmt feature
 fwtest-rmt-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 # Run firmware on ESP32-C6 device using the test_dither feature
 fwtest-dithering-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
+# Run firmware with test_oom: allocates until OOM, verifies catch_unwind recovers
+fwtest-oom-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \
@@ -318,7 +409,7 @@ cargo-update:
 decode-backtrace *addrs:
     #!/usr/bin/env bash
     set -e
-    test -f target/{{ rv32_target }}/release/fw-esp32
+    test -f target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32
     if [ -n "{{ addrs }}" ]; then
         ADDRS="{{ addrs }}"
     else
@@ -329,22 +420,24 @@ decode-backtrace *addrs:
         exit 1
     fi
     if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then
-        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/release/fw-esp32 $ADDRS
+        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32 $ADDRS
     else
-        addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a $ADDRS
+        addr2line -e target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32 -f -a $ADDRS
     fi
 
 # ============================================================================
 # Allocation tracing
 # ============================================================================
-
 # Run a project in the emulator with allocation tracing.
 # Outputs path to trace directory.
-# Usage: just emu-trace path/to/project [--frames N] [--note "description"]
-emu-trace project_dir *args:
-    cargo run -p lp-cli -- emu-trace {{ project_dir }} {{ args }}
+# Default project: examples/mem-profile
 
-# Summarize heap allocations from an emu-trace output directory.
+# Usage: just mem-profile [path/to/project] [--frames N] [--note "description"]
+mem-profile *args:
+    cargo run -p lp-cli -- mem-profile {{ args }}
+
+# Summarize heap allocations from a mem-profile output directory.
+
 # Usage: just heap-summary traces/2026-03-08-185520-simple-test [--top N]
 heap-summary trace_dir *args:
     cargo run -p lp-cli -- heap-summary {{ trace_dir }} {{ args }}

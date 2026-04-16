@@ -1,7 +1,7 @@
 fn main() {
     // Use the linker script from lp-riscv-emu-guest crate
     // CARGO_MANIFEST_DIR points to fw-emu directory
-    // We need to go up to fw-emu/, then to lp-fw/, then to root/, then to lp-glsl/, then to crates/, then to lp-riscv-emu-guest
+    // We need to go up to fw-emu/, then to lp-fw/, then to root/, then to lp-shader/, then to crates/, then to lp-riscv-emu-guest
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
 
     // Go from lp-fw/fw-emu to lp-riscv/lp-riscv-emu-guest

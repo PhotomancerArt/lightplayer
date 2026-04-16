@@ -81,8 +81,8 @@ impl Riscv32Emulator {
                 // Only log on errors (handled elsewhere)
             }
             LogLevel::Instructions => {
-                // Implement rolling buffer: if buffer reaches 100, remove oldest
-                if self.log_buffer.len() >= 100 {
+                // Implement rolling buffer: if buffer reaches max, remove oldest
+                if self.log_buffer.len() >= crate::config::INSTRUCTION_LOG_BUFFER_SIZE {
                     self.log_buffer.remove(0);
                 }
                 self.log_buffer.push(log);

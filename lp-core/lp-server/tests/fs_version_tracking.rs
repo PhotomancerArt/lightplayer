@@ -1,10 +1,12 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_model::{AsLpPath, AsLpPathBuf};
 use lp_server::LpServer;
+use lp_server::{CraneliftGraphics, LpGraphics};
 use lp_shared::fs::LpFsMemory;
 
 #[test]
@@ -12,12 +14,14 @@ fn test_fs_changes_not_repeated() {
     // Create server with memory filesystem
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let base_fs = Box::new(LpFsMemory::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
     let mut server = LpServer::new(
         output_provider.clone(),
         base_fs,
         "projects".as_path(),
         None,
         None,
+        graphics.clone(),
     );
 
     // Create a project
@@ -41,8 +45,15 @@ fn test_fs_changes_not_repeated() {
         unsafe {
             let pm = (*server_ptr).project_manager_mut();
             let fs = (*server_ptr).base_fs_mut();
-            pm.load_project(&project_path, fs, output_provider.clone(), None, None)
-                .expect("Failed to load project")
+            pm.load_project(
+                &project_path,
+                fs,
+                output_provider.clone(),
+                None,
+                None,
+                graphics.clone(),
+            )
+            .expect("Failed to load project")
         }
     };
 

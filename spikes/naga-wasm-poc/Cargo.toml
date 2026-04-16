@@ -1,0 +1,17 @@
+[package]
+name = "naga-wasm-poc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Spike: GLSL → Naga IR → WASM (f32 / Q32). Not for production."
+
+[lints]
+workspace = true
+
+[dependencies]
+naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
+wasm-encoder = "0.245"
+
+[dev-dependencies]
+wasmtime = "42"

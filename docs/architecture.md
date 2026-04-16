@@ -26,7 +26,8 @@ This provides significant performance benefits:
 
 The GLSL compiler automatically transforms floating-point operations in shaders to fixed-point
 equivalents, and provides optimized builtin functions (sin, cos, sqrt, etc.) implemented using
-efficient fixed-point algorithms.
+efficient fixed-point algorithms. Float mode selection is a backend parameter — the IR itself is
+mode-agnostic, so the same lowered program can be emitted for either mode.
 
 ## Core Application Architecture
 
@@ -100,25 +101,73 @@ Shared firmware abstractions:
 - **Transport** - Serial-based transport implementation for client-server communication
 - **Logging** - Platform-specific logging infrastructure (emulator syscalls, ESP32 `esp_println`)
 
-## GLSL Compiler (`lp-glsl/`)
+## GLSL Compiler (`lp-shader/`)
 
-The GLSL compiler transforms GLSL shaders into executable RISC-V code:
+The GLSL compiler transforms GLSL shaders into executable code for embedded and desktop targets.
+See [`lp-shader/README.md`](../lp-shader/README.md) for the full crate index and commands, and
+[`docs/lpir/`](lpir/) for the IR specification.
 
-- **Parsing** - Uses a forked `glsl-parser` to parse GLSL source code with span information
-- **Transformation** - Converts GLSL to a simplified intermediate representation, handles
-  fixed-point math (Q32), and applies optimizations
-- **Code Generation** - Uses a custom 32-bit fork of Cranelift to generate RISC-V32 machine code
-- **JIT Compilation** - Compiles shaders at runtime on embedded devices using Cranelift's JIT
-  backend
-- **ELF Linking** - Can also generate ELF binaries for static linking and testing
-- **Builtin Functions** - Provides a library of GLSL builtin functions (math, noise, color space)
-  implemented in Rust, inspired by Lygia
+### Pipeline
 
-The compiler supports multiple execution modes:
+```
+GLSL source (#version 450 core)
+  │
+  ▼
+lps-frontend           Naga glsl-in → IrModule
+  │
+  ▼
+LPIR                    flat, scalarized, mode-agnostic IR
+  │
+  ├──► lpvm-cranelift     → native machine code (RISC-V / host JIT)
+  ├──► lps-wasm       → .wasm (browser preview, wasm.q32 filetests)
+  └──► lpir::interp       → in-process interpreter (testing)
+```
 
-- **HostJit** - JIT compilation on the host (for testing)
-- **Emulator** - JIT compilation within the RISC-V emulator
-- **ELF** - Static compilation to ELF files
+**Naga** (`glsl-in`) parses GLSL 4.50 and type-checks it. **`lps-frontend`** walks Naga's
+expression arena and lowers to **LPIR** — a flat, scalarized IR with structured control flow and
+virtual registers. Lowering is mode-agnostic: Q32 vs float is a backend decision.
+
+**LPIR** is LightPlayer's own intermediate representation. It acts as an anti-corruption layer so
+the compiler core is written entirely in LightPlayer's terms, independent of Cranelift. Cranelift
+only appears in **`lpvm-cranelift`**, the backend adapter. This gives decoupled testing (the
+in-crate interpreter runs any LPIR program without Cranelift), multiple backends from one lowering,
+and stable compiler internals across Cranelift version bumps.
+
+### Backends
+
+- **`lpvm-cranelift`** — LPIR → Cranelift → machine code. Supports any ISA Cranelift supports;
+  primary target is RISC-V 32-bit (`riscv32imac`) for ESP32-C6. Host JIT uses `cranelift-native`
+  for development and testing. Optional `glsl` feature pulls in `lps-frontend` for
+  string-to-machine-code entry points.
+
+- **`lps-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct
+  WASM for the web demo and `wasm.q32` filetests without requiring Cranelift.
+
+- **`lpir::interp`** — Tree-walking interpreter inside the `lpir` crate. Runs LPIR directly for
+  testing without invoking any backend.
+
+### Builtins
+
+GLSL math builtins (`sin`, `cos`, `sqrt`, `pow`, etc.), LPFX generative functions (noise, hash,
+color space), and LPIR helpers are provided as `extern "C"` functions in **`lps-builtins`**.
+Both Q32 (fixed-point) and f32 (float) implementations exist. The generator app
+(**`lps-builtins-gen-app`**) scans builtin sources and emits:
+
+- `BuiltinId` enum and mappings (`lps-builtin-ids`)
+- Cranelift ABI glue (`lpvm-cranelift/src/generated_builtin_abi.rs`)
+- WASM import types (`lps-wasm/src/emit/builtin_wasm_import_types.rs`)
+- Dead-code-prevention refs for the RV32 emu app and WASM cdylib
+
+### Filetests
+
+Cranelift-style file-based tests under `lps-filetests/filetests/`. Each `.glsl` file declares
+expected results; the harness compiles and executes on three backends:
+
+- **jit.q32** — Host JIT via `lpvm-cranelift` (default, fast local iteration)
+- **wasm.q32** — WASM via `lps-wasm` + Wasmtime
+- **rv32.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
+
+Run with `./scripts/glsl-filetests.sh` or `just test-filetests`.
 
 ## RISC-V Tooling (`lp-riscv/`)
 
@@ -140,11 +189,16 @@ Tools for working with RISC-V code:
 
 ## Cranelift Fork
 
-LightPlayer uses a [forked version of Cranelift](https://github.com/Yona-Appletree/lp-cranelift)
+LightPlayer uses a [forked version of Cranelift](https://github.com/light-player/lp-cranelift)
 with modifications for embedded use:
 
-- **32-bit RISC-V Support** - Support for RISC-V `imac` 32-bit instruction set
-- **`no_std`** - Supports `no_std` for both object and JIT compilation
+- **32-bit RISC-V Support** - `riscv32imac` code generation (upstream Cranelift only supports
+  64-bit RISC-V)
+- **`no_std`** - Supports `no_std` + alloc for both object and JIT compilation, enabling the
+  compiler to run on bare-metal targets
+- **regalloc2 fork** - Paired with a
+  [forked regalloc2](https://github.com/light-player/lp-regalloc2) with `ChunkedVec` for OOM
+  mitigation and feature-gated ION allocator
 
 The fork maintains compatibility with upstream Cranelift while adding the necessary features for
 embedded JIT compilation.
@@ -158,9 +212,6 @@ Major features planned for future releases:
 
 - **GPU Shader Execution** - Support for executing shaders on GPU hardware (OpenGL/Vulkan) for
   platforms with GPU capabilities, providing significant performance improvements
-
-- **Floating Point Support** - Native floating-point arithmetic support for shaders, enabling more
-  complex visual effects and reducing the complexity of fixed-point math
 
 - **Input Device Support** - Integration with input devices (sensors, MIDI controllers, network
   events) to enable interactive and responsive visual effects

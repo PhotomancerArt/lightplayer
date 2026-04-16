@@ -1,0 +1,73 @@
+//! Handler for `shader-debug`.
+
+use anyhow::{Context, Result};
+use lpir::{FloatMode, validate_module};
+
+use super::args::Args;
+use super::collect::{collect_cranelift_data, collect_fa_data};
+use super::display::{print_comparison_table, print_detailed_view, print_help_text};
+use super::types::{BackendTarget, DebugReport};
+
+pub fn handle_shader_debug(args: Args) -> Result<()> {
+    let src = std::fs::read_to_string(&args.input)
+        .with_context(|| format!("read {}", args.input.display()))?;
+
+    let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
+    let (ir, sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+
+    if let Err(errs) = validate_module(&ir) {
+        anyhow::bail!(
+            "LPIR validation failed:\n{}",
+            errs.iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    let float_mode = match args.float_mode.as_str() {
+        "q32" => FloatMode::Q32,
+        "f32" => FloatMode::F32,
+        _ => anyhow::bail!("invalid --float-mode (use q32 or f32)"),
+    };
+
+    // Parse targets
+    let targets = args.targets();
+    if targets.is_empty() {
+        anyhow::bail!("no valid targets specified. Use: rv32c, rv32n, emu");
+    }
+
+    // Get section filter
+    let sections = args.sections();
+    let func_filter = args.func.as_deref();
+    let file_path_str = args.input.to_string_lossy().to_string();
+
+    // Collect data from all targets
+    let mut report = DebugReport::new();
+
+    for target in &targets {
+        let backend_data = match target {
+            BackendTarget::Rv32fa => collect_fa_data(&ir, &sig, float_mode, func_filter)?,
+            BackendTarget::Rv32 => {
+                collect_cranelift_data(&ir, &sig, float_mode, func_filter, false)?
+            }
+            BackendTarget::Emu => collect_cranelift_data(&ir, &sig, float_mode, func_filter, true)?,
+        };
+        report.backends.push(backend_data);
+    }
+
+    // Print detailed view first (unless summary-only mode)
+    if !args.summary {
+        print_detailed_view(&report, &sections);
+
+        // Print help text if showing all functions and there's more than one
+        if func_filter.is_none() && report.function_names().len() > 1 {
+            print_help_text(&file_path_str, &report);
+        }
+    }
+
+    // Print comparison table at the bottom (always shown)
+    print_comparison_table(&report);
+
+    Ok(())
+}

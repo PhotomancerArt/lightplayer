@@ -13,6 +13,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+pub mod backtrace;
 pub mod error;
 pub mod fps;
 pub mod fs;

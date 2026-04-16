@@ -1,4 +1,16 @@
-# Cranelift Fork - Cursor Rules
+# LightPlayer - Cursor Rules
+
+# Product: LightPlayer is an embedded GLSL JIT shader execution system. GLSL is compiled to native RISC-V on ESP32-C6 at runtime via lpvm-native (default) or lpvm-cranelift. This is the product. Read AGENTS.md for full context.
+
+# Embedded JIT: The on-device compiler is non-negotiable. Do NOT feature-gate the compiler behind `std`. Do NOT add `#[cfg(feature = "std")]` to compile/execute paths. Do NOT return stubs from `compile_shader` on embedded.
+
+# Embedded JIT: If a dependency doesn't support no_std, fix the dependency (fork/patch/upstream). Do NOT work around it by removing the compiler from embedded builds.
+
+# Embedded JIT: Binary size issues are solved with LTO, opt-level z, strip, disabling cranelift-optimizer/verifier. NOT by disabling the compiler.
+
+# Embedded JIT: `std` means "host-only conveniences" (libstd, cranelift-native, anyhow). It does NOT mean "has a compiler."
+
+# Embedded JIT: Every change to lp-core/, lp-shader/, lp-fw/ must be validated against: cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 
 # Warnings: Fix warnings before committing. Don't just ignore them. If you can't fix them easily, ask for help.
 

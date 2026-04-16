@@ -1,0 +1,17 @@
+[package]
+name = "lps-frontend"
+description = "GLSL to LPIR frontend via naga"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+libm = "0.2"
+smallvec = { version = "1", default-features = false }
+lps-shared = { path = "../lps-shared" }
+lps-builtin-ids = { path = "../lps-builtin-ids" }
+lpir = { path = "../lpir" }
+naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }

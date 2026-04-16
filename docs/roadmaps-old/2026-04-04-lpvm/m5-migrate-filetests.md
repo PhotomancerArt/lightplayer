@@ -1,0 +1,83 @@
+# M5: Migrate Filetests
+
+## Goal
+
+Port **`lps-filetests`** (rename of `lps-filetests`) from **`GlslExecutable`**
+to the LPVM trait system. All three backends (JIT, RV32, WASM) exercise the same
+LPVM-shaped API. Primary validation step.
+
+## Naming / paths
+
+Target crate: **`lps-filetests`**. During migration the directory or package may
+still be `lps-filetests`; use **`cargo test -p <actual-package-name>`**.
+
+## Context for Agents
+
+### How filetests work today
+
+1. Read `.glsl` tests + expected outputs.
+2. Select backend: `Backend::Jit` | `Rv32` | `Wasm`.
+3. Build **`Box<dyn GlslExecutable>`** (or equivalent).
+4. Call functions, compare to expectations.
+
+Typical wiring:
+
+- **Jit** → `LpirJitExecutable` + **`lpvm_cranelift::JitModule`**
+- **Rv32** → object + link + emulate (`lpvm-cranelift` `riscv32-emu` path today)
+- **Wasm** → emission + wasmtime (runner may live in filetests until **`lpvm-wasm`**
+  `runtime` is ready)
+
+### `GlslExecutable` surface
+
+Typed `call_*`, `call_array`, `get_function_signature`, `list_functions`, plus
+optional std debug hooks (`format_clif_ir`, etc.). Logical signatures use
+**`lps-shared`** (`LpsFunctionSignature`, etc.) after M1 renames.
+
+### Target shape
+
+1. Compile / load → **`LpvmModule`** (per backend crate).
+2. **`LpvmInstance`** for execution state (memory managed internally by each backend).
+3. Calls through LPVM API; keep **ergonomic test helpers** (wrapper module or
+   extension traits) so tests stay readable.
+
+### Debug output
+
+Backend-specific formatting (CLIF, VCode, wasm WAT, emulator state) may **not**
+live on the core traits. Expose via concrete backend types or side APIs that
+filetests import explicitly.
+
+## Migration strategy
+
+1. **Parallel path**: keep `GlslExecutable` working while LPVM path is built.
+2. **Switch** when LPVM path passes all tests on all backends.
+3. **Remove** `GlslExecutable` and `lps-exec` dependency from filetests.
+
+## Dependencies after migration (illustrative)
+
+```toml
+[dependencies]
+lpvm = { path = "../../lpvm/lpvm" }
+lpvm-cranelift = { path = "../../lp-shader/lpvm-cranelift" }  # or lpvm/lpvm-cranelift
+lpvm-rv32 = { path = "../../lp-riscv/lpvm-rv32" }  # or lpvm/lpvm-rv32
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }  # actual location
+lpir = { path = "../lpir" }   # or top-level path after moves
+lps-shared = { path = "../lps-shared" }
+lps-frontend = { path = "../lps-frontend" }
+```
+
+**Remove** (once fully migrated): `lps-exec`, direct `lpvm`, direct
+`lpvm-cranelift` (replaced by `lpvm-cranelift` / `lpvm-rv32`), direct `wasmtime`
+if folded into `lpvm-wasm` runtime.
+
+## What NOT To Do
+
+- Do NOT drop a backend.
+- Do NOT weaken debug output without replacement.
+- Do NOT change test expectations to hide bugs (project rule).
+
+## Done When
+
+- All filetests pass on **Jit, RV32, WASM** via LPVM
+- `GlslExecutable` unused in filetests
+- **`lps-filetests`** (or current package name) depends on `lpvm` + three
+  backends, not on `lps-exec`

@@ -14,6 +14,8 @@ use std::time::Instant;
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
 pub const DEFAULT_RAM_START: u32 = 0x80000000;
 
+pub use super::super::memory::DEFAULT_SHARED_START;
+
 /// RISC-V 32-bit emulator state.
 pub struct Riscv32Emulator {
     pub(super) regs: [i32; 32],
@@ -73,6 +75,28 @@ impl Riscv32Emulator {
     /// * `ram` - RAM region (data)
     pub fn new(code: Vec<u8>, ram: Vec<u8>) -> Self {
         Self::with_traps(code, ram, &[])
+    }
+
+    /// Build an emulator from a pre-built [`Memory`] (e.g. with a shared region) and trap list.
+    pub fn from_memory(memory: Memory, traps: &[(u32, TrapCode)]) -> Self {
+        let mut trap_list: Vec<(u32, TrapCode)> = traps.to_vec();
+        trap_list.sort_by_key(|(offset, _)| *offset);
+
+        Self {
+            regs: [0; 32],
+            pc: 0,
+            memory,
+            instruction_count: 0,
+            log_level: LogLevel::None,
+            log_buffer: Vec::new(),
+            traps: trap_list,
+            serial_host: None,
+            #[cfg(feature = "std")]
+            start_time: None,
+            time_mode: TimeMode::RealTime,
+            #[cfg(feature = "std")]
+            alloc_tracer: None,
+        }
     }
 
     /// Set the logging level.
@@ -258,25 +282,30 @@ impl Riscv32Emulator {
     /// Get elapsed milliseconds based on current time mode
     ///
     /// Returns 0 if start time not initialized (RealTime mode) or std feature disabled.
-    #[cfg(feature = "std")]
+    #[cfg_attr(
+        not(feature = "std"),
+        allow(
+            dead_code,
+            reason = "SYSCALL_TIME_MS returns 0 without std; still used by unit tests and std builds"
+        )
+    )]
     pub(super) fn elapsed_ms(&self) -> u32 {
         match self.time_mode {
+            TimeMode::Simulated(current) => current,
             TimeMode::RealTime => {
-                if let Some(start) = self.start_time {
-                    start.elapsed().as_millis() as u32
-                } else {
+                #[cfg(feature = "std")]
+                {
+                    if let Some(start) = self.start_time {
+                        start.elapsed().as_millis() as u32
+                    } else {
+                        0
+                    }
+                }
+                #[cfg(not(feature = "std"))]
+                {
                     0
                 }
             }
-            TimeMode::Simulated(current) => current,
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    pub(super) fn elapsed_ms(&self) -> u32 {
-        match self.time_mode {
-            TimeMode::RealTime => 0,
-            TimeMode::Simulated(current) => current,
         }
     }
 }

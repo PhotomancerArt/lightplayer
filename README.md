@@ -1,7 +1,7 @@
 # LightPlayer
 
-LightPlayer is a tool for controlling visual effects on 32-bit RISC-V microcontrollers
-(such as esp32c6) and various linux and desktop platforms.
+LightPlayer is a work-in-progress application for controlling visual effects on the esp32c6
+microcontroller and various other embedded and linux systems.
 
 GLSL shaders are used to define the visual effects, which are just-in-time (JIT) compiled to native
 RISC-V code on the target device.
@@ -94,20 +94,28 @@ See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 - **`lp-model`** Data models and API definitions for projects, nodes, and server communication
 - **`lp-shared`** Shared utilities for filesystem, logging, time, and transport
 
-## GLSL Compiler (`lp-glsl/`)
+## GLSL Compiler (`lp-shader/`)
 
-- **`lp-glsl-compiler`** Main GLSL compiler that parses, transforms, and codegens to various ISAs,
-  handles JIT and ELF linking
-- **`lp-glsl-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
-  lygia-inspired libary of native glsl functions
-- **`lp-glsl-builtins-emu-app`** RISC-V guest for running tests linked against builtins
-- **`lp-glsl-builtins-gen-app`** Code generator for builtin function boilerplate
-- **`lp-glsl-filetests`** Collection of tests for GLSL spec compliance and correctnees
-- **`lp-glsl-filetests-gen-app`** Generator for repetative filetests (vector, matries)
-- **`lp-glsl-filetests-app`** Filetest runner binary
-- **`lp-glsl-jit-util`** Utilities for JIT compilation
-- **`esp32-glsl-jit`** ESP32 proof-of-concept JIT compiler
-- **`lp-glsl-q32-metrics-app`** Metrics tool for fixed-point math (q32)
+Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
+
+- **`lps-frontend`** GLSL → LPIR (via naga)
+- **`lpir`** LightPlayer IR definitions
+- **`lpvm-native`** LPIR → custom RV32 machine code (default on-device JIT)
+- **`lpvm-cranelift`** LPIR → Cranelift → RISC-V machine code (reference backend)
+- **`lpvm-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
+- **`lps-q32`** Fixed-point Q16.16 types: `Q32` scalar, `Vec2Q32`–`Vec4Q32`, `Mat2Q32`–`Mat4Q32`,
+  component-wise math helpers, constant encoding for compiler
+- **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
+- **`lps-diagnostics`** Error codes, spans, `GlslError`
+- **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
+- **`lps-builtin-ids`** Generated enum of builtin function IDs
+- **`lps-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
+  lygia-inspired library of native glsl functions
+- **`lps-builtins-emu-app`** RISC-V guest for running tests linked against builtins
+- **`lps-builtins-gen-app`** Code generator for builtin function boilerplate
+- **`lps-filetests`** Collection of tests for GLSL spec compliance and correctness
+- **`lps-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
+- **`lps-filetests-app`** Filetest runner binary
 - **`lpfx-impl-macro`** Macros for builtin function implementations
 
 ## RISC-V Tooling (`lp-riscv/`)
@@ -132,9 +140,14 @@ LightPlayer would not be possible without the amazing work of these projects:
 - **[Cranelift](https://cranelift.dev/)** - Fast, secure compiler
   backend ([forked](https://github.com/Yona-Appletree/lp-cranelift) to support 32-bit RISC-V and
   `no_std`)
-- **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL
-  parser - ([forked](https://github.com/Yona-Appletree/glsl-parser) to support
-  spans)
+- **[Naga](https://github.com/gfx-rs/wgpu/tree/main/naga)** - Shader IR and **`glsl-in`** GLSL
+  frontend (used by `lps-frontend`)
+- **[pp-rs](https://github.com/light-player/pp-rs)** - GLSL preprocessor fork, patched in
+  **`[patch.crates-io]`** in the workspace `Cargo.toml` so naga `glsl-in` works on **`no_std`**
+  targets
+- **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL parser (
+  [forked](https://github.com/light-player/glsl-parser) for spans; used by `lpvm` and
+  filetest helpers, not the main naga frontend)
 - **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfx
   built-in functions)
 - **[DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler)** - HLSL compiler (

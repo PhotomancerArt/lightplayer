@@ -1,0 +1,29 @@
+➜  lightplayer-native git:(feature/native) ✗ scripts/glsl-filetests.sh --target rv32,rv32lp lpvm/native/perf
+Building lps-builtins-emu-app...
+Builtins source unchanged, skipping code generation...
+    Finished `release` profile [optimized] target(s) in 0.16s
+lps-builtins-emu-app: built with 84 built-ins
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `/Users/yona/dev/photomancer/feature/lightplayer-native/target/debug/lps-filetests-app test --target rv32,rv32lp lpvm/native/perf`
+Running 8 test file(s)...
+
+✓  3/ 3   rv32.q32  lpvm/native/perf/caller-save-pressure.glsl (85 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/caller-save-pressure.glsl (148 inst)
+✓  3/ 3   rv32.q32  lpvm/native/perf/live-range-interference.glsl (208 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/live-range-interference.glsl (410 inst)
+✓  3/ 3   rv32.q32  lpvm/native/perf/mat4-reg-pressure.glsl (753 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/mat4-reg-pressure.glsl (1,613 inst)
+✓  5/ 5   rv32.q32  lpvm/native/perf/nested-call-overhead.glsl (244 inst)
+✓  5/ 5 rv32lp.q32  lpvm/native/perf/nested-call-overhead.glsl (445 inst)
+✓  2/ 2   rv32.q32  lpvm/native/perf/spill-density.glsl (303 inst)
+✓  2/ 2 rv32lp.q32  lpvm/native/perf/spill-density.glsl (778 inst)
+✓  1/ 1   rv32.q32  lpvm/native/perf/stack-args-incoming-16.glsl (75 inst)
+✓  1/ 1 rv32lp.q32  lpvm/native/perf/stack-args-incoming-16.glsl (61 inst)
+✓  3/ 3   rv32.q32  lpvm/native/perf/stack-args-incoming.glsl (178 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/stack-args-incoming.glsl (135 inst)
+✓  2/ 2   rv32.q32  lpvm/native/perf/stack-args-outgoing.glsl (163 inst)
+✓  2/ 2 rv32lp.q32  lpvm/native/perf/stack-args-outgoing.glsl (184 inst)
+
+                  pass    fail   unimpl  unsupported  compile-fail  total inst  vs fastest
+      rv32.q32      22       0        0            0             0  2,009 inst       1.00×
+    rv32lp.q32      22       0        0            0             0  3,774 inst       1.88×

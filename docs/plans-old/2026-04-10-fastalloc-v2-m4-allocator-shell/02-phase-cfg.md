@@ -1,0 +1,117 @@
+# Phase 2: Region Tree Display
+
+## Scope
+
+Add debug formatting for the region tree, so `--show-region` can render the structured control flow.
+
+## Implementation
+
+### 1. Create `rv32/debug/region.rs`
+
+```rust
+//! Region tree display for debug output.
+
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
+use crate::vinst::{ModuleSymbols, VInst, VReg};
+
+/// Format the region tree as indented text.
+pub fn format_region_tree(
+    tree: &RegionTree,
+    region_id: RegionId,
+    vinsts: &[VInst],
+    pool: &[VReg],
+    symbols: &ModuleSymbols,
+    indent: usize,
+) -> String {
+    if region_id == REGION_ID_NONE {
+        return "(empty)".into();
+    }
+
+    let prefix = "  ".repeat(indent);
+    let region = &tree.nodes[region_id as usize];
+    let mut lines = Vec::new();
+
+    match region {
+        Region::Linear { start, end } => {
+            lines.push(format!("{}Linear [{}..{})", prefix, start, end));
+            for i in *start..*end {
+                let v = &vinsts[i as usize];
+                lines.push(format!(
+                    "{}  {}: {} {}",
+                    prefix, i,
+                    v.mnemonic(),
+                    v.format_alloc_trace_detail(pool, symbols),
+                ));
+            }
+        }
+
+        Region::IfThenElse { head, then_body, else_body } => {
+            lines.push(format!("{}IfThenElse", prefix));
+            lines.push(format!("{}  head:", prefix));
+            lines.push(format_region_tree(tree, *head, vinsts, pool, symbols, indent + 2));
+            lines.push(format!("{}  then:", prefix));
+            lines.push(format_region_tree(tree, *then_body, vinsts, pool, symbols, indent + 2));
+            lines.push(format!("{}  else:", prefix));
+            lines.push(format_region_tree(tree, *else_body, vinsts, pool, symbols, indent + 2));
+        }
+
+        Region::Loop { header, body } => {
+            lines.push(format!("{}Loop", prefix));
+            lines.push(format!("{}  header:", prefix));
+            lines.push(format_region_tree(tree, *header, vinsts, pool, symbols, indent + 2));
+            lines.push(format!("{}  body:", prefix));
+            lines.push(format_region_tree(tree, *body, vinsts, pool, symbols, indent + 2));
+        }
+
+        Region::Seq { children_start, child_count } => {
+            lines.push(format!("{}Seq ({})", prefix, child_count));
+            let start = *children_start as usize;
+            let end = start + *child_count as usize;
+            for &child_id in &tree.seq_children[start..end] {
+                lines.push(format_region_tree(tree, child_id, vinsts, pool, symbols, indent + 1));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+```
+
+### 2. Register in `rv32/debug/mod.rs`
+
+Add `pub mod region;` to the debug module.
+
+### 3. Add unit tests
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::region::{Region, RegionTree};
+    use crate::vinst::{ModuleSymbols, VInst, VReg};
+
+    #[test]
+    fn format_linear_region() {
+        let mut tree = RegionTree::new();
+        let vinsts = vec![
+            VInst::IConst32 { dst: VReg(0), val: 42, src_op: 0xFFFF },
+        ];
+        let root = tree.push(Region::Linear { start: 0, end: 1 });
+        tree.root = root;
+
+        let output = format_region_tree(&tree, root, &vinsts, &[], &ModuleSymbols::default(), 0);
+        assert!(output.contains("Linear [0..1)"));
+        assert!(output.contains("IConst32"));
+    }
+}
+```
+
+## Validate
+
+```bash
+cargo test -p lpvm-native --lib -- rv32::debug::region
+```

@@ -13,6 +13,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+// Compile-time configuration
+pub mod config;
+
 // Re-export instruction utilities for convenience
 pub use lp_riscv_inst::{Gpr, Inst, decode_instruction, format_instruction};
 
@@ -27,9 +30,10 @@ pub mod alloc_trace;
 pub mod test_util;
 
 // Re-exports for convenience
+pub use emu::memory::{DEFAULT_RAM_START, Memory};
 pub use emu::{
-    EmulatorError, InstLog, LogLevel, MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator,
-    StepResult, SyscallInfo, trap_code_to_string,
+    DEFAULT_SHARED_START, EmulatorError, InstLog, LogLevel, MemoryAccessKind, OomInfo, PanicInfo,
+    Riscv32Emulator, StepResult, SyscallInfo, trap_code_to_string,
 };
 pub use time::TimeMode;
 

@@ -5,11 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Try to find workspace root if script is run from elsewhere
-# Look for Cargo.toml and lp-glsl directory
+# Look for Cargo.toml and lps directory
 find_workspace_root() {
   local dir="$1"
   while [ "$dir" != "/" ]; do
-    if [ -f "$dir/Cargo.toml" ] && [ -d "$dir/lp-glsl" ]; then
+    if [ -f "$dir/Cargo.toml" ] && [ -d "$dir/lp-shader" ]; then
       echo "$dir"
       return 0
     fi
@@ -19,7 +19,7 @@ find_workspace_root() {
 }
 
 # If workspace root detection from script location fails, try current directory
-if [ ! -f "$WORKSPACE_ROOT/Cargo.toml" ] || [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
+if [ ! -f "$WORKSPACE_ROOT/Cargo.toml" ] || [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
   WORKSPACE_ROOT="$(find_workspace_root "$(pwd)")" || {
     echo "Error: Could not find workspace root. Please run from the workspace root directory." >&2
     exit 1
@@ -32,9 +32,9 @@ cd "$WORKSPACE_ROOT" || {
   exit 1
 }
 
-# Check if lp-glsl directory exists
-if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
-  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-glsl" >&2
+# Check if lps directory exists
+if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
+  echo "Error: lps directory not found at $WORKSPACE_ROOT/lp-shader" >&2
   exit 1
 fi
 
@@ -42,6 +42,7 @@ fi
 SHOW_HELP=false
 SHOW_LIST=false
 REGEN_GEN_FILES=false
+TARGET_ARG=()
 TEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -56,6 +57,38 @@ while [[ $# -gt 0 ]]; do
     ;;
   -g)
     REGEN_GEN_FILES=true
+    shift
+    ;;
+  --target | -t)
+    TARGET_ARG=("--target" "$2")
+    shift 2
+    ;;
+  --summary)
+    TEST_ARGS+=("--concise")
+    shift
+    ;;
+  --fix)
+    TEST_ARGS+=("--fix")
+    shift
+    ;;
+  --mark-unimplemented)
+    TEST_ARGS+=("--mark-unimplemented")
+    shift
+    ;;
+  --assume-yes)
+    TEST_ARGS+=("--assume-yes")
+    shift
+    ;;
+  --debug)
+    TEST_ARGS+=("--debug")
+    shift
+    ;;
+  --concise)
+    TEST_ARGS+=("--concise")
+    shift
+    ;;
+  --detail)
+    TEST_ARGS+=("--detail")
     shift
     ;;
   *)
@@ -79,6 +112,21 @@ OPTIONS:
     -h, --help          Show this help message
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
+    -t, --target SPEC   Run target(s): comma-separated, backend shorthand (jit,wasm,rv32c), or full names (jit.q32)
+    --summary           Same as --concise (alias for the wrapper script)
+    --debug             Full output plus CLIF/disassembly on failure (same as DEBUG=1)
+    --concise           Minimal output even for a single file
+    --detail            Verbose per-// run: output even for many files
+    --fix               Remove @unimplemented annotations from tests that now pass
+    --mark-unimplemented  Add @unimplemented(backend=…) to failing tests (baseline); use with --target
+    --assume-yes        With --mark-unimplemented, skip the interactive confirmation
+
+ENVIRONMENT:
+    DEBUG=1             Show debug output (CLIF, WAT) when a test fails
+    LP_FIX_XFAIL=1      Same as --fix; remove annotations from newly passing tests
+    LP_MARK_UNIMPLEMENTED=1  Same as --mark-unimplemented
+    LP_FILETESTS_THREADS=N   Worker threads for concurrent filetests (default: num_cpus).
+                        WASM and RV32 are thread-safe. Use N=1 when testing JIT to avoid segfaults.
 
 PATTERNS:
     Patterns can be filenames, glob patterns, or directory paths.
@@ -106,6 +154,12 @@ EXAMPLES:
     # Regenerate .gen.glsl file before running tests
     glsl-filetests.sh vec/vec4/fn-equal.gen.glsl -g
 
+    # Fix unexpected passes: remove @unimplemented from tests that now pass
+    glsl-filetests.sh --target wasm.q32 --fix
+
+    # Baseline: mark all current failures @unimplemented(backend=jit), then re-run to get exit 0
+    glsl-filetests.sh --target jit.q32 --mark-unimplemented --assume-yes
+
 PATTERN SYNTAX:
     *         Matches any sequence of characters
     ?         Matches any single character
@@ -126,11 +180,11 @@ fi
 
 # Show list of tests if requested
 if [ "$SHOW_LIST" = true ]; then
-  FILETESTS_DIR="$WORKSPACE_ROOT/lp-glsl/lp-glsl-filetests/filetests"
+  FILETESTS_DIR="$WORKSPACE_ROOT/lp-shader/lps-filetests/filetests"
 
-  # Ensure lp-glsl directory exists
-  if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
-    echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-glsl" >&2
+  # Ensure lps directory exists
+  if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
+    echo "Error: lps directory not found at $WORKSPACE_ROOT/lp-shader" >&2
     exit 1
   fi
 
@@ -181,36 +235,36 @@ if [ "$SHOW_LIST" = true ]; then
   exit 0
 fi
 
-# Ensure lp-glsl directory exists before running tests
-if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
-  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-glsl" >&2
+# Ensure lps directory exists before running tests
+if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
+  echo "Error: lps directory not found at $WORKSPACE_ROOT/lp-shader" >&2
   exit 1
 fi
 
 # Build builtins executable before running tests to catch any changes
-echo "Building lp-glsl-builtins-emu-app..."
+echo "Building lps-builtins-emu-app..."
 "$SCRIPT_DIR/build-builtins.sh" || {
-  echo "Error: Failed to build lp-glsl-builtins-emu-app" >&2
+  echo "Error: Failed to build lps-builtins-emu-app" >&2
   exit 1
 }
 
-# Change to lp-glsl directory where lp-glsl-filetests-app workspace is located
-cd "$WORKSPACE_ROOT/lp-glsl" || {
-  echo "Error: Failed to change to lp-glsl directory" >&2
+# Change to lps directory where lps-filetests-app workspace is located
+cd "$WORKSPACE_ROOT/lp-shader" || {
+  echo "Error: Failed to change to lps directory" >&2
   exit 1
 }
 
 # Regenerate .gen.glsl files if -g flag is set
 if [ "$REGEN_GEN_FILES" = true ]; then
   # Pass all test args to the generator - it will handle expansion
-  cargo run -p lp-glsl-filetests-gen-app -- "${TEST_ARGS[@]}" --write || {
+  cargo run -p lps-filetests-gen-app -- "${TEST_ARGS[@]}" --write || {
     echo "Error: Failed to regenerate test files" >&2
     exit 1
   }
 fi
 
-# Run the GLSL filetests using lp-glsl-filetests-app binary with cargo run
-# This ensures cargo run picks up all compilation changes in the lp-glsl workspace
+# Run the GLSL filetests using lps-filetests-app binary with cargo run
+# This ensures cargo run picks up all compilation changes in the lps workspace
 # Pass all remaining arguments directly to the test runner
 # Pass through DEBUG environment variable for debug logging
-cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TEST_ARGS[@]}"
+cargo run -p lps-filetests-app --bin lps-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"

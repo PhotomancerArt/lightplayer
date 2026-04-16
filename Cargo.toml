@@ -12,27 +12,36 @@ members = [
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lp-model",
-    # lp-glsl workspace members
-    "lp-glsl/lp-glsl-builtins",
-    "lp-glsl/lp-glsl-filetests-gen-app",
-    "lp-glsl/lp-glsl-compiler",
-    "lp-glsl/lp-glsl-filetests",
-    "lp-glsl/lp-glsl-jit-util",
+    # lps workspace members
+    "lp-shader/lps-builtin-ids",
+    "lp-shader/lps-builtins",
+    "lp-shader/lpfx-impl-macro",
+    "lp-shader/lps-filetests-gen-app",
+    "lp-shader/lps-shared",
+    "lp-shader/lps-diagnostics",
+    "lp-shader/lpvm",
+    "lp-shader/lpvm-wasm",
+    "lp-shader/lps-frontend",
+    "lp-shader/lpvm-cranelift",
+    "lp-shader/lpvm-native",
+    "lp-shader/lpvm-emu",
+    "lp-shader/lpir",
+    "lp-shader/lps-filetests",
     "lp-riscv/lp-riscv-emu-shared",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
     "lp-riscv/lp-riscv-emu-guest",
     "lp-riscv/lp-riscv-emu-guest-test-app",
-    "lp-glsl/lp-glsl-builtins-gen-app",
-    "lp-glsl/lp-glsl-builtins-emu-app",
-    "lp-glsl/lp-glsl-filetests-app",
-    "lp-glsl/esp32-glsl-jit",
-    "lp-glsl/lp-glsl-q32-metrics-app",
+    "lp-shader/lps-builtins-gen-app",
+    "lp-shader/lps-builtins-emu-app",
+    "lp-shader/lps-filetests-app",
+    "lp-app/web-demo",
+    "spikes/naga-wasm-poc", "lp-shader/lps-q32",
 ]
 resolver = "2"
 
-# Exclude lp-glsl-builtins-emu-app, esp32-glsl-jit, and fw-esp32 from default workspace builds (they're no_std, only build for RISC-V)
+# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
 # Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [
@@ -46,19 +55,23 @@ default-members = [
     "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lp-model",
-    # lp-glsl workspace members (excluding lp-glsl-builtins-emu-app)
-    "lp-glsl/lp-glsl-builtins",
-    "lp-glsl/lp-glsl-filetests-gen-app",
-    "lp-glsl/lp-glsl-compiler",
-    "lp-glsl/lp-glsl-filetests",
-    "lp-glsl/lp-glsl-jit-util",
+    # lps workspace members (excluding lps-builtins-emu-app)
+    "lp-shader/lps-builtin-ids",
+    "lp-shader/lps-builtins",
+    "lp-shader/lps-filetests-gen-app",
+    "lp-shader/lps-shared",
+    "lp-shader/lps-diagnostics",
+    "lp-shader/lpvm",
+    "lp-shader/lpvm-wasm",
+    "lp-shader/lps-frontend",
+    "lp-shader/lpir",
+    "lp-shader/lps-filetests",
     "lp-riscv/lp-riscv-emu-shared",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
-    "lp-glsl/lp-glsl-builtins-gen-app",
-    "lp-glsl/lp-glsl-filetests-app",
-    "lp-glsl/lp-glsl-q32-metrics-app",
+    "lp-shader/lps-builtins-gen-app",
+    "lp-shader/lps-filetests-app",
 ]
 [workspace.package]
 version = "40.0.0"
@@ -115,13 +128,14 @@ regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "li
 
 # Common dependencies
 target-lexicon = "0.13.0"
-hashbrown = { version = "0.15", default-features = false, features = ["alloc", "default-hasher"] }
+hashbrown = { version = "0.15", default-features = false, features = ["default-hasher"] }
 anyhow = { version = "1.0.100", default-features = false }
 log = { version = "0.4", default-features = false }
 regex = "1.9.1"
 glob = "0.3.3"
 object = { version = "0.37.3", default-features = false, features = ['read_core', 'elf'] }
 critical-section = { version = "1.2.0", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
@@ -131,14 +145,19 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 lto = true
 opt-level = "z"
 codegen-units = 1
-
-# ESP32 app release profile optimizations (embedded target)
-[profile.release.package.esp32-glsl-jit]
-strip = "debuginfo"
+panic = "unwind"
 
 # fw-emu: keep debug info for backtrace symbolication
 [profile.release.package.fw-emu]
 debug = 1
+
+# ESP32: panic=unwind for OOM recovery via unwinding crate
+[profile.release-esp32]
+inherits = "release"
+panic = "unwind"
+
+[profile.release-esp32.package.fw-esp32]
+strip = "debuginfo"
 
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).
@@ -146,13 +165,10 @@ debug = 1
 inherits = "release"
 opt-level = 3
 codegen-units = 4
+# panic = "unwind" inherited from release
 
 [profile.release-emu.package.fw-emu]
 debug = 1
-
-# ESP32 firmware release profile optimizations (embedded target)
-[profile.release.package.fw-esp32]
-strip = "debuginfo"
 
 # Hot-path crates: optimize for speed instead of size
 # These crates are in the critical rendering path and benefit from speed optimizations
@@ -163,7 +179,7 @@ opt-level = 3
 codegen-units = 4
 # Note: lto is inherited from workspace [profile.release]
 
-[profile.release.package.lp-glsl-builtins]
+[profile.release.package.lps-builtins]
 # Optimize for speed (hot path in shader execution)
 opt-level = 3
 # Keep multiple codegen units for faster compilation and better parallelization
@@ -173,29 +189,32 @@ codegen-units = 4
 # Patch esp-println to use our fork with custom writer support
 [patch.crates-io]
 esp-println = { path = "lp-fw/esp-println-fork" }
+# no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
+pp-rs = { git = "https://github.com/light-player/pp-rs", branch = "main" }
 
-# Patch regalloc2 for local lp-regalloc2 development
-# Uncomment for local dev; comment out to use git
-# [patch."https://github.com/light-player/lp-regalloc2"]
-# regalloc2 = { path = "../lp-regalloc2" }
+#####################################
+# Local dev patches
 
-# Patch cranelift for local development; comment out to use git main
-# [patch."https://github.com/light-player/lp-cranelift"]
-# cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
-# cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
-# cranelift-module = { path = "../lp-cranelift/cranelift/module" }
-# cranelift-jit = { path = "../lp-cranelift/cranelift/jit" }
-# cranelift-native = { path = "../lp-cranelift/cranelift/native" }
-# cranelift-object = { path = "../lp-cranelift/cranelift/object" }
-# cranelift-reader = { path = "../lp-cranelift/cranelift/reader" }
-# cranelift-control = { path = "../lp-cranelift/cranelift/control" }
-# cranelift-interpreter = { path = "../lp-cranelift/cranelift/interpreter" }
+# pp-rs local clone (sibling of lp2025): git clone https://github.com/light-player/pp-rs ../pp-rs
+#[patch.crates-io]
+#pp-rs = { path = "../pp-rs" }
 
-# lp-collection (lp-common): same path/git toggle pattern as cranelift
-# Path for local dev; comment out to use published (git) lp-common
-# [patch."https://github.com/light-player/lp-common"]
-# lp-collection = { path = "../lp-common/lp-collection" }
-
-# littlefs-rust: uncomment for local dev; comment out to use crates.io 0.1.0
-# [patch.crates-io]
-# littlefs-rust = { path = "../littlefs-rust/littlefs-rust" }
+#[patch."https://github.com/light-player/lp-regalloc2"]
+#regalloc2 = { path = "../lp-regalloc2" }
+#
+#[patch."https://github.com/light-player/lp-cranelift"]
+#cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
+#cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
+#cranelift-module = { path = "../lp-cranelift/cranelift/module" }
+#cranelift-jit = { path = "../lp-cranelift/cranelift/jit" }
+#cranelift-native = { path = "../lp-cranelift/cranelift/native" }
+#cranelift-object = { path = "../lp-cranelift/cranelift/object" }
+#cranelift-reader = { path = "../lp-cranelift/cranelift/reader" }
+#cranelift-control = { path = "../lp-cranelift/cranelift/control" }
+#cranelift-interpreter = { path = "../lp-cranelift/cranelift/interpreter" }
+#
+#[patch."https://github.com/light-player/lp-common"]
+#lp-collection = { path = "../lp-common/lp-collection" }
+#
+#[patch.crates-io]
+#littlefs-rust = { path = "../littlefs-rust/littlefs-rust" }

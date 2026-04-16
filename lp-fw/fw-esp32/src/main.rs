@@ -6,10 +6,85 @@
 
 #![no_std]
 #![no_main]
+#![feature(alloc_error_handler)]
+#![allow(
+    unstable_features,
+    reason = "alloc_error_handler required for custom OOM handler in no_std"
+)]
 
 extern crate alloc;
+#[allow(
+    unused_extern_crates,
+    reason = "unwinding is used for panic recovery; extern crate needed for no_std"
+)]
+extern crate unwinding;
 
-use esp_backtrace as _; // panic handler
+#[cfg(all(
+    feature = "server",
+    not(any(feature = "native-jit", feature = "cranelift"))
+))]
+compile_error!(
+    "fw-esp32: enable `native-jit` (default) or `cranelift` for the shader graphics backend"
+);
+
+use core::alloc::Layout;
+use core::panic::PanicInfo;
+
+/// Custom panic handler that starts stack unwinding via the `unwinding` crate.
+///
+/// In no_std, `panic!()` routes directly to `#[panic_handler]` — there is no automatic
+/// unwinding step. We must explicitly call `begin_panic` to start unwinding so that
+/// `catch_unwind` (used for panic recovery in node render) can catch panics.
+///
+/// If no `catch_unwind` exists on the call stack, the unwinder reaches the top and aborts.
+#[panic_handler]
+fn panic_handler(info: &PanicInfo) -> ! {
+    esp_println::println!("\n\n====================== PANIC ======================");
+    esp_println::println!("{info}");
+    esp_println::println!();
+
+    let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
+        #[cfg(feature = "server")]
+        {
+            use core::fmt::Write;
+            let message = {
+                let mut buf = alloc::string::String::new();
+                let _ = write!(buf, "{}", info.message());
+                if buf.is_empty() {
+                    alloc::string::String::from("panic occurred (no message)")
+                } else {
+                    buf
+                }
+            };
+            let (file, line) = if let Some(loc) = info.location() {
+                (
+                    Some(alloc::string::String::from(loc.file())),
+                    Some(loc.line()),
+                )
+            } else {
+                (None, None)
+            };
+            alloc::boxed::Box::new(lp_shared::backtrace::PanicPayload::new(message, file, line))
+        }
+        #[cfg(not(feature = "server"))]
+        {
+            struct Dummy;
+            alloc::boxed::Box::new(Dummy)
+        }
+    };
+    let code = unwinding::panic::begin_panic(payload);
+
+    // begin_panic returns if no catch_unwind was found on the stack.
+    esp_println::println!("unwinding failed: code={}", code.0);
+    loop {}
+}
+
+/// Custom OOM handler that panics normally so catch_unwind can recover.
+/// The default alloc_error_handler uses nounwind panic and cannot be caught.
+#[alloc_error_handler]
+fn on_alloc_error(layout: Layout) -> ! {
+    panic!("memory allocation of {} bytes failed", layout.size());
+}
 
 mod board;
 mod boot;
@@ -27,12 +102,16 @@ mod flash_storage;
 #[cfg(not(feature = "memory_fs"))]
 mod lp_fs_flash;
 
-use alloc::{boxed::Box, rc::Rc};
+use alloc::{boxed::Box, rc::Rc, sync::Arc};
 use core::cell::RefCell;
 
 use board::esp32c6::init::{init_board, start_runtime};
 use lp_model::path::AsLpPath;
-use lp_server::LpServer;
+#[cfg(feature = "cranelift")]
+use lp_server::CraneliftGraphics;
+#[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+use lp_server::NativeJitGraphics;
+use lp_server::{LpGraphics, LpServer};
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
@@ -139,6 +218,39 @@ async fn main(spawner: embassy_executor::Spawner) {
         // Initialize log crate to write to outgoing serial (host will see these)
         crate::logger::init(serial::io_task::log_write_to_outgoing);
 
+        #[cfg(feature = "cranelift")]
+        log::info!("[fw-esp32] Shader backend: Cranelift (LPIR → lpvm-cranelift)");
+        #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+        log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native rt_jit)");
+
+        #[cfg(feature = "test_oom")]
+        {
+            // Test 1: simple panic (not OOM) — validates basic unwinding
+            esp_println::println!("[test_oom] Test 1: catching simple panic...");
+            let r1 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                panic!("test panic");
+            }));
+            match r1 {
+                Ok(_) => esp_println::println!("[test_oom] Test 1 FAIL: panic was not caught"),
+                Err(_) => esp_println::println!("[test_oom] Test 1 OK: simple panic caught"),
+            }
+
+            // Test 2: OOM inside catch_unwind
+            esp_println::println!("[test_oom] Test 2: catching OOM...");
+            let r2 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                let mut vecs: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec::Vec::new();
+                loop {
+                    vecs.push(alloc::vec![0u8; 64 * 1024]);
+                }
+            }));
+            match r2 {
+                Ok(_) => esp_println::println!("[test_oom] Test 2 FAIL: did not OOM"),
+                Err(_) => esp_println::println!("[test_oom] Test 2 OK: OOM caught, recovery works"),
+            }
+
+            esp_println::println!("[test_oom] Tests complete, continuing boot...");
+        }
+
         // Create streaming transport (serializes in io_task, never buffers full JSON)
         esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
         let transport = transport::StreamingMessageRouterTransport::from_io_channels();
@@ -198,29 +310,38 @@ async fn main(spawner: embassy_executor::Spawner) {
         #[cfg(feature = "memory_fs")]
         esp_println::println!("[INIT] In-memory filesystem created");
 
-        // Create server (with time provider for shader comp timing)
-        esp_println::println!("[INIT] Creating LpServer instance...");
-        let time_provider_rc = Rc::new(Esp32TimeProvider::new());
-        let mut server = LpServer::new(
-            output_provider,
-            base_fs,
-            "projects/".as_path(),
-            Some(esp32_memory_stats),
-            Some(time_provider_rc),
-        );
-        esp_println::println!("[INIT] LpServer created");
+        // Create server (with time provider for shader comp timing). Requires a graphics backend
+        // (`native-jit` default or `cranelift`); see `compile_error!` above when `server` lacks both.
+        #[cfg(any(feature = "cranelift", feature = "native-jit"))]
+        {
+            esp_println::println!("[INIT] Creating LpServer instance...");
+            let time_provider_rc = Rc::new(Esp32TimeProvider::new());
+            #[cfg(feature = "cranelift")]
+            let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+            #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+            let graphics: Arc<dyn LpGraphics> = Arc::new(NativeJitGraphics::new());
+            let mut server = LpServer::new(
+                output_provider,
+                base_fs,
+                "projects/".as_path(),
+                Some(esp32_memory_stats),
+                Some(time_provider_rc),
+                graphics,
+            );
+            esp_println::println!("[INIT] LpServer created");
 
-        // Auto-load project at boot (from config or lexical-first)
-        boot::auto_load_project(&mut server);
+            // Auto-load project at boot (from config or lexical-first)
+            boot::auto_load_project(&mut server);
 
-        // Create time provider
-        esp_println::println!("[INIT] Creating time provider...");
-        let time_provider = Esp32TimeProvider::new();
-        esp_println::println!("[INIT] Time provider created");
+            // Create time provider
+            esp_println::println!("[INIT] Creating time provider...");
+            let time_provider = Esp32TimeProvider::new();
+            esp_println::println!("[INIT] Time provider created");
 
-        esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
+            esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
 
-        // Run server loop (never returns)
-        run_server_loop(server, transport, time_provider).await;
+            // Run server loop (never returns)
+            run_server_loop(server, transport, time_provider).await;
+        }
     }
 }

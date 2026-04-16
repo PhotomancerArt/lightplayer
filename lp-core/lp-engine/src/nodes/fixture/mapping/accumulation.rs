@@ -3,7 +3,7 @@
 use super::entry::PixelMappingEntry;
 use super::sampling::create_sampler;
 use alloc::vec::Vec;
-use lp_glsl_builtins::glsl::q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// Convert u8 (0-255) from sampler to Q32 (0-1)
 fn u8_to_q32_normalized(v: u8) -> Q32 {

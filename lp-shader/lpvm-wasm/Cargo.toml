@@ -1,0 +1,29 @@
+[package]
+name = "lpvm-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LPIR to WebAssembly emission and wasmtime/browser runtimes for LPVM"
+
+[lints]
+workspace = true
+
+[dependencies]
+lps-builtin-ids = { path = "../lps-builtin-ids" }
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }
+lps-builtins = { path = "../lps-builtins" }
+lpvm = { path = "../lpvm" }
+wasm-encoder = "0.245"
+log = { workspace = true, default-features = false }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wasmtime = "42"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+lps-frontend = { path = "../lps-frontend" }
+wasmtime = "42"

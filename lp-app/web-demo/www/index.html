@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LightPlayer Shader Demo</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: system-ui, sans-serif;
+            --preview-size: min(512px, 25vw);
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #111;
+            color: #e0e0e0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            padding: 8px 12px;
+            gap: 6px;
+        }
+
+        /* ── Desktop: code left, preview right ── */
+        #app {
+            flex: 1 1 0;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+        }
+
+        #editor-pane {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            min-width: 0;
+        }
+
+        #source {
+            flex: 1 1 0;
+            min-height: 0;
+            border: 1px solid #333;
+        }
+
+        #canvas-pane {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        #output {
+            width: var(--preview-size);
+            height: var(--preview-size);
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            border: 1px solid #444;
+            background: #000;
+        }
+
+        #status {
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #777;
+            letter-spacing: 0.02em;
+        }
+
+        .tex-size-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        .tex-size-row input[type="range"] {
+            width: 140px;
+            accent-color: #6a9;
+        }
+
+        .tex-size-row #tex-size-label {
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #8c8;
+            min-width: 5.5em;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+
+        .toolbar button {
+            font-size: 12px;
+            padding: 3px 10px;
+            background: #2a2a2a;
+            color: #ccc;
+            border: 1px solid #444;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .toolbar button:hover {
+            background: #383838;
+        }
+
+        .toolbar button:active {
+            background: #444;
+        }
+
+        .toolbar .flash {
+            color: #8c8;
+        }
+
+        #errors {
+            flex: 0 0 auto;
+            margin-top: 4px;
+            padding: 6px 8px;
+            background: #2a1515;
+            border: 1px solid #633;
+            color: #f88;
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 150px;
+            overflow: auto;
+        }
+
+        #errors:empty {
+            display: none;
+        }
+
+        #sidebar-meta {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: var(--preview-size);
+        }
+
+        #sidebar-meta h1 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        #sidebar-meta p {
+            margin: 0;
+            font-size: 11px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        #sidebar-meta a {
+            color: #7a9;
+        }
+
+        /* ── Mobile / narrow: code top, preview bottom ── */
+        @media (max-width: 768px) {
+            :root {
+                --preview-size: min(512px, 25vh);
+            }
+
+            #app {
+                grid-template-columns: 1fr;
+                grid-template-rows: 1fr auto;
+            }
+
+            #canvas-pane {
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div id="editor-pane">
+        <div id="source"></div>
+        <pre id="errors"></pre>
+    </div>
+    <div id="canvas-pane">
+        <canvas id="output" width="64" height="64"></canvas>
+        <div id="status"></div>
+        <div class="tex-size-row">
+            <label for="tex-size">Texture</label>
+            <input type="range" id="tex-size" min="0" max="16" value="8" step="1"
+                   aria-valuemin="0" aria-valuemax="16" aria-label="Texture size"/>
+            <span id="tex-size-label" aria-live="polite">64×64</span>
+        </div>
+        <div id="sidebar-meta">
+            <h1>LightPlayer Shader Demo</h1>
+            <p>Edit GLSL on the left; the compiler runs in the browser and recompiles after a short
+                pause.</p>
+            <div class="toolbar">
+                <button id="btn-reset">Reset</button>
+                <button id="btn-copy-link">Copy link</button>
+            </div>
+            <p>
+                GLSL is lowered through <a href="https://github.com/gfx-rs/naga">Naga</a> to LPIR,
+                then <code>lpvm-wasm</code> emits shader WASM. Builtins are native Rust from
+                <code>lps-builtins</code> (same module as the demo). All math uses Q16.16 fixed-point.
+            </p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.36.5/ace.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.36.5/ext-language_tools.min.js"></script>
+<script type="module">
+  import init, {
+    lpvm_init_exports,
+    init_engine,
+    compile_shader,
+    render_frame,
+    get_shader_memory,
+    shader_ready,
+  } from './pkg/web_demo.js';
+
+  // ── Ace editor setup ──────────────────────────────────────────────
+  const editor = ace.edit('source');
+  editor.setTheme('ace/theme/tomorrow_night');
+  editor.session.setMode('ace/mode/glsl');
+  editor.setOptions({
+    fontSize: 13,
+    showPrintMargin: false,
+    enableBasicAutocompletion: true,
+    enableLiveAutocompletion: true,
+    enableSnippets: true,
+    tabSize: 4,
+    useSoftTabs: true,
+  });
+
+  const LPFX_COMPLETIONS = [
+    {
+      v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',
+      c: 'float lpfx_fbm(vec2 p, int octaves, uint seed)',
+      d: 'Fractal Brownian Motion (2D)'
+    },
+    {
+      v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',
+      c: 'float lpfx_fbm(vec3 p, int octaves, uint seed)',
+      d: 'Fractal Brownian Motion (3D)'
+    },
+    {
+      v: 'lpfx_fbm(${1:p}, ${2:tileLength}, ${3:octaves}, ${4:seed})',
+      c: 'float lpfx_fbm(vec3 p, float tileLength, int octaves, uint seed)',
+      d: 'FBM tileable (3D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:x}, ${2:seed})',
+      c: 'float lpfx_gnoise(float x, uint seed)',
+      d: 'Gradient noise (1D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_gnoise(vec2 p, uint seed)',
+      d: 'Gradient noise (2D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_gnoise(vec3 p, uint seed)',
+      d: 'Gradient noise (3D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:p}, ${2:tileLength}, ${3:seed})',
+      c: 'float lpfx_gnoise(vec3 p, float tileLength, uint seed)',
+      d: 'Gradient noise tileable (3D)'
+    },
+    {
+      v: 'lpfx_hash(${1:x}, ${2:seed})',
+      c: 'uint lpfx_hash(uint x, uint seed)',
+      d: 'Integer hash (1D)'
+    },
+    {
+      v: 'lpfx_hash(${1:xy}, ${2:seed})',
+      c: 'uint lpfx_hash(uvec2 xy, uint seed)',
+      d: 'Integer hash (2D)'
+    },
+    {
+      v: 'lpfx_hash(${1:xyz}, ${2:seed})',
+      c: 'uint lpfx_hash(uvec3 xyz, uint seed)',
+      d: 'Integer hash (3D)'
+    },
+    {v: 'lpfx_hsv2rgb(${1:hsv})', c: 'vec3 lpfx_hsv2rgb(vec3 hsv)', d: 'HSV to RGB'},
+    {v: 'lpfx_hsv2rgb(${1:hsv})', c: 'vec4 lpfx_hsv2rgb(vec4 hsv)', d: 'HSV to RGB (vec4)'},
+    {v: 'lpfx_hue2rgb(${1:hue})', c: 'vec3 lpfx_hue2rgb(float hue)', d: 'Hue to RGB'},
+    {
+      v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
+      c: 'float lpfx_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)',
+      d: 'Periodic simplex rotation-derivative noise (2D)'
+    },
+    {
+      v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
+      c: 'float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)',
+      d: 'Periodic simplex rotation-derivative noise (3D)'
+    },
+    {
+      v: 'lpfx_random(${1:x}, ${2:seed})',
+      c: 'float lpfx_random(float x, uint seed)',
+      d: 'Pseudo-random [0,1] (1D)'
+    },
+    {
+      v: 'lpfx_random(${1:p}, ${2:seed})',
+      c: 'float lpfx_random(vec2 p, uint seed)',
+      d: 'Pseudo-random [0,1] (2D)'
+    },
+    {
+      v: 'lpfx_random(${1:p}, ${2:seed})',
+      c: 'float lpfx_random(vec3 p, uint seed)',
+      d: 'Pseudo-random [0,1] (3D)'
+    },
+    {v: 'lpfx_rgb2hsv(${1:rgb})', c: 'vec3 lpfx_rgb2hsv(vec3 rgb)', d: 'RGB to HSV'},
+    {v: 'lpfx_rgb2hsv(${1:rgb})', c: 'vec4 lpfx_rgb2hsv(vec4 rgb)', d: 'RGB to HSV (vec4)'},
+    {v: 'lpfx_saturate(${1:x})', c: 'float lpfx_saturate(float x)', d: 'Clamp to [0,1]'},
+    {v: 'lpfx_saturate(${1:v})', c: 'vec3 lpfx_saturate(vec3 v)', d: 'Clamp to [0,1] (vec3)'},
+    {v: 'lpfx_saturate(${1:v})', c: 'vec4 lpfx_saturate(vec4 v)', d: 'Clamp to [0,1] (vec4)'},
+    {
+      v: 'lpfx_snoise(${1:x}, ${2:seed})',
+      c: 'float lpfx_snoise(float x, uint seed)',
+      d: 'Simplex noise (1D)'
+    },
+    {
+      v: 'lpfx_snoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_snoise(vec2 p, uint seed)',
+      d: 'Simplex noise (2D)'
+    },
+    {
+      v: 'lpfx_snoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_snoise(vec3 p, uint seed)',
+      d: 'Simplex noise (3D)'
+    },
+    {
+      v: 'lpfx_srandom(${1:x}, ${2:seed})',
+      c: 'float lpfx_srandom(float x, uint seed)',
+      d: 'Signed random [-1,1] (1D)'
+    },
+    {
+      v: 'lpfx_srandom(${1:p}, ${2:seed})',
+      c: 'float lpfx_srandom(vec2 p, uint seed)',
+      d: 'Signed random [-1,1] (2D)'
+    },
+    {
+      v: 'lpfx_srandom(${1:p}, ${2:seed})',
+      c: 'float lpfx_srandom(vec3 p, uint seed)',
+      d: 'Signed random [-1,1] (3D)'
+    },
+    {
+      v: 'lpfx_srandom3_tile(${1:p}, ${2:tileLength}, ${3:seed})',
+      c: 'vec3 lpfx_srandom3_tile(vec3 p, float tileLength, uint seed)',
+      d: 'Signed random vec3 tileable'
+    },
+    {
+      v: 'lpfx_srandom3_vec(${1:p}, ${2:seed})',
+      c: 'vec3 lpfx_srandom3_vec(vec3 p, uint seed)',
+      d: 'Signed random vec3'
+    },
+    {
+      v: 'lpfx_worley(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley(vec2 p, uint seed)',
+      d: 'Worley (cellular) noise (2D)'
+    },
+    {
+      v: 'lpfx_worley(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley(vec3 p, uint seed)',
+      d: 'Worley (cellular) noise (3D)'
+    },
+    {
+      v: 'lpfx_worley_value(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley_value(vec2 p, uint seed)',
+      d: 'Worley value noise (2D)'
+    },
+    {
+      v: 'lpfx_worley_value(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley_value(vec3 p, uint seed)',
+      d: 'Worley value noise (3D)'
+    },
+  ];
+
+  const lpfxCompleter = {
+    getCompletions(_editor, _session, _pos, _prefix, callback) {
+      callback(null, LPFX_COMPLETIONS.map(e => ({
+        caption: e.c,
+        snippet: e.v,
+        meta: e.d,
+        score: 1000,
+      })));
+    },
+  };
+  editor.completers = [lpfxCompleter, ...editor.completers];
+
+  // ── Texture sizes ─────────────────────────────────────────────────
+  /** log2 from 4..1024 in half-integer steps: 2^2, 2^2.5, ..., 2^10 (rounded). */
+  const TEXTURE_SIZES = (() => {
+    const out = [];
+    for (let k = 0; k <= 16; k++) {
+      const exp = 2 + k * 0.5;
+      const s = Math.max(4, Math.min(1024, Math.round(2 ** exp)));
+      out.push(s);
+    }
+    return out;
+  })();
+
+  const canvas = document.getElementById('output');
+  let ctx = canvas.getContext('2d');
+  const errorsEl = document.getElementById('errors');
+  const statusEl = document.getElementById('status');
+  const texSizeInput = document.getElementById('tex-size');
+  const texSizeLabel = document.getElementById('tex-size-label');
+
+  const PIXEL_BUF_OFFSET = 0x20000; // 128KB -- above shadow stack region
+
+  let sharedMemory = null;
+
+  let texSize = TEXTURE_SIZES[Number(texSizeInput.value)] ?? 64;
+  let imageData = ctx.createImageData(texSize, texSize);
+
+  function pixelBufSize() {
+    return texSize * texSize * 4;
+  }
+
+  function ensureWasmMemoryForPixelBuffer() {
+    if (!sharedMemory) return;
+    const needBytes = PIXEL_BUF_OFFSET + pixelBufSize();
+    const needPages = Math.ceil(needBytes / 65536);
+    const curPages = sharedMemory.buffer.byteLength / 65536;
+    if (needPages > curPages) {
+      sharedMemory.grow(needPages - curPages);
+    }
+  }
+
+  function applyTextureSizeIndex(idx) {
+    const n = TEXTURE_SIZES[idx];
+    if (n === undefined || n === texSize) return;
+    texSize = n;
+    ensureWasmMemoryForPixelBuffer();
+    canvas.width = n;
+    canvas.height = n;
+    ctx = canvas.getContext('2d');
+    imageData = ctx.createImageData(texSize, texSize);
+    texSizeLabel.textContent = `${n}\u00d7${n}`;
+    resetFrameSamples();
+  }
+
+  let compileTimeout = null;
+  let lastError = '';
+
+  const LS_KEY = 'lps-source';
+
+  async function fetchDefaultSource() {
+    try {
+      const res = await fetch('rainbow-default.glsl');
+      if (res.ok) return await res.text();
+    } catch (_) { /* ignore */
+    }
+    return 'vec4 render(vec2 fragCoord, vec2 outputSize, float time) {\n    return vec4(1.0, 0.0, 1.0, 1.0);\n}\n';
+  }
+
+  let defaultSource = null;
+
+  async function loadInitialSource() {
+    defaultSource = await fetchDefaultSource();
+
+    // Priority: URL hash > localStorage > default
+    const hash = location.hash;
+    if (hash.startsWith('#src=')) {
+      try {
+        const src = atob(hash.slice(5));
+        editor.setValue(src, -1);
+        history.replaceState(null, '', location.pathname + location.search);
+        return;
+      } catch (_) { /* bad base64, fall through */
+      }
+    }
+
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved !== null) {
+      editor.setValue(saved, -1);
+      return;
+    }
+
+    editor.setValue(defaultSource, -1);
+  }
+
+  function saveSource() {
+    localStorage.setItem(LS_KEY, editor.getValue());
+  }
+
+  function resetSource() {
+    if (!defaultSource) return;
+    localStorage.removeItem(LS_KEY);
+    editor.setValue(defaultSource, -1);
+  }
+
+  function copyLink() {
+    const encoded = btoa(editor.getValue());
+    const url = location.origin + location.pathname + '#src=' + encoded;
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = document.getElementById('btn-copy-link');
+      btn.textContent = 'Copied!';
+      btn.classList.add('flash');
+      setTimeout(() => {
+        btn.textContent = 'Copy link';
+        btn.classList.remove('flash');
+      }, 1500);
+    });
+  }
+
+  function setError(msg) {
+    lastError = msg;
+    errorsEl.textContent = msg || '';
+  }
+
+  function compileShader(source) {
+    try {
+      compile_shader(source);
+      sharedMemory = get_shader_memory();
+      if (!sharedMemory) {
+        setError('Shader has no linear memory export');
+        return false;
+      }
+      ensureWasmMemoryForPixelBuffer();
+      resetFrameSamples();
+      setError('');
+      return true;
+    } catch (e) {
+      setError(String(e));
+      return false;
+    }
+  }
+
+  function scheduleCompile() {
+    clearTimeout(compileTimeout);
+    compileTimeout = setTimeout(() => {
+      compileShader(editor.getValue());
+    }, 300);
+  }
+
+  const FRAME_SAMPLES_CAP = 100;
+  const frameUsRing = new Float64Array(FRAME_SAMPLES_CAP);
+  let frameUsWrite = 0;
+  let frameUsCount = 0;
+
+  function resetFrameSamples() {
+    frameUsWrite = 0;
+    frameUsCount = 0;
+  }
+
+  function pushFrameUsSample(us) {
+    frameUsRing[frameUsWrite] = us;
+    frameUsWrite = (frameUsWrite + 1) % FRAME_SAMPLES_CAP;
+    if (frameUsCount < FRAME_SAMPLES_CAP) {
+      frameUsCount++;
+    }
+  }
+
+  /** @returns {{mean: number, std: number, min: number, max: number, n: number} | null} */
+  function frameUsStats() {
+    if (frameUsCount < 2) return null;
+    const oldest = (frameUsWrite - frameUsCount + FRAME_SAMPLES_CAP) % FRAME_SAMPLES_CAP;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < frameUsCount; i++) {
+      const v = frameUsRing[(oldest + i) % FRAME_SAMPLES_CAP];
+      sum += v;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const mean = sum / frameUsCount;
+    let sq = 0;
+    for (let i = 0; i < frameUsCount; i++) {
+      const v = frameUsRing[(oldest + i) % FRAME_SAMPLES_CAP];
+      const d = v - mean;
+      sq += d * d;
+    }
+    const std = Math.sqrt(sq / (frameUsCount - 1));
+    return {mean, std, min, max, n: frameUsCount};
+  }
+
+  function fmtMsFromUs(us) {
+    const ms = us / 1000;
+    return ms >= 1 ? ms.toFixed(2) : ms.toFixed(3);
+  }
+
+  let frames = 0;
+  let lastFpsT = performance.now();
+  let frameUsSum = 0;
+
+  function render(timestamp) {
+    requestAnimationFrame(render);
+
+    if (!shader_ready() || !sharedMemory) return;
+
+    const timeSec = timestamp / 1000;
+    const q32Time = Math.round(timeSec * 65536);
+
+    const t0 = performance.now();
+    try {
+      render_frame(texSize, texSize, q32Time, PIXEL_BUF_OFFSET);
+    } catch (e) {
+      setError('Runtime: ' + e);
+      return;
+    }
+    const frameUs = (performance.now() - t0) * 1000;
+    pushFrameUsSample(frameUs);
+
+    const src = new Uint8Array(sharedMemory.buffer, PIXEL_BUF_OFFSET, pixelBufSize());
+    imageData.data.set(src);
+    ctx.putImageData(imageData, 0, 0);
+
+    frames++;
+    frameUsSum += frameUs;
+    const now = performance.now();
+    if (now - lastFpsT >= 1000) {
+      const actualFps = (frames * 1000) / (now - lastFpsT);
+      const avgUs = frameUsSum / frames;
+      const stats = frameUsStats();
+      const meanUsForTheo = stats ? stats.mean : avgUs;
+      const theoFps = 1e6 / meanUsForTheo;
+      const theoStr =
+        theoFps >= 1000 ? (theoFps / 1000).toFixed(1) + 'k' : theoFps.toFixed(0);
+      if (lastError) {
+        statusEl.textContent = 'error (previous shader still running)';
+      } else if (stats) {
+        const timeSeg = `${fmtMsFromUs(stats.mean)}\u00b1${fmtMsFromUs(stats.std)}ms (${fmtMsFromUs(stats.min)}\u2013${fmtMsFromUs(stats.max)})`;
+        statusEl.textContent =
+          `${actualFps.toFixed(0)}fps \u00b7 ${timeSeg} ~${theoStr}fps \u00b7 ${texSize}\u00d7${texSize} \u00b7 Q32`;
+      } else {
+        const usStr = avgUs >= 1000 ? (avgUs / 1000).toFixed(1) + 'ms' : avgUs.toFixed(0) + '\u00b5s';
+        statusEl.textContent =
+          `${actualFps.toFixed(0)}fps \u00b7 ${usStr} (~${theoStr}fps) \u00b7 ${texSize}\u00d7${texSize} \u00b7 Q32`;
+      }
+      frames = 0;
+      frameUsSum = 0;
+      lastFpsT = now;
+    }
+  }
+
+  async function main() {
+    const exports = await init();
+    lpvm_init_exports(exports);
+    init_engine();
+
+    await loadInitialSource();
+    editor.resize();
+    ensureWasmMemoryForPixelBuffer();
+    applyTextureSizeIndex(Number(texSizeInput.value));
+    compileShader(editor.getValue());
+    editor.session.on('change', () => {
+      scheduleCompile();
+      saveSource();
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', resetSource);
+    document.getElementById('btn-copy-link').addEventListener('click', copyLink);
+    texSizeInput.addEventListener('input', () => {
+      applyTextureSizeIndex(Number(texSizeInput.value));
+    });
+
+    requestAnimationFrame(render);
+  }
+
+  main().catch((e) => {
+    setError('Startup: ' + e);
+  });
+</script>
+</body>
+</html>

@@ -1,8 +1,9 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_engine::{MemoryOutputProvider, ProjectRuntime};
+use lp_engine::{CraneliftGraphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lp_model::AsLpPath;
 use lp_shared::ProjectBuilder;
 use lp_shared::fs::LpFsMemory;
@@ -24,9 +25,11 @@ fn test_node_json_modification() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None).unwrap();
+    let mut runtime =
+        ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -100,9 +103,11 @@ fn test_main_glsl_modification() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None).unwrap();
+    let mut runtime =
+        ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -125,7 +130,7 @@ fn test_main_glsl_modification() {
         .write_file_mut(
             "/src/shader-1.shader/main.glsl".as_path(),
             r#"
-                vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+                vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
                     return vec4(0.0, mod(time, 1.0), 0.0, 1.0);  // Green instead of red
                 }
             "#
@@ -181,9 +186,11 @@ fn test_node_deletion() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None).unwrap();
+    let mut runtime =
+        ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();

@@ -1,10 +1,11 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_model::{AsLpPath, AsLpPathBuf, ClientMessage, ClientRequest};
-use lp_server::{LpServer, handlers::handle_client_message};
+use lp_server::{CraneliftGraphics, LpGraphics, LpServer, handlers::handle_client_message};
 use lp_shared::ProjectBuilder;
 use lp_shared::fs::{LpFs, LpFsMemory};
 
@@ -78,6 +79,7 @@ fn test_stop_all_projects() {
     // Create output provider
     let output_provider: Rc<RefCell<dyn lp_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
 
     // Create server with prepared filesystem
     let mut server = LpServer::new(
@@ -86,6 +88,7 @@ fn test_stop_all_projects() {
         "projects/".as_path(),
         None,
         None,
+        graphics.clone(),
     );
 
     // Load project
@@ -100,6 +103,7 @@ fn test_stop_all_projects() {
                 output_provider.clone(),
                 None,
                 None,
+                graphics.clone(),
             )
             .unwrap()
         }
@@ -122,7 +126,17 @@ fn test_stop_all_projects() {
     let response = unsafe {
         let pm = (*server_ptr).project_manager_mut();
         let fs = (*server_ptr).base_fs_mut();
-        handle_client_message(pm, fs, &output_provider, None, None, request, None).unwrap()
+        handle_client_message(
+            pm,
+            fs,
+            &output_provider,
+            None,
+            None,
+            graphics.clone(),
+            request,
+            None,
+        )
+        .unwrap()
     };
 
     // Verify response is StopAllProjects

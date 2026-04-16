@@ -12,7 +12,8 @@ development, a headless host for larger deployments, or as bare-metal firmware
 on an embedded system.
 
 On machines without OpenGL support, such as embedded systems, the shaders are compiled to native
-code using the bespoke LightPlayer GLSL compiler which is built on a fork of Cranelift.
+code using the bespoke LightPlayer GLSL compiler (`lpvm-native` custom RV32 backend, with a
+Cranelift-based reference backend also available).
 
 # Workspace
 

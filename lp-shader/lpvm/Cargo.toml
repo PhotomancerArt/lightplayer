@@ -1,0 +1,19 @@
+[package]
+name = "lpvm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LPVM runtime - traits, VM context, and execution abstractions"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Host crates may enable `std` for consistency; `lpvm` stays `no_std` either way.
+std = []
+
+[dependencies]
+lps-q32 = { path = "../lps-q32", default-features = false }
+lps-shared = { path = "../lps-shared" }
+lpir = { path = "../lpir" }

@@ -36,6 +36,8 @@ pub struct ElfLoadInfo {
     pub code_end: u32,
     /// End offset of RAM sections (relative to RAM_START, where RAM sections end)
     pub ram_end: u32,
+    /// Start address of user code from linked object file (0 if no object file linked)
+    pub user_code_start: u32,
 }
 
 /// Load a RISC-V ELF file and extract code and data sections for the emulator.
@@ -142,6 +144,7 @@ pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
         symbol_list,
         code_end,
         ram_end,
+        user_code_start: 0,
     })
 }
 
@@ -184,7 +187,7 @@ mod tests {
             .join("../../../../../target")
             .join(target)
             .join(profile)
-            .join("lp-glsl-builtins-emu-app");
+            .join("lps-builtins-emu-app");
 
         // If not found, try workspace root directly (for when running from lightplayer/)
         let exe_path = if exe_path.exists() {
@@ -194,7 +197,7 @@ mod tests {
                 .join("../../../../target")
                 .join(target)
                 .join(profile)
-                .join("lp-glsl-builtins-emu-app")
+                .join("lps-builtins-emu-app")
         };
 
         if exe_path.exists() {

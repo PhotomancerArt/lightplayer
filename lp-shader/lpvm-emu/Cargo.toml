@@ -1,0 +1,27 @@
+[package]
+name = "lpvm-emu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LPVM trait implementation for RV32 emulator (lp-riscv-emu)"
+
+[lints]
+workspace = true
+
+[features]
+default = ["std"]
+std = ["lpvm/std", "lp-riscv-emu/std", "lpvm-cranelift/std"]
+
+[dependencies]
+lpvm = { path = "../lpvm", default-features = false }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lpvm-cranelift = { path = "../lpvm-cranelift", default-features = false, features = [
+    "std",
+    "glsl",
+    "riscv32-object",
+] }
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }
+cranelift-codegen = { workspace = true, default-features = false, features = ["riscv32"] }
+target-lexicon = { workspace = true }

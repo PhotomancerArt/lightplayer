@@ -1,4 +1,4 @@
-vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     // Pan through noise using time with oscillation to stay bounded
     // Oscillate between minZoom and maxZoom to avoid unbounded growth
     float panSpeed = .3;
