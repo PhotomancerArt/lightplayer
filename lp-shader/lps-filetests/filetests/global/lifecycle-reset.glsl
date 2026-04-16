@@ -15,7 +15,6 @@ float test_reset_counter() {
 
 // Both calls should return 1.0 — counter resets to 0.0 before each call.
 // run: test_reset_counter() ~= 1.0
-// @unimplemented(wasm.q32)
 // run: test_reset_counter() ~= 1.0
 
 float initialized_val = 5.0;
@@ -27,7 +26,5 @@ float test_reset_initialized() {
 }
 
 // Should always read the initialized value (5.0), not the mutated one.
-// @unimplemented(wasm.q32)
 // run: test_reset_initialized() ~= 5.0
-// @unimplemented(wasm.q32)
 // run: test_reset_initialized() ~= 5.0

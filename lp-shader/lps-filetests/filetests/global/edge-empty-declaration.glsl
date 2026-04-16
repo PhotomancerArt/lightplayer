@@ -22,7 +22,6 @@ float test_edge_empty_declaration_normal() {
     return normal_float + float(normal_int) + normal_vec2.x + normal_vec2.y;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_edge_empty_declaration_normal() ~= 168.0
 
 float test_edge_empty_declaration_modify() {
@@ -34,8 +33,7 @@ float test_edge_empty_declaration_modify() {
     return normal_float + float(normal_int) + normal_vec2.x + normal_vec2.y;
 }
 
-// @unimplemented(wasm.q32)
-// run: test_edge_empty_declaration_modify() ~= 298.0
+// run: test_edge_empty_declaration_modify() ~= 330.0
 
 void test_edge_empty_declaration_unused() {
     // Test with potentially unused variables

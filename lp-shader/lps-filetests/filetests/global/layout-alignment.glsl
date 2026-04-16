@@ -15,7 +15,6 @@ float test_layout_read_all() {
 }
 
 // 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 = 36
-// @unimplemented(wasm.q32)
 // run: test_layout_read_all() ~= 36.0
 
 float test_layout_mutate_first() {
@@ -23,12 +22,10 @@ float test_layout_mutate_first() {
     return ga + gv2.x;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_layout_mutate_first() ~= 102.0
 
 vec4 test_layout_read_vec4() {
     return gv4;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_layout_read_vec4() ~= vec4(5.0, 6.0, 7.0, 8.0)

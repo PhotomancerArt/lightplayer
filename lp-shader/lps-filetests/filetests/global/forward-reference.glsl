@@ -22,9 +22,6 @@ float test_forward_reference_after_declare() {
     return global_after_function * 2.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_forward_reference_after_declare() ~= 84.0
 
 // Multiple globals with forward references
@@ -61,7 +58,4 @@ float test_forward_reference_complex() {
     return scalar_result + vec_result.x + vec_result.y + mat_result[0][0];
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_forward_reference_complex() ~= 58.0

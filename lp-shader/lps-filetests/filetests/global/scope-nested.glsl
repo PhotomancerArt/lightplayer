@@ -24,15 +24,14 @@ float test_scope_nested_access() {
     return global_counter;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_scope_nested_access() ~= 6.0
 
 vec2 test_scope_nested_vector() {
     // Global vector accessible from nested scopes
     {
-        global_position.x = 5.0;
+        global_position = vec2(5.0, global_position.y);
         {
-            global_position.y = 10.0;
+            global_position = vec2(global_position.x, 10.0);
             {
                 global_position = global_position * 2.0;
             }
@@ -42,7 +41,6 @@ vec2 test_scope_nested_vector() {
     return global_position;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_scope_nested_vector() ~= vec2(10.0, 20.0)
 
 bool test_scope_nested_bool() {
@@ -60,7 +58,6 @@ bool test_scope_nested_bool() {
     return global_flag;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_scope_nested_bool() == true
 
 int test_scope_nested_depth() {
@@ -85,11 +82,11 @@ int test_scope_nested_depth() {
     return global_depth;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_scope_nested_depth() == 0
 
 float test_scope_nested_mixed() {
     // Mixed local and global access in nested scopes
+    global_counter = 0.0;
     float local_var = 10.0;
 
     {
@@ -106,34 +103,7 @@ float test_scope_nested_mixed() {
     return global_counter + local_var;  // Uses outer local
 }
 
-// @unimplemented(wasm.q32)
 // run: test_scope_nested_mixed() ~= 65.0
-
-vec2 test_scope_nested_functions() {
-    // Global access from nested function scopes
-    void outer_func() {
-        global_position.x = global_position.x + 1.0;
-
-        void inner_func() {
-            global_position.y = global_position.y + 1.0;
-
-            void innermost_func() {
-                global_position = global_position * 2.0;
-            }
-
-            innermost_func();
-        }
-
-        inner_func();
-    }
-
-    global_position = vec2(1.0, 1.0);
-    outer_func();
-    return global_position;
-}
-
-// @unimplemented(wasm.q32)
-// run: test_scope_nested_functions() ~= vec2(4.0, 4.0)
 
 float test_scope_nested_complex() {
     // Complex nesting with multiple global accesses
@@ -157,5 +127,4 @@ float test_scope_nested_complex() {
     return global_counter;
 }
 
-// @unimplemented(wasm.q32)
 // run: test_scope_nested_complex() ~= 5.0

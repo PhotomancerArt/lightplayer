@@ -5,10 +5,10 @@
 // ============================================================================
 
 // Shared uniform arrays - sizes must match across shaders
-uniform vec4 shared_colors[4];
-uniform mat3 shared_transforms[2];
-uniform float shared_weights[8];
-uniform int shared_indices[16];
+layout(binding = 0) uniform vec4 shared_colors[4];
+layout(binding = 0) uniform mat3 shared_transforms[2];
+layout(binding = 0) uniform float shared_weights[8];
+layout(binding = 0) uniform int shared_indices[16];
 
 // These arrays would need to have the same sizes in all shaders
 // that declare them

@@ -56,20 +56,19 @@ mat2 test_access_from_main_matrix() {
 float test_access_from_main_calculations() {
     // Main function with complex calculations using globals
     global_counter = 10.0;
-    global_color = vec3(0.1, 0.2, 0.3);
+    global_color = vec3(0.25, 0.5, 0.75);
 
     float total = global_counter;
-    total = total + global_color.x * 10.0;
-    total = total + global_color.y * 20.0;
-    total = total + global_color.z * 30.0;
+    total = total + global_color.x * 4.0;
+    total = total + global_color.y * 4.0;
+    total = total + global_color.z * 4.0;
 
     global_counter = total;
 
     return global_counter;
 }
 
-// @unimplemented(wasm.q32)
-// run: test_access_from_main_calculations() ~= 22.0
+// run: test_access_from_main_calculations() ~= 16.0
 
 vec3 test_access_from_main_vector_ops() {
     // Main function with vector operations on globals

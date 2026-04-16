@@ -41,7 +41,7 @@ vec4 test_type_vector_vec4() {
 
 // run: test_type_vector_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
-ivec2 test_type_vector_ivec2() {
+vec2 test_type_vector_ivec2() {
     // Global ivec2 variable
     global_ivec2 = ivec2(1, 2);
     return vec2(global_ivec2);
@@ -49,7 +49,7 @@ ivec2 test_type_vector_ivec2() {
 
 // run: test_type_vector_ivec2() ~= vec2(1.0, 2.0)
 
-ivec3 test_type_vector_ivec3() {
+vec3 test_type_vector_ivec3() {
     // Global ivec3 variable
     global_ivec3 = ivec3(1, 2, 3);
     return vec3(global_ivec3);
@@ -57,7 +57,7 @@ ivec3 test_type_vector_ivec3() {
 
 // run: test_type_vector_ivec3() ~= vec3(1.0, 2.0, 3.0)
 
-ivec4 test_type_vector_ivec4() {
+vec4 test_type_vector_ivec4() {
     // Global ivec4 variable
     global_ivec4 = ivec4(1, 2, 3, 4);
     return vec4(global_ivec4);
@@ -65,7 +65,7 @@ ivec4 test_type_vector_ivec4() {
 
 // run: test_type_vector_ivec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
-uvec2 test_type_vector_uvec2() {
+vec2 test_type_vector_uvec2() {
     // Global uvec2 variable
     global_uvec2 = uvec2(1u, 2u);
     return vec2(global_uvec2);
@@ -73,7 +73,7 @@ uvec2 test_type_vector_uvec2() {
 
 // run: test_type_vector_uvec2() ~= vec2(1.0, 2.0)
 
-uvec3 test_type_vector_uvec3() {
+vec3 test_type_vector_uvec3() {
     // Global uvec3 variable
     global_uvec3 = uvec3(1u, 2u, 3u);
     return vec3(global_uvec3);
@@ -81,7 +81,7 @@ uvec3 test_type_vector_uvec3() {
 
 // run: test_type_vector_uvec3() ~= vec3(1.0, 2.0, 3.0)
 
-uvec4 test_type_vector_uvec4() {
+vec4 test_type_vector_uvec4() {
     // Global uvec4 variable
     global_uvec4 = uvec4(1u, 2u, 3u, 4u);
     return vec4(global_uvec4);
@@ -89,7 +89,7 @@ uvec4 test_type_vector_uvec4() {
 
 // run: test_type_vector_uvec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
-bvec2 test_type_vector_bvec2() {
+vec2 test_type_vector_bvec2() {
     // Global bvec2 variable
     global_bvec2 = bvec2(true, false);
     return vec2(global_bvec2);
@@ -97,7 +97,7 @@ bvec2 test_type_vector_bvec2() {
 
 // run: test_type_vector_bvec2() ~= vec2(1.0, 0.0)
 
-bvec3 test_type_vector_bvec3() {
+vec3 test_type_vector_bvec3() {
     // Global bvec3 variable
     global_bvec3 = bvec3(true, false, true);
     return vec3(global_bvec3);
@@ -105,7 +105,7 @@ bvec3 test_type_vector_bvec3() {
 
 // run: test_type_vector_bvec3() ~= vec3(1.0, 0.0, 1.0)
 
-bvec4 test_type_vector_bvec4() {
+vec4 test_type_vector_bvec4() {
     // Global bvec4 variable
     global_bvec4 = bvec4(true, false, true, false);
     return vec4(global_bvec4);

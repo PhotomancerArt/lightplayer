@@ -11,11 +11,11 @@
 // uniform int count_init = 0;         // May be compile error
 // uniform vec2 position_init = vec2(0.0, 0.0);  // May be compile error
 
-uniform float time;
-uniform int count;
-uniform vec2 position;
-uniform vec3 color;
-uniform mat4 transform;
+layout(binding = 0) uniform float time;
+layout(binding = 0) uniform int count;
+layout(binding = 0) uniform vec2 position;
+layout(binding = 0) uniform vec3 color;
+layout(binding = 0) uniform mat4 transform;
 
 float test_initialize_uniform_float() {
     // Uniform global float (no initialization)
@@ -23,9 +23,6 @@ float test_initialize_uniform_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_float() ~= 1.0
 
 int test_initialize_uniform_int() {
@@ -34,9 +31,6 @@ int test_initialize_uniform_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_int() == 5
 
 vec2 test_initialize_uniform_vec2() {
@@ -45,9 +39,6 @@ vec2 test_initialize_uniform_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_initialize_uniform_vec3() {
@@ -56,9 +47,6 @@ vec3 test_initialize_uniform_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_initialize_uniform_mat4() {
@@ -67,9 +55,6 @@ mat4 test_initialize_uniform_mat4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_initialize_uniform_usage() {

@@ -32,7 +32,7 @@ uint test_edge_uninitialized_read_uint() {
     return int(uninit_uint + 5u);
 }
 
-// run: test_edge_uninitialized_read_uint() == 5
+// run: test_edge_uninitialized_read_uint() == 5u
 
 bool test_edge_uninitialized_read_bool() {
     // Reading uninitialized bool - undefined value
@@ -67,7 +67,7 @@ mat2 test_edge_uninitialized_read_mat2() {
     return uninit_mat2 + mat2(1.0);
 }
 
-// run: test_edge_uninitialized_read_mat2() ~= mat2(1.0, 1.0, 1.0, 1.0)
+// run: test_edge_uninitialized_read_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 void test_edge_uninitialized_assign_then_read() {
     // Assign values then read - should be defined

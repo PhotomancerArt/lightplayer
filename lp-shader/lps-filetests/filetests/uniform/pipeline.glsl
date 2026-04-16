@@ -6,11 +6,11 @@
 
 // Shared uniform globals - these would need to be declared consistently
 // across multiple shaders in a program
-uniform float shared_time;
-uniform vec3 shared_light_direction;
-uniform mat4 shared_view_matrix;
-uniform vec4 shared_material_color;
-uniform int shared_render_mode;
+layout(binding = 0) uniform float shared_time;
+layout(binding = 0) uniform vec3 shared_light_direction;
+layout(binding = 0) uniform mat4 shared_view_matrix;
+layout(binding = 0) uniform vec4 shared_material_color;
+layout(binding = 0) uniform int shared_render_mode;
 
 // These represent globals that must be shared across shaders
 // In practice, these would be uniforms that link shaders together
@@ -21,9 +21,6 @@ float test_shared_globals_time() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_globals_time() ~= 1.0
 
 vec3 test_shared_globals_light() {
@@ -32,9 +29,6 @@ vec3 test_shared_globals_light() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_globals_light() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_shared_globals_view() {
@@ -43,9 +37,6 @@ mat4 test_shared_globals_view() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_globals_view() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 vec4 test_shared_globals_material() {
@@ -54,9 +45,6 @@ vec4 test_shared_globals_material() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_globals_material() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 int test_shared_globals_mode() {
@@ -65,9 +53,6 @@ int test_shared_globals_mode() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_globals_mode() == 1
 
 float test_shared_globals_combined() {

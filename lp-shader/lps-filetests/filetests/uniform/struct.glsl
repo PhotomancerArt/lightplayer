@@ -27,9 +27,9 @@ struct Camera {
 };
 
 // Shared uniform structs - definitions must match exactly
-uniform Light shared_light;
-uniform Material shared_material;
-uniform Camera shared_camera;
+layout(binding = 0) uniform Light shared_light;
+layout(binding = 0) uniform Material shared_material;
+layout(binding = 0) uniform Camera shared_camera;
 
 vec3 test_shared_struct_match_light() {
     // Access shared light struct

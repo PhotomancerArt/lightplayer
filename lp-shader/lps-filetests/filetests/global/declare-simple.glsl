@@ -31,7 +31,7 @@ uint test_declare_simple_uint() {
     return int(global_uint);
 }
 
-// run: test_declare_simple_uint() == 987
+// run: test_declare_simple_uint() == 987u
 
 bool test_declare_simple_bool() {
     // Simple global bool declaration

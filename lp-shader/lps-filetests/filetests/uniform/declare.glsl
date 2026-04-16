@@ -4,16 +4,16 @@
 // Uniform Global Declarations: Global variables with uniform qualifier
 // ============================================================================
 
-uniform float time;
-uniform int frame_count;
-uniform uint seed;
-uniform bool enabled;
-uniform vec2 resolution;
-uniform vec3 camera_position;
-uniform vec4 color;
-uniform mat2 transform_2d;
-uniform mat3 transform_3d;
-uniform mat4 model_view_projection;
+layout(binding = 0) uniform float time;
+layout(binding = 0) uniform int frame_count;
+layout(binding = 0) uniform uint seed;
+layout(binding = 0) uniform bool enabled;
+layout(binding = 0) uniform vec2 resolution;
+layout(binding = 0) uniform vec3 camera_position;
+layout(binding = 0) uniform vec4 color;
+layout(binding = 0) uniform mat2 transform_2d;
+layout(binding = 0) uniform mat3 transform_3d;
+layout(binding = 0) uniform mat4 model_view_projection;
 
 float test_declare_uniform_float() {
     // Uniform global float declaration
@@ -21,10 +21,10 @@ float test_declare_uniform_float() {
     return time * 2.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_float() ~= 0.0
 
 int test_declare_uniform_int() {
@@ -32,10 +32,10 @@ int test_declare_uniform_int() {
     return frame_count + 1;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_int() == 1
 
 uint test_declare_uniform_uint() {
@@ -43,10 +43,10 @@ uint test_declare_uniform_uint() {
     return int(seed / 2u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_uint() == 0
 
 bool test_declare_uniform_bool() {
@@ -54,10 +54,10 @@ bool test_declare_uniform_bool() {
     return enabled;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_bool() == false
 
 vec2 test_declare_uniform_vec2() {
@@ -65,10 +65,10 @@ vec2 test_declare_uniform_vec2() {
     return resolution * 0.5;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_declare_uniform_vec3() {
@@ -76,10 +76,10 @@ vec3 test_declare_uniform_vec3() {
     return camera_position + vec3(1.0, 0.0, 0.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_vec3() ~= vec3(1.0, 0.0, 0.0)
 
 vec4 test_declare_uniform_vec4() {
@@ -87,10 +87,10 @@ vec4 test_declare_uniform_vec4() {
     return color;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat2 test_declare_uniform_mat2() {
@@ -98,10 +98,10 @@ mat2 test_declare_uniform_mat2() {
     return transform_2d;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_mat2() ~= mat2(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_declare_uniform_mat3() {
@@ -110,10 +110,10 @@ mat3 test_declare_uniform_mat3() {
     return transform_3d;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_mat3() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat4 test_declare_uniform_mat4() {
@@ -121,8 +121,8 @@ mat4 test_declare_uniform_mat4() {
     return model_view_projection;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32n.q32)
 // run: test_declare_uniform_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)

@@ -4,15 +4,15 @@
 // Uniform Read-Only: Uniform global variables are read-only in shader code
 // ============================================================================
 
-uniform float time;
-uniform int frame_count;
-uniform uint random_seed;
-uniform bool enable_lighting;
-uniform vec2 resolution;
-uniform vec3 camera_position;
-uniform vec4 ambient_color;
-uniform mat4 view_matrix;
-uniform mat3 normal_matrix;
+layout(binding = 0) uniform float time;
+layout(binding = 0) uniform int frame_count;
+layout(binding = 0) uniform uint random_seed;
+layout(binding = 0) uniform bool enable_lighting;
+layout(binding = 0) uniform vec2 resolution;
+layout(binding = 0) uniform vec3 camera_position;
+layout(binding = 0) uniform vec4 ambient_color;
+layout(binding = 0) uniform mat4 view_matrix;
+layout(binding = 0) uniform mat3 normal_matrix;
 
 float test_uniform_readonly_float() {
     // Uniform float is read-only - can only read, not write
@@ -20,9 +20,6 @@ float test_uniform_readonly_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_float() ~= 1.0
 
 int test_uniform_readonly_int() {
@@ -31,9 +28,6 @@ int test_uniform_readonly_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_int() == 0
 
 uint test_uniform_readonly_uint() {
@@ -53,9 +47,6 @@ bool test_uniform_readonly_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_bool() == false
 
 vec2 test_uniform_readonly_vec2() {
@@ -64,9 +55,6 @@ vec2 test_uniform_readonly_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_uniform_readonly_vec3() {
@@ -75,9 +63,6 @@ vec3 test_uniform_readonly_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_uniform_readonly_vec4() {
@@ -86,9 +71,6 @@ vec4 test_uniform_readonly_vec4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_uniform_readonly_mat4() {
@@ -97,9 +79,6 @@ mat4 test_uniform_readonly_mat4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat3 test_uniform_readonly_mat3() {
@@ -108,9 +87,6 @@ mat3 test_uniform_readonly_mat3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_mat3() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_readonly_calculations() {
@@ -123,9 +99,6 @@ float test_uniform_readonly_calculations() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_calculations() ~= 10.0
 
 vec4 test_uniform_readonly_lighting() {
@@ -140,9 +113,6 @@ vec4 test_uniform_readonly_lighting() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_lighting() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_readonly_transform() {
@@ -154,7 +124,4 @@ float test_uniform_readonly_transform() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_readonly_transform() ~= 0.0

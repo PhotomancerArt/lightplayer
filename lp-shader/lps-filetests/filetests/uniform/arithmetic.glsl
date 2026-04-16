@@ -4,17 +4,14 @@
 // Uniform: Arithmetic with uniforms (default zero values)
 // ============================================================================
 
-uniform float u_time;
-uniform vec2 u_offset;
+layout(binding = 0) uniform float u_time;
+layout(binding = 0) uniform vec2 u_offset;
 
 float test_uniform_add_constant() {
     return u_time + 1.0;
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_add_constant() ~= 1.0
 
 vec2 test_uniform_vec_offset() {
@@ -22,9 +19,6 @@ vec2 test_uniform_vec_offset() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_vec_offset() ~= vec2(10.0, 20.0)
 
 float test_uniform_multiply() {
@@ -32,7 +26,4 @@ float test_uniform_multiply() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_uniform_multiply() ~= 5.0

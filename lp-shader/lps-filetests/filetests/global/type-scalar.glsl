@@ -31,7 +31,7 @@ uint test_type_scalar_uint() {
     return int(global_uint);
 }
 
-// run: test_type_scalar_uint() == 987
+// run: test_type_scalar_uint() == 987u
 
 bool test_type_scalar_bool() {
     // Global bool variable
@@ -69,7 +69,7 @@ uint test_type_scalar_uint_operations() {
     return int(global_uint);
 }
 
-// run: test_type_scalar_uint_operations() == 25
+// run: test_type_scalar_uint_operations() == 25u
 
 bool test_type_scalar_bool_operations() {
     // Bool operations on global
