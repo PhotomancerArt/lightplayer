@@ -23,6 +23,7 @@ mod lpvm_abi;
 mod lpvm_data_q32;
 mod memory;
 mod module;
+mod set_uniform;
 mod vmcontext;
 
 pub use buffer::{LpvmBuffer, LpvmPtr};
@@ -44,6 +45,7 @@ pub use lpvm_abi::{
 pub use lpvm_data_q32::LpvmDataQ32;
 pub use memory::{AllocError, BumpLpvmMemory, LpvmMemory};
 pub use module::LpvmModule;
+pub use set_uniform::{encode_uniform_write, encode_uniform_write_q32};
 pub use vmcontext::{
     DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_METADATA,
     VMCTX_OFFSET_TRAP_HANDLER, VmContext, VmContextHeader, minimal_vmcontext,

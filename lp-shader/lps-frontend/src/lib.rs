@@ -162,11 +162,10 @@ float test() {
             Err(e) => {
                 // Currently naga doesn't support local const as array sizes
                 // This is a known limitation
-                let err_str = alloc::format!("{}", e);
+                let err_str = alloc::format!("{e}");
                 assert!(
                     err_str.contains("Unknown variable") || err_str.contains("SIZE"),
-                    "Expected error about unknown variable SIZE, got: {}",
-                    err_str
+                    "Expected error about unknown variable SIZE, got: {err_str}"
                 );
             }
         }

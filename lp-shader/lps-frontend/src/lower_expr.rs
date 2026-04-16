@@ -4,6 +4,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
+use lps_shared::{LayoutRules, LpsType, array_stride, type_alignment, type_size};
 use naga::{
     ArraySize, BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind,
     TypeInner,
@@ -111,50 +112,15 @@ fn lower_expr_vec_uncached(
             }
             Expression::GlobalVariable(gv_handle) => {
                 // Load from a global variable (uniform or private global).
-                let Some(info) = ctx.global_map.get(gv_handle) else {
-                    return Err(LowerError::Internal(format!(
-                        "GlobalVariable {:?} not found in global_map",
-                        gv_handle
-                    )));
+                let (byte_offset, ty) = {
+                    let Some(info) = ctx.global_map.get(gv_handle) else {
+                        return Err(LowerError::Internal(format!(
+                            "GlobalVariable {gv_handle:?} not found in global_map"
+                        )));
+                    };
+                    (info.byte_offset, info.ty.clone())
                 };
-
-                // Determine IR types for this global's components
-                let ir_ty = match info.ty {
-                    lps_shared::LpsType::Float => IrType::F32,
-                    lps_shared::LpsType::Int => IrType::I32,
-                    lps_shared::LpsType::UInt => IrType::I32,
-                    lps_shared::LpsType::Bool => IrType::I32,
-                    lps_shared::LpsType::Vec2
-                    | lps_shared::LpsType::Vec3
-                    | lps_shared::LpsType::Vec4 => IrType::F32,
-                    lps_shared::LpsType::IVec2
-                    | lps_shared::LpsType::IVec3
-                    | lps_shared::LpsType::IVec4 => IrType::I32,
-                    lps_shared::LpsType::UVec2
-                    | lps_shared::LpsType::UVec3
-                    | lps_shared::LpsType::UVec4 => IrType::I32,
-                    lps_shared::LpsType::BVec2
-                    | lps_shared::LpsType::BVec3
-                    | lps_shared::LpsType::BVec4 => IrType::I32,
-                    lps_shared::LpsType::Mat2
-                    | lps_shared::LpsType::Mat3
-                    | lps_shared::LpsType::Mat4 => IrType::F32,
-                    _ => IrType::F32,
-                };
-
-                // Emit Load ops for each component from VMContext
-                let mut vregs = VRegVec::new();
-                for i in 0..info.component_count {
-                    let dst = ctx.fb.alloc_vreg(ir_ty);
-                    let offset = info.byte_offset + (i * 4);
-                    ctx.fb.push(LpirOp::Load {
-                        dst,
-                        base: VMCTX_VREG,
-                        offset,
-                    });
-                    vregs.push(dst);
-                }
-                Ok(vregs)
+                load_lps_value_from_vmctx(ctx, byte_offset, &ty)
             }
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-local pointer",
@@ -296,6 +262,39 @@ fn lower_expr_vec_uncached(
                             let start = (*index as usize) * n;
                             Ok(m[start..start + n].into())
                         }
+                        TypeInner::Struct { .. } => match &ctx.func.expressions[*base] {
+                            Expression::GlobalVariable(gv_handle) => {
+                                let (byte_offset, member_ty) = {
+                                    let Some(info) = ctx.global_map.get(gv_handle) else {
+                                        return Err(LowerError::Internal(format!(
+                                            "GlobalVariable {gv_handle:?} not found in global_map"
+                                        )));
+                                    };
+                                    let LpsType::Struct { members, .. } = &info.ty else {
+                                        return Err(LowerError::Internal(String::from(
+                                            "AccessIndex: uniform global is not a struct",
+                                        )));
+                                    };
+                                    let idx = *index as usize;
+                                    let Some(m) = members.get(idx) else {
+                                        return Err(LowerError::UnsupportedExpression(format!(
+                                            "AccessIndex struct member index {idx} out of range (len {})",
+                                            members.len()
+                                        )));
+                                    };
+                                    let rel = struct_member_start_offset_u32(
+                                        members,
+                                        idx,
+                                        LayoutRules::Std430,
+                                    )?;
+                                    (info.byte_offset.wrapping_add(rel), m.ty.clone())
+                                };
+                                load_lps_value_from_vmctx(ctx, byte_offset, &member_ty)
+                            }
+                            _ => Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: pointer to struct must be a uniform GlobalVariable",
+                            ))),
+                        },
                         _ => Err(LowerError::UnsupportedExpression(format!(
                             "AccessIndex on pointer to {inner:?}"
                         ))),
@@ -524,8 +523,7 @@ fn lower_expr_vec_uncached(
             // This should only be reached when the global is used as a pointer (not loaded).
             let Some(info) = ctx.global_map.get(&gv_handle) else {
                 return Err(LowerError::Internal(format!(
-                    "GlobalVariable {:?} not found in global_map",
-                    gv_handle
+                    "GlobalVariable {gv_handle:?} not found in global_map"
                 )));
             };
             if info.component_count == 1 {
@@ -874,4 +872,152 @@ fn snapshot_load_result_vregs(
         out.push(dst);
     }
     Ok(out)
+}
+
+fn round_up_u32_vmctx(size: u32, alignment: u32) -> u32 {
+    ((size + alignment - 1) / alignment) * alignment
+}
+
+fn struct_member_start_offset_u32(
+    members: &[lps_shared::StructMember],
+    member_index: usize,
+    rules: LayoutRules,
+) -> Result<u32, LowerError> {
+    if member_index >= members.len() {
+        return Err(LowerError::UnsupportedExpression(format!(
+            "struct member index {member_index} >= {}",
+            members.len()
+        )));
+    }
+    let mut off = 0u32;
+    for (i, m) in members.iter().enumerate() {
+        let align = type_alignment(&m.ty, rules) as u32;
+        off = round_up_u32_vmctx(off, align);
+        if i == member_index {
+            return Ok(off);
+        }
+        off = off.wrapping_add(type_size(&m.ty, rules) as u32);
+    }
+    Err(LowerError::Internal(String::from(
+        "struct_member_start_offset_u32: fallthrough",
+    )))
+}
+
+/// Load a value of `ty` from VMContext at `base_byte_offset` using std430 member layout.
+fn load_lps_value_from_vmctx(
+    ctx: &mut LowerCtx<'_>,
+    base_byte_offset: u32,
+    ty: &LpsType,
+) -> Result<VRegVec, LowerError> {
+    let rules = LayoutRules::Std430;
+    match ty {
+        LpsType::Float => {
+            let dst = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(LpirOp::Load {
+                dst,
+                base: VMCTX_VREG,
+                offset: base_byte_offset,
+            });
+            Ok(smallvec::smallvec![dst])
+        }
+        LpsType::Int | LpsType::UInt | LpsType::Bool => {
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::Load {
+                dst,
+                base: VMCTX_VREG,
+                offset: base_byte_offset,
+            });
+            Ok(smallvec::smallvec![dst])
+        }
+        LpsType::Vec2 | LpsType::Vec3 | LpsType::Vec4 => {
+            let n = ty.component_count().ok_or_else(|| {
+                LowerError::Internal(String::from("load_lps_value_from_vmctx: vector"))
+            })? as u32;
+            let mut out = VRegVec::new();
+            for i in 0..n {
+                let dst = ctx.fb.alloc_vreg(IrType::F32);
+                ctx.fb.push(LpirOp::Load {
+                    dst,
+                    base: VMCTX_VREG,
+                    offset: base_byte_offset.wrapping_add(i * 4),
+                });
+                out.push(dst);
+            }
+            Ok(out)
+        }
+        LpsType::IVec2
+        | LpsType::IVec3
+        | LpsType::IVec4
+        | LpsType::UVec2
+        | LpsType::UVec3
+        | LpsType::UVec4
+        | LpsType::BVec2
+        | LpsType::BVec3
+        | LpsType::BVec4 => {
+            let n = ty.component_count().ok_or_else(|| {
+                LowerError::Internal(String::from("load_lps_value_from_vmctx: ivec vector"))
+            })? as u32;
+            let mut out = VRegVec::new();
+            for i in 0..n {
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Load {
+                    dst,
+                    base: VMCTX_VREG,
+                    offset: base_byte_offset.wrapping_add(i * 4),
+                });
+                out.push(dst);
+            }
+            Ok(out)
+        }
+        LpsType::Mat2 | LpsType::Mat3 | LpsType::Mat4 => {
+            let col_ty = ty.matrix_column_type().ok_or_else(|| {
+                LowerError::Internal(String::from("load_lps_value_from_vmctx: matrix columns"))
+            })?;
+            let (cols, _) = ty.matrix_dims().ok_or_else(|| {
+                LowerError::Internal(String::from("load_lps_value_from_vmctx: mat"))
+            })?;
+            let mut out = VRegVec::new();
+            let mut col_off: u32 = 0;
+            for _ in 0..cols {
+                let align = type_alignment(&col_ty, rules) as u32;
+                col_off = round_up_u32_vmctx(col_off, align);
+                out.extend(load_lps_value_from_vmctx(
+                    ctx,
+                    base_byte_offset.wrapping_add(col_off),
+                    &col_ty,
+                )?);
+                col_off = col_off.wrapping_add(type_size(&col_ty, rules) as u32);
+            }
+            Ok(out)
+        }
+        LpsType::Struct { members, .. } => {
+            let mut out = VRegVec::new();
+            let mut member_off: u32 = 0;
+            for m in members {
+                let align = type_alignment(&m.ty, rules) as u32;
+                member_off = round_up_u32_vmctx(member_off, align);
+                out.extend(load_lps_value_from_vmctx(
+                    ctx,
+                    base_byte_offset.wrapping_add(member_off),
+                    &m.ty,
+                )?);
+                member_off = member_off.wrapping_add(type_size(&m.ty, rules) as u32);
+            }
+            Ok(out)
+        }
+        LpsType::Array { element, len } => {
+            let mut out = VRegVec::new();
+            let stride = array_stride(element, rules) as u32;
+            for i in 0..*len {
+                let off = i.saturating_mul(stride);
+                out.extend(load_lps_value_from_vmctx(
+                    ctx,
+                    base_byte_offset.wrapping_add(off),
+                    element,
+                )?);
+            }
+            Ok(out)
+        }
+        LpsType::Void => Ok(VRegVec::new()),
+    }
 }

@@ -5,8 +5,10 @@ use std::format;
 use std::sync::Arc;
 
 use lpir::FloatMode;
-use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
-use lpvm::{DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmInstance};
+use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
+use lpvm::{
+    DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmInstance, encode_uniform_write, encode_uniform_write_q32,
+};
 use wasmtime::{Instance, Val};
 
 use super::WasmLpvmSharedRuntime;
@@ -20,7 +22,7 @@ use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport};
 
 use super::WasmLpvmModule;
 
-/// Runnable WASM instance (fuel, shadow stack, linked memory).
+/// Runnable WASM instance (fuel, shadow stack, linked memory, globals lifecycle).
 pub struct WasmLpvmInstance {
     runtime: Arc<WasmLpvmSharedRuntime>,
     instance: Instance,
@@ -28,6 +30,12 @@ pub struct WasmLpvmInstance {
     signatures: LpsModuleSig,
     shadow_stack_base: Option<i32>,
     float_mode: FloatMode,
+    /// Byte offset from vmctx base to globals region
+    globals_offset: usize,
+    /// Byte offset from vmctx base to snapshot region
+    snapshot_offset: usize,
+    /// Size of globals region in bytes
+    globals_size: usize,
 }
 
 impl WasmLpvmInstance {
@@ -37,14 +45,99 @@ impl WasmLpvmInstance {
             module.runtime.as_ref(),
             &module.wasm_bytes,
         )?;
-        Ok(Self {
+
+        let sigs = &module.signatures;
+        let globals_offset = sigs.globals_offset();
+        let snapshot_offset = sigs.snapshot_offset();
+        let globals_size = sigs.globals_size();
+
+        let mut inst = Self {
             runtime: Arc::clone(&module.runtime),
             instance,
             exports: module.exports.clone(),
             signatures: module.signatures.clone(),
             shadow_stack_base: module.shadow_stack_base,
             float_mode: module.opts.float_mode,
-        })
+            globals_offset,
+            snapshot_offset,
+            globals_size,
+        };
+
+        // Auto-init globals: call __shader_init if it exists, then snapshot
+        inst.init_globals()?;
+
+        Ok(inst)
+    }
+
+    /// Initialize globals by calling `__shader_init` if it exists,
+    /// then memcpy globals -> snapshot to capture the initialized state.
+    pub fn init_globals(&mut self) -> Result<(), WasmError> {
+        let mut guard = self.runtime.lock();
+
+        // Call __shader_init if it exists (it may not be present if there are no globals with initializers)
+        if self.exports.contains_key("__shader_init") {
+            let mem = guard.memory;
+            let store = &mut guard.store;
+            let func = self
+                .instance
+                .get_func(&mut *store, "__shader_init")
+                .ok_or_else(|| WasmError::runtime("__shader_init export not found"))?;
+
+            self.prepare_call(store, mem)?;
+            // Pass vmctx pointer (0) as first argument, same as other shader calls
+            let wasm_args = vec![Val::I32(0)];
+            func.call(&mut *store, &wasm_args, &mut [])
+                .map_err(|e| WasmError::runtime(format!("WASM trap in __shader_init: {e}")))?;
+        }
+
+        // Copy globals region to snapshot region
+        self.snapshot_globals_with_guard(&mut guard);
+        Ok(())
+    }
+
+    /// Reset globals by memcpy snapshot -> globals using the provided guard.
+    /// This is a no-op if globals_size == 0.
+    fn reset_globals_with_guard(
+        &self,
+        guard: &mut super::shared_runtime::WasmLpvmSharedRuntimeInner,
+    ) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        let mem = guard.memory;
+        let store = &mut guard.store;
+
+        let globals_start = self.globals_offset;
+        let snapshot_start = self.snapshot_offset;
+        let size = self.globals_size;
+
+        // Copy snapshot -> globals
+        let src = mem.data(&*store)[snapshot_start..snapshot_start + size].to_vec();
+        let dst = &mut mem.data_mut(store)[globals_start..globals_start + size];
+        dst.copy_from_slice(&src);
+    }
+
+    /// Copy globals region to snapshot region (for init) using the provided guard.
+    fn snapshot_globals_with_guard(
+        &self,
+        guard: &mut super::shared_runtime::WasmLpvmSharedRuntimeInner,
+    ) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        let mem = guard.memory;
+        let store = &mut guard.store;
+
+        let globals_start = self.globals_offset;
+        let snapshot_start = self.snapshot_offset;
+        let size = self.globals_size;
+
+        // Copy globals -> snapshot
+        let src = mem.data(&*store)[globals_start..globals_start + size].to_vec();
+        let dst = &mut mem.data_mut(store)[snapshot_start..snapshot_start + size];
+        dst.copy_from_slice(&src);
     }
 
     fn prepare_call(
@@ -71,6 +164,24 @@ impl WasmLpvmInstance {
         (*store)
             .set_fuel(DEFAULT_VMCTX_FUEL)
             .map_err(|e| WasmError::runtime(format!("failed to set fuel: {e}")))
+    }
+
+    fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), WasmError> {
+        let total = self.signatures.vmctx_buffer_size();
+        let end = offset
+            .checked_add(data.len())
+            .ok_or_else(|| WasmError::runtime("vmctx write: offset overflow"))?;
+        if end > total {
+            return Err(WasmError::runtime(format!(
+                "vmctx write out of bounds: end {end} total {total}"
+            )));
+        }
+        let mut guard = self.runtime.lock();
+        let mem = guard.memory;
+        let store = &mut guard.store;
+        mem.write(store, offset, data)
+            .map_err(|e| WasmError::runtime(format!("vmctx write failed: {e}")))?;
+        Ok(())
     }
 }
 
@@ -114,6 +225,9 @@ impl LpvmInstance for WasmLpvmInstance {
         let mut results = zero_results_for_type(&return_ty, self.float_mode);
 
         let mut guard = self.runtime.lock();
+        // Reset globals before each shader call to ensure per-pixel isolation
+        self.reset_globals_with_guard(&mut guard);
+
         let mem = guard.memory;
         let store = &mut guard.store;
         let func = self
@@ -165,6 +279,9 @@ impl LpvmInstance for WasmLpvmInstance {
         let wasm_args = build_wasm_args_q32_flat(&export.param_types, export.params.len(), args)?;
 
         let mut guard = self.runtime.lock();
+        // Reset globals before each shader call to ensure per-pixel isolation
+        self.reset_globals_with_guard(&mut guard);
+
         let mem = guard.memory;
         let store = &mut guard.store;
         let func = self
@@ -186,5 +303,17 @@ impl LpvmInstance for WasmLpvmInstance {
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
 
         wasm_vals_to_q32_words(&return_ty, &results, self.float_mode)
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write(&self.signatures, path, value, self.float_mode)
+            .map_err(|e| WasmError::runtime(format!("set_uniform: {e}")))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write_q32(&self.signatures, path, value)
+            .map_err(|e| WasmError::runtime(format!("set_uniform_q32: {e}")))?;
+        self.vmctx_write_bytes(off, &bytes)
     }
 }

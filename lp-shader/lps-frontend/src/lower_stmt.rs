@@ -385,8 +385,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 // Store to a global variable.
                 let info = ctx.global_map.get(gv_handle).cloned().ok_or_else(|| {
                     LowerError::Internal(format!(
-                        "GlobalVariable {:?} not found in global_map",
-                        gv_handle
+                        "GlobalVariable {gv_handle:?} not found in global_map"
                     ))
                 })?;
 

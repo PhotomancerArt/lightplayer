@@ -21,7 +21,7 @@ use crate::NagaModule;
 use crate::lower_ctx::{GlobalVarInfo, GlobalVarMap, LowerCtx};
 use crate::lower_error::LowerError;
 use crate::lower_lpfx;
-use crate::naga_types::naga_type_inner_to_glsl;
+use crate::naga_types::naga_type_handle_to_lps;
 
 /// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
 ///
@@ -112,25 +112,11 @@ fn compute_global_layout(
         }
 
         // Map Naga type to LpsType
-        let ty_inner = &module.types[gv.ty].inner;
-        let lps_ty = naga_type_inner_to_glsl(module, ty_inner)
-            .map_err(|e| LowerError::UnsupportedType(format!("{:?}", e)))?;
+        let lps_ty = naga_type_handle_to_lps(module, gv.ty)
+            .map_err(|e| LowerError::UnsupportedType(format!("{e:?}")))?;
 
         // Determine component count for scalarization
-        let component_count = match &lps_ty {
-            LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
-            LpsType::Vec2 | LpsType::IVec2 | LpsType::UVec2 | LpsType::BVec2 => 2,
-            LpsType::Vec3 | LpsType::IVec3 | LpsType::UVec3 | LpsType::BVec3 => 3,
-            LpsType::Vec4 | LpsType::IVec4 | LpsType::UVec4 | LpsType::BVec4 => 4,
-            LpsType::Mat2 => 4,
-            LpsType::Mat3 => 9,
-            LpsType::Mat4 => 16,
-            LpsType::Array { element, len } => {
-                let elem_count = element.component_count().unwrap_or(1);
-                ((*len) as usize * elem_count) as u32
-            }
-            _ => 1,
-        };
+        let component_count = lps_scalar_component_count(&lps_ty);
 
         let member = StructMember {
             name: gv.name.clone(),
@@ -191,6 +177,19 @@ fn compute_global_layout(
 
     let uniforms_type = if uniforms_members.is_empty() {
         None
+    } else if uniforms_members.len() == 1 {
+        // `uniform Block { ... } u;` → one global whose type is a struct. Hoist inner fields so
+        // `uniforms_type` matches GLSL scope (e.g. `time` not `u.time`) and filetest `set_uniform`.
+        match &uniforms_members[0].ty {
+            LpsType::Struct { name, members } => Some(LpsType::Struct {
+                name: name.clone().or(Some(String::from("__uniforms"))),
+                members: members.clone(),
+            }),
+            _ => Some(LpsType::Struct {
+                name: Some(String::from("__uniforms")),
+                members: uniforms_members,
+            }),
+        }
     } else {
         Some(LpsType::Struct {
             name: Some(String::from("__uniforms")),
@@ -214,6 +213,25 @@ fn round_up_u32(size: u32, alignment: u32) -> u32 {
     ((size + alignment - 1) / alignment) * alignment
 }
 
+/// Scalar slots (each4 bytes in VMContext) for a value of `ty` when flattened for loads/stores.
+fn lps_scalar_component_count(ty: &LpsType) -> u32 {
+    match ty {
+        LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
+        LpsType::Vec2 | LpsType::IVec2 | LpsType::UVec2 | LpsType::BVec2 => 2,
+        LpsType::Vec3 | LpsType::IVec3 | LpsType::UVec3 | LpsType::BVec3 => 3,
+        LpsType::Vec4 | LpsType::IVec4 | LpsType::UVec4 | LpsType::BVec4 => 4,
+        LpsType::Mat2 => 4,
+        LpsType::Mat3 => 9,
+        LpsType::Mat4 => 16,
+        LpsType::Array { element, len } => lps_scalar_component_count(element).saturating_mul(*len),
+        LpsType::Struct { members, .. } => members
+            .iter()
+            .map(|m| lps_scalar_component_count(&m.ty))
+            .sum(),
+        LpsType::Void => 0,
+    }
+}
+
 /// Synthesize a __shader_init function that evaluates global initializers.
 fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<IrFunction> {
     // Collect globals that have initializers
@@ -234,6 +252,7 @@ fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<
     }
 
     let mut fb = FunctionBuilder::new("__shader_init", &[]);
+    let mut emitted_any = false;
 
     // For each global with an initializer, evaluate it and store to VMContext.
     for (_gv_handle, info, init_expr) in globals_with_init {
@@ -242,29 +261,14 @@ fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<
             continue;
         }
 
-        // Evaluate the initializer expression
-        let init_vregs = match init_expr {
-            Expression::Literal(lit) => {
-                vec![push_literal_to_builder(&mut fb, lit)?]
-            }
-            Expression::Compose { components, .. } => {
-                let mut vregs = Vec::new();
-                for comp in components.iter() {
-                    if let Expression::Literal(lit) = &module.global_expressions[*comp] {
-                        vregs.push(push_literal_to_builder(&mut fb, lit)?);
-                    } else {
-                        // Non-constant component - not supported yet
-                        return None;
-                    }
-                }
-                vregs
-            }
-            _ => {
-                // Non-constant initializer - not supported yet
-                return None;
-            }
+        let Some(init_vregs) = flatten_shader_init_vregs(module, &mut fb, init_expr) else {
+            continue;
         };
+        if init_vregs.is_empty() {
+            continue;
+        }
 
+        emitted_any = true;
         // Store each component to the VMContext buffer
         for (i, vreg) in init_vregs.iter().enumerate() {
             let offset = info.byte_offset + (i as u32 * 4);
@@ -276,8 +280,33 @@ fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<
         }
     }
 
+    if !emitted_any {
+        return None;
+    }
+
     fb.push_return(&[]);
     Some(fb.finish())
+}
+
+/// Flatten constant global initializer expressions (literals and nested `Compose`, e.g. `mat2`).
+fn flatten_shader_init_vregs(
+    module: &Module,
+    fb: &mut FunctionBuilder,
+    expr: &naga::Expression,
+) -> Option<Vec<VReg>> {
+    match expr {
+        Expression::Literal(lit) => Some(vec![push_literal_to_builder(fb, lit)?]),
+        Expression::Compose { components, .. } => {
+            let mut vregs = Vec::new();
+            for comp in components.iter() {
+                let sub = &module.global_expressions[*comp];
+                let mut part = flatten_shader_init_vregs(module, fb, sub)?;
+                vregs.append(&mut part);
+            }
+            Some(vregs)
+        }
+        _ => None,
+    }
 }
 
 fn push_literal_to_builder(fb: &mut FunctionBuilder, lit: &naga::Literal) -> Option<VReg> {
@@ -300,11 +329,11 @@ fn push_literal_to_builder(fb: &mut FunctionBuilder, lit: &naga::Literal) -> Opt
             });
             Some(d)
         }
-        naga::Literal::Bool(b) => {
+        naga::Literal::Bool(v) => {
             let d = fb.alloc_vreg(IrType::I32);
             fb.push(LpirOp::IconstI32 {
                 dst: d,
-                value: b as i32,
+                value: if v { 1 } else { 0 },
             });
             Some(d)
         }

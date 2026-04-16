@@ -300,6 +300,19 @@ pub(crate) fn expr_type_inner(
                         })
                     }
                     TypeInner::Array { base: elt, .. } => Ok(module.types[*elt].inner.clone()),
+                    TypeInner::Struct { members, .. } => {
+                        let idx = *index as usize;
+                        let Some(member) = members.get(idx) else {
+                            return Err(LowerError::UnsupportedExpression(format!(
+                                "AccessIndex struct index {index} out of range (len {})",
+                                members.len()
+                            )));
+                        };
+                        Ok(TypeInner::Pointer {
+                            base: member.ty,
+                            space,
+                        })
+                    }
                     _ => Err(LowerError::UnsupportedExpression(String::from(
                         "AccessIndex base not vector/matrix/array",
                     ))),
@@ -578,9 +591,28 @@ pub(crate) fn expr_scalar_kind(
         Expression::Compose { ty, .. } => type_handle_scalar_kind(module, *ty),
         Expression::Splat { value, .. } => expr_scalar_kind(module, func, *value),
         Expression::Swizzle { vector, .. } => expr_scalar_kind(module, func, *vector),
-        Expression::AccessIndex { base, .. } | Expression::Access { base, .. } => {
-            expr_scalar_kind(module, func, *base)
+        Expression::AccessIndex { base, index } => {
+            let base_ty = expr_type_inner(module, func, *base)?;
+            match base_ty {
+                TypeInner::Pointer {
+                    base: pointee_h, ..
+                } => match &module.types[pointee_h].inner {
+                    TypeInner::Struct { members, .. } => {
+                        let idx = *index as usize;
+                        let Some(m) = members.get(idx) else {
+                            return Err(LowerError::UnsupportedExpression(format!(
+                                "AccessIndex struct index {index} out of range (len {})",
+                                members.len()
+                            )));
+                        };
+                        type_handle_scalar_kind(module, m.ty)
+                    }
+                    _ => expr_scalar_kind(module, func, *base),
+                },
+                _ => expr_scalar_kind(module, func, *base),
+            }
         }
+        Expression::Access { base, .. } => expr_scalar_kind(module, func, *base),
         Expression::Binary { op, left, .. } => match op {
             BinaryOperator::Equal
             | BinaryOperator::NotEqual

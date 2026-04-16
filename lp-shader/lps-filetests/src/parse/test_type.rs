@@ -33,6 +33,15 @@ pub enum ComparisonOp {
     Approx,
 }
 
+/// One `// set_uniform: name = value` line attached to the following `// run:`.
+#[derive(Debug, Clone)]
+pub struct SetUniform {
+    /// Uniform field name (path into `LpsModuleSig::uniforms_type`).
+    pub name: String,
+    /// Right-hand side as in GLSL (e.g. `3.0`, `vec2(1.0, 2.0)`).
+    pub value_str: String,
+}
+
 /// A run directive parsed from a `// run:` line.
 #[derive(Debug, Clone)]
 pub struct RunDirective {
@@ -48,6 +57,8 @@ pub struct RunDirective {
     pub line_number: usize,
     /// Annotations attached to this directive.
     pub annotations: Vec<Annotation>,
+    /// `// set_uniform:` lines immediately before this `// run:` (applied before execution).
+    pub set_uniforms: Vec<SetUniform>,
 }
 
 /// An error expectation parsed from `// expected-error {{...}}` and optional `// expected-error-code: E0xxx`.

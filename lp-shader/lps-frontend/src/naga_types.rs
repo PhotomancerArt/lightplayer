@@ -6,9 +6,11 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use naga::{AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, TypeInner, VectorSize};
+use naga::{
+    AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, Type, TypeInner, VectorSize,
+};
 
-use lps_shared::{FnParam, LpsType, ParamQualifier};
+use lps_shared::{FnParam, LpsType, ParamQualifier, StructMember};
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -87,10 +89,10 @@ fn function_info(
                     base,
                     space: AddressSpace::Function,
                 } => (
-                    naga_type_inner_to_glsl(module, &module.types[base].inner)?,
+                    naga_type_handle_to_lps(module, base)?,
                     ParamQualifier::InOut,
                 ),
-                _ => (naga_type_inner_to_glsl(module, inner)?, ParamQualifier::In),
+                _ => (naga_type_handle_to_lps(module, arg.ty)?, ParamQualifier::In),
             };
             Ok(FnParam {
                 name: pname,
@@ -100,7 +102,7 @@ fn function_info(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let return_type = match &function.result {
-        Some(res) => naga_type_inner_to_glsl(module, &module.types[res.ty].inner)?,
+        Some(res) => naga_type_handle_to_lps(module, res.ty)?,
         None => LpsType::Void,
     };
     Ok(FunctionInfo {
@@ -110,14 +112,38 @@ fn function_info(
     })
 }
 
+/// Map a Naga [`Type`] handle to [`LpsType`], preserving user `struct` names.
+pub(crate) fn naga_type_handle_to_lps(
+    module: &Module,
+    ty_h: Handle<Type>,
+) -> Result<LpsType, CompileError> {
+    let inner = &module.types[ty_h].inner;
+    match *inner {
+        TypeInner::Pointer { base, .. } => naga_type_handle_to_lps(module, base),
+        TypeInner::Struct { ref members, .. } => {
+            let t = &module.types[ty_h];
+            let mut out = Vec::with_capacity(members.len());
+            for m in members {
+                out.push(StructMember {
+                    name: m.name.clone(),
+                    ty: naga_type_handle_to_lps(module, m.ty)?,
+                });
+            }
+            Ok(LpsType::Struct {
+                name: t.name.clone(),
+                members: out,
+            })
+        }
+        _ => naga_type_inner_to_glsl(module, inner),
+    }
+}
+
 pub(crate) fn naga_type_inner_to_glsl(
     module: &Module,
     inner: &TypeInner,
 ) -> Result<LpsType, CompileError> {
     match *inner {
-        TypeInner::Pointer { base, .. } => {
-            naga_type_inner_to_glsl(module, &module.types[base].inner)
-        }
+        TypeInner::Pointer { base, .. } => naga_type_handle_to_lps(module, base),
         TypeInner::Scalar(scalar) => match scalar.kind {
             ScalarKind::Float if scalar.width == 4 => Ok(LpsType::Float),
             ScalarKind::Sint if scalar.width == 4 => Ok(LpsType::Int),
@@ -167,7 +193,7 @@ pub(crate) fn naga_type_inner_to_glsl(
                     )));
                 }
             };
-            let elem = naga_type_inner_to_glsl(module, &module.types[base].inner)?;
+            let elem = naga_type_handle_to_lps(module, base)?;
             Ok(LpsType::Array {
                 element: Box::new(elem),
                 len,
@@ -193,7 +219,9 @@ pub(crate) fn naga_type_inner_to_glsl(
                 ))),
             }
         }
-        TypeInner::Struct { .. } => Err(CompileError::UnsupportedType(String::from("struct"))),
+        TypeInner::Struct { .. } => Err(CompileError::UnsupportedType(String::from(
+            "struct type must be mapped with naga_type_handle_to_lps",
+        ))),
         _ => Err(CompileError::UnsupportedType(format!("{inner:?}"))),
     }
 }

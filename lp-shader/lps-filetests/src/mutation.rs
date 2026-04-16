@@ -455,10 +455,7 @@ impl MutationPlan {
                             );
                         }
                     }
-                } else if let MutationAction::AddAnnotation {
-                    annotation, ..
-                } = action
-                {
+                } else if let MutationAction::AddAnnotation { annotation, .. } = action {
                     let target_name = extract_target_from_annotation(annotation);
                     let run_content = if let Some(ref lines) = file_lines {
                         extract_run_content(lines, line)
@@ -472,10 +469,7 @@ impl MutationPlan {
                                 println!(
                                     "  {:12}  {}:{}  {}{}",
                                     target_name,
-                                    colors::colorize(
-                                        &rel_path.display().to_string(),
-                                        colors::DIM
-                                    ),
+                                    colors::colorize(&rel_path.display().to_string(), colors::DIM),
                                     line,
                                     colors::colorize(&run_content, colors::GREEN),
                                     colors::RESET

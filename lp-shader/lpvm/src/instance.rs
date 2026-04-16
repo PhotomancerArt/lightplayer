@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lps_shared::lps_value_f32::LpsValueF32;
+use lps_shared::{LpsValueF32, LpsValueQ32};
 
 /// An execution instance with mutable state.
 ///
@@ -24,6 +24,14 @@ use lps_shared::lps_value_f32::LpsValueF32;
 /// Q32 filetests and embedded callers may use [`LpvmInstance::call_q32`] with
 /// pre-flattened `i32` words; layout matches concatenating [`crate::flatten_q32_arg`]
 /// for each `in` parameter.
+///
+/// # Uniforms
+///
+/// [`LpvmInstance::set_uniform`] sets one uniform field by path (e.g. `u_time`,
+/// `touch_input.touches[0].x`) using [`LpsValueF32`], matching [`LpvmInstance::call`] semantics.
+///
+/// [`LpvmInstance::set_uniform_q32`] sets the same using pre-encoded [`LpsValueQ32`] words,
+/// matching [`LpvmInstance::call_q32`]. Encoding follows [`crate::LpsModuleSig`] std430 layout.
 pub trait LpvmInstance {
     /// Error type for execution failures (trap, unknown function, type mismatch).
     type Error: core::fmt::Display;
@@ -42,6 +50,12 @@ pub trait LpvmInstance {
     /// Return value is flattened the same way as [`crate::flatten_q32_return`] for the
     /// function’s logical return type. For `void`, returns an empty vector.
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error>;
+
+    /// Set a uniform by dot/bracket path with F32-level values (encoded per backend float mode).
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error>;
+
+    /// Set a uniform by path with Q32-encoded values (raw fixed-point lanes).
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error>;
 
     /// Optional backend diagnostics (e.g. emulator registers); `None` if unavailable.
     fn debug_state(&self) -> Option<String> {

@@ -92,6 +92,7 @@ pub fn parse_run_directive(
         tolerance,
         line_number,
         annotations,
+        set_uniforms: Vec::new(),
     })
 }
 

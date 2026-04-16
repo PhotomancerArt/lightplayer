@@ -3,7 +3,7 @@
 use lp_riscv_emu::LogLevel;
 use lpir::{FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
-use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
+use lpvm::{LpsValueF32, LpsValueQ32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
 use lpvm_native::{
@@ -85,6 +85,30 @@ impl FiletestInstance {
             Self::Emu(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
+        }
+    }
+
+    pub(crate) fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), String> {
+        match self {
+            Self::Jit(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
+            Self::Emu(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
+            Self::NativeFa(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
+            Self::Wasm(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Pre-encoded Q32 uniforms (filetests use [`Self::set_uniform`]; this mirrors `LpvmInstance`).
+    #[allow(dead_code)]
+    pub(crate) fn set_uniform_q32(
+        &mut self,
+        path: &str,
+        value: &LpsValueQ32,
+    ) -> Result<(), String> {
+        match self {
+            Self::Jit(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
+            Self::Emu(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
+            Self::NativeFa(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
+            Self::Wasm(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
         }
     }
 

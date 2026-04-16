@@ -5,8 +5,8 @@ use std::format;
 
 use js_sys::{Function, Reflect, WebAssembly};
 use lpir::FloatMode;
-use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
-use lpvm::{LpsValueF32, LpvmInstance};
+use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
+use lpvm::{LpsValueF32, LpvmInstance, encode_uniform_write, encode_uniform_write_q32};
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::error::WasmError;
@@ -60,6 +60,39 @@ impl BrowserLpvmInstance {
             )
             .map_err(|e| WasmError::runtime(format!("set shadow stack: {e:?}")))?;
         }
+        Ok(())
+    }
+
+    fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), WasmError> {
+        let total = self.signatures.vmctx_buffer_size();
+        let end = offset
+            .checked_add(data.len())
+            .ok_or_else(|| WasmError::runtime("vmctx write: offset overflow"))?;
+        if end > total {
+            return Err(WasmError::runtime(format!(
+                "vmctx write out of bounds: end {end} total {total}"
+            )));
+        }
+        let mem = self
+            .memory
+            .as_ref()
+            .ok_or_else(|| WasmError::runtime("no linear memory for vmctx write"))?;
+        let ab: js_sys::ArrayBuffer = mem
+            .buffer()
+            .dyn_into()
+            .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
+        let len = ab.byte_length() as usize;
+        if end > len {
+            return Err(WasmError::runtime(format!(
+                "linear memory too small: need {end} have {len}"
+            )));
+        }
+        let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
+            &ab,
+            offset as u32,
+            data.len() as u32,
+        );
+        view.copy_from(data);
         Ok(())
     }
 
@@ -172,5 +205,17 @@ impl LpvmInstance for BrowserLpvmInstance {
         }
 
         js_result_to_q32_words(&return_ty, &result, self.float_mode)
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write(&self.signatures, path, value, self.float_mode)
+            .map_err(|e| WasmError::runtime(format!("set_uniform: {e}")))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write_q32(&self.signatures, path, value)
+            .map_err(|e| WasmError::runtime(format!("set_uniform_q32: {e}")))?;
+        self.vmctx_write_bytes(off, &bytes)
     }
 }

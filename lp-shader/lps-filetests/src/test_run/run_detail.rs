@@ -10,6 +10,7 @@ use crate::test_run::execution;
 use crate::test_run::filetest_lpvm::FiletestInstance;
 use crate::test_run::parse_assert;
 use crate::test_run::record_result;
+use crate::test_run::set_uniform;
 use anyhow::Result;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
@@ -277,6 +278,25 @@ pub fn run(
                 continue;
             }
         };
+
+        if let Err(e) = set_uniform::apply_set_uniforms(
+            &mut inst,
+            compiled.module_sig(),
+            &directive.set_uniforms,
+        ) {
+            record_result(
+                disposition,
+                false,
+                &mut stats,
+                &mut failed_lines,
+                &mut unexpected_pass_lines,
+                directive.line_number,
+            );
+            let msg = format!("set_uniform failed: {e:#}");
+            eprintln_if_detail(output_mode, &msg);
+            errors.push(e.context(msg));
+            continue;
+        }
 
         // Emulator diagnostics are appended inside `execute_function` when available.
         let execution_result =

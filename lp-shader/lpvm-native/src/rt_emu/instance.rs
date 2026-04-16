@@ -9,10 +9,10 @@ use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
 use lp_riscv_emu::{DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
-use lps_shared::{LpsType, ParamQualifier, lps_value_f32::LpsValueF32};
+use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmInstance, decode_q32_return, flat_q32_words_from_f32_args, glsl_component_count,
-    q32_to_lps_value_f32,
+    CallError, LpvmInstance, decode_q32_return, encode_uniform_write, encode_uniform_write_q32,
+    flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
 };
 use lpvm_cranelift::{CompileOptions, signature_for_ir_func};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_header};
@@ -229,6 +229,38 @@ impl NativeEmuInstance {
             }
         }
     }
+
+    fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), NativeError> {
+        let total = self.module.meta.vmctx_buffer_size();
+        let end = offset.checked_add(data.len()).ok_or_else(|| {
+            NativeError::Call(CallError::Unsupported(String::from(
+                "vmctx write: offset overflow",
+            )))
+        })?;
+        if end > total {
+            return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
+                "vmctx write out of bounds: end {end} total {total}"
+            ))));
+        }
+        let shared_start = self.module.arena.shared_start() as usize;
+        let vmctx_base = self.vmctx_guest as usize;
+        let dst_addr = vmctx_base
+            .checked_add(offset)
+            .and_then(|a| a.checked_sub(shared_start))
+            .ok_or_else(|| {
+                NativeError::Call(CallError::Unsupported(String::from(
+                    "vmctx write: address overflow",
+                )))
+            })?;
+        let mut storage = self.module.arena.lock_storage();
+        if dst_addr + data.len() > storage.len() {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "vmctx write: arena too small",
+            ))));
+        }
+        storage[dst_addr..dst_addr + data.len()].copy_from_slice(data);
+        Ok(())
+    }
 }
 
 impl LpvmInstance for NativeEmuInstance {
@@ -363,6 +395,29 @@ impl LpvmInstance for NativeEmuInstance {
             return Ok(Vec::new());
         }
         Ok(words)
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write(
+            &self.module.meta,
+            path,
+            value,
+            self.module.options.float_mode,
+        )
+        .map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("set_uniform: {e}")))
+        })?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
+        let (off, bytes) =
+            encode_uniform_write_q32(&self.module.meta, path, value).map_err(|e| {
+                NativeError::Call(CallError::Unsupported(alloc::format!(
+                    "set_uniform_q32: {e}"
+                )))
+            })?;
+        self.vmctx_write_bytes(off, &bytes)
     }
 
     fn debug_state(&self) -> Option<String> {

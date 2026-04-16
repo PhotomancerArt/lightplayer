@@ -8,10 +8,11 @@ use core::fmt;
 
 use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
-use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
+use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
     CallError, LpsValueF32, LpvmInstance, LpvmModule, VmContext, decode_q32_return,
-    flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
+    encode_uniform_write, encode_uniform_write_q32, flat_q32_words_from_f32_args,
+    glsl_component_count, q32_to_lps_value_f32,
 };
 
 use crate::lpvm_module::CraneliftModule;
@@ -125,6 +126,22 @@ impl CraneliftInstance {
         unsafe {
             core::ptr::copy_nonoverlapping(globals_ptr, snapshot_ptr, self.globals_size);
         }
+    }
+
+    fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), InstanceError> {
+        let end = offset.checked_add(data.len()).ok_or_else(|| {
+            InstanceError::Call(CallError::Unsupported(String::from(
+                "vmctx write: offset overflow",
+            )))
+        })?;
+        if end > self.vmctx_buf.len() {
+            return Err(InstanceError::Call(CallError::Unsupported(format!(
+                "vmctx write out of bounds: end {end} len {}",
+                self.vmctx_buf.len()
+            ))));
+        }
+        self.vmctx_buf[offset..end].copy_from_slice(data);
+        Ok(())
     }
 }
 
@@ -297,5 +314,24 @@ impl LpvmInstance for CraneliftInstance {
         }
 
         Ok(words)
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write(
+            self.module.metadata(),
+            path,
+            value,
+            self.module.float_mode(),
+        )
+        .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("set_uniform: {e}"))))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
+        let (off, bytes) =
+            encode_uniform_write_q32(self.module.metadata(), path, value).map_err(|e| {
+                InstanceError::Call(CallError::Unsupported(format!("set_uniform_q32: {e}")))
+            })?;
+        self.vmctx_write_bytes(off, &bytes)
     }
 }

@@ -16,3 +16,10 @@ float test_initialized_mutate() {
 }
 
 // run: test_initialized_mutate() ~= 43.0
+
+float test_initialized_mutate2() {
+    g = g + 2.0;
+    return g;
+}
+
+// run: test_initialized_mutate2() ~= 44.0

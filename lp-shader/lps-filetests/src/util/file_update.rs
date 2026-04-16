@@ -403,8 +403,7 @@ impl FileUpdate {
             return Ok(0);
         }
 
-        let skip: std::collections::HashSet<usize> =
-            indices_to_remove.iter().copied().collect();
+        let skip: std::collections::HashSet<usize> = indices_to_remove.iter().copied().collect();
 
         let mut new_test = String::new();
         for (i, line) in all_lines.iter().enumerate() {

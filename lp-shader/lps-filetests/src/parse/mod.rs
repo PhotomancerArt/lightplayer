@@ -3,6 +3,7 @@
 pub mod parse_annotation;
 pub mod parse_expected_error;
 pub mod parse_run;
+pub mod parse_set_uniform;
 pub mod parse_source;
 pub mod parse_target;
 pub mod parse_test_type;
@@ -11,7 +12,7 @@ pub mod test_type;
 
 // Re-exports
 pub use test_type::{
-    ClifExpectations, ComparisonOp, ErrorExpectation, RunDirective, TestFile, TestType,
+    ClifExpectations, ComparisonOp, ErrorExpectation, RunDirective, SetUniform, TestFile, TestType,
     TrapExpectation,
 };
 
@@ -62,6 +63,7 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
     let mut run_directives = Vec::new();
     let mut trap_expectations = Vec::new();
     let mut pending_annotations: Vec<crate::targets::Annotation> = Vec::new();
+    let mut pending_set_uniforms: Vec<SetUniform> = Vec::new();
 
     let mut in_block_comment = false;
     for (line_num, line) in lines.iter().enumerate() {
@@ -83,11 +85,20 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
             continue;
         }
 
+        if let Some(body) = parse_set_uniform::parse_set_uniform_line(&logical) {
+            pending_set_uniforms.push(parse_set_uniform::parse_set_uniform_body(
+                body,
+                line_number,
+            )?);
+            continue;
+        }
+
         if let Some(run_line) = parse_run::parse_run_directive_line(&logical) {
             let legacy_expect_fail = run_line.trim_end().ends_with("[expect-fail]");
             let mut directive =
                 parse_run::parse_run_directive(run_line, line_number, legacy_expect_fail)?;
             directive.annotations = std::mem::take(&mut pending_annotations);
+            directive.set_uniforms = std::mem::take(&mut pending_set_uniforms);
             run_directives.push(directive);
             continue;
         }
