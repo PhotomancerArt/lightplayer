@@ -1,8 +1,8 @@
 //! LPIR → CLIF translation: scalar ops, structured control flow, memory, and local calls.
 
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use alloc::collections::BTreeMap;
 use cranelift_codegen::ir::{AbiParam, ArgumentPurpose, Signature, types};
 use cranelift_codegen::ir::{Block, FuncRef, InstBuilder, StackSlot, TrapCode, Value};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
