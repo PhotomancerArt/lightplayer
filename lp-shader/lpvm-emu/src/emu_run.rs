@@ -94,12 +94,11 @@ pub fn glsl_q32_call_emulated(
             got: args.len(),
         });
     }
-    let idx = ir
+    let ir_func = ir
         .functions
-        .iter()
-        .position(|f| f.name == name)
+        .values()
+        .find(|f| f.name == name)
         .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-    let ir_func = &ir.functions[idx];
     let param_count = ir_func.param_count as usize;
     let mut flat: Vec<i32> = Vec::new();
     for (p, a) in gfn.parameters.iter().zip(args.iter()) {
@@ -196,7 +195,7 @@ pub fn run_loaded_function_i32(
 ) -> Result<i32, CompilerError> {
     let f = ir
         .functions
-        .iter()
+        .values()
         .find(|f| f.name == func_name)
         .ok_or_else(|| {
             CompilerError::Codegen(CompileError::unsupported(format!(

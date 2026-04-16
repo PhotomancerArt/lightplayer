@@ -173,6 +173,7 @@ mod tests {
                     },
                 ],
             }],
+            ..Default::default()
         };
 
         let engine = CraneliftEngine::new(CompileOptions {

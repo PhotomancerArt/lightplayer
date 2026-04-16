@@ -1,5 +1,6 @@
 //! Validator positive and negative tests.
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -8,7 +9,7 @@ use crate::builder::FunctionBuilder;
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
 use crate::parse::parse_module;
-use crate::types::{CalleeRef, IrType, VReg, VRegRange};
+use crate::types::{CalleeRef, FuncId, ImportId, IrType, VReg, VRegRange};
 use crate::validate::{validate_function, validate_module};
 
 #[test]
@@ -70,7 +71,7 @@ fn validate_err_break_outside_loop() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("expected validation errors");
     assert!(errs.iter().any(|e| e.message.contains("loop")));
@@ -123,9 +124,9 @@ fn validate_err_undefined_vreg() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
-    let errs = validate_function(&m.functions[0], &m).expect_err("undefined v0");
+    let errs = validate_function(m.functions.values().next().unwrap(), &m).expect_err("undefined v0");
     assert!(errs.iter().any(|e| e.message.contains("before definition")));
 }
 
@@ -147,7 +148,7 @@ fn validate_err_copy_type_mismatch() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("copy types");
     assert!(errs.iter().any(|e| e.message.contains("copy")));
@@ -161,7 +162,7 @@ fn validate_err_call_arity() {
         dst: v0,
         value: 1.0,
     });
-    fb.push_call(CalleeRef(0), &[], &[]);
+    fb.push_call(CalleeRef::Import(ImportId(0)), &[], &[]);
     let func = fb.finish();
     let m = LpirModule {
         imports: vec![ImportDecl {
@@ -172,7 +173,7 @@ fn validate_err_call_arity() {
             lpfn_glsl_params: None,
             needs_vmctx: false,
         }],
-        functions: vec![func],
+        functions: BTreeMap::from([(FuncId(0), func)]),
     };
     let errs = validate_module(&m).expect_err("call arity");
     assert!(errs.iter().any(|e| e.message.contains("arg count")));
@@ -189,7 +190,7 @@ fn validate_err_callee_oob() {
         vreg_types: Vec::new(),
         slots: Vec::new(),
         body: vec![LpirOp::Call {
-            callee: CalleeRef(3),
+            callee: CalleeRef::Local(FuncId(3)),
             args: VRegRange { start: 0, count: 0 },
             results: VRegRange { start: 0, count: 0 },
         }],
@@ -197,7 +198,7 @@ fn validate_err_callee_oob() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("callee");
     assert!(errs.iter().any(|e| e.message.contains("callee")));
@@ -218,7 +219,7 @@ fn validate_err_continue_outside_loop() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("continue");
     assert!(errs.iter().any(|e| e.message.contains("loop")));
@@ -257,7 +258,7 @@ fn validate_err_duplicate_switch_case() {
     let f = b.finish();
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("dup case");
     assert!(
@@ -289,7 +290,7 @@ fn validate_err_return_value_type() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("return type");
     assert!(errs.iter().any(|e| e.message.contains("return value")));
@@ -312,7 +313,7 @@ fn validate_err_vreg_pool_oob() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("pool");
     assert!(errs.iter().any(|e| e.message.contains("pool")));
@@ -412,8 +413,8 @@ fn validate_err_slot_addr_oob() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: vec![f],
+        functions: BTreeMap::from([(FuncId(0), f)]),
     };
-    let errs = validate_function(&m.functions[0], &m).expect_err("bad slot");
+    let errs = validate_function(m.functions.values().next().unwrap(), &m).expect_err("bad slot");
     assert!(errs.iter().any(|e| e.message.contains("slot")));
 }

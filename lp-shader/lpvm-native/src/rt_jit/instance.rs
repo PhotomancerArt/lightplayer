@@ -155,15 +155,14 @@ impl NativeJitInstance {
     }
 
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
-        let idx = self
+        let ir_func = self
             .module
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let ir_func = &self.module.inner.ir.functions[idx];
 
         let gfn = self
             .module
@@ -331,15 +330,14 @@ impl LpvmInstance for NativeJitInstance {
         }
 
         let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
-        let idx = self
+        let ir_func = self
             .module
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let ir_func = &self.module.inner.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
         if flat.len() != param_count {
             return Err(NativeError::Call(CallError::Unsupported(format!(
@@ -383,15 +381,14 @@ impl LpvmInstance for NativeJitInstance {
             }
         }
 
-        let idx = self
+        let ir_func = self
             .module
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let ir_func = &self.module.inner.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
 
         let expected_words: usize = gfn

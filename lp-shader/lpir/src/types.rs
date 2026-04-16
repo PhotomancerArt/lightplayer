@@ -65,6 +65,38 @@ impl VRegRange {
     }
 }
 
-/// Index into the module callee table: imports first, then local functions.
+/// Stable id for an [`crate::lpir_module::ImportDecl`] (`imports` vector index).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Ord, PartialOrd)]
+pub struct ImportId(pub u16);
+
+impl fmt::Display for ImportId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Stable id for a local function in [`crate::lpir_module::LpirModule::functions`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Ord, PartialOrd)]
+pub struct FuncId(pub u16);
+
+impl fmt::Display for FuncId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Callee target: import or local function (stable ids, not mixed flat indices).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CalleeRef(pub u32);
+pub enum CalleeRef {
+    Import(ImportId),
+    Local(FuncId),
+}
+
+impl fmt::Display for CalleeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CalleeRef::Import(i) => write!(f, "import({i})"),
+            CalleeRef::Local(id) => write!(f, "local({id})"),
+        }
+    }
+}

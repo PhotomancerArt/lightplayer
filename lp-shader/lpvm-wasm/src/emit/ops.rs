@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{IrFunction, IrType, LpirModule, LpirOp};
+use lpir::{CalleeRef, FuncId, ImportId, IrFunction, IrType, LpirModule, LpirOp};
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
 use crate::emit::FuncEmitCtx;
@@ -17,14 +17,14 @@ use crate::emit::imports;
 use crate::emit::memory;
 use crate::emit::q32;
 
-fn wasm_func_index(ctx: &FuncEmitCtx<'_>, callee: lpir::CalleeRef) -> Result<u32, String> {
+fn wasm_func_index(ctx: &FuncEmitCtx<'_>, callee: CalleeRef) -> Result<u32, String> {
     let m = ctx.module;
-    let k = callee.0 as usize;
-    if k < m.import_remap.len() {
-        m.import_remap[k].ok_or_else(|| format!("call to pruned import {k}"))
-    } else {
-        let j = callee.0 - m.full_import_count;
-        Ok(m.filtered_import_count + j)
+    match callee {
+        CalleeRef::Import(ImportId(i)) => {
+            let k = i as usize;
+            m.import_remap[k].ok_or_else(|| format!("call to pruned import {k}"))
+        }
+        CalleeRef::Local(FuncId(id)) => Ok(m.filtered_import_count + id as u32),
     }
 }
 
@@ -409,16 +409,18 @@ pub(crate) fn emit_op(
             results,
         } => {
             let idx = wasm_func_index(fctx, *callee)?;
-            let callee_usize = callee.0 as usize;
-            let is_import = callee_usize < fctx.module.full_import_count as usize;
+            let (is_import, import_idx) = match *callee {
+                CalleeRef::Import(ImportId(i)) => (true, i as usize),
+                CalleeRef::Local(_) => (false, 0),
+            };
             let is_result_ptr =
-                is_import && imports::import_uses_result_pointer_abi(ir, callee_usize);
+                is_import && imports::import_uses_result_pointer_abi(ir, import_idx);
 
             let all_args = func.pool_slice(*args);
             let import_needs_vmctx = is_import
                 && ir
                     .imports
-                    .get(callee_usize)
+                    .get(import_idx)
                     .map(|d| d.needs_vmctx)
                     .unwrap_or(false);
             let args_to_pass =

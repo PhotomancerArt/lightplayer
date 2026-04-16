@@ -8,10 +8,11 @@ use crate::regalloc::{
 };
 use crate::rv32::gpr::reg_name;
 use crate::vinst::{IcmpCond, ModuleSymbols, VInst, VReg};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lpir::{IrFunction, LpirModule, LpirOp, print_module};
+use lpir::{FuncId, IrFunction, LpirModule, LpirOp, print_module};
 
 /// Indentation for LPIR body lines (after `; ` in the file).
 const IND_LP: &str = "    ";
@@ -32,9 +33,15 @@ fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &Fu
     }
     // Also update param_count to match ABI for printing
     f.param_count = (total_abi_slots.saturating_sub(1)) as u16; // exclude vmctx
+    let id = module
+        .functions
+        .iter()
+        .find(|(_, mf)| mf.name == func.name)
+        .map(|(k, _)| *k)
+        .unwrap_or(FuncId(0));
     let m = LpirModule {
         imports: module.imports.clone(),
-        functions: alloc::vec![f],
+        functions: BTreeMap::from([(id, f)]),
     };
     let s = print_module(&m);
     s.lines()
@@ -57,12 +64,11 @@ fn format_lpir_op_line(
     // Replace the function in the module while preserving all other functions
     // so that CalleeRef indices remain valid.
     let mut functions = module.functions.clone();
-    // Find which function we're replacing by name
-    if let Some(pos) = functions.iter().position(|mf| mf.name == func.name) {
-        functions[pos] = f;
+    if let Some((k, _)) = functions.iter().find(|(_, mf)| mf.name == func.name) {
+        let k = *k;
+        functions.insert(k, f);
     } else {
-        // If not found (shouldn't happen), append it
-        functions.push(f);
+        functions.insert(FuncId(0), f);
     }
     let m = LpirModule {
         imports: module.imports.clone(),

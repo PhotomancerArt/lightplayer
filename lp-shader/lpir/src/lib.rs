@@ -25,5 +25,5 @@ pub use lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};
 pub use lpir_op::LpirOp;
 pub use parse::{ParseError, parse_module};
 pub use print::print_module;
-pub use types::{CalleeRef, FloatMode, IrType, SlotId, VReg, VRegRange};
+pub use types::{CalleeRef, FloatMode, FuncId, ImportId, IrType, SlotId, VReg, VRegRange};
 pub use validate::{ValidationError, validate_function, validate_module};

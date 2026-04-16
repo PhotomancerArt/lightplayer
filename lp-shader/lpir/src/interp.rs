@@ -85,7 +85,7 @@ pub fn interpret_with_depth(
 ) -> Result<Vec<Value>, InterpError> {
     let func = module
         .functions
-        .iter()
+        .values()
         .find(|f| f.name == func_name)
         .ok_or_else(|| InterpError::FunctionNotFound(func_name.to_string()))?;
     let mut full = alloc::vec![Value::I32(0); 1];
@@ -268,8 +268,7 @@ fn exec_func(
                 let res = if let Some(ii) = module.callee_as_import(*callee) {
                     let imp = &module.imports[ii];
                     imports.call(imp.module_name.as_str(), imp.func_name.as_str(), &call_args)?
-                } else if let Some(fi) = module.callee_as_function(*callee) {
-                    let callee_fn = &module.functions[fi];
+                } else if let Some(callee_fn) = module.callee_as_function(*callee) {
                     if call_args.len() != 1 + callee_fn.param_count as usize {
                         return Err(InterpError::Internal(format!(
                             "local call arg count {} != 1 + callee param_count {}",

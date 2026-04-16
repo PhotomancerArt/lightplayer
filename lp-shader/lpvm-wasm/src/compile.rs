@@ -64,7 +64,7 @@ fn validate_metadata(ir: &LpirModule, meta: &LpsModuleSig) -> Result<(), WasmErr
             meta.functions.len()
         )));
     }
-    for (ir_f, sig) in ir.functions.iter().zip(meta.functions.iter()) {
+    for (ir_f, sig) in ir.functions.values().zip(meta.functions.iter()) {
         if ir_f.name != sig.name {
             return Err(WasmError::metadata_mismatch(format!(
                 "function name mismatch: IR {:?} vs metadata {:?}",
@@ -77,7 +77,7 @@ fn validate_metadata(ir: &LpirModule, meta: &LpsModuleSig) -> Result<(), WasmErr
 
 fn collect_exports(ir: &LpirModule, meta: &LpsModuleSig, options: &WasmOptions) -> Vec<WasmExport> {
     ir.functions
-        .iter()
+        .values()
         .zip(meta.functions.iter())
         .map(|(ir_f, sig)| {
             let mut params: Vec<_> = alloc::vec![WasmValType::I32];

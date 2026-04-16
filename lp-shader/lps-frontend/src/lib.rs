@@ -140,8 +140,8 @@ mod tests {
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
         assert_eq!(ir.functions.len(), 1);
-        assert_eq!(ir.functions[0].name, "add");
-        assert_eq!(ir.functions[0].param_count, 2);
+        let add = ir.functions.values().find(|f| f.name == "add").expect("add fn");
+        assert_eq!(add.param_count, 2);
     }
 
     #[test]
@@ -307,7 +307,7 @@ float test_main() {
         // Verify the test function contains Load ops with VMCTX base
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let has_load_from_vmctx = test_func.body.iter().any(|op| {
@@ -346,7 +346,7 @@ float test_main() {
         // Verify the test function contains multiple Load ops
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let load_count = test_func
@@ -377,7 +377,7 @@ float test_main() {
         assert!(sig.globals_type.is_some(), "globals_type should be set");
 
         // Verify __shader_init function exists
-        let init_func = ir.functions.iter().find(|f| f.name == "__shader_init");
+        let init_func = ir.functions.values().find(|f| f.name == "__shader_init");
         assert!(
             init_func.is_some(),
             "__shader_init function should be synthesized"
@@ -411,7 +411,7 @@ float test_main() {
         // Verify the test function contains Store ops with VMCTX base
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let has_store_to_vmctx = test_func.body.iter().any(|op| {
@@ -440,7 +440,7 @@ float test_main() {
         // Verify the test function contains 3 Store ops (one per component)
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let store_count = test_func

@@ -132,7 +132,7 @@ impl EmuInstance {
 
     /// Check if a function exists in the module.
     fn has_function(&self, name: &str) -> bool {
-        self.module.ir.functions.iter().any(|f| f.name == name)
+        self.module.ir.functions.values().any(|f| f.name == name)
     }
 
     /// Memcpy within the guest memory (via shared arena).
@@ -246,14 +246,13 @@ impl LpvmInstance for EmuInstance {
         }
 
         let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
-        let idx = self
+        let ir_func = self
             .module
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let ir_func = &self.module.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
         if flat.len() != param_count {
             return Err(CallError::Unsupported(format!(
@@ -300,14 +299,13 @@ impl LpvmInstance for EmuInstance {
             }
         }
 
-        let idx = self
+        let ir_func = self
             .module
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let ir_func = &self.module.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
 
         let expected_words: usize = gfn
@@ -371,14 +369,13 @@ impl EmuInstance {
         self.last_guest_instruction_count = None;
         self.refresh_vmctx_header();
 
-        let idx = self
+        let ir_func = self
             .module
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let ir_func = &self.module.ir.functions[idx];
 
         let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
         full.push(self.vmctx_guest as i32);

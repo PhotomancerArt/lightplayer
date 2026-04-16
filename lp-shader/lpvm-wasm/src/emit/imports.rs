@@ -7,7 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{CalleeRef, ImportDecl, IrFunction, IrType, LpirModule, LpirOp};
+use lpir::{CalleeRef, ImportDecl, ImportId, IrFunction, IrType, LpirModule, LpirOp};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
@@ -18,7 +18,6 @@ pub(crate) struct FilteredImports {
     pub decls: Vec<ImportDecl>,
     /// `remap[old_index] = Some(wasm_import_func_index)` for kept imports, else `None`.
     pub remap: Vec<Option<u32>>,
-    pub full_count: u32,
 }
 
 fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
@@ -27,11 +26,13 @@ fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
     let mut needs_lpir_sqrt = false;
     let mut needs_glsl_round = false;
 
-    for f in &ir.functions {
+    for f in ir.functions.values() {
         for op in &f.body {
             if let LpirOp::Call { callee, .. } = op {
-                if callee.0 < n {
-                    used.insert(callee.0);
+                if let CalleeRef::Import(ImportId(i)) = callee {
+                    if (*i as u32) < n {
+                        used.insert(*i as u32);
+                    }
                 }
             }
             // Track LPIR ops that resolve to builtin calls at emit time (Q32 mode)
@@ -166,7 +167,6 @@ fn lpfn_strip_suffix(func_name: &str) -> Result<&str, String> {
 
 pub(crate) fn build_filtered_imports(ir: &LpirModule) -> Result<FilteredImports, String> {
     let used = collect_used_import_indices(ir);
-    let full_count = ir.imports.len() as u32;
     let mut remap = vec![None; ir.imports.len()];
     let mut decls = Vec::new();
     let mut next_wasm = 0u32;
@@ -179,22 +179,20 @@ pub(crate) fn build_filtered_imports(ir: &LpirModule) -> Result<FilteredImports,
         decls.push(decl.clone());
         next_wasm += 1;
     }
-    Ok(FilteredImports {
-        decls,
-        remap,
-        full_count,
-    })
+    Ok(FilteredImports { decls, remap })
 }
 
 /// True if any user function calls an import that uses the result-pointer WASM ABI
 /// (non-scalar return via hidden pointer; callee has zero WASM results).
 pub(crate) fn module_needs_result_ptr_calls(ir: &LpirModule) -> bool {
     let n = ir.imports.len() as u32;
-    for f in &ir.functions {
+    for f in ir.functions.values() {
         for op in &f.body {
             if let LpirOp::Call { callee, .. } = op {
-                if callee.0 < n && import_uses_result_pointer_abi(ir, callee.0 as usize) {
-                    return true;
+                if let CalleeRef::Import(ImportId(i)) = callee {
+                    if (*i as u32) < n && import_uses_result_pointer_abi(ir, *i as usize) {
+                        return true;
+                    }
                 }
             }
         }
@@ -227,9 +225,11 @@ pub(crate) fn max_result_ptr_buffer_bytes(ir: &LpirModule, f: &IrFunction) -> u3
             callee, results, ..
         } = op
         {
-            if callee.0 < n && import_uses_result_pointer_abi(ir, callee.0 as usize) {
-                let count = f.pool_slice(*results).len() as u32;
-                max_b = max_b.max(count.saturating_mul(4));
+            if let CalleeRef::Import(ImportId(i)) = callee {
+                if (*i as u32) < n && import_uses_result_pointer_abi(ir, *i as usize) {
+                    let count = f.pool_slice(*results).len() as u32;
+                    max_b = max_b.max(count.saturating_mul(4));
+                }
             }
         }
     }
@@ -257,6 +257,6 @@ pub(crate) fn import_callee(
         .iter()
         .enumerate()
         .find(|(_, d)| d.module_name == module && d.func_name == func_name)
-        .map(|(i, _)| CalleeRef(i as u32))
+        .map(|(i, _)| CalleeRef::Import(ImportId(i as u16)))
         .ok_or_else(|| format!("missing import @{module}::{func_name}"))
 }

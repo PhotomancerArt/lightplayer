@@ -161,7 +161,7 @@ pub fn compile_module(
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut functions = Vec::with_capacity(ir.functions.len());
-    for (idx, func) in ir.functions.iter().enumerate() {
+    for (idx, func) in ir.functions.values().enumerate() {
         log::debug!(
             "[native-fa] compile_module: compiling function {cur}/{total}: {name}",
             cur = idx + 1,
@@ -200,7 +200,9 @@ mod tests {
     use super::*;
     use alloc::string::String;
     use alloc::vec;
-    use lpir::{IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
+    use alloc::collections::BTreeMap;
+
+    use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
     use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
     #[test]
@@ -208,7 +210,7 @@ mod tests {
         let abi = ModuleAbi::from_ir_and_sig(
             &LpirModule {
                 imports: vec![],
-                functions: vec![],
+                functions: Default::default(),
             },
             &LpsModuleSig::default(),
         );
@@ -220,7 +222,7 @@ mod tests {
     fn test_compile_module_empty() {
         let ir = LpirModule {
             imports: vec![],
-            functions: vec![],
+            functions: BTreeMap::new(),
         };
         let sig = LpsModuleSig::default();
         let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
@@ -233,25 +235,28 @@ mod tests {
     fn test_compile_simple_iconst() {
         let ir = LpirModule {
             imports: vec![],
-            functions: vec![IrFunction {
-                name: String::from("test"),
-                is_entry: true,
-                vmctx_vreg: VReg(0),
-                param_count: 0,
-                return_types: vec![IrType::I32],
-                vreg_types: vec![IrType::I32],
-                slots: vec![],
-                body: vec![
-                    LpirOp::IconstI32 {
-                        dst: VReg(0),
-                        value: 42,
-                    },
-                    LpirOp::Return {
-                        values: VRegRange { start: 0, count: 1 },
-                    },
-                ],
-                vreg_pool: vec![VReg(0)],
-            }],
+            functions: BTreeMap::from([(
+                FuncId(0),
+                IrFunction {
+                    name: String::from("test"),
+                    is_entry: true,
+                    vmctx_vreg: VReg(0),
+                    param_count: 0,
+                    return_types: vec![IrType::I32],
+                    vreg_types: vec![IrType::I32],
+                    slots: vec![],
+                    body: vec![
+                        LpirOp::IconstI32 {
+                            dst: VReg(0),
+                            value: 42,
+                        },
+                        LpirOp::Return {
+                            values: VRegRange { start: 0, count: 1 },
+                        },
+                    ],
+                    vreg_pool: vec![VReg(0)],
+                },
+            )]),
         };
         let sig = LpsModuleSig {
             functions: vec![LpsFnSig {

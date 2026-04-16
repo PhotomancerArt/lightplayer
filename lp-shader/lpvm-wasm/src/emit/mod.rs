@@ -25,7 +25,6 @@ use wasm_encoder::{
 pub(crate) struct EmitCtx<'a> {
     pub options: &'a crate::options::WasmOptions,
     pub import_remap: &'a [Option<u32>],
-    pub full_import_count: u32,
     pub filtered_import_count: u32,
 }
 
@@ -65,7 +64,7 @@ pub(crate) fn emit_module(
     }
 
     let mut def_fn_types = Vec::new();
-    for f in &ir.functions {
+    for f in ir.functions.values() {
         let (params, results) = func::wasm_function_signature(f, options.float_mode);
         types.ty().function(params, results);
         def_fn_types.push(next_type);
@@ -86,12 +85,12 @@ pub(crate) fn emit_module(
     };
     let _ = next_type;
 
-    let any_slots = ir.functions.iter().any(|f| !f.slots.is_empty());
+    let any_slots = ir.functions.values().any(|f| !f.slots.is_empty());
     let needs_result_ptr_calls = imports::module_needs_result_ptr_calls(ir);
     let needs_shadow_stack = any_slots || needs_result_ptr_calls;
     let mut import_section = ImportSection::new();
     let needs_memory = !filtered.decls.is_empty()
-        || ir.functions.iter().any(|f| f.uses_memory())
+        || ir.functions.values().any(|f| f.uses_memory())
         || render_entry.is_some();
     let env_memory = if needs_memory {
         let spec = EnvMemorySpec::shader_import_limits();
@@ -132,7 +131,7 @@ pub(crate) fn emit_module(
             0,
         );
     }
-    for (i, f) in ir.functions.iter().enumerate() {
+    for (i, f) in ir.functions.values().enumerate() {
         let wasm_fn_index = filtered_fn_count + i as u32;
         exports.export(f.name.as_str(), ExportKind::Func, wasm_fn_index);
     }
@@ -144,7 +143,6 @@ pub(crate) fn emit_module(
     let ctx = EmitCtx {
         options,
         import_remap: &filtered.remap,
-        full_import_count: filtered.full_count,
         filtered_import_count: filtered_fn_count,
     };
 
@@ -166,7 +164,7 @@ pub(crate) fn emit_module(
     }
 
     let mut code = CodeSection::new();
-    for f in &ir.functions {
+    for f in ir.functions.values() {
         let func_ctx = FuncEmitCtx {
             module: &ctx,
             vmctx_local,
@@ -212,7 +210,7 @@ pub(crate) fn emit_module(
 
 /// Match `vec4 render(vec2, vec2, float)` — WASM `(vmctx, 5×i32) -> 4×i32` in Q32.
 fn find_render_entry(ir: &LpirModule, mode: FloatMode) -> Option<(usize, u32)> {
-    for (i, f) in ir.functions.iter().enumerate() {
+    for (i, f) in ir.functions.values().enumerate() {
         if f.name != "render" {
             continue;
         }

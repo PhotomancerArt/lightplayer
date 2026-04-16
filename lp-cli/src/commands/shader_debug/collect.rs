@@ -27,7 +27,7 @@ pub fn collect_fa_data(
 
     let mut backend_data = BackendDebugData::new("rv32n");
 
-    for func in &ir.functions {
+    for func in ir.functions.values() {
         // Filter if specified
         if let Some(name) = func_filter {
             if func.name != name {
@@ -150,7 +150,7 @@ pub fn collect_cranelift_data(
     let backend_name = if is_emu { "emu" } else { "rv32c" };
     let mut backend_data = BackendDebugData::new(backend_name);
 
-    for func in &ir.functions {
+    for func in ir.functions.values() {
         if let Some(name) = func_filter {
             if func.name != name {
                 continue;

@@ -12,7 +12,7 @@ use core::fmt;
 use crate::builder::{FunctionBuilder, ModuleBuilder};
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
-use crate::types::{CalleeRef, IrType, SlotId, VReg};
+use crate::types::{CalleeRef, FuncId, ImportId, IrType, SlotId, VReg};
 
 /// Parse error (line/column best-effort).
 #[derive(Debug)]
@@ -56,26 +56,26 @@ pub fn parse_module(input: &str) -> Result<LpirModule, ParseError> {
             continue;
         }
         if s.starts_with("entry ") {
-            let next_local = mb.function_count();
+            let self_id = mb.next_local_func_id();
             let func = parse_func_decl(
                 &mut s,
                 true,
                 &mut names,
                 mb.import_count(),
-                next_local,
+                self_id,
                 mb.imports(),
             )?;
             mb.add_function(func);
             continue;
         }
         if s.starts_with("func ") {
-            let next_local = mb.function_count();
+            let self_id = mb.next_local_func_id();
             let func = parse_func_decl(
                 &mut s,
                 false,
                 &mut names,
                 mb.import_count(),
-                next_local,
+                self_id,
                 mb.imports(),
             )?;
             mb.add_function(func);
@@ -227,7 +227,7 @@ fn parse_func_decl(
     is_entry: bool,
     names: &mut Vec<(String, CalleeRef)>,
     import_count: u32,
-    next_local_func_index: u32,
+    self_func_id: FuncId,
     imports: &[ImportDecl],
 ) -> Result<IrFunction, ParseError> {
     let mut t = *s;
@@ -266,7 +266,7 @@ fn parse_func_decl(
     let t = t.strip_prefix('{').ok_or_else(|| err(1, 1, "expected {"))?;
     let (body, rest) = extract_brace_inner(t)?;
     *s = rest.trim_start();
-    let self_ref = CalleeRef(import_count + next_local_func_index);
+    let self_ref = CalleeRef::Local(self_func_id);
     names.push((format!("@{fname}"), self_ref));
     parse_function_body(
         fname.as_str(),
@@ -282,17 +282,14 @@ fn parse_func_decl(
 
 fn call_operands_with_vmctx(
     callee: CalleeRef,
-    import_count: u32,
     imports: &[ImportDecl],
     user: Vec<VReg>,
 ) -> Vec<VReg> {
-    let local = callee.0 >= import_count;
-    let need_vmctx = if local {
-        true
-    } else {
-        imports
-            .get(callee.0 as usize)
-            .is_some_and(|i| i.needs_vmctx)
+    let need_vmctx = match callee {
+        CalleeRef::Local(_) => true,
+        CalleeRef::Import(ImportId(i)) => imports
+            .get(i as usize)
+            .is_some_and(|imp| imp.needs_vmctx),
     };
     if need_vmctx {
         let mut v = alloc::vec![VMCTX_VREG];
@@ -612,11 +609,7 @@ fn parse_memcpy(fb: &mut FunctionBuilder, line: &str) -> Result<(), ParseError> 
     Ok(())
 }
 
-fn resolve_callee(
-    s: &str,
-    names: &[(String, CalleeRef)],
-    _import_count: u32,
-) -> Result<CalleeRef, ParseError> {
+fn resolve_callee(s: &str, names: &[(String, CalleeRef)]) -> Result<CalleeRef, ParseError> {
     let key = s.trim();
     names
         .iter()
@@ -630,7 +623,7 @@ fn parse_call_void(
     fb: &mut FunctionBuilder,
     line: &str,
     names: &[(String, CalleeRef)],
-    import_count: u32,
+    _import_count: u32,
     imports: &[ImportDecl],
 ) -> Result<(), ParseError> {
     let rest = line.strip_prefix("call ").unwrap().trim();
@@ -640,9 +633,9 @@ fn parse_call_void(
     let args_s = args_s
         .strip_suffix(')')
         .ok_or_else(|| err(1, 1, "call needs )"))?;
-    let callee = resolve_callee(callee_s, names, import_count)?;
+    let callee = resolve_callee(callee_s, names)?;
     let user = parse_vreg_list(args_s)?;
-    let args = call_operands_with_vmctx(callee, import_count, imports, user);
+    let args = call_operands_with_vmctx(callee, imports, user);
     let results: Vec<VReg> = Vec::new();
     fb.push_call(callee, &args, &results);
     Ok(())
@@ -652,7 +645,7 @@ fn parse_call_assign(
     fb: &mut FunctionBuilder,
     line: &str,
     names: &[(String, CalleeRef)],
-    import_count: u32,
+    _import_count: u32,
     imports: &[ImportDecl],
 ) -> Result<(), ParseError> {
     let (lhs, rhs) = line
@@ -670,9 +663,9 @@ fn parse_call_assign(
     let args_s = args_s
         .strip_suffix(')')
         .ok_or_else(|| err(1, 1, "call needs )"))?;
-    let callee = resolve_callee(callee_s.trim(), names, import_count)?;
+    let callee = resolve_callee(callee_s.trim(), names)?;
     let user = parse_vreg_list(args_s)?;
-    let args = call_operands_with_vmctx(callee, import_count, imports, user);
+    let args = call_operands_with_vmctx(callee, imports, user);
     fb.push_call(callee, &args, &results);
     Ok(())
 }

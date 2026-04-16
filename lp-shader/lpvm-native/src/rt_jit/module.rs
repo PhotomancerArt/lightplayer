@@ -56,13 +56,12 @@ impl NativeJitModule {
     pub fn direct_call(&self, name: &str) -> Option<NativeJitDirectCall> {
         let entry_offset = self.inner.entry_offsets.get(name).copied()?;
 
-        let ir_func_idx = self
+        let ir_func = self
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)?;
-        let ir_func = &self.inner.ir.functions[ir_func_idx];
+            .values()
+            .find(|f| f.name == name)?;
 
         let gfn = self.inner.meta.functions.iter().find(|f| f.name == name)?;
 

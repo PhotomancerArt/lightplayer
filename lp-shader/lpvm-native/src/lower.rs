@@ -1113,21 +1113,18 @@ pub fn lower_ops(
 }
 
 fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<String> {
-    let idx = callee.0 as usize;
-    let ni = ir.imports.len();
-    if idx < ni {
-        // For imports, map to the C ABI symbol name using BuiltinId
+    if let Some(idx) = ir.callee_as_import(callee) {
         ir.imports.get(idx).map(|imp| {
-            // Try to resolve to a BuiltinId to get the proper C symbol name
             if let Some(bid) = resolve_import_to_builtin(imp) {
                 String::from(bid.name())
             } else {
-                // Fallback: use the import name directly (for non-builtin imports)
                 imp.func_name.clone()
             }
         })
+    } else if let Some(f) = ir.callee_as_function(callee) {
+        Some(f.name.clone())
     } else {
-        ir.functions.get(idx - ni).map(|f| f.name.clone())
+        None
     }
 }
 
@@ -1215,12 +1212,13 @@ fn ir_params_to_glsl_kinds(params: &[lpir::IrType]) -> Vec<GlslParamKind> {
 }
 
 fn callee_return_uses_sret(ir: &LpirModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
-    let idx = callee.0 as usize;
-    let ni = ir.imports.len();
-    if idx < ni {
-        return ir.imports[idx].return_types.len() > SRET_SCALAR_THRESHOLD;
+    if let Some(imp_idx) = ir.callee_as_import(callee) {
+        return ir.imports[imp_idx]
+            .return_types
+            .len()
+            > SRET_SCALAR_THRESHOLD;
     }
-    let Some(f) = ir.functions.get(idx - ni) else {
+    let Some(f) = ir.callee_as_function(callee) else {
         return false;
     };
     if let Some(fa) = abi.func_abi(f.name.as_str()) {
@@ -1868,8 +1866,10 @@ mod tests {
 
     #[test]
     fn lower_ops_populates_region_tree() {
+        use alloc::collections::BTreeMap;
         use crate::region::{REGION_ID_NONE, Region};
         use lpir::types::VRegRange;
+        use lpir::FuncId;
 
         // Build a simple function: return 42
         // v0 = vmctx
@@ -1896,8 +1896,8 @@ mod tests {
         };
 
         let ir = LpirModule {
-            functions: vec![func.clone()],
             imports: vec![],
+            functions: BTreeMap::from([(FuncId(0), func.clone())]),
         };
         let sig = LpsModuleSig::default();
         let abi = ModuleAbi::from_ir_and_sig(&ir, &sig);

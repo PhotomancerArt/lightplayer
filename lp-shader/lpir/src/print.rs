@@ -7,15 +7,17 @@ use alloc::vec::Vec;
 use core::fmt::Write as _;
 
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
+use crate::types::ImportId;
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType, VReg};
 
 fn callee_needs_vmctx_operand(module: &LpirModule, callee: CalleeRef) -> bool {
-    let import_count = module.imports.len() as u32;
-    if callee.0 >= import_count {
-        true
-    } else {
-        module.imports[callee.0 as usize].needs_vmctx
+    match callee {
+        CalleeRef::Local(_) => true,
+        CalleeRef::Import(ImportId(i)) => module
+            .imports
+            .get(i as usize)
+            .is_some_and(|imp| imp.needs_vmctx),
     }
 }
 
@@ -49,7 +51,7 @@ pub fn print_module(module: &LpirModule) -> String {
     if !module.imports.is_empty() && !module.functions.is_empty() {
         let _ = writeln!(out);
     }
-    for (i, f) in module.functions.iter().enumerate() {
+    for (i, (_, f)) in module.functions.iter().enumerate() {
         if i > 0 {
             let _ = writeln!(out);
         }
@@ -335,8 +337,7 @@ fn callee_name(module: &LpirModule, callee: crate::types::CalleeRef) -> (&str, &
     if let Some(i) = module.callee_as_import(callee) {
         let imp = &module.imports[i];
         (imp.module_name.as_str(), imp.func_name.as_str())
-    } else if let Some(i) = module.callee_as_function(callee) {
-        let f = &module.functions[i];
+    } else if let Some(f) = module.callee_as_function(callee) {
         ("", f.name.as_str())
     } else {
         ("?", "?")

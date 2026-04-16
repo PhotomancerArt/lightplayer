@@ -84,6 +84,7 @@ mod tests {
                 ],
                 return_type: LpsType::Float,
             }],
+            ..Default::default()
         };
         let engine = EmuEngine::new(CompileOptions::default());
         let module = engine

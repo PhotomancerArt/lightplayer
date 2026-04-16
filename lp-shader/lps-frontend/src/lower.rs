@@ -8,8 +8,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{
-    CalleeRef, FunctionBuilder, ImportDecl, IrFunction, IrType, LpirModule, LpirOp, ModuleBuilder,
-    VMCTX_VREG, VReg,
+    CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrFunction, IrType, LpirModule, LpirOp,
+    ModuleBuilder, VMCTX_VREG, VReg,
 };
 use lps_shared::{
     LayoutRules, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE, type_alignment,
@@ -32,11 +32,9 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
     let mut mb = ModuleBuilder::new();
     let import_map = register_math_imports(&mut mb);
     let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
-    let import_count = mb.import_count();
-
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
     for (i, (handle, _)) in naga_module.functions.iter().enumerate() {
-        func_map.insert(*handle, CalleeRef(import_count.saturating_add(i as u32)));
+        func_map.insert(*handle, CalleeRef::Local(FuncId(i as u16)));
     }
 
     // Walk global variables and compute layout for uniforms and globals.

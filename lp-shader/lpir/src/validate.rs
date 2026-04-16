@@ -9,7 +9,7 @@ use core::fmt;
 
 use crate::lpir_module::{IrFunction, LpirModule};
 use crate::lpir_op::LpirOp;
-use crate::types::{CalleeRef, IrType, VReg, VRegRange};
+use crate::types::{CalleeRef, ImportId, IrType, VReg, VRegRange};
 
 /// Validation issue.
 #[derive(Debug)]
@@ -59,7 +59,7 @@ pub fn validate_module(module: &LpirModule) -> Result<(), Vec<ValidationError>> 
     validate_imports(module, &mut errs);
     let mut entry = 0u32;
     let mut seen_names: Vec<&str> = Vec::new();
-    for f in &module.functions {
+    for f in module.functions.values() {
         if f.is_entry {
             entry += 1;
         }
@@ -341,16 +341,6 @@ fn validate_call(
     results: VRegRange,
     errs: &mut Vec<ValidationError>,
 ) {
-    let total = module.imports.len() + module.functions.len();
-    if callee.0 as usize >= total {
-        errs.push(err_in_func(
-            fname,
-            op_i,
-            format!("callee index {} out of range", callee.0),
-        ));
-        return;
-    }
-
     let arg_slice = func.pool_slice(args);
     let res_slice = func.pool_slice(results);
 
@@ -359,8 +349,17 @@ fn validate_call(
     }
 
     let mut import_param_scratch: Vec<IrType> = Vec::new();
-    let (param_tys, ret_tys): (&[IrType], &[IrType]) =
-        if let Some(i) = module.callee_as_import(callee) {
+    let (param_tys, ret_tys): (&[IrType], &[IrType]) = match callee {
+        CalleeRef::Import(ImportId(i)) => {
+            let i = i as usize;
+            if i >= module.imports.len() {
+                errs.push(err_in_func(
+                    fname,
+                    op_i,
+                    format!("callee import index {i} out of range"),
+                ));
+                return;
+            }
             let imp = &module.imports[i];
             import_param_scratch.clear();
             if imp.needs_vmctx {
@@ -368,8 +367,16 @@ fn validate_call(
             }
             import_param_scratch.extend_from_slice(&imp.param_types);
             (import_param_scratch.as_slice(), imp.return_types.as_slice())
-        } else if let Some(i) = module.callee_as_function(callee) {
-            let fdef = &module.functions[i];
+        }
+        CalleeRef::Local(id) => {
+            let Some(fdef) = module.functions.get(&id) else {
+                errs.push(err_in_func(
+                    fname,
+                    op_i,
+                    format!("callee unknown local func {}", id.0),
+                ));
+                return;
+            };
             let vm = fdef.vmctx_vreg.0 as usize;
             let end = vm + 1 + fdef.param_count as usize;
             if end > fdef.vreg_types.len() {
@@ -381,14 +388,8 @@ fn validate_call(
                 return;
             }
             (&fdef.vreg_types[..end], fdef.return_types.as_slice())
-        } else {
-            errs.push(err_in_func(
-                fname,
-                op_i,
-                "internal: callee signature missing",
-            ));
-            return;
-        };
+        }
+    };
 
     if param_tys.len() != arg_slice.len() {
         errs.push(err_in_func(
