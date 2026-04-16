@@ -1,0 +1,20 @@
+[package]
+name = "lp-shader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "High-level shader compilation and texture API"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+std = []
+cranelift = ["dep:lpvm-cranelift"]
+
+[dependencies]
+lps-shared = { path = "../lps-shared" }
+lpvm = { path = "../lpvm" }
+lps-frontend = { path = "../lps-frontend" }
+lpvm-cranelift = { path = "../lpvm-cranelift", optional = true }

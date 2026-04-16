@@ -113,7 +113,9 @@ fn raw_resolution(raw: &Option<RawResolution>) -> Result<FxResolution, FxError> 
     Ok(FxResolution { width, height })
 }
 
-fn validate_inputs(map: BTreeMap<String, RawInputDef>) -> Result<BTreeMap<String, FxInputDef>, FxError> {
+fn validate_inputs(
+    map: BTreeMap<String, RawInputDef>,
+) -> Result<BTreeMap<String, FxInputDef>, FxError> {
     let mut out = BTreeMap::new();
     for (name, raw) in map {
         let def = validate_input(&name, raw)?;
@@ -277,11 +279,7 @@ fn value_from_toml(
     }
 }
 
-fn vec3_from_toml(
-    input: &str,
-    v: &toml::Value,
-    field: &'static str,
-) -> Result<FxValue, FxError> {
+fn vec3_from_toml(input: &str, v: &toml::Value, field: &'static str) -> Result<FxValue, FxError> {
     let arr = v.as_array().ok_or_else(|| FxError::DefaultTypeMismatch {
         input: String::from(input),
         expected: String::from("[f32, f32, f32]"),

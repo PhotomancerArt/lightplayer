@@ -3861,6 +3861,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-shader"
+version = "40.0.0"
+dependencies = [
+ "lps-frontend",
+ "lps-shared",
+ "lpvm",
+ "lpvm-cranelift",
+]
+
+[[package]]
 name = "lp-shared"
 version = "40.0.0"
 dependencies = [

@@ -6,16 +6,16 @@
 
 extern crate alloc;
 
-mod error;
 pub mod engine;
+mod error;
 mod input;
 mod manifest;
 mod module;
 mod parse;
 pub mod texture;
 
-pub use error::FxError;
 pub use engine::{FxEngine, FxInstance};
+pub use error::FxError;
 pub use input::{FxChoice, FxInputDef, FxInputType, FxPresentation, FxValue};
 pub use manifest::{FxManifest, FxMeta, FxResolution};
 pub use module::FxModule;
@@ -49,7 +49,13 @@ mod tests {
     fn missing_meta_name() {
         let toml = "[meta]\nname = \"\"\n";
         let e = parse_manifest(toml).unwrap_err();
-        assert!(matches!(e, FxError::MissingField { section: "meta", .. }));
+        assert!(matches!(
+            e,
+            FxError::MissingField {
+                section: "meta",
+                ..
+            }
+        ));
     }
 
     #[test]

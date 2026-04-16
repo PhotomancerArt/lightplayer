@@ -13,7 +13,10 @@ pub enum FxError {
         field: &'static str,
     },
     /// An input's `type` string was not recognized.
-    InvalidType { input: alloc::string::String, found: alloc::string::String },
+    InvalidType {
+        input: alloc::string::String,
+        found: alloc::string::String,
+    },
     /// `default`, `min`, or `max` did not match the input's declared type.
     DefaultTypeMismatch {
         input: alloc::string::String,

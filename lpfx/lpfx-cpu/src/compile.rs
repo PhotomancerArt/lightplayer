@@ -4,9 +4,9 @@ use alloc::format;
 use alloc::string::String;
 
 use lpir::LpirModule;
-use lpvm::LpvmEngine;
 use lps_shared::LpsModuleSig;
 use lps_shared::path_resolve::LpsTypePathExt;
+use lpvm::LpvmEngine;
 
 use lpfx::FxManifest;
 

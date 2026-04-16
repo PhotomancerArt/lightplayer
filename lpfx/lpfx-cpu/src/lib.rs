@@ -10,15 +10,15 @@ use alloc::format;
 use alloc::string::String;
 
 #[cfg(feature = "cranelift")]
+use lps_shared::lps_value_f32::LpsValueF32;
+#[cfg(feature = "cranelift")]
 use lpvm::{LpvmInstance, LpvmModule};
 #[cfg(feature = "cranelift")]
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, FloatMode, MemoryStrategy};
-#[cfg(feature = "cranelift")]
-use lps_shared::lps_value_f32::LpsValueF32;
 
 use lpfx::engine::{FxEngine, FxInstance};
-use lpfx::{FxModule, FxValue};
 use lpfx::texture::{CpuTexture, TextureFormat, TextureId};
+use lpfx::{FxModule, FxValue};
 
 #[cfg(feature = "cranelift")]
 fn fx_value_to_lps(value: &FxValue) -> LpsValueF32 {
@@ -105,12 +105,7 @@ impl FxEngine for CpuFxEngine {
     type Instance = CpuFxInstance;
     type Error = String;
 
-    fn create_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        format: TextureFormat,
-    ) -> TextureId {
+    fn create_texture(&mut self, width: u32, height: u32, format: TextureFormat) -> TextureId {
         let id = TextureId::from_raw(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.textures
@@ -118,7 +113,11 @@ impl FxEngine for CpuFxEngine {
         id
     }
 
-    fn instantiate(&mut self, module: &FxModule, output: TextureId) -> Result<Self::Instance, Self::Error> {
+    fn instantiate(
+        &mut self,
+        module: &FxModule,
+        output: TextureId,
+    ) -> Result<Self::Instance, Self::Error> {
         let out_tex = self
             .textures
             .remove(&output)
@@ -224,9 +223,6 @@ mod tests {
 
         let output = instance.output();
         let center = output.pixel_u16(8, 8);
-        assert!(
-            center[3] > 0,
-            "alpha should be non-zero from render()"
-        );
+        assert!(center[3] > 0, "alpha should be non-zero from render()");
     }
 }

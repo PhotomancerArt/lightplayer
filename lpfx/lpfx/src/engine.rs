@@ -9,12 +9,7 @@ pub trait FxEngine {
     type Instance: FxInstance;
     type Error: core::fmt::Display;
 
-    fn create_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        format: TextureFormat,
-    ) -> TextureId;
+    fn create_texture(&mut self, width: u32, height: u32, format: TextureFormat) -> TextureId;
 
     fn instantiate(
         &mut self,
