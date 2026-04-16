@@ -1,12 +1,12 @@
 // noise.fx — demo effect: lpfn noise + palettes + cycling (M0 compile check).
 // Entry point for tooling / previews.
 
-layout(binding = 0) uniform float speed;
-layout(binding = 0) uniform float zoom;
-layout(binding = 0) uniform int noise_fn;
-layout(binding = 0) uniform int palette;
-layout(binding = 0) uniform bool cycle_palettes;
-layout(binding = 0) uniform float cycle_time_s;
+layout(binding = 0) uniform float input_speed;
+layout(binding = 0) uniform float input_zoom;
+layout(binding = 0) uniform int input_noise_fn;
+layout(binding = 0) uniform int input_palette;
+layout(binding = 0) uniform bool input_cycle_palettes;
+layout(binding = 0) uniform float input_cycle_time_s;
 
 vec3 paletteHeatmap(float t) {
     vec3 r = t * 2.1 - vec3(1.8, 1.14, 0.3);
@@ -82,14 +82,14 @@ vec2 fbm_demo(vec2 scaledCoord, float t) {
 }
 
 vec2 pick_noise(vec2 scaledCoord, float t) {
-    if (noise_fn == 0) return prsd_demo(scaledCoord, t);
-    if (noise_fn == 1) return worley_demo(scaledCoord, t);
+    if (input_noise_fn == 0) return prsd_demo(scaledCoord, t);
+    if (input_noise_fn == 1) return worley_demo(scaledCoord, t);
     return fbm_demo(scaledCoord, t);
 }
 
 vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
-    float t = time * speed;
-    float s = 0.05 * zoom;
+    float t = time * input_speed;
+    float s = 0.05 * input_zoom;
     vec2 center = outputSize * 0.5;
     vec2 dir = fragCoord - center;
     vec2 scaledCoord = center + dir * s;
@@ -97,8 +97,8 @@ vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     vec2 tv = pick_noise(scaledCoord, t);
 
     vec3 col;
-    if (cycle_palettes) {
-        float period = max(cycle_time_s, 0.001);
+    if (input_cycle_palettes) {
+        float period = max(input_cycle_time_s, 0.001);
         float u = mod(t / period, 1.0);
         float a = floor(u * 5.0);
         float b = mod(a + 1.0, 5.0);
@@ -108,7 +108,7 @@ vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
         vec3 c1 = applyPalette(tv.x, int(b));
         col = mix(c0, c1, w);
     } else {
-        col = applyPalette(tv.x, palette);
+        col = applyPalette(tv.x, input_palette);
     }
 
     return vec4(col * tv.y, 1.0);

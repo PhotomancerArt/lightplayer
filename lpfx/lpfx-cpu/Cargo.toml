@@ -1,0 +1,24 @@
+[package]
+name = "lpfx-cpu"
+description = "CPU rendering backend for lpfx effect modules (no_std + alloc)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["cranelift"]
+cranelift = ["dep:lpvm-cranelift"]
+
+[dependencies]
+lpfx = { path = "../lpfx" }
+lpir = { path = "../../lp-shader/lpir" }
+lpvm = { path = "../../lp-shader/lpvm", default-features = false }
+lps-frontend = { path = "../../lp-shader/lps-frontend" }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
+
+lpvm-cranelift = { path = "../../lp-shader/lpvm-cranelift", optional = true, default-features = false, features = ["std", "glsl"] }
+
+[lints]
+workspace = true

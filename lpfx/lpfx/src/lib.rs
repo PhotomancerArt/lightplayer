@@ -7,16 +7,20 @@
 extern crate alloc;
 
 mod error;
+pub mod engine;
 mod input;
 mod manifest;
 mod module;
 mod parse;
+pub mod texture;
 
 pub use error::FxError;
+pub use engine::{FxEngine, FxInstance};
 pub use input::{FxChoice, FxInputDef, FxInputType, FxPresentation, FxValue};
 pub use manifest::{FxManifest, FxMeta, FxResolution};
 pub use module::FxModule;
 pub use parse::parse_manifest;
+pub use texture::{CpuTexture, TextureFormat, TextureId};
 
 #[cfg(test)]
 mod tests {

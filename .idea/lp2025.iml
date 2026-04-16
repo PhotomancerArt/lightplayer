@@ -69,6 +69,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-native/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpfn-impl-macro/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-native/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lpfx/lpfx/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

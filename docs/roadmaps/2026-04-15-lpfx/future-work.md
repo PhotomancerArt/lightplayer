@@ -84,6 +84,26 @@ Any input can be bound to any compatible source:
 This lives in lp-core's project/node graph layer, not in lpfx itself.
 The effect module just declares its inputs; the system does the wiring.
 
+## Uniform struct for inputs
+
+The M1 `input_` prefix convention (`[input.speed]` → `uniform float input_speed`)
+is a workaround for the compiler not yet supporting uniform structs. Once
+lps-frontend / naga can handle a `uniform Input { float speed; ... }` block,
+refactor to:
+
+```glsl
+layout(binding = 0) uniform Input {
+    float speed;
+    float zoom;
+    int noise_fn;
+    // ...
+};
+```
+
+`set_input("speed")` would then map to `set_uniform("input.speed")` — the
+manifest stays the same, only the GLSL convention changes. This is also
+the natural pattern for WGSL / WebGPU (`var<uniform> input: Input;`).
+
 ## Output configuration
 
 Configurable output depth and format:

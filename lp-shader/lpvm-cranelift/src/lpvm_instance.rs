@@ -80,7 +80,14 @@ impl CraneliftInstance {
         instance
     }
 
-    fn vmctx_ptr(&self) -> *const u8 {
+    /// Pointer to this instance's VM context buffer (header + uniforms + globals snapshot layout).
+    ///
+    /// # Safety
+    /// The pointer is valid for the lifetime of `self`. Pass it only to APIs that expect the
+    /// same layout as this module's VM context (for example [`crate::DirectCall::call_i32_buf`]
+    /// together with code compiled from the same [`crate::CraneliftModule`]).
+    #[must_use]
+    pub fn vmctx_ptr(&self) -> *const u8 {
         self.vmctx_buf.as_ptr()
     }
 

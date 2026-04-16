@@ -39,6 +39,7 @@ members = [
     "lp-app/web-demo",
     "spikes/naga-wasm-poc", "lp-shader/lps-q32",
     "lpfx/lpfx",
+    "lpfx/lpfx-cpu",
 ]
 resolver = "2"
 
@@ -74,6 +75,7 @@ default-members = [
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-filetests-app",
     "lpfx/lpfx",
+    "lpfx/lpfx-cpu",
 ]
 [workspace.package]
 version = "40.0.0"
