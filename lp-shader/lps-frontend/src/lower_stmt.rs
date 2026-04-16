@@ -12,7 +12,7 @@ use crate::lower_access;
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
-use crate::lower_lpfx;
+use crate::lower_lpfn;
 use crate::naga_util::expr_type_inner;
 
 pub(crate) fn lower_block(ctx: &mut LowerCtx<'_>, block: &Block) -> Result<(), LowerError> {
@@ -509,8 +509,8 @@ fn lower_user_call(
 ) -> Result<(), LowerError> {
     let f = &ctx.module.functions[callee];
     let name = f.name.as_deref().unwrap_or("");
-    if name.starts_with("lpfx_") {
-        return lower_lpfx::lower_lpfx_call(ctx, callee, arguments, result);
+    if name.starts_with("lpfn_") {
+        return lower_lpfn::lower_lpfn_call(ctx, callee, arguments, result);
     }
     if f.body.is_empty() {
         if name == "__lp_get_fuel" {

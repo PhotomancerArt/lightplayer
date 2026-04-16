@@ -1,31 +1,31 @@
-//! Discovery of LPFX functions with #[lpfx_impl] attributes
+//! Discovery of LPFX functions with #[lpfn_impl] attributes
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::{Item, ItemFn, parse_file};
 use walkdir::WalkDir;
 
-use crate::lpfx::errors::LpfxCodegenError;
+use crate::lpfn::errors::LpfnCodegenError;
 
 /// Information about a discovered LPFX function
 #[derive(Debug, Clone)]
-pub struct LpfxFunctionInfo {
-    /// Rust function name (e.g., "__lp_lpfx_snoise3_f32")
+pub struct LpfnFunctionInfo {
+    /// Rust function name (e.g., "__lp_lpfn_snoise3_f32")
     pub rust_fn_name: String,
-    /// BuiltinId enum variant name (e.g., "LpLpfxSnoise3F32")
+    /// BuiltinId enum variant name (e.g., "LpLpfnSnoise3F32")
     pub builtin_id_variant: String,
     /// File path where function is defined
     pub file_path: PathBuf,
-    /// Whether function has #[lpfx_impl] attribute (will be parsed in next phase)
-    pub has_lpfx_impl_attr: bool,
+    /// Whether function has #[lpfn_impl] attribute (will be parsed in next phase)
+    pub has_lpfn_impl_attr: bool,
 }
 
 /// Discover all LPFX functions in the given directory
-pub fn discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, LpfxCodegenError> {
-    let mut functions: Vec<LpfxFunctionInfo> = Vec::new();
+pub fn discover_lpfn_functions(dir: &Path) -> Result<Vec<LpfnFunctionInfo>, LpfnCodegenError> {
+    let mut functions: Vec<LpfnFunctionInfo> = Vec::new();
 
     for entry in WalkDir::new(dir) {
-        let entry = entry.map_err(|e| LpfxCodegenError::AttributeParseError {
+        let entry = entry.map_err(|e| LpfnCodegenError::AttributeParseError {
             function_name: String::new(),
             file_path: String::new(),
             error: format!("Failed to walk directory: {}", e),
@@ -38,7 +38,7 @@ pub fn discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, Lpfx
         }
 
         let file_name = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-            LpfxCodegenError::AttributeParseError {
+            LpfnCodegenError::AttributeParseError {
                 function_name: String::new(),
                 file_path: path.display().to_string(),
                 error: "Invalid file name".to_string(),
@@ -51,13 +51,13 @@ pub fn discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, Lpfx
         }
 
         let content =
-            fs::read_to_string(path).map_err(|e| LpfxCodegenError::AttributeParseError {
+            fs::read_to_string(path).map_err(|e| LpfnCodegenError::AttributeParseError {
                 function_name: String::new(),
                 file_path: path.display().to_string(),
                 error: format!("Failed to read file: {}", e),
             })?;
 
-        let ast = parse_file(&content).map_err(|e| LpfxCodegenError::AttributeParseError {
+        let ast = parse_file(&content).map_err(|e| LpfnCodegenError::AttributeParseError {
             function_name: String::new(),
             file_path: path.display().to_string(),
             error: format!("Failed to parse file: {}", e),
@@ -65,7 +65,7 @@ pub fn discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, Lpfx
 
         for item in ast.items {
             if let Item::Fn(func) = item
-                && let Some(info) = extract_lpfx_function(&func, path)
+                && let Some(info) = extract_lpfn_function(&func, path)
             {
                 // Skip if already added
                 if !functions
@@ -85,23 +85,23 @@ pub fn discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, Lpfx
 }
 
 /// Extract LPFX function information from a function item
-fn extract_lpfx_function(func: &ItemFn, file_path: &Path) -> Option<LpfxFunctionInfo> {
+fn extract_lpfn_function(func: &ItemFn, file_path: &Path) -> Option<LpfnFunctionInfo> {
     let func_name = func.sig.ident.to_string();
 
-    // Only process functions that start with __lp_lpfx_ (LPFX convention)
-    if !func_name.starts_with("__lp_lpfx_") {
+    // Only process functions that start with __lp_lpfn_ (LPFX convention)
+    if !func_name.starts_with("__lp_lpfn_") {
         return None;
     }
 
-    // Check for #[lpfx_impl] or #[lpfx_impl_macro::lpfx_impl] attribute
-    let has_lpfx_impl_attr = func.attrs.iter().any(|attr| {
+    // Check for #[lpfn_impl] or #[lpfn_impl_macro::lpfn_impl] attribute
+    let has_lpfn_impl_attr = func.attrs.iter().any(|attr| {
         let path = attr.path();
-        if path.is_ident("lpfx_impl") {
+        if path.is_ident("lpfn_impl") {
             return true;
         }
-        // Check if last segment is "lpfx_impl"
+        // Check if last segment is "lpfn_impl"
         if let Some(last_seg) = path.segments.last() {
-            return last_seg.ident == "lpfx_impl";
+            return last_seg.ident == "lpfn_impl";
         }
         false
     });
@@ -111,9 +111,9 @@ fn extract_lpfx_function(func: &ItemFn, file_path: &Path) -> Option<LpfxFunction
     // 2. Split by _ and capitalize each word
     // 3. Join together
     // Examples:
-    // __lp_lpfx_hash_1 -> LpLpfxHash1
-    // __lp_lpfx_snoise1_f32 -> LpLpfxSnoise1F32
-    // __lp_lpfx_snoise1_q32 -> LpLpfxSnoise1Q32
+    // __lp_lpfn_hash_1 -> LpLpfnHash1
+    // __lp_lpfn_snoise1_f32 -> LpLpfnSnoise1F32
+    // __lp_lpfn_snoise1_q32 -> LpLpfnSnoise1Q32
     let name_without_prefix = func_name.strip_prefix("__").unwrap();
     let builtin_id_variant = name_without_prefix
         .split('_')
@@ -126,10 +126,10 @@ fn extract_lpfx_function(func: &ItemFn, file_path: &Path) -> Option<LpfxFunction
         })
         .collect::<String>();
 
-    Some(LpfxFunctionInfo {
+    Some(LpfnFunctionInfo {
         rust_fn_name: func_name,
         builtin_id_variant,
         file_path: file_path.to_path_buf(),
-        has_lpfx_impl_attr,
+        has_lpfn_impl_attr,
     })
 }

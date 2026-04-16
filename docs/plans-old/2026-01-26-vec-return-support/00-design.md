@@ -11,12 +11,12 @@ returns.
 
 ```
 lp-shader/lps-compiler/src/frontend/
-├── semantic/lpfx/
-│   └── lpfx_sig.rs                    # UPDATE: Add StructReturn support for vector returns
+├── semantic/lpfn/
+│   └── lpfn_sig.rs                    # UPDATE: Add StructReturn support for vector returns
 └── codegen/
-    └── lpfx_fns.rs                     # UPDATE: Handle StructReturn in LPFX calls
+    └── lpfn_fns.rs                     # UPDATE: Handle StructReturn in LPFX calls
 
-lp-shader/lps-builtins/src/builtins/lpfx/
+lp-shader/lps-builtins/src/builtins/lpfn/
 ├── color/space/
 │   ├── hue2rgb_q32.rs                  # UPDATE: Add StructReturn parameter to extern C wrapper
 │   ├── hue2rgb_f32.rs                  # UPDATE: Add StructReturn parameter to extern C wrapper
@@ -31,7 +31,7 @@ lp-shader/lps-builtins/src/builtins/lpfx/
 
 ## Types and Functions
 
-### `lpfx_sig.rs`
+### `lpfn_sig.rs`
 
 **`build_call_signature()`** - UPDATE
 
@@ -45,7 +45,7 @@ lp-shader/lps-builtins/src/builtins/lpfx/
 - `get_pointer_type()` - Get pointer type for StructReturn parameter
 - `calculate_struct_return_size()` - Calculate buffer size for vector return
 
-### `lpfx_fns.rs`
+### `lpfn_fns.rs`
 
 **`emit_lp_lib_fn_call()`** - UPDATE
 
@@ -55,13 +55,13 @@ lp-shader/lps-builtins/src/builtins/lpfx/
 - Load return values from buffer after call
 - Handle both Decimal and NonDecimal implementations
 
-**`get_lpfx_testcase_call()`** - UPDATE
+**`get_lpfn_testcase_call()`** - UPDATE
 
 - No changes needed (signature building handles StructReturn)
 
 ### Extern C Wrappers (all vector-returning functions)
 
-**`__lpfx_*_q32()` / `__lpfx_*_f32()`** - UPDATE
+**`__lpfn_*_q32()` / `__lpfn_*_f32()`** - UPDATE
 
 - Add `*mut i32` / `*mut f32` parameter for StructReturn (first parameter)
 - Write all vector components to memory at offsets

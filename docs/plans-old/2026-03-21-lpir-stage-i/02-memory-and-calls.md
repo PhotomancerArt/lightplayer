@@ -120,7 +120,7 @@ func @noise_example(v0:f32, v1:f32) -> f32 {
   v3:i32 = ftoi_sat_s v0             ; flatten to i32 for Q32
   v4:i32 = ftoi_sat_s v1
   store v2, 0, v3                    ; prepend result pointer (implicit)
-  call @lpfx::noise3(v2, v3, v4)
+  call @lpfn::noise3(v2, v3, v4)
   v5:f32 = load v2, 0               ; result.x
   v6:f32 = load v2, 4               ; result.y
   v7:f32 = load v2, 8               ; result.z
@@ -192,7 +192,7 @@ Cranelift JIT exposes all symbols), not gated by `entry`.
 import @std.math::fmin(f32, f32) -> f32
 import @std.math::fmax(f32, f32) -> f32
 import @lp.q32::q32_add(i32, i32) -> i32
-import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+import @lpfn::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
 
 entry func @shader_main(v0:i32) -> f32 {
   ...

@@ -1,19 +1,19 @@
-# Phase 1: Update find_lpfx_fn to support overload resolution
+# Phase 1: Update find_lpfn_fn to support overload resolution
 
 ## Description
 
-Update `find_lpfx_fn` in `lpfx_fn_registry.rs` to accept `arg_types` parameter and implement
+Update `find_lpfn_fn` in `lpfn_fn_registry.rs` to accept `arg_types` parameter and implement
 overload resolution logic. The function should find all functions with matching name, then match on
 parameter types using exact type matching.
 
 ## Implementation
 
-### File: `lp-shader/lps-compiler/src/frontend/semantic/lpfx/lpfx_fn_registry.rs`
+### File: `lp-shader/lps-compiler/src/frontend/semantic/lpfn/lpfn_fn_registry.rs`
 
-**Update `find_lpfx_fn` signature:**
+**Update `find_lpfn_fn` signature:**
 
-- Change from: `find_lpfx_fn(name: &str) -> Option<&'static LpfxFn>`
-- Change to: `find_lpfx_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfxFn>`
+- Change from: `find_lpfn_fn(name: &str) -> Option<&'static LpfnFn>`
+- Change to: `find_lpfn_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfnFn>`
 
 **Implement overload resolution:**
 
@@ -26,13 +26,13 @@ parameter types using exact type matching.
 
 **Add helper function for parameter type matching:**
 
-- `matches_signature(func: &LpfxFn, arg_types: &[Type]) -> bool`
+- `matches_signature(func: &LpfnFn, arg_types: &[Type]) -> bool`
 - Checks parameter count matches
 - Checks each parameter type matches exactly
 
 ## Success Criteria
 
-- `find_lpfx_fn` signature updated to require `arg_types`
+- `find_lpfn_fn` signature updated to require `arg_types`
 - Overload resolution implemented with exact type matching
 - Returns correct function for matching signature
 - Returns None for ambiguous or no match cases

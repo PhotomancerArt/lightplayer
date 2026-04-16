@@ -16,7 +16,7 @@ mod lower_cast;
 mod lower_ctx;
 mod lower_error;
 mod lower_expr;
-mod lower_lpfx;
+mod lower_lpfn;
 mod lower_math;
 mod lower_math_geom;
 mod lower_math_helpers;
@@ -256,9 +256,9 @@ float test_main() {
     }
 
     #[test]
-    fn lower_lpfx_saturate_validates_and_interps() {
+    fn lower_lpfn_saturate_validates_and_interps() {
         use lpir::interpret;
-        let src = "float f(float x) { return lpfx_saturate(x); }";
+        let src = "float f(float x) { return lpfn_saturate(x); }";
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
@@ -279,7 +279,7 @@ float test_main() {
             func_name: &str,
             args: &[Value],
         ) -> Result<Vec<Value>, InterpError> {
-            if module_name == "lpfx" && func_name.starts_with("lpfx_saturate_") {
+            if module_name == "lpfn" && func_name.starts_with("lpfn_saturate_") {
                 let x = args[0]
                     .as_f32()
                     .ok_or_else(|| InterpError::Import(String::from("expected f32")))?;

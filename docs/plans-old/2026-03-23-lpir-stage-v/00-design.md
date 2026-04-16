@@ -15,7 +15,7 @@ instructions.
 lps-wasm/src/emit.rs      # OLD: 1970-line Naga-direct emitter
 lps-wasm/src/emit_vec.rs   # OLD: vector lowering (LPIR is scalarized)
 lps-wasm/src/locals.rs     # OLD: complex local allocation
-lps-wasm/src/lpfx.rs       # OLD: LPFX resolution from Naga
+lps-wasm/src/lpfn.rs       # OLD: LPFX resolution from Naga
 lps-wasm/src/types.rs      # OLD: Naga type → WASM type mapping
 ```
 
@@ -30,7 +30,7 @@ lps-wasm/src/
     q32.rs          # Q32 inline expansion (add_sat, sub_sat, mul, div, etc.)
     control.rs      # structured control flow (if, loop, switch, break, continue)
     memory.rs       # shadow stack, slot_addr, load, store, memcpy
-    imports.rs      # @std.math + @lpfx → builtins module resolution
+    imports.rs      # @std.math + @lpfn → builtins module resolution
   lib.rs            # UPDATE: new public API, add lpir dep
   module.rs         # KEEP: WasmModule, WasmExport (update to use IrModule metadata)
   options.rs        # KEEP: WasmOptions
@@ -72,7 +72,7 @@ emit_module(&IrModule, &WasmOptions) ── emit/mod.rs (new)
   │
   ├─ collect all imports ──────────────── emit/imports.rs
   │   ├─ @std.math::sin → builtins::__lp_q32_sin
-  │   ├─ @lpfx::lpfx_hash1 → builtins::__lpfx_hash_1
+  │   ├─ @lpfn::lpfn_hash1 → builtins::__lpfn_hash_1
   │   └─ allocate WASM import indices
   │
   ├─ build WASM type section
@@ -185,13 +185,13 @@ The emitter maintains a depth counter and a control stack to compute
 
 ### Import resolution
 
-All `@std.math::*` and `@lpfx::*` imports map to the `builtins` WASM
+All `@std.math::*` and `@lpfn::*` imports map to the `builtins` WASM
 module for Q32 mode:
 
 - `@std.math::sin` → `builtins::__lp_q32_sin` (i32 → i32)
 - `@std.math::cos` → `builtins::__lp_q32_cos` (i32 → i32)
 - `@std.math::pow` → `builtins::__lp_q32_pow` (i32, i32 → i32)
-- `@lpfx::lpfx_hash1` → `builtins::__lpfx_hash_1` (i32, i32 → i32)
+- `@lpfn::lpfn_hash1` → `builtins::__lpfn_hash_1` (i32, i32 → i32)
 - etc.
 
 The `imports.rs` module:

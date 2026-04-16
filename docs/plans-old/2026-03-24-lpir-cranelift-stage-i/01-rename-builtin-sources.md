@@ -64,28 +64,28 @@ each file that call the function by name also need updating.
 For each file: replace all occurrences of the old name with the new name
 (function definition, test calls, doc comments referencing it).
 
-### LPFX builtins (67 functions, `builtins/lpfx/`)
+### LPFX builtins (67 functions, `builtins/lpfn/`)
 
-Prefix change: `__lpfx_` → `__lp_lpfx_`. The descriptor part stays the same.
+Prefix change: `__lpfn_` → `__lp_lpfn_`. The descriptor part stays the same.
 
 For each of the 67 LPFX functions across all subdirectories (color, generative,
-math, hash): find-and-replace `__lpfx_` → `__lp_lpfx_` within each file.
+math, hash): find-and-replace `__lpfn_` → `__lp_lpfn_` within each file.
 
 Examples:
 
-- `__lpfx_fbm2_q32` → `__lp_lpfx_fbm2_q32`
-- `__lpfx_hash_1` → `__lp_lpfx_hash_1`
-- `__lpfx_saturate_vec3_q32` → `__lp_lpfx_saturate_vec3_q32`
-- `__lpfx_hsv2rgb_vec4_f32` → `__lp_lpfx_hsv2rgb_vec4_f32`
+- `__lpfn_fbm2_q32` → `__lp_lpfn_fbm2_q32`
+- `__lpfn_hash_1` → `__lp_lpfn_hash_1`
+- `__lpfn_saturate_vec3_q32` → `__lp_lpfn_saturate_vec3_q32`
+- `__lpfn_hsv2rgb_vec4_f32` → `__lp_lpfn_hsv2rgb_vec4_f32`
 
-This can be done as a bulk `__lpfx_` → `__lp_lpfx_` replacement across all
-files in `builtins/lpfx/`.
+This can be done as a bulk `__lpfn_` → `__lp_lpfn_` replacement across all
+files in `builtins/lpfn/`.
 
 ### Tests within lps-builtins
 
 Tests in these files call the functions directly. The renames above cover
 these since they're in the same files. Verify no test references are missed
-by searching for any remaining `__lp_q32_` or `__lpfx_` occurrences in
+by searching for any remaining `__lp_q32_` or `__lpfn_` occurrences in
 the `lps-builtins/src/` tree after the rename.
 
 ## Validate

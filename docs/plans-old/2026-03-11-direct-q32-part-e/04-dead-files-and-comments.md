@@ -3,12 +3,12 @@
 ## Dead file
 
 Delete `frontend/codegen/lp_lib_fns.rs`. It is not included in `mod.rs`
-(superseded by `lpfx_fns.rs`) and contains stale transform references.
+(superseded by `lpfn_fns.rs`) and contains stale transform references.
 
 ## Stale comments to fix
 
-### `frontend/codegen/lpfx_fns.rs`
-- **Lines 231–234**: Doc on `get_lpfx_testcase_call` says "These are
+### `frontend/codegen/lpfn_fns.rs`
+- **Lines 231–234**: Doc on `get_lpfn_testcase_call` says "These are
   converted to q32 builtins by the transform." → Update to reflect that
   this path is only used in float mode; Q32 uses builtins directly.
 - **Lines 253–254**: "The transform will convert this to q32 when

@@ -47,7 +47,7 @@ vec3 applyPalette(float t, float palette) {
 
 vec2 prsd_demo(vec2 scaledCoord, float time) {
     vec2 gradient;
-    float noiseValue = lpfx_psrdnoise(
+    float noiseValue = lpfn_psrdnoise(
         scaledCoord,
         vec2(0.0),
         time,

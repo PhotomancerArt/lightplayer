@@ -3,61 +3,61 @@
 ## Overview
 
 Add support for function overloading in LPFX functions, allowing multiple implementations with the
-same GLSL name but different parameter signatures (e.g., `lpfx_hsv2rgb(vec3)` and
-`lpfx_hsv2rgb(vec4)`). This enables porting lygia functions that use overloading.
+same GLSL name but different parameter signatures (e.g., `lpfn_hsv2rgb(vec3)` and
+`lpfn_hsv2rgb(vec4)`). This enables porting lygia functions that use overloading.
 
 ## Architecture
 
 ### File Structure
 
 ```
-lp-shader/lps-compiler/src/frontend/semantic/lpfx/
-├── lpfx_fn.rs                    # UPDATE: No changes needed
-├── lpfx_fns.rs                   # UPDATE: Generated code will have multiple entries per name
-├── lpfx_fn_registry.rs           # UPDATE: Add overload resolution to find_lpfx_fn
-└── lpfx_sig.rs                   # No changes
+lp-shader/lps-compiler/src/frontend/semantic/lpfn/
+├── lpfn_fn.rs                    # UPDATE: No changes needed
+├── lpfn_fns.rs                   # UPDATE: Generated code will have multiple entries per name
+├── lpfn_fn_registry.rs           # UPDATE: Add overload resolution to find_lpfn_fn
+└── lpfn_sig.rs                   # No changes
 
 lp-shader/lps-compiler/src/frontend/codegen/
-├── lpfx_fns.rs                   # UPDATE: Extract arg types and pass to find_lpfx_fn
-└── lp_lib_fns.rs                 # UPDATE: Extract arg types and pass to find_lpfx_fn
+├── lpfn_fns.rs                   # UPDATE: Extract arg types and pass to find_lpfn_fn
+└── lp_lib_fns.rs                 # UPDATE: Extract arg types and pass to find_lpfn_fn
 
-lp-shader/lps-builtin-gen-app/src/lpfx/
-├── generate.rs                   # UPDATE: Generate multiple LpfxFn entries per unique signature
+lp-shader/lps-builtin-gen-app/src/lpfn/
+├── generate.rs                   # UPDATE: Generate multiple LpfnFn entries per unique signature
 └── validate.rs                   # UPDATE: Validate distinct signatures for overloads
 ```
 
 ### Types and Functions
 
-#### Registry Lookup (`lpfx_fn_registry.rs`)
+#### Registry Lookup (`lpfn_fn_registry.rs`)
 
 ```
-find_lpfx_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfxFn>
+find_lpfn_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfnFn>
   # UPDATE: Now requires arg_types, does overload resolution
   # - Finds all functions with matching name
   # - Matches on parameter types (exact match only)
   # - Returns first match or None if ambiguous/no match
 
-check_lpfx_fn_call(name: &str, arg_types: &[Type]) -> Result<Type, String>
-  # UPDATE: Uses find_lpfx_fn with arg_types, extracts return type
+check_lpfn_fn_call(name: &str, arg_types: &[Type]) -> Result<Type, String>
+  # UPDATE: Uses find_lpfn_fn with arg_types, extracts return type
 ```
 
-#### Codegen (`lpfx_fns.rs`, `lp_lib_fns.rs`)
+#### Codegen (`lpfn_fns.rs`, `lp_lib_fns.rs`)
 
 ```
 emit_lp_lib_fn_call(name: &str, args: Vec<(Vec<Value>, Type)>) -> Result<...>
-  # UPDATE: Extract arg_types from args, pass to find_lpfx_fn
+  # UPDATE: Extract arg_types from args, pass to find_lpfn_fn
 ```
 
-#### Codegen Tool (`lps-builtin-gen-app/src/lpfx/generate.rs`)
+#### Codegen Tool (`lps-builtin-gen-app/src/lpfn/generate.rs`)
 
 ```
-generate_lpfx_fns(parsed_functions: &[ParsedLpfxFunction]) -> String
-  # UPDATE: Generate multiple LpfxFn entries for each unique signature
+generate_lpfn_fns(parsed_functions: &[ParsedLpfnFunction]) -> String
+  # UPDATE: Generate multiple LpfnFn entries for each unique signature
   # - Group by GLSL name (already done)
-  # - For each group, create one LpfxFn per unique signature
+  # - For each group, create one LpfnFn per unique signature
   # - Each entry maps to correct BuiltinId for its signature
 
-validate_overloads(functions: &[ParsedLpfxFunction]) -> Result<(), Error>
+validate_overloads(functions: &[ParsedLpfnFunction]) -> Result<(), Error>
   # NEW: Validate that overloads have distinct parameter signatures
 ```
 
@@ -65,7 +65,7 @@ validate_overloads(functions: &[ParsedLpfxFunction]) -> Result<(), Error>
 
 ### 1. Registry Structure
 
-Keep the flat array structure (`&'static [LpfxFn]`), allowing multiple entries with the same GLSL
+Keep the flat array structure (`&'static [LpfnFn]`), allowing multiple entries with the same GLSL
 name. This requires minimal changes and maintains the current memory layout.
 
 ### 2. Overload Resolution
@@ -76,12 +76,12 @@ name. This requires minimal changes and maintains the current memory layout.
 
 ### 3. Lookup Function Signature
 
-Change `find_lpfx_fn` to require `arg_types` parameter since overload resolution always needs
+Change `find_lpfn_fn` to require `arg_types` parameter since overload resolution always needs
 argument types. All current call sites have access to argument types, so this is a clean change.
 
 ### 4. Codegen Tool Updates
 
-- Generate multiple `LpfxFn` entries for functions with the same GLSL name but different signatures
+- Generate multiple `LpfnFn` entries for functions with the same GLSL name but different signatures
 - Validate that overloads have distinct parameter signatures
 - Each entry correctly maps to its corresponding `BuiltinId`
 
@@ -107,15 +107,15 @@ signature change is breaking but acceptable since it's compiler-internal code.
 
 ### Error Handling
 
-- No match found: return `None` from `find_lpfx_fn`, codegen will emit "Unknown LPFX function" error
-- Ambiguous match: return `None` from `find_lpfx_fn`, codegen will emit "Ambiguous overload" error
-- Type mismatch: handled by `check_lpfx_fn_call` which validates after resolution
+- No match found: return `None` from `find_lpfn_fn`, codegen will emit "Unknown LPFX function" error
+- Ambiguous match: return `None` from `find_lpfn_fn`, codegen will emit "Ambiguous overload" error
+- Type mismatch: handled by `check_lpfn_fn_call` which validates after resolution
 
 ## Success Criteria
 
 - Multiple overloads of the same function name can be registered
 - Overload resolution correctly selects implementation based on argument types
-- `lpfx_hsv2rgb(vec3)` and `lpfx_hsv2rgb(vec4)` both work correctly
+- `lpfn_hsv2rgb(vec3)` and `lpfn_hsv2rgb(vec4)` both work correctly
 - Existing filetests pass
 - Codegen tool validates distinct signatures for overloads
 - All code compiles without warnings

@@ -25,7 +25,7 @@ The Q32 transform rewrites these calls: when it sees a `call` to a TestCase
 function named "sinf", it replaces it with a call to the Q32 builtin
 `LpQ32Sin`.
 
-### 2. LPFX functions (lpfx_fns.rs)
+### 2. LPFX functions (lpfn_fns.rs)
 
 LPFX (library pixel effects) functions have both float and Q32
 implementations. The registry entry has a `q32_impl` field. Currently, the
@@ -75,17 +75,17 @@ The LPFX dispatch already knows both variants. Change the selection from
 "always float, transform later" to "select based on DecimalFormat":
 
 ```rust
-// Before (in lpfx_fns.rs):
-let func_ref = get_lpfx_testcase_call(name, ...);  // always float
+// Before (in lpfn_fns.rs):
+let func_ref = get_lpfn_testcase_call(name, ...);  // always float
 
 // After:
 let func_ref = match ctx.float_mode {
-    DecimalFormat::Float => get_lpfx_testcase_call(name, ...),
-    DecimalFormat::Q32 => get_lpfx_q32_call(name, ...),
+    DecimalFormat::Float => get_lpfn_testcase_call(name, ...),
+    DecimalFormat::Q32 => get_lpfn_q32_call(name, ...),
 };
 ```
 
-The Q32 variant uses `find_lpfx_fn` → `lpfx_fn.q32_impl` → declare as
+The Q32 variant uses `find_lpfn_fn` → `lpfn_fn.q32_impl` → declare as
 builtin → FuncRef. This logic already exists in the Q32 transform's call
 conversion; it needs to move to the LPFX dispatch.
 
@@ -120,7 +120,7 @@ The changes are localized:
   numeric-aware libcall selection for pow, exp, log, etc.
 - `builtins/trigonometric.rs` — numeric-aware libcall selection for
   sin, cos, tan, etc.
-- `lpfx_fns.rs` — select float vs Q32 variant based on format
+- `lpfn_fns.rs` — select float vs Q32 variant based on format
 - `expr/function.rs` — use mapped signatures for user function calls
 
 The bulk of the math logic already exists in the Q32 transform. It's

@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Add `seed: UInt` to the `lpfx_psrdnoise` GLSL signatures (vec2 and vec3 overloads). Fix the
+Add `seed: UInt` to the `lpfn_psrdnoise` GLSL signatures (vec2 and vec3 overloads). Fix the
 Cranelift builtin registry to declare the correct parameter count. Update all GLSL shader sources.
 Regenerate derived code.
 
@@ -19,11 +19,11 @@ phases depend on the GLSL signature being correct.
 
 ## Implementation details
 
-### 1. Update GLSL signatures in `lpfx_fns.rs`
+### 1. Update GLSL signatures in `lpfn_fns.rs`
 
-File: `lp-shader/lps-frontend/src/semantic/lpfx/lpfx_fns.rs`
+File: `lp-shader/lps-frontend/src/semantic/lpfn/lpfn_fns.rs`
 
-Add `seed: UInt` as the last `In` parameter for both `lpfx_psrdnoise` overloads (vec2 at ~line 299
+Add `seed: UInt` as the last `In` parameter for both `lpfn_psrdnoise` overloads (vec2 at ~line 299
 and vec3 at ~line 331):
 
 ```rust
@@ -41,11 +41,11 @@ The vec2 overload goes from 4 params `[vec2, vec2, float, out vec2]` to 5 params
 
 File: `lp-shader/lps-cranelift/src/backend/builtins/registry.rs`
 
-`signature_for_builtin` for `LpfxPsrdnoise2F32 | LpfxPsrdnoise2Q32` currently has 6 params (5× i32 +
+`signature_for_builtin` for `LpfnPsrdnoise2F32 | LpfnPsrdnoise2Q32` currently has 6 params (5× i32 +
 pointer). Add the seed param (i32) to make it 7:
 
 ```rust
-BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
+BuiltinId::LpfnPsrdnoise2F32 | BuiltinId::LpfnPsrdnoise2Q32 => {
 sig.params.push(AbiParam::new(types::I32)); // x
 sig.params.push(AbiParam::new(types::I32)); // y
 sig.params.push(AbiParam::new(types::I32)); // period_x
@@ -57,11 +57,11 @@ sig.returns.push(AbiParam::new(types::I32));
 }
 ```
 
-Same for `LpfxPsrdnoise3F32 | LpfxPsrdnoise3Q32` — add one more i32 param for seed.
+Same for `LpfnPsrdnoise3F32 | LpfnPsrdnoise3Q32` — add one more i32 param for seed.
 
 ### 3. Update shader sources
 
-Two files use `lpfx_psrdnoise`:
+Two files use `lpfn_psrdnoise`:
 
 - `examples/basic/src/rainbow.shader/main.glsl`
 - `examples/mem-profile/src/rainbow.shader/main.glsl`
@@ -69,7 +69,7 @@ Two files use `lpfx_psrdnoise`:
 Change the call from:
 
 ```glsl
-float noiseValue = lpfx_psrdnoise(
+float noiseValue = lpfn_psrdnoise(
     scaledCoord,
     vec2(0.0),
     time,
@@ -80,7 +80,7 @@ float noiseValue = lpfx_psrdnoise(
 To:
 
 ```glsl
-float noiseValue = lpfx_psrdnoise(
+float noiseValue = lpfn_psrdnoise(
     scaledCoord,
     vec2(0.0),
     time,

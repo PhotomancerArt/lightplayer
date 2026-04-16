@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FloatMode, IrFunction, LpirModule, LpirOp};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
 };
 
@@ -1143,12 +1143,12 @@ fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<Bui
             let ac = decl.param_types.len();
             lpir_q32_builtin_id(&decl.func_name, ac)
         }
-        "lpfx" => {
-            // LPFX builtins are named like "lpfx_psrdnoise_34" - strip the suffix
-            let base = lpfx_strip_suffix(&decl.func_name)?;
-            // Get GLSL kinds from lpfx_glsl_params CSV or fall back to IR types
-            let kinds = lpfx_glsl_kinds_from_decl(decl);
-            glsl_lpfx_q32_builtin_id(base, &kinds)
+        "lpfn" => {
+            // LPFX builtins are named like "lpfn_psrdnoise_34" - strip the suffix
+            let base = lpfn_strip_suffix(&decl.func_name)?;
+            // Get GLSL kinds from lpfn_glsl_params CSV or fall back to IR types
+            let kinds = lpfn_glsl_kinds_from_decl(decl);
+            glsl_lpfn_q32_builtin_id(base, &kinds)
         }
         "vm" => {
             let ac = decl.param_types.len();
@@ -1158,17 +1158,17 @@ fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<Bui
     }
 }
 
-/// Strip the numeric suffix from LPFX import names (e.g., "lpfx_psrdnoise_34" → "lpfx_psrdnoise").
-fn lpfx_strip_suffix(func_name: &str) -> Option<&str> {
+/// Strip the numeric suffix from LPFX import names (e.g., "lpfn_psrdnoise_34" → "lpfn_psrdnoise").
+fn lpfn_strip_suffix(func_name: &str) -> Option<&str> {
     let (base, tail) = func_name.rsplit_once('_')?;
     tail.parse::<u32>().ok()?;
     Some(base)
 }
 
-/// Get GLSL parameter kinds from lpfx_glsl_params CSV or infer from IR types.
-fn lpfx_glsl_kinds_from_decl(decl: &lpir::lpir_module::ImportDecl) -> Vec<GlslParamKind> {
-    if let Some(ref enc) = decl.lpfx_glsl_params {
-        parse_lpfx_glsl_params_csv(enc)
+/// Get GLSL parameter kinds from lpfn_glsl_params CSV or infer from IR types.
+fn lpfn_glsl_kinds_from_decl(decl: &lpir::lpir_module::ImportDecl) -> Vec<GlslParamKind> {
+    if let Some(ref enc) = decl.lpfn_glsl_params {
+        parse_lpfn_glsl_params_csv(enc)
             .unwrap_or_else(|_| ir_params_to_glsl_kinds(&decl.param_types))
     } else {
         ir_params_to_glsl_kinds(&decl.param_types)
@@ -1176,7 +1176,7 @@ fn lpfx_glsl_kinds_from_decl(decl: &lpir::lpir_module::ImportDecl) -> Vec<GlslPa
 }
 
 /// Parse LPFX glsl params CSV (e.g., "Vec2,Vec2,Float,Vec2,UInt").
-fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
+fn parse_lpfn_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
     if enc.is_empty() {
         return Ok(Vec::new());
     }
@@ -1271,7 +1271,7 @@ mod tests {
 
     fn empty_ir_abi() -> (LpirModule, ModuleAbi) {
         let ir = LpirModule::default();
-        let abi = ModuleAbi::from_ir_and_sig(&ir, &LpsModuleSig { functions: vec![] });
+        let abi = ModuleAbi::from_ir_and_sig(&ir, &LpsModuleSig::default());
         (ir, abi)
     }
 
@@ -1899,7 +1899,7 @@ mod tests {
             functions: vec![func.clone()],
             imports: vec![],
         };
-        let sig = LpsModuleSig { functions: vec![] };
+        let sig = LpsModuleSig::default();
         let abi = ModuleAbi::from_ir_and_sig(&ir, &sig);
 
         let lowered = lower_ops(&func, &ir, &abi, FloatMode::Q32).expect("lower ok");

@@ -15,7 +15,7 @@ members = [
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
-    "lp-shader/lpfx-impl-macro",
+    "lp-shader/lpfn-impl-macro",
     "lp-shader/lps-filetests-gen-app",
     "lp-shader/lps-shared",
     "lp-shader/lps-diagnostics",

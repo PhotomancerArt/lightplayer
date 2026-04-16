@@ -6,7 +6,7 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 7
 
 1. Implement WASM linear memory + bump allocator for out-param slots
 2. Implement out/inout parameters (caller allocates, passes pointer, callee writes, caller reads)
-3. Implement LPFX imports (lpfx_worley, lpfx_fbm, lpfx_psrdnoise)
+3. Implement LPFX imports (lpfn_worley, lpfn_fbm, lpfn_psrdnoise)
 4. Handle LPFX vector returns
 5. Validate LPFX tests
 
@@ -39,7 +39,7 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 7
 
 ---
 
-## 3. lpfx_psrdnoise gradient out param
+## 3. lpfn_psrdnoise gradient out param
 
 **Signature (conceptually):** `psrdnoise(vec3 p, vec3 period, out vec3 gradient) -> float`
 
@@ -51,7 +51,7 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 7
 
 ## 4. LPFX as imports
 
-Same pattern as Phase 6 builtins. Add LPFX to the import set. Map GLSL name "lpfx_psrdnoise" (or whatever) to import name "__lpfx_psrdnoise3_q32" etc. Provide host function that calls lps-builtins.
+Same pattern as Phase 6 builtins. Add LPFX to the import set. Map GLSL name "lpfn_psrdnoise" (or whatever) to import name "__lpfn_psrdnoise3_q32" etc. Provide host function that calls lps-builtins.
 
 **Host for psrdnoise with out:** The Rust impl has signature `(p_x, p_y, p_z, period_x, period_y, period_z, gradient_ptr: i32) -> i32`. It computes result and gradient. It needs to write gradient to memory. It receives a `Store<T>` or `Caller` to access memory. `caller.get_export("memory")` and write at gradient_ptr.
 
@@ -59,7 +59,7 @@ Same pattern as Phase 6 builtins. Add LPFX to the import set. Map GLSL name "lpf
 
 ## 5. Vector returns from imports
 
-**Multi-value return from import:** WASM supports func imports with multiple results. So `(import "lpfx" "..." (func (param ...) (result i32) (result i32) (result i32)))`. Host returns 3 values. Caller gets 3 on stack.
+**Multi-value return from import:** WASM supports func imports with multiple results. So `(import "lpfn" "..." (func (param ...) (result i32) (result i32) (result i32)))`. Host returns 3 values. Caller gets 3 on stack.
 
 **Alternative:** Return via memory (sret). Pass a pointer as first param, function writes result there, returns void or status. Cranelift might use sret. Check LPFX builtin ABI in Cranelift.
 
@@ -78,7 +78,7 @@ Same pattern as Phase 6 builtins. Add LPFX to the import set. Map GLSL name "lpf
 | File | Changes |
 |------|---------|
 | `codegen/mod.rs` | Add memory section; bump allocator state |
-| `codegen/expr/function.rs` | emit_lpfx_call: allocate slot, emit ptr, call, load results |
+| `codegen/expr/function.rs` | emit_lpfn_call: allocate slot, emit ptr, call, load results |
 | `codegen/memory.rs` | New: reserve, allocate slot, emit instructions |
 | `exec/*` | Host LPFX imports that write to memory |
 | Import section | Add LPFX imports with correct signatures |

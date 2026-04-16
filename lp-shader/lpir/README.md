@@ -83,7 +83,7 @@ Builtins are module-qualified imports — the set is open-ended without changing
 
 ```
 import @std.math::fsin(f32) -> f32
-import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+import @lpfn::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
 
 func @example(v0:f32) -> f32 {
   v1:f32 = call @std.math::fsin(v0)
@@ -100,7 +100,7 @@ func @example(v0:f32) -> f32 {
 | **Non-SSA**                 | VRegs can be reassigned. Lowering stays simple; backends that want SSA rebuild it themselves.                                                       |
 | **Structured control flow** | `if`/`loop`/`switch`/`break`/`continue` — mirrors GLSL and maps directly to WASM. Other backends lower structured CF to their own CFG trivially.   |
 | **Float-mode-agnostic**     | `fadd` means "GLSL float add". Whether that becomes IEEE `f32` or Q16.16 fixed-point is a backend decision, not an IR property.                     |
-| **Open import modules**     | `@std.math::fsin`, `@lp.q32::…`, `@lpfx::…` — adding builtins never changes the opcode set.                                                         |
+| **Open import modules**     | `@std.math::fsin`, `@lp.q32::…`, `@lpfn::…` — adding builtins never changes the opcode set.                                                         |
 
 ## Pipeline
 
@@ -150,7 +150,7 @@ The full language spec lives in [`docs/lpir/`](../../docs/lpir/):
 | [03-memory](../../docs/lpir/03-memory.md)                   | Slots, load/store, memcpy, pointer model                                    |
 | [04-control-flow](../../docs/lpir/04-control-flow.md)       | if/else, loop, switch, break/continue, br_if_not                            |
 | [05-calls](../../docs/lpir/05-calls.md)                     | Function declarations, call op, multi-return, recursion                     |
-| [06-import-modules](../../docs/lpir/06-import-modules.md)   | `@std.math`, `@lp.q32`, `@lpfx` modules                                     |
+| [06-import-modules](../../docs/lpir/06-import-modules.md)   | `@std.math`, `@lp.q32`, `@lpfn` modules                                     |
 | [07-text-format](../../docs/lpir/07-text-format.md)         | Lexical rules, EBNF grammar, well-formedness                                |
 | [08-glsl-mapping](../../docs/lpir/08-glsl-mapping.md)       | Naga expression/statement → LPIR lowering tables                            |
 | [09-future](../../docs/lpir/09-future.md)                   | Vector types, i64, optimizations, diagnostics                               |

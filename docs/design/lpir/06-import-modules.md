@@ -6,7 +6,7 @@ External functions are declared with module-qualified names:
 
 ```
 import @std.math::fsin(f32) -> f32
-import @lpfx::noise3(ptr, i32, i32, i32) -> (i32, i32, i32)
+import @lpfn::noise3(ptr, i32, i32, i32) -> (i32, i32, i32)
 ```
 
 Import `param_types` and return types use the same `f32` / `i32` / `ptr` spellings as functions. Address or buffer arguments (LPFX out-pointers, result scratch) use `ptr`. WebAssembly emission maps `ptr` to linear-memory `i32`; RV32 uses 32-bit pointers.
@@ -108,8 +108,8 @@ The `lp.q32` module supplies Q32 fixed-point counterparts to core arithmetic and
 
 Exact per-function names and signatures are defined by the Q32 provider and reference documentation; they mirror the scalar `std.math` surface where a fixed-point analogue exists.
 
-## Well-known module: `lpfx`
+## Well-known module: `lpfn`
 
-`lpfx` is the module for LPFX (Lygia-family) builtins. It is available only when the emitter is configured with an LPFX provider.
+`lpfn` is the module for LPFX (Lygia-family) builtins. It is available only when the emitter is configured with an LPFX provider.
 
 Functions take `i32` parameters representing Q32-encoded values where that is the LPFX ABI. Some operations use **out-parameter** or slot-based conventions (multiple results via memory or caller-allocated slots); those details are specified in the LPFX provider and ABI documentation, not duplicated here.

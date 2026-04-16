@@ -6,7 +6,7 @@ Refactor `psrdnoise3_q32.rs` to use the new vector helper methods instead of man
 
 ## Implementation
 
-Update `builtins/lpfx/generative/psrdnoise/psrdnoise3_q32.rs`:
+Update `builtins/lpfn/generative/psrdnoise/psrdnoise3_q32.rs`:
 
 1. Replace manual component operations with vector operations:
    - `x.x - v0_x, x.y - v0_y, x.z - v0_z` → `x - v0`

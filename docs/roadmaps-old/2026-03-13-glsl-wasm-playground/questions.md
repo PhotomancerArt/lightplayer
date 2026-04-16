@@ -11,7 +11,7 @@ compilation path before integrating it into the larger LightPlayer web app.
 **Context**: The full GLSL compiler supports scalars (int, uint, float, bool),
 vectors (vec2/3/4), matrices (mat2/3/4), arrays, user functions, all control
 flow (if/else, for, while, do-while, break, continue), builtins
-(trig, noise, color), and lpfx functions.
+(trig, noise, color), and lpfn functions.
 
 **Suggestion**: Start with the subset needed to run the `basic/rainbow.shader`
 example: scalars, vectors, basic arithmetic, control flow, and a small set
@@ -24,8 +24,8 @@ structure, linking, build tooling. The rainbow shader is the concrete target
 — implement exactly the GLSL features it requires (scalars, vec2/3/4,
 arithmetic, comparisons, if/else, user functions, const bool, swizzle,
 out parameters, builtins: clamp, abs, mod, fract, floor, exp, cos, sin,
-smoothstep, mix, atan, min, and lpfx: lpfx_worley, lpfx_fbm,
-lpfx_psrdnoise). Adding more compiler features later is easy once the
+smoothstep, mix, atan, min, and lpfn: lpfn_worley, lpfn_fbm,
+lpfn_psrdnoise). Adding more compiler features later is easy once the
 architecture is solid. This is enough work for one roadmap.
 
 ---
@@ -53,7 +53,7 @@ FloatStrategy later. Same compiler config, same options, different backend.
 
 ### Q3: How should builtins be provided to the shader WASM module?
 
-**Context**: Shaders call builtins like `__lp_q32_sin`, `lpfx_snoise`, etc.
+**Context**: Shaders call builtins like `__lp_q32_sin`, `lpfn_snoise`, etc.
 In the JIT path, these are linked via `symbol_lookup_fn`. In WASM, the
 options are:
 

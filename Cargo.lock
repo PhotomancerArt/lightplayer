@@ -3873,7 +3873,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpfx-impl-macro"
+name = "lpfn-impl-macro"
 version = "40.0.0"
 dependencies = [
  "proc-macro2",
@@ -3897,7 +3897,7 @@ name = "lps-builtins"
 version = "40.0.0"
 dependencies = [
  "log",
- "lpfx-impl-macro",
+ "lpfn-impl-macro",
  "lps-builtin-ids",
  "lps-q32",
  "lpvm",

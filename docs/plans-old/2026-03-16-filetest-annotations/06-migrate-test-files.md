@@ -48,7 +48,7 @@ For every `.glsl` file in `lp-shader/lps-filetests/filetests/` (excluding
     - Everything in `control/` (if/else, loops — wasm doesn't support these)
     - Everything in `function/` (multi-function calls, out/inout params)
     - Everything in `operators/` (inc/dec on vectors/matrices)
-    - Everything in `lpfx/`
+    - Everything in `lpfn/`
     - Anything using vectors, matrices, structs, arrays, globals, builtins,
       control flow, or multi-function calls
 

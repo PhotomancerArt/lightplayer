@@ -140,19 +140,19 @@
 [31m✗[0m [31m 0/14[0m [2mglobal/type-vector.glsl[0m [33m(compile-fail)[0m [31m(14 unexpected)[0m
 [31m✗[0m [31m 0/ 9[0m [2mglobal/uniform-no-init-error.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
 [31m✗[0m [31m 0/12[0m [2mglobal/uniform-readonly.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
-[31m✗[0m [33m 6/ 7[0m [2mlpfx/lp_fbm.glsl[0m [31m(1 unexpected)[0m [94m(52,657 inst)[0m
-[31m✗[0m [33m 7/ 8[0m [2mlpfx/lp_gnoise.glsl[0m [31m(1 unexpected)[0m [94m(12,300 inst)[0m
-[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_hash.glsl[0m [31m(1 unexpected)[0m [94m(282 inst)[0m
-[31m✗[0m [33m 2/ 5[0m [2mlpfx/lp_hsv2rgb.glsl[0m [31m(3 unexpected)[0m [94m(772 inst)[0m
-[31m✗[0m [33m 2/ 5[0m [2mlpfx/lp_hue2rgb.glsl[0m [31m(3 unexpected)[0m [94m(738 inst)[0m
-[31m✗[0m [31m 0/ 5[0m [2mlpfx/lp_psrdnoise.glsl[0m [31m(5 unexpected)[0m
-[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_random.glsl[0m [31m(1 unexpected)[0m [94m(1,657 inst)[0m
-[31m✗[0m [33m 4/ 6[0m [2mlpfx/lp_rgb2hsv.glsl[0m [31m(2 unexpected)[0m [94m(1,715 inst)[0m
-[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_saturate.glsl[0m [31m(2 unexpected)[0m [94m(151 inst)[0m
-[31m✗[0m [33m 4/ 5[0m [2mlpfx/lp_simplex1.glsl[0m [31m(1 unexpected)[0m [94m(2,369 inst)[0m
-[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_simplex2.glsl[0m [31m(1 unexpected)[0m [94m(8,212 inst)[0m
-[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_simplex3.glsl[0m [31m(1 unexpected)[0m [94m(34,196 inst)[0m
-[31m✗[0m [33m 6/ 7[0m [2mlpfx/lp_srandom.glsl[0m [31m(1 unexpected)[0m [94m(2,859 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mlpfn/lp_fbm.glsl[0m [31m(1 unexpected)[0m [94m(52,657 inst)[0m
+[31m✗[0m [33m 7/ 8[0m [2mlpfn/lp_gnoise.glsl[0m [31m(1 unexpected)[0m [94m(12,300 inst)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfn/lp_hash.glsl[0m [31m(1 unexpected)[0m [94m(282 inst)[0m
+[31m✗[0m [33m 2/ 5[0m [2mlpfn/lp_hsv2rgb.glsl[0m [31m(3 unexpected)[0m [94m(772 inst)[0m
+[31m✗[0m [33m 2/ 5[0m [2mlpfn/lp_hue2rgb.glsl[0m [31m(3 unexpected)[0m [94m(738 inst)[0m
+[31m✗[0m [31m 0/ 5[0m [2mlpfn/lp_psrdnoise.glsl[0m [31m(5 unexpected)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfn/lp_random.glsl[0m [31m(1 unexpected)[0m [94m(1,657 inst)[0m
+[31m✗[0m [33m 4/ 6[0m [2mlpfn/lp_rgb2hsv.glsl[0m [31m(2 unexpected)[0m [94m(1,715 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfn/lp_saturate.glsl[0m [31m(2 unexpected)[0m [94m(151 inst)[0m
+[31m✗[0m [33m 4/ 5[0m [2mlpfn/lp_simplex1.glsl[0m [31m(1 unexpected)[0m [94m(2,369 inst)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfn/lp_simplex2.glsl[0m [31m(1 unexpected)[0m [94m(8,212 inst)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfn/lp_simplex3.glsl[0m [31m(1 unexpected)[0m [94m(34,196 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mlpfn/lp_srandom.glsl[0m [31m(1 unexpected)[0m [94m(2,859 inst)[0m
 [31m✗[0m [31m 0/ 1[0m [2mlpvm/native/native-call-multi-args.glsl[0m [31m(1 unexpected)[0m
 [31m✗[0m [31m 0/ 1[0m [2mlpvm/native/native-call-vec4-return.glsl[0m [31m(1 unexpected)[0m
 [31m✗[0m [33m 1/ 7[0m [2mlpvm/native/perf/call-clobber-correctness.glsl[0m [31m(6 unexpected)[0m [94m(102 inst)[0m

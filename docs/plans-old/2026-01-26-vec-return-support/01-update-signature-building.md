@@ -2,12 +2,12 @@
 
 ## Description
 
-Update `build_call_signature()` in `lpfx_sig.rs` to handle vector return types (Vec2, Vec3, Vec4)
+Update `build_call_signature()` in `lpfn_sig.rs` to handle vector return types (Vec2, Vec3, Vec4)
 using StructReturn. This matches how user functions handle vector returns.
 
 ## Changes
 
-### `lp-shader/lps-compiler/src/frontend/semantic/lpfx/lpfx_sig.rs`
+### `lp-shader/lps-compiler/src/frontend/semantic/lpfn/lpfn_sig.rs`
 
 - Update `build_call_signature()` to:
     - Check if return type is a vector (Vec2, Vec3, Vec4)

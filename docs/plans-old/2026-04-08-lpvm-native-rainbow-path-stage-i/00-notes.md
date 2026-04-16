@@ -6,7 +6,7 @@ Implement the RISC-V RV32 ILP32 calling convention for LPIR, matching Cranelift'
 
 - **Multi-scalar returns**: Return small structs/vectors in registers (vec2 in a0-a1, vec4 in a0-a3)
 - **`sret` pointer**: For large returns (>4 scalars), pass destination address in a0
-- **Out-parameters**: Pointer arguments for LPIR pointer types (e.g., `gradient` param in `lpfx_psrdnoise`)
+- **Out-parameters**: Pointer arguments for LPIR pointer types (e.g., `gradient` param in `lpfn_psrdnoise`)
 - **Stack spill slots**: Frame layout with proper alignment for spilled registers
 - **Frame management**: Prologue/epilogue with saved ra, frame pointer, spill area
 
@@ -52,7 +52,7 @@ _Status: **answered**._
 
 ### Q2: Out-parameter ABI for builtins
 
-**Question:** How should out-parameters like `gradient` in `lpfx_psrdnoise` be handled in the ABI?
+**Question:** How should out-parameters like `gradient` in `lpfn_psrdnoise` be handled in the ABI?
 
 **Current state:** LPIR represents out-params as pointer arguments. Current abi.rs just assigns them to arg registers like scalars.
 

@@ -148,7 +148,7 @@ Signed vs unsigned is determined by the op, not the type (e.g. `ilt_s` vs
 │  │  Well-known modules:                  │       │
 │  │    std.math  — fsin, fcos, fmin, ...  │       │
 │  │    lp.q32   — q32_add, q32_mul, ...  │       │
-│  │    lpfx     — noise3, fbm, ...       │       │
+│  │    lpfn     — noise3, fbm, ...       │       │
 │  │                                       │       │
 │  │  Open-ended: new modules don't        │       │
 │  │  require IR spec changes.             │       │
@@ -236,14 +236,14 @@ scalarized vector/matrix results.
 import @std.math::fmin(f32, f32) -> f32             ; standard math
 import @std.math::fmax(f32, f32) -> f32             ; standard math
 import @lp.q32::q32_add(i32, i32) -> i32            ; Q32 builtin (mode-dependent)
-import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)  ; LPFX (multi-return)
+import @lpfn::noise3(i32, i32, i32, i32) -> (i32, i32, i32)  ; LPFX (multi-return)
 entry func @shader_main(v0:i32) -> f32 { ... }      ; runtime entry point (0 or 1 per module)
 func @my_helper(v0:f32, v1:f32) -> f32 { ... }      ; local, single return
 func @vec3_fn(v0:f32) -> (f32, f32, f32) { ... }    ; local, multi-return
 ```
 
 Import names use `@module::function` syntax. The module prefix (`std.math`,
-`lp.q32`, `lpfx`) tells the emitter which **provider** resolves the import.
+`lp.q32`, `lpfn`) tells the emitter which **provider** resolves the import.
 Local functions use bare `@name`. The `::` separator is structural — the
 parser distinguishes imported vs local calls by its presence.
 
@@ -427,7 +427,7 @@ func @array_example(v0:i32) -> f32 {
 | `Statement::Return`                       | `return v`                                                  |
 | `Statement::Store` (local var)            | VReg reassignment or `store`                                |
 | `Statement::Call` (user fn)               | `call @name(...)`                                           |
-| `Statement::Call` (LPFX)                  | `store` + `call @lpfx::name(...)` + `load` sequence         |
+| `Statement::Call` (LPFX)                  | `store` + `call @lpfn::name(...)` + `load` sequence         |
 | Vector expression                         | N× scalar ops (scalarized in lowering)                      |
 
 ### Numeric semantics: GPU-aligned, non-trapping

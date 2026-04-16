@@ -26,15 +26,15 @@ lp-shader/
 ├── lps-builtins-gen-app/
 │   ├── Cargo.toml                  # DROP: lps-frontend dep
 │   └── src/
-│       ├── main.rs                 # REMOVE: registry.rs, mapping.rs, lpfx_fns.rs gen paths
-│       └── lpfx/
+│       ├── main.rs                 # REMOVE: registry.rs, mapping.rs, lpfn_fns.rs gen paths
+│       └── lpfn/
 │           ├── glsl_parse.rs       # INLINE: FunctionSignature / extract_function_signature
 │           ├── validate.rs         # USE: local types (inlined)
 │           └── generate.rs         # USE: local types (inlined)
 ├── lps-filetests/
 │   ├── Cargo.toml                  # DROP: lps-frontend dep
 │   └── src/test_run/test_glsl.rs   # USE: glsl::parser::Parse directly
-│   └── tests/lpfx_builtins_memory.rs  # UN-IGNORE, test, update comment if needed
+│   └── tests/lpfn_builtins_memory.rs  # UN-IGNORE, test, update comment if needed
 Cargo.toml                          # REMOVE: members, default-members, profiles
 justfile                            # REMOVE: rv32_packages, build/test/clippy refs
 scripts/lp-build.sh                 # CLEAN UP or DELETE
@@ -75,13 +75,13 @@ REMAINS (new chain — no changes):
 | `lps-frontend`         | Delete directory (after migrating gen-app + filetests)                                                                                                                                                                            |
 | `esp32-glsl-jit`       | Delete directory                                                                                                                                                                                                                  |
 | `lps-q32-metrics-app`  | Delete directory                                                                                                                                                                                                                  |
-| `lps-builtins-gen-app` | Remove old-backend gen paths; inline `FunctionSignature`, `Type`, `ParamQualifier`, `Parameter`, `extract_function_signature` as local types; drop `lps-frontend` dep; stop generating `lpfx_fns.rs`, `registry.rs`, `mapping.rs` |
+| `lps-builtins-gen-app` | Remove old-backend gen paths; inline `FunctionSignature`, `Type`, `ParamQualifier`, `Parameter`, `extract_function_signature` as local types; drop `lps-frontend` dep; stop generating `lpfn_fns.rs`, `registry.rs`, `mapping.rs` |
 | `lps-filetests`        | Replace `CompilationPipeline::parse()` with `TranslationUnit::parse()`; drop `lps-frontend` dep                                                                                                                                   |
 | Workspace `Cargo.toml` | Remove deleted crates from `members`, `default-members`, profile entries                                                                                                                                                          |
 | `justfile`             | Remove deleted crate references from `rv32_packages`, build/test/clippy                                                                                                                                                           |
 | Scripts / Docker       | Delete `Dockerfile.rv32-jit`; clean up `scripts/lp-build.sh`                                                                                                                                                                      |
 | Docs                   | Update `README.md`, `lp-shader/README.md`, `AGENTS.md`, cursor rules; leave historical docs                                                                                                                                       |
-| Ignored tests          | Un-ignore `lpfx_builtins_memory`, re-ignore with updated comment if WASM ABI still broken                                                                                                                                         |
+| Ignored tests          | Un-ignore `lpfn_builtins_memory`, re-ignore with updated comment if WASM ABI still broken                                                                                                                                         |
 
 ## Decisions (from notes)
 

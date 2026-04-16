@@ -195,7 +195,7 @@ types, who allocates scratch). That breaks â€œvalidate on WASM, ship on device.â
       access control.
     - **Current WASM**: Every **named user function** in the Naga pipeline's
       `functions` list becomes a **WASM export**. `main` is not part of that
-      list (`extract_functions` skips `main` and `lpfx_*`).
+      list (`extract_functions` skips `main` and `lpfn_*`).
     - **Inner `call`**: Still `call @name`; lowering uses **function index**
       (WASM) or symbol linkage (Cranelift).
 

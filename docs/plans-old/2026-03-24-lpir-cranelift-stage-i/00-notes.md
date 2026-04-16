@@ -4,33 +4,33 @@
 
 Establish `__lp_<module>_<fn>_<mode>` as the universal naming convention for
 all builtins. Rename all existing symbols, update all consumers, make BuiltinId
-self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
+self-describing. Three modules: `lpir`, `glsl`, `lpfn`.
 
 ## Current state
 
 ### BuiltinId (lps-builtin-ids)
 
 - **Auto-generated** by `lps-builtins-gen-app`. `#![no_std]`, no deps.
-- **Flat enum** with 96 variants: 29 `LpQ32*` (Q32 math) + 67 `Lpfx*` (LPFX).
+- **Flat enum** with 96 variants: 29 `LpQ32*` (Q32 math) + 67 `Lpfn*` (LPFX).
 - **Methods**: `name() -> &'static str`, `builtin_id_from_name(name) -> Option`,
   `all() -> &'static [BuiltinId]`.
 - **No structural metadata**: module, function name, and mode are baked into
   each variant's string; there's no `module()`, `mode()`, etc.
 - **`glsl_builtin_mapping.rs`** (also generated): `glsl_q32_math_builtin_id`
-  maps (GLSL name, arity) → `BuiltinId`. `glsl_lpfx_q32_builtin_id` maps
-  (lpfx name, `GlslParamKind` list) → `BuiltinId`.
+  maps (GLSL name, arity) → `BuiltinId`. `glsl_lpfn_q32_builtin_id` maps
+  (lpfn name, `GlslParamKind` list) → `BuiltinId`.
 
 ### Current symbol naming
 
 - **Q32 math**: `__lp_q32_<name>` (e.g. `__lp_q32_sin`, `__lp_q32_add`)
-- **LPFX**: `__lpfx_<descriptor>` (e.g. `__lpfx_fbm2_q32`, `__lpfx_hash_1`)
-- Two different prefix conventions (`__lp_q32_` vs `__lpfx_`), no uniform
+- **LPFX**: `__lpfn_<descriptor>` (e.g. `__lpfn_fbm2_q32`, `__lpfn_hash_1`)
+- Two different prefix conventions (`__lp_q32_` vs `__lpfn_`), no uniform
   structure.
 
 ### What the generator produces
 
 `lps-builtins-gen-app/src/main.rs` (~1600 lines) walks `builtins/q32/` and
-`builtins/lpfx/`, parses with `syn`, and emits:
+`builtins/lpfn/`, parses with `syn`, and emits:
 
 | Output                     | Path                                                |
 |----------------------------|-----------------------------------------------------|
@@ -42,15 +42,15 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 | WASM DCE refs              | `lps-builtins-wasm/src/builtin_refs.rs`             |
 | Q32 mod.rs                 | `lps-builtins/src/builtins/q32/mod.rs`              |
 | WASM import valtypes       | `lps-wasm/src/codegen/builtin_wasm_import_types.rs` |
-| LPFX frontend registry     | `lps-frontend/src/semantic/lpfx/lpfx_fns.rs`        |
+| LPFX frontend registry     | `lps-frontend/src/semantic/lpfn/lpfn_fns.rs`        |
 
 ### Builtin source files (lps-builtins)
 
 - `builtins/q32/*.rs`: one file per Q32 op. Function identifier = symbol name
   (e.g. `pub extern "C" fn __lp_q32_sin`). `#[unsafe(no_mangle)]`.
-- `builtins/lpfx/**/*.rs`: domain folders (color, generative, math, hash).
-  Each has `pub extern "C" fn __lpfx_*` with `#[lpfx_impl_macro::lpfx_impl]`.
-- Hash functions are mode-independent: `__lpfx_hash_1`, `_2`, `_3` (uint only).
+- `builtins/lpfn/**/*.rs`: domain folders (color, generative, math, hash).
+  Each has `pub extern "C" fn __lpfn_*` with `#[lpfn_impl_macro::lpfn_impl]`.
+- Hash functions are mode-independent: `__lpfn_hash_1`, `_2`, `_3` (uint only).
 
 ### LPIR imports
 
@@ -58,7 +58,7 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 - Naga lowering registers `std.math` imports: sin, cos, tan, asin, acos, atan,
   atan2, sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, log, log2, pow,
   ldexp, sqrt, round.
-- LPFX imports: `module_name = "lpfx"`, `func_name = "{name}_{naga_index}"`.
+- LPFX imports: `module_name = "lpfn"`, `func_name = "{name}_{naga_index}"`.
 - Text format: `import @std.math::sin(f32) -> f32`.
 
 ### WASM emitter import resolution
@@ -66,7 +66,7 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 `imports.rs` does: `resolve_builtin_id(decl)` → matches on `module_name`:
 
 - `"std.math"` → `glsl_q32_math_builtin_id(func_name, arity)` → `BuiltinId`
-- `"lpfx"` → strip naga suffix → `glsl_lpfx_q32_builtin_id(base, kinds)`
+- `"lpfn"` → strip naga suffix → `glsl_lpfn_q32_builtin_id(base, kinds)`
 - WASM import: `("builtins", BuiltinId::name())` e.g. `"__lp_q32_sin"`.
 
 ### WASM emitter float op handling
@@ -115,7 +115,7 @@ Two options:
 **Answer**: (A) — enum. Exhaustive matching is valuable for
 `signature_for_builtin`, `get_function_pointer`, etc. The generator already
 exists and can emit the extra methods. Variant naming becomes structured:
-`LpGlslSinQ32`, `LpLpirFaddQ32`, `LpLpfxFbm2Q32`, `LpLpfxHash1` (no mode).
+`LpGlslSinQ32`, `LpLpirFaddQ32`, `LpLpfnFbm2Q32`, `LpLpfnHash1` (no mode).
 
 ### Q2: Classification of current Q32 math builtins
 
@@ -167,7 +167,7 @@ Key decisions:
   from `Op::Fnearest` (ties-to-even).
 - `roundeven` is `lpir` as `fnearest` — matches `Op::Fnearest` semantics.
 - Import module matches builtin module: `@lpir::sqrt`, `@glsl::sin`,
-  `@lpfx::fbm2`. No cross-module import resolution needed.
+  `@lpfn::fbm2`. No cross-module import resolution needed.
 
 ### Q3: Generator output for old Cranelift crate
 
@@ -208,38 +208,38 @@ exercising the old Cranelift path will fail — that's acceptable.
 **Answer**: Rename `"std.math"` → split into `"glsl"` and `"lpir"` based on
 Q2 classification. `register_std_math_imports` splits registration by module.
 Import map keys change accordingly (`"glsl::{name}"`, `"lpir::{name}"`).
-WASM emitter matches on `"glsl"`, `"lpir"`, `"lpfx"`.
+WASM emitter matches on `"glsl"`, `"lpir"`, `"lpfn"`.
 Rename `StdMathHandler` → something that handles both `"glsl"` and `"lpir"`
 modules (e.g. `BuiltinImportHandler`). Straightforward search-and-replace
 across affected files.
 
 ### Q5: LPFX symbol naming details
 
-**Context**: Current LPFX symbols use `__lpfx_<descriptor>` with inconsistent
-separator patterns. New convention is `__lp_lpfx_<fn>_<mode>`.
+**Context**: Current LPFX symbols use `__lpfn_<descriptor>` with inconsistent
+separator patterns. New convention is `__lp_lpfn_<fn>_<mode>`.
 
 **Hash functions** are mode-independent (integer-only):
 
-- `__lpfx_hash_1` → `__lp_lpfx_hash1` (no mode suffix)
-- `__lpfx_hash_2` → `__lp_lpfx_hash2`
-- `__lpfx_hash_3` → `__lp_lpfx_hash3`
+- `__lpfn_hash_1` → `__lp_lpfn_hash1` (no mode suffix)
+- `__lpfn_hash_2` → `__lp_lpfn_hash2`
+- `__lpfn_hash_3` → `__lp_lpfn_hash3`
 
 **Mode-dependent LPFX** with vec variants:
 
-- `__lpfx_saturate_q32` → `__lp_lpfx_saturate_q32`
-- `__lpfx_saturate_vec3_q32` → `__lp_lpfx_saturate_vec3_q32`
-- `__lpfx_hsv2rgb_vec4_q32` → `__lp_lpfx_hsv2rgb_vec4_q32`
+- `__lpfn_saturate_q32` → `__lp_lpfn_saturate_q32`
+- `__lpfn_saturate_vec3_q32` → `__lp_lpfn_saturate_vec3_q32`
+- `__lpfn_hsv2rgb_vec4_q32` → `__lp_lpfn_hsv2rgb_vec4_q32`
 
 **Tile/vec variants**:
 
-- `__lpfx_fbm3_tile_q32` → `__lp_lpfx_fbm3_tile_q32`
-- `__lpfx_srandom3_vec_q32` → `__lp_lpfx_srandom3_vec_q32`
+- `__lpfn_fbm3_tile_q32` → `__lp_lpfn_fbm3_tile_q32`
+- `__lpfn_srandom3_vec_q32` → `__lp_lpfn_srandom3_vec_q32`
 
 **Answer**: Keep existing LPFX descriptors as-is, just change prefix from
-`__lpfx_` to `__lp_lpfx_`. No function name changes within LPFX.
+`__lpfn_` to `__lp_lpfn_`. No function name changes within LPFX.
 Mode suffix stays in place where present; hash keeps no mode suffix.
-Examples: `__lpfx_fbm2_q32` → `__lp_lpfx_fbm2_q32`,
-`__lpfx_hash_1` → `__lp_lpfx_hash_1`.
+Examples: `__lpfn_fbm2_q32` → `__lp_lpfn_fbm2_q32`,
+`__lpfn_hash_1` → `__lp_lpfn_hash_1`.
 
 ### Q6: Scope of function renaming in lps-builtins
 
@@ -249,8 +249,8 @@ Rust functions themselves.
 
 - `builtins/q32/sin.rs`: `pub extern "C" fn __lp_q32_sin` →
   `pub extern "C" fn __lps_sin_q32`
-- `builtins/lpfx/hash.rs`: `pub extern "C" fn __lpfx_hash_1` →
-  `pub extern "C" fn __lp_lpfx_hash1`
+- `builtins/lpfn/hash.rs`: `pub extern "C" fn __lpfn_hash_1` →
+  `pub extern "C" fn __lp_lpfn_hash1`
 - All test code referencing these functions by name needs updating.
 
 **Answer**: Straightforward rename of Rust function identifiers.

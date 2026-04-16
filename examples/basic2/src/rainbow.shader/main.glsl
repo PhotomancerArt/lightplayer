@@ -19,11 +19,11 @@ vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
 
 vec4 worley_demo(vec2 scaledCoord, float time) {
     // Call built-in 3D Worley noise, returns vec2(d0, d1)
-    float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
+    float noiseValue = lpfn_worley(scaledCoord * 2, 0u) / 2 + 0.5;
 
     // Use the distance to the closest point for visualization
     float hue = cos(noiseValue * 3.1415 + time) / 2 + .5;
 
-    vec3 rgb = lpfx_hsv2rgb(vec3(hue, 1.0, 1.0));
+    vec3 rgb = lpfn_hsv2rgb(vec3(hue, 1.0, 1.0));
     return vec4(rgb, 1.0);
 }

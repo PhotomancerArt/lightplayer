@@ -22,7 +22,7 @@ Operations traced from `examples/basic/src/rainbow.shader/main.glsl`:
 - `vec3 * vec3`, `vec3 + vec3`, `vec2 + vec2` — `vec*/op-multiply.gen.glsl`, `op-add.gen.glsl`
 - `vec2(scalar)` broadcast — `vec2/from-scalar.glsl`
 - `min`/`max` scalar+vec — `vec*/fn-min.gen.glsl`, `fn-max.gen.glsl`
-- `lpfx_psrdnoise` — `lpfx/lp_psrdnoise.glsl`
+- `lpfn_psrdnoise` — `lpfn/lp_psrdnoise.glsl`
 
 ### Missing — no filetests at all
 

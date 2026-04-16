@@ -26,8 +26,8 @@ scripts/build-builtins.sh
 The generator will:
 
 1. Scan `lps-builtins/src/builtins/q32/` for new functions
-2. Detect `__lpfx_hash_1`, `__lpfx_hash_2`, `__lpfx_hash_3`, `__lpfx_snoise1`, `__lpfx_snoise2`,
-   `__lpfx_snoise3`
+2. Detect `__lpfn_hash_1`, `__lpfn_hash_2`, `__lpfn_hash_3`, `__lpfn_snoise1`, `__lpfn_snoise2`,
+   `__lpfn_snoise3`
 3. Add enum variants to `BuiltinId`: `LpHash1`, `LpHash2`, `LpHash3`, `LpSimplex1`, `LpSimplex2`,
    `LpSimplex3`
 4. Generate `name()` method returning symbol names
@@ -40,7 +40,7 @@ The generator will:
 Check that `backend/builtins/registry.rs` includes:
 
 - New enum variants in `BuiltinId`
-- `name()` implementations returning `"__lpfx_hash_1"`, etc.
+- `name()` implementations returning `"__lpfn_hash_1"`, etc.
 - `signature()` implementations with correct parameter counts and types
 - Function pointer mappings in `get_function_pointer()`
 

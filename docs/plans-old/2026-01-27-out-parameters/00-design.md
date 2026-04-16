@@ -51,8 +51,8 @@ lp-shader/lps-compiler/src/
 │   │   │   └── function_signature.rs        # REUSE: Already parses qualifiers
 │   │   └── functions.rs                     # REUSE: Already stores qualifiers
 │   └── glsl_compiler.rs                     # UPDATE: Handle out/inout in definitions (pointer storage)
-└── frontend/semantic/lpfx/
-    └── lpfx_sig.rs                          # UPDATE: Support out parameters in LPFX signatures
+└── frontend/semantic/lpfn/
+    └── lpfn_sig.rs                          # UPDATE: Support out parameters in LPFX signatures
 ```
 
 ## Type and Function Summary
@@ -101,7 +101,7 @@ lp-shader/lps-compiler/src/
 - Out/inout parameters: Store as pointer variable
 - When parameter is accessed: Load/store from pointer
 
-### lpfx_sig.rs
+### lpfn_sig.rs
 
 **UPDATE**: `build_call_signature()`
 

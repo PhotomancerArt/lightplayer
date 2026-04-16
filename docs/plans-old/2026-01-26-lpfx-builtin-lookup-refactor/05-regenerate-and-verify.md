@@ -12,7 +12,7 @@ Regenerate all builtin code using the updated codegen tool, then verify all test
 
 2. Run `just fix ci` to ensure code compiles and lints pass
 
-3. Run `scripts/glsl-filetests.sh lpfx/lp_` to verify LPFX filetests pass
+3. Run `scripts/glsl-filetests.sh lpfn/lp_` to verify LPFX filetests pass
 
 4. Run all unit tests to ensure nothing broke
 

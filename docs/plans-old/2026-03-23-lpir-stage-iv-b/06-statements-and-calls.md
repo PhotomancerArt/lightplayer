@@ -55,20 +55,20 @@ if let Some(res_h) = result {
 ctx.fb.push_call(callee_ref, &arg_vs, &result_vs);
 ```
 
-### `lower_lpfx.rs` — vector value arguments
+### `lower_lpfn.rs` — vector value arguments
 
-Update `lpfx_arg_kinds` to handle vector value arguments:
+Update `lpfn_arg_kinds` to handle vector value arguments:
 
 ```rust
 TypeInner::Vector { size, scalar, .. } => {
     let ir_ty = naga_scalar_to_ir_type(scalar.kind)?;
     for _ in 0..(*size as usize) {
-        out.push(LpfxArgKind::Value);
+        out.push(LpfnArgKind::Value);
     }
 }
 ```
 
-In `build_lpfx_import_decl`, vector value params add N scalar param
+In `build_lpfn_import_decl`, vector value params add N scalar param
 types:
 
 ```rust
@@ -80,10 +80,10 @@ TypeInner::Vector { size, scalar, .. } => {
 }
 ```
 
-In `lower_lpfx_call`, flatten vector value arguments:
+In `lower_lpfn_call`, flatten vector value arguments:
 
 ```rust
-LpfxArgKind::Value => {
+LpfnArgKind::Value => {
     let vs = ctx.ensure_expr_vec(arg_expr)?;
     for v in &vs {
         arg_vs.push(*v);
@@ -91,28 +91,28 @@ LpfxArgKind::Value => {
 }
 ```
 
-### `lower_lpfx.rs` — vector out-parameters
+### `lower_lpfn.rs` — vector out-parameters
 
-New `LpfxArgKind` variant:
+New `LpfnArgKind` variant:
 
 ```rust
-pub(crate) enum LpfxArgKind {
+pub(crate) enum LpfnArgKind {
     Value,
     OutScalar(IrType),
     OutVector(IrType, u8),  // element type, component count
 }
 ```
 
-In `lpfx_arg_kinds`:
+In `lpfn_arg_kinds`:
 
 ```rust
 TypeInner::Pointer { base, space: AddressSpace::Function } => {
     match &module.types[*base].inner {
         TypeInner::Scalar(scalar) => {
-            out.push(LpfxArgKind::OutScalar(naga_scalar_to_ir_type(scalar.kind)?));
+            out.push(LpfnArgKind::OutScalar(naga_scalar_to_ir_type(scalar.kind)?));
         }
         TypeInner::Vector { size, scalar, .. } => {
-            out.push(LpfxArgKind::OutVector(
+            out.push(LpfnArgKind::OutVector(
                 naga_scalar_to_ir_type(scalar.kind)?,
                 *size as u8,
             ));
@@ -122,7 +122,7 @@ TypeInner::Pointer { base, space: AddressSpace::Function } => {
 }
 ```
 
-In `build_lpfx_import_decl`, vector out-params contribute one `I32`
+In `build_lpfn_import_decl`, vector out-params contribute one `I32`
 param (the slot address), same as scalar out-params:
 
 ```rust
@@ -131,10 +131,10 @@ TypeInner::Vector { .. } => {
 }
 ```
 
-In `lower_lpfx_call`, handle `OutVector`:
+In `lower_lpfn_call`, handle `OutVector`:
 
 ```rust
-LpfxArgKind::OutVector(ir_ty, count) => {
+LpfnArgKind::OutVector(ir_ty, count) => {
     let lv = out_pointer_local(ctx.func, arg_expr)?;
     let dsts = ctx.resolve_local(lv)?;
     let n = *count as usize;
@@ -162,10 +162,10 @@ for (addr, dsts, ir_ty, n) in vec_outs {
 }
 ```
 
-### `lower_lpfx.rs` — vector return values
+### `lower_lpfn.rs` — vector return values
 
 If an LPFX function returns a vector (unlikely but possible), update
-`build_lpfx_import_decl` and the result handling in `lower_lpfx_call`
+`build_lpfn_import_decl` and the result handling in `lower_lpfn_call`
 to allocate N return VRegs. Follow the same pattern as user calls.
 
 ## Validate
@@ -177,4 +177,4 @@ cargo clippy -p lps-frontend
 ```
 
 LPFX filetests with vector arguments and out-parameters (especially
-`lpfx_psrdnoise` with `out vec2 gradient`) should now lower.
+`lpfn_psrdnoise` with `out vec2 gradient`) should now lower.

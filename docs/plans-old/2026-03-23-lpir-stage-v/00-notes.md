@@ -43,15 +43,15 @@ for native float support. For now, Q32-only; float mode errors.
 
 ### Q2: LPFX import resolution
 
-LPIR has `@lpfx::lpfx_hash1(f32, f32) -> f32` etc. The WASM emitter
+LPIR has `@lpfn::lpfn_hash1(f32, f32) -> f32` etc. The WASM emitter
 needs to create `builtins` module imports with the correct Q32 WASM
-signature. Currently, `lps-wasm/src/lpfx.rs` resolves via
-`lps-builtin-ids::BuiltinId` → `q32_lpfx_wasm_signature`.
+signature. Currently, `lps-wasm/src/lpfn.rs` resolves via
+`lps-builtin-ids::BuiltinId` → `q32_lpfn_wasm_signature`.
 
 For the new emitter, the LPIR import carries the *logical* signature
 (generic, float-mode-unaware). The emitter needs to:
 
-- Detect `@lpfx::*` imports by module name
+- Detect `@lpfn::*` imports by module name
 - Resolve the LPFX name + param types → BuiltinId
 - Get the Q32 WASM signature from the BuiltinId
 - Emit the appropriate WASM import + call
@@ -111,12 +111,12 @@ lps-wasm/src/
     q32.rs          # Q32 inline expansion (add_sat, mul, div, etc.)
     control.rs      # structured control flow (if, loop, switch)
     memory.rs       # slot_addr, load, store, memcpy, shadow stack
-    imports.rs      # import resolution (std.math, lpfx)
+    imports.rs      # import resolution (std.math, lpfn)
   lib.rs
   module.rs
   options.rs
 ```
 
-Deletions: `emit.rs`, `emit_vec.rs`, `locals.rs`, `lpfx.rs`, `types.rs`.
+Deletions: `emit.rs`, `emit_vec.rs`, `locals.rs`, `lpfn.rs`, `types.rs`.
 
 **Answer:** Agreed. Small targeted modules in a directory module.

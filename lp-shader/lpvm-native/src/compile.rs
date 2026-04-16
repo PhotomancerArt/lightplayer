@@ -80,9 +80,9 @@ pub fn compile_function(
     fn_sig: &LpsFnSig,
 ) -> Result<CompiledFunction, NativeError> {
     log::debug!(
-        "[native-fa] compile_function: lowering {} ({} ops)",
-        func.name,
-        func.body.len()
+        "[native-fa] compile_function: lowering {name} ({ops} ops)",
+        name = func.name,
+        ops = func.body.len(),
     );
 
     // Build function ABI (needed for both debug and non-debug paths)
@@ -93,17 +93,14 @@ pub fn compile_function(
         let mut func_opt = func.clone();
         let n_folded = lpir::const_fold::fold_constants(&mut func_opt);
         if n_folded > 0 {
-            log::debug!(
-                "[native-fa] compile_function: folded {} LPIR constants",
-                n_folded
-            );
+            log::debug!("[native-fa] compile_function: folded {n_folded} LPIR constants");
         }
 
         let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, session.float_mode)
             .map_err(NativeError::Lower)?;
         log::debug!(
-            "[native-fa] compile_function: lowered to {} vinsts",
-            lowered.vinsts.len()
+            "[native-fa] compile_function: lowered to {n} vinsts",
+            n = lowered.vinsts.len(),
         );
 
         crate::opt::fold_immediates(&mut lowered);
@@ -112,8 +109,8 @@ pub fn compile_function(
         let emitted =
             crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
         log::debug!(
-            "[native-fa] compile_function: emitted {} bytes",
-            emitted.code.len()
+            "[native-fa] compile_function: emitted {n} bytes",
+            n = emitted.code.len(),
         );
 
         let code = emitted.code;
@@ -154,8 +151,8 @@ pub fn compile_module(
     options: crate::native_options::NativeCompileOptions,
 ) -> Result<CompiledModule, NativeError> {
     log::debug!(
-        "[native-fa] compile_module: building ABI for {} functions",
-        ir.functions.len()
+        "[native-fa] compile_module: building ABI for {n} functions",
+        n = ir.functions.len(),
     );
     let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
     let mut session = CompileSession::new(module_abi, float_mode, options);
@@ -166,10 +163,10 @@ pub fn compile_module(
     let mut functions = Vec::with_capacity(ir.functions.len());
     for (idx, func) in ir.functions.iter().enumerate() {
         log::debug!(
-            "[native-fa] compile_module: compiling function {}/{}: {}",
-            idx + 1,
-            ir.functions.len(),
-            func.name
+            "[native-fa] compile_module: compiling function {cur}/{total}: {name}",
+            cur = idx + 1,
+            total = ir.functions.len(),
+            name = func.name,
         );
         let default_sig = LpsFnSig {
             name: func.name.clone(),
@@ -183,14 +180,14 @@ pub fn compile_module(
         let compiled = compile_function(&mut session, func, ir, fn_sig)?;
         functions.push(compiled);
         log::debug!(
-            "[native-fa] compile_module: function {} complete",
-            func.name
+            "[native-fa] compile_module: function {name} complete",
+            name = func.name,
         );
     }
 
     log::debug!(
-        "[native-fa] compile_module: all {} functions compiled",
-        functions.len()
+        "[native-fa] compile_module: all {n} functions compiled",
+        n = functions.len(),
     );
     Ok(CompiledModule {
         functions,
@@ -213,7 +210,7 @@ mod tests {
                 imports: vec![],
                 functions: vec![],
             },
-            &LpsModuleSig { functions: vec![] },
+            &LpsModuleSig::default(),
         );
         let session = CompileSession::new(abi, lpir::FloatMode::Q32, Default::default());
         assert!(session.symbols.names.is_empty());
@@ -225,7 +222,7 @@ mod tests {
             imports: vec![],
             functions: vec![],
         };
-        let sig = LpsModuleSig { functions: vec![] };
+        let sig = LpsModuleSig::default();
         let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
         // Should succeed with no functions
         let compiled = result.unwrap();
@@ -262,12 +259,12 @@ mod tests {
                 return_type: LpsType::Int,
                 parameters: vec![],
             }],
+            ..Default::default()
         };
         let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
         assert!(
             result.is_ok(),
-            "expected successful compilation, got: {:?}",
-            result
+            "expected successful compilation, got: {result:?}",
         );
         let module = result.unwrap();
         assert_eq!(module.functions.len(), 1, "expected 1 compiled function");

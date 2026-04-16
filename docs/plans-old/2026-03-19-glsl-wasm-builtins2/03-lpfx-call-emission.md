@@ -2,16 +2,16 @@
 
 ## Scope of phase
 
-Implement `lpfx_call.rs` for LPFX function calls in the WASM backend. Add `memory.rs` for out-param
-offset constants. Wire into FunCall dispatch. After this phase, `lpfx_worley`, `lpfx_fbm`, and
-`lpfx_psrdnoise` (with `out vec2 gradient`) all compile and run under wasmtime with `builtins.wasm`.
+Implement `lpfn_call.rs` for LPFX function calls in the WASM backend. Add `memory.rs` for out-param
+offset constants. Wire into FunCall dispatch. After this phase, `lpfn_worley`, `lpfn_fbm`, and
+`lpfn_psrdnoise` (with `out vec2 gradient`) all compile and run under wasmtime with `builtins.wasm`.
 
 This is the hardest phase. The LPFX ABI differs from Q32 math imports (pre-flattened mixed types,
 out-param pointers, memory reads).
 
 ## Code organization reminders
 
-- New `lpfx_call.rs` alongside `builtin_call.rs` — separate calling conventions.
+- New `lpfn_call.rs` alongside `builtin_call.rs` — separate calling conventions.
 - New `memory.rs` for out-param offset constants — keep magic numbers in one place.
 - Tests first in test modules; helpers at bottom.
 - Temporary debug prints should have a TODO comment.
@@ -41,26 +41,26 @@ Add LPFX branch after the Q32 math import branch:
 
 ```rust
 } else if options.float_mode == FloatMode::Q32
-    && lpfx_fn_registry::is_lpfx_fn(name)
+    && lpfn_fn_registry::is_lpfn_fn(name)
 {
-    lpfx_call::emit_lpfx_call(ctx, sink, expr, name, args, options)
+    lpfn_call::emit_lpfn_call(ctx, sink, expr, name, args, options)
 } else {
     // error
 }
 ```
 
-Add `mod lpfx_call;` and import `lpfx_fn_registry`.
+Add `mod lpfn_call;` and import `lpfn_fn_registry`.
 
-### 3. `lpfx_call.rs`
+### 3. `lpfn_call.rs`
 
-File: `lp-shader/lps-wasm/src/codegen/expr/lpfx_call.rs`
+File: `lp-shader/lps-wasm/src/codegen/expr/lpfn_call.rs`
 
 Main entry point:
-`emit_lpfx_call(ctx, sink, full_call, name, args, options) -> Result<WasmRValue, GlslDiagnostics>`
+`emit_lpfn_call(ctx, sink, full_call, name, args, options) -> Result<WasmRValue, GlslDiagnostics>`
 
 #### Algorithm
 
-1. **Resolve function:** Infer GLSL arg types → `find_lpfx_fn(name, &arg_types)` → get `LpfxFn` with
+1. **Resolve function:** Infer GLSL arg types → `find_lpfn_fn(name, &arg_types)` → get `LpfnFn` with
    GLSL signature and `BuiltinId`. Extract Q32 impl id.
 
 2. **Get import index:** `ctx.builtin_func_index.get(&builtin_id)`.
@@ -86,24 +86,24 @@ Main entry point:
 
 #### Rainbow LPFX calls (concrete examples)
 
-**`lpfx_worley(scaledCoord * 2, 0u)`**
+**`lpfn_worley(scaledCoord * 2, 0u)`**
 
-- GLSL: `[vec2, uint]` → `LpfxWorley2Q32`
+- GLSL: `[vec2, uint]` → `LpfnWorley2Q32`
 - WASM params: `[i32, i32, i32]` (p.x, p.y, seed)
 - Emit: `emit_rvalue(scaledCoord * 2)` → 2 i32 on stack; `emit_rvalue(0u)` → 1 i32; `call`
 - Return: 1 i32 (scalar float)
 
-**`lpfx_fbm(scaledCoord, 3, 0u)`**
+**`lpfn_fbm(scaledCoord, 3, 0u)`**
 
-- GLSL: `[vec2, int, uint]` → `LpfxFbm2Q32`
+- GLSL: `[vec2, int, uint]` → `LpfnFbm2Q32`
 - WASM params: `[i32, i32, i32, i32]` (p.x, p.y, octaves, seed)
 - Emit: `emit_rvalue(scaledCoord)` → 2 i32; `emit_rvalue(3)` → 1 i32; `emit_rvalue(0u)` → 1 i32;
   `call`
 - Return: 1 i32
 
-**`lpfx_psrdnoise(scaledCoord, vec2(0.0), time, gradient, 0u)`** (after phase 1 seed fix)
+**`lpfn_psrdnoise(scaledCoord, vec2(0.0), time, gradient, 0u)`** (after phase 1 seed fix)
 
-- GLSL: `[vec2, vec2, float, out vec2, uint]` → `LpfxPsrdnoise2Q32`
+- GLSL: `[vec2, vec2, float, out vec2, uint]` → `LpfnPsrdnoise2Q32`
 - WASM params: `[i32, i32, i32, i32, i32, i32, i32]` (x, y, period_x, period_y, alpha, gradient_ptr,
   seed)
 - Emit: `emit_rvalue(scaledCoord)` → 2 i32; `emit_rvalue(vec2(0.0))` → 2 i32; `emit_rvalue(time)` →
@@ -133,16 +133,16 @@ error for now — Rainbow only uses `gradient` as a plain `vec2` local.
 
 In `lps-wasm/tests/basic.rs` (compile-only):
 
-- `test_lpfx_worley_compiles` — shader calling `lpfx_worley(vec2(1.0, 2.0), 0u)` compiles
-- `test_lpfx_fbm_compiles` — shader calling `lpfx_fbm(vec2(1.0, 2.0), 3, 0u)` compiles
-- `test_lpfx_psrdnoise_compiles` — shader calling
-  `lpfx_psrdnoise(vec2(1.0), vec2(0.0), 0.5, gradient, 0u)` compiles, produces correct imports
+- `test_lpfn_worley_compiles` — shader calling `lpfn_worley(vec2(1.0, 2.0), 0u)` compiles
+- `test_lpfn_fbm_compiles` — shader calling `lpfn_fbm(vec2(1.0, 2.0), 3, 0u)` compiles
+- `test_lpfn_psrdnoise_compiles` — shader calling
+  `lpfn_psrdnoise(vec2(1.0), vec2(0.0), 0.5, gradient, 0u)` compiles, produces correct imports
   including memory
 
 In `lps-wasm/tests/q32_builtin_link.rs` (linked execution):
 
-- `test_lpfx_worley_linked` — compile + link + run, verify non-zero return
-- `test_lpfx_psrdnoise_linked` — compile + link + run, verify gradient local is written
+- `test_lpfn_worley_linked` — compile + link + run, verify non-zero return
+- `test_lpfn_psrdnoise_linked` — compile + link + run, verify gradient local is written
 
 ## Validate
 

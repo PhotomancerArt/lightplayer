@@ -14,7 +14,7 @@ Quick reference for memory optimizations. Trace summaries use peak free bytes (h
 | 2026-03-11 | [ast-free-before-define](2026-03-11-ast-free-before-define.md) | +28 KB | -511 | Kept |
 | 2026-03-12 | [chunkedvec-dynamic](2026-03-12-chunkedvec-dynamic.md) | +20 KB | -339 | Kept |
 | 2026-03-12 | [chunkedmap-small](2026-03-12-chunkedmap-small.md) | 0 | 0 | Kept (consolidation) |
-| 2026-03-12 | [lpfx-static-registry](2026-03-12-lpfx-static-registry.md) | — | — | Kept (no trace yet) |
+| 2026-03-12 | [lpfn-static-registry](2026-03-12-lpfn-static-registry.md) | — | — | Kept (no trace yet) |
 
 ## Baseline progression
 

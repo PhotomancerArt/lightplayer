@@ -20,18 +20,18 @@ use naga::{AddressSpace, Expression, Function, GlobalVariable, Handle, Module};
 use crate::NagaModule;
 use crate::lower_ctx::{GlobalVarInfo, GlobalVarMap, LowerCtx};
 use crate::lower_error::LowerError;
-use crate::lower_lpfx;
+use crate::lower_lpfn;
 use crate::naga_types::naga_type_handle_to_lps;
 
 /// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
 ///
-/// Registers `@glsl::*`, `@lpir::*`, and `@lpfx::*` imports as needed, then emits one [`lpir::IrFunction`] per
+/// Registers `@glsl::*`, `@lpir::*`, and `@lpfn::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the
 /// scalar subset.
 pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
     let import_map = register_math_imports(&mut mb);
-    let lpfx_map = lower_lpfx::register_lpfx_imports(&mut mb, naga_module)?;
+    let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
     let import_count = mb.import_count();
 
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
@@ -57,7 +57,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             info.name.as_str(),
             &func_map,
             &import_map,
-            &lpfx_map,
+            &lpfn_map,
             global_map.clone(),
         )
         .map_err(|e| LowerError::InFunction {
@@ -358,7 +358,7 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
                 func_name: String::from(name),
                 param_types: params.to_vec(),
                 return_types: rets.to_vec(),
-                lpfx_glsl_params: None,
+                lpfn_glsl_params: None,
                 needs_vmctx,
             });
             m.insert(format!("{module}::{name}"), r);
@@ -397,11 +397,11 @@ fn lower_function(
     name: &str,
     func_map: &BTreeMap<Handle<Function>, CalleeRef>,
     import_map: &BTreeMap<String, CalleeRef>,
-    lpfx_map: &BTreeMap<Handle<Function>, CalleeRef>,
+    lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
     global_map: GlobalVarMap,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
-        module, func, name, func_map, import_map, lpfx_map, global_map,
+        module, func, name, func_map, import_map, lpfn_map, global_map,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

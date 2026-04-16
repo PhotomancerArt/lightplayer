@@ -16,7 +16,7 @@ lp-shader/
 │   │                                   #   new variant names (LpGlslSinQ32, etc.)
 │   │                                   #   new methods: module(), fn_name(), mode()
 │   └── glsl_builtin_mapping.rs         # UPDATE: regenerated, new BuiltinId names
-│                                       #   resolve_builtin_id matches "glsl"+"lpir"+"lpfx"
+│                                       #   resolve_builtin_id matches "glsl"+"lpir"+"lpfn"
 │
 ├── lps-builtins/src/builtins/
 │   ├── q32/
@@ -25,10 +25,10 @@ lp-shader/
 │   │   ├── sqrt.rs                     # UPDATE: fn __lp_q32_sqrt → fn __lp_lpir_fsqrt_q32
 │   │   ├── ... (all 29 q32 files)      # UPDATE: renamed per Q2 classification
 │   │   └── mod.rs                      # UPDATE: regenerated
-│   └── lpfx/
-│       ├── hash.rs                     # UPDATE: fn __lpfx_hash_1 → fn __lp_lpfx_hash_1
-│       ├── generative/fbm/...          # UPDATE: __lpfx_ → __lp_lpfx_ prefix
-│       ├── ... (all lpfx files)        # UPDATE: prefix rename
+│   └── lpfn/
+│       ├── hash.rs                     # UPDATE: fn __lpfn_hash_1 → fn __lp_lpfn_hash_1
+│       ├── generative/fbm/...          # UPDATE: __lpfn_ → __lp_lpfn_ prefix
+│       ├── ... (all lpfn files)        # UPDATE: prefix rename
 │       └── ...
 │
 ├── lps-builtins-gen-app/src/
@@ -53,7 +53,7 @@ lp-shader/
 │
 ├── lps-wasm/src/
 │   ├── emit/imports.rs                 # UPDATE: resolve_builtin_id matches
-│   │                                   #   "glsl", "lpir", "lpfx"
+│   │                                   #   "glsl", "lpir", "lpfn"
 │   └── codegen/
 │       └── builtin_wasm_import_types.rs # UPDATE: regenerated
 │
@@ -82,7 +82,7 @@ lp-shader/
          │         │      │
          │         │      └── _q32 / _f32 / (none for mode-independent)
          │         └── function name (sin, fadd, fbm2, hash_1)
-         └── module: lpir / glsl / lpfx
+         └── module: lpir / glsl / lpfn
 
 
                Module Classification
@@ -97,9 +97,9 @@ lp-shader/
     │   sin, cos, pow, exp, round, fma, mod, ...          │
     │   Naga imports as @glsl::{name}                     │
     ├─────────────────────────────────────────────────────┤
-    │ lpfx  — LightPlayer effects                         │
+    │ lpfn  — LightPlayer effects                         │
     │   fbm2, snoise3, hash_1, saturate, ...              │
-    │   Naga imports as @lpfx::{name}                     │
+    │   Naga imports as @lpfn::{name}                     │
     └─────────────────────────────────────────────────────┘
 
 
@@ -118,9 +118,9 @@ lp-shader/
         .fn_name() → "fadd"
         .mode()    → Some(Mode::Q32)
 
-    BuiltinId::LpLpfxHash1
-        .name()    → "__lp_lpfx_hash_1"
-        .module()  → Module::Lpfx
+    BuiltinId::LpLpfnHash1
+        .name()    → "__lp_lpfn_hash_1"
+        .module()  → Module::Lpfn
         .fn_name() → "hash_1"
         .mode()    → None
 
@@ -171,6 +171,6 @@ lp-shader/
    `"glsl"` and `"lpir"` module names. Import map keys change accordingly.
 
 5. **`lps-wasm` import resolution** — `resolve_builtin_id` matches on
-   `"glsl"`, `"lpir"`, `"lpfx"` module names.
+   `"glsl"`, `"lpir"`, `"lpfn"` module names.
 
 6. **Interpreter handler** — renamed, dispatches on `"glsl"` and `"lpir"`.

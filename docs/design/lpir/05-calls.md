@@ -10,7 +10,7 @@ LPIR distinguishes three declaration forms.
 import @module::name(param_types) -> return_type
 ```
 
-The callee name is module-qualified: the `::` separator distinguishes imports from local functions. The module prefix (`std.math`, `lp.q32`, `lpfx`, and others) tells the emitter which provider resolves the import.
+The callee name is module-qualified: the `::` separator distinguishes imports from local functions. The module prefix (`std.math`, `lp.q32`, `lpfn`, and others) tells the emitter which provider resolves the import.
 
 ### 2. Local functions
 
@@ -70,6 +70,6 @@ The emitter is configured with **providers** keyed by import module name. Exampl
 |-----------|------|
 | `std.math` | Standard math builtins; WASM may lower to browser `libm`-style imports; Cranelift may use libcalls or intrinsics. |
 | `lp.q32`   | Q32 fixed-point helpers; available only when the emitter runs in Q32 mode. |
-| `lpfx`     | LPFX (Lygia) builtins; available only when an LPFX provider is configured. |
+| `lpfn`     | LPFX (Lygia) builtins; available only when an LPFX provider is configured. |
 
 If a module required by the IR has no provider, the emitter reports an error. If a call’s argument or result types do not match the imported signature, the emitter reports an error.

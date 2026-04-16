@@ -11,8 +11,8 @@ Add builtin function calling to the `lps-wasm` backend. This involves:
 2. **Builtin call emission** — resolve GLSL builtin names to import indices and emit `call` instructions
 3. **Import satisfaction** — `builtins.wasm` (compiled from `lps-builtins` for `wasm32-unknown-unknown`) instantiated with **shared linear memory**; same linking path in wasmtime tests and in the browser. No separate “test-only” host path unless needed for debugging.
 4. **Vector-argument builtins** — handle builtins that take/return vectors (flattened ABI)
-5. **LPFX function imports** — same pattern for `lpfx_worley`, `lpfx_fbm`, `lpfx_psrdnoise`
-6. **Out parameters** — WASM linear memory for `lpfx_psrdnoise`'s `out vec2 gradient`
+5. **LPFX function imports** — same pattern for `lpfn_worley`, `lpfn_fbm`, `lpfn_psrdnoise`
+6. **Out parameters** — WASM linear memory for `lpfn_psrdnoise`'s `out vec2 gradient`
 7. **Rainbow shader end-to-end** — validate the full pipeline
 
 Predecessors: phases 1–5 of part-iii are complete (scalar ops, type constructors, control flow, user functions, vectors). The Q32 mul/div i64 validation bug is tracked but works in practice for filetests.
@@ -29,7 +29,7 @@ Predecessors: phases 1–5 of part-iii are complete (scalar ops, type constructo
 - `lps-builtin-ids`: `BuiltinId` enum, `name()` → `"__lp_q32_sin"`, `builtin_id_from_name()`
 - `lps-builtins`: `extern "C"` implementations, all i32-based for Q32
 - Vector ABI: inputs scalarized (one i32 per component), vector returns via `*mut i32` (sret pointer as first param)
-- `lps-frontend`: `is_builtin_function(name)`, `check_builtin_call(name, &arg_types)`, `is_lpfx_fn(name)`
+- `lps-frontend`: `is_builtin_function(name)`, `check_builtin_call(name, &arg_types)`, `is_lpfn_fn(name)`
 
 ### Cranelift builtin calling pattern
 - GLSL name → string match in `emit_builtin_call` → per-builtin method
@@ -39,7 +39,7 @@ Predecessors: phases 1–5 of part-iii are complete (scalar ops, type constructo
 
 ### Rainbow.shader builtins needed
 Scalar: `clamp`, `abs`, `mod`, `fract`, `floor`, `exp`, `cos`, `sin`, `smoothstep`, `mix`, `atan`, `min`
-LPFX: `lpfx_worley`, `lpfx_fbm`, `lpfx_psrdnoise` (with out param)
+LPFX: `lpfn_worley`, `lpfn_fbm`, `lpfn_psrdnoise` (with out param)
 
 ## Questions
 
@@ -48,7 +48,7 @@ The WASM import section must come before the code section. We need to know which
 - **Pre-scan AST:** Walk all function bodies to collect builtin names, build import table, then emit code with known indices.
 - **Two-pass codegen:** Emit code once (recording builtin usage), then re-emit with correct import indices.
 
-**Suggested answer:** Pre-scan. Simpler, no re-emission. Walk the AST looking for FunCall nodes where `is_builtin_function(name)` or `is_lpfx_fn(name)` is true.
+**Suggested answer:** Pre-scan. Simpler, no re-emission. Walk the AST looking for FunCall nodes where `is_builtin_function(name)` or `is_lpfn_fn(name)` is true.
 
 **Decision:** Pre-scan. Matches existing `walk_for_declarations` pattern.
 
@@ -77,7 +77,7 @@ Cranelift has a complex chain: GLSL name → per-builtin method → libcall name
 **Decision:** Auto-generate `glsl_to_builtin_id(name, arg_count) -> Option<BuiltinId>` in `lps-builtin-ids` via `build-builtins.sh`. WASM backend checks inline implementations first, falls back to import call via this mapping. New builtins auto-resolve to imports with no compiler changes.
 
 ### Q5: Out parameter strategy for LPFX
-`lpfx_psrdnoise` has an `out vec2 gradient` parameter. Options:
+`lpfn_psrdnoise` has an `out vec2 gradient` parameter. Options:
 - WASM linear memory: declare memory, allocate slots, pass pointers
 - Multi-value return: return the gradient components alongside the scalar return
 

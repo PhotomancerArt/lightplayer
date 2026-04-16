@@ -5,15 +5,15 @@ use syn::{Item, ItemFn, parse_file};
 use walkdir::WalkDir;
 
 mod discovery;
-mod lpfx;
+mod lpfn;
 mod native_dispatch_codegen;
 
-use discovery::discover_lpfx_functions;
-use lpfx::errors::Variant;
-use lpfx::grouping::{group_by_signature, group_functions_by_name};
-use lpfx::process::process_lpfx_functions;
-use lpfx::types::Type;
-use lpfx::validate::{ParsedLpfxFunction, validate_lpfx_functions};
+use discovery::discover_lpfn_functions;
+use lpfn::errors::Variant;
+use lpfn::grouping::{group_by_signature, group_functions_by_name};
+use lpfn::process::process_lpfn_functions;
+use lpfn::types::Type;
+use lpfn::validate::{ParsedLpfnFunction, validate_lpfn_functions};
 
 #[derive(Debug, Clone)]
 pub(crate) struct BuiltinInfo {
@@ -28,9 +28,9 @@ pub(crate) struct BuiltinInfo {
     file_name: String,
     /// Rust function signature types as strings (e.g., "extern \"C\" fn(f32, u32) -> f32")
     rust_signature: String,
-    /// Module path relative to builtins/ directory (e.g., "glsl::sin_q32", "lpir::fsqrt_q32", "lpfx::hash")
+    /// Module path relative to builtins/ directory (e.g., "glsl::sin_q32", "lpir::fsqrt_q32", "lpfn::hash")
     module_path: String,
-    /// `lpir`, `glsl`, or `lpfx`
+    /// `lpir`, `glsl`, or `lpfn`
     builtin_module: String,
     /// Function name within the module (e.g. `fadd`, `sin`, `fbm2`, `hash_1`)
     builtin_fn_name: String,
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("builtins");
     let glsl_dir = builtins_dir.join("glsl");
     let lpir_dir = builtins_dir.join("lpir");
-    let lpfx_dir = builtins_dir.join("lpfx");
+    let lpfn_dir = builtins_dir.join("lpfn");
 
     let mut builtins =
         discover_builtins(&glsl_dir, &builtins_dir).expect("Failed to discover glsl builtins");
@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         discover_builtins(&lpir_dir, &builtins_dir).expect("Failed to discover lpir builtins"),
     );
     builtins.extend(
-        discover_builtins(&lpfx_dir, &builtins_dir).expect("Failed to discover lpfx builtins"),
+        discover_builtins(&lpfn_dir, &builtins_dir).expect("Failed to discover lpfn builtins"),
     );
     let vm_dir = builtins_dir.join("vm");
     builtins
@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("lps-builtin-ids")
         .join("src")
         .join("glsl_builtin_mapping.rs");
-    generate_glsl_builtin_mapping(&glsl_map_path, &builtins, &lpfx_dir)?;
+    generate_glsl_builtin_mapping(&glsl_map_path, &builtins, &lpfn_dir)?;
 
     // Generate builtin-ids lib.rs (after `glsl_builtin_mapping.rs` for consistent partial runs)
     let builtin_ids_path = workspace_root
@@ -93,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("builtin_refs.rs");
     generate_builtin_refs(&builtin_refs_lps_path, &builtins, "crate");
 
-    // Generate glsl/mod.rs and lpir/mod.rs (submodule lists only; lpfx keeps hand-written mod tree)
+    // Generate glsl/mod.rs and lpir/mod.rs (submodule lists only; lpfn keeps hand-written mod tree)
     let glsl_builtins: Vec<BuiltinInfo> = builtins
         .iter()
         .filter(|b| b.module_path.starts_with("glsl::"))
@@ -187,11 +187,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn generate_glsl_builtin_mapping(
     path: &Path,
     builtins: &[BuiltinInfo],
-    lpfx_dir: &Path,
+    lpfn_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let discovered = discover_lpfx_functions(lpfx_dir)?;
-    let parsed = process_lpfx_functions(&discovered)?;
-    validate_lpfx_functions(&parsed)?;
+    let discovered = discover_lpfn_functions(lpfn_dir)?;
+    let parsed = process_lpfn_functions(&discovered)?;
+    validate_lpfn_functions(&parsed)?;
 
     let header = r#"//! GLSL / LPIR / LPFX name → `BuiltinId` for Q32 WASM imports.
 //!
@@ -199,7 +199,7 @@ fn generate_glsl_builtin_mapping(
 //!
 //! - `glsl_q32_math_builtin_id`: `@glsl::*` scalar imports.
 //! - `lpir_q32_builtin_id`: `@lpir::*` library ops (e.g. `sqrt`).
-//! - `glsl_lpfx_q32_builtin_id`: `lpfx_*` overloads keyed by parameter types.
+//! - `glsl_lpfn_q32_builtin_id`: `lpfn_*` overloads keyed by parameter types.
 //!
 //! Regenerate: `cargo run -p lps-builtins-gen-app` or `scripts/build-builtins.sh`
 
@@ -290,12 +290,12 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
 
     out.push_str(
         "        _ => None,\n    }\n}\n\n\
-         /// Map `lpfx_*` name + parameter type list to the Q32 `BuiltinId`.\n\
-         pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {\n\
+         /// Map `lpfn_*` name + parameter type list to the Q32 `BuiltinId`.\n\
+         pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {\n\
          match (name, params) {\n",
     );
 
-    let mut lpfx_arms: Vec<String> = Vec::new();
+    let mut lpfn_arms: Vec<String> = Vec::new();
     let grouped = group_functions_by_name(&parsed);
     let mut sorted_names: Vec<&String> = grouped.keys().collect();
     sorted_names.sort();
@@ -321,7 +321,7 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
             std::cmp::Ordering::Equal
         });
         for (signature_funcs, sig) in sigs {
-            let Some(variant) = lpfx_q32_builtin_variant(&signature_funcs) else {
+            let Some(variant) = lpfn_q32_builtin_variant(&signature_funcs) else {
                 continue;
             };
             let kinds: Vec<String> = sig
@@ -331,13 +331,13 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
                 .collect();
             let pat = kinds.join(", ");
             let escaped_name = sig.name.replace('\\', "\\\\").replace('"', "\\\"");
-            lpfx_arms.push(format!(
+            lpfn_arms.push(format!(
                 "        (\"{escaped_name}\", &[{pat}]) => Some(BuiltinId::{variant}),\n",
             ));
         }
     }
-    lpfx_arms.sort();
-    for arm in lpfx_arms {
+    lpfn_arms.sort();
+    for arm in lpfn_arms {
         out.push_str(&arm);
     }
 
@@ -357,7 +357,7 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         .iter()
         .find(|b| b.symbol_name.contains("fbm2") && b.symbol_name.ends_with("_q32"))
         .map(|b| b.enum_variant.as_str())
-        .expect("lpfx fbm2 q32");
+        .expect("lpfn fbm2 q32");
     let sqrt_v = builtins
         .iter()
         .find(|b| b.builtin_module == "lpir" && b.builtin_fn_name == "fsqrt")
@@ -370,7 +370,7 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         .expect("vm get_fuel builtin");
 
     out.push_str(&format!(
-        "#[cfg(test)]\nmod glsl_builtin_mapping_tests {{\n    use crate::BuiltinId;\n    use super::{{glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, vm_q32_builtin_id, GlslParamKind}};\n\n    #[test]\n    fn q32_sin() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"sin\", 1),\n            Some(BuiltinId::{sin_v})\n        );\n    }}\n\n    #[test]\n    fn q32_atan_two_args_is_atan2_import() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"atan\", 2),\n            Some(BuiltinId::{atan2_v})\n        );\n    }}\n\n    #[test]\n    fn lpir_sqrt() {{\n        assert_eq!(lpir_q32_builtin_id(\"sqrt\", 1), Some(BuiltinId::{sqrt_v}));\n    }}\n\n    #[test]\n    fn vm_get_fuel() {{\n        assert_eq!(\n            vm_q32_builtin_id(\"__lp_get_fuel\", 0),\n            Some(BuiltinId::{get_fuel_v})\n        );\n    }}\n\n    #[test]\n    fn lpfx_fbm_vec2() {{\n        assert_eq!(\n            glsl_lpfx_q32_builtin_id(\n                \"lpfx_fbm\",\n                &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],\n            ),\n            Some(BuiltinId::{fbm_v})\n        );\n    }}\n}}\n",
+        "#[cfg(test)]\nmod glsl_builtin_mapping_tests {{\n    use crate::BuiltinId;\n    use super::{{glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, vm_q32_builtin_id, GlslParamKind}};\n\n    #[test]\n    fn q32_sin() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"sin\", 1),\n            Some(BuiltinId::{sin_v})\n        );\n    }}\n\n    #[test]\n    fn q32_atan_two_args_is_atan2_import() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"atan\", 2),\n            Some(BuiltinId::{atan2_v})\n        );\n    }}\n\n    #[test]\n    fn lpir_sqrt() {{\n        assert_eq!(lpir_q32_builtin_id(\"sqrt\", 1), Some(BuiltinId::{sqrt_v}));\n    }}\n\n    #[test]\n    fn vm_get_fuel() {{\n        assert_eq!(\n            vm_q32_builtin_id(\"__lp_get_fuel\", 0),\n            Some(BuiltinId::{get_fuel_v})\n        );\n    }}\n\n    #[test]\n    fn lpfn_fbm_vec2() {{\n        assert_eq!(\n            glsl_lpfn_q32_builtin_id(\n                \"lpfn_fbm\",\n                &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],\n            ),\n            Some(BuiltinId::{fbm_v})\n        );\n    }}\n}}\n",
         sin_v = sin_v,
         atan2_v = atan2_v,
         sqrt_v = sqrt_v,
@@ -418,7 +418,7 @@ fn type_to_glsl_param_kind_variant(ty: &Type) -> &'static str {
     }
 }
 
-fn lpfx_q32_builtin_variant(funcs: &[&ParsedLpfxFunction]) -> Option<String> {
+fn lpfn_q32_builtin_variant(funcs: &[&ParsedLpfnFunction]) -> Option<String> {
     let has_decimal = funcs.iter().any(|f| f.attribute.variant.is_some());
     if has_decimal {
         funcs
@@ -476,7 +476,7 @@ fn discover_builtins(
         }
 
         // Compute module path relative to base_dir (builtins/)
-        // This includes the full directory structure: "glsl::sin_q32", "lpfx::hash", ...
+        // This includes the full directory structure: "glsl::sin_q32", "lpfn::hash", ...
         let relative_path = path
             .strip_prefix(base_dir)
             .map_err(|_| "Failed to compute relative path")?;
@@ -534,7 +534,7 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
 
     let func_name = func.sig.ident.to_string();
 
-    // `__lps_*` — GLSL imports; `__lp_lpir_*` / `__lp_lpfx_*` / `__lp_vm_*`
+    // `__lps_*` — GLSL imports; `__lp_lpir_*` / `__lp_lpfn_*` / `__lp_vm_*`
     let (builtin_module, rest) = if let Some(r) = func_name.strip_prefix("__lps_") {
         ("glsl", r)
     } else if let Some(after_lp) = func_name.strip_prefix("__lp_") {
@@ -544,8 +544,8 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
             ("glsl", r)
         } else if let Some(r) = after_lp.strip_prefix("vm_") {
             ("vm", r)
-        } else if let Some(r) = after_lp.strip_prefix("lpfx_") {
-            ("lpfx", r)
+        } else if let Some(r) = after_lp.strip_prefix("lpfn_") {
+            ("lpfn", r)
         } else {
             return None;
         }
@@ -565,7 +565,7 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
 
     let symbol_name = func_name.clone();
 
-    // Match `lps-builtin-ids` naming: LpGlslSinQ32, LpLpirFaddQ32, LpLpfxHash1, …
+    // Match `lps-builtin-ids` naming: LpGlslSinQ32, LpLpirFaddQ32, LpLpfnHash1, …
     let enum_variant = {
         let pascal: String = rest
             .split('_')
@@ -581,7 +581,7 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
             "glsl" => "LpGlsl",
             "lpir" => "LpLpir",
             "vm" => "LpVm",
-            "lpfx" => "LpLpfx",
+            "lpfn" => "LpLpfn",
             _ => return None,
         };
         format!("{prefix}{pascal}")
@@ -833,7 +833,7 @@ pub enum BuiltinId {
                 "lpir" => "Module::Lpir",
                 "glsl" => "Module::Glsl",
                 "vm" => "Module::Vm",
-                "lpfx" => "Module::Lpfx",
+                "lpfn" => "Module::Lpfn",
                 other => panic!("unknown builtin_module: {other}"),
             };
             output.push_str(&format!(
@@ -903,7 +903,7 @@ pub enum BuiltinId {
     output.push_str("    Lpir,\n");
     output.push_str("    Glsl,\n");
     output.push_str("    Vm,\n");
-    output.push_str("    Lpfx,\n");
+    output.push_str("    Lpfn,\n");
     output.push_str("}\n\n");
     output.push_str("/// Float ABI for mode-specific builtins.\n");
     output.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n");
@@ -913,7 +913,7 @@ pub enum BuiltinId {
     output.push_str("}\n\n");
 
     output.push_str("mod glsl_builtin_mapping;\n\n");
-    output.push_str("pub use glsl_builtin_mapping::glsl_lpfx_q32_builtin_id;\n");
+    output.push_str("pub use glsl_builtin_mapping::glsl_lpfn_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::glsl_q32_math_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::lpir_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::vm_q32_builtin_id;\n");
@@ -1039,7 +1039,7 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
     let mut glsl_files: BTreeSet<String> = BTreeSet::new();
     let mut lpir_files: BTreeSet<String> = BTreeSet::new();
     let mut vm_files: BTreeSet<String> = BTreeSet::new();
-    let mut lpfx_roots: BTreeSet<String> = BTreeSet::new();
+    let mut lpfn_roots: BTreeSet<String> = BTreeSet::new();
 
     for builtin in builtins {
         let components: Vec<&str> = builtin.module_path.split("::").collect();
@@ -1053,8 +1053,8 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
             Some("vm") if components.len() >= 2 => {
                 vm_files.insert(components[1].to_string());
             }
-            Some("lpfx") if components.len() >= 2 => {
-                lpfx_roots.insert(format!("lpfx::{}", components[1]));
+            Some("lpfn") if components.len() >= 2 => {
+                lpfn_roots.insert(format!("lpfn::{}", components[1]));
             }
             _ => {}
         }
@@ -1079,7 +1079,7 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
             vm_files.into_iter().collect::<Vec<_>>().join(", ")
         ));
     }
-    import_parts.extend(lpfx_roots);
+    import_parts.extend(lpfn_roots);
     import_parts.sort();
 
     if !import_parts.is_empty() {
@@ -1201,7 +1201,7 @@ fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo], import_root: &st
                 // One Rust module per file: import symbols from the leaf module.
                 (format!("{import_root}::builtins::{}", module_path), None)
             } else {
-                // lpfx::...::file — import parent path, qualify with last component
+                // lpfn::...::file — import parent path, qualify with last component
                 let import_components = &components[..components.len() - 1];
                 let import_path_str = import_components.join("::");
                 let import_path = format!("{import_root}::builtins::{}", import_path_str);

@@ -20,8 +20,8 @@ purely about:
 ### BuiltinId (from Stage I)
 
 Self-describing enum in `lps-builtin-ids`. Variants like `LpGlslSinQ32`,
-`LpLpirFaddQ32`, `LpLpfxFbm2Q32`. Methods: `name()` → symbol string,
-`module()` → `Module::{Glsl,Lpir,Lpfx}`, `fn_name()` → logical name,
+`LpLpirFaddQ32`, `LpLpfnFbm2Q32`. Methods: `name()` → symbol string,
+`module()` → `Module::{Glsl,Lpir,Lpfn}`, `fn_name()` → logical name,
 `mode()` → `Option<Mode::{Q32,F32}>`.
 
 ### Import resolution (existing, shared)
@@ -30,7 +30,7 @@ Self-describing enum in `lps-builtin-ids`. Variants like `LpGlslSinQ32`,
 
 - `glsl_q32_math_builtin_id(name, arg_count) → Option<BuiltinId>` — glsl module
 - `lpir_q32_builtin_id(name, arg_count) → Option<BuiltinId>` — lpir module
-- `glsl_lpfx_q32_builtin_id(base, &[GlslParamKind]) → Option<BuiltinId>` — lpfx
+- `glsl_lpfn_q32_builtin_id(base, &[GlslParamKind]) → Option<BuiltinId>` — lpfn
 
 The WASM emitter's `resolve_builtin_id` dispatches on `ImportDecl.module_name`
 and calls these. The Cranelift emitter needs the same logic.

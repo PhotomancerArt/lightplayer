@@ -9,7 +9,7 @@ color manipulation code to Rust.
 ## File Structure
 
 ```
-lp-shader/lps-builtins/src/builtins/lpfx/
+lp-shader/lps-builtins/src/builtins/lpfn/
 ├── color/
 │   └── space/
 │       ├── mod.rs                    # NEW: Module declaration for color/space
@@ -27,63 +27,63 @@ lp-shader/lps-builtins/src/builtins/lpfx/
 ### Math Module (`math/saturate_q32.rs`)
 
 ```
-lpfx_saturate_q32(value: Q32) -> Q32
+lpfn_saturate_q32(value: Q32) -> Q32
   # NEW: Clamp value between 0 and 1 (Q32 fixed-point)
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_saturate_q32(i32) -> i32
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_saturate_q32(i32) -> i32
 
-lpfx_saturate_vec3_q32(v: Vec3Q32) -> Vec3Q32
+lpfn_saturate_vec3_q32(v: Vec3Q32) -> Vec3Q32
   # NEW: Saturate each component of vec3
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_saturate_vec3_q32(i32, i32, i32) -> (i32, i32, i32)
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_saturate_vec3_q32(i32, i32, i32) -> (i32, i32, i32)
 
-lpfx_saturate_vec4_q32(v: Vec4Q32) -> Vec4Q32
+lpfn_saturate_vec4_q32(v: Vec4Q32) -> Vec4Q32
   # NEW: Saturate each component of vec4
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_saturate_vec4_q32(i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_saturate_vec4_q32(i32, i32, i32, i32) -> (i32, i32, i32, i32)
 ```
 
 ### Color/Space Module (`color/space/hue2rgb_q32.rs`)
 
 ```
-lpfx_hue2rgb_q32(hue: Q32) -> Vec3Q32
+lpfn_hue2rgb_q32(hue: Q32) -> Vec3Q32
   # NEW: Convert hue value (0-1) to RGB vec3
   # Public Rust function - can be inlined, called by hsv2rgb
-  # Extern C wrapper: __lpfx_hue2rgb_q32(i32) -> (i32, i32, i32)
+  # Extern C wrapper: __lpfn_hue2rgb_q32(i32) -> (i32, i32, i32)
   # Algorithm: Uses abs() and arithmetic to compute RGB from hue
-  # Uses: lpfx_saturate_vec3_q32
+  # Uses: lpfn_saturate_vec3_q32
 ```
 
 ### Color/Space Module (`color/space/hsv2rgb_q32.rs`)
 
 ```
-lpfx_hsv2rgb_q32(hsv: Vec3Q32) -> Vec3Q32
+lpfn_hsv2rgb_q32(hsv: Vec3Q32) -> Vec3Q32
   # NEW: Convert HSV to RGB
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_hsv2rgb_q32(i32, i32, i32) -> (i32, i32, i32)
-  # Uses: lpfx_hue2rgb_q32, lpfx_saturate_vec3_q32
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_hsv2rgb_q32(i32, i32, i32) -> (i32, i32, i32)
+  # Uses: lpfn_hue2rgb_q32, lpfn_saturate_vec3_q32
 
-lpfx_hsv2rgb_vec4_q32(hsv: Vec4Q32) -> Vec4Q32
+lpfn_hsv2rgb_vec4_q32(hsv: Vec4Q32) -> Vec4Q32
   # NEW: Convert HSV to RGB (with alpha channel preserved)
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_hsv2rgb_vec4_q32(i32, i32, i32, i32) -> (i32, i32, i32, i32)
-  # Uses: lpfx_hsv2rgb_q32
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_hsv2rgb_vec4_q32(i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  # Uses: lpfn_hsv2rgb_q32
 ```
 
 ### Color/Space Module (`color/space/rgb2hsv_q32.rs`)
 
 ```
-lpfx_rgb2hsv_q32(rgb: Vec3Q32) -> Vec3Q32
+lpfn_rgb2hsv_q32(rgb: Vec3Q32) -> Vec3Q32
   # NEW: Convert RGB to HSV
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_rgb2hsv_q32(i32, i32, i32) -> (i32, i32, i32)
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_rgb2hsv_q32(i32, i32, i32) -> (i32, i32, i32)
   # Uses: epsilon constant to avoid division by zero
 
-lpfx_rgb2hsv_vec4_q32(rgb: Vec4Q32) -> Vec4Q32
+lpfn_rgb2hsv_vec4_q32(rgb: Vec4Q32) -> Vec4Q32
   # NEW: Convert RGB to HSV (with alpha channel preserved)
-  # Public Rust function - can be inlined, called by other lpfx functions
-  # Extern C wrapper: __lpfx_rgb2hsv_vec4_q32(i32, i32, i32, i32) -> (i32, i32, i32, i32)
-  # Uses: lpfx_rgb2hsv_q32
+  # Public Rust function - can be inlined, called by other lpfn functions
+  # Extern C wrapper: __lpfn_rgb2hsv_vec4_q32(i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  # Uses: lpfn_rgb2hsv_q32
 ```
 
 ## Implementation Details
@@ -101,16 +101,16 @@ The `rgb2hsv` function uses an epsilon value to avoid division by zero. For Q32:
 
 Each function follows this two-layer pattern:
 
-1. **`lpfx_*`** - Public Rust function with nice types (Q32, Vec3Q32, Vec4Q32)
+1. **`lpfn_*`** - Public Rust function with nice types (Q32, Vec3Q32, Vec4Q32)
     - Contains the actual implementation
     - Can be inlined when called from other Rust code
-    - Allows ergonomic calls between lpfx functions (e.g., `hsv2rgb` can call `hue2rgb` and
+    - Allows ergonomic calls between lpfn functions (e.g., `hsv2rgb` can call `hue2rgb` and
       `saturate` with nice types)
 
-2. **`__lpfx_*`** - Extern C wrapper with expanded types (i32, flattened vectors)
-    - Wraps the `lpfx_*` function for compiler/GLSL calls
+2. **`__lpfn_*`** - Extern C wrapper with expanded types (i32, flattened vectors)
+    - Wraps the `lpfn_*` function for compiler/GLSL calls
     - Takes expanded types: Q32 becomes i32, Vec3Q32 becomes three i32 parameters
-    - Has `#[lpfx_impl_macro::lpfx_impl]` annotation for auto-registration
+    - Has `#[lpfn_impl_macro::lpfn_impl]` annotation for auto-registration
     - Has `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
 
 Example:
@@ -118,16 +118,16 @@ Example:
 ```rust
 // Public Rust API - can be inlined
 #[inline(always)]
-pub fn lpfx_saturate_q32(value: Q32) -> Q32 {
+pub fn lpfn_saturate_q32(value: Q32) -> Q32 {
     // Actual implementation
     value.max(Q32::ZERO).min(Q32::ONE)
 }
 
 // Extern C wrapper for compiler
-#[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_saturate(float x)")]
+#[lpfn_impl_macro::lpfn_impl(q32, "float lpfn_saturate(float x)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_saturate_q32(value: i32) -> i32 {
-    lpfx_saturate_q32(Q32::from_fixed(value)).to_fixed()
+pub extern "C" fn __lpfn_saturate_q32(value: i32) -> i32 {
+    lpfn_saturate_q32(Q32::from_fixed(value)).to_fixed()
 }
 ```
 
@@ -136,12 +136,12 @@ refactored to follow this pattern in the future, but that's out of scope for thi
 
 ### Dependencies
 
-- `lpfx_saturate_q32` is a simple utility (clamp to [0, 1])
-- `lpfx_hue2rgb_q32` is a color-specific helper, uses `lpfx_saturate_vec3_q32`
-- `lpfx_hsv2rgb_q32` depends on `lpfx_hue2rgb_q32` and `lpfx_saturate_vec3_q32`
-- `lpfx_rgb2hsv_q32` is standalone (uses epsilon constant)
+- `lpfn_saturate_q32` is a simple utility (clamp to [0, 1])
+- `lpfn_hue2rgb_q32` is a color-specific helper, uses `lpfn_saturate_vec3_q32`
+- `lpfn_hsv2rgb_q32` depends on `lpfn_hue2rgb_q32` and `lpfn_saturate_vec3_q32`
+- `lpfn_rgb2hsv_q32` is standalone (uses epsilon constant)
 
-All functions call each other using the `lpfx_*` names with nice types, allowing inlining and
+All functions call each other using the `lpfn_*` names with nice types, allowing inlining and
 ergonomic Rust code.
 
 ## Testing Requirements

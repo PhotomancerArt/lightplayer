@@ -51,7 +51,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpLpirFtruncQ32
         | BuiltinId::LpLpirItofSQ32
         | BuiltinId::LpLpirItofUQ32
-        | BuiltinId::LpLpfxSaturateQ32
+        | BuiltinId::LpLpfnSaturateQ32
         | BuiltinId::LpVmGetFuelQ32 => {
             // extern "C" fn(i32) -> i32
             sig.params.push(AbiParam::new(types::I32));
@@ -67,31 +67,31 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpLpirFminQ32
         | BuiltinId::LpLpirFmulQ32
         | BuiltinId::LpLpirFsubQ32
-        | BuiltinId::LpLpfxGnoise1Q32
-        | BuiltinId::LpLpfxHash1
-        | BuiltinId::LpLpfxRandom1Q32
-        | BuiltinId::LpLpfxSnoise1Q32
-        | BuiltinId::LpLpfxSrandom1Q32 => {
+        | BuiltinId::LpLpfnGnoise1Q32
+        | BuiltinId::LpLpfnHash1
+        | BuiltinId::LpLpfnRandom1Q32
+        | BuiltinId::LpLpfnSnoise1Q32
+        | BuiltinId::LpLpfnSrandom1Q32 => {
             // extern "C" fn(i32, i32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
         BuiltinId::LpGlslFmaQ32
-        | BuiltinId::LpLpfxGnoise2Q32
-        | BuiltinId::LpLpfxHash2
-        | BuiltinId::LpLpfxRandom2Q32
-        | BuiltinId::LpLpfxSnoise2Q32
-        | BuiltinId::LpLpfxSrandom2Q32
-        | BuiltinId::LpLpfxWorley2Q32
-        | BuiltinId::LpLpfxWorley2ValueQ32 => {
+        | BuiltinId::LpLpfnGnoise2Q32
+        | BuiltinId::LpLpfnHash2
+        | BuiltinId::LpLpfnRandom2Q32
+        | BuiltinId::LpLpfnSnoise2Q32
+        | BuiltinId::LpLpfnSrandom2Q32
+        | BuiltinId::LpLpfnWorley2Q32
+        | BuiltinId::LpLpfnWorley2ValueQ32 => {
             // extern "C" fn(i32, i32, i32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxFbm2F32 => {
+        BuiltinId::LpLpfnFbm2F32 => {
             // extern "C" fn(f32, f32, i32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -99,14 +99,14 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxFbm2Q32
-        | BuiltinId::LpLpfxGnoise3Q32
-        | BuiltinId::LpLpfxHash3
-        | BuiltinId::LpLpfxRandom3Q32
-        | BuiltinId::LpLpfxSnoise3Q32
-        | BuiltinId::LpLpfxSrandom3Q32
-        | BuiltinId::LpLpfxWorley3Q32
-        | BuiltinId::LpLpfxWorley3ValueQ32 => {
+        BuiltinId::LpLpfnFbm2Q32
+        | BuiltinId::LpLpfnGnoise3Q32
+        | BuiltinId::LpLpfnHash3
+        | BuiltinId::LpLpfnRandom3Q32
+        | BuiltinId::LpLpfnSnoise3Q32
+        | BuiltinId::LpLpfnSrandom3Q32
+        | BuiltinId::LpLpfnWorley3Q32
+        | BuiltinId::LpLpfnWorley3ValueQ32 => {
             // extern "C" fn(i32, i32, i32, u32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
@@ -114,7 +114,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxFbm3F32 => {
+        BuiltinId::LpLpfnFbm3F32 => {
             // extern "C" fn(f32, f32, f32, i32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -123,7 +123,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxFbm3Q32 | BuiltinId::LpLpfxGnoise3TileQ32 => {
+        BuiltinId::LpLpfnFbm3Q32 | BuiltinId::LpLpfnGnoise3TileQ32 => {
             // extern "C" fn(i32, i32, i32, i32, u32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
@@ -132,7 +132,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxFbm3TileF32 => {
+        BuiltinId::LpLpfnFbm3TileF32 => {
             // extern "C" fn(f32, f32, f32, f32, i32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -142,7 +142,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxFbm3TileQ32 => {
+        BuiltinId::LpLpfnFbm3TileQ32 => {
             // extern "C" fn(i32, i32, i32, i32, i32, u32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
@@ -152,33 +152,33 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxGnoise1F32
-        | BuiltinId::LpLpfxRandom1F32
-        | BuiltinId::LpLpfxSnoise1F32
-        | BuiltinId::LpLpfxSrandom1F32 => {
+        BuiltinId::LpLpfnGnoise1F32
+        | BuiltinId::LpLpfnRandom1F32
+        | BuiltinId::LpLpfnSnoise1F32
+        | BuiltinId::LpLpfnSrandom1F32 => {
             // extern "C" fn(f32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxGnoise2F32
-        | BuiltinId::LpLpfxRandom2F32
-        | BuiltinId::LpLpfxSnoise2F32
-        | BuiltinId::LpLpfxSrandom2F32
-        | BuiltinId::LpLpfxWorley2F32
-        | BuiltinId::LpLpfxWorley2ValueF32 => {
+        BuiltinId::LpLpfnGnoise2F32
+        | BuiltinId::LpLpfnRandom2F32
+        | BuiltinId::LpLpfnSnoise2F32
+        | BuiltinId::LpLpfnSrandom2F32
+        | BuiltinId::LpLpfnWorley2F32
+        | BuiltinId::LpLpfnWorley2ValueF32 => {
             // extern "C" fn(f32, f32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxGnoise3F32
-        | BuiltinId::LpLpfxRandom3F32
-        | BuiltinId::LpLpfxSnoise3F32
-        | BuiltinId::LpLpfxSrandom3F32
-        | BuiltinId::LpLpfxWorley3F32
-        | BuiltinId::LpLpfxWorley3ValueF32 => {
+        BuiltinId::LpLpfnGnoise3F32
+        | BuiltinId::LpLpfnRandom3F32
+        | BuiltinId::LpLpfnSnoise3F32
+        | BuiltinId::LpLpfnSrandom3F32
+        | BuiltinId::LpLpfnWorley3F32
+        | BuiltinId::LpLpfnWorley3ValueF32 => {
             // extern "C" fn(f32, f32, f32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -186,7 +186,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxGnoise3TileF32 => {
+        BuiltinId::LpLpfnGnoise3TileF32 => {
             // extern "C" fn(f32, f32, f32, f32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -195,27 +195,27 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxHsv2rgbF32
-        | BuiltinId::LpLpfxRgb2hsvF32
-        | BuiltinId::LpLpfxSaturateVec3F32 => {
+        BuiltinId::LpLpfnHsv2rgbF32
+        | BuiltinId::LpLpfnRgb2hsvF32
+        | BuiltinId::LpLpfnSaturateVec3F32 => {
             // extern "C" fn(*mut f32, f32, f32, f32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxHsv2rgbQ32
-        | BuiltinId::LpLpfxRgb2hsvQ32
-        | BuiltinId::LpLpfxSaturateVec3Q32 => {
+        BuiltinId::LpLpfnHsv2rgbQ32
+        | BuiltinId::LpLpfnRgb2hsvQ32
+        | BuiltinId::LpLpfnSaturateVec3Q32 => {
             // extern "C" fn(*mut i32, i32, i32, i32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxHsv2rgbVec4F32
-        | BuiltinId::LpLpfxRgb2hsvVec4F32
-        | BuiltinId::LpLpfxSaturateVec4F32 => {
+        BuiltinId::LpLpfnHsv2rgbVec4F32
+        | BuiltinId::LpLpfnRgb2hsvVec4F32
+        | BuiltinId::LpLpfnSaturateVec4F32 => {
             // extern "C" fn(*mut f32, f32, f32, f32, f32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::F32));
@@ -223,10 +223,10 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxHsv2rgbVec4Q32
-        | BuiltinId::LpLpfxRgb2hsvVec4Q32
-        | BuiltinId::LpLpfxSaturateVec4Q32
-        | BuiltinId::LpLpfxSrandom3VecQ32 => {
+        BuiltinId::LpLpfnHsv2rgbVec4Q32
+        | BuiltinId::LpLpfnRgb2hsvVec4Q32
+        | BuiltinId::LpLpfnSaturateVec4Q32
+        | BuiltinId::LpLpfnSrandom3VecQ32 => {
             // extern "C" fn(*mut i32, i32, i32, i32, i32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::I32));
@@ -234,17 +234,17 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxHue2rgbF32 => {
+        BuiltinId::LpLpfnHue2rgbF32 => {
             // extern "C" fn(*mut f32, f32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxHue2rgbQ32 => {
+        BuiltinId::LpLpfnHue2rgbQ32 => {
             // extern "C" fn(*mut i32, i32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxPsrdnoise2F32 => {
+        BuiltinId::LpLpfnPsrdnoise2F32 => {
             // extern "C" fn(f32, f32, f32, f32, f32, *mut f32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -255,7 +255,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxPsrdnoise2Q32 => {
+        BuiltinId::LpLpfnPsrdnoise2Q32 => {
             // extern "C" fn(i32, i32, i32, i32, i32, *mut i32, u32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
@@ -266,7 +266,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxPsrdnoise3F32 => {
+        BuiltinId::LpLpfnPsrdnoise3F32 => {
             // extern "C" fn(f32, f32, f32, f32, f32, f32, f32, *mut f32, u32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::F32));
@@ -279,7 +279,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxPsrdnoise3Q32 => {
+        BuiltinId::LpLpfnPsrdnoise3Q32 => {
             // extern "C" fn(i32, i32, i32, i32, i32, i32, i32, *mut i32, u32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
@@ -292,12 +292,12 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxSaturateF32 => {
+        BuiltinId::LpLpfnSaturateF32 => {
             // extern "C" fn(f32) -> f32
             sig.params.push(AbiParam::new(types::F32));
             sig.returns.push(AbiParam::new(types::F32));
         }
-        BuiltinId::LpLpfxSrandom3TileF32 => {
+        BuiltinId::LpLpfnSrandom3TileF32 => {
             // extern "C" fn(*mut f32, f32, f32, f32, f32, u32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::F32));
@@ -306,7 +306,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxSrandom3TileQ32 => {
+        BuiltinId::LpLpfnSrandom3TileQ32 => {
             // extern "C" fn(*mut i32, i32, i32, i32, i32, u32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::I32));
@@ -315,7 +315,7 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxSrandom3VecF32 => {
+        BuiltinId::LpLpfnSrandom3VecF32 => {
             // extern "C" fn(*mut f32, f32, f32, f32, u32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::F32));
@@ -334,10 +334,10 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
             cosh_q32, exp_q32, exp2_q32, fma_q32, inversesqrt_q32, ldexp_q32, log_q32, log2_q32,
             mod_q32, pow_q32, round_q32, sin_q32, sinh_q32, tan_q32, tanh_q32,
         },
-        lpfx::color,
-        lpfx::generative,
-        lpfx::hash,
-        lpfx::math,
+        lpfn::color,
+        lpfn::generative,
+        lpfn::hash,
+        lpfn::math,
         lpir::{
             fadd_q32, fdiv_q32, float_misc_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32,
             ftoi_sat_q32, itof_s_q32, itof_u_q32,
@@ -384,188 +384,188 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpLpirFtruncQ32 => float_misc_q32::__lp_lpir_ftrunc_q32 as *const u8,
         BuiltinId::LpLpirItofSQ32 => itof_s_q32::__lp_lpir_itof_s_q32 as *const u8,
         BuiltinId::LpLpirItofUQ32 => itof_u_q32::__lp_lpir_itof_u_q32 as *const u8,
-        BuiltinId::LpLpfxFbm2F32 => generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32 as *const u8,
-        BuiltinId::LpLpfxFbm2Q32 => generative::fbm::fbm2_q32::__lp_lpfx_fbm2_q32 as *const u8,
-        BuiltinId::LpLpfxFbm3F32 => generative::fbm::fbm3_f32::__lp_lpfx_fbm3_f32 as *const u8,
-        BuiltinId::LpLpfxFbm3Q32 => generative::fbm::fbm3_q32::__lp_lpfx_fbm3_q32 as *const u8,
-        BuiltinId::LpLpfxFbm3TileF32 => {
-            generative::fbm::fbm3_tile_f32::__lp_lpfx_fbm3_tile_f32 as *const u8
+        BuiltinId::LpLpfnFbm2F32 => generative::fbm::fbm2_f32::__lp_lpfn_fbm2_f32 as *const u8,
+        BuiltinId::LpLpfnFbm2Q32 => generative::fbm::fbm2_q32::__lp_lpfn_fbm2_q32 as *const u8,
+        BuiltinId::LpLpfnFbm3F32 => generative::fbm::fbm3_f32::__lp_lpfn_fbm3_f32 as *const u8,
+        BuiltinId::LpLpfnFbm3Q32 => generative::fbm::fbm3_q32::__lp_lpfn_fbm3_q32 as *const u8,
+        BuiltinId::LpLpfnFbm3TileF32 => {
+            generative::fbm::fbm3_tile_f32::__lp_lpfn_fbm3_tile_f32 as *const u8
         }
-        BuiltinId::LpLpfxFbm3TileQ32 => {
-            generative::fbm::fbm3_tile_q32::__lp_lpfx_fbm3_tile_q32 as *const u8
+        BuiltinId::LpLpfnFbm3TileQ32 => {
+            generative::fbm::fbm3_tile_q32::__lp_lpfn_fbm3_tile_q32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise1F32 => {
-            generative::gnoise::gnoise1_f32::__lp_lpfx_gnoise1_f32 as *const u8
+        BuiltinId::LpLpfnGnoise1F32 => {
+            generative::gnoise::gnoise1_f32::__lp_lpfn_gnoise1_f32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise1Q32 => {
-            generative::gnoise::gnoise1_q32::__lp_lpfx_gnoise1_q32 as *const u8
+        BuiltinId::LpLpfnGnoise1Q32 => {
+            generative::gnoise::gnoise1_q32::__lp_lpfn_gnoise1_q32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise2F32 => {
-            generative::gnoise::gnoise2_f32::__lp_lpfx_gnoise2_f32 as *const u8
+        BuiltinId::LpLpfnGnoise2F32 => {
+            generative::gnoise::gnoise2_f32::__lp_lpfn_gnoise2_f32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise2Q32 => {
-            generative::gnoise::gnoise2_q32::__lp_lpfx_gnoise2_q32 as *const u8
+        BuiltinId::LpLpfnGnoise2Q32 => {
+            generative::gnoise::gnoise2_q32::__lp_lpfn_gnoise2_q32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise3F32 => {
-            generative::gnoise::gnoise3_f32::__lp_lpfx_gnoise3_f32 as *const u8
+        BuiltinId::LpLpfnGnoise3F32 => {
+            generative::gnoise::gnoise3_f32::__lp_lpfn_gnoise3_f32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise3Q32 => {
-            generative::gnoise::gnoise3_q32::__lp_lpfx_gnoise3_q32 as *const u8
+        BuiltinId::LpLpfnGnoise3Q32 => {
+            generative::gnoise::gnoise3_q32::__lp_lpfn_gnoise3_q32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise3TileF32 => {
-            generative::gnoise::gnoise3_tile_f32::__lp_lpfx_gnoise3_tile_f32 as *const u8
+        BuiltinId::LpLpfnGnoise3TileF32 => {
+            generative::gnoise::gnoise3_tile_f32::__lp_lpfn_gnoise3_tile_f32 as *const u8
         }
-        BuiltinId::LpLpfxGnoise3TileQ32 => {
-            generative::gnoise::gnoise3_tile_q32::__lp_lpfx_gnoise3_tile_q32 as *const u8
+        BuiltinId::LpLpfnGnoise3TileQ32 => {
+            generative::gnoise::gnoise3_tile_q32::__lp_lpfn_gnoise3_tile_q32 as *const u8
         }
-        BuiltinId::LpLpfxHash1 => hash::__lp_lpfx_hash_1 as *const u8,
-        BuiltinId::LpLpfxHash2 => hash::__lp_lpfx_hash_2 as *const u8,
-        BuiltinId::LpLpfxHash3 => hash::__lp_lpfx_hash_3 as *const u8,
-        BuiltinId::LpLpfxHsv2rgbF32 => {
-            color::space::hsv2rgb_f32::__lp_lpfx_hsv2rgb_f32 as *const u8
+        BuiltinId::LpLpfnHash1 => hash::__lp_lpfn_hash_1 as *const u8,
+        BuiltinId::LpLpfnHash2 => hash::__lp_lpfn_hash_2 as *const u8,
+        BuiltinId::LpLpfnHash3 => hash::__lp_lpfn_hash_3 as *const u8,
+        BuiltinId::LpLpfnHsv2rgbF32 => {
+            color::space::hsv2rgb_f32::__lp_lpfn_hsv2rgb_f32 as *const u8
         }
-        BuiltinId::LpLpfxHsv2rgbQ32 => {
-            color::space::hsv2rgb_q32::__lp_lpfx_hsv2rgb_q32 as *const u8
+        BuiltinId::LpLpfnHsv2rgbQ32 => {
+            color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_q32 as *const u8
         }
-        BuiltinId::LpLpfxHsv2rgbVec4F32 => {
-            color::space::hsv2rgb_f32::__lp_lpfx_hsv2rgb_vec4_f32 as *const u8
+        BuiltinId::LpLpfnHsv2rgbVec4F32 => {
+            color::space::hsv2rgb_f32::__lp_lpfn_hsv2rgb_vec4_f32 as *const u8
         }
-        BuiltinId::LpLpfxHsv2rgbVec4Q32 => {
-            color::space::hsv2rgb_q32::__lp_lpfx_hsv2rgb_vec4_q32 as *const u8
+        BuiltinId::LpLpfnHsv2rgbVec4Q32 => {
+            color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_vec4_q32 as *const u8
         }
-        BuiltinId::LpLpfxHue2rgbF32 => {
-            color::space::hue2rgb_f32::__lp_lpfx_hue2rgb_f32 as *const u8
+        BuiltinId::LpLpfnHue2rgbF32 => {
+            color::space::hue2rgb_f32::__lp_lpfn_hue2rgb_f32 as *const u8
         }
-        BuiltinId::LpLpfxHue2rgbQ32 => {
-            color::space::hue2rgb_q32::__lp_lpfx_hue2rgb_q32 as *const u8
+        BuiltinId::LpLpfnHue2rgbQ32 => {
+            color::space::hue2rgb_q32::__lp_lpfn_hue2rgb_q32 as *const u8
         }
-        BuiltinId::LpLpfxPsrdnoise2F32 => {
-            generative::psrdnoise::psrdnoise2_f32::__lp_lpfx_psrdnoise2_f32 as *const u8
+        BuiltinId::LpLpfnPsrdnoise2F32 => {
+            generative::psrdnoise::psrdnoise2_f32::__lp_lpfn_psrdnoise2_f32 as *const u8
         }
-        BuiltinId::LpLpfxPsrdnoise2Q32 => {
-            generative::psrdnoise::psrdnoise2_q32::__lp_lpfx_psrdnoise2_q32 as *const u8
+        BuiltinId::LpLpfnPsrdnoise2Q32 => {
+            generative::psrdnoise::psrdnoise2_q32::__lp_lpfn_psrdnoise2_q32 as *const u8
         }
-        BuiltinId::LpLpfxPsrdnoise3F32 => {
-            generative::psrdnoise::psrdnoise3_f32::__lp_lpfx_psrdnoise3_f32 as *const u8
+        BuiltinId::LpLpfnPsrdnoise3F32 => {
+            generative::psrdnoise::psrdnoise3_f32::__lp_lpfn_psrdnoise3_f32 as *const u8
         }
-        BuiltinId::LpLpfxPsrdnoise3Q32 => {
-            generative::psrdnoise::psrdnoise3_q32::__lp_lpfx_psrdnoise3_q32 as *const u8
+        BuiltinId::LpLpfnPsrdnoise3Q32 => {
+            generative::psrdnoise::psrdnoise3_q32::__lp_lpfn_psrdnoise3_q32 as *const u8
         }
-        BuiltinId::LpLpfxRandom1F32 => {
-            generative::random::random1_f32::__lp_lpfx_random1_f32 as *const u8
+        BuiltinId::LpLpfnRandom1F32 => {
+            generative::random::random1_f32::__lp_lpfn_random1_f32 as *const u8
         }
-        BuiltinId::LpLpfxRandom1Q32 => {
-            generative::random::random1_q32::__lp_lpfx_random1_q32 as *const u8
+        BuiltinId::LpLpfnRandom1Q32 => {
+            generative::random::random1_q32::__lp_lpfn_random1_q32 as *const u8
         }
-        BuiltinId::LpLpfxRandom2F32 => {
-            generative::random::random2_f32::__lp_lpfx_random2_f32 as *const u8
+        BuiltinId::LpLpfnRandom2F32 => {
+            generative::random::random2_f32::__lp_lpfn_random2_f32 as *const u8
         }
-        BuiltinId::LpLpfxRandom2Q32 => {
-            generative::random::random2_q32::__lp_lpfx_random2_q32 as *const u8
+        BuiltinId::LpLpfnRandom2Q32 => {
+            generative::random::random2_q32::__lp_lpfn_random2_q32 as *const u8
         }
-        BuiltinId::LpLpfxRandom3F32 => {
-            generative::random::random3_f32::__lp_lpfx_random3_f32 as *const u8
+        BuiltinId::LpLpfnRandom3F32 => {
+            generative::random::random3_f32::__lp_lpfn_random3_f32 as *const u8
         }
-        BuiltinId::LpLpfxRandom3Q32 => {
-            generative::random::random3_q32::__lp_lpfx_random3_q32 as *const u8
+        BuiltinId::LpLpfnRandom3Q32 => {
+            generative::random::random3_q32::__lp_lpfn_random3_q32 as *const u8
         }
-        BuiltinId::LpLpfxRgb2hsvF32 => {
-            color::space::rgb2hsv_f32::__lp_lpfx_rgb2hsv_f32 as *const u8
+        BuiltinId::LpLpfnRgb2hsvF32 => {
+            color::space::rgb2hsv_f32::__lp_lpfn_rgb2hsv_f32 as *const u8
         }
-        BuiltinId::LpLpfxRgb2hsvQ32 => {
-            color::space::rgb2hsv_q32::__lp_lpfx_rgb2hsv_q32 as *const u8
+        BuiltinId::LpLpfnRgb2hsvQ32 => {
+            color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_q32 as *const u8
         }
-        BuiltinId::LpLpfxRgb2hsvVec4F32 => {
-            color::space::rgb2hsv_f32::__lp_lpfx_rgb2hsv_vec4_f32 as *const u8
+        BuiltinId::LpLpfnRgb2hsvVec4F32 => {
+            color::space::rgb2hsv_f32::__lp_lpfn_rgb2hsv_vec4_f32 as *const u8
         }
-        BuiltinId::LpLpfxRgb2hsvVec4Q32 => {
-            color::space::rgb2hsv_q32::__lp_lpfx_rgb2hsv_vec4_q32 as *const u8
+        BuiltinId::LpLpfnRgb2hsvVec4Q32 => {
+            color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_vec4_q32 as *const u8
         }
-        BuiltinId::LpLpfxSaturateF32 => math::saturate_f32::__lp_lpfx_saturate_f32 as *const u8,
-        BuiltinId::LpLpfxSaturateQ32 => math::saturate_q32::__lp_lpfx_saturate_q32 as *const u8,
-        BuiltinId::LpLpfxSaturateVec3F32 => {
-            math::saturate_f32::__lp_lpfx_saturate_vec3_f32 as *const u8
+        BuiltinId::LpLpfnSaturateF32 => math::saturate_f32::__lp_lpfn_saturate_f32 as *const u8,
+        BuiltinId::LpLpfnSaturateQ32 => math::saturate_q32::__lp_lpfn_saturate_q32 as *const u8,
+        BuiltinId::LpLpfnSaturateVec3F32 => {
+            math::saturate_f32::__lp_lpfn_saturate_vec3_f32 as *const u8
         }
-        BuiltinId::LpLpfxSaturateVec3Q32 => {
-            math::saturate_q32::__lp_lpfx_saturate_vec3_q32 as *const u8
+        BuiltinId::LpLpfnSaturateVec3Q32 => {
+            math::saturate_q32::__lp_lpfn_saturate_vec3_q32 as *const u8
         }
-        BuiltinId::LpLpfxSaturateVec4F32 => {
-            math::saturate_f32::__lp_lpfx_saturate_vec4_f32 as *const u8
+        BuiltinId::LpLpfnSaturateVec4F32 => {
+            math::saturate_f32::__lp_lpfn_saturate_vec4_f32 as *const u8
         }
-        BuiltinId::LpLpfxSaturateVec4Q32 => {
-            math::saturate_q32::__lp_lpfx_saturate_vec4_q32 as *const u8
+        BuiltinId::LpLpfnSaturateVec4Q32 => {
+            math::saturate_q32::__lp_lpfn_saturate_vec4_q32 as *const u8
         }
-        BuiltinId::LpLpfxSnoise1F32 => {
-            generative::snoise::snoise1_f32::__lp_lpfx_snoise1_f32 as *const u8
+        BuiltinId::LpLpfnSnoise1F32 => {
+            generative::snoise::snoise1_f32::__lp_lpfn_snoise1_f32 as *const u8
         }
-        BuiltinId::LpLpfxSnoise1Q32 => {
-            generative::snoise::snoise1_q32::__lp_lpfx_snoise1_q32 as *const u8
+        BuiltinId::LpLpfnSnoise1Q32 => {
+            generative::snoise::snoise1_q32::__lp_lpfn_snoise1_q32 as *const u8
         }
-        BuiltinId::LpLpfxSnoise2F32 => {
-            generative::snoise::snoise2_f32::__lp_lpfx_snoise2_f32 as *const u8
+        BuiltinId::LpLpfnSnoise2F32 => {
+            generative::snoise::snoise2_f32::__lp_lpfn_snoise2_f32 as *const u8
         }
-        BuiltinId::LpLpfxSnoise2Q32 => {
-            generative::snoise::snoise2_q32::__lp_lpfx_snoise2_q32 as *const u8
+        BuiltinId::LpLpfnSnoise2Q32 => {
+            generative::snoise::snoise2_q32::__lp_lpfn_snoise2_q32 as *const u8
         }
-        BuiltinId::LpLpfxSnoise3F32 => {
-            generative::snoise::snoise3_f32::__lp_lpfx_snoise3_f32 as *const u8
+        BuiltinId::LpLpfnSnoise3F32 => {
+            generative::snoise::snoise3_f32::__lp_lpfn_snoise3_f32 as *const u8
         }
-        BuiltinId::LpLpfxSnoise3Q32 => {
-            generative::snoise::snoise3_q32::__lp_lpfx_snoise3_q32 as *const u8
+        BuiltinId::LpLpfnSnoise3Q32 => {
+            generative::snoise::snoise3_q32::__lp_lpfn_snoise3_q32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom1F32 => {
-            generative::srandom::srandom1_f32::__lp_lpfx_srandom1_f32 as *const u8
+        BuiltinId::LpLpfnSrandom1F32 => {
+            generative::srandom::srandom1_f32::__lp_lpfn_srandom1_f32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom1Q32 => {
-            generative::srandom::srandom1_q32::__lp_lpfx_srandom1_q32 as *const u8
+        BuiltinId::LpLpfnSrandom1Q32 => {
+            generative::srandom::srandom1_q32::__lp_lpfn_srandom1_q32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom2F32 => {
-            generative::srandom::srandom2_f32::__lp_lpfx_srandom2_f32 as *const u8
+        BuiltinId::LpLpfnSrandom2F32 => {
+            generative::srandom::srandom2_f32::__lp_lpfn_srandom2_f32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom2Q32 => {
-            generative::srandom::srandom2_q32::__lp_lpfx_srandom2_q32 as *const u8
+        BuiltinId::LpLpfnSrandom2Q32 => {
+            generative::srandom::srandom2_q32::__lp_lpfn_srandom2_q32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom3F32 => {
-            generative::srandom::srandom3_f32::__lp_lpfx_srandom3_f32 as *const u8
+        BuiltinId::LpLpfnSrandom3F32 => {
+            generative::srandom::srandom3_f32::__lp_lpfn_srandom3_f32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom3Q32 => {
-            generative::srandom::srandom3_q32::__lp_lpfx_srandom3_q32 as *const u8
+        BuiltinId::LpLpfnSrandom3Q32 => {
+            generative::srandom::srandom3_q32::__lp_lpfn_srandom3_q32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom3TileF32 => {
-            generative::srandom::srandom3_tile_f32::__lp_lpfx_srandom3_tile_f32 as *const u8
+        BuiltinId::LpLpfnSrandom3TileF32 => {
+            generative::srandom::srandom3_tile_f32::__lp_lpfn_srandom3_tile_f32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom3TileQ32 => {
-            generative::srandom::srandom3_tile_q32::__lp_lpfx_srandom3_tile_q32 as *const u8
+        BuiltinId::LpLpfnSrandom3TileQ32 => {
+            generative::srandom::srandom3_tile_q32::__lp_lpfn_srandom3_tile_q32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom3VecF32 => {
-            generative::srandom::srandom3_vec_f32::__lp_lpfx_srandom3_vec_f32 as *const u8
+        BuiltinId::LpLpfnSrandom3VecF32 => {
+            generative::srandom::srandom3_vec_f32::__lp_lpfn_srandom3_vec_f32 as *const u8
         }
-        BuiltinId::LpLpfxSrandom3VecQ32 => {
-            generative::srandom::srandom3_vec_q32::__lp_lpfx_srandom3_vec_q32 as *const u8
+        BuiltinId::LpLpfnSrandom3VecQ32 => {
+            generative::srandom::srandom3_vec_q32::__lp_lpfn_srandom3_vec_q32 as *const u8
         }
-        BuiltinId::LpLpfxWorley2F32 => {
-            generative::worley::worley2_f32::__lp_lpfx_worley2_f32 as *const u8
+        BuiltinId::LpLpfnWorley2F32 => {
+            generative::worley::worley2_f32::__lp_lpfn_worley2_f32 as *const u8
         }
-        BuiltinId::LpLpfxWorley2Q32 => {
-            generative::worley::worley2_q32::__lp_lpfx_worley2_q32 as *const u8
+        BuiltinId::LpLpfnWorley2Q32 => {
+            generative::worley::worley2_q32::__lp_lpfn_worley2_q32 as *const u8
         }
-        BuiltinId::LpLpfxWorley2ValueF32 => {
-            generative::worley::worley2_value_f32::__lp_lpfx_worley2_value_f32 as *const u8
+        BuiltinId::LpLpfnWorley2ValueF32 => {
+            generative::worley::worley2_value_f32::__lp_lpfn_worley2_value_f32 as *const u8
         }
-        BuiltinId::LpLpfxWorley2ValueQ32 => {
-            generative::worley::worley2_value_q32::__lp_lpfx_worley2_value_q32 as *const u8
+        BuiltinId::LpLpfnWorley2ValueQ32 => {
+            generative::worley::worley2_value_q32::__lp_lpfn_worley2_value_q32 as *const u8
         }
-        BuiltinId::LpLpfxWorley3F32 => {
-            generative::worley::worley3_f32::__lp_lpfx_worley3_f32 as *const u8
+        BuiltinId::LpLpfnWorley3F32 => {
+            generative::worley::worley3_f32::__lp_lpfn_worley3_f32 as *const u8
         }
-        BuiltinId::LpLpfxWorley3Q32 => {
-            generative::worley::worley3_q32::__lp_lpfx_worley3_q32 as *const u8
+        BuiltinId::LpLpfnWorley3Q32 => {
+            generative::worley::worley3_q32::__lp_lpfn_worley3_q32 as *const u8
         }
-        BuiltinId::LpLpfxWorley3ValueF32 => {
-            generative::worley::worley3_value_f32::__lp_lpfx_worley3_value_f32 as *const u8
+        BuiltinId::LpLpfnWorley3ValueF32 => {
+            generative::worley::worley3_value_f32::__lp_lpfn_worley3_value_f32 as *const u8
         }
-        BuiltinId::LpLpfxWorley3ValueQ32 => {
-            generative::worley::worley3_value_q32::__lp_lpfx_worley3_value_q32 as *const u8
+        BuiltinId::LpLpfnWorley3ValueQ32 => {
+            generative::worley::worley3_value_q32::__lp_lpfn_worley3_value_q32 as *const u8
         }
         BuiltinId::LpVmGetFuelQ32 => get_fuel_q32::__lp_vm_get_fuel_q32 as *const u8,
     }

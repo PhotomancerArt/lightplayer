@@ -89,7 +89,7 @@ function counts are small).
 |------|--------|
 | `lower.rs` | `func_map` builds `CalleeRef::Local(FuncId(i))`. `register_math_imports` returns `CalleeRef::Import(ImportId(i))`. |
 | `lower_ctx.rs` | Type signatures change (`BTreeMap<Handle<Function>, CalleeRef>` is fine — CalleeRef type just changed shape). |
-| `lower_lpfx.rs` | Same — construct `CalleeRef::Import` instead of `CalleeRef(i)`. |
+| `lower_lpfn.rs` | Same — construct `CalleeRef::Import` instead of `CalleeRef(i)`. |
 
 ### Tests
 

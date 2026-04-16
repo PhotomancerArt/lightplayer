@@ -19,7 +19,7 @@ pub struct ImportDecl {
     pub return_types: Vec<IrType>,
     /// LPFX only: comma-separated logical GLSL parameter kinds for WASM builtin matching
     /// (e.g. `Vec2,Vec2,Float,Vec2,UInt`). When `None`, callers infer from [`Self::param_types`].
-    pub lpfx_glsl_params: Option<String>,
+    pub lpfn_glsl_params: Option<String>,
     /// When true, the native/WASM callee takes the VMContext pointer as its first argument
     /// (not represented in [`Self::param_types`]); lowering passes [`VMCTX_VREG`] first.
     pub needs_vmctx: bool,

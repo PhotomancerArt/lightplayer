@@ -16,11 +16,11 @@ make BuiltinId self-describing.
 
 - Redesign `BuiltinId` in `lps-builtin-ids` to be self-describing:
   given (module, name, mode) it derives symbol name, LPIR import path,
-  file path. Replace the flat generated enum (`LpQ32Sin`, `LpfxFbm2F32`,
+  file path. Replace the flat generated enum (`LpQ32Sin`, `LpfnFbm2F32`,
   etc.) with a structured representation.
 - Rename all builtin symbols:
     - `__lp_q32_sin` → `__lps_sin_q32`
-    - `__lpfx_fbm2_f32` → `__lp_lpfx_fbm2_f32`
+    - `__lpfn_fbm2_f32` → `__lp_lpfn_fbm2_f32`
     - `__lp_q32_add` (etc.) → `__lp_lpir_fadd_q32` (intrinsic math)
     - Mode-independent functions (hash) get no suffix
 - Update `lps-builtins`: rename `#[no_mangle]` symbols
@@ -44,12 +44,12 @@ make BuiltinId self-describing.
 ## Key decisions
 
 - Three modules: `lpir` (IR ops needing library support), `glsl` (GLSL
-  std functions), `lpfx` (LightPlayer effects)
+  std functions), `lpfn` (LightPlayer effects)
 - Mode suffix `_q32` / `_f32` for float-mode-specific, no suffix for
   mode-independent
 - `BuiltinId` should support: `symbol() -> &str`, `module() -> Module`,
   `name() -> &str`, `mode() -> Option<Mode>`
-- The `glsl_q32_math_builtin_id` and `glsl_lpfx_q32_builtin_id` mapping
+- The `glsl_q32_math_builtin_id` and `glsl_lpfn_q32_builtin_id` mapping
   functions in `lps-builtin-ids` should be updated to work with the
   new naming. These become the shared import resolution used by both WASM
   and Cranelift emitters.
@@ -79,7 +79,7 @@ make BuiltinId self-describing.
 - Restructured `BuiltinId` with self-describing API
 - All `__lp_*` symbols renamed across `lps-builtins`
 - Updated generator
-- LPIR imports use `glsl::` and `lpfx::` module names
+- LPIR imports use `glsl::` and `lpfn::` module names
 - WASM emitter import resolution updated
 - All WASM-path and LPIR-path tests passing
 

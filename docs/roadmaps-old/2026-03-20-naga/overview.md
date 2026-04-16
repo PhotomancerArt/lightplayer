@@ -33,7 +33,7 @@ lp-shader/
 │   └── src/
 │       ├── lib.rs               # glsl_wasm() entry point
 │       ├── emit.rs              # Walk naga::Module, emit wasm-encoder instructions
-│       └── builtins.rs          # MathFunction → inline/import, lpfx → import
+│       └── builtins.rs          # MathFunction → inline/import, lpfn → import
 ├── lps-frontend/            # UNCHANGED during migration (Cranelift uses it)
 ├── lps-cranelift/           # UNCHANGED during Phase I-II
 ├── lps-builtin-ids/         # UNCHANGED (shared by old and new stacks)
@@ -46,7 +46,7 @@ Data flow (new stack):
 GLSL source
     │
     ▼
-lps-frontend: prepend lpfx prototypes + #line 1
+lps-frontend: prepend lpfn prototypes + #line 1
     │
     ▼
 naga::front::glsl::Frontend::parse()
@@ -63,7 +63,7 @@ naga::Module
     ▼
 lps-wasm: emit_module()
   ├── Expression::Math → inline WASM or BuiltinId import
-  ├── Statement::Call (lpfx_*) → BuiltinId import
+  ├── Statement::Call (lpfn_*) → BuiltinId import
   ├── Expression::Binary → f32.add / i32.add (Q32)
   ├── vectors → scalarized emission
   └── wasm-encoder → WASM bytes
@@ -92,7 +92,7 @@ lps-wasm: emit_module()
 - **LPFX prototype injection**: The `#line 1` reset after prototypes depends
   on `pp-rs` handling `#line` correctly. Must verify early.
 - **`out` parameter pattern**: `rainbow.glsl` uses `out` parameters
-  (`lpfx_psrdnoise` writes to `gradient`). Naga models these differently from
+  (`lpfn_psrdnoise` writes to `gradient`). Naga models these differently from
   the custom frontend. Must handle during WASM emission.
 
 ## Phases

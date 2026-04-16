@@ -4,21 +4,21 @@
 
 ## Scope
 
-Eliminate heap allocations from the LPFX function registry (`lpfx_fns::init_functions`). Currently
+Eliminate heap allocations from the LPFX function registry (`lpfn_fns::init_functions`). Currently
 143 allocations (~4 KB) at first use, all live for the process. Target: 0 heap bytes for the
 registry by using static/const data in ROM. Also eliminate temporary Vec allocations in
-`find_lpfx_fn` lookups.
+`find_lpfn_fn` lookups.
 
 ## File structure
 
 ```
-lp-shader/lps-compiler/src/frontend/semantic/lpfx/
-├── lpfx_fn.rs           # UPDATE: LpfxFn uses FunctionSignatureRef; add ParameterRef, FunctionSignatureRef
-├── lpfx_fns.rs          # REPLACE: static LPFX_FNS array (generated), lpfx_fns() returns &LPFX_FNS directly
-├── lpfx_fn_registry.rs  # UPDATE: find_lpfx_fn loop-based (no Vec allocs); use new ref types
-└── lpfx_sig.rs          # UPDATE: build_call_signature uses FunctionSignatureRef (same field names)
+lp-shader/lps-compiler/src/frontend/semantic/lpfn/
+├── lpfn_fn.rs           # UPDATE: LpfnFn uses FunctionSignatureRef; add ParameterRef, FunctionSignatureRef
+├── lpfn_fns.rs          # REPLACE: static LPFX_FNS array (generated), lpfn_fns() returns &LPFX_FNS directly
+├── lpfn_fn_registry.rs  # UPDATE: find_lpfn_fn loop-based (no Vec allocs); use new ref types
+└── lpfn_sig.rs          # UPDATE: build_call_signature uses FunctionSignatureRef (same field names)
 
-lp-shader/lps-builtins-gen-app/src/lpfx/
+lp-shader/lps-builtins-gen-app/src/lpfn/
 └── generate.rs          # UPDATE: emit static const array with &'static str, &[ParameterRef]
 ```
 
@@ -26,23 +26,23 @@ lp-shader/lps-builtins-gen-app/src/lpfx/
 
 ```
                     ┌─────────────────────────────────────┐
-                    │  static LPFX_FNS: &[LpfxFn]         │
+                    │  static LPFX_FNS: &[LpfnFn]         │
                     │  (in .rodata / flash, 0 heap)        │
                     └─────────────────┬───────────────────┘
                                       │
-lpfx_fns() ──────────────────────────►│
+lpfn_fns() ──────────────────────────►│
                                       │
-find_lpfx_fn(name, arg_types) ───────►│  iterates, compares name/params
+find_lpfn_fn(name, arg_types) ───────►│  iterates, compares name/params
                                       │  (no Vec allocs)
                                       ▼
                     ┌─────────────────────────────────────┐
-                    │  LpfxFn {                           │
+                    │  LpfnFn {                           │
                     │    glsl_sig: FunctionSignatureRef {  │
                     │      name: &'static str,             │
                     │      return_type: Type,               │
                     │      parameters: &'static [ParamRef]  │
                     │    },                                │
-                    │    impls: LpfxFnImpl                 │
+                    │    impls: LpfnFnImpl                 │
                     │  }                                   │
                     └─────────────────────────────────────┘
 ```
@@ -53,17 +53,17 @@ uses parallel `ParameterRef` and `FunctionSignatureRef` with `&'static str` and
 
 ## Phases
 
-### Phase 1: Add ParameterRef and FunctionSignatureRef; update LpfxFn
+### Phase 1: Add ParameterRef and FunctionSignatureRef; update LpfnFn
 
-**Scope:** Introduce the ref-based types in `lpfx_fn.rs` and switch `LpfxFn` to use
+**Scope:** Introduce the ref-based types in `lpfn_fn.rs` and switch `LpfnFn` to use
 `FunctionSignatureRef`. The compiler will break until Phase 2 updates consumers.
 
-**Code organization:** Place `ParameterRef` and `FunctionSignatureRef` before `LpfxFn`. Use
-`ParamQualifier` from `crate::semantic::functions`. Keep `LpfxFnImpl` unchanged.
+**Code organization:** Place `ParameterRef` and `FunctionSignatureRef` before `LpfnFn`. Use
+`ParamQualifier` from `crate::semantic::functions`. Keep `LpfnFnImpl` unchanged.
 
 **Implementation details:**
 
-1. In `lps-compiler/src/frontend/semantic/lpfx/lpfx_fn.rs`:
+1. In `lps-compiler/src/frontend/semantic/lpfn/lpfn_fn.rs`:
     - Add `ParameterRef` (mirrors `Parameter` with `&'static str`):
       ```rust
       use crate::semantic::functions::ParamQualifier;
@@ -82,11 +82,11 @@ uses parallel `ParameterRef` and `FunctionSignatureRef` with `&'static str` and
           pub parameters: &'static [ParameterRef],
       }
       ```
-    - Change `LpfxFn` to use `FunctionSignatureRef`:
+    - Change `LpfnFn` to use `FunctionSignatureRef`:
       ```rust
-      pub struct LpfxFn {
+      pub struct LpfnFn {
           pub glsl_sig: FunctionSignatureRef,
-          pub impls: LpfxFnImpl,
+          pub impls: LpfnFnImpl,
       }
       ```
     - Remove `use crate::semantic::functions::FunctionSignature;`; add
@@ -100,32 +100,32 @@ new types compile; do not run full test suite yet.
 
 ---
 
-### Phase 2: Update lpfx_sig and codegen consumers to use ref types
+### Phase 2: Update lpfn_sig and codegen consumers to use ref types
 
-**Scope:** Update all consumers of `LpfxFn.glsl_sig` to work with `FunctionSignatureRef`. Field
+**Scope:** Update all consumers of `LpfnFn.glsl_sig` to work with `FunctionSignatureRef`. Field
 names (`.name`, `.parameters`, `.return_type`, `param.ty`, `param.qualifier`) are unchanged — only
 the type changes, so most code needs no edits. Fix any `param.ty.clone()` — `Type` is `Copy` so use
 `param.ty` or `*param.ty` if needed.
 
 **Implementation details:**
 
-1. **lpfx_sig.rs** (`build_call_signature`): No structural changes — it uses
+1. **lpfn_sig.rs** (`build_call_signature`): No structural changes — it uses
    `func.glsl_sig.return_type`, `func.glsl_sig.parameters`, `param.ty`, `param.qualifier`. Change
    `param.ty.clone()` to `param.ty` (Type is Copy) if present.
 
-2. **codegen/lpfx_fns.rs** (`emit_lp_lib_fn_call`, etc.): Same — uses `func.glsl_sig.parameters`,
+2. **codegen/lpfn_fns.rs** (`emit_lp_lib_fn_call`, etc.): Same — uses `func.glsl_sig.parameters`,
    `func.glsl_sig.return_type`. No signature changes.
 
 3. **codegen/expr/function.rs** (LPFX call path): The LPFX branch uses `func.glsl_sig` from
-   `find_lpfx_fn` — no changes if it only reads `.parameters`, `.return_type`, `param.ty`,
+   `find_lpfn_fn` — no changes if it only reads `.parameters`, `.return_type`, `param.ty`,
    `param.qualifier`.
 
-4. **lpfx_fn_registry.rs**: Update `find_lpfx_fn` and `matches_signature` to use `glsl_sig.name` (
+4. **lpfn_fn_registry.rs**: Update `find_lpfn_fn` and `matches_signature` to use `glsl_sig.name` (
    now `&str` — compare with `== name`), `glsl_sig.parameters.len()`, etc. Remove
    `use alloc::vec::Vec` once Phase 4 refactors the lookup. For now keep the filter/collect logic —
    it will still compile with `FunctionSignatureRef`.
 
-**Validate:** `cargo build -p lps-compiler` succeeds. Tests will fail because `lpfx_fns.rs`
+**Validate:** `cargo build -p lps-compiler` succeeds. Tests will fail because `lpfn_fns.rs`
 still has the old `init_functions` format.
 
 ---
@@ -134,29 +134,29 @@ still has the old `init_functions` format.
 
 **Scope:** Change `lps-builtins-gen-app` to emit a `static` array with `&'static str` and
 `&'static [ParameterRef]` instead of `init_functions()` with `String::from` and `vec![]`. Replace
-`lpfx_fns()` body to return the static slice directly.
+`lpfn_fns()` body to return the static slice directly.
 
 **Implementation details:**
 
-1. In **lps-builtins-gen-app/src/lpfx/generate.rs**:
+1. In **lps-builtins-gen-app/src/lpfn/generate.rs**:
     - Change imports in emitted code: remove `alloc::{boxed::Box, string::String, vec, vec::Vec}`.
       Add `use crate::semantic::functions::ParamQualifier;` and ensure `ParameterRef`,
-      `FunctionSignatureRef` are used (from `super::lpfx_fn`).
-    - Emit `static LPFX_FNS: &[LpfxFn] = &[` instead of
-      `fn init_functions() -> ... { let vec: Vec<LpfxFn> = vec![`.
+      `FunctionSignatureRef` are used (from `super::lpfn_fn`).
+    - Emit `static LPFX_FNS: &[LpfnFn] = &[` instead of
+      `fn init_functions() -> ... { let vec: Vec<LpfnFn> = vec![`.
     - For each function: emit
-      `FunctionSignatureRef { name: "lpfx_fbm", return_type: Type::Float, parameters: &[...] },`
+      `FunctionSignatureRef { name: "lpfn_fbm", return_type: Type::Float, parameters: &[...] },`
       where parameters is a `&[ParameterRef]` literal.
     - Use `ParameterRef { name: "p", ty: Type::Vec2, qualifier: ParamQualifier::In }` etc.
     - For shared parameter arrays (e.g. same params for multiple overloads), emit
       `static PARAMS_XYZ: &[ParameterRef] = &[...];` and reference `parameters: PARAMS_XYZ` — or
       inline `&[ParameterRef { ... }, ...]` per entry. Inlining is simpler; sharing can be a later
       optimization.
-    - Remove `Box::leak(vec.into_boxed_slice())` and `init_functions()`. Replace `lpfx_fns()` body
+    - Remove `Box::leak(vec.into_boxed_slice())` and `init_functions()`. Replace `lpfn_fns()` body
       with `LPFX_FNS` (no OnceLock, no static mut).
     - Emit:
       ```rust
-      pub fn lpfx_fns() -> &'static [LpfxFn] {
+      pub fn lpfn_fns() -> &'static [LpfnFn] {
           LPFX_FNS
       }
       ```
@@ -166,7 +166,7 @@ still has the old `init_functions` format.
       `FunctionSignatureRef { name: "..", return_type: ..., parameters: &[ ... ] }`.
     - `format_parameter` → emit `ParameterRef { name: "..", ty: ..., qualifier: ... }`.
 
-3. Run `scripts/build-builtins.sh` to regenerate `lpfx_fns.rs`.
+3. Run `scripts/build-builtins.sh` to regenerate `lpfn_fns.rs`.
 
 4. Manually fix any first-time generation issues (e.g. escaping in strings, Type::Array which uses
    Box — LPFX params don't use Array, so we're fine).
@@ -179,18 +179,18 @@ still has the old `init_functions` format.
 
 ---
 
-### Phase 4: Refactor find_lpfx_fn to loop-based (no Vec allocs)
+### Phase 4: Refactor find_lpfn_fn to loop-based (no Vec allocs)
 
-**Scope:** Replace the three `filter().collect()` chains in `find_lpfx_fn` with a single loop that
+**Scope:** Replace the three `filter().collect()` chains in `find_lpfn_fn` with a single loop that
 finds the matching function without allocating.
 
 **Implementation details:**
 
-1. In **lpfx_fn_registry.rs**, rewrite `find_lpfx_fn`:
+1. In **lpfn_fn_registry.rs**, rewrite `find_lpfn_fn`:
    ```rust
-   pub fn find_lpfx_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfxFn> {
+   pub fn find_lpfn_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfnFn> {
        let functions = get_cached_functions();
-       let mut exact_match: Option<&'static LpfxFn> = None;
+       let mut exact_match: Option<&'static LpfnFn> = None;
 
        for func in functions.iter() {
            if func.glsl_sig.name != name {
@@ -213,7 +213,7 @@ finds the matching function without allocating.
    ```
 
 2. Remove `use alloc::{format, string::String, vec::Vec};` — keep `format` and `String` if still
-   used by `check_lpfx_fn_call` (they are). Remove only `Vec` if it's unused.
+   used by `check_lpfn_fn_call` (they are). Remove only `Vec` if it's unused.
 
 **Validate:** `cargo test -p lps-compiler --features std`
 
@@ -244,9 +244,9 @@ finds the matching function without allocating.
 
 (Answers from design iteration)
 
-- **Type strategy**: Parallel types. Add `ParameterRef` and `FunctionSignatureRef` in the lpfx
+- **Type strategy**: Parallel types. Add `ParameterRef` and `FunctionSignatureRef` in the lpfn
   module.
-- **find_lpfx_fn allocations**: Yes, include loop-based refactor. Lower priority.
-- **no_std**: With static data, `lpfx_fns()` returns `&LPFX_FNS` directly; no OnceLock.
+- **find_lpfn_fn allocations**: Yes, include loop-based refactor. Lower priority.
+- **no_std**: With static data, `lpfn_fns()` returns `&LPFX_FNS` directly; no OnceLock.
 
 (Implementation complete)

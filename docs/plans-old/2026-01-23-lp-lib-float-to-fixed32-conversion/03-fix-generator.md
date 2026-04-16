@@ -32,7 +32,7 @@ Modify `extract_builtin()` or discovery logic:
 Ensure `generate_registry()`:
 
 - Uses `LpLibFn::builtin_id()` to get correct `BuiltinId` variant names
-- Maps `BuiltinId::LpSimplex3.name()` to actual function name (`__lp_q32_lpfx_snoise3`)
+- Maps `BuiltinId::LpSimplex3.name()` to actual function name (`__lp_q32_lpfn_snoise3`)
 - Generates correct enum variants matching what `lp_lib_fns.rs` expects
 
 ### 3.4 Update TestCase Mapping Generation
@@ -46,7 +46,7 @@ Ensure `generate_testcase_mapping()`:
 
 - Generator reads `LpLibFn` enum instead of using prefix matching
 - Generated registry has `LpSimplex1/2/3` variants (not `Q32LpSimplex1/2/3`)
-- `BuiltinId::LpSimplex3.name()` returns `"__lp_q32_lpfx_snoise3"`
+- `BuiltinId::LpSimplex3.name()` returns `"__lp_q32_lpfn_snoise3"`
 - Code compiles without warnings
 - Code formatted with `cargo +nightly fmt`
 

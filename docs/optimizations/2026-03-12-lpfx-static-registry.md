@@ -16,12 +16,12 @@
 ---
 
 ## Change
-Replaced heap-allocated LPFX function registry with a static `&[LpfxFn]` in ROM. `lpfx_fns::init_functions` previously allocated 143 `LpfxFn` (~4 KB) at first use; now uses `static LPFX_FNS` with `FunctionSignatureRef` and `ParameterRef` (`&'static str`, `&'static [ParameterRef]`). `find_lpfx_fn` refactored to loop-based lookup (no Vec allocs). Plan: docs/plans-done/2026-03-12-lpfx-fns-static. Commit: `e4139bd`.
+Replaced heap-allocated LPFX function registry with a static `&[LpfnFn]` in ROM. `lpfn_fns::init_functions` previously allocated 143 `LpfnFn` (~4 KB) at first use; now uses `static LPFX_FNS` with `FunctionSignatureRef` and `ParameterRef` (`&'static str`, `&'static [ParameterRef]`). `find_lpfn_fn` refactored to loop-based lookup (no Vec allocs). Plan: docs/plans-done/2026-03-12-lpfn-fns-static. Commit: `e4139bd`.
 
 ## Effect
-- Expected: eliminates 4,068 B + 143 allocations from `lpfx_fns::init_functions` at peak.
+- Expected: eliminates 4,068 B + 143 allocations from `lpfn_fns::init_functions` at peak.
 - Live allocations at end of trace should drop by that amount.
 - No trace captured yet post-merge.
 
 ## Outcome
-Kept. Implementation complete. Run `just mem-profile` (or equivalent) to capture a trace and confirm the lpfx hotspot is gone.
+Kept. Implementation complete. Run `just mem-profile` (or equivalent) to capture a trace and confirm the lpfn hotspot is gone.

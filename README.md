@@ -116,7 +116,7 @@ Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 - **`lps-filetests`** Collection of tests for GLSL spec compliance and correctness
 - **`lps-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
 - **`lps-filetests-app`** Filetest runner binary
-- **`lpfx-impl-macro`** Macros for builtin function implementations
+- **`lpfn-impl-macro`** Macros for builtin function implementations
 
 ## RISC-V Tooling (`lp-riscv/`)
 
@@ -148,7 +148,7 @@ LightPlayer would not be possible without the amazing work of these projects:
 - **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL parser (
   [forked](https://github.com/light-player/glsl-parser) for spans; used by `lpvm` and
   filetest helpers, not the main naga frontend)
-- **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfx
+- **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfn
   built-in functions)
 - **[DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler)** - HLSL compiler (
   compiler architecture inspiration)

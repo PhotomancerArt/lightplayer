@@ -2,17 +2,17 @@
 
 ## Description
 
-Update all call sites of `find_lpfx_fn` in codegen modules to extract argument types from the
+Update all call sites of `find_lpfn_fn` in codegen modules to extract argument types from the
 available arguments and pass them to the updated function signature.
 
 ## Implementation
 
-### File: `lp-shader/lps-compiler/src/frontend/codegen/lpfx_fns.rs`
+### File: `lp-shader/lps-compiler/src/frontend/codegen/lpfn_fns.rs`
 
 **Update `emit_lp_lib_fn_call`:**
 
 - Extract `arg_types: Vec<Type>` from `args: Vec<(Vec<Value>, Type)>`
-- Pass `arg_types` to `find_lpfx_fn(name, &arg_types)`
+- Pass `arg_types` to `find_lpfn_fn(name, &arg_types)`
 - Update error message if needed to handle ambiguous/no match cases
 
 ### File: `lp-shader/lps-compiler/src/frontend/codegen/lp_lib_fns.rs`
@@ -20,12 +20,12 @@ available arguments and pass them to the updated function signature.
 **Update `emit_lp_lib_fn_call`:**
 
 - Extract `arg_types: Vec<Type>` from `args: Vec<(Vec<Value>, Type)>`
-- Pass `arg_types` to `find_lpfx_fn(name, &arg_types)`
+- Pass `arg_types` to `find_lpfn_fn(name, &arg_types)`
 - Update error message if needed to handle ambiguous/no match cases
 
 ## Success Criteria
 
-- Both codegen modules updated to pass `arg_types` to `find_lpfx_fn`
+- Both codegen modules updated to pass `arg_types` to `find_lpfn_fn`
 - Argument types correctly extracted from function arguments
 - Error handling updated for ambiguous/no match cases
 - Code compiles without warnings

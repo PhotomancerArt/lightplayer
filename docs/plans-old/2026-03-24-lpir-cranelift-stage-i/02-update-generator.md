@@ -34,7 +34,7 @@ Add fields to `BuiltinInfo`:
 ```rust
 struct BuiltinInfo {
     // ... existing fields ...
-    /// Builtin module: "lpir", "glsl", or "lpfx"
+    /// Builtin module: "lpir", "glsl", or "lpfn"
     builtin_module: String,
     /// Function name within the module (e.g., "sin", "fadd", "fbm2")
     builtin_fn_name: String,
@@ -51,13 +51,13 @@ the new naming convention:
 // Format: __lp_<module>_<fn>_<mode>  or  __lp_<module>_<fn> (no mode)
 let after_lp = func_name.strip_prefix("__lp_")?;
 
-// Module is the first segment: "lpir", "glsl", or "lpfx"
+// Module is the first segment: "lpir", "glsl", or "lpfn"
 let (module, rest) = if after_lp.starts_with("lpir_") {
     ("lpir", &after_lp[5..])
 } else if after_lp.starts_with("glsl_") {
     ("glsl", &after_lp[5..])
-} else if after_lp.starts_with("lpfx_") {
-    ("lpfx", &after_lp[5..])
+} else if after_lp.starts_with("lpfn_") {
+    ("lpfn", &after_lp[5..])
 } else {
     return None; // Unknown module
 };
@@ -85,7 +85,7 @@ pub enum Module {
     /// GLSL std.450 functions (sin, cos, pow, exp, ...)
     Glsl,
     /// LightPlayer effects (fbm, snoise, hash, ...)
-    Lpfx,
+    Lpfn,
 }
 
 /// Float mode for mode-dependent builtins.
@@ -100,14 +100,14 @@ pub enum Mode {
 
 Add to the generated `impl BuiltinId`:
 
-**`module()`** — generated match returning `Module::Lpir/Glsl/Lpfx`:
+**`module()`** — generated match returning `Module::Lpir/Glsl/Lpfn`:
 
 ```rust
 pub fn module(&self) -> Module {
     match self {
         BuiltinId::LpLpirFaddQ32 => Module::Lpir,
         BuiltinId::LpGlslSinQ32 => Module::Glsl,
-        BuiltinId::LpLpfxFbm2Q32 => Module::Lpfx,
+        BuiltinId::LpLpfnFbm2Q32 => Module::Lpfn,
         // ...
     }
 }
@@ -121,8 +121,8 @@ pub fn fn_name(&self) -> &'static str {
     match self {
         BuiltinId::LpLpirFaddQ32 => "fadd",
         BuiltinId::LpGlslSinQ32 => "sin",
-        BuiltinId::LpLpfxFbm2Q32 => "fbm2",
-        BuiltinId::LpLpfxHash1 => "hash_1",
+        BuiltinId::LpLpfnFbm2Q32 => "fbm2",
+        BuiltinId::LpLpfnHash1 => "hash_1",
         // ...
     }
 }
@@ -134,7 +134,7 @@ pub fn fn_name(&self) -> &'static str {
 pub fn mode(&self) -> Option<Mode> {
     match self {
         BuiltinId::LpGlslSinQ32 => Some(Mode::Q32),
-        BuiltinId::LpLpfxHash1 => None,  // mode-independent
+        BuiltinId::LpLpfnHash1 => None,  // mode-independent
         // ...
     }
 }
@@ -143,17 +143,17 @@ pub fn mode(&self) -> Option<Mode> {
 ### 2e. Update re-exports
 
 The generated `lib.rs` currently re-exports `GlslParamKind`,
-`glsl_q32_math_builtin_id`, `glsl_lpfx_q32_builtin_id`. Add re-exports for
+`glsl_q32_math_builtin_id`, `glsl_lpfn_q32_builtin_id`. Add re-exports for
 `Module` and `Mode` (these are defined inline in `lib.rs`, not in a
 submodule, so no re-export needed — just make sure they're `pub`).
 
 ### 2f. Update glsl_builtin_mapping generation
 
 The `generate_glsl_builtin_mapping` function generates
-`glsl_q32_math_builtin_id` and `glsl_lpfx_q32_builtin_id`. These use enum
+`glsl_q32_math_builtin_id` and `glsl_lpfn_q32_builtin_id`. These use enum
 variant names, which change with the rename:
 - `BuiltinId::LpQ32Sin` → `BuiltinId::LpGlslSinQ32`
-- `BuiltinId::LpfxFbm2Q32` → `BuiltinId::LpLpfxFbm2Q32`
+- `BuiltinId::LpfnFbm2Q32` → `BuiltinId::LpLpfnFbm2Q32`
 
 The generator already reads variant names from `BuiltinInfo`, so this should
 happen automatically once Phase 1 renames are in place and the generator

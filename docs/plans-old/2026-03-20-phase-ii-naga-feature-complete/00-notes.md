@@ -32,7 +32,7 @@ Part of: `docs/roadmaps/2026-03-20-naga/phase-ii.md`
 
 ```
  30 builtins      — Expression::Math not handled
- 13 lpfx          — Statement::Call + WASM imports not handled
+ 13 lpfn          — Statement::Call + WASM imports not handled
  10 control/while — Break/Continue missing
   9 control/do_while — Break/Continue missing
   8 function      — Statement::Call (user fn) + CallResult not handled
@@ -94,7 +94,7 @@ Requires: a function index map (`Handle<Function>` → WASM func index).
 
 ### LPFX builtins (external imports)
 
-`lpfx_*` functions (e.g. `lpfx_psrdnoise`, `lpfx_worley`, `lpfx_fbm`)
+`lpfn_*` functions (e.g. `lpfn_psrdnoise`, `lpfn_worley`, `lpfn_fbm`)
 appear as `Statement::Call` to functions declared via prototypes prepended
 to the source. Their Naga `Handle<Function>` points to a function with a
 body (the stub `void main() {}` pattern doesn't apply; Naga must see their
@@ -105,7 +105,7 @@ Approach:
 1. In `lps-frontend`: prepend GLSL forward declarations for all LPFX
    functions before parsing. Use `#line 1` after prototypes to reset line
    numbers.
-2. In `lps-wasm`: detect LPFX calls by function name prefix (`lpfx_`)
+2. In `lps-wasm`: detect LPFX calls by function name prefix (`lpfn_`)
    or by matching against a known list. Emit as WASM imports to the
    `builtins` module instead of intra-module calls.
 
@@ -144,7 +144,7 @@ falls through to `continuing`).
 
 ### `out` parameters
 
-`rainbow.glsl` uses `out vec2 gradient` in `lpfx_psrdnoise`. Naga may model
+`rainbow.glsl` uses `out vec2 gradient` in `lpfn_psrdnoise`. Naga may model
 this as a pointer parameter or as a local variable with post-call store-back.
 Need to check how Naga's GLSL frontend handles `out` parameters for external
 (stub) functions.
@@ -176,15 +176,15 @@ For Float mode, use native WASM instructions where available (`f32.floor`,
 
 ### Q2: LPFX prototype injection — format?
 
-**Context**: Need to tell Naga about `lpfx_*` functions so it can parse calls
+**Context**: Need to tell Naga about `lpfn_*` functions so it can parse calls
 to them without seeing their bodies.
 
 **Approach**: Prepend GLSL function prototypes:
 
 ```glsl
-float lpfx_psrdnoise(vec2 pos, vec2 per, float rot, out vec2 gradient, uint quality);
-float lpfx_worley(vec2 pos, uint quality);
-float lpfx_fbm(vec2 pos, int octaves, uint quality);
+float lpfn_psrdnoise(vec2 pos, vec2 per, float rot, out vec2 gradient, uint quality);
+float lpfn_worley(vec2 pos, uint quality);
+float lpfn_fbm(vec2 pos, int octaves, uint quality);
 // ... etc
 #line 1
 ```

@@ -10,10 +10,10 @@ but specific to Lightplayer's needs.
 
 ```
 lp-shader/lps-builtins/src/builtins/q32/
-├── lpfx_hash.rs                 # NEW: Hash function (1D, 2D, 3D overloads)
-├── lpfx_snoise1.rs             # NEW: 1D Simplex noise
-├── lpfx_snoise2.rs             # NEW: 2D Simplex noise
-├── lpfx_snoise3.rs             # NEW: 3D Simplex noise
+├── lpfn_hash.rs                 # NEW: Hash function (1D, 2D, 3D overloads)
+├── lpfn_snoise1.rs             # NEW: 1D Simplex noise
+├── lpfn_snoise2.rs             # NEW: 2D Simplex noise
+├── lpfn_snoise3.rs             # NEW: 3D Simplex noise
 └── mod.rs                     # UPDATE: Add exports for new functions
 
 lp-shader/lps-compiler/src/
@@ -32,12 +32,12 @@ LP library functions map user-facing names to internal implementation functions:
 
 ```
 User-facing name          Internal symbol name (auto-registered)
-lpfx_hash(u32)            -> __lpfx_hash_1(u32, u32) -> u32
-lpfx_hash(u32, u32)       -> __lpfx_hash_2(u32, u32, u32) -> u32
-lpfx_hash(u32, u32, u32)  -> __lpfx_hash_3(u32, u32, u32, u32) -> u32
-lpfx_snoise1(i32, u32)   -> __lpfx_snoise1(i32, u32) -> i32
-lpfx_snoise2(i32, i32, u32) -> __lpfx_snoise2(i32, i32, u32) -> i32
-lpfx_snoise3(i32, i32, i32, u32) -> __lpfx_snoise3(i32, i32, i32, u32) -> i32
+lpfn_hash(u32)            -> __lpfn_hash_1(u32, u32) -> u32
+lpfn_hash(u32, u32)       -> __lpfn_hash_2(u32, u32, u32) -> u32
+lpfn_hash(u32, u32, u32)  -> __lpfn_hash_3(u32, u32, u32, u32) -> u32
+lpfn_snoise1(i32, u32)   -> __lpfn_snoise1(i32, u32) -> i32
+lpfn_snoise2(i32, i32, u32) -> __lpfn_snoise2(i32, i32, u32) -> i32
+lpfn_snoise3(i32, i32, i32, u32) -> __lpfn_snoise3(i32, i32, i32, u32) -> i32
 ```
 
 Internal functions (`__lp_*`) are automatically registered by `lps-builtin-gen-app` which scans
@@ -71,19 +71,19 @@ emit_lp_lib_fn_call() - # NEW: Generate code for LP library function call
 ### Builtin Implementations (`lps-builtins/src/builtins/q32/`)
 
 ```
-lpfx_hash.rs:
-  __lpfx_hash_1(x: u32, seed: u32) -> u32 - # NEW: 1D hash
-  __lpfx_hash_2(x: u32, y: u32, seed: u32) -> u32 - # NEW: 2D hash
-  __lpfx_hash_3(x: u32, y: u32, z: u32, seed: u32) -> u32 - # NEW: 3D hash
+lpfn_hash.rs:
+  __lpfn_hash_1(x: u32, seed: u32) -> u32 - # NEW: 1D hash
+  __lpfn_hash_2(x: u32, y: u32, seed: u32) -> u32 - # NEW: 2D hash
+  __lpfn_hash_3(x: u32, y: u32, z: u32, seed: u32) -> u32 - # NEW: 3D hash
 
-lpfx_snoise1.rs:
-  __lpfx_snoise1(x: i32, seed: u32) -> i32 - # NEW: 1D Simplex noise
+lpfn_snoise1.rs:
+  __lpfn_snoise1(x: i32, seed: u32) -> i32 - # NEW: 1D Simplex noise
 
-lpfx_snoise2.rs:
-  __lpfx_snoise2(x: i32, y: i32, seed: u32) -> i32 - # NEW: 2D Simplex noise
+lpfn_snoise2.rs:
+  __lpfn_snoise2(x: i32, y: i32, seed: u32) -> i32 - # NEW: 2D Simplex noise
 
-lpfx_snoise3.rs:
-  __lpfx_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: 3D Simplex noise
+lpfn_snoise3.rs:
+  __lpfn_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: 3D Simplex noise
 ```
 
 ## Design Decisions
@@ -108,8 +108,8 @@ Function calls are checked in this order:
 
 Vector arguments are flattened to individual scalar parameters:
 
-- `lpfx_snoise2(vec2 p, uint seed)` becomes `lpfx_snoise2(i32 x, i32 y, u32 seed)`
-- `lpfx_snoise3(vec3 p, uint seed)` becomes `lpfx_snoise3(i32 x, i32 y, i32 z, u32 seed)`
+- `lpfn_snoise2(vec2 p, uint seed)` becomes `lpfn_snoise2(i32 x, i32 y, u32 seed)`
+- `lpfn_snoise3(vec3 p, uint seed)` becomes `lpfn_snoise3(i32 x, i32 y, i32 z, u32 seed)`
 
 This matches how the compiler currently handles vectors and simplifies the implementation.
 
@@ -117,8 +117,8 @@ This matches how the compiler currently handles vectors and simplifies the imple
 
 Function signatures are manually specified (no auto-generation initially). Each function has:
 
-- User-facing name: `lpfx_hash`, `lpfx_snoise1`, etc.
-- Internal symbol name: `__lpfx_hash_1`, `__lpfx_snoise1`, etc.
+- User-facing name: `lpfn_hash`, `lpfn_snoise1`, etc.
+- Internal symbol name: `__lpfn_hash_1`, `__lpfn_snoise1`, etc.
 - Parameter types: Flattened scalar types (i32, u32)
 - Return type: i32 (Q32 fixed-point) or u32 (for hash)
 
@@ -145,7 +145,7 @@ Implements Simplex noise (not Perlin):
 Frequency parameter removed - caller can scale coordinates themselves:
 
 ```glsl
-lpfx_snoise3(p.x * freq, p.y * freq, p.z * freq, seed)
+lpfn_snoise3(p.x * freq, p.y * freq, p.z * freq, seed)
 ```
 
 This simplifies the API and gives callers more flexibility.
@@ -160,30 +160,30 @@ randomness control.
 ### Hash Functions
 
 ```glsl
-uint lpfx_hash(uint x);
-uint lpfx_hash(uint x, uint y);
-uint lpfx_hash(uint x, uint y, uint z);
+uint lpfn_hash(uint x);
+uint lpfn_hash(uint x, uint y);
+uint lpfn_hash(uint x, uint y, uint z);
 ```
 
 **Internal signatures:**
 
-- `__lpfx_hash_1(x: u32, seed: u32) -> u32`
-- `__lpfx_hash_2(x: u32, y: u32, seed: u32) -> u32`
-- `__lpfx_hash_3(x: u32, y: u32, z: u32, seed: u32) -> u32`
+- `__lpfn_hash_1(x: u32, seed: u32) -> u32`
+- `__lpfn_hash_2(x: u32, y: u32, seed: u32) -> u32`
+- `__lpfn_hash_3(x: u32, y: u32, z: u32, seed: u32) -> u32`
 
 ### Simplex Noise Functions
 
 ```glsl
-float lpfx_snoise1(float x, uint seed);
-float lpfx_snoise2(vec2 p, uint seed);
-float lpfx_snoise3(vec3 p, uint seed);
+float lpfn_snoise1(float x, uint seed);
+float lpfn_snoise2(vec2 p, uint seed);
+float lpfn_snoise3(vec3 p, uint seed);
 ```
 
 **Internal signatures (flattened):**
 
-- `__lpfx_snoise1(x: i32, seed: u32) -> i32`
-- `__lpfx_snoise2(x: i32, y: i32, seed: u32) -> i32`
-- `__lpfx_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32`
+- `__lpfn_snoise1(x: i32, seed: u32) -> i32`
+- `__lpfn_snoise2(x: i32, y: i32, seed: u32) -> i32`
+- `__lpfn_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32`
 
 **Return values:**
 

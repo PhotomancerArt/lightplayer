@@ -21,7 +21,7 @@ All packages live under `lp-shader/` unless noted. Workspace membership follows 
 | Crate                   | Role (from code / `Cargo.toml`)                                             | README present             |
 |-------------------------|-----------------------------------------------------------------------------|----------------------------|
 | `lps-builtin-ids`       | Generated `BuiltinId` and GLSL name mapping (written by gen app)            | No                         |
-| `lps-builtins`          | `#[no_mangle]` builtins (Q32 / f32), LPFX; links `lpfx-impl-macro`          | Yes (stale — see findings) |
+| `lps-builtins`          | `#[no_mangle]` builtins (Q32 / f32), LPFX; links `lpfn-impl-macro`          | Yes (stale — see findings) |
 | `lps-builtins-gen-app`  | Scans `lps-builtins`, emits IDs, `generated_builtin_abi.rs`, refs, etc.     | Yes (stale paths)          |
 | `lps-builtins-emu-app`  | RISC-V guest binary: links all builtins for emu / filetests                 | Yes (stale names)          |
 | `lps-builtins-wasm`     | `cdylib` WASM builtins (`import-memory`)                                    | Yes (accurate)             |
@@ -36,7 +36,7 @@ All packages live under `lp-shader/` unless noted. Workspace membership follows 
 | `lps-filetests-app`     | CLI runner for filetests                                                    | No                         |
 | `lps-filetests-gen-app` | Generates repetitive `.glsl` tests                                          | No                         |
 | `lps-wasm`              | GLSL → WASM (Naga → LPIR → emit)                                            | Yes (stale architecture)   |
-| `lpfx-impl-macro`       | Proc-macros for LPFX builtins                                               | No                         |
+| `lpfn-impl-macro`       | Proc-macros for LPFX builtins                                               | No                         |
 
 **Not under `lp-shader/` but part of the same pipeline:** `lp-core/lp-engine` → `lpvm-cranelift` (+
 `lps-builtins`); `lp-riscv/*` for RV32 filetests.
@@ -64,7 +64,7 @@ flowchart TB
   end
 
   subgraph builtins["Builtins"]
-    pm["lpfx-impl-macro"]
+    pm["lpfn-impl-macro"]
     builtins["lps-builtins"]
     builtins --> pm
   end
@@ -168,11 +168,11 @@ trust in docs).
 
 ## Workspace membership
 
-- **`lpfx-impl-macro`** is **not** listed in the explicit `[workspace].members` array in the root
+- **`lpfn-impl-macro`** is **not** listed in the explicit `[workspace].members` array in the root
   `Cargo.toml`, but **`cargo metadata` includes it** in `workspace_members` (as a path dependency of
   `lps-builtins` using `version.workspace = true`). This is easy to miss when editing the
   workspace list.
-- **Recommendation:** Add `"lp-shader/lpfx-impl-macro"` explicitly to `[workspace].members` so the
+- **Recommendation:** Add `"lp-shader/lpfn-impl-macro"` explicitly to `[workspace].members` so the
   manifest matches tooling and onboarding expectations.
 
 ## Root `README.md` acknowledgments

@@ -29,7 +29,7 @@ Create new module with:
    ```rust
    pub fn lookup_lp_lib_fn(name: &str) -> Option<Vec<LpLibFnSignature>>
    ```
-   Returns signatures for the function (handles overloads like `lpfx_hash`)
+   Returns signatures for the function (handles overloads like `lpfn_hash`)
 
 4. **Type check function**
    ```rust
@@ -39,12 +39,12 @@ Create new module with:
 
 ### Function Signatures to Define
 
-- `lpfx_hash(u32) -> u32`
-- `lpfx_hash(u32, u32) -> u32`
-- `lpfx_hash(u32, u32, u32) -> u32`
-- `lpfx_snoise1(i32, u32) -> i32` (or `float, uint` -> `float` in GLSL types)
-- `lpfx_snoise2(vec2, uint) -> float` (maps to `i32, i32, u32` internally)
-- `lpfx_snoise3(vec3, uint) -> float` (maps to `i32, i32, i32, u32` internally)
+- `lpfn_hash(u32) -> u32`
+- `lpfn_hash(u32, u32) -> u32`
+- `lpfn_hash(u32, u32, u32) -> u32`
+- `lpfn_snoise1(i32, u32) -> i32` (or `float, uint` -> `float` in GLSL types)
+- `lpfn_snoise2(vec2, uint) -> float` (maps to `i32, i32, u32` internally)
+- `lpfn_snoise3(vec3, uint) -> float` (maps to `i32, i32, i32, u32` internally)
 
 ### Integration
 

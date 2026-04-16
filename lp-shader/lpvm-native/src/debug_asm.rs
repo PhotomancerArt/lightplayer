@@ -114,6 +114,7 @@ mod tests {
                     },
                 ],
             }],
+            ..Default::default()
         };
 
         let result = compile_module_asm_text(
@@ -125,8 +126,7 @@ mod tests {
         );
         assert!(
             result.is_ok(),
-            "expected successful compilation, got: {:?}",
-            result
+            "expected successful compilation, got: {result:?}",
         );
         let asm_text = result.unwrap();
         assert!(!asm_text.is_empty(), "expected non-empty assembly text");

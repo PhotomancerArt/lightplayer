@@ -5,11 +5,11 @@
 Refactor the Q32 transform to use proper lookup chains instead of hacky string manipulation. The
 correct flow is:
 
-1. **Compiler frontend**: Resolves function call to `LpfxFn` → gets `float_impl` `BuiltinId` →
-   generates call to `builtin_id.name()` (e.g., `__lpfx_saturate_vec3_f32`)
-2. **Q32 Transform**: Sees `__lpfx_saturate_vec3_f32` in CLIF → looks up `BuiltinId` from name →
-   finds corresponding `LpfxFn` → replaces with `q32_impl` `BuiltinId` → uses `builtin_id.name()` (
-   e.g., `__lpfx_saturate_vec3_q32`)
+1. **Compiler frontend**: Resolves function call to `LpfnFn` → gets `float_impl` `BuiltinId` →
+   generates call to `builtin_id.name()` (e.g., `__lpfn_saturate_vec3_f32`)
+2. **Q32 Transform**: Sees `__lpfn_saturate_vec3_f32` in CLIF → looks up `BuiltinId` from name →
+   finds corresponding `LpfnFn` → replaces with `q32_impl` `BuiltinId` → uses `builtin_id.name()` (
+   e.g., `__lpfn_saturate_vec3_q32`)
 
 Currently, the transform uses `map_testcase_to_builtin` which expects GLSL names without `_f32`
 suffixes, requiring string manipulation. This is fragile and incorrect.
@@ -22,8 +22,8 @@ suffixes, requiring string manipulation. This is fragile and incorrect.
 lp-shader/lps-compiler/src/backend/builtins/
 └── registry.rs                      # UPDATE: Add builtin_id_from_name function
 
-lp-shader/lps-compiler/src/frontend/semantic/lpfx/
-└── lpfx_fn_registry.rs              # UPDATE: Already has find_lpfx_fn_by_builtin_id
+lp-shader/lps-compiler/src/frontend/semantic/lpfn/
+└── lpfn_fn_registry.rs              # UPDATE: Already has find_lpfn_fn_by_builtin_id
 
 lp-shader/lps-compiler/src/backend/transform/q32/converters/
 ├── calls.rs                         # UPDATE: Use proper lookup chain for LPFX functions
@@ -44,11 +44,11 @@ BuiltinId::builtin_id_from_name(name: &str) -> Option<BuiltinId>
   # - Returns None for unknown names
 ```
 
-#### LPFX Function Registry (`lpfx_fn_registry.rs`)
+#### LPFX Function Registry (`lpfn_fn_registry.rs`)
 
 ```
-find_lpfx_fn_by_builtin_id(builtin_id: BuiltinId) -> Option<&'static LpfxFn>
-  # EXISTING: Finds LpfxFn that has this BuiltinId as float_impl or q32_impl
+find_lpfn_fn_by_builtin_id(builtin_id: BuiltinId) -> Option<&'static LpfnFn>
+  # EXISTING: Finds LpfnFn that has this BuiltinId as float_impl or q32_impl
 ```
 
 #### Q32 Transform (`calls.rs`)
@@ -57,8 +57,8 @@ find_lpfx_fn_by_builtin_id(builtin_id: BuiltinId) -> Option<&'static LpfxFn>
 convert_call(...) -> Result<(), GlslError>
   # UPDATE: For TestCase names:
   # 1. Try builtin_id_from_name(testcase_name)
-  # 2. If Some(builtin_id), try find_lpfx_fn_by_builtin_id(builtin_id)
-  # 3. If Some(lpfx_fn), extract q32_impl and use that
+  # 2. If Some(builtin_id), try find_lpfn_fn_by_builtin_id(builtin_id)
+  # 3. If Some(lpfn_fn), extract q32_impl and use that
   # 4. If None, fall back to map_testcase_to_builtin for regular q32 functions
   # 5. If neither works, return error
 ```
@@ -89,12 +89,12 @@ generate_map_testcase_to_builtin(...)
 
 ### 1. Lookup Chain for LPFX Functions
 
-Use the proper chain: `name` → `BuiltinId` → `LpfxFn` → `q32_impl` → `name`. This avoids string
+Use the proper chain: `name` → `BuiltinId` → `LpfnFn` → `q32_impl` → `name`. This avoids string
 manipulation and ensures correctness.
 
 ### 2. Identification of LPFX Functions
 
-Check if `builtin_id_from_name` returns `Some`, then check if `find_lpfx_fn_by_builtin_id` returns
+Check if `builtin_id_from_name` returns `Some`, then check if `find_lpfn_fn_by_builtin_id` returns
 `Some`. This robustly identifies LPFX functions without string prefix checks.
 
 ### 3. Fallback for Regular Q32 Functions
@@ -117,13 +117,13 @@ silently ignore unknown functions.
 
 ### Lookup Chain Flow
 
-1. Transform sees `__lpfx_saturate_vec3_f32` in CLIF
-2. Call `BuiltinId::builtin_id_from_name("__lpfx_saturate_vec3_f32")` →
-   `Some(BuiltinId::LpfxSaturateVec3F32)`
-3. Call `find_lpfx_fn_by_builtin_id(BuiltinId::LpfxSaturateVec3F32)` → `Some(lpfx_fn)` where
-   `lpfx_fn.impls.float_impl == LpfxSaturateVec3F32`
-4. Extract `lpfx_fn.impls.q32_impl` → `BuiltinId::LpfxSaturateVec3Q32`
-5. Use `BuiltinId::LpfxSaturateVec3Q32.name()` → `"__lpfx_saturate_vec3_q32"`
+1. Transform sees `__lpfn_saturate_vec3_f32` in CLIF
+2. Call `BuiltinId::builtin_id_from_name("__lpfn_saturate_vec3_f32")` →
+   `Some(BuiltinId::LpfnSaturateVec3F32)`
+3. Call `find_lpfn_fn_by_builtin_id(BuiltinId::LpfnSaturateVec3F32)` → `Some(lpfn_fn)` where
+   `lpfn_fn.impls.float_impl == LpfnSaturateVec3F32`
+4. Extract `lpfn_fn.impls.q32_impl` → `BuiltinId::LpfnSaturateVec3Q32`
+5. Use `BuiltinId::LpfnSaturateVec3Q32.name()` → `"__lpfn_saturate_vec3_q32"`
 
 ### Generated Code Structure
 
@@ -135,8 +135,8 @@ pub fn builtin_id_from_name(name: &str) -> Option<BuiltinId> {
         "__lp_q32_acos" => Some(BuiltinId::LpQ32Acos),
         "__lp_q32_acosh" => Some(BuiltinId::LpQ32Acosh),
         // ... all builtin names ...
-        "__lpfx_saturate_vec3_f32" => Some(BuiltinId::LpfxSaturateVec3F32),
-        "__lpfx_saturate_vec3_q32" => Some(BuiltinId::LpfxSaturateVec3Q32),
+        "__lpfn_saturate_vec3_f32" => Some(BuiltinId::LpfnSaturateVec3F32),
+        "__lpfn_saturate_vec3_q32" => Some(BuiltinId::LpfnSaturateVec3Q32),
         // ... all builtin names ...
         _ => None,
     }
@@ -146,13 +146,13 @@ pub fn builtin_id_from_name(name: &str) -> Option<BuiltinId> {
 ### Testing Strategy
 
 - Unit tests for `builtin_id_from_name` in `registry.rs`
-- Unit tests for full lookup chain (f32 → q32) in `lpfx_fn_registry.rs`
+- Unit tests for full lookup chain (f32 → q32) in `lpfn_fn_registry.rs`
 - Integration tests via existing filetests to ensure end-to-end correctness
 
 ## Success Criteria
 
 - No string manipulation in Q32 transform for LPFX functions
-- Proper lookup chain used: `name` → `BuiltinId` → `LpfxFn` → `q32_impl` → `name`
+- Proper lookup chain used: `name` → `BuiltinId` → `LpfnFn` → `q32_impl` → `name`
 - All existing tests pass
 - Codegen tool generates `builtin_id_from_name` correctly
 - `map_testcase_to_builtin` no longer contains LPFX function entries

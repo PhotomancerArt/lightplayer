@@ -291,7 +291,7 @@ mod tests {
         use lpir::LpirModule;
 
         let ir = LpirModule::default();
-        let sig = LpsModuleSig { functions: vec![] };
+        let sig = LpsModuleSig::default();
         let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
         assert_eq!(m.max_callee_sret_bytes(), 0);
         assert!(m.func_abi("x").is_none());
@@ -315,6 +315,7 @@ mod tests {
                     parameters: vec![],
                 },
             ],
+            ..Default::default()
         };
         let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
         assert_eq!(m.max_callee_sret_bytes(), 64);
@@ -334,10 +335,10 @@ mod tests {
             func_name: String::from("big_ret"),
             param_types: vec![],
             return_types: vec![IrType::I32; 5],
-            lpfx_glsl_params: None,
+            lpfn_glsl_params: None,
             needs_vmctx: false,
         });
-        let sig = LpsModuleSig { functions: vec![] };
+        let sig = LpsModuleSig::default();
         let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
         assert_eq!(m.max_callee_sret_bytes(), 20);
     }

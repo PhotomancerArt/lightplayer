@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use lpir::FloatMode;
 use lpir::{CalleeRef, ImportDecl, IrFunction, IrType, LpirModule, LpirOp};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
 };
 
@@ -77,15 +77,15 @@ fn ir_params_to_glsl_kinds(params: &[IrType]) -> Vec<GlslParamKind> {
         .collect()
 }
 
-fn lpfx_glsl_kinds_from_decl(decl: &ImportDecl) -> Result<Vec<GlslParamKind>, String> {
-    if let Some(ref enc) = decl.lpfx_glsl_params {
-        parse_lpfx_glsl_params_csv(enc)
+fn lpfn_glsl_kinds_from_decl(decl: &ImportDecl) -> Result<Vec<GlslParamKind>, String> {
+    if let Some(ref enc) = decl.lpfn_glsl_params {
+        parse_lpfn_glsl_params_csv(enc)
     } else {
         Ok(ir_params_to_glsl_kinds(&decl.param_types))
     }
 }
 
-fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
+fn parse_lpfn_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
     if enc.is_empty() {
         return Ok(Vec::new());
     }
@@ -131,12 +131,12 @@ fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
                 )
             })
         }
-        "lpfx" => {
-            let base = lpfx_strip_suffix(&decl.func_name)?;
-            let kinds = lpfx_glsl_kinds_from_decl(decl)?;
-            glsl_lpfx_q32_builtin_id(base, &kinds).ok_or_else(|| {
+        "lpfn" => {
+            let base = lpfn_strip_suffix(&decl.func_name)?;
+            let kinds = lpfn_glsl_kinds_from_decl(decl)?;
+            glsl_lpfn_q32_builtin_id(base, &kinds).ok_or_else(|| {
                 format!(
-                    "unsupported lpfx import `{}` with {:?}",
+                    "unsupported lpfn import `{}` with {:?}",
                     decl.func_name, kinds
                 )
             })
@@ -154,13 +154,13 @@ fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
     }
 }
 
-/// `lpfx_saturate_3` → `lpfx_saturate`.
-fn lpfx_strip_suffix(func_name: &str) -> Result<&str, String> {
+/// `lpfn_saturate_3` → `lpfn_saturate`.
+fn lpfn_strip_suffix(func_name: &str) -> Result<&str, String> {
     let (base, tail) = func_name
         .rsplit_once('_')
-        .ok_or_else(|| format!("malformed lpfx import name `{func_name}`"))?;
+        .ok_or_else(|| format!("malformed lpfn import name `{func_name}`"))?;
     tail.parse::<u32>()
-        .map_err(|_| format!("malformed lpfx import name `{func_name}`"))?;
+        .map_err(|_| format!("malformed lpfn import name `{func_name}`"))?;
     Ok(base)
 }
 

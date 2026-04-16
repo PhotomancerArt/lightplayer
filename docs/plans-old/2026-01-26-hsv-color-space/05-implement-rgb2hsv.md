@@ -6,34 +6,34 @@ Implement the `rgb2hsv` function which converts RGB color space to HSV. This fun
 
 ## Implementation
 
-### File: `lpfx/color/space/rgb2hsv_q32.rs`
+### File: `lpfn/color/space/rgb2hsv_q32.rs`
 
 Implement following the two-layer pattern:
 
 **Public Rust functions:**
-- `lpfx_rgb2hsv_q32(rgb: Vec3Q32) -> Vec3Q32` - Convert RGB to HSV
+- `lpfn_rgb2hsv_q32(rgb: Vec3Q32) -> Vec3Q32` - Convert RGB to HSV
   - Algorithm from lygia (Sam Hocevar's implementation)
   - Uses Vec4Q32 K with constants: `Vec4Q32::new(0., -0.33333333333333333333, 0.6666666666666666666, -1.0)`
   - Computes p and q based on component comparisons
   - Uses epsilon to avoid division by zero: `d / (q.x + HCV_EPSILON_Q32)`
   - Returns HSV as `Vec3Q32(hue, saturation, value)`
-- `lpfx_rgb2hsv_vec4_q32(rgb: Vec4Q32) -> Vec4Q32` - Convert RGB to HSV (preserves alpha)
-  - Applies `lpfx_rgb2hsv_q32` to RGB components, preserves alpha
+- `lpfn_rgb2hsv_vec4_q32(rgb: Vec4Q32) -> Vec4Q32` - Convert RGB to HSV (preserves alpha)
+  - Applies `lpfn_rgb2hsv_q32` to RGB components, preserves alpha
 
 For Q32 epsilon:
 - Use minimum representable Q32 value or very small representable value
 - Define as constant: `const HCV_EPSILON_Q32: Q32 = ...`
 
 **Extern C wrappers:**
-- `__lpfx_rgb2hsv_q32(x: i32, y: i32, z: i32) -> (i32, i32, i32)` - Wraps `lpfx_rgb2hsv_q32`
-- `__lpfx_rgb2hsv_vec4_q32(x: i32, y: i32, z: i32, w: i32) -> (i32, i32, i32, i32)` - Wraps `lpfx_rgb2hsv_vec4_q32`
-  - Both have `#[lpfx_impl_macro::lpfx_impl]` annotations with GLSL signatures
+- `__lpfn_rgb2hsv_q32(x: i32, y: i32, z: i32) -> (i32, i32, i32)` - Wraps `lpfn_rgb2hsv_q32`
+- `__lpfn_rgb2hsv_vec4_q32(x: i32, y: i32, z: i32, w: i32) -> (i32, i32, i32, i32)` - Wraps `lpfn_rgb2hsv_vec4_q32`
+  - Both have `#[lpfn_impl_macro::lpfn_impl]` annotations with GLSL signatures
   - Both have `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
-  - Convert expanded types to nice types, call the `lpfx_*` function, convert back
+  - Convert expanded types to nice types, call the `lpfn_*` function, convert back
 
 ### Update Module
 
-Update `lpfx/color/space/mod.rs` to export `rgb2hsv_q32`.
+Update `lpfn/color/space/mod.rs` to export `rgb2hsv_q32`.
 
 ## Success Criteria
 

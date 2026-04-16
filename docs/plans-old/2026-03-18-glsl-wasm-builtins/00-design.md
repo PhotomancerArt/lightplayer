@@ -28,7 +28,7 @@ Non-goals for this plan: browser UI (playground shell is separate); matrix built
 | Import discovery      | Pre-scan AST for builtin / LPFX calls before codegen                                                                 |
 | Vector builtins       | Match Cranelift: component-wise scalar imports; compound builtins inline                                             |
 | Import module/name    | `"builtins"` / `BuiltinId::name()`                                                                                   |
-| GLSL → BuiltinId      | Auto-generated: `glsl_q32_math_builtin_id`, `glsl_lpfx_q32_builtin_id`, `GlslParamKind` in `glsl_builtin_mapping.rs` |
+| GLSL → BuiltinId      | Auto-generated: `glsl_q32_math_builtin_id`, `glsl_lpfn_q32_builtin_id`, `GlslParamKind` in `glsl_builtin_mapping.rs` |
 | Out params / sret     | Offsets in shared linear memory                                                                                      |
 | Test vs prod builtins | Same `builtins.wasm` + shared memory (no divergent native-only path)                                                 |
 | Memory ownership      | Host creates memory; shader and builtins **import** it (future: textures use same region)                            |
@@ -126,7 +126,7 @@ Generated artifacts (paths TBD in implementation):
 | 3 | `03-shader-imports-and-memory.md`  | Pre-scan, import section, memory import, indices |
 | 4 | `04-builtin-codegen.md`            | Inline vs import, FunCall                        |
 | 5 | `05-wasmtime-linking.md`           | Wasmtime + shared memory + `builtins.wasm`       |
-| 6 | `06-lpfx-out-params.md`            | LPFX, out params, memory slots                   |
+| 6 | `06-lpfn-out-params.md`            | LPFX, out params, memory slots                   |
 | 7 | `07-rainbow-validation-cleanup.md` | Rainbow, filetests, docs, plan done              |
 
 ## Validate (repo-wide)

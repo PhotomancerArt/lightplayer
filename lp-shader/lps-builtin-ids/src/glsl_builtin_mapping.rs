@@ -4,7 +4,7 @@
 //!
 //! - `glsl_q32_math_builtin_id`: `@glsl::*` scalar imports.
 //! - `lpir_q32_builtin_id`: `@lpir::*` library ops (e.g. `sqrt`).
-//! - `glsl_lpfx_q32_builtin_id`: `lpfx_*` overloads keyed by parameter types.
+//! - `glsl_lpfn_q32_builtin_id`: `lpfn_*` overloads keyed by parameter types.
 //!
 //! Regenerate: `cargo run -p lps-builtins-gen-app` or `scripts/build-builtins.sh`
 
@@ -94,49 +94,49 @@ pub fn vm_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
     }
 }
 
-/// Map `lpfx_*` name + parameter type list to the Q32 `BuiltinId`.
-pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {
+/// Map `lpfn_*` name + parameter type list to the Q32 `BuiltinId`.
+pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {
     match (name, params) {
-        ("lpfx_fbm", &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxFbm2Q32)
+        ("lpfn_fbm", &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnFbm2Q32)
         }
         (
-            "lpfx_fbm",
+            "lpfn_fbm",
             &[
                 GlslParamKind::Vec3,
                 GlslParamKind::Float,
                 GlslParamKind::Int,
                 GlslParamKind::UInt,
             ],
-        ) => Some(BuiltinId::LpLpfxFbm3TileQ32),
-        ("lpfx_fbm", &[GlslParamKind::Vec3, GlslParamKind::Int, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxFbm3Q32)
+        ) => Some(BuiltinId::LpLpfnFbm3TileQ32),
+        ("lpfn_fbm", &[GlslParamKind::Vec3, GlslParamKind::Int, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnFbm3Q32)
         }
-        ("lpfx_gnoise", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxGnoise1Q32)
+        ("lpfn_gnoise", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnGnoise1Q32)
         }
-        ("lpfx_gnoise", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxGnoise2Q32)
+        ("lpfn_gnoise", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnGnoise2Q32)
         }
         (
-            "lpfx_gnoise",
+            "lpfn_gnoise",
             &[
                 GlslParamKind::Vec3,
                 GlslParamKind::Float,
                 GlslParamKind::UInt,
             ],
-        ) => Some(BuiltinId::LpLpfxGnoise3TileQ32),
-        ("lpfx_gnoise", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxGnoise3Q32)
+        ) => Some(BuiltinId::LpLpfnGnoise3TileQ32),
+        ("lpfn_gnoise", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnGnoise3Q32)
         }
-        ("lpfx_hash", &[GlslParamKind::UInt, GlslParamKind::UInt]) => Some(BuiltinId::LpLpfxHash1),
-        ("lpfx_hash", &[GlslParamKind::UVec2, GlslParamKind::UInt]) => Some(BuiltinId::LpLpfxHash2),
-        ("lpfx_hash", &[GlslParamKind::UVec3, GlslParamKind::UInt]) => Some(BuiltinId::LpLpfxHash3),
-        ("lpfx_hsv2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfxHsv2rgbQ32),
-        ("lpfx_hsv2rgb", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfxHsv2rgbVec4Q32),
-        ("lpfx_hue2rgb", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfxHue2rgbQ32),
+        ("lpfn_hash", &[GlslParamKind::UInt, GlslParamKind::UInt]) => Some(BuiltinId::LpLpfnHash1),
+        ("lpfn_hash", &[GlslParamKind::UVec2, GlslParamKind::UInt]) => Some(BuiltinId::LpLpfnHash2),
+        ("lpfn_hash", &[GlslParamKind::UVec3, GlslParamKind::UInt]) => Some(BuiltinId::LpLpfnHash3),
+        ("lpfn_hsv2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnHsv2rgbQ32),
+        ("lpfn_hsv2rgb", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnHsv2rgbVec4Q32),
+        ("lpfn_hue2rgb", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnHue2rgbQ32),
         (
-            "lpfx_psrdnoise",
+            "lpfn_psrdnoise",
             &[
                 GlslParamKind::Vec2,
                 GlslParamKind::Vec2,
@@ -144,9 +144,9 @@ pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
                 GlslParamKind::Vec2,
                 GlslParamKind::UInt,
             ],
-        ) => Some(BuiltinId::LpLpfxPsrdnoise2Q32),
+        ) => Some(BuiltinId::LpLpfnPsrdnoise2Q32),
         (
-            "lpfx_psrdnoise",
+            "lpfn_psrdnoise",
             &[
                 GlslParamKind::Vec3,
                 GlslParamKind::Vec3,
@@ -154,61 +154,61 @@ pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
                 GlslParamKind::Vec3,
                 GlslParamKind::UInt,
             ],
-        ) => Some(BuiltinId::LpLpfxPsrdnoise3Q32),
-        ("lpfx_random", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxRandom1Q32)
+        ) => Some(BuiltinId::LpLpfnPsrdnoise3Q32),
+        ("lpfn_random", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnRandom1Q32)
         }
-        ("lpfx_random", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxRandom2Q32)
+        ("lpfn_random", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnRandom2Q32)
         }
-        ("lpfx_random", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxRandom3Q32)
+        ("lpfn_random", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnRandom3Q32)
         }
-        ("lpfx_rgb2hsv", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfxRgb2hsvQ32),
-        ("lpfx_rgb2hsv", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfxRgb2hsvVec4Q32),
-        ("lpfx_saturate", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfxSaturateQ32),
-        ("lpfx_saturate", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfxSaturateVec3Q32),
-        ("lpfx_saturate", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfxSaturateVec4Q32),
-        ("lpfx_snoise", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSnoise1Q32)
+        ("lpfn_rgb2hsv", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2hsvQ32),
+        ("lpfn_rgb2hsv", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnRgb2hsvVec4Q32),
+        ("lpfn_saturate", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnSaturateQ32),
+        ("lpfn_saturate", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnSaturateVec3Q32),
+        ("lpfn_saturate", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnSaturateVec4Q32),
+        ("lpfn_snoise", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSnoise1Q32)
         }
-        ("lpfx_snoise", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSnoise2Q32)
+        ("lpfn_snoise", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSnoise2Q32)
         }
-        ("lpfx_snoise", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSnoise3Q32)
+        ("lpfn_snoise", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSnoise3Q32)
         }
-        ("lpfx_srandom", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSrandom1Q32)
+        ("lpfn_srandom", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSrandom1Q32)
         }
-        ("lpfx_srandom", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSrandom2Q32)
+        ("lpfn_srandom", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSrandom2Q32)
         }
-        ("lpfx_srandom", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSrandom3Q32)
+        ("lpfn_srandom", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSrandom3Q32)
         }
         (
-            "lpfx_srandom3_tile",
+            "lpfn_srandom3_tile",
             &[
                 GlslParamKind::Vec3,
                 GlslParamKind::Float,
                 GlslParamKind::UInt,
             ],
-        ) => Some(BuiltinId::LpLpfxSrandom3TileQ32),
-        ("lpfx_srandom3_vec", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxSrandom3VecQ32)
+        ) => Some(BuiltinId::LpLpfnSrandom3TileQ32),
+        ("lpfn_srandom3_vec", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnSrandom3VecQ32)
         }
-        ("lpfx_worley", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxWorley2Q32)
+        ("lpfn_worley", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnWorley2Q32)
         }
-        ("lpfx_worley", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxWorley3Q32)
+        ("lpfn_worley", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnWorley3Q32)
         }
-        ("lpfx_worley_value", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxWorley2ValueQ32)
+        ("lpfn_worley_value", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnWorley2ValueQ32)
         }
-        ("lpfx_worley_value", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfxWorley3ValueQ32)
+        ("lpfn_worley_value", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
+            Some(BuiltinId::LpLpfnWorley3ValueQ32)
         }
         _ => None,
     }
@@ -217,7 +217,7 @@ pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
 #[cfg(test)]
 mod glsl_builtin_mapping_tests {
     use super::{
-        GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id,
+        GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id,
         vm_q32_builtin_id,
     };
     use crate::BuiltinId;
@@ -255,13 +255,13 @@ mod glsl_builtin_mapping_tests {
     }
 
     #[test]
-    fn lpfx_fbm_vec2() {
+    fn lpfn_fbm_vec2() {
         assert_eq!(
-            glsl_lpfx_q32_builtin_id(
-                "lpfx_fbm",
+            glsl_lpfn_q32_builtin_id(
+                "lpfn_fbm",
                 &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],
             ),
-            Some(BuiltinId::LpLpfxFbm2Q32)
+            Some(BuiltinId::LpLpfnFbm2Q32)
         );
     }
 }

@@ -1,9 +1,9 @@
-# Plan: Auto-generate lpfx_fns.rs
+# Plan: Auto-generate lpfn_fns.rs
 
 ## Overview
 
-Extend `lps-builtin-gen-app` to automatically generate `lpfx_fns.rs` by discovering LPFX
-functions annotated with `#[lpfx_impl(...)]` attributes, parsing their GLSL signatures, and
+Extend `lps-builtin-gen-app` to automatically generate `lpfn_fns.rs` by discovering LPFX
+functions annotated with `#[lpfn_impl(...)]` attributes, parsing their GLSL signatures, and
 generating the registry code.
 
 ## Phases
@@ -21,10 +21,10 @@ generating the registry code.
 
 ## Success Criteria
 
-- All LPFX functions have `#[lpfx_impl(...)]` attributes
+- All LPFX functions have `#[lpfn_impl(...)]` attributes
 - Codegen successfully discovers and parses all LPFX functions
-- Generated `lpfx_fns.rs` matches current manual implementation structure
+- Generated `lpfn_fns.rs` matches current manual implementation structure
 - All validation errors are caught with clear messages
 - Tests cover parsing, validation, and error cases
 - Generated code compiles and works correctly
-- No manual maintenance of `lpfx_fns.rs` required
+- No manual maintenance of `lpfn_fns.rs` required

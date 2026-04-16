@@ -9,7 +9,7 @@ compare against reference implementations or previous known-good outputs.
 
 ### 1. Add Image Generation Test
 
-**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfn_snoise2.rs` (in test module)
 
 Add visual output test:
 
@@ -34,7 +34,7 @@ mod visual_tests {
             for x in 0..WIDTH {
                 let fx = x as f32 * SCALE;
                 let fy = y as f32 * SCALE;
-                let noise = __lp_q32_lpfx_snoise2(float_to_fixed(fx), float_to_fixed(fy), 0);
+                let noise = __lp_q32_lpfn_snoise2(float_to_fixed(fx), float_to_fixed(fy), 0);
                 let noise_float = fixed_to_float(noise);
                 
                 // Normalize from [-1, 1] to [0, 255]
@@ -63,7 +63,7 @@ mod visual_tests {
 
 ### 2. Add Comparison Test Against noise-rs
 
-**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfn_snoise2.rs` (in test module)
 
 Add comparison test:
 
@@ -87,7 +87,7 @@ mod comparison_tests {
         ];
         
         for (x, y) in test_points {
-            let our_value = __lp_q32_lpfx_snoise2(float_to_fixed(x), float_to_fixed(y), 0);
+            let our_value = __lp_q32_lpfn_snoise2(float_to_fixed(x), float_to_fixed(y), 0);
             let our_float = fixed_to_float(our_value);
             
             let noise_rs_value = noise_rs_fn.get([x as f64, y as f64]) as f32;
@@ -107,7 +107,7 @@ mod comparison_tests {
 
 ### 3. Add Artifact Detection Test
 
-**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfn_snoise2.rs` (in test module)
 
 Add test to detect discontinuities:
 
@@ -124,7 +124,7 @@ fn test_simplex2_no_discontinuities() {
     for i in 0..1000 {
         let x = i as f32 * STEP;
         let y = x; // Diagonal line
-        let result = __lp_q32_lpfx_snoise2(float_to_fixed(x), float_to_fixed(y), 0);
+        let result = __lp_q32_lpfn_snoise2(float_to_fixed(x), float_to_fixed(y), 0);
         let result_float = fixed_to_float(result);
         
         if let Some(prev) = prev_value {

@@ -19,7 +19,7 @@ color manipulation code to Rust.
 ## Success Criteria
 
 - All HSV color space functions implemented and working
-- Functions follow the same pattern as other lpfx functions
+- Functions follow the same pattern as other lpfn functions
 - Helper functions (saturate, hue2rgb) can be inlined
 - Tests cover basic conversions, round-trips, edge cases, and epsilon scenarios
 - Code compiles without warnings

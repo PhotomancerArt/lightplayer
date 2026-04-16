@@ -4,7 +4,7 @@
 
 Wire up Q32 float ops that use builtins (fadd, fsub, fmul, fdiv, sqrt,
 fnearest) to call `__lp_lpir_*_q32` via FuncRef. Enable import calls
-(`Op::Call` where `callee < import_count`) for `glsl::*` and `lpfx::*`
+(`Op::Call` where `callee < import_count`) for `glsl::*` and `lpfn::*`
 builtins. End-to-end Q32 tests with builtin math.
 
 ## Code Organization Reminders

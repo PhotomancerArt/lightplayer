@@ -30,7 +30,7 @@ Check across all `docs/lpir/` chapters for:
 - Every `std.math` function in `06-import-modules.md` appears in
   `08-glsl-mapping.md`.
 - Import names use `@module::name` syntax consistently; no bare `@__lp_*`
-  or `@__lpfx_*` style imports remain.
+  or `@__lpfn_*` style imports remain.
 - No `mathcall` keyword remains anywhere — all external calls use `call`.
 - Grammar in `07-text-format.md` covers every op and construct.
 - Examples are valid according to the grammar.

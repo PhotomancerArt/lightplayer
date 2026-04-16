@@ -22,7 +22,7 @@ lp-shader/lps-builtins/src/
 │       ├── mix.rs                              # NEW: mix() standalone functions
 │       ├── cubic.rs                            # NEW: cubic() interpolation functions
 │       └── quintic.rs                           # NEW: quintic() interpolation functions
-└── builtins/lpfx/
+└── builtins/lpfn/
     ├── generative/
     │   ├── mod.rs                              # UPDATE: Export gnoise and fbm modules
     │   ├── random/
@@ -112,64 +112,64 @@ quintic() - Quintic polynomial smoothing (6t⁵ - 15t⁴ + 10t³)
 └── quintic_vec4(v: Vec4Q32) -> Vec4Q32 - # NEW: Vec4 quintic
 ```
 
-### Random Functions (`builtins/lpfx/generative/random/`)
+### Random Functions (`builtins/lpfn/generative/random/`)
 
 ```
 random() - Returns [0, 1] using sin-based hash
-├── lpfx_random1(x: Q32, seed: u32) -> Q32 - # NEW: 1D random
-├── lpfx_random2(p: Vec2Q32, seed: u32) -> Q32 - # NEW: 2D random
-└── lpfx_random3(p: Vec3Q32, seed: u32) -> Q32 - # NEW: 3D random
+├── lpfn_random1(x: Q32, seed: u32) -> Q32 - # NEW: 1D random
+├── lpfn_random2(p: Vec2Q32, seed: u32) -> Q32 - # NEW: 2D random
+└── lpfn_random3(p: Vec3Q32, seed: u32) -> Q32 - # NEW: 3D random
 
-__lpfx_random1_q32(x: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_random2_q32(x: i32, y: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_random3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_random1_q32(x: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_random2_q32(x: i32, y: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_random3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
 ```
 
-### Signed Random Functions (`builtins/lpfx/generative/srandom/`)
+### Signed Random Functions (`builtins/lpfn/generative/srandom/`)
 
 ```
 srandom() - Returns [-1, 1] (signed random)
-├── lpfx_srandom1(x: Q32, seed: u32) -> Q32 - # NEW: 1D signed random
-├── lpfx_srandom2(p: Vec2Q32, seed: u32) -> Q32 - # NEW: 2D signed random
-├── lpfx_srandom3(p: Vec3Q32, seed: u32) -> Q32 - # NEW: 3D signed random
-└── lpfx_srandom3_vec(p: Vec3Q32, seed: u32) -> Vec3Q32 - # NEW: 3D signed random vec3
+├── lpfn_srandom1(x: Q32, seed: u32) -> Q32 - # NEW: 1D signed random
+├── lpfn_srandom2(p: Vec2Q32, seed: u32) -> Q32 - # NEW: 2D signed random
+├── lpfn_srandom3(p: Vec3Q32, seed: u32) -> Q32 - # NEW: 3D signed random
+└── lpfn_srandom3_vec(p: Vec3Q32, seed: u32) -> Vec3Q32 - # NEW: 3D signed random vec3
 
-__lpfx_srandom1_q32(x: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_srandom2_q32(x: i32, y: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_srandom3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_srandom3_vec_q32(x: i32, y: i32, z: i32, seed: u32, out: *mut i32) - # NEW: Extern C wrapper (vec3 output)
+__lpfn_srandom1_q32(x: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_srandom2_q32(x: i32, y: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_srandom3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_srandom3_vec_q32(x: i32, y: i32, z: i32, seed: u32, out: *mut i32) - # NEW: Extern C wrapper (vec3 output)
 
 srandom3_tile() - Signed random with tiling
-├── lpfx_srandom3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Vec3Q32 - # NEW: 3D signed random with tiling
-└── __lpfx_srandom3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, seed: u32, out: *mut i32) - # NEW: Extern C wrapper
+├── lpfn_srandom3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Vec3Q32 - # NEW: 3D signed random with tiling
+└── __lpfn_srandom3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, seed: u32, out: *mut i32) - # NEW: Extern C wrapper
 ```
 
-### Gradient Noise Functions (`builtins/lpfx/generative/gnoise/`)
+### Gradient Noise Functions (`builtins/lpfn/generative/gnoise/`)
 
 ```
 gnoise() - Gradient noise (Perlin-style)
-├── lpfx_gnoise1(x: Q32, seed: u32) -> Q32 - # NEW: 1D gradient noise
-├── lpfx_gnoise2(p: Vec2Q32, seed: u32) -> Q32 - # NEW: 2D gradient noise
-├── lpfx_gnoise3(p: Vec3Q32, seed: u32) -> Q32 - # NEW: 3D gradient noise
-└── lpfx_gnoise3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Q32 - # NEW: 3D tilable gradient noise
+├── lpfn_gnoise1(x: Q32, seed: u32) -> Q32 - # NEW: 1D gradient noise
+├── lpfn_gnoise2(p: Vec2Q32, seed: u32) -> Q32 - # NEW: 2D gradient noise
+├── lpfn_gnoise3(p: Vec3Q32, seed: u32) -> Q32 - # NEW: 3D gradient noise
+└── lpfn_gnoise3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Q32 - # NEW: 3D tilable gradient noise
 
-__lpfx_gnoise1_q32(x: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_gnoise2_q32(x: i32, y: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_gnoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_gnoise3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_gnoise1_q32(x: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_gnoise2_q32(x: i32, y: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_gnoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_gnoise3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
 ```
 
-### FBM Noise Functions (`builtins/lpfx/generative/fbm/`)
+### FBM Noise Functions (`builtins/lpfn/generative/fbm/`)
 
 ```
 fbm() - Fractal Brownian Motion noise
-├── lpfx_fbm2(p: Vec2Q32, octaves: i32, seed: u32) -> Q32 - # NEW: 2D FBM
-├── lpfx_fbm3(p: Vec3Q32, octaves: i32, seed: u32) -> Q32 - # NEW: 3D FBM
-└── lpfx_fbm3_tile(p: Vec3Q32, tile_length: Q32, octaves: i32, seed: u32) -> Q32 - # NEW: 3D tilable FBM
+├── lpfn_fbm2(p: Vec2Q32, octaves: i32, seed: u32) -> Q32 - # NEW: 2D FBM
+├── lpfn_fbm3(p: Vec3Q32, octaves: i32, seed: u32) -> Q32 - # NEW: 3D FBM
+└── lpfn_fbm3_tile(p: Vec3Q32, tile_length: Q32, octaves: i32, seed: u32) -> Q32 - # NEW: 3D tilable FBM
 
-__lpfx_fbm2_q32(x: i32, y: i32, octaves: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_fbm3_q32(x: i32, y: i32, z: i32, octaves: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
-__lpfx_fbm3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, octaves: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_fbm2_q32(x: i32, y: i32, octaves: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_fbm3_q32(x: i32, y: i32, z: i32, octaves: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
+__lpfn_fbm3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, octaves: i32, seed: u32) -> i32 - # NEW: Extern C wrapper
 ```
 
 ## Implementation Notes
@@ -205,8 +205,8 @@ Keep the Rust code structure as close as possible to the GLSL source:
     - `FBM_AMPLITUDE_SCALAR = 0.5` (persistence)
 
 3. **Helper Functions**: Create helper functions that mirror GLSL function calls:
-    - `random()` → `lpfx_random()`
-    - `srandom3()` → `lpfx_srandom3_vec()`
+    - `random()` → `lpfn_random()`
+    - `srandom3()` → `lpfn_srandom3_vec()`
     - `cubic()` → `cubic()`
     - `quintic()` → `quintic()`
     - `mix()` → `mix()`
@@ -255,9 +255,9 @@ FBM combines multiple octaves of noise:
 
 All functions follow the standard LPFX pattern:
 
-- Public Rust function: `lpfx_*` with nice types (Q32, Vec2Q32, etc.)
-- Extern C wrapper: `__lpfx_*` with expanded types (i32, flattened vectors)
-- F32 wrapper: `__lpfx_*_f32` that converts to q32, calls q32 version, converts back
+- Public Rust function: `lpfn_*` with nice types (Q32, Vec2Q32, etc.)
+- Extern C wrapper: `__lpfn_*` with expanded types (i32, flattened vectors)
+- F32 wrapper: `__lpfn_*_f32` that converts to q32, calls q32 version, converts back
 
 ## Success Criteria
 

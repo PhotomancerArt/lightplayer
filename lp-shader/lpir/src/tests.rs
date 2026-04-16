@@ -218,12 +218,12 @@ fn parse_error_display() {
 #[test]
 fn round_trip_noise_sample() {
     assert_round_trip(
-        "import @lpfx::noise3(i32, f32, f32, f32)
+        "import @lpfn::noise3(i32, f32, f32, f32)
 
 func @noise_sample(v1:f32, v2:f32, v3:f32) -> f32 {
   slot ss0, 12
   v4:i32 = slot_addr ss0
-  call @lpfx::noise3(v4, v1, v2, v3)
+  call @lpfn::noise3(v4, v1, v2, v3)
   v5:f32 = load v4, 0
   v6:f32 = load v4, 4
   v7:f32 = load v4, 8

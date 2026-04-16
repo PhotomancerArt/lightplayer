@@ -46,20 +46,20 @@ vec3 applyPalette(float t, float palette) {
 
 // Naga GLSL-in resolves calls in source order; define helpers before render().
 vec2 worley_demo(vec2 scaledCoord, float time) {
-    float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
+    float noiseValue = lpfn_worley(scaledCoord * 2, 0u) / 2 + 0.5;
     float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
     return vec2(t, 1.0);
 }
 
 vec2 fbm_demo(vec2 scaledCoord, float time) {
-    float noiseValue = lpfx_fbm(scaledCoord, 3, 0u);
+    float noiseValue = lpfn_fbm(scaledCoord, 3, 0u);
     float t = mod(time * 0.1 + (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5 / 3.0, 1.0);
     return vec2(t, 1.0);
 }
 
 vec2 prsd_demo(vec2 scaledCoord, float time) {
     vec2 gradient;
-    float noiseValue = lpfx_psrdnoise(
+    float noiseValue = lpfn_psrdnoise(
         scaledCoord,
         vec2(0.0),
         time,

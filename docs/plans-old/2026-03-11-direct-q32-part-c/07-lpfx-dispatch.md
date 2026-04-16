@@ -2,16 +2,16 @@
 
 ## Current state
 
-In `lpfx_fns.rs`, the `Decimal` branch always uses `float_impl`:
+In `lpfn_fns.rs`, the `Decimal` branch always uses `float_impl`:
 
 ```rust
-LpfxFnImpl::Decimal { float_impl, .. } => {
-    let func_ref = self.get_lpfx_testcase_call(func, *float_impl, &param_types)?;
+LpfnFnImpl::Decimal { float_impl, .. } => {
+    let func_ref = self.get_lpfn_testcase_call(func, *float_impl, &param_types)?;
     // ...
 }
 ```
 
-The `q32_impl` field exists on `LpfxFnImpl::Decimal` but is ignored at
+The `q32_impl` field exists on `LpfnFnImpl::Decimal` but is ignored at
 codegen time. The transform rewrites the float call to the Q32 variant.
 
 ## Proposed change
@@ -19,11 +19,11 @@ codegen time. The transform rewrites the float call to the Q32 variant.
 Branch on `float_mode`:
 
 ```rust
-LpfxFnImpl::Decimal { float_impl, q32_impl } => {
+LpfnFnImpl::Decimal { float_impl, q32_impl } => {
     let func_ref = if self.is_q32() {
         self.gl_module.get_builtin_func_ref(*q32_impl, self.builder.func)?
     } else {
-        self.get_lpfx_testcase_call(func, *float_impl, &param_types)?
+        self.get_lpfn_testcase_call(func, *float_impl, &param_types)?
     };
     // ... rest unchanged (call, result handling)
 }
@@ -35,7 +35,7 @@ The signature is already correct (i32-based, declared during
 
 ## NonDecimal branch
 
-`LpfxFnImpl::NonDecimal` functions (hash, etc.) are integer-only and
+`LpfnFnImpl::NonDecimal` functions (hash, etc.) are integer-only and
 already call builtins directly. No change needed.
 
 ## Result handling
@@ -71,10 +71,10 @@ functions in the future, tests will catch it.
 
 ## Implementation notes
 
-- The `get_lpfx_testcase_call` method and `build_call_signature` are
+- The `get_lpfn_testcase_call` method and `build_call_signature` are
   only used for the float path. In Q32 mode, the signature comes from
   the builtin registry (already correct).
-- `find_lpfx_fn` overload resolution is format-agnostic (works on GLSL
+- `find_lpfn_fn` overload resolution is format-agnostic (works on GLSL
   types, not CLIF types), so it doesn't need changes.
 - Test with LPFX-using shaders (noise, HSV, etc.) once Plan D wires
   everything up.

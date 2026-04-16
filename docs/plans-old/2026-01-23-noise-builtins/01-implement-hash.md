@@ -2,19 +2,19 @@
 
 ## Description
 
-Create the hash function implementation in `lps-builtins/src/builtins/q32/lpfx_hash.rs` with
+Create the hash function implementation in `lps-builtins/src/builtins/q32/lpfn_hash.rs` with
 three variants for 1D, 2D, and 3D hashing. The hash function uses the noiz algorithm optimized for
 noise generation.
 
 ## Implementation
 
-### File: `lps-builtins/src/builtins/q32/lpfx_hash.rs`
+### File: `lps-builtins/src/builtins/q32/lpfn_hash.rs`
 
 Implement three hash functions:
 
-- `__lpfx_hash_1(x: u32, seed: u32) -> u32` - 1D hash
-- `__lpfx_hash_2(x: u32, y: u32, seed: u32) -> u32` - 2D hash
-- `__lpfx_hash_3(x: u32, y: u32, z: u32, seed: u32) -> u32` - 3D hash
+- `__lpfn_hash_1(x: u32, seed: u32) -> u32` - 1D hash
+- `__lpfn_hash_2(x: u32, y: u32, seed: u32) -> u32` - 2D hash
+- `__lpfn_hash_3(x: u32, y: u32, z: u32, seed: u32) -> u32` - 3D hash
 
 Use the noiz hash algorithm:
 

@@ -15,7 +15,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
 use lpir::lpir_module::{ImportDecl, LpirModule};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
 };
 
@@ -56,12 +56,12 @@ pub(crate) fn resolve_import(
                 ))
             })
         }
-        ("lpfx", FloatMode::Q32) => {
-            let base = lpfx_strip_suffix(&decl.func_name)?;
-            let kinds = lpfx_glsl_kinds_from_decl(decl)?;
-            glsl_lpfx_q32_builtin_id(base, &kinds).ok_or_else(|| {
+        ("lpfn", FloatMode::Q32) => {
+            let base = lpfn_strip_suffix(&decl.func_name)?;
+            let kinds = lpfn_glsl_kinds_from_decl(decl)?;
+            glsl_lpfn_q32_builtin_id(base, &kinds).ok_or_else(|| {
                 CompileError::unsupported(format!(
-                    "unsupported lpfx import `{}` with kinds {:?}",
+                    "unsupported lpfn import `{}` with kinds {:?}",
                     decl.func_name, kinds
                 ))
             })
@@ -75,7 +75,7 @@ pub(crate) fn resolve_import(
                 ))
             })
         }
-        ("glsl" | "lpir" | "lpfx" | "vm", FloatMode::F32) => {
+        ("glsl" | "lpir" | "lpfn" | "vm", FloatMode::F32) => {
             Err(CompileError::unsupported(format!(
                 "import `{}::{}` requires FloatMode::Q32",
                 decl.module_name, decl.func_name
@@ -158,15 +158,15 @@ fn ir_params_to_glsl_kinds(params: &[lpir::types::IrType]) -> Vec<GlslParamKind>
         .collect()
 }
 
-fn lpfx_glsl_kinds_from_decl(decl: &ImportDecl) -> Result<Vec<GlslParamKind>, CompileError> {
-    if let Some(ref enc) = decl.lpfx_glsl_params {
-        parse_lpfx_glsl_params_csv(enc).map_err(CompileError::unsupported)
+fn lpfn_glsl_kinds_from_decl(decl: &ImportDecl) -> Result<Vec<GlslParamKind>, CompileError> {
+    if let Some(ref enc) = decl.lpfn_glsl_params {
+        parse_lpfn_glsl_params_csv(enc).map_err(CompileError::unsupported)
     } else {
         Ok(ir_params_to_glsl_kinds(&decl.param_types))
     }
 }
 
-fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
+fn parse_lpfn_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
     if enc.is_empty() {
         return Ok(Vec::new());
     }
@@ -192,12 +192,12 @@ fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
         .collect()
 }
 
-fn lpfx_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
+fn lpfn_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
     let (base, tail) = func_name.rsplit_once('_').ok_or_else(|| {
-        CompileError::unsupported(format!("malformed lpfx import name `{func_name}`"))
+        CompileError::unsupported(format!("malformed lpfn import name `{func_name}`"))
     })?;
     tail.parse::<u32>().map_err(|_| {
-        CompileError::unsupported(format!("malformed lpfx import name `{func_name}`"))
+        CompileError::unsupported(format!("malformed lpfn import name `{func_name}`"))
     })?;
     Ok(base)
 }
@@ -211,12 +211,12 @@ fn lpfx_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
 /// multiple return values that must be loaded from the result buffer.
 pub(crate) fn is_import_result_ptr_builtin(decl: &ImportDecl, pointer_type: types::Type) -> bool {
     // Only LPFX module uses result-pointer pattern
-    if decl.module_name != "lpfx" {
+    if decl.module_name != "lpfn" {
         return false;
     }
 
     // Resolve to BuiltinId to check the actual Cranelift signature
-    let Ok(bid) = resolve_lpfx_builtin(decl) else {
+    let Ok(bid) = resolve_lpfn_builtin(decl) else {
         return false;
     };
 
@@ -228,8 +228,8 @@ pub(crate) fn is_import_result_ptr_builtin(decl: &ImportDecl, pointer_type: type
 }
 
 /// Resolve an LPFX import declaration to a BuiltinId.
-fn resolve_lpfx_builtin(decl: &ImportDecl) -> Result<BuiltinId, CompileError> {
-    // LPFX builtins are named like "lpfx_hsv2rgb_123" where 123 is the naga function index.
+fn resolve_lpfn_builtin(decl: &ImportDecl) -> Result<BuiltinId, CompileError> {
+    // LPFX builtins are named like "lpfn_hsv2rgb_123" where 123 is the naga function index.
     // Extract the base name (everything before the last underscore+number).
     let base_name = decl
         .func_name
@@ -245,9 +245,9 @@ fn resolve_lpfx_builtin(decl: &ImportDecl) -> Result<BuiltinId, CompileError> {
         .unwrap_or(&decl.func_name);
 
     // Parse the GLSL parameter kinds from the declaration
-    let kinds = lpfx_glsl_kinds_from_decl(decl)?;
+    let kinds = lpfn_glsl_kinds_from_decl(decl)?;
 
     // Look up the BuiltinId using the same mapping as the GLSL builtin resolution
-    glsl_lpfx_q32_builtin_id(base_name, &kinds)
+    glsl_lpfn_q32_builtin_id(base_name, &kinds)
         .ok_or_else(|| CompileError::unsupported(format!("unknown LPFX builtin `{base_name}`")))
 }

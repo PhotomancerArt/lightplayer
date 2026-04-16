@@ -26,7 +26,7 @@ lp-shader/lps-frontend/
     │                             #   vector Return, vector Call results
     ├── lower_math.rs             # UPDATE: component-wise math dispatch,
     │                             #   vector broadcast for mixed args
-    ├── lower_lpfx.rs             # UPDATE: vector out-params (slot + loads),
+    ├── lower_lpfn.rs             # UPDATE: vector out-params (slot + loads),
     │                             #   vector value args
     ├── lower_matrix.rs           # NEW: mat*vec, mat*mat, transpose,
     │                             #   determinant, inverse
@@ -173,13 +173,13 @@ c1.y, c1.z, c2.x, c2.y, c2.z] — 9 VRegs.
 - **Return**: push all N component VRegs.
 - **Call (user)**: flatten vector arguments, allocate N result VRegs.
 
-### `lower_lpfx.rs` — vector LPFX changes
+### `lower_lpfn.rs` — vector LPFX changes
 
 - Vector value arguments: flatten to N scalar args.
 - Vector out-parameters: allocate slot of N×4 bytes, pass slot address,
   load N components at offsets [0, 4, 8, ...] after call.
-- Both `build_lpfx_import_decl` and `lpfx_arg_kinds` updated for vectors.
-- New `LpfxArgKind::OutVector(IrType, u8)` variant (type + component count).
+- Both `build_lpfn_import_decl` and `lpfn_arg_kinds` updated for vectors.
+- New `LpfnArgKind::OutVector(IrType, u8)` variant (type + component count).
 
 ### `lower.rs` — entry point changes
 

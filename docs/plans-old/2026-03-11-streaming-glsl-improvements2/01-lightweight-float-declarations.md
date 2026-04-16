@@ -95,7 +95,7 @@ Files to change:
 - `frontend/codegen/context.rs` — change CodegenContext generic parameter
 - `frontend/codegen/expr/function.rs` — use trait method instead of module_mut
 - `frontend/codegen/lp_lib_fns.rs` — use pointer_type() from trait
-- `frontend/codegen/lpfx_fns.rs` — same
+- `frontend/codegen/lpfn_fns.rs` — same
 - `frontend/codegen/lvalue/read.rs` — same
 - `frontend/codegen/lvalue/write.rs` — same
 - `frontend/codegen/expr/component.rs` — same

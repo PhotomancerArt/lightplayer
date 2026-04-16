@@ -17,7 +17,7 @@ structure. The lowering is completely float-mode-unaware.
 - Parameter aliasing: detect `Store(LocalVariable, FunctionArgument)` pattern,
   alias the local's VReg to the parameter's VReg
 - User function calls: `Statement::Call` → `Op::Call`
-- LPFX calls: detect LPFX builtins, generate `@lpfx::...` imports with
+- LPFX calls: detect LPFX builtins, generate `@lpfn::...` imports with
   slot-based out-parameter ABI
 - Math builtin decomposition/import: abs, round, min, max, mix, smoothstep,
   step, mod
@@ -50,7 +50,7 @@ The reference for what Naga IR patterns the lowering must handle. Key files:
   instructions directly. Handles scalars + vectors, mode-aware (float/Q32).
 - `locals.rs` (~310 lines): WASM local allocation, parameter aliasing detection,
   CallResult tracking, scratch pool.
-- `lpfx.rs` (~330 lines): LPFX builtin resolution, out-pointer ABI via scratch
+- `lpfn.rs` (~330 lines): LPFX builtin resolution, out-pointer ABI via scratch
   memory, call emission.
 
 The WASM emitter covers these expression types (scalar path):
@@ -91,7 +91,7 @@ Complete as of Stage III. Key API surface for the lowering:
   `for` loops; `break_if` holds loop exit condition. `Continue` should target
   the continuing block, not the loop head.
 - LPFX functions: parsed as bodyless functions in `naga::Module` via the
-  prologue; resolved by name pattern `lpfx_*` + parameter type overloading.
+  prologue; resolved by name pattern `lpfn_*` + parameter type overloading.
 
 ## Questions
 
@@ -210,12 +210,12 @@ up intervening If frames).
 The roadmap includes LPFX: "detect LPFX builtins, generate memory ops for
 out-params." In LPIR, this means:
 
-1. Detect `lpfx_*` calls in Naga IR
-2. Create `@lpfx::builtin_name(...)` import declarations in the IrModule
+1. Detect `lpfn_*` calls in Naga IR
+2. Create `@lpfn::builtin_name(...)` import declarations in the IrModule
 3. For out-parameters: allocate slots via `FunctionBuilder::alloc_slot`,
    pass slot address as i32 arg, load results from slot after call
 
-The existing LPFX resolution logic lives in `lps-wasm/src/lpfx.rs` and
+The existing LPFX resolution logic lives in `lps-wasm/src/lpfn.rs` and
 depends on `lps-builtin-ids` for `BuiltinId` resolution.
 
 **Suggested:** Implement full LPFX lowering as described. This requires adding
