@@ -800,6 +800,22 @@ pub(crate) fn emit_op(
                 _ => return Err(String::from("Load: unsupported vreg type")),
             }
         }
+        LpirOp::Load8U { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 0);
+            sink.local_get(base.0).i32_load8_u(m).local_set(dst.0);
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 0);
+            sink.local_get(base.0).i32_load8_s(m).local_set(dst.0);
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 1);
+            sink.local_get(base.0).i32_load16_u(m).local_set(dst.0);
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 1);
+            sink.local_get(base.0).i32_load16_s(m).local_set(dst.0);
+        }
         LpirOp::Store {
             base,
             offset,
@@ -815,6 +831,22 @@ pub(crate) fn emit_op(
                 }
                 _ => return Err(String::from("Store: unsupported vreg type")),
             }
+        }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let m = memory::mem_arg0(*offset, 0);
+            sink.local_get(base.0).local_get(value.0).i32_store8(m);
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let m = memory::mem_arg0(*offset, 1);
+            sink.local_get(base.0).local_get(value.0).i32_store16(m);
         }
         LpirOp::Memcpy {
             dst_addr,
