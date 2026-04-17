@@ -170,8 +170,8 @@ Inliner regression test as described above.
 ## Dependencies
 
 - M1 (pixel shader contract) — done
-- M1.1 (Store16 op + new format variants) — must land first
-- LPIR inliner / stable function IDs from `feature/inline` — assumed landed
+- M1.1 (six narrow memory ops + `R16Unorm` / `Rgb16Unorm` + `compile_px` validation) — must land first; see [`m1.1-lpir-format-prereqs.md`](./m1.1-lpir-format-prereqs.md)
+- LPIR inliner / stable function IDs — prerequisite ops landed in M1.1; full inliner integration remains as needed for `__render_texture`
 
 ## Out of Scope (future work)
 
