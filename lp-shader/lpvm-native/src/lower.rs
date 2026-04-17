@@ -3297,12 +3297,10 @@ mod tests {
 
     #[test]
     fn lower_ops_populates_region_tree() {
-        use alloc::collections::BTreeMap;
         use crate::region::{REGION_ID_NONE, Region};
         use alloc::collections::BTreeMap;
         use lpir::FuncId;
         use lpir::types::VRegRange;
-        use lpir::FuncId;
 
         // Build a simple function: return 42
         // v0 = vmctx
