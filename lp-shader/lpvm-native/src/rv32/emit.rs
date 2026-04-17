@@ -623,6 +623,52 @@ impl<'a> EmitContext<'a> {
                 let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
                 self.push_u32(encode_sw(rs2, rs1, *offset), src_op);
             }
+            VInst::Load8U { offset, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_lbu(rd, rs1, *offset), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Load8S { offset, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_lb(rd, rs1, *offset), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Load16U { offset, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_lhu(rd, rs1, *offset), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Load16S { offset, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_lh(rd, rs1, *offset), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Store8 { offset, .. } => {
+                let rs2 = self.use_vreg(output, inst_idx, 0, Self::TEMP0, src_op)? as u32;
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                self.push_u32(encode_sb(rs2, rs1, *offset), src_op);
+            }
+            VInst::Store16 { offset, .. } => {
+                let rs2 = self.use_vreg(output, inst_idx, 0, Self::TEMP0, src_op)? as u32;
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                self.push_u32(encode_sh(rs2, rs1, *offset), src_op);
+            }
             VInst::IConst32 { val, .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
                     return Ok(());

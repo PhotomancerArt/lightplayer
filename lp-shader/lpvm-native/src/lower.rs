@@ -334,6 +334,80 @@ pub fn lower_lpir_op(
                 src_op: po,
             })
         }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Store8: offset does not fit i32"),
+            })?;
+            Ok(VInst::Store8 {
+                src: fa_vreg(*value),
+                base: fa_vreg(*base),
+                offset: off,
+                src_op: po,
+            })
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Store16: offset does not fit i32"),
+            })?;
+            Ok(VInst::Store16 {
+                src: fa_vreg(*value),
+                base: fa_vreg(*base),
+                offset: off,
+                src_op: po,
+            })
+        }
+        LpirOp::Load8U { dst, base, offset } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Load8U: offset does not fit i32"),
+            })?;
+            Ok(VInst::Load8U {
+                dst: fa_vreg(*dst),
+                base: fa_vreg(*base),
+                offset: off,
+                src_op: po,
+            })
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Load8S: offset does not fit i32"),
+            })?;
+            Ok(VInst::Load8S {
+                dst: fa_vreg(*dst),
+                base: fa_vreg(*base),
+                offset: off,
+                src_op: po,
+            })
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Load16U: offset does not fit i32"),
+            })?;
+            Ok(VInst::Load16U {
+                dst: fa_vreg(*dst),
+                base: fa_vreg(*base),
+                offset: off,
+                src_op: po,
+            })
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Load16S: offset does not fit i32"),
+            })?;
+            Ok(VInst::Load16S {
+                dst: fa_vreg(*dst),
+                base: fa_vreg(*base),
+                offset: off,
+                src_op: po,
+            })
+        }
         LpirOp::SlotAddr { dst, slot } => Ok(VInst::SlotAddr {
             dst: fa_vreg(*dst),
             slot: slot.0,
@@ -1392,6 +1466,90 @@ mod tests {
                 src: FaVReg(3),
                 base: FaVReg(2),
                 offset: 8,
+                ..
+            }
+        ));
+        let st8 = LpirOp::Store8 {
+            base: v(2),
+            offset: 1,
+            value: v(3),
+        };
+        assert!(matches!(
+            call_lower_op(&st8, FloatMode::Q32, None, &f, &ir, &abi).expect("store8"),
+            VInst::Store8 {
+                src: FaVReg(3),
+                base: FaVReg(2),
+                offset: 1,
+                ..
+            }
+        ));
+        let l8u = LpirOp::Load8U {
+            dst: v(3),
+            base: v(2),
+            offset: 5,
+        };
+        assert!(matches!(
+            call_lower_op(&l8u, FloatMode::Q32, None, &f, &ir, &abi).expect("load8u"),
+            VInst::Load8U {
+                dst: FaVReg(3),
+                base: FaVReg(2),
+                offset: 5,
+                ..
+            }
+        ));
+        let st16 = LpirOp::Store16 {
+            base: v(2),
+            offset: 2,
+            value: v(3),
+        };
+        assert!(matches!(
+            call_lower_op(&st16, FloatMode::Q32, None, &f, &ir, &abi).expect("store16"),
+            VInst::Store16 {
+                src: FaVReg(3),
+                base: FaVReg(2),
+                offset: 2,
+                ..
+            }
+        ));
+        let l8s = LpirOp::Load8S {
+            dst: v(3),
+            base: v(2),
+            offset: 6,
+        };
+        assert!(matches!(
+            call_lower_op(&l8s, FloatMode::Q32, None, &f, &ir, &abi).expect("load8s"),
+            VInst::Load8S {
+                dst: FaVReg(3),
+                base: FaVReg(2),
+                offset: 6,
+                ..
+            }
+        ));
+        let l16u = LpirOp::Load16U {
+            dst: v(3),
+            base: v(2),
+            offset: 7,
+        };
+        assert!(matches!(
+            call_lower_op(&l16u, FloatMode::Q32, None, &f, &ir, &abi).expect("load16u"),
+            VInst::Load16U {
+                dst: FaVReg(3),
+                base: FaVReg(2),
+                offset: 7,
+                ..
+            }
+        ));
+        let l16s = LpirOp::Load16S {
+            dst: v(3),
+            base: v(2),
+            offset: 9,
+        };
+        assert!(matches!(
+            call_lower_op(&l16s, FloatMode::Q32, None, &f, &ir, &abi).expect("load16s"),
+            VInst::Load16S {
+                dst: FaVReg(3),
+                base: FaVReg(2),
+                offset: 9,
                 ..
             }
         ));

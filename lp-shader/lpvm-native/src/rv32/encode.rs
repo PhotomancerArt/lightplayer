@@ -65,6 +65,12 @@ const F3_OR_REM: u32 = 0b110;
 /// Shared with `remu` / `and`.
 const F3_AND_REMU: u32 = 0b111;
 const F3_LW: u32 = 0b010;
+const F3_LB: u32 = 0b000;
+const F3_LH: u32 = 0b001;
+const F3_LBU: u32 = 0b100;
+const F3_LHU: u32 = 0b101;
+const F3_SB: u32 = 0b000;
+const F3_SH: u32 = 0b001;
 
 const F7_ADD: u32 = 0;
 const F7_SUB: u32 = 0b0100000;
@@ -240,6 +246,42 @@ pub fn encode_sw(rs2: u32, rs1: u32, offset: i32) -> u32 {
     encode_s_type(OP_STORE, F3_LW, rs1, rs2, offset)
 }
 
+/// lb rd, offset(rs1)
+#[inline]
+pub fn encode_lb(rd: u32, rs1: u32, offset: i32) -> u32 {
+    encode_i_type(OP_LOAD, rd, F3_LB, rs1, offset)
+}
+
+/// lbu rd, offset(rs1)
+#[inline]
+pub fn encode_lbu(rd: u32, rs1: u32, offset: i32) -> u32 {
+    encode_i_type(OP_LOAD, rd, F3_LBU, rs1, offset)
+}
+
+/// lh rd, offset(rs1)
+#[inline]
+pub fn encode_lh(rd: u32, rs1: u32, offset: i32) -> u32 {
+    encode_i_type(OP_LOAD, rd, F3_LH, rs1, offset)
+}
+
+/// lhu rd, offset(rs1)
+#[inline]
+pub fn encode_lhu(rd: u32, rs1: u32, offset: i32) -> u32 {
+    encode_i_type(OP_LOAD, rd, F3_LHU, rs1, offset)
+}
+
+/// sb rs2, offset(rs1)
+#[inline]
+pub fn encode_sb(rs2: u32, rs1: u32, offset: i32) -> u32 {
+    encode_s_type(OP_STORE, F3_SB, rs1, rs2, offset)
+}
+
+/// sh rs2, offset(rs1)
+#[inline]
+pub fn encode_sh(rs2: u32, rs1: u32, offset: i32) -> u32 {
+    encode_s_type(OP_STORE, F3_SH, rs1, rs2, offset)
+}
+
 /// B-type branch: `imm` is byte offset (must be even, ±4 KiB).
 #[inline]
 pub fn encode_b_type(funct3: u32, rs1: u32, rs2: u32, imm: i32) -> u32 {
@@ -327,6 +369,16 @@ mod tests {
     #[test]
     fn encode_add_x1_x2_x3() {
         assert_eq!(encode_add(1, 2, 3), 0x003100b3);
+    }
+
+    #[test]
+    fn encode_lb_lbu_lh_lhu_sb_sh_smoke() {
+        assert_eq!(encode_lb(1, 2, 4), 0x00410083);
+        assert_eq!(encode_lbu(1, 2, 4), 0x00414083);
+        assert_eq!(encode_lh(1, 2, 4), 0x00411083);
+        assert_eq!(encode_lhu(1, 2, 4), 0x00415083);
+        assert_eq!(encode_sb(1, 2, 4), 0x00110223);
+        assert_eq!(encode_sh(1, 2, 4), 0x00111223);
     }
 
     #[test]

@@ -477,6 +477,36 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
         } => {
             format!("Store32 i{}, i{}{:+}", src.0, base.0, offset)
         }
+        VInst::Load8U {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load8U i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Load8S {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load8S i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Load16U {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load16U i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Load16S {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load16S i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Store8 {
+            src, base, offset, ..
+        } => {
+            format!("Store8 i{}, i{}{:+}", src.0, base.0, offset)
+        }
+        VInst::Store16 {
+            src, base, offset, ..
+        } => {
+            format!("Store16 i{}, i{}{:+}", src.0, base.0, offset)
+        }
         VInst::SlotAddr { dst, slot, .. } => {
             format!("i{} = SlotAddr {}", dst.0, slot)
         }
