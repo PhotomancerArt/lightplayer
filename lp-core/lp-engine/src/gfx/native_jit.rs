@@ -66,6 +66,7 @@ impl LpGraphics for NativeJitGraphics {
                 debug_info: false,
                 emu_trace_instructions: false,
                 alloc_trace: false,
+                ..Default::default()
             },
         );
 

@@ -198,9 +198,9 @@ pub fn compile_module(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::vec;
-    use alloc::collections::BTreeMap;
 
     use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
     use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};

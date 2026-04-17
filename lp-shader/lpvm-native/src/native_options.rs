@@ -1,7 +1,7 @@
 //! Backend-specific compile options (not shared with Cranelift / WASM).
 
 /// Options for LPIR → native RV32 codegen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeCompileOptions {
     pub float_mode: lpir::FloatMode,
 
@@ -15,6 +15,9 @@ pub struct NativeCompileOptions {
     /// When true, print register-allocation trace (liveness + assignments) during codegen.
     /// Off by default for production and normal test runs.
     pub alloc_trace: bool,
+
+    /// Middle-end LPIR pass settings (inline, etc.).
+    pub config: lpir::CompilerConfig,
 }
 
 impl Default for NativeCompileOptions {
@@ -24,6 +27,7 @@ impl Default for NativeCompileOptions {
             debug_info: false,
             emu_trace_instructions: false,
             alloc_trace: false,
+            config: lpir::CompilerConfig::default(),
         }
     }
 }

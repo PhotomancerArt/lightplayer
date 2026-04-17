@@ -36,7 +36,8 @@ impl LpvmEngine for NativeEmuEngine {
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         // 1. Compile module
-        let compiled = compile_module(ir, meta, self.options.float_mode, self.options)?;
+        let opts = self.options.clone();
+        let compiled = compile_module(ir, meta, opts.float_mode, opts)?;
 
         // 2. Build ModuleDebugInfo from compiled functions
         let mut debug_info = ModuleDebugInfo::new();
@@ -57,7 +58,7 @@ impl LpvmEngine for NativeEmuEngine {
             meta: meta.clone(),
             load,
             arena: self.arena.clone(),
-            options: self.options,
+            options: self.options.clone(),
             debug_info,
         })
     }

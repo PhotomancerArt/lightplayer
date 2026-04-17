@@ -126,7 +126,8 @@ fn validate_err_undefined_vreg() {
         imports: Vec::new(),
         functions: BTreeMap::from([(FuncId(0), f)]),
     };
-    let errs = validate_function(m.functions.values().next().unwrap(), &m).expect_err("undefined v0");
+    let errs =
+        validate_function(m.functions.values().next().unwrap(), &m).expect_err("undefined v0");
     assert!(errs.iter().any(|e| e.message.contains("before definition")));
 }
 

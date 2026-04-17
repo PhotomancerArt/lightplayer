@@ -106,6 +106,7 @@ impl NativeEmuInstance {
     fn cranelift_options(&self) -> CompileOptions {
         CompileOptions {
             float_mode: self.module.options.float_mode,
+            config: self.module.options.config.clone(),
             ..Default::default()
         }
     }

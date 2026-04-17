@@ -287,9 +287,9 @@ fn call_operands_with_vmctx(
 ) -> Vec<VReg> {
     let need_vmctx = match callee {
         CalleeRef::Local(_) => true,
-        CalleeRef::Import(ImportId(i)) => imports
-            .get(i as usize)
-            .is_some_and(|imp| imp.needs_vmctx),
+        CalleeRef::Import(ImportId(i)) => {
+            imports.get(i as usize).is_some_and(|imp| imp.needs_vmctx)
+        }
     };
     if need_vmctx {
         let mut v = alloc::vec![VMCTX_VREG];

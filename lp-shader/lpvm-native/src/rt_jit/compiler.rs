@@ -43,6 +43,7 @@ pub fn compile_module_jit(
         debug_info: false,
         emu_trace_instructions: false,
         alloc_trace: false,
+        ..Default::default()
     };
 
     // 1. Compile module

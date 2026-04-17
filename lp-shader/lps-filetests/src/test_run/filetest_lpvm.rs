@@ -1,7 +1,7 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
 use lp_riscv_emu::LogLevel;
-use lpir::{FloatMode as LpirFloatMode, LpirModule};
+use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpsValueQ32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
@@ -141,6 +141,7 @@ impl CompiledShader {
         source: &str,
         target: &Target,
         emu_log_level: LogLevel,
+        compiler_config: &CompilerConfig,
     ) -> anyhow::Result<Self> {
         let (ir, meta) = lower_glsl(source)?;
         let fm = match target.float_mode {
@@ -150,6 +151,7 @@ impl CompiledShader {
         let opts = CompileOptions {
             float_mode: fm,
             emu_trace_instructions: emu_log_level == LogLevel::Instructions,
+            config: compiler_config.clone(),
             ..Default::default()
         };
         match target.backend {
@@ -167,13 +169,18 @@ impl CompiledShader {
                     float_mode: fm,
                     emu_trace_instructions: opts.emu_trace_instructions,
                     alloc_trace,
+                    config: compiler_config.clone(),
                     ..Default::default()
                 };
                 let engine = FaEmuEngine::new(native_opts);
                 Ok(Self::NativeFa(engine.compile(&ir, &meta)?))
             }
             Backend::Wasm => {
-                let wasm_opts = LpvmWasmOptions { float_mode: fm };
+                let wasm_opts = LpvmWasmOptions {
+                    float_mode: fm,
+                    config: compiler_config.clone(),
+                    ..Default::default()
+                };
                 let engine = WasmLpvmEngine::new(wasm_opts).map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(Self::Wasm(engine.compile(&ir, &meta)?))
             }

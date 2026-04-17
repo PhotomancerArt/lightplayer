@@ -20,7 +20,7 @@ pub fn jit(source: &str, options: &CompileOptions) -> Result<CraneliftModule, Co
         lps_frontend::compile(source).map_err(|e| CompilerError::Parse(alloc::format!("{e}")))?;
     let (ir, meta) = lps_frontend::lower(&naga).map_err(CompilerError::Lower)?;
     drop(naga);
-    CraneliftModule::compile(&ir, &meta, *options)
+    CraneliftModule::compile(&ir, &meta, options.clone())
 }
 
 /// Build JIT from borrowed LPIR. [`LpsModuleSig::default`] is used; [`CraneliftModule::call`] needs
@@ -29,7 +29,7 @@ pub fn jit_from_ir(
     ir: &LpirModule,
     options: &CompileOptions,
 ) -> Result<CraneliftModule, CompilerError> {
-    CraneliftModule::compile(ir, &LpsModuleSig::default(), *options)
+    CraneliftModule::compile(ir, &LpsModuleSig::default(), options.clone())
 }
 
 /// Owned LPIR + metadata (e.g. from [`lps_frontend::lower`]) for a full [`CraneliftModule::call`] surface.
@@ -38,7 +38,7 @@ pub fn jit_from_ir_owned(
     meta: LpsModuleSig,
     options: &CompileOptions,
 ) -> Result<CraneliftModule, CompilerError> {
-    CraneliftModule::compile(&ir, &meta, *options)
+    CraneliftModule::compile(&ir, &meta, options.clone())
 }
 
 #[cfg(feature = "riscv32-object")]

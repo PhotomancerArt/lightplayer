@@ -12,6 +12,7 @@ fn call_float_add_q32_without_builtins() {
     let (ir, meta) = lower(&naga).expect("lower");
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
+        ..Default::default()
     };
     let engine = WasmLpvmEngine::new(opts).expect("engine");
     let module = engine.compile(&ir, &meta).expect("compile");

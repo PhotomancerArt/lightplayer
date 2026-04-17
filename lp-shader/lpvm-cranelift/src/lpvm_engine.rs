@@ -36,7 +36,7 @@ impl LpvmEngine for CraneliftEngine {
     type Error = CompilerError;
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        CraneliftModule::compile(ir, meta, self.options)
+        CraneliftModule::compile(ir, meta, self.options.clone())
     }
 
     fn memory(&self) -> &dyn LpvmMemory {

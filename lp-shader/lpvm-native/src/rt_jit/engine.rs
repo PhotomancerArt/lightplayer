@@ -55,7 +55,7 @@ impl LpvmEngine for NativeJitEngine {
                 meta: meta.clone(),
                 buffer,
                 entry_offsets,
-                options: self.options,
+                options: self.options.clone(),
             }),
         })
     }

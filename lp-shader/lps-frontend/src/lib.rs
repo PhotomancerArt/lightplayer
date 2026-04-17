@@ -140,7 +140,11 @@ mod tests {
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
         assert_eq!(ir.functions.len(), 1);
-        let add = ir.functions.values().find(|f| f.name == "add").expect("add fn");
+        let add = ir
+            .functions
+            .values()
+            .find(|f| f.name == "add")
+            .expect("add fn");
         assert_eq!(add.param_count, 2);
     }
 

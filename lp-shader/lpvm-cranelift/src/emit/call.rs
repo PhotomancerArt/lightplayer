@@ -24,16 +24,14 @@ pub(crate) fn emit_call(
             results,
         } => {
             let func_ref = match *callee {
-                CalleeRef::Import(ImportId(i)) => {
-                    *ctx.import_func_refs
-                        .get(i as usize)
-                        .ok_or_else(|| CompileError::unsupported("call to unknown import index"))?
-                }
+                CalleeRef::Import(ImportId(i)) => *ctx
+                    .import_func_refs
+                    .get(i as usize)
+                    .ok_or_else(|| CompileError::unsupported("call to unknown import index"))?,
                 CalleeRef::Local(id) => {
-                    let rank = *ctx
-                        .func_id_to_ir_rank
-                        .get(&id)
-                        .ok_or_else(|| CompileError::unsupported("call to unknown local func id"))?;
+                    let rank = *ctx.func_id_to_ir_rank.get(&id).ok_or_else(|| {
+                        CompileError::unsupported("call to unknown local func id")
+                    })?;
                     *ctx.func_refs.get(rank).ok_or_else(|| {
                         CompileError::unsupported("call to unknown local function index")
                     })?
@@ -41,12 +39,7 @@ pub(crate) fn emit_call(
             };
             if let CalleeRef::Local(id) = *callee {
                 let rank = ctx.func_id_to_ir_rank[&id];
-                if ctx
-                    .callee_struct_return
-                    .get(rank)
-                    .copied()
-                    .unwrap_or(false)
-                {
+                if ctx.callee_struct_return.get(rank).copied().unwrap_or(false) {
                     let callee_ir = ctx.ir.functions.get(&id).ok_or_else(|| {
                         CompileError::unsupported("missing local callee IR for struct return")
                     })?;

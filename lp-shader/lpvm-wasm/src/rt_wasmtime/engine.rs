@@ -104,7 +104,7 @@ impl LpvmEngine for WasmLpvmEngine {
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: artifact.wasm_module().shadow_stack_base,
-            opts: self.compile_options,
+            opts: self.compile_options.clone(),
         })
     }
 

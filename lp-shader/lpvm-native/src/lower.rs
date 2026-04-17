@@ -1213,10 +1213,7 @@ fn ir_params_to_glsl_kinds(params: &[lpir::IrType]) -> Vec<GlslParamKind> {
 
 fn callee_return_uses_sret(ir: &LpirModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
     if let Some(imp_idx) = ir.callee_as_import(callee) {
-        return ir.imports[imp_idx]
-            .return_types
-            .len()
-            > SRET_SCALAR_THRESHOLD;
+        return ir.imports[imp_idx].return_types.len() > SRET_SCALAR_THRESHOLD;
     }
     let Some(f) = ir.callee_as_function(callee) else {
         return false;
@@ -1866,10 +1863,10 @@ mod tests {
 
     #[test]
     fn lower_ops_populates_region_tree() {
-        use alloc::collections::BTreeMap;
         use crate::region::{REGION_ID_NONE, Region};
-        use lpir::types::VRegRange;
+        use alloc::collections::BTreeMap;
         use lpir::FuncId;
+        use lpir::types::VRegRange;
 
         // Build a simple function: return 42
         // v0 = vmctx

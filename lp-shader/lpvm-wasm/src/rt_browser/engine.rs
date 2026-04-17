@@ -93,7 +93,7 @@ impl LpvmEngine for BrowserLpvmEngine {
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: wm.shadow_stack_base,
-            opts: self.compile_options,
+            opts: self.compile_options.clone(),
         })
     }
 

@@ -31,6 +31,7 @@ pub fn compile_module_asm_text(
         debug_info: true,
         emu_trace_instructions: false,
         alloc_trace: false,
+        ..Default::default()
     };
 
     // Compile module

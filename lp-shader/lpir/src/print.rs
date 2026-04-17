@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use core::fmt::Write as _;
 
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
-use crate::types::ImportId;
 use crate::lpir_op::LpirOp;
+use crate::types::ImportId;
 use crate::types::{CalleeRef, IrType, VReg};
 
 fn callee_needs_vmctx_operand(module: &LpirModule, callee: CalleeRef) -> bool {

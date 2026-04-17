@@ -91,11 +91,13 @@ pub fn run(
         return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
     }
 
+    let compiler_config = compile::build_compiler_config(&test_file.config_overrides)?;
     let compiled = match compile::compile_for_target(
         &test_file.glsl_source,
         target,
         &relative_path,
         log_level,
+        &compiler_config,
     ) {
         Ok(c) => {
             // Print compile-time debug (same building blocks as `shader-debug.sh`: LPIR,

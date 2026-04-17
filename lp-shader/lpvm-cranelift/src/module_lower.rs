@@ -90,12 +90,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     let indices: Vec<LpirFuncId> = match (order, options.memory_strategy) {
         (_, MemoryStrategy::LowMemory) => {
             let mut v: Vec<LpirFuncId> = ir.functions.keys().copied().collect();
-            v.sort_by(|a, b| {
-                ir.functions[b]
-                    .body
-                    .len()
-                    .cmp(&ir.functions[a].body.len())
-            });
+            v.sort_by(|a, b| ir.functions[b].body.len().cmp(&ir.functions[a].body.len()));
             v
         }
         (LpirFuncEmitOrder::Source, _) => ir.functions.keys().copied().collect(),

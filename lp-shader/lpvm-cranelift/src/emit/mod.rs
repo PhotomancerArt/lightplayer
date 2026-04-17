@@ -2,16 +2,16 @@
 
 use alloc::vec::Vec;
 
+use alloc::collections::BTreeMap;
 use cranelift_codegen::ir::{AbiParam, ArgumentPurpose, Signature, types};
 use cranelift_codegen::ir::{Block, FuncRef, InstBuilder, StackSlot, TrapCode, Value};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_frontend::{FunctionBuilder, Variable};
-use alloc::collections::BTreeMap;
 
 use lpir::FloatMode;
 use lpir::lpir_module::{IrFunction, LpirModule};
-use lpir::types::FuncId as LpirFuncId;
 use lpir::lpir_op::LpirOp;
+use lpir::types::FuncId as LpirFuncId;
 use lpir::types::{IrType, VReg};
 
 use crate::error::CompileError;

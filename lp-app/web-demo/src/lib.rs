@@ -27,6 +27,7 @@ pub fn lpvm_init_exports(exports: JsValue) {
 pub fn init_engine() {
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
+        ..Default::default()
     };
     ENGINE.with(|e| {
         *e.borrow_mut() = Some(BrowserLpvmEngine::new(opts).expect("BrowserLpvmEngine::new"));
