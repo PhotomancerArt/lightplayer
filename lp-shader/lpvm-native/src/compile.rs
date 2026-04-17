@@ -86,7 +86,7 @@ pub fn compile_function(
     );
 
     // Build function ABI (needed for both debug and non-debug paths)
-    let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
+    let func_abi = crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
 
     // 1-4. Const-fold, lower, optimize, allocate, emit
     let (code, relocs, debug_lines, sections) = {

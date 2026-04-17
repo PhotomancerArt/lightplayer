@@ -12,7 +12,7 @@ use crate::regalloc::{
 };
 use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 use crate::regset::RegSet;
-use crate::rv32::gpr::{self, PReg};
+use crate::isa::rv32::gpr::{self, PReg};
 use crate::vinst::{VInst, VReg};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -1177,7 +1177,7 @@ fn process_call(
 mod tests {
     use super::*;
     use crate::debug::vinst;
-    use crate::rv32::abi;
+    use crate::isa::rv32::abi;
     use lps_shared::{LpsFnSig, LpsType};
 
     fn make_abi() -> FuncAbi {

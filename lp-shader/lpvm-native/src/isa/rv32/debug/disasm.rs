@@ -128,7 +128,7 @@ pub fn disassemble_function(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rv32::debug::LineTable;
+    use crate::isa::rv32::debug::LineTable;
     use alloc::string::String;
     use alloc::vec;
     use lpir::types::VRegRange;

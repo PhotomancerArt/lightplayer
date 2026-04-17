@@ -6,7 +6,7 @@ use crate::abi::{FrameLayout, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
 use crate::regalloc::{AllocOutput, AllocResult, allocate};
-use crate::rv32::emit::emit_function;
+use crate::isa::rv32::emit::emit_function;
 use crate::vinst::VInst;
 
 /// Emission result containing machine code and metadata.
@@ -70,7 +70,7 @@ pub fn emit_lowered_with_alloc(
     if func_abi.is_sret() {
         // sret functions overwrite s1 in the prologue (mv s1, a0) so it must be
         // saved/restored even though the allocator never assigns it.
-        used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::rv32::abi::S1));
+        used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::isa::rv32::abi::S1));
     }
     let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
     let is_leaf = !contains_call(&lowered.vinsts);
@@ -155,7 +155,7 @@ fn contains_call(vinsts: &[VInst]) -> bool {
 
 /// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
 fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
-    use crate::rv32::abi::ARG_REGS;
+    use crate::isa::rv32::abi::ARG_REGS;
     let mut max_bytes = 0u32;
     for inst in vinsts {
         if let VInst::Call {
@@ -203,7 +203,7 @@ mod tests {
             .push(crate::region::Region::Linear { start: 0, end: 0 });
         lowered.region_tree.root = root;
 
-        let abi = crate::rv32::abi::func_abi_rv32(
+        let abi = crate::isa::rv32::abi::func_abi_rv32(
             &lps_shared::LpsFnSig {
                 name: alloc::string::String::from("test"),
                 return_type: lps_shared::LpsType::Void,

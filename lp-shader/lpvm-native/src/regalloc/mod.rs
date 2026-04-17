@@ -29,7 +29,7 @@ pub mod test;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alloc {
     /// Allocated to a physical register.
-    Reg(crate::rv32::gpr::PReg),
+    Reg(crate::isa::rv32::gpr::PReg),
     /// Spilled to stack slot.
     Stack(u8),
     /// No allocation (dead, or never used).
@@ -45,7 +45,7 @@ impl Alloc {
         matches!(self, Alloc::Stack(_))
     }
 
-    pub fn reg(self) -> Option<crate::rv32::gpr::PReg> {
+    pub fn reg(self) -> Option<crate::isa::rv32::gpr::PReg> {
         match self {
             Alloc::Reg(r) => Some(r),
             _ => None,
@@ -199,10 +199,10 @@ pub struct AllocResult {
 /// Collect callee-saved pool GPRs (x18–x27) used in `output` for prologue/epilogue.
 fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
     use crate::abi::PReg as AbiPReg;
-    use crate::rv32::gpr;
+    use crate::isa::rv32::gpr;
 
     let mut set = crate::abi::PregSet::EMPTY;
-    let mut insert = |r: crate::rv32::gpr::PReg| {
+    let mut insert = |r: crate::isa::rv32::gpr::PReg| {
         if gpr::is_callee_saved_pool_gpr(r) {
             set.insert(AbiPReg::int(r));
         }
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn allocator_works_for_linear_regions() {
         let lowered = make_linear_lowered();
-        let func_abi = crate::rv32::abi::func_abi_rv32(
+        let func_abi = crate::isa::rv32::abi::func_abi_rv32(
             &lps_shared::LpsFnSig {
                 name: String::from("test"),
                 return_type: lps_shared::LpsType::Void,
@@ -406,7 +406,7 @@ mod tests {
         use crate::debug::vinst;
         use crate::regalloc::render::render_alloc_output;
         use crate::regalloc::walk::walk_linear;
-        use crate::rv32::abi;
+        use crate::isa::rv32::abi;
         use lps_shared::{LpsFnSig, LpsType};
 
         let (vinsts, symbols, pool) = vinst::parse(input).unwrap();

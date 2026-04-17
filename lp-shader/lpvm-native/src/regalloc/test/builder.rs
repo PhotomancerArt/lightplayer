@@ -23,7 +23,7 @@ use crate::regalloc::AllocOutput;
 use crate::regalloc::pool::RegPool;
 use crate::regalloc::render::render_alloc_output;
 use crate::regalloc::walk::walk_linear_with_pool;
-use crate::rv32::abi;
+use crate::isa::rv32::abi;
 use crate::vinst::{ModuleSymbols, VInst, VReg};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;

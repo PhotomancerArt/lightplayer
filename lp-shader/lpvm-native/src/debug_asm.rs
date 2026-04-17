@@ -8,8 +8,8 @@ use lps_shared::LpsModuleSig;
 
 use crate::compile::compile_module;
 use crate::error::NativeError;
-use crate::rv32::debug::LineTable;
-use crate::rv32::debug::disasm::{DisasmOptions, disassemble_function};
+use crate::isa::rv32::debug::LineTable;
+use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
 
 /// Emit annotated assembly for every function in `ir` (concatenated).
 ///

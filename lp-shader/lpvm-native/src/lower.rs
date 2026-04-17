@@ -13,7 +13,7 @@ use lps_builtin_ids::{
 use crate::abi::ModuleAbi;
 use crate::error::LowerError;
 use crate::region::{REGION_ID_NONE, RegionId, RegionTree};
-use crate::rv32::abi::SRET_SCALAR_THRESHOLD;
+use crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD;
 use crate::vinst::{
     AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice,
     pack_src_op,

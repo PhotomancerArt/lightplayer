@@ -6,7 +6,7 @@ use crate::regalloc::trace::TraceEntry;
 use crate::regalloc::{
     Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
 };
-use crate::rv32::gpr::reg_name;
+use crate::isa::rv32::gpr::reg_name;
 use crate::vinst::{IcmpCond, ModuleSymbols, VInst, VReg};
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -731,7 +731,7 @@ mod tests {
     use crate::abi::FuncAbi;
     use crate::debug::vinst;
     use crate::regalloc::walk;
-    use crate::rv32::abi;
+    use crate::isa::rv32::abi;
     use lps_shared::{LpsFnSig, LpsType};
 
     fn make_abi() -> FuncAbi {

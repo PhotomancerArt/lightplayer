@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 
 use crate::abi::FrameLayout;
 use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
-use crate::rv32::encode::*;
-use crate::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
+use crate::isa::rv32::encode::*;
+use crate::isa::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
 use crate::vinst::{AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
 
 /// Callee sret buffer pointer (saved from incoming a0).
@@ -980,7 +980,7 @@ pub fn emit_function(
 mod tests {
     use super::*;
     use crate::debug::vinst;
-    use crate::rv32::abi;
+    use crate::isa::rv32::abi;
     use lps_shared::{LpsFnSig, LpsType};
 
     #[test]

@@ -1,6 +1,6 @@
 //! Physical register pool with LRU eviction.
 
-use crate::rv32::gpr::{ALLOC_POOL, PReg};
+use crate::isa::rv32::gpr::{ALLOC_POOL, PReg};
 use crate::vinst::VReg;
 use alloc::vec::Vec;
 

@@ -17,8 +17,8 @@ pub fn collect_fa_data(
     use lpvm_native::lower_ops;
     use lpvm_native::regalloc::allocate;
     use lpvm_native::regalloc::render::render_interleaved;
-    use lpvm_native::rv32::abi::func_abi_rv32;
-    use lpvm_native::rv32::emit::emit_function;
+    use lpvm_native::isa::rv32::abi::func_abi_rv32;
+    use lpvm_native::isa::rv32::emit::emit_function;
 
     let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
 
@@ -71,7 +71,7 @@ pub fn collect_fa_data(
         let mut used_callee_saved = alloc_result.used_callee_saved;
         if func_abi.is_sret() {
             use lpvm_native::abi::PregSet;
-            use lpvm_native::rv32::abi::S1;
+            use lpvm_native::isa::rv32::abi::S1;
             used_callee_saved = used_callee_saved.union(PregSet::singleton(S1));
         }
         let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
@@ -229,7 +229,7 @@ fn disassemble_raw(code: &[u8]) -> String {
 
 /// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
 fn max_outgoing_stack_bytes(vinsts: &[lpvm_native::vinst::VInst]) -> u32 {
-    use lpvm_native::rv32::abi::ARG_REGS;
+    use lpvm_native::isa::rv32::abi::ARG_REGS;
     let mut max_bytes = 0u32;
     for inst in vinsts {
         if let lpvm_native::vinst::VInst::Call {

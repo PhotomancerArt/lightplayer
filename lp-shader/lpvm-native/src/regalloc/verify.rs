@@ -5,7 +5,7 @@
 
 use crate::abi::FuncAbi;
 use crate::regalloc::{Alloc, AllocOutput};
-use crate::rv32::gpr;
+use crate::isa::rv32::gpr;
 use crate::vinst::{VInst, VReg};
 use alloc::vec::Vec;
 

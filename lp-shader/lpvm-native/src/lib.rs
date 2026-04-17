@@ -27,7 +27,6 @@ pub mod opt;
 pub mod regalloc;
 pub mod region;
 pub mod regset;
-pub mod rv32;
 pub mod types;
 pub mod vinst;
 
@@ -36,21 +35,22 @@ pub mod rt_emu;
 
 #[cfg(target_arch = "riscv32")]
 pub mod rt_jit;
+pub mod isa;
 
 pub use abi::ModuleAbi;
 pub use compile::{
-    CompileSession, CompiledFunction, CompiledModule, NativeReloc, compile_function, compile_module,
+    compile_function, compile_module, CompileSession, CompiledFunction, CompiledModule, NativeReloc,
 };
 pub use debug_asm::compile_module_asm_text;
-pub use emit::{EmittedCode, emit_lowered_with_alloc, emit_vinsts};
+pub use emit::{emit_lowered_with_alloc, emit_vinsts, EmittedCode};
 pub use error::{LowerError, NativeError};
-pub use link::{LinkedJitImage, link_elf, link_jit};
-pub use lower::{LoopRegion, LoweredFunction, lower_lpir_op, lower_ops};
+pub use link::{link_elf, link_jit, LinkedJitImage};
+pub use lower::{lower_lpir_op, lower_ops, LoopRegion, LoweredFunction};
 pub use native_options::NativeCompileOptions;
 pub use types::NativeType;
 pub use vinst::{
-    IcmpCond, IrVReg, LabelId, ModuleSymbols, SRC_OP_NONE, SymbolId, VInst, VReg, VRegSlice,
-    pack_src_op, unpack_src_op,
+    pack_src_op, unpack_src_op, IcmpCond, IrVReg, LabelId, ModuleSymbols, SymbolId, VInst, VReg,
+    VRegSlice, SRC_OP_NONE,
 };
 
 #[cfg(feature = "emu")]
