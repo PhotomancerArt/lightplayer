@@ -12,7 +12,16 @@ pub(crate) fn module_all_ops() -> LpirModule {
     id_b.push_return(&[id_arg]);
     let id_callee = mb.add_function(id_b.finish());
 
-    let mut b = FunctionBuilder::new("all_ops", &[IrType::F32]);
+    let mut b = FunctionBuilder::new(
+        "all_ops",
+        &[
+            IrType::F32,
+            IrType::I32,
+            IrType::I32,
+            IrType::I32,
+            IrType::I32,
+        ],
+    );
 
     let f1 = b.alloc_vreg(IrType::F32);
     b.push(LpirOp::FconstF32 {
@@ -74,22 +83,22 @@ pub(crate) fn module_all_ops() -> LpirModule {
     unary_f!(Ftrunc, f1);
     unary_f!(Fnearest, f1);
 
-    macro_rules! icmp {
+    macro_rules! fcmp {
         ($op:ident) => {{
             let d = b.alloc_vreg(IrType::I32);
             b.push(LpirOp::$op {
                 dst: d,
-                lhs: i1,
-                rhs: i2,
+                lhs: f1,
+                rhs: f2,
             });
         }};
     }
-    icmp!(Feq);
-    icmp!(Fne);
-    icmp!(Flt);
-    icmp!(Fle);
-    icmp!(Fgt);
-    icmp!(Fge);
+    fcmp!(Feq);
+    fcmp!(Fne);
+    fcmp!(Flt);
+    fcmp!(Fle);
+    fcmp!(Fgt);
+    fcmp!(Fge);
 
     macro_rules! iop {
         ($op:ident) => {{
@@ -206,6 +215,76 @@ pub(crate) fn module_all_ops() -> LpirModule {
         offset: 0,
         value: f1,
     });
+
+    // Narrow memory: distinct offsets in the 16-byte slot (see table in phase-5 plan).
+    let v_8u = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::IconstI32 {
+        dst: v_8u,
+        value: 0xAB,
+    });
+    b.push(LpirOp::Store8 {
+        base,
+        offset: 4,
+        value: v_8u,
+    });
+    let r_8u = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::Load8U {
+        dst: r_8u,
+        base,
+        offset: 4,
+    });
+
+    let v_8s = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::IconstI32 {
+        dst: v_8s,
+        value: 0x80,
+    });
+    b.push(LpirOp::Store8 {
+        base,
+        offset: 5,
+        value: v_8s,
+    });
+    let r_8s = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::Load8S {
+        dst: r_8s,
+        base,
+        offset: 5,
+    });
+
+    let v_16u = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::IconstI32 {
+        dst: v_16u,
+        value: 0xABCD,
+    });
+    b.push(LpirOp::Store16 {
+        base,
+        offset: 8,
+        value: v_16u,
+    });
+    let r_16u = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::Load16U {
+        dst: r_16u,
+        base,
+        offset: 8,
+    });
+
+    let v_16s = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::IconstI32 {
+        dst: v_16s,
+        value: 0x8000,
+    });
+    b.push(LpirOp::Store16 {
+        base,
+        offset: 10,
+        value: v_16s,
+    });
+    let r_16s = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::Load16S {
+        dst: r_16s,
+        base,
+        offset: 10,
+    });
+
     let loaded = b.alloc_vreg(IrType::F32);
     b.push(LpirOp::Load {
         dst: loaded,
@@ -265,8 +344,48 @@ pub(crate) fn module_all_ops() -> LpirModule {
     let call_out = b.alloc_vreg(IrType::I32);
     b.push_call(id_callee, &[VMCTX_VREG, i2], &[call_out]);
 
-    b.push_return(&[f1]);
+    b.push_return(&[f1, r_8u, r_8s, r_16u, r_16s]);
 
     mb.add_function(b.finish());
     mb.finish()
+}
+
+#[cfg(test)]
+mod all_ops_exec {
+    use alloc::vec::Vec;
+
+    use super::module_all_ops;
+    use crate::interp::{ImportHandler, InterpError, Value, interpret};
+    use crate::validate::validate_module;
+
+    struct NoImports;
+
+    impl ImportHandler for NoImports {
+        fn call(
+            &mut self,
+            _module_name: &str,
+            _func_name: &str,
+            _args: &[Value],
+        ) -> Result<Vec<Value>, InterpError> {
+            Err(InterpError::Import(alloc::string::String::from(
+                "no imports in all_ops fixture",
+            )))
+        }
+    }
+
+    /// Interpreter reference for narrow mem return values (backends should match).
+    #[test]
+    fn interp_all_ops_narrow_memory_returns() {
+        let m = module_all_ops();
+        validate_module(&m).unwrap();
+        let mut imp = NoImports;
+        // `all_ops` has only implicit vmctx; `f1` comes from `fconst.f32 1.0` in the body.
+        let out = interpret(&m, "all_ops", &[], &mut imp).unwrap();
+        assert_eq!(out.len(), 5);
+        assert!((out[0].as_f32().unwrap() - 1.0).abs() < 1e-6);
+        assert_eq!(out[1], Value::I32(0xAB));
+        assert_eq!(out[2], Value::I32(-128));
+        assert_eq!(out[3], Value::I32(0xABCD));
+        assert_eq!(out[4], Value::I32(-32768));
+    }
 }

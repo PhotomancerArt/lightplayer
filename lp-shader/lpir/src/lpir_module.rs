@@ -73,14 +73,20 @@ impl IrFunction {
     }
 
     /// Whether this function's body contains any memory-accessing ops
-    /// (Load, Store, SlotAddr, Memcpy).
+    /// (word/narrow load/store, [`LpirOp::SlotAddr`], [`LpirOp::Memcpy`]).
     pub fn uses_memory(&self) -> bool {
         !self.slots.is_empty()
             || self.body.iter().any(|op| {
                 matches!(
                     op,
                     LpirOp::Load { .. }
+                        | LpirOp::Load8U { .. }
+                        | LpirOp::Load8S { .. }
+                        | LpirOp::Load16U { .. }
+                        | LpirOp::Load16S { .. }
                         | LpirOp::Store { .. }
+                        | LpirOp::Store8 { .. }
+                        | LpirOp::Store16 { .. }
                         | LpirOp::SlotAddr { .. }
                         | LpirOp::Memcpy { .. }
                 )

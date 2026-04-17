@@ -328,6 +328,42 @@ pub enum LpirOp {
         offset: u32,
         value: VReg,
     },
+    /// 8-bit store: writes the low 8 bits of `value` to `[base + offset]`.
+    Store8 {
+        base: VReg,
+        offset: u32,
+        value: VReg,
+    },
+    /// 16-bit store: writes the low 16 bits of `value` to `[base + offset]`.
+    Store16 {
+        base: VReg,
+        offset: u32,
+        value: VReg,
+    },
+    /// 8-bit zero-extending load: `dst = u8[base + offset]`.
+    Load8U {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
+    /// 8-bit sign-extending load: `dst = i8[base + offset]` (sign-extended to i32).
+    Load8S {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
+    /// 16-bit zero-extending load.
+    Load16U {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
+    /// 16-bit sign-extending load.
+    Load16S {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
     Memcpy {
         dst_addr: VReg,
         src_addr: VReg,
@@ -452,9 +488,15 @@ impl LpirOp {
             | LpirOp::Copy { dst, .. }
             | LpirOp::SlotAddr { dst, .. }
             | LpirOp::Load { dst, .. }
+            | LpirOp::Load8U { dst, .. }
+            | LpirOp::Load8S { dst, .. }
+            | LpirOp::Load16U { dst, .. }
+            | LpirOp::Load16S { dst, .. }
             | LpirOp::FconstF32 { dst, .. }
             | LpirOp::IconstI32 { dst, .. } => Some(*dst),
             LpirOp::Store { .. }
+            | LpirOp::Store8 { .. }
+            | LpirOp::Store16 { .. }
             | LpirOp::Memcpy { .. }
             | LpirOp::Return { .. }
             | LpirOp::Call { .. }

@@ -1398,6 +1398,76 @@ fn interp_memcpy_slots() {
 }
 
 #[test]
+fn interp_store8_load8u_trunc_zext() {
+    let ir = "func @f() -> i32 {
+  slot ss0, 8
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0x1234
+  store8 v1, 0, v2
+  v3:i32 = load8u v1, 0
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "f", &[]), 0x34);
+}
+
+#[test]
+fn interp_store8_load8s_sign_ext() {
+    let ir = "func @f() -> i32 {
+  slot ss0, 8
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0x80
+  store8 v1, 0, v2
+  v3:i32 = load8s v1, 0
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "f", &[]), -128);
+}
+
+#[test]
+fn interp_store16_load16u_trunc_zext() {
+    let ir = "func @f() -> i32 {
+  slot ss0, 8
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0x12345
+  store16 v1, 0, v2
+  v3:i32 = load16u v1, 0
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "f", &[]), 0x2345);
+}
+
+#[test]
+fn interp_store16_load16s_sign_ext() {
+    let ir = "func @f() -> i32 {
+  slot ss0, 8
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0x18000
+  store16 v1, 0, v2
+  v3:i32 = load16s v1, 0
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "f", &[]), -32768);
+}
+
+#[test]
+fn interp_store8_load8u_offset() {
+    let ir = "func @f() -> i32 {
+  slot ss0, 16
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0xab
+  store8 v1, 1, v2
+  v3:i32 = load8u v1, 1
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "f", &[]), 0xab);
+}
+
+#[test]
 fn interp_dynamic_index() {
     let ir = "func @arr_dyn(v1:i32) -> f32 {
   slot ss0, 16

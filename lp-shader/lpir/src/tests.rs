@@ -270,6 +270,90 @@ fn round_trip_arr_dyn() {
 }
 
 #[test]
+fn round_trip_store8() {
+    assert_round_trip(
+        "func @s8(v1:i32) {
+  slot ss0, 4
+  v2:i32 = slot_addr ss0
+  store8 v2, 0, v1
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_store16() {
+    assert_round_trip(
+        "func @s16(v1:i32) {
+  slot ss0, 4
+  v2:i32 = slot_addr ss0
+  store16 v2, 0, v1
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load8u() {
+    assert_round_trip(
+        "func @l8u() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 7
+  store8 v1, 0, v2
+  v3:i32 = load8u v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load8s() {
+    assert_round_trip(
+        "func @l8s() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0
+  store8 v1, 0, v2
+  v3:i32 = load8s v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load16u() {
+    assert_round_trip(
+        "func @l16u() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 13330
+  store16 v1, 0, v2
+  v3:i32 = load16u v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load16s() {
+    assert_round_trip(
+        "func @l16s() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0
+  store16 v1, 0, v2
+  v3:i32 = load16s v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
 fn round_trip_use_ctx() {
     assert_round_trip(
         "func @use_ctx(v1:f32, v2:i32) -> f32 {

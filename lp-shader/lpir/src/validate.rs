@@ -588,8 +588,14 @@ fn check_op_operands_defined(
             check(*if_false, "select if_false");
         }
         LpirOp::Copy { src, .. } => check(*src, "copy src"),
-        LpirOp::Load { base, .. } => check(*base, "load base"),
-        LpirOp::Store { base, value, .. } => {
+        LpirOp::Load { base, .. }
+        | LpirOp::Load8U { base, .. }
+        | LpirOp::Load8S { base, .. }
+        | LpirOp::Load16U { base, .. }
+        | LpirOp::Load16S { base, .. } => check(*base, "load base"),
+        LpirOp::Store { base, value, .. }
+        | LpirOp::Store8 { base, value, .. }
+        | LpirOp::Store16 { base, value, .. } => {
             check(*base, "store base");
             check(*value, "store value");
         }
@@ -770,6 +776,13 @@ fn check_opcode_dst_types(
             }
         }
         LpirOp::SlotAddr { dst, .. } => expect(*dst, IrType::I32, "slot_addr"),
+        LpirOp::Load8U { dst, .. }
+        | LpirOp::Load8S { dst, .. }
+        | LpirOp::Load16U { dst, .. }
+        | LpirOp::Load16S { dst, .. } => expect(*dst, IrType::I32, "narrow load result"),
+        LpirOp::Store8 { value, .. } | LpirOp::Store16 { value, .. } => {
+            expect(*value, IrType::I32, "narrow store value");
+        }
         LpirOp::Load { .. }
         | LpirOp::Store { .. }
         | LpirOp::Memcpy { .. }
@@ -857,13 +870,20 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::ItofU { dst, .. }
         | LpirOp::FfromI32Bits { dst, .. } => mark(*dst, defined),
         LpirOp::Select { dst, .. } | LpirOp::Copy { dst, .. } => mark(*dst, defined),
-        LpirOp::SlotAddr { dst, .. } | LpirOp::Load { dst, .. } => mark(*dst, defined),
+        LpirOp::SlotAddr { dst, .. }
+        | LpirOp::Load { dst, .. }
+        | LpirOp::Load8U { dst, .. }
+        | LpirOp::Load8S { dst, .. }
+        | LpirOp::Load16U { dst, .. }
+        | LpirOp::Load16S { dst, .. } => mark(*dst, defined),
         LpirOp::Call { results, .. } => {
             for v in func.pool_slice(*results) {
                 mark(*v, defined);
             }
         }
         LpirOp::Store { .. }
+        | LpirOp::Store8 { .. }
+        | LpirOp::Store16 { .. }
         | LpirOp::Memcpy { .. }
         | LpirOp::IfStart { .. }
         | LpirOp::Else

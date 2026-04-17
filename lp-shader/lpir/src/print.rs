@@ -326,6 +326,30 @@ fn print_op_at(
             let _ = writeln!(out);
             *pc += 1;
         }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let _ = write!(out, "{ind}store8 ");
+            fmt_vreg(st, out, *base);
+            let _ = write!(out, ", {offset}, ");
+            fmt_vreg(st, out, *value);
+            let _ = writeln!(out);
+            *pc += 1;
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let _ = write!(out, "{ind}store16 ");
+            fmt_vreg(st, out, *base);
+            let _ = write!(out, ", {offset}, ");
+            fmt_vreg(st, out, *value);
+            let _ = writeln!(out);
+            *pc += 1;
+        }
         LpirOp::Memcpy {
             dst_addr,
             src_addr,
@@ -556,6 +580,34 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Lp
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = load ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load8U { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load8u ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load8s ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load16u ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load16s ");
             fmt_vreg(st, out, *base);
             let _ = writeln!(out, ", {offset}");
         }

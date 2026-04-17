@@ -542,8 +542,16 @@ fn parse_stmt_line(
         }
         return Ok(());
     }
+    if line.starts_with("store8 ") {
+        parse_store_n(fb, line, "store8 ", StoreWidth::U8)?;
+        return Ok(());
+    }
+    if line.starts_with("store16 ") {
+        parse_store_n(fb, line, "store16 ", StoreWidth::U16)?;
+        return Ok(());
+    }
     if line.starts_with("store ") {
-        parse_store(fb, line)?;
+        parse_store_n(fb, line, "store ", StoreWidth::U32)?;
         return Ok(());
     }
     if line.starts_with("memcpy ") {
@@ -583,8 +591,20 @@ fn parse_int_literal(s: &str) -> Result<i32, ParseError> {
     }
 }
 
-fn parse_store(fb: &mut FunctionBuilder, line: &str) -> Result<(), ParseError> {
-    let rest = line.strip_prefix("store ").unwrap();
+#[derive(Clone, Copy)]
+enum StoreWidth {
+    U8,
+    U16,
+    U32,
+}
+
+fn parse_store_n(
+    fb: &mut FunctionBuilder,
+    line: &str,
+    prefix: &str,
+    width: StoreWidth,
+) -> Result<(), ParseError> {
+    let rest = line.strip_prefix(prefix).unwrap();
     let parts: Vec<&str> = rest.split(',').map(str::trim).collect();
     if parts.len() != 3 {
         return Err(err(1, 1, "store base, offset, value"));
@@ -592,11 +612,24 @@ fn parse_store(fb: &mut FunctionBuilder, line: &str) -> Result<(), ParseError> {
     let base = parse_vreg_token(parts[0])?;
     let offset: u32 = parts[1].parse().map_err(|_| err(1, 1, "offset"))?;
     let value = parse_vreg_token(parts[2])?;
-    fb.push(LpirOp::Store {
-        base,
-        offset,
-        value,
-    });
+    let op = match width {
+        StoreWidth::U8 => LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        },
+        StoreWidth::U16 => LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        },
+        StoreWidth::U32 => LpirOp::Store {
+            base,
+            offset,
+            value,
+        },
+    };
+    fb.push(op);
     Ok(())
 }
 
@@ -1013,6 +1046,26 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<LpirOp, ParseError> {
             })
         }
         "load" => Ok(LpirOp::Load {
+            dst,
+            base: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            offset: parts[2].parse().map_err(|_| err(1, 1, "offset"))?,
+        }),
+        "load8u" => Ok(LpirOp::Load8U {
+            dst,
+            base: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            offset: parts[2].parse().map_err(|_| err(1, 1, "offset"))?,
+        }),
+        "load8s" => Ok(LpirOp::Load8S {
+            dst,
+            base: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            offset: parts[2].parse().map_err(|_| err(1, 1, "offset"))?,
+        }),
+        "load16u" => Ok(LpirOp::Load16U {
+            dst,
+            base: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            offset: parts[2].parse().map_err(|_| err(1, 1, "offset"))?,
+        }),
+        "load16s" => Ok(LpirOp::Load16S {
             dst,
             base: parse_vreg_token(parts[1].trim_end_matches(','))?,
             offset: parts[2].parse().map_err(|_| err(1, 1, "offset"))?,

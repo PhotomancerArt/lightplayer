@@ -743,6 +743,60 @@ fn eval_op(
                 Value::I32(i) => write_u32(slot_mem, addr, i as u32)?,
             }
         }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let i = val_i32(get_reg(regs, *value)?)?;
+            write_u8(slot_mem, addr, i as u8)?;
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let i = val_i32(get_reg(regs, *value)?)?;
+            write_u16(slot_mem, addr, i as u16)?;
+        }
+        LpirOp::Load8U {
+            dst,
+            base,
+            offset,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let b = read_u8(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(b as i32))?;
+        }
+        LpirOp::Load8S {
+            dst,
+            base,
+            offset,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let b = read_u8(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(b as i8 as i32))?;
+        }
+        LpirOp::Load16U {
+            dst,
+            base,
+            offset,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let w = read_u16(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(w as i32))?;
+        }
+        LpirOp::Load16S {
+            dst,
+            base,
+            offset,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let w = read_u16(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(w as i16 as i32))?;
+        }
         LpirOp::Memcpy {
             dst_addr,
             src_addr,
@@ -787,12 +841,43 @@ fn read_u32(mem: &[u8], addr: usize) -> Result<u32, InterpError> {
     ]))
 }
 
+fn read_u8(mem: &[u8], addr: usize) -> Result<u8, InterpError> {
+    if addr + 1 > mem.len() {
+        return Err(InterpError::Internal("load oob".into()));
+    }
+    Ok(mem[addr])
+}
+
+fn read_u16(mem: &[u8], addr: usize) -> Result<u16, InterpError> {
+    if addr + 2 > mem.len() {
+        return Err(InterpError::Internal("load oob".into()));
+    }
+    Ok(u16::from_le_bytes([mem[addr], mem[addr + 1]]))
+}
+
 fn write_u32(mem: &mut [u8], addr: usize, v: u32) -> Result<(), InterpError> {
     if addr + 4 > mem.len() {
         return Err(InterpError::Internal("store oob".into()));
     }
     let b = v.to_le_bytes();
     mem[addr..addr + 4].copy_from_slice(&b);
+    Ok(())
+}
+
+fn write_u8(mem: &mut [u8], addr: usize, v: u8) -> Result<(), InterpError> {
+    if addr + 1 > mem.len() {
+        return Err(InterpError::Internal("store oob".into()));
+    }
+    mem[addr] = v;
+    Ok(())
+}
+
+fn write_u16(mem: &mut [u8], addr: usize, v: u16) -> Result<(), InterpError> {
+    if addr + 2 > mem.len() {
+        return Err(InterpError::Internal("store oob".into()));
+    }
+    let b = v.to_le_bytes();
+    mem[addr..addr + 2].copy_from_slice(&b);
     Ok(())
 }
 
