@@ -67,4 +67,10 @@ pub trait LpvmInstance {
     fn last_guest_instruction_count(&self) -> Option<u64> {
         None
     }
+
+    /// Guest cycle estimate for the last **successful** RV32 emulator call (per active
+    /// cost model); JIT/WASM return `None`.
+    fn last_guest_cycle_count(&self) -> Option<u64> {
+        None
+    }
 }

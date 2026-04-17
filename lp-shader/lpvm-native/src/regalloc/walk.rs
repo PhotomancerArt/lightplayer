@@ -4,6 +4,7 @@
 //! freeing registers for defs, and recording spill/reload edits.
 
 use crate::abi::FuncAbi;
+use crate::isa::rv32::gpr::{self, PReg};
 use crate::regalloc::pool::RegPool;
 use crate::regalloc::spill::SpillAlloc;
 use crate::regalloc::trace::TraceEntry;
@@ -12,7 +13,6 @@ use crate::regalloc::{
 };
 use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 use crate::regset::RegSet;
-use crate::isa::rv32::gpr::{self, PReg};
 use crate::vinst::{VInst, VReg};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -678,7 +678,7 @@ fn process_generic(
     // The emitter loads each into TEMP0 and stores to the sret buffer sequentially,
     // so no register conflicts are possible. This eliminates the entire class of
     // Ret operand collisions where later operands evict earlier ones.
-    let is_sret_ret = matches!(inst, VInst::Ret { vals, .. } if (vals.count as usize) > crate::rv32::abi::SRET_SCALAR_THRESHOLD);
+    let is_sret_ret = matches!(inst, VInst::Ret { vals, .. } if (vals.count as usize) > crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD);
     inst.for_each_use(vreg_pool, |use_vreg| {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
