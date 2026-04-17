@@ -1,126 +1,181 @@
-# M2 — `render_frame` and Pixel Loop
+# M2 — `render_frame` via Synthetic `__render_texture`
 
 ## Goal
 
-Move the per-pixel render loop into lp-shader. `FragInstance::render_frame`
-replaces the duplicated pixel loops in lpfx-cpu and lp-engine.
+Move the per-pixel render loop into LPIR itself: synthesize a
+`__render_texture` function that contains the nested y/x loops, calls
+`render(vec2 pos)` for each pixel, converts Q32 → unorm16, and writes the
+result to the texture buffer via `Store16`.
+
+`LpsPxShader::render_frame` becomes one trait-level call:
+`instance.call_q32("__render_texture", &[tex_ptr, width, height])`.
+
+## Why synthetic LPIR (not host-driven loop)
+
+We considered a host-driven pixel loop (mirroring `lpfx-cpu`'s
+`DirectCall::call_i32_buf` pattern). Synthetic LPIR is both faster *and*
+simpler:
+
+- **Performance**: one compiled function, `render()` inlined into the loop
+  body via the LPIR inliner. Backend optimizes across the loop (hoist
+  invariants, register-allocate across pixels). Eliminates per-pixel
+  function call + globals reset overhead from the host side.
+- **Simplicity**: no backend-specific `render_frame_fast` impls, no
+  `DirectCall` plumbing in `lp-shader`, no generic leakage of
+  `LpsPxShader<M>` to callers.
+- **Portability**: works identically on Cranelift, native JIT, WASM, and
+  emulator. No special emulator path needed.
+- **Cost**: small one-time codegen overhead (more LPIR ops to compile)
+  and a few extra functions in the module. Negligible.
 
 ## Deliverables
 
-### `FragInstance` with `render_frame`
+### Synthetic `__render_texture(tex_ptr: i32, width: i32, height: i32)`
 
-```rust
-pub struct FragInstance<I: LpvmInstance> {
-    instance: I,
-    meta: LpsModuleSig,
-    output_desc: FragOutputDesc,
-    frag_color_offset: u32,
-    frag_color_components: u32,
-}
+Built programmatically in `lp-shader` after `lps_frontend::lower()`,
+before backend `compile()`. Parameterized over `TextureStorageFormat`.
 
-impl<I: LpvmInstance> FragInstance<I> {
-    /// Set a uniform by name (wraps LpvmInstance::set_uniform).
-    pub fn set_uniform(&mut self, name: &str, value: &LpsValueF32)
-        -> Result<(), Error>;
-
-    /// Render all pixels into the given texture buffer.
-    /// Sets gl_FragCoord per pixel, calls main(), reads fragColor,
-    /// converts to storage format, writes to texture.
-    pub fn render_frame(
-        &mut self,
-        texture: &mut dyn TextureBuffer,
-        time: f32,
-    ) -> Result<(), Error>;
-}
-```
-
-### Generic (slow) pixel loop
-
-The initial `render_frame` implementation is backend-agnostic:
+LPIR shape (pseudo-code):
 
 ```
-for y in 0..height:
-    for x in 0..width:
-        reset_globals()
-        set_uniform("gl_FragCoord", vec2(x, y))
-        set_uniform("outputSize", vec2(width, height))
-        set_uniform("time", time)
-        call_q32("main", &[])
-        read fragColor from vmctx at frag_color_offset
-        convert Q32 -> storage format (e.g. * 65535 >> 16 for unorm16)
-        write to texture buffer at (x, y)
-```
+fn __render_texture(tex_ptr, width, height):
+    y = 0
+    loop {
+        if y >= height: break
+        x = 0
+        loop {
+            if x >= width: break
+            // globals reset (Memcpy snapshot -> globals)
+            Memcpy(globals_addr, snapshot_addr, globals_size)
 
-This works through the `LpvmInstance` trait -- no backend-specific code.
-It's slower than the current DirectCall path but correct and portable.
+            // pixel center coords in Q32
+            pos_x = (x << 16) + 32768
+            pos_y = (y << 16) + 32768
 
-### Backend-specific fast path (Cranelift)
+            // call render -- inliner fuses this in
+            color = render(pos_x, pos_y)
 
-For backends that support it, `FragInstance` can downcast or use a
-backend-specific method to get a fast path:
+            // pixel byte offset
+            row_off = y * (width * bytes_per_pixel)
+            px_off  = row_off + x * bytes_per_pixel
 
-```rust
-impl FragInstance<CraneliftInstance> {
-    pub fn render_frame_fast(
-        &mut self,
-        texture: &mut dyn TextureBuffer,
-        time: f32,
-    ) -> Result<(), Error> {
-        // Use DirectCall::call_i32_buf with instance.vmctx_ptr()
-        // Same performance as today's lp-engine/lpfx-cpu pixel loops
+            // per-channel Q32 -> unorm16 + Store16
+            // (channel count varies by format)
+            for ch in 0..channels:
+                u = clamp_q32_to_unorm16(color[ch])
+                Store16 base=tex_ptr offset=(px_off + ch*2) value=u
+
+            x += 1
+        }
+        y += 1
     }
+```
+
+Format-driven parameters:
+- `Rgba16Unorm`: 4 channels, 8 bpp, return type `Vec4`
+- `Rgb16Unorm`: 3 channels, 6 bpp, return type `Vec3`
+- `R16Unorm`: 1 channel, 2 bpp, return type `Float`
+
+### Q32 → unorm16 conversion
+
+Inlined LPIR sequence (no helper function):
+
+```
+v_clamped = max(0, min(value, 65536))  // via Imin/Imax or Select
+u16_val   = (v_clamped * 65535) >> 16  // safe in i32: max product = 65535 * 65536
+```
+
+Same math as the existing host-side conversion in
+`lpfx-cpu/render_cranelift.rs` and `lp-engine/gfx/native_jit.rs`.
+
+### `LpsPxShader` refactor
+
+Drop the `<M: LpvmModule>` generic. Hold the instance type-erased so the
+struct doesn't leak the backend type to callers:
+
+```rust
+pub struct LpsPxShader {
+    inner: Box<dyn PxShaderBackend>,
+    output_format: TextureStorageFormat,
+    meta: LpsModuleSig,
+    render_fn_index: usize,
+}
+
+trait PxShaderBackend {
+    fn call_render_texture(&mut self, tex_ptr: u32, w: u32, h: u32)
+        -> Result<(), LpsError>;
+    fn set_uniform(&mut self, name: &str, value: &LpsValueF32)
+        -> Result<(), LpsError>;
 }
 ```
 
-The fast path uses `DirectCall::call_i32_buf` with the real instance vmctx
-(supporting uniforms/globals), matching the pattern already proven in
-lpfx-cpu's `render_cranelift.rs`.
+`LpsEngine::compile_px` returns `LpsPxShader` (no generic in the public
+type).
 
-### Q32 -> unorm16 conversion
-
-Centralized in lp-shader (used by all backends):
+### `render_frame` implementation
 
 ```rust
-/// Convert a clamped Q16.16 value to unorm16.
-/// Input: Q32 in [0, 65536] (i.e. [0.0, 1.0])
-/// Output: u16 in [0, 65535]
-fn q32_to_unorm16(q32: i32) -> u16 {
-    let clamped = q32.max(0).min(65535);
-    clamped as u16
+pub fn render_frame(
+    &self,
+    uniforms: &LpsValueF32,
+    tex: &mut LpsTextureBuf,
+) -> Result<(), LpsError> {
+    self.apply_uniforms(uniforms)?;
+    let w = tex.width();
+    let h = tex.height();
+    let ptr = tex.guest_ptr().raw();
+    self.inner.call_render_texture(ptr, w, h)?;
+    Ok(())
 }
 ```
 
-This is a saturate-to-65535, not a multiply. The single value discontinuity
-(65535 and 65536 both map to 65535) is at pure white where it's invisible.
-On RV32, `min` is a single instruction (Zbb, available in LPIR as `Imin`).
-See `notes.md` for the full rationale.
+One `call_q32` through the trait. No backend-specific code in
+`render_frame`.
 
-### Texture write helpers
+### Inliner regression test
 
-Format-aware pixel write functions:
+Compile a simple shader, dump LPIR for `__render_texture`, assert that
+`render()` was inlined:
+- No `Call` op targeting the `render` function in `__render_texture`'s op
+  stream
+- Ops from the body of `render` are present inline
 
-```rust
-fn write_pixel_rgb16(buf: &mut [u8], offset: usize, r: u16, g: u16, b: u16);
-fn write_pixel_rgba16(buf: &mut [u8], offset: usize, r: u16, g: u16, b: u16, a: u16);
-```
+Codify as a test that fails if the inliner stops fusing.
 
-These are inlineable and used by both the slow and fast paths.
+### Migrate consumers
+
+Replace duplicated host-loop pixel rendering:
+- `lpfx/lpfx-cpu/src/render_cranelift.rs` → use `LpsPxShader::render_frame`
+- `lp-core/lp-engine/src/gfx/cranelift.rs` → use `LpsPxShader::render_frame`
+- `lp-core/lp-engine/src/gfx/native_jit.rs` → use `LpsPxShader::render_frame`
+
+Removes the duplicated Q32 → unorm16 host code in those files.
 
 ## Validation
 
 ```bash
-cargo test -p lp-shader
-# Verify: compile_frag + render_frame produces non-trivial pixels
-# Verify: fast path matches slow path output
+cargo test -p lp-shader --features cranelift
+cargo test -p lpfx-cpu
+cargo test -p lp-engine
 ```
 
-## Future optimization: synthetic __render_frame
+End-to-end correctness tests (per format):
+- Constant color shader produces uniform texture
+- Gradient shader (`return vec4(pos / outputSize, 0.0, 1.0)`) produces
+  expected gradient
+- Uniform-driven shader respects `set_uniform`
 
-Not in this milestone, but the API is designed for it. A future pass could
-emit a synthetic LPIR function that fuses the pixel loop, main() call,
-format conversion, and texture writes. With the LPIR inliner, this could
-produce a single flat function with no per-pixel call overhead.
+Inliner regression test as described above.
 
 ## Dependencies
 
-- M1 (fragment shader contract, output globals, compile_frag)
+- M1 (pixel shader contract) — done
+- M1.1 (Store16 op + new format variants) — must land first
+- LPIR inliner / stable function IDs from `feature/inline` — assumed landed
+
+## Out of Scope (future work)
+
+- Texture reads (`sampler2D`, `texelFetch`) — separate milestone
+- Multi-target rendering (multiple output textures)
+- Compute-shader-style dispatch
+- Additional pixel formats beyond the three in M1.1
