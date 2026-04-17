@@ -76,6 +76,9 @@ pub(crate) enum CtrlFrame {
     Default {
         merge_block: Block,
     },
+    Block {
+        merge_block: Block,
+    },
 }
 
 /// RISC-V32 cannot return >2 scalars in registers; use a hidden StructReturn pointer (Cranelift #9510).

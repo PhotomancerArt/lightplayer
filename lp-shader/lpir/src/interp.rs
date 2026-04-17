@@ -177,11 +177,34 @@ fn exec_func(
                 });
                 pc += 1;
             }
+            LpirOp::Block { end_offset } => {
+                ctrl.push(Ctrl::Block {
+                    exit: *end_offset as usize,
+                });
+                pc += 1;
+            }
+            LpirOp::ExitBlock => {
+                let mut found = false;
+                while let Some(c) = ctrl.pop() {
+                    if let Ctrl::Block { exit } = c {
+                        pc = exit;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return Err(InterpError::Internal("exit_block outside block".into()));
+                }
+            }
             LpirOp::End => match ctrl.last() {
                 Some(Ctrl::Loop { exit, head, .. }) if *exit == pc + 1 => {
                     pc = *head + 1;
                 }
                 Some(Ctrl::If { .. }) => {
+                    ctrl.pop();
+                    pc += 1;
+                }
+                Some(Ctrl::Block { .. }) => {
                     ctrl.pop();
                     pc += 1;
                 }
@@ -306,6 +329,10 @@ enum Ctrl {
     Loop {
         head: usize,
         continuing: usize,
+        exit: usize,
+    },
+    /// `exit` is the merge PC (first instruction after the closing [`LpirOp::End`]).
+    Block {
         exit: usize,
     },
     SwitchArm {

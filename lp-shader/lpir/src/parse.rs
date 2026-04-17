@@ -497,6 +497,14 @@ fn parse_stmt_line(
             .map_err(|m| err(1, 1, m))?;
         return Ok(());
     }
+    if line.starts_with("block {") {
+        fb.push_block();
+        return Ok(());
+    }
+    if line == "exit_block" {
+        fb.push_exit_block();
+        return Ok(());
+    }
     if line.starts_with("loop {") {
         fb.push_loop();
         return Ok(());

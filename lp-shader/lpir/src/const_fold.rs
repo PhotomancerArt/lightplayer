@@ -328,9 +328,11 @@ pub fn fold_constants(func: &mut IrFunction) -> usize {
             | LpirOp::Else
             | LpirOp::End
             | LpirOp::LoopStart { .. }
+            | LpirOp::Block { .. }
             | LpirOp::Break
             | LpirOp::Continue
-            | LpirOp::BrIfNot { .. } => {
+            | LpirOp::BrIfNot { .. }
+            | LpirOp::ExitBlock => {
                 vreg_val.iter_mut().for_each(|v| *v = None);
                 op
             }

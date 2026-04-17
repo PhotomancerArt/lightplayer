@@ -26,6 +26,11 @@ pub enum Region {
         header_label: crate::vinst::LabelId,
         exit_label: crate::vinst::LabelId,
     },
+    /// Forward-only block: `body` then fall through to the label after [`exit_label`](Region::Block::exit_label).
+    Block {
+        body: RegionId,
+        exit_label: crate::vinst::LabelId,
+    },
     Seq {
         children_start: u16,
         child_count: u16,

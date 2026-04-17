@@ -58,6 +58,7 @@ fn region_first_vinst(tree: &RegionTree, id: RegionId) -> Option<u16> {
         Region::Loop { header, body, .. } => {
             region_first_vinst(tree, *header).or_else(|| region_first_vinst(tree, *body))
         }
+        Region::Block { body, .. } => region_first_vinst(tree, *body),
     }
 }
 
@@ -225,6 +226,15 @@ impl<'a> WalkState<'a> {
                     self.boundary_reload_before(anchor);
                 }
                 self.walk_region(*head)?;
+                Ok(())
+            }
+            Region::Block { body, .. } => {
+                if *body != REGION_ID_NONE {
+                    self.walk_region(*body)?;
+                    if let Some(anchor) = region_first_vinst(self.tree, *body) {
+                        self.boundary_reload_before(anchor);
+                    }
+                }
                 Ok(())
             }
             Region::Loop { header, body, .. } => {

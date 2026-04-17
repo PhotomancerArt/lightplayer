@@ -26,6 +26,27 @@ pub(crate) enum CtrlEntry {
     },
     SwitchCaseArm,
     SwitchDefaultArm,
+    /// Forward `block` (for [`lpir::LpirOp::Block`] / [`lpir::LpirOp::ExitBlock`]).
+    FwdBlock {
+        /// [`WasmOpenDepth`] immediately after this `block` was opened.
+        after_open_wasm_depth: WasmOpenDepth,
+    },
+}
+
+/// `br` depth to exit the innermost [`CtrlEntry::FwdBlock`].
+pub(crate) fn innermost_fwd_block_exit_depth(
+    ctrl: &[CtrlEntry],
+    wasm_open: WasmOpenDepth,
+) -> Result<u32, String> {
+    for entry in ctrl.iter().rev() {
+        if let CtrlEntry::FwdBlock {
+            after_open_wasm_depth,
+        } = entry
+        {
+            return Ok(wasm_open.saturating_sub(*after_open_wasm_depth));
+        }
+    }
+    Err(String::from("exit_block outside block"))
 }
 
 /// Before emitting the op at `pc`, close the inner `block` of any loop whose continuing section starts here.

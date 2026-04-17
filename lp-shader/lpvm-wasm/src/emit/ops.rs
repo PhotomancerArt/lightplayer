@@ -10,8 +10,9 @@ use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
 use crate::emit::FuncEmitCtx;
 use crate::emit::control::{
-    CtrlEntry, WasmOpenDepth, innermost_loop_break_depth, innermost_loop_continue_depth,
-    innermost_switch_selector, switch_merge_open_depth, unwind_ctrl_after_return,
+    CtrlEntry, WasmOpenDepth, innermost_fwd_block_exit_depth, innermost_loop_break_depth,
+    innermost_loop_continue_depth, innermost_switch_selector, switch_merge_open_depth,
+    unwind_ctrl_after_return,
 };
 use crate::emit::imports;
 use crate::emit::memory;
@@ -56,6 +57,7 @@ pub(crate) fn emit_op(
         op,
         LpirOp::End
             | LpirOp::Else
+            | LpirOp::Block { .. }
             | LpirOp::SwitchStart { .. }
             | LpirOp::CaseStart { .. }
             | LpirOp::DefaultStart { .. }
@@ -276,6 +278,17 @@ pub(crate) fn emit_op(
         LpirOp::Copy { dst, src } => {
             sink.local_get(src.0).local_set(dst.0);
         }
+        LpirOp::Block { .. } => {
+            sink.block(BlockType::Empty);
+            *wasm_open += 1;
+            ctrl.push(CtrlEntry::FwdBlock {
+                after_open_wasm_depth: *wasm_open,
+            });
+        }
+        LpirOp::ExitBlock => {
+            let d = innermost_fwd_block_exit_depth(ctrl, *wasm_open)?;
+            sink.br(d);
+        }
         LpirOp::IfStart { cond, .. } => {
             sink.local_get(cond.0).if_(BlockType::Empty);
             *wasm_open += 1;
@@ -329,6 +342,10 @@ pub(crate) fn emit_op(
                     *wasm_open = wasm_open.saturating_sub(2);
                 }
                 Some(CtrlEntry::Switch { .. }) => {
+                    sink.end();
+                    *wasm_open = wasm_open.saturating_sub(1);
+                }
+                Some(CtrlEntry::FwdBlock { .. }) => {
                     sink.end();
                     *wasm_open = wasm_open.saturating_sub(1);
                 }

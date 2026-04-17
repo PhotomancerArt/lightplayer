@@ -591,10 +591,15 @@ pub fn lower_lpir_op(
             description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
         }),
 
-        LpirOp::IfStart { .. } | LpirOp::Else | LpirOp::End | LpirOp::LoopStart { .. } => {
+        LpirOp::IfStart { .. }
+        | LpirOp::Else
+        | LpirOp::End
+        | LpirOp::LoopStart { .. }
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {
             Err(LowerError::UnsupportedOp {
                 description: String::from(
-                    "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Else/End)",
+                    "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Block/Else/End/ExitBlock)",
                 ),
             })
         }
@@ -684,6 +689,8 @@ struct LowerCtx<'a> {
     epilogue_label: LabelId,
     loop_regions: Vec<LoopRegion>,
     region_tree: RegionTree,
+    /// Target labels for in-flight [`LpirOp::Block`] regions (for [`LpirOp::ExitBlock`]).
+    block_exit_stack: Vec<LabelId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -958,6 +965,52 @@ impl<'a> LowerCtx<'a> {
                     i = eo;
                     current_linear_start = Some(self.out.len() as u16);
                 }
+                LpirOp::Block { end_offset } => {
+                    flush_linear(
+                        &mut seq,
+                        &mut self.region_tree,
+                        &mut current_linear_start,
+                        vinst_start,
+                    );
+                    let eo = *end_offset as usize;
+                    let exit_lbl = self.alloc_label();
+                    self.block_exit_stack.push(exit_lbl);
+                    let body_inner = self.lower_range(i + 1, eo)?;
+                    let popped = self.block_exit_stack.pop();
+                    debug_assert_eq!(popped, Some(exit_lbl));
+
+                    let exit_ls = self.out.len() as u16;
+                    self.out
+                        .push(VInst::Label(exit_lbl, pack_src_op(Some(eo as u32))));
+                    let exit_le = self.out.len() as u16;
+                    let exit_lin = self.region_tree.push(Region::Linear {
+                        start: exit_ls,
+                        end: exit_le,
+                    });
+                    let block_reg = self.region_tree.push(Region::Block {
+                        body: body_inner,
+                        exit_label: exit_lbl,
+                    });
+                    seq.push(block_reg);
+                    seq.push(exit_lin);
+                    i = eo;
+                    current_linear_start = Some(self.out.len() as u16);
+                }
+                LpirOp::ExitBlock => {
+                    let exit_lbl = *self.block_exit_stack.last().ok_or_else(|| {
+                        LowerError::UnsupportedOp {
+                            description: String::from("exit_block outside block"),
+                        }
+                    })?;
+                    if current_linear_start.is_none() {
+                        current_linear_start = Some(self.out.len() as u16);
+                    }
+                    self.out.push(VInst::Br {
+                        target: exit_lbl,
+                        src_op: pack_src_op(Some(i as u32)),
+                    });
+                    i += 1;
+                }
                 LpirOp::Break => {
                     let frame =
                         self.loop_stack
@@ -1088,6 +1141,7 @@ pub fn lower_ops(
         epilogue_label: 0,
         loop_regions: Vec::new(),
         region_tree: RegionTree::with_capacity(func.body.len()),
+        block_exit_stack: Vec::new(),
     };
     ctx.epilogue_label = ctx.alloc_label();
     let root = ctx.lower_range(0, func.body.len())?;

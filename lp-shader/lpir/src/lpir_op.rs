@@ -361,12 +361,21 @@ pub enum LpirOp {
     },
     End,
 
+    /// Forward-only region: [`LpirOp::ExitBlock`] jumps to the instruction at `end_offset`
+    /// (first op after the matching [`LpirOp::End`]). Closed by [`LpirOp::End`], same pattern
+    /// as `IfStart` / `LoopStart` / `SwitchStart`.
+    Block {
+        end_offset: u32,
+    },
+
     // --- Control flow jumps ---
     Break,
     Continue,
     BrIfNot {
         cond: VReg,
     },
+    /// Jump to the end of the nearest enclosing [`LpirOp::Block`] (skips `If`/`Loop`/`Switch` frames).
+    ExitBlock,
 
     // --- Call / return ---
     Call {
@@ -458,7 +467,9 @@ impl LpirOp {
             | LpirOp::BrIfNot { .. }
             | LpirOp::SwitchStart { .. }
             | LpirOp::CaseStart { .. }
-            | LpirOp::DefaultStart { .. } => None,
+            | LpirOp::DefaultStart { .. }
+            | LpirOp::Block { .. }
+            | LpirOp::ExitBlock => None,
         }
     }
 }

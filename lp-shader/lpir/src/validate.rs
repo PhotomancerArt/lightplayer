@@ -109,11 +109,17 @@ enum StackEntry {
         loop_start: usize,
         continuing_offset: u32,
     },
+    /// Paired with [`LpirOp::End`] that closes the `Block` region.
+    Block,
     Switch {
         cases: BTreeSet<i32>,
         default_arm: bool,
     },
     Arm,
+}
+
+fn has_enclosing_block(stack: &[StackEntry]) -> bool {
+    stack.iter().rev().any(|e| matches!(e, StackEntry::Block))
 }
 
 fn validate_function_inner(
@@ -155,6 +161,15 @@ fn validate_function_inner(
         let op_i = Some(i);
 
         match op {
+            LpirOp::ExitBlock => {
+                if !has_enclosing_block(&stack) {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        "exit_block outside block",
+                    ));
+                }
+            }
             LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
                 let innermost_loop = stack
                     .iter()
@@ -219,6 +234,31 @@ fn validate_function_inner(
                     loop_start: i,
                     continuing_offset: *continuing_offset,
                 });
+            }
+            LpirOp::Block { end_offset } => {
+                if *end_offset == 0 {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        "Block end_offset is zero (not patched)",
+                    ));
+                } else {
+                    let eo = *end_offset as usize;
+                    if eo > func.body.len() {
+                        errs.push(err_in_func(
+                            fname,
+                            op_i,
+                            "Block end_offset past function body",
+                        ));
+                    } else if eo <= i + 1 {
+                        errs.push(err_in_func(
+                            fname,
+                            op_i,
+                            "Block end_offset must follow block header",
+                        ));
+                    }
+                }
+                stack.push(StackEntry::Block);
             }
             LpirOp::SwitchStart { .. } => stack.push(StackEntry::Switch {
                 cases: BTreeSet::new(),
@@ -581,7 +621,9 @@ fn check_op_operands_defined(
         | LpirOp::DefaultStart { .. }
         | LpirOp::End
         | LpirOp::Break
-        | LpirOp::Continue => {}
+        | LpirOp::Continue
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {}
     }
 }
 
@@ -742,7 +784,9 @@ fn check_opcode_dst_types(
         | LpirOp::Continue
         | LpirOp::BrIfNot { .. }
         | LpirOp::Call { .. }
-        | LpirOp::Return { .. } => {}
+        | LpirOp::Return { .. }
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {}
     }
 }
 
@@ -831,7 +875,9 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::Break
         | LpirOp::Continue
         | LpirOp::BrIfNot { .. }
-        | LpirOp::Return { .. } => {}
+        | LpirOp::Return { .. }
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {}
     }
 }
 

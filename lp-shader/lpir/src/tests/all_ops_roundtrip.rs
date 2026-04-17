@@ -258,6 +258,10 @@ pub(crate) fn module_all_ops() -> LpirModule {
     b.end_switch_arm();
     b.end_switch();
 
+    b.push_block();
+    b.push_exit_block();
+    b.end_block();
+
     let call_out = b.alloc_vreg(IrType::I32);
     b.push_call(id_callee, &[VMCTX_VREG, i2], &[call_out]);
 

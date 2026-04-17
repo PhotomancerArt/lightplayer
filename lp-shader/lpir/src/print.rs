@@ -39,6 +39,8 @@ enum Block {
     Loop { start_pc: usize },
     Switch,
     Case,
+    /// Forward-only `block {` region (paired with `End`).
+    Blk,
 }
 
 /// Print a full module in LPIR text form.
@@ -235,6 +237,16 @@ fn print_op_at(
             let _ = writeln!(out, "{}default {{", indent_str(*depth));
             stack.push(Block::Case);
             *depth += 1;
+            *pc += 1;
+        }
+        LpirOp::Block { .. } => {
+            let _ = writeln!(out, "{ind}block {{");
+            stack.push(Block::Blk);
+            *depth += 1;
+            *pc += 1;
+        }
+        LpirOp::ExitBlock => {
+            let _ = writeln!(out, "{ind}exit_block");
             *pc += 1;
         }
         LpirOp::End => {

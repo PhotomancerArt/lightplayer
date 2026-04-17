@@ -34,6 +34,10 @@ enum BlockEntry {
         start_idx: usize,
         continuing_set: bool,
     },
+    /// `LpirOp::Block` at `start_idx`; `end_offset` patched in [`FunctionBuilder::push_end_block`].
+    Block {
+        start_idx: usize,
+    },
     Switch {
         start_idx: usize,
         /// Index of last `CaseStart` / `DefaultStart` needing `end_offset` patch, if any.
@@ -211,6 +215,33 @@ impl FunctionBuilder {
         }
     }
 
+    pub fn push_block(&mut self) {
+        let idx = self.body.len();
+        self.body.push(LpirOp::Block { end_offset: 0 });
+        self.block_stack.push(BlockEntry::Block { start_idx: idx });
+    }
+
+    pub fn end_block(&mut self) {
+        let end_idx = self.body.len();
+        self.body.push(LpirOp::End);
+        let after = (end_idx + 1) as u32;
+        let entry = self.block_stack.pop().expect("end_block without push_block");
+        match entry {
+            BlockEntry::Block { start_idx } => {
+                if let LpirOp::Block { end_offset } = &mut self.body[start_idx] {
+                    *end_offset = after;
+                } else {
+                    panic!("end_block: corrupted Block entry");
+                }
+            }
+            _ => panic!("end_block: expected Block"),
+        }
+    }
+
+    pub fn push_exit_block(&mut self) {
+        self.body.push(LpirOp::ExitBlock);
+    }
+
     pub fn push_switch(&mut self, selector: VReg) {
         let idx = self.body.len();
         self.body.push(LpirOp::SwitchStart {
@@ -302,6 +333,10 @@ impl FunctionBuilder {
         match self.block_stack.last() {
             Some(BlockEntry::If { .. }) | Some(BlockEntry::Else { .. }) => {
                 self.end_if();
+                Ok(())
+            }
+            Some(BlockEntry::Block { .. }) => {
+                self.end_block();
                 Ok(())
             }
             Some(BlockEntry::Loop { .. }) => {

@@ -3,6 +3,9 @@
 #[path = "tests/all_ops_roundtrip.rs"]
 mod all_ops_roundtrip;
 
+#[path = "tests/block_ops.rs"]
+mod block_ops;
+
 #[path = "tests/interp.rs"]
 mod interp;
 

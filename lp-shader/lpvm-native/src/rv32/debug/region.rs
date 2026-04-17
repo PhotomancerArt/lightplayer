@@ -107,6 +107,22 @@ pub fn format_region_tree(
             ));
         }
 
+        Region::Block {
+            body,
+            exit_label,
+        } => {
+            lines.push(format!("{prefix}Block (exit={exit_label})"));
+            lines.push(format!("{prefix}  body:"));
+            lines.push(format_region_tree(
+                tree,
+                *body,
+                vinsts,
+                pool,
+                symbols,
+                indent + 2,
+            ));
+        }
+
         Region::Seq {
             children_start,
             child_count,
