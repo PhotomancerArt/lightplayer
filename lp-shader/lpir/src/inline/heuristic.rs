@@ -4,6 +4,10 @@ use crate::compiler_config::{InlineConfig, InlineMode};
 use crate::lpir_module::IrFunction;
 use crate::lpir_op::LpirOp;
 
+/// LPIR-op count of `func.body`. Empirically the best simple correlate of
+/// rv32n instruction count on the `inline-weights.glsl` corpus
+/// (Pearson r ≈ 0.98 vs `mz`/`hb` candidates evaluated in M3.1).
+/// See `docs/roadmaps/2026-04-15-lpir-inliner/m3.1-tune-inline-weights.md`.
 pub(crate) fn func_weight(func: &IrFunction) -> usize {
     func.body.len()
 }

@@ -63,6 +63,9 @@ impl FromStr for InlineMode {
 pub struct InlineConfig {
     pub mode: InlineMode,
     pub always_inline_single_site: bool,
+    /// Maximum `func_weight` for "small" callees that are inlined unconditionally
+    /// (subject to budgets). Empirically tuned against the rv32n cost model on the
+    /// `inline-weights.glsl` corpus — see `docs/roadmaps/2026-04-15-lpir-inliner/m3.1-tune-inline-weights.md`.
     pub small_func_threshold: usize,
     pub max_growth_budget: Option<usize>,
     pub module_op_budget: Option<usize>,
@@ -73,7 +76,7 @@ impl Default for InlineConfig {
         Self {
             mode: InlineMode::Auto,
             always_inline_single_site: true,
-            small_func_threshold: 20,
+            small_func_threshold: 16,
             max_growth_budget: None,
             module_op_budget: None,
         }
