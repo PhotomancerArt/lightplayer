@@ -16,6 +16,7 @@ use lp_riscv_emu::LogLevel;
 use std::path::Path;
 
 use crate::colors;
+use crate::perf_model::PerfModel;
 use crate::util::format_glsl_value;
 
 /// Run tests in detail mode: compile the full translation unit once, then execute each directive.
@@ -28,6 +29,7 @@ pub fn run(
     output_mode: OutputMode,
     target: &Target,
     suppress_rerun: bool,
+    perf_model: PerfModel,
 ) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>, bool)> {
     // Compute relative path for rerun command
     let filetests_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
@@ -301,8 +303,14 @@ pub fn run(
         }
 
         // Emulator diagnostics are appended inside `execute_function` when available.
-        let execution_result =
-            execution::execute_function(&mut inst, target, gfn, &func_name, &args);
+        let execution_result = execution::execute_function(
+            &mut inst,
+            target,
+            gfn,
+            &func_name,
+            &args,
+            perf_model.cycle_model(),
+        );
 
         match (execution_result, trap_expectation) {
             (Ok(actual_value), Some(exp)) => {
@@ -540,6 +548,7 @@ pub fn run(
                         );
                         stats.guest_instructions_total +=
                             inst.last_guest_instruction_count().unwrap_or(0);
+                        stats.guest_cycles_total += inst.last_guest_cycle_count().unwrap_or(0);
                         // Print success message in detailed mode
                         if output_mode.show_full_output() {
                             use crate::{colors, colors::should_color};

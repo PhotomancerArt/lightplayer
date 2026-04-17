@@ -30,6 +30,8 @@ pub struct TestCaseStats {
     pub unsupported: usize,
     /// Sum of guest RV32 instructions for successful `// run:` executions (emu backends only).
     pub guest_instructions_total: u64,
+    /// Sum of guest cycle estimates (same runs as [`Self::guest_instructions_total`]).
+    pub guest_cycles_total: u64,
 }
 
 impl TestCaseStats {
@@ -48,6 +50,7 @@ impl TestCaseStats {
         self.unexpected_pass += o.unexpected_pass;
         self.unsupported += o.unsupported;
         self.guest_instructions_total += o.guest_instructions_total;
+        self.guest_cycles_total += o.guest_cycles_total;
     }
 }
 

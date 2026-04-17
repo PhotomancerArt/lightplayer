@@ -1,6 +1,6 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
-use lp_riscv_emu::LogLevel;
+use lp_riscv_emu::{CycleModel, LogLevel};
 use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpsValueQ32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
@@ -79,11 +79,20 @@ impl FiletestInstance {
         }
     }
 
-    pub(crate) fn call_q32_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, String> {
+    pub(crate) fn call_q32_flat(
+        &mut self,
+        name: &str,
+        flat: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, String> {
         match self {
             Self::Jit(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
-            Self::Emu(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
-            Self::NativeFa(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
+            Self::Emu(i) => i
+                .call_q32_with_cycle_model(name, flat, cycle_model)
+                .map_err(|e| e.to_string()),
+            Self::NativeFa(i) => i
+                .call_q32_with_cycle_model(name, flat, cycle_model)
+                .map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
         }
     }
@@ -127,6 +136,15 @@ impl FiletestInstance {
             Self::Emu(i) => i.last_guest_instruction_count(),
             Self::NativeFa(i) => i.last_guest_instruction_count(),
             Self::Wasm(i) => i.last_guest_instruction_count(),
+        }
+    }
+
+    pub(crate) fn last_guest_cycle_count(&self) -> Option<u64> {
+        match self {
+            Self::Jit(i) => i.last_guest_cycle_count(),
+            Self::Emu(i) => i.last_guest_cycle_count(),
+            Self::NativeFa(i) => i.last_guest_cycle_count(),
+            Self::Wasm(i) => i.last_guest_cycle_count(),
         }
     }
 }

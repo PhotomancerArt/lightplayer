@@ -4,6 +4,7 @@
 //! concurrently.
 
 use crate::output_mode::OutputMode;
+use crate::perf_model::PerfModel;
 use crate::targets::Target;
 use crate::test_run::{PerTargetStats, TestCaseStats};
 use anyhow::Result;
@@ -26,6 +27,7 @@ struct Request {
     /// When true, individual test failure messages omit rerun commands (used in
     /// mark-unimplemented mode).
     suppress_rerun: bool,
+    perf_model: PerfModel,
 }
 
 /// Reply from worker thread.
@@ -121,6 +123,7 @@ impl ConcurrentRunner {
         output_mode: OutputMode,
         targets: &[&'static Target],
         suppress_rerun: bool,
+        perf_model: PerfModel,
     ) {
         self.request_tx
             .as_ref()
@@ -132,6 +135,7 @@ impl ConcurrentRunner {
                 output_mode,
                 targets: targets.to_vec(),
                 suppress_rerun,
+                perf_model,
             })
             .expect("all the worker threads are gone");
     }
@@ -173,6 +177,7 @@ fn worker_thread(
                     output_mode,
                     targets,
                     suppress_rerun,
+                    perf_model,
                 } = match requests.lock().unwrap().recv() {
                     Err(..) => break, // TX end shut down. exit thread.
                     Ok(req) => req,
@@ -195,6 +200,7 @@ fn worker_thread(
                         output_mode,
                         &targets,
                         suppress_rerun,
+                        perf_model,
                     )
                 })) {
                     Ok(Ok((r, pt, s, up, fl, cfmap, cf))) => (r, pt, s, up, fl, cfmap, cf, true),
