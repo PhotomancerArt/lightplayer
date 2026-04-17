@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{
     error::EmulatorError,
     logging::{InstLog, SystemKind},
@@ -389,6 +389,7 @@ fn execute_c_addi4spn<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -455,6 +456,7 @@ fn execute_c_lw<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -521,6 +523,7 @@ fn execute_c_sw<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Store,
         log,
     })
 }
@@ -559,6 +562,7 @@ fn execute_c_addi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -588,6 +592,7 @@ fn execute_c_nop<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -620,6 +625,7 @@ fn execute_c_jal<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
+        class: InstClass::Jal,
         log,
     })
 }
@@ -656,6 +662,7 @@ fn execute_c_li<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -691,6 +698,7 @@ fn execute_c_addi16sp<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -725,6 +733,7 @@ fn execute_c_lui<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Lui,
         log,
     })
 }
@@ -764,6 +773,7 @@ fn execute_c_srli<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -803,6 +813,7 @@ fn execute_c_srai<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -841,6 +852,7 @@ fn execute_c_andi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -880,6 +892,7 @@ fn execute_c_sub<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -919,6 +932,7 @@ fn execute_c_xor<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -958,6 +972,7 @@ fn execute_c_or<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -997,6 +1012,7 @@ fn execute_c_and<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1027,6 +1043,7 @@ fn execute_c_j<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
+        class: InstClass::Jal,
         log,
     })
 }
@@ -1062,10 +1079,16 @@ fn execute_c_beqz<M: LoggingMode>(
         None
     };
 
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc: target_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -1101,10 +1124,16 @@ fn execute_c_bnez<M: LoggingMode>(
         None
     };
 
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc: target_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -1144,6 +1173,7 @@ fn execute_c_slli<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1209,6 +1239,7 @@ fn execute_c_lwsp<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -1240,6 +1271,7 @@ fn execute_c_jr<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
+        class: InstClass::Jalr,
         log,
     })
 }
@@ -1277,6 +1309,7 @@ fn execute_c_mv<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1310,6 +1343,7 @@ fn execute_c_jalr<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
+        class: InstClass::Jalr,
         log,
     })
 }
@@ -1349,6 +1383,7 @@ fn execute_c_add<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1414,6 +1449,7 @@ fn execute_c_swsp<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Store,
         log,
     })
 }
@@ -1439,6 +1475,7 @@ fn execute_c_ebreak<M: LoggingMode>(
         new_pc: None,
         should_halt: true,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }

@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 use lp_riscv_inst::{Gpr, format::TypeR};
 
@@ -112,6 +112,7 @@ fn execute_lr_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }
@@ -184,6 +185,7 @@ fn execute_sc_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }
@@ -274,6 +276,7 @@ fn execute_amoswap_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }
@@ -365,6 +368,7 @@ fn execute_amoadd_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }
@@ -456,6 +460,7 @@ fn execute_amoxor_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }
@@ -547,6 +552,7 @@ fn execute_amoand_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }
@@ -638,6 +644,7 @@ fn execute_amoor_w<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Atomic,
         log,
     })
 }

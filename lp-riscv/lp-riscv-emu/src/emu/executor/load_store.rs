@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 use lp_riscv_inst::{
     Gpr,
@@ -119,6 +119,7 @@ fn execute_lb<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -185,6 +186,7 @@ fn execute_lh<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -250,6 +252,7 @@ fn execute_lw<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -308,6 +311,7 @@ fn execute_lbu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -374,6 +378,7 @@ fn execute_lhu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Load,
         log,
     })
 }
@@ -433,6 +438,7 @@ fn execute_sb<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Store,
         log,
     })
 }
@@ -502,6 +508,7 @@ fn execute_sh<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Store,
         log,
     })
 }
@@ -568,6 +575,7 @@ fn execute_sw<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Store,
         log,
     })
 }

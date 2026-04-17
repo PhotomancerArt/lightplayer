@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 use lp_riscv_inst::{Gpr, format::TypeR};
 
@@ -110,6 +110,7 @@ fn execute_add<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -148,6 +149,7 @@ fn execute_sub<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -186,6 +188,7 @@ fn execute_mul<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Mul,
         log,
     })
 }
@@ -228,6 +231,7 @@ fn execute_mulh<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Mul,
         log,
     })
 }
@@ -270,6 +274,7 @@ fn execute_mulhsu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Mul,
         log,
     })
 }
@@ -312,6 +317,7 @@ fn execute_mulhu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Mul,
         log,
     })
 }
@@ -359,6 +365,7 @@ fn execute_div<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::DivRem,
         log,
     })
 }
@@ -405,6 +412,7 @@ fn execute_divu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::DivRem,
         log,
     })
 }
@@ -451,6 +459,7 @@ fn execute_rem<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::DivRem,
         log,
     })
 }
@@ -497,6 +506,7 @@ fn execute_remu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::DivRem,
         log,
     })
 }
@@ -535,6 +545,7 @@ fn execute_slt<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -573,6 +584,7 @@ fn execute_sltu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -611,6 +623,7 @@ fn execute_xor<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -649,6 +662,7 @@ fn execute_or<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -687,6 +701,7 @@ fn execute_and<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -726,6 +741,7 @@ fn execute_sll<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -765,6 +781,7 @@ fn execute_srl<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -805,6 +822,7 @@ fn execute_sra<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -845,6 +863,7 @@ fn execute_rol<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -885,6 +904,7 @@ fn execute_ror<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -923,6 +943,7 @@ fn execute_andn<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -961,6 +982,7 @@ fn execute_orn<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -999,6 +1021,7 @@ fn execute_xnor<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1037,6 +1060,7 @@ fn execute_min<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1077,6 +1101,7 @@ fn execute_minu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1115,6 +1140,7 @@ fn execute_max<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1155,6 +1181,7 @@ fn execute_maxu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1195,6 +1222,7 @@ fn execute_bclr<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1234,6 +1262,7 @@ fn execute_bext<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1274,6 +1303,7 @@ fn execute_binv<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1314,6 +1344,7 @@ fn execute_bset<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1352,6 +1383,7 @@ fn execute_sh1add<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1390,6 +1422,7 @@ fn execute_sh2add<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1428,6 +1461,7 @@ fn execute_sh3add<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
