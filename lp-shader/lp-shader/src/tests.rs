@@ -179,6 +179,46 @@ fn compile_px_wrong_return_type_returns_validation_error() {
 }
 
 #[test]
+fn compile_px_r16_accepts_float_return() {
+    let engine = test_engine();
+    let glsl = "float render(vec2 pos) { return 0.5; }";
+    assert!(engine
+        .compile_px(glsl, TextureStorageFormat::R16Unorm)
+        .is_ok());
+}
+
+#[test]
+fn compile_px_r16_rejects_vec4_return() {
+    let engine = test_engine();
+    let glsl = "vec4 render(vec2 pos) { return vec4(1.0); }";
+    match engine.compile_px(glsl, TextureStorageFormat::R16Unorm) {
+        Err(LpsError::Validation(msg)) => assert!(msg.contains("return"), "{msg}"),
+        Err(other) => panic!("wrong error: {other}"),
+        Ok(_) => panic!("expected validation error"),
+    }
+}
+
+#[test]
+fn compile_px_rgb16_accepts_vec3_return() {
+    let engine = test_engine();
+    let glsl = "vec3 render(vec2 pos) { return vec3(0.5); }";
+    assert!(engine
+        .compile_px(glsl, TextureStorageFormat::Rgb16Unorm)
+        .is_ok());
+}
+
+#[test]
+fn compile_px_rgb16_rejects_vec4_return() {
+    let engine = test_engine();
+    let glsl = "vec4 render(vec2 pos) { return vec4(1.0); }";
+    match engine.compile_px(glsl, TextureStorageFormat::Rgb16Unorm) {
+        Err(LpsError::Validation(msg)) => assert!(msg.contains("return"), "{msg}"),
+        Err(other) => panic!("wrong error: {other}"),
+        Ok(_) => panic!("expected validation error"),
+    }
+}
+
+#[test]
 fn compile_px_with_helpers_and_uniforms() {
     let engine = test_engine();
     let glsl = "

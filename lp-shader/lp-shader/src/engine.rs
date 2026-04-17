@@ -113,6 +113,8 @@ fn validate_render_sig(
 /// Map output format to expected return type.
 fn expected_return_type(format: TextureStorageFormat) -> LpsType {
     match format {
+        TextureStorageFormat::R16Unorm => LpsType::Float,
+        TextureStorageFormat::Rgb16Unorm => LpsType::Vec3,
         TextureStorageFormat::Rgba16Unorm => LpsType::Vec4,
     }
 }
