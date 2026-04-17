@@ -132,7 +132,11 @@ fn legend_line(use_color: bool) -> String {
 }
 
 /// Render the summary block (title + table + optional legend), or `None` if there is nothing to show.
-pub fn render_summary_table(report: &DebugReport, use_color: bool) -> Option<String> {
+pub fn render_summary_table(
+    report: &DebugReport,
+    use_color: bool,
+    show_weights: bool,
+) -> Option<String> {
     if report.backends.is_empty() {
         return None;
     }
@@ -145,9 +149,17 @@ pub fn render_summary_table(report: &DebugReport, use_color: bool) -> Option<Str
     let n = report.backends.len();
 
     let mut align = vec![ColAlign::Left, ColAlign::Right];
+    if show_weights {
+        align.extend(std::iter::repeat(ColAlign::Right).take(3));
+    }
     align.extend(std::iter::repeat(ColAlign::Right).take(n));
 
     let mut header: Vec<String> = vec!["Function".to_string(), "LPIR".to_string()];
+    if show_weights {
+        header.push("body_len".to_string());
+        header.push("mz".to_string());
+        header.push("hb".to_string());
+    }
     for b in &report.backends {
         header.push(b.backend.clone());
     }
@@ -155,16 +167,32 @@ pub fn render_summary_table(report: &DebugReport, use_color: bool) -> Option<Str
     let mut rows: Vec<Vec<String>> = vec![header];
 
     let mut total_lpir = 0usize;
+    let mut total_body_len = 0usize;
+    let mut total_mz = 0usize;
+    let mut total_hb = 0usize;
     let mut total_disasm: Vec<usize> = vec![0; n];
 
     for func_name in &func_names {
-        let lpir_count = report
+        let first_fd = report
             .backends
             .first()
-            .and_then(|b| b.get_function(func_name))
-            .map(|f| f.lpir_count)
-            .unwrap_or(0);
+            .and_then(|b| b.get_function(func_name));
+
+        let lpir_count = first_fd.map(|f| f.lpir_count).unwrap_or(0);
         total_lpir += lpir_count;
+
+        let (w_bl, w_mz, w_hb) = if show_weights {
+            first_fd
+                .map(|f| (f.weight_body_len, f.weight_mz, f.weight_hb))
+                .unwrap_or((0, 0, 0))
+        } else {
+            (0usize, 0usize, 0usize)
+        };
+        if show_weights {
+            total_body_len += w_bl;
+            total_mz += w_mz;
+            total_hb += w_hb;
+        }
 
         let mut disasm = Vec::with_capacity(n);
         for backend in &report.backends {
@@ -182,6 +210,11 @@ pub fn render_summary_table(report: &DebugReport, use_color: bool) -> Option<Str
         let multi = n > 1;
 
         let mut row: Vec<String> = vec![(*func_name).to_string(), lpir_count.to_string()];
+        if show_weights {
+            row.push(w_bl.to_string());
+            row.push(w_mz.to_string());
+            row.push(w_hb.to_string());
+        }
         for d in &disasm {
             row.push(format_count_with_ratio(*d, min_d, multi, use_color));
         }
@@ -192,6 +225,11 @@ pub fn render_summary_table(report: &DebugReport, use_color: bool) -> Option<Str
     let multi = n > 1;
 
     let mut total_row: Vec<String> = vec!["TOTAL".to_string(), total_lpir.to_string()];
+    if show_weights {
+        total_row.push(total_body_len.to_string());
+        total_row.push(total_mz.to_string());
+        total_row.push(total_hb.to_string());
+    }
     for t in &total_disasm {
         total_row.push(format_count_with_ratio(*t, min_t, multi, use_color));
     }
@@ -246,11 +284,44 @@ mod tests {
         r.backends.push(rv32c);
         r.backends.push(rv32n);
 
-        let s = render_summary_table(&r, false).expect("table");
+        let s = render_summary_table(&r, false, false).expect("table");
         assert!(!s.contains('\x1b'), "no ansi when use_color=false:\n{s}");
         assert!(s.contains("callee_identity"));
         assert!(s.contains("2 (1.00×)"));
         assert!(s.contains("9 (4.50×)"));
         assert!(s.contains("TOTAL"));
+    }
+
+    #[test]
+    fn summary_includes_weight_columns_when_requested() {
+        let mut rv32c = BackendDebugData::new("rv32c");
+        let mut f0 = FunctionDebugData::new("foo".to_string());
+        f0.lpir_count = 10;
+        f0.weight_body_len = 10;
+        f0.weight_mz = 6;
+        f0.weight_hb = 8;
+        f0.disasm_count = 3;
+        rv32c.functions.push(f0);
+
+        let mut rv32n = BackendDebugData::new("rv32n");
+        let mut f1 = FunctionDebugData::new("foo".to_string());
+        f1.lpir_count = 10;
+        f1.weight_body_len = 10;
+        f1.weight_mz = 6;
+        f1.weight_hb = 8;
+        f1.disasm_count = 12;
+        rv32n.functions.push(f1);
+
+        let mut r = DebugReport::new();
+        r.backends.push(rv32c);
+        r.backends.push(rv32n);
+
+        let s = render_summary_table(&r, false, true).expect("table");
+        assert!(s.contains("body_len"));
+        assert!(s.contains("mz"));
+        assert!(s.contains("hb"));
+        assert!(s.contains("foo"));
+        assert!(s.contains("TOTAL"));
+        assert!(s.lines().any(|line| line.contains("foo") && line.contains("10") && line.contains("6") && line.contains("8")));
     }
 }

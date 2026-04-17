@@ -27,6 +27,9 @@ mod inline_basic;
 #[path = "tests/inline_heuristic.rs"]
 mod inline_heuristic;
 
+#[path = "tests/inline_weights.rs"]
+mod inline_weights;
+
 #[path = "tests/validate.rs"]
 mod validate;
 

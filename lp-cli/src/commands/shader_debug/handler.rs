@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use lp_shader::synth::{SynthError, synthesise_render_texture};
+use lpir::inline_weights::{weight_body_len, weight_heavy_bias, weight_markers_zero};
 use lpir::{CompilerConfig, FloatMode, LpirModule, validate_module};
 use lps_frontend::LpsModuleSig;
 use lps_shared::TextureStorageFormat;
@@ -110,6 +111,23 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
         report.backends.push(backend_data);
     }
 
+    if args.weights {
+        let by_name: std::collections::BTreeMap<&str, &lpir::IrFunction> = ir
+            .functions
+            .values()
+            .map(|f| (f.name.as_str(), f))
+            .collect();
+        for backend in &mut report.backends {
+            for fd in &mut backend.functions {
+                if let Some(func) = by_name.get(fd.name.as_str()) {
+                    fd.weight_body_len = weight_body_len(func);
+                    fd.weight_mz = weight_markers_zero(func);
+                    fd.weight_hb = weight_heavy_bias(func);
+                }
+            }
+        }
+    }
+
     // Print detailed view first (unless summary-only mode)
     if !args.summary {
         print_detailed_view(&report, &sections);
@@ -121,7 +139,7 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     }
 
     // Print comparison table at the bottom (always shown)
-    print_comparison_table(&report);
+    print_comparison_table(&report, args.weights);
 
     Ok(())
 }

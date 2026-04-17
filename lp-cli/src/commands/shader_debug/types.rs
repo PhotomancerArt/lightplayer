@@ -4,6 +4,12 @@
 pub struct FunctionDebugData {
     pub name: String,
     pub lpir_count: usize,
+    /// `weight_body_len` from lpir inline_weights when `--weights` is used; otherwise 0.
+    pub weight_body_len: usize,
+    /// Markers-zero weight (`mz` column).
+    pub weight_mz: usize,
+    /// Heavy-bias weight (`hb` column).
+    pub weight_hb: usize,
     pub disasm_count: usize,
     pub spill_slots: Option<usize>,  // FA only
     pub interleaved: Option<String>, // FA only
@@ -16,6 +22,9 @@ impl FunctionDebugData {
         Self {
             name,
             lpir_count: 0,
+            weight_body_len: 0,
+            weight_mz: 0,
+            weight_hb: 0,
             disasm_count: 0,
             spill_slots: None,
             interleaved: None,

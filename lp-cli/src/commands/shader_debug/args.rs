@@ -65,6 +65,10 @@ pub struct Args {
         default_missing_value = "",
     )]
     pub opt: Vec<String>,
+
+    /// Add inline weight columns (`body_len`, `mz`, `hb`) to the summary table
+    #[arg(long)]
+    pub weights: bool,
 }
 
 impl Args {

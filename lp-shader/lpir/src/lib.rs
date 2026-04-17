@@ -31,3 +31,10 @@ pub use parse::{ParseError, parse_module};
 pub use print::print_module;
 pub use types::{CalleeRef, FloatMode, FuncId, ImportId, IrType, SlotId, VReg, VRegRange};
 pub use validate::{ValidationError, validate_function, validate_module};
+
+/// Candidate inline size metrics for M3.1 (`func_weight` tuning). See [`inline_weights`].
+pub mod inline_weights {
+    pub use crate::inline::heuristic::{
+        weight, weight_body_len, weight_heavy_bias, weight_markers_zero, WeightKind,
+    };
+}
