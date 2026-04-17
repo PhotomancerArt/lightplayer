@@ -171,7 +171,8 @@ impl FunctionBuilder {
     }
 
     pub fn push_continuing(&mut self) {
-        let cur = self.body.len() as u32;
+        self.body.push(LpirOp::Continuing);
+        let cur = (self.body.len() - 1) as u32;
         let top = self
             .block_stack
             .last_mut()

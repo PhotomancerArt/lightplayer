@@ -175,17 +175,6 @@ fn print_op_at(
     pc: &mut usize,
     depth: &mut usize,
 ) {
-    if let Some(Block::Loop { start_pc }) = stack.last() {
-        if let LpirOp::LoopStart {
-            continuing_offset, ..
-        } = &body[*start_pc]
-        {
-            let co = *continuing_offset as usize;
-            if co != *start_pc + 1 && *pc == co {
-                let _ = writeln!(out, "{}continuing:", indent_str(*depth));
-            }
-        }
-    }
     let ind = indent_str(*depth);
     match &body[*pc] {
         LpirOp::IfStart { cond, .. } => {
@@ -202,6 +191,10 @@ fn print_op_at(
                 stack.push(Block::Else);
             }
             let _ = writeln!(out, "{}}} else {{", indent_str(*depth - 1));
+            *pc += 1;
+        }
+        LpirOp::Continuing => {
+            let _ = writeln!(out, "{ind}continuing:");
             *pc += 1;
         }
         LpirOp::LoopStart { .. } => {

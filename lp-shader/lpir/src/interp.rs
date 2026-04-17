@@ -196,6 +196,9 @@ fn exec_func(
                     return Err(InterpError::Internal("exit_block outside block".into()));
                 }
             }
+            LpirOp::Continuing => {
+                pc += 1;
+            }
             LpirOp::End => match ctrl.last() {
                 Some(Ctrl::Loop { exit, head, .. }) if *exit == pc + 1 => {
                     pc = *head + 1;

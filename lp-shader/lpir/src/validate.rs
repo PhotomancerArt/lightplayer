@@ -219,6 +219,16 @@ fn validate_function_inner(
                         "LoopStart continuing_offset before body start",
                     ));
                 }
+                if co != i + 1 {
+                    match func.body.get(co) {
+                        Some(LpirOp::Continuing) => {}
+                        _ => errs.push(err_in_func(
+                            fname,
+                            op_i,
+                            "LoopStart continuing_offset must point at `continuing:` marker unless it is the first body op (legacy)",
+                        )),
+                    }
+                }
                 if *end_offset > 0 && *continuing_offset >= *end_offset {
                     errs.push(err_in_func(
                         fname,
@@ -230,6 +240,15 @@ fn validate_function_inner(
                     loop_start: i,
                     continuing_offset: *continuing_offset,
                 });
+            }
+            LpirOp::Continuing => {
+                if !matches!(stack.last(), Some(StackEntry::Loop { .. })) {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        "`continuing:` must be directly inside a loop body (not nested in if/switch/block/inner loop)",
+                    ));
+                }
             }
             LpirOp::Block { end_offset } => {
                 if *end_offset == 0 {
@@ -621,6 +640,7 @@ fn check_op_operands_defined(
         | LpirOp::FconstF32 { .. }
         | LpirOp::IconstI32 { .. }
         | LpirOp::Else
+        | LpirOp::Continuing
         | LpirOp::LoopStart { .. }
         | LpirOp::CaseStart { .. }
         | LpirOp::DefaultStart { .. }
@@ -791,6 +811,7 @@ fn check_opcode_dst_types(
         | LpirOp::Memcpy { .. }
         | LpirOp::IfStart { .. }
         | LpirOp::Else
+        | LpirOp::Continuing
         | LpirOp::LoopStart { .. }
         | LpirOp::SwitchStart { .. }
         | LpirOp::CaseStart { .. }
@@ -894,6 +915,7 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::Memcpy { .. }
         | LpirOp::IfStart { .. }
         | LpirOp::Else
+        | LpirOp::Continuing
         | LpirOp::LoopStart { .. }
         | LpirOp::SwitchStart { .. }
         | LpirOp::CaseStart { .. }

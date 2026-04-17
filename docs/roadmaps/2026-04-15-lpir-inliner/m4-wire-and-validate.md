@@ -19,7 +19,7 @@ pub fn compile_module(
     options: NativeCompileOptions,
 ) -> Result<CompiledModule, NativeError> {
     let mut ir_opt = ir.clone();
-    let inline_result = lpir::inline::inline_module(
+    let inline_result = lpir::inline_module(
         &mut ir_opt,
         &options.config.inline,
     );

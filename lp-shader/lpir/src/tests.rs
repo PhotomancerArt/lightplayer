@@ -9,6 +9,24 @@ mod block_ops;
 #[path = "tests/interp.rs"]
 mod interp;
 
+#[path = "tests/inline_offsets.rs"]
+mod inline_offsets;
+
+#[path = "tests/inline_callgraph.rs"]
+mod inline_callgraph;
+
+#[path = "tests/inline_param_writes.rs"]
+mod inline_param_writes;
+
+#[path = "tests/inline_remap.rs"]
+mod inline_remap;
+
+#[path = "tests/inline_basic.rs"]
+mod inline_basic;
+
+#[path = "tests/inline_heuristic.rs"]
+mod inline_heuristic;
+
 #[path = "tests/validate.rs"]
 mod validate;
 

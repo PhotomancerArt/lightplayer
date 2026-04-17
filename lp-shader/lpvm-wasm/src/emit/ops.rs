@@ -373,6 +373,7 @@ pub(crate) fn emit_op(
                 outer_open_depth: outer_open + 1,
             });
         }
+        LpirOp::Continuing => {}
         LpirOp::SwitchStart { selector, .. } => {
             sink.block(BlockType::Empty);
             *wasm_open += 1;

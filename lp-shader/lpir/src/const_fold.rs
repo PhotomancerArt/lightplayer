@@ -328,6 +328,7 @@ pub fn fold_constants(func: &mut IrFunction) -> usize {
             | LpirOp::Else
             | LpirOp::End
             | LpirOp::LoopStart { .. }
+            | LpirOp::Continuing
             | LpirOp::Block { .. }
             | LpirOp::Break
             | LpirOp::Continue

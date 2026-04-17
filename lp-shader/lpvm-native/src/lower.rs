@@ -1231,6 +1231,9 @@ pub fn lower_lpir_op(
                 "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Block/Else/End/ExitBlock)",
             ),
         }),
+        LpirOp::Continuing => Err(LowerError::UnsupportedOp {
+            description: String::from("Continuing is a structural marker (skipped in lower_range)"),
+        }),
         LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
             Err(LowerError::UnsupportedOp {
                 description: String::from(
@@ -1693,7 +1696,7 @@ impl<'a> LowerCtx<'a> {
                     });
                     i += 1;
                 }
-                LpirOp::Else | LpirOp::End => {
+                LpirOp::Else | LpirOp::End | LpirOp::Continuing => {
                     i += 1;
                 }
                 other => {

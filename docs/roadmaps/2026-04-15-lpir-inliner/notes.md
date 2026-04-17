@@ -15,7 +15,9 @@ in LPIR to handle multi-return callees without fake-loop overhead.
 | M0 | Stable CalleeRef refactor | [m0](m0-stable-callee-ref.md) | — |
 | M1 | OptPass enum + filetest annotations | [m1](m1-optpass-filetests.md) | — |
 | M2 | Block/EndBlock/ExitBlock LPIR ops | [m2](m2-block-ops.md) | — |
-| M3 | LPIR inlining pass | [m3](m3-inlining-pass.md) | M2 |
+| M2.5 | `Continuing` marker op | [m2.5](m2.5-continuing-marker.md) | M2 |
+| M3 | LPIR inlining pass | [m3](m3-inlining-pass.md) | M2.5 |
+| M3.1 | Tune `func_weight` empirically | [m3.1](m3.1-tune-inline-weights.md) | M3 |
 | M4 | Wire into native + validation | [m4](m4-wire-and-validate.md) | M1, M3 |
 | M5 | Dead function elimination | [m5](m5-dead-func-elim.md) | M0, M4 |
 

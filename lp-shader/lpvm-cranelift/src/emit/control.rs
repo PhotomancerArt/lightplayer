@@ -125,6 +125,7 @@ pub(crate) fn emit_control(
             });
             Ok(true)
         }
+        LpirOp::Continuing => Ok(true),
         LpirOp::Break => {
             let exit = find_innermost_loop_exit(ctrl_stack)?;
             builder.ins().jump(exit, &[]);

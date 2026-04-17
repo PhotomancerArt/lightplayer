@@ -9,6 +9,7 @@ extern crate alloc;
 pub mod builder;
 pub mod compiler_config;
 pub mod const_fold;
+mod inline;
 pub mod interp;
 pub mod lpir_module;
 pub mod lpir_op;
@@ -22,6 +23,7 @@ mod tests;
 
 pub use builder::{FunctionBuilder, ModuleBuilder};
 pub use compiler_config::{CompilerConfig, ConfigError, InlineConfig, InlineMode};
+pub use inline::{inline_module, InlineResult};
 pub use interp::{ImportHandler, InterpError, Value, interpret, interpret_with_depth};
 pub use lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};
 pub use lpir_op::LpirOp;

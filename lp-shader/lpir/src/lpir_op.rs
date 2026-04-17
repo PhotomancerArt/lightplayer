@@ -404,6 +404,9 @@ pub enum LpirOp {
     },
     /// False branch target; if reached by fall-through from the then-arm, jump to the enclosing `IfStart`'s `end_offset`.
     Else,
+    /// Marker for the start of the continuing block of the enclosing [`LpirOp::LoopStart`].
+    /// Position is cached in [`LpirOp::LoopStart::continuing_offset`] for fast backend access.
+    Continuing,
     LoopStart {
         continuing_offset: u32,
         end_offset: u32,
@@ -531,6 +534,7 @@ impl LpirOp {
             | LpirOp::Call { .. }
             | LpirOp::IfStart { .. }
             | LpirOp::Else
+            | LpirOp::Continuing
             | LpirOp::End
             | LpirOp::LoopStart { .. }
             | LpirOp::Break

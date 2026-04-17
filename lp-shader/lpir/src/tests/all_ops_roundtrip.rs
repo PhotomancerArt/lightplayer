@@ -333,6 +333,16 @@ pub(crate) fn module_all_ops() -> LpirModule {
     b.push(LpirOp::Break);
     b.end_loop();
 
+    b.push_loop();
+    b.push(LpirOp::BrIfNot { cond: i0 });
+    b.push_continuing();
+    let cont_v = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::IconstI32 {
+        dst: cont_v,
+        value: 42,
+    });
+    b.end_loop();
+
     b.push_switch(i1);
     b.push_case(0);
     let z0 = b.alloc_vreg(IrType::I32);
