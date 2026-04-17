@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 
 // Four-word return (sret on RV32): caller-side buffer + callee stores.

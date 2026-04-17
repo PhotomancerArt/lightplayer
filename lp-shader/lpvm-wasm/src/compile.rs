@@ -41,10 +41,19 @@ pub fn compile_lpir(
     meta: &LpsModuleSig,
     options: &WasmOptions,
 ) -> Result<WasmArtifact, WasmError> {
-    validate_metadata(ir, meta)?;
+    let mut ir_opt = ir.clone();
+    let inline_result = lpir::inline_module(&mut ir_opt, &options.config.inline);
+    if inline_result.call_sites_replaced > 0 {
+        log::info!(
+            "[wasm] inline: replaced {} call sites",
+            inline_result.call_sites_replaced
+        );
+    }
+
+    validate_metadata(&ir_opt, meta)?;
     let (wasm_bytes, shadow_stack_base, env_memory) =
-        emit::emit_module(ir, options).map_err(WasmError::emit)?;
-    let exports = collect_exports(ir, meta, options);
+        emit::emit_module(&ir_opt, options).map_err(WasmError::emit)?;
+    let exports = collect_exports(&ir_opt, meta, options);
     Ok(WasmArtifact {
         module: WasmModule {
             bytes: wasm_bytes,

@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 
 // Six user float args (+ vmctx): register args a1–a7 on RV32 when no caller sret.

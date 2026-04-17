@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 
 // Native / multi-backend: user function call, scalar float return (direct registers).

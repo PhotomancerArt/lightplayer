@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 //
 // Performance: incoming stack parameter load overhead.

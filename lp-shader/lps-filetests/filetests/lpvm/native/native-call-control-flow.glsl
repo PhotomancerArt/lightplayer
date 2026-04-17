@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 
 // User calls from if/else and from a for-loop.

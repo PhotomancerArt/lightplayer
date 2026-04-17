@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 //
 // Performance: caller-saved register preservation across calls.

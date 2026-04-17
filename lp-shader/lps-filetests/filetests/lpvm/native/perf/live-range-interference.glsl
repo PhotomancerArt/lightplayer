@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 //
 // Performance: live range interference patterns.

@@ -22,7 +22,10 @@ pub mod validate;
 mod tests;
 
 pub use builder::{FunctionBuilder, ModuleBuilder};
-pub use compiler_config::{CompilerConfig, ConfigError, InlineConfig, InlineMode};
+pub use compiler_config::{
+    CompilerConfig, ConfigError, InlineConfig, InlineMode, COMPILER_CONFIG_APPLY_HELP,
+    COMPILER_CONFIG_KEYS_HELP,
+};
 pub use inline::{inline_module, InlineResult};
 pub use interp::{ImportHandler, InterpError, Value, interpret, interpret_with_depth};
 pub use lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};

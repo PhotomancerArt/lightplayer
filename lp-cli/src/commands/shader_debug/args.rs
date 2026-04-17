@@ -69,6 +69,18 @@ pub struct Args {
     /// Add inline weight columns (`body_len`, `mz`, `hb`) to the summary table
     #[arg(long)]
     pub weights: bool,
+
+    /// Override compiler options. Format: `key=value`. Repeatable.
+    /// Use `--compiler-opt` alone (no value) to print valid keys and values.
+    /// Example: `--compiler-opt inline.mode=never --compiler-opt inline.small_func_threshold=8`.
+    #[arg(
+        long = "compiler-opt",
+        value_name = "KEY=VALUE",
+        action = clap::ArgAction::Append,
+        num_args = 0..=1,
+        default_missing_value = "",
+    )]
+    pub compiler_opt: Vec<String>,
 }
 
 impl Args {

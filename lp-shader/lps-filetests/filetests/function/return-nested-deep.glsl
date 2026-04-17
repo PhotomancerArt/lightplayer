@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // ============================================================================
 // Deeply Nested Return Tests: Return from various depths of nested ifs
 // ============================================================================

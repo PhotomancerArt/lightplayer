@@ -3300,7 +3300,7 @@ mod tests {
 
     #[test]
     fn lower_ops_populates_region_tree() {
-        use crate::region::{REGION_ID_NONE, Region};
+        use crate::region::{Region, REGION_ID_NONE};
         use alloc::collections::BTreeMap;
         use lpir::FuncId;
         use lpir::types::VRegRange;

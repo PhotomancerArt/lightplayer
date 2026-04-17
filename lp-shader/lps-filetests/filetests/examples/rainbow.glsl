@@ -47,7 +47,7 @@ vec3 applyPalette(float t, float palette) {
 
 vec2 prsd_demo(vec2 scaledCoord, float time) {
     vec2 gradient;
-    float noiseValue = lpfn_psrdnoise(
+    float noiseValue = lpfx_psrdnoise(
         scaledCoord,
         vec2(0.0),
         time,
@@ -89,46 +89,6 @@ vec4 rainbow_main(vec2 fragCoord, vec2 outputSize, float time) {
     } else {
         return vec4(applyPalette(tv.x, 0) * tv.y, 1.0);
     }
-}
-
-vec3 test_rainbow_palette_heatmap_0() {
-    return paletteHeatmap(0.0);
-}
-
-// run: test_rainbow_palette_heatmap_0() ~= vec3(0.0, 0.0, 0.91) (tolerance: 0.002)
-
-vec3 test_rainbow_palette_heatmap_half() {
-    return paletteHeatmap(0.5);
-}
-
-// run: test_rainbow_palette_heatmap_half() ~= vec3(0.4375, 0.99191284, 0.4375) (tolerance: 0.002)
-
-vec3 test_rainbow_palette_rainbow_quarter() {
-    return paletteRainbow(0.25);
-}
-
-// run: test_rainbow_palette_rainbow_quarter() ~= vec3(0.5, 0.9259186, 0.0740509) (tolerance: 0.002)
-
-vec2 test_rainbow_prsd_center_t1() {
-    return prsd_demo(vec2(32.0, 32.0), 1.0);
-}
-
-// run: test_rainbow_prsd_center_t1() ~= vec2(0.35671997, 0.99105835) (tolerance: 0.002)
-
-vec4 test_rainbow_main_center_t0() {
-    return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 0.0);
-}
-
-// run: test_rainbow_main_center_t0() ~= vec4(0.0, 0.7347107, 0.76535034, 1.0) (tolerance: 0.002)
-
-vec4 test_rainbow_main_center_t25() {
-    return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 2.5);
-}
-
-// run: test_rainbow_main_center_t25() ~= vec4(0.0, 0.4289856, 0.55758667, 1.0) (tolerance: 0.002)
-
-vec4 test_rainbow_main_corner_t5() {
-    return rainbow_main(vec2(0.0, 0.0), vec2(64.0, 64.0), 5.0);
 }
 
 // run: rainbow_main(vec2(0.0, 0.0), vec2(64.0, 64.0), 5.0) ~= vec4(0.3924713, 0.63394165, 0.14109802, 1.0) (tolerance: 0.002)

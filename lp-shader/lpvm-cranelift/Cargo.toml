@@ -35,6 +35,7 @@ riscv32-object = [
 ]
 
 [dependencies]
+log = { workspace = true, default-features = false }
 libm = "0.2"
 spin = { workspace = true }
 lpvm = { path = "../lpvm", default-features = false }

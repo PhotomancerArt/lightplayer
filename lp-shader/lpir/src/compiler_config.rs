@@ -47,14 +47,19 @@ impl fmt::Display for InlineMode {
 impl FromStr for InlineMode {
     type Err = ();
 
-    /// Accepts lowercase names: `auto`, `always`, `never`.
+    /// Accepts `auto`, `always`, `never` (ASCII case-insensitive).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim() {
-            "auto" => Ok(InlineMode::Auto),
-            "always" => Ok(InlineMode::Always),
-            "never" => Ok(InlineMode::Never),
-            _ => Err(()),
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("auto") {
+            return Ok(InlineMode::Auto);
         }
+        if s.eq_ignore_ascii_case("always") {
+            return Ok(InlineMode::Always);
+        }
+        if s.eq_ignore_ascii_case("never") {
+            return Ok(InlineMode::Never);
+        }
+        Err(())
     }
 }
 
@@ -83,30 +88,111 @@ impl Default for InlineConfig {
     }
 }
 
+/// Keys accepted by [`CompilerConfig::apply`] (for error messages and tooling).
+pub const COMPILER_CONFIG_KEYS_HELP: &str = "inline.mode, inline.always_inline_single_site, inline.small_func_threshold, inline.max_growth_budget, inline.module_op_budget";
+
+/// Multi-line listing of keys and allowed values (e.g. `shader-debug --compiler-opt` with no value).
+pub const COMPILER_CONFIG_APPLY_HELP: &str = r#"Valid `--compiler-opt` entries use KEY=value. Repeat the flag for multiple overrides.
+
+Keys and values:
+
+  inline.mode
+      auto | always | never   (ASCII case-insensitive; default: auto)
+
+  inline.always_inline_single_site
+      true | false | 1 | 0   (default: true)
+
+  inline.small_func_threshold
+      non-negative integer   (default: 16)
+
+  inline.max_growth_budget
+      non-negative integer   (optional per-module growth cap)
+
+  inline.module_op_budget
+      non-negative integer   (optional whole-module op budget)
+
+Examples:
+  --compiler-opt inline.mode=never
+  --compiler-opt inline.mode=always --compiler-opt inline.small_func_threshold=8
+"#;
+
 /// Error applying a single `compile-opt` key/value pair.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfigError {
     UnknownKey { key: String },
-    InvalidValue { key: String, value: String },
+    InvalidValue {
+        key: String,
+        value: String,
+        expected: &'static str,
+    },
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::UnknownKey { key } => write!(f, "unknown config key {key:?}"),
-            ConfigError::InvalidValue { key, value } => {
-                write!(f, "invalid value {value:?} for config key {key:?}")
-            }
+            ConfigError::UnknownKey { key } => write!(
+                f,
+                "unknown config key {key:?} (valid keys: {COMPILER_CONFIG_KEYS_HELP})"
+            ),
+            ConfigError::InvalidValue {
+                key,
+                value,
+                expected,
+            } => write!(
+                f,
+                "invalid value {value:?} for config key {key:?} (expected {expected})"
+            ),
         }
     }
 }
 
 impl core::error::Error for ConfigError {}
 
-fn invalid(key: &str, value: &str) -> ConfigError {
+fn invalid_usize(key: &str, value: &str) -> ConfigError {
     ConfigError::InvalidValue {
         key: String::from(key),
         value: String::from(value),
+        expected: "a non-negative integer",
+    }
+}
+
+fn invalid_bool(key: &str, value: &str) -> ConfigError {
+    ConfigError::InvalidValue {
+        key: String::from(key),
+        value: String::from(value),
+        expected: "true, false, 1, or 0",
+    }
+}
+
+fn invalid_inline_mode(key: &str, value: &str) -> ConfigError {
+    ConfigError::InvalidValue {
+        key: String::from(key),
+        value: String::from(value),
+        expected: "one of: auto, always, never (ASCII case-insensitive)",
+    }
+}
+
+fn invalid_q32_addsub(key: &str, value: &str) -> ConfigError {
+    ConfigError::InvalidValue {
+        key: String::from(key),
+        value: String::from(value),
+        expected: "one of: saturating, wrapping",
+    }
+}
+
+fn invalid_q32_mul(key: &str, value: &str) -> ConfigError {
+    ConfigError::InvalidValue {
+        key: String::from(key),
+        value: String::from(value),
+        expected: "one of: saturating, wrapping",
+    }
+}
+
+fn invalid_q32_div(key: &str, value: &str) -> ConfigError {
+    ConfigError::InvalidValue {
+        key: String::from(key),
+        value: String::from(value),
+        expected: "one of: saturating, reciprocal",
     }
 }
 
@@ -115,32 +201,44 @@ impl CompilerConfig {
     pub fn apply(&mut self, key: &str, value: &str) -> Result<(), ConfigError> {
         match key.trim() {
             "inline.mode" => {
-                self.inline.mode = value.trim().parse().map_err(|_| invalid(key, value))?;
+                self.inline.mode = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| invalid_inline_mode(key, value))?;
             }
             "inline.always_inline_single_site" => {
                 self.inline.always_inline_single_site =
-                    parse_bool(value).ok_or_else(|| invalid(key, value))?;
+                    parse_bool(value).ok_or_else(|| invalid_bool(key, value))?;
             }
             "inline.small_func_threshold" => {
                 self.inline.small_func_threshold =
-                    value.trim().parse().map_err(|_| invalid(key, value))?;
+                    value.trim().parse().map_err(|_| invalid_usize(key, value))?;
             }
             "inline.max_growth_budget" => {
                 self.inline.max_growth_budget =
-                    Some(value.trim().parse().map_err(|_| invalid(key, value))?);
+                    Some(value.trim().parse().map_err(|_| invalid_usize(key, value))?);
             }
             "inline.module_op_budget" => {
                 self.inline.module_op_budget =
-                    Some(value.trim().parse().map_err(|_| invalid(key, value))?);
+                    Some(value.trim().parse().map_err(|_| invalid_usize(key, value))?);
             }
             "q32.add_sub" => {
-                self.q32.add_sub = value.trim().parse().map_err(|_| invalid(key, value))?;
+                self.q32.add_sub = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| invalid_q32_addsub(key, value))?;
             }
             "q32.mul" => {
-                self.q32.mul = value.trim().parse().map_err(|_| invalid(key, value))?;
+                self.q32.mul = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| invalid_q32_mul(key, value))?;
             }
             "q32.div" => {
-                self.q32.div = value.trim().parse().map_err(|_| invalid(key, value))?;
+                self.q32.div = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| invalid_q32_div(key, value))?;
             }
             _ => {
                 return Err(ConfigError::UnknownKey {
@@ -199,8 +297,14 @@ mod tests {
     #[test]
     fn apply_unknown_key_errors() {
         let mut c = CompilerConfig::default();
-        let r = c.apply("inline.unknown", "x");
-        assert!(matches!(r, Err(ConfigError::UnknownKey { .. })));
+        let err = c.apply("inline.unknown", "x").unwrap_err();
+        assert!(matches!(err, ConfigError::UnknownKey { .. }));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("inline.mode"),
+            "error should list valid keys: {msg}"
+        );
+        assert!(msg.contains("inline.unknown"));
     }
 
     #[test]
@@ -208,6 +312,19 @@ mod tests {
         let mut c = CompilerConfig::default();
         assert!(c.apply("inline.mode", "bogus").is_err());
         assert!(c.apply("inline.small_func_threshold", "nope").is_err());
+        let msg = c.apply("inline.mode", "bogus").unwrap_err().to_string();
+        assert!(msg.contains("auto"));
+        assert!(msg.contains("always"));
+        assert!(msg.contains("never"));
+    }
+
+    #[test]
+    fn apply_inline_mode_case_insensitive() {
+        let mut c = CompilerConfig::default();
+        c.apply("inline.mode", "Never").unwrap();
+        assert_eq!(c.inline.mode, InlineMode::Never);
+        c.apply("inline.mode", "AUTO").unwrap();
+        assert_eq!(c.inline.mode, InlineMode::Auto);
     }
 
     #[test]
@@ -216,6 +333,9 @@ mod tests {
             let m: InlineMode = s.parse().expect(s);
             assert_eq!(m.to_string(), s);
         }
+        let m: InlineMode = "Never".parse().unwrap();
+        assert_eq!(m, InlineMode::Never);
+        assert_eq!(m.to_string(), "never");
     }
 
     #[test]

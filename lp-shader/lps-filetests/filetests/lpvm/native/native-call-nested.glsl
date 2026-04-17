@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 
 // Nested user calls (multiple callees in one expression).

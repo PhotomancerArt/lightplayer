@@ -72,6 +72,15 @@ pub fn object_bytes_from_ir(
     ir: &LpirModule,
     options: &CompileOptions,
 ) -> Result<Vec<u8>, CompilerError> {
+    let mut ir_opt = ir.clone();
+    let inline_result = lpir::inline_module(&mut ir_opt, &options.config.inline);
+    if inline_result.call_sites_replaced > 0 {
+        log::info!(
+            "[cranelift] inline: replaced {} call sites",
+            inline_result.call_sites_replaced
+        );
+    }
+
     let _codegen_guard = process_sync::codegen_guard();
 
     let isa = riscv32_owned_isa()?;
@@ -84,7 +93,7 @@ pub fn object_bytes_from_ir(
     let mut object_module = ObjectModule::new(builder);
     lower_lpir_into_module(
         &mut object_module,
-        ir,
+        &ir_opt,
         options.clone(),
         LpirFuncEmitOrder::Name,
     )?;

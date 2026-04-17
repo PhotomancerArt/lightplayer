@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 
 // Large sret (mat4): stress max callee buffer sizing on native path.

@@ -167,22 +167,31 @@ pub fn compile_module(
     options: crate::native_options::NativeCompileOptions,
     isa: IsaTarget,
 ) -> Result<CompiledModule, NativeError> {
+    let mut ir_opt = ir.clone();
+    let inline_result = lpir::inline_module(&mut ir_opt, &options.config.inline);
+    if inline_result.call_sites_replaced > 0 {
+        log::info!(
+            "[native-fa] inline: replaced {} call sites",
+            inline_result.call_sites_replaced
+        );
+    }
+
     log::debug!(
         "[native-fa] compile_module: building ABI for {n} functions",
-        n = ir.functions.len(),
+        n = ir_opt.functions.len(),
     );
-    let module_abi = ModuleAbi::from_ir_and_sig(isa, ir, sig);
+    let module_abi = ModuleAbi::from_ir_and_sig(isa, &ir_opt, sig);
     let mut session = CompileSession::new(module_abi, isa, float_mode, options);
 
     let sig_map: alloc::collections::BTreeMap<&str, &LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
-    let mut functions = Vec::with_capacity(ir.functions.len());
-    for (idx, func) in ir.functions.values().enumerate() {
+    let mut functions = Vec::with_capacity(ir_opt.functions.len());
+    for (idx, func) in ir_opt.functions.values().enumerate() {
         log::debug!(
             "[native-fa] compile_module: compiling function {cur}/{total}: {name}",
             cur = idx + 1,
-            total = ir.functions.len(),
+            total = ir_opt.functions.len(),
             name = func.name,
         );
         let default_sig = LpsFnSig {
@@ -195,7 +204,7 @@ pub fn compile_module(
             .get(func.name.as_str())
             .copied()
             .unwrap_or(&default_sig);
-        let compiled = compile_function(&mut session, func, ir, fn_sig)?;
+        let compiled = compile_function(&mut session, func, &ir_opt, fn_sig)?;
         functions.push(compiled);
         log::debug!(
             "[native-fa] compile_module: function {name} complete",

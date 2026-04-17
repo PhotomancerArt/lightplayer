@@ -1,3 +1,5 @@
+// compile-opt(inline.mode, never)
+
 // test run
 //
 // Call clobber + spill slot correctness: sequential calls, evictions during arg

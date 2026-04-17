@@ -8,9 +8,9 @@ use crate::regalloc::pool::RegPool;
 use crate::regalloc::spill::SpillAlloc;
 use crate::regalloc::trace::TraceEntry;
 use crate::regalloc::{
-    Alloc, AllocError, AllocOutput, Edit, EditPoint, TracePush, TraceSink, trace_sink_new,
+    trace_sink_new, Alloc, AllocError, AllocOutput, Edit, EditPoint, TracePush, TraceSink,
 };
-use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
+use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
 use crate::regset::RegSet;
 use crate::vinst::{VInst, VReg};
 use alloc::string::String;

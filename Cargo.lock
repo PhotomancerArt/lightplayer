@@ -4073,6 +4073,7 @@ dependencies = [
  "cranelift-native 0.127.0",
  "cranelift-object",
  "libm",
+ "log",
  "lp-riscv-elf",
  "lpir",
  "lps-builtin-ids",
