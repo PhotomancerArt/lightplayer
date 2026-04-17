@@ -14,6 +14,9 @@ pub enum LpsError {
     Compile(String),
     /// Render-time failure (trap, type mismatch, etc.).
     Render(String),
+    /// Pixel shader contract validation failure (e.g. missing `render`,
+    /// wrong signature, return type mismatch with output format).
+    Validation(String),
 }
 
 impl fmt::Display for LpsError {
@@ -23,6 +26,7 @@ impl fmt::Display for LpsError {
             LpsError::Lower(msg) => write!(f, "lower: {msg}"),
             LpsError::Compile(msg) => write!(f, "compile: {msg}"),
             LpsError::Render(msg) => write!(f, "render: {msg}"),
+            LpsError::Validation(msg) => write!(f, "validation: {msg}"),
         }
     }
 }

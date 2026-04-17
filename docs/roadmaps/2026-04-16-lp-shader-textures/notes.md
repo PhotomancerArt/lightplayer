@@ -13,11 +13,12 @@ of a Q32 value to get a unorm16 -- that gives 0 for the value 1.0.
 The simplest and best conversion is: `min(clamped_q32, 65535) as u16`.
 
 This maps:
+
 - 0 -> 0
 - 1 -> 1
 - ...
 - 65535 -> 65535
-- 65536 -> 65535  (saturation at pure white)
+- 65536 -> 65535 (saturation at pure white)
 
 The single value discontinuity (two inputs mapping to one output) is at the
 top of the range, between 0.999985 and 1.0 -- completely invisible.
@@ -37,10 +38,12 @@ The pedantic unorm16 interpretation says output 32768 means 32768/65535 =
 ## GPU texture format constraints
 
 wgpu/WebGPU baseline formats (no feature flags required):
+
 - Rgba16Float (f16, 8 bytes/pixel) -- universally supported
 - Rgba8Unorm (u8, 4 bytes/pixel) -- universally supported
 
 Feature-gated (TEXTURE_FORMAT_16BIT_NORM):
+
 - Rgba16Unorm (u16, 8 bytes/pixel) -- NOT baseline
 
 No 3-channel (RGB) formats in WebGPU at all.
@@ -64,10 +67,11 @@ for not having uniforms/globals. Now that we have those:
 - Output is via `out vec4 fragColor` (output global)
 
 Benefits:
+
 - Standard GLSL -- portable to GPU without transformation
 - Output globals enable the runtime to read results without return values
 - The compiler can see the full data flow (uniforms in, globals out)
-- Enables future synthetic __render_frame inlined function
+- Enables future synthetic \_\_render_frame inlined function
 
 The bootstrap wrapper approach means existing `render()` style shaders
 keep working -- lpfx generates the wrapper GLSL automatically.
@@ -75,6 +79,7 @@ keep working -- lpfx generates the wrapper GLSL automatically.
 ## Why output format at compile time
 
 If the output format is known at compile time, the compiler can:
+
 1. Emit format-specific Q32 -> unorm16 conversion inline
 2. Emit direct stores to texture memory with known stride
 3. In the future, fuse the pixel loop into a synthetic LPIR function
@@ -86,6 +91,7 @@ channel. On ESP32 that's measurable.
 ## Crate structure decision
 
 Considered merging lps-shared + lpvm. Rejected because:
+
 - lps-frontend depends only on lps-shared, not lpvm
 - lpir depends on neither
 - Merging would pull runtime concepts into the frontend's dep tree

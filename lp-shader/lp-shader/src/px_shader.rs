@@ -1,37 +1,40 @@
-//! Compiled fragment shader: module + instance, uniforms at render time.
+//! Compiled pixel shader: module + instance, uniforms at render time.
 
 use alloc::format;
 use alloc::string::String;
 use core::cell::RefCell;
 
-use lps_shared::{LpsModuleSig, LpsType, LpsValueF32, TextureStorageFormat};
+use lps_shared::{LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureStorageFormat};
 use lpvm::LpvmInstance;
 use lpvm::LpvmModule;
 
 use crate::error::LpsError;
 use crate::texture_buf::LpsTextureBuf;
 
-/// A compiled fragment shader with internal execution state.
+/// A compiled pixel shader with internal execution state.
 ///
 /// Combines module + instance internally. Uniforms are passed into [`Self::render_frame`],
 /// not stored as separate mutable state on this type (aside from the internal instance).
 ///
 /// The instance lives in a [`RefCell`] so [`Self::render_frame`] can take `&self`: mutation
 /// goes through runtime borrow checks (panic if re-entrant). This type is `!Sync` as a result.
-pub struct LpsFragShader<M: LpvmModule> {
+pub struct LpsPxShader<M: LpvmModule> {
     // Instance may depend on code owned by the module; keep both in one struct.
     #[allow(dead_code, reason = "retain compiled module for instance lifetime")]
     module: M,
     instance: RefCell<M::Instance>,
     output_format: TextureStorageFormat,
     meta: LpsModuleSig,
+    /// Index of the `render` function in `meta.functions`.
+    render_fn_index: usize,
 }
 
-impl<M: LpvmModule> LpsFragShader<M> {
+impl<M: LpvmModule> LpsPxShader<M> {
     pub(crate) fn new(
         module: M,
         meta: LpsModuleSig,
         output_format: TextureStorageFormat,
+        render_fn_index: usize,
     ) -> Result<Self, LpsError> {
         let instance = module
             .instantiate()
@@ -41,6 +44,7 @@ impl<M: LpvmModule> LpsFragShader<M> {
             instance: RefCell::new(instance),
             output_format,
             meta,
+            render_fn_index,
         })
     }
 
@@ -54,6 +58,12 @@ impl<M: LpvmModule> LpsFragShader<M> {
     #[must_use]
     pub fn output_format(&self) -> TextureStorageFormat {
         self.output_format
+    }
+
+    /// Signature of the `render` function.
+    #[must_use]
+    pub fn render_sig(&self) -> &LpsFnSig {
+        &self.meta.functions[self.render_fn_index]
     }
 
     /// Render one frame into the given texture buffer.

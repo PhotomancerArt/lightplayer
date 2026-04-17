@@ -9,12 +9,12 @@ extern crate alloc;
 
 mod engine;
 mod error;
-mod frag_shader;
+mod px_shader;
 mod texture_buf;
 
 pub use engine::LpsEngine;
 pub use error::LpsError;
-pub use frag_shader::LpsFragShader;
+pub use px_shader::LpsPxShader;
 pub use lpvm::AllocError;
 pub use texture_buf::LpsTextureBuf;
 
