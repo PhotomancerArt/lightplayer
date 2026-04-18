@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::abi::{FrameLayout, PregSet};
+use crate::abi::{FrameLayout, FuncAbi, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
 use crate::regalloc::{AllocOutput, AllocResult, allocate};
@@ -67,12 +67,12 @@ pub fn emit_lowered_with_alloc(
     caller_sret_bytes: u32,
 ) -> Result<EmittedCode, NativeError> {
     let mut used_callee_saved = alloc_result.used_callee_saved;
-    if func_abi.is_sret() {
-        // sret functions overwrite s1 in the prologue (mv s1, a0) so it must be
-        // saved/restored even though the allocator never assigns it.
-        used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::isa::rv32::abi::S1));
+    if let Some(p) = func_abi.sret_preservation_reg() {
+        // sret functions preserve the designated GPR in the prologue; it must be
+        // saved/restored even when the allocator never assigns it.
+        used_callee_saved = used_callee_saved.union(PregSet::singleton(p));
     }
-    let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
+    let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts, func_abi);
     let is_leaf = !contains_call(&lowered.vinsts);
     let frame = FrameLayout::compute(
         func_abi,
@@ -154,8 +154,8 @@ fn contains_call(vinsts: &[VInst]) -> bool {
 }
 
 /// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
-fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
-    use crate::isa::rv32::abi::ARG_REGS;
+pub fn max_outgoing_stack_bytes(vinsts: &[VInst], func_abi: &FuncAbi) -> u32 {
+    let arg_regs = func_abi.arg_regs();
     let mut max_bytes = 0u32;
     for inst in vinsts {
         if let VInst::Call {
@@ -165,9 +165,9 @@ fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
         } = inst
         {
             let cap = if *callee_uses_sret {
-                ARG_REGS.len() - 1
+                arg_regs.len() - 1
             } else {
-                ARG_REGS.len()
+                arg_regs.len()
             };
             let n = args.len();
             if n > cap {

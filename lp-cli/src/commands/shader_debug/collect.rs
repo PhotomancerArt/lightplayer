@@ -70,12 +70,12 @@ pub fn collect_fa_data(
 
         // Emit to get machine code
         let mut used_callee_saved = alloc_result.used_callee_saved;
-        if func_abi.is_sret() {
+        if let Some(p) = func_abi.sret_preservation_reg() {
             use lpvm_native::abi::PregSet;
-            use lpvm_native::isa::rv32::abi::S1;
-            used_callee_saved = used_callee_saved.union(PregSet::singleton(S1));
+            used_callee_saved = used_callee_saved.union(PregSet::singleton(p));
         }
-        let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
+        let caller_outgoing_stack_bytes =
+            lpvm_native::emit::max_outgoing_stack_bytes(&lowered.vinsts, &func_abi);
         let is_leaf = !contains_call(&lowered.vinsts);
         let frame = lpvm_native::abi::FrameLayout::compute(
             &func_abi,
@@ -226,32 +226,6 @@ fn disassemble_raw(code: &[u8]) -> String {
     }
 
     out
-}
-
-/// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
-fn max_outgoing_stack_bytes(vinsts: &[lpvm_native::vinst::VInst]) -> u32 {
-    use lpvm_native::isa::rv32::abi::ARG_REGS;
-    let mut max_bytes = 0u32;
-    for inst in vinsts {
-        if let lpvm_native::vinst::VInst::Call {
-            args,
-            callee_uses_sret,
-            ..
-        } = inst
-        {
-            let cap = if *callee_uses_sret {
-                ARG_REGS.len() - 1
-            } else {
-                ARG_REGS.len()
-            };
-            let n = args.len();
-            if n > cap {
-                let stack_words = (n - cap) as u32;
-                max_bytes = max_bytes.max(stack_words * 4);
-            }
-        }
-    }
-    max_bytes
 }
 
 /// Returns true if the function contains any call instructions.

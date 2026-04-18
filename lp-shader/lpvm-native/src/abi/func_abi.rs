@@ -136,6 +136,7 @@ impl FuncAbi {
 /// Pre-computed ABI for every [`LpsFnSig`] in a module plus max callee sret buffer size.
 #[derive(Clone, Debug)]
 pub struct ModuleAbi {
+    isa: IsaTarget,
     func_abis: BTreeMap<String, FuncAbi>,
     max_callee_sret_bytes: u32,
 }
@@ -168,9 +169,14 @@ impl ModuleAbi {
         }
 
         Self {
+            isa,
             func_abis,
             max_callee_sret_bytes: max_sret_bytes,
         }
+    }
+
+    pub fn isa(&self) -> IsaTarget {
+        self.isa
     }
 
     pub fn func_abi(&self, name: &str) -> Option<&FuncAbi> {

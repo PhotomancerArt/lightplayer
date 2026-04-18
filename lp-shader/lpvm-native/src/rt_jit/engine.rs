@@ -58,6 +58,7 @@ impl LpvmEngine for NativeJitEngine {
                 buffer,
                 entry_offsets,
                 options: self.options.clone(),
+                isa: IsaTarget::Rv32imac,
             }),
         })
     }

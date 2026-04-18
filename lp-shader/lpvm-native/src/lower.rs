@@ -13,7 +13,6 @@ use lps_builtin_ids::{
 use crate::abi::ModuleAbi;
 use crate::error::LowerError;
 use crate::region::{REGION_ID_NONE, RegionId, RegionTree};
-use crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD;
 use crate::vinst::{
     AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice,
     pack_src_op,
@@ -1340,8 +1339,9 @@ fn ir_params_to_glsl_kinds(params: &[lpir::IrType]) -> Vec<GlslParamKind> {
 }
 
 fn callee_return_uses_sret(ir: &LpirModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
+    let isa = abi.isa();
     if let Some(imp_idx) = ir.callee_as_import(callee) {
-        return ir.imports[imp_idx].return_types.len() > SRET_SCALAR_THRESHOLD;
+        return isa.sret_uses_buffer_for(ir.imports[imp_idx].return_types.len() as u32);
     }
     let Some(f) = ir.callee_as_function(callee) else {
         return false;
@@ -1349,7 +1349,7 @@ fn callee_return_uses_sret(ir: &LpirModule, abi: &ModuleAbi, callee: CalleeRef) 
     if let Some(fa) = abi.func_abi(f.name.as_str()) {
         fa.is_sret()
     } else {
-        f.return_types.len() > SRET_SCALAR_THRESHOLD
+        isa.sret_uses_buffer_for(f.return_types.len() as u32)
     }
 }
 

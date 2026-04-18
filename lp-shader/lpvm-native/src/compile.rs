@@ -51,6 +51,8 @@ pub struct CompileSession {
     pub symbols: ModuleSymbols,
     /// Module ABI for param/return locations.
     pub abi: ModuleAbi,
+    /// Target ISA for per-function ABI construction.
+    pub isa: IsaTarget,
     /// Floating point mode.
     pub float_mode: FloatMode,
     /// Compilation options.
@@ -61,12 +63,14 @@ impl CompileSession {
     /// Create a new compile session for a module.
     pub fn new(
         abi: ModuleAbi,
+        isa: IsaTarget,
         float_mode: FloatMode,
         options: crate::native_options::NativeCompileOptions,
     ) -> Self {
         Self {
             symbols: ModuleSymbols::default(),
             abi,
+            isa,
             float_mode,
             options,
         }
@@ -87,7 +91,11 @@ pub fn compile_function(
     );
 
     // Build function ABI (needed for both debug and non-debug paths)
-    let func_abi = crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
+    let func_abi = match session.isa {
+        IsaTarget::Rv32imac => {
+            crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize)
+        }
+    };
 
     // 1-4. Const-fold, lower, optimize, allocate, emit
     let (code, relocs, debug_lines, sections) = {
@@ -157,7 +165,7 @@ pub fn compile_module(
         n = ir.functions.len(),
     );
     let module_abi = ModuleAbi::from_ir_and_sig(isa, ir, sig);
-    let mut session = CompileSession::new(module_abi, float_mode, options);
+    let mut session = CompileSession::new(module_abi, isa, float_mode, options);
 
     let sig_map: alloc::collections::BTreeMap<&str, &LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
@@ -217,7 +225,7 @@ mod tests {
             },
             &LpsModuleSig::default(),
         );
-        let session = CompileSession::new(abi, lpir::FloatMode::Q32, Default::default());
+        let session = CompileSession::new(abi, IsaTarget::Rv32imac, lpir::FloatMode::Q32, Default::default());
         assert!(session.symbols.names.is_empty());
     }
 
