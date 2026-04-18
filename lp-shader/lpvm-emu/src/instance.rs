@@ -8,7 +8,7 @@ use core::fmt;
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
-use lp_riscv_emu::{DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
+use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
@@ -53,6 +53,7 @@ pub struct EmuInstance {
     vmctx_guest: u32,
     last_debug: Option<String>,
     last_guest_instruction_count: Option<u64>,
+    last_guest_cycle_count: Option<u64>,
     /// Byte offset from vmctx base to globals region
     globals_offset: usize,
     /// Byte offset from vmctx base to snapshot region
@@ -87,6 +88,7 @@ impl EmuInstance {
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
             last_guest_instruction_count: None,
+            last_guest_cycle_count: None,
             globals_offset,
             snapshot_offset,
             globals_size,
@@ -103,7 +105,7 @@ impl EmuInstance {
     pub fn init_globals(&mut self) -> Result<(), InstanceError> {
         // Call __shader_init if it exists
         if self.has_function("__shader_init") {
-            self.invoke_flat("__shader_init", &[])?;
+            self.invoke_flat("__shader_init", &[], CycleModel::default())?;
         }
 
         // Copy globals region to snapshot region
@@ -207,6 +209,7 @@ impl LpvmInstance for EmuInstance {
 
         self.last_debug = None;
         self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "EmuInstance::call requires FloatMode::Q32",
@@ -263,18 +266,62 @@ impl LpvmInstance for EmuInstance {
             .into());
         }
 
-        let words = self.invoke_flat(name, &flat)?;
+        let words = self.invoke_flat(name, &flat, CycleModel::default())?;
         let gq = decode_q32_return(&gfn.return_type, &words)?;
         q32_to_lps_value_f32(&gfn.return_type, gq)
             .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        self.call_q32_with_cycle_model(name, args, CycleModel::default())
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write(
+            &self.module.meta,
+            path,
+            value,
+            self.module.options.float_mode,
+        )
+        .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("set_uniform: {e}"))))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
+        let (off, bytes) =
+            encode_uniform_write_q32(&self.module.meta, path, value).map_err(|e| {
+                InstanceError::Call(CallError::Unsupported(format!("set_uniform_q32: {e}")))
+            })?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn debug_state(&self) -> Option<String> {
+        self.last_debug.clone()
+    }
+
+    fn last_guest_instruction_count(&self) -> Option<u64> {
+        self.last_guest_instruction_count
+    }
+
+    fn last_guest_cycle_count(&self) -> Option<u64> {
+        self.last_guest_cycle_count
+    }
+}
+
+impl EmuInstance {
+    /// Like [`LpvmInstance::call_q32`], but selects the guest [`CycleModel`] for this invocation.
+    pub fn call_q32_with_cycle_model(
+        &mut self,
+        name: &str,
+        args: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, InstanceError> {
         // Reset globals before each call to ensure fresh state
         self.reset_globals();
 
         self.last_debug = None;
         self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "EmuInstance::call_q32 requires FloatMode::Q32",
@@ -329,44 +376,21 @@ impl LpvmInstance for EmuInstance {
             .into());
         }
 
-        let words = self.invoke_flat(name, args)?;
+        let words = self.invoke_flat(name, args, cycle_model)?;
         if gfn.return_type == LpsType::Void {
             return Ok(Vec::new());
         }
         Ok(words)
     }
 
-    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
-        let (off, bytes) = encode_uniform_write(
-            &self.module.meta,
-            path,
-            value,
-            self.module.options.float_mode,
-        )
-        .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("set_uniform: {e}"))))?;
-        self.vmctx_write_bytes(off, &bytes)
-    }
-
-    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
-        let (off, bytes) =
-            encode_uniform_write_q32(&self.module.meta, path, value).map_err(|e| {
-                InstanceError::Call(CallError::Unsupported(format!("set_uniform_q32: {e}")))
-            })?;
-        self.vmctx_write_bytes(off, &bytes)
-    }
-
-    fn debug_state(&self) -> Option<String> {
-        self.last_debug.clone()
-    }
-
-    fn last_guest_instruction_count(&self) -> Option<u64> {
-        self.last_guest_instruction_count
-    }
-}
-
-impl EmuInstance {
-    fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, InstanceError> {
+    fn invoke_flat(
+        &mut self,
+        name: &str,
+        flat: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, InstanceError> {
         self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
         self.refresh_vmctx_header();
 
         let ir_func = self
@@ -411,6 +435,7 @@ impl EmuInstance {
             LogLevel::None
         };
         let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
+        emu.set_cycle_model(cycle_model);
 
         let has_sr = sig
             .params
@@ -458,10 +483,12 @@ impl EmuInstance {
                 }
                 words.truncate(n_ret);
                 self.last_guest_instruction_count = Some(n_inst);
+                self.last_guest_cycle_count = Some(emu.get_cycle_count());
                 Ok(words)
             }
             Err(e) => {
                 self.last_guest_instruction_count = None;
+                self.last_guest_cycle_count = None;
                 let mut debug_parts = Vec::new();
                 debug_parts.push(String::from("=== Debug Info ==="));
                 debug_parts.push(format!("Error: {e:?}"));

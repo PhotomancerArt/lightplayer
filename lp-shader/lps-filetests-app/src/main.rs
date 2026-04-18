@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use lps_filetests::output_mode::OutputMode;
+use lps_filetests::perf_model::PerfModel;
 
 /// lps filetest utility.
 #[derive(Parser)]
@@ -26,6 +27,10 @@ struct OutputModeCli {
     /// Verbose per-`// run:` output even when running many files
     #[arg(long, group = "output_mode")]
     detail: bool,
+}
+
+fn parse_perf_flag(s: &str) -> Result<PerfModel, String> {
+    PerfModel::parse(s)
 }
 
 impl OutputModeCli {
@@ -71,6 +76,9 @@ struct TestOptions {
     target: Option<String>,
     #[command(flatten)]
     output_mode: OutputModeCli,
+    /// Guest RV32 cost column in the summary table (`vs fastest` uses the same metric).
+    #[arg(long, value_name = "MODEL", default_value = "esp32c6", value_parser = parse_perf_flag)]
+    perf: PerfModel,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -97,6 +105,7 @@ fn main() -> anyhow::Result<()> {
                 t.mark_unimplemented_if_baseline,
                 target_spec,
                 output_override,
+                t.perf,
             )?;
         }
     }

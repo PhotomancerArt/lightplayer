@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
-use lp_riscv_emu::{DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
+use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
@@ -27,6 +27,7 @@ pub struct NativeEmuInstance {
     pub(crate) vmctx_guest: u32,
     pub(crate) last_debug: Option<String>,
     pub(crate) last_guest_instruction_count: Option<u64>,
+    pub(crate) last_guest_cycle_count: Option<u64>,
     /// Byte offset from vmctx base to globals region
     pub(crate) globals_offset: usize,
     /// Byte offset from vmctx base to snapshot region
@@ -41,7 +42,7 @@ impl NativeEmuInstance {
     pub fn init_globals(&mut self) -> Result<(), NativeError> {
         // Call __shader_init if it exists
         if self.has_function("__shader_init") {
-            self.invoke_flat("__shader_init", &[])?;
+            self.invoke_flat("__shader_init", &[], CycleModel::default())?;
         }
 
         // Copy globals region to snapshot region
@@ -111,8 +112,14 @@ impl NativeEmuInstance {
         }
     }
 
-    fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
+    fn invoke_flat(
+        &mut self,
+        name: &str,
+        flat: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, NativeError> {
         self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
         self.refresh_vmctx_header();
 
         let ir_func = self
@@ -158,6 +165,7 @@ impl NativeEmuInstance {
             LogLevel::None
         };
         let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
+        emu.set_cycle_model(cycle_model);
 
         // The emulator handles sret natively: call_function_with_struct_return
         // allocates a buffer on the emulator stack, passes its address in a0
@@ -208,10 +216,12 @@ impl NativeEmuInstance {
                 }
                 words.truncate(n_ret);
                 self.last_guest_instruction_count = Some(n_inst);
+                self.last_guest_cycle_count = Some(emu.get_cycle_count());
                 Ok(words)
             }
             Err(e) => {
                 self.last_guest_instruction_count = None;
+                self.last_guest_cycle_count = None;
                 // Capture full debug info including disassembly and instruction log
                 let mut debug_parts = Vec::new();
                 debug_parts.push(format!("=== Debug Info ==="));
@@ -272,6 +282,7 @@ impl LpvmInstance for NativeEmuInstance {
 
         self.last_debug = None;
         self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeEmuInstance::call requires FloatMode::Q32",
@@ -325,18 +336,68 @@ impl LpvmInstance for NativeEmuInstance {
             ))));
         }
 
-        let words = self.invoke_flat(name, &flat)?;
+        let words = self.invoke_flat(name, &flat, CycleModel::default())?;
         let gq = decode_q32_return(&gfn.return_type, &words)?;
         q32_to_lps_value_f32(&gfn.return_type, gq)
             .map_err(|e| NativeError::Call(CallError::TypeMismatch(e.to_string())))
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        self.call_q32_with_cycle_model(name, args, CycleModel::default())
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_uniform_write(
+            &self.module.meta,
+            path,
+            value,
+            self.module.options.float_mode,
+        )
+        .map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("set_uniform: {e}")))
+        })?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
+        let (off, bytes) =
+            encode_uniform_write_q32(&self.module.meta, path, value).map_err(|e| {
+                NativeError::Call(CallError::Unsupported(alloc::format!(
+                    "set_uniform_q32: {e}"
+                )))
+            })?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn debug_state(&self) -> Option<String> {
+        // Compile-time interleaved/disasm lives on [`NativeEmuModule::debug_info`]; filetests and
+        // tooling print that once after compile. Here we only surface per-run emulator output.
+        self.last_debug.clone()
+    }
+
+    fn last_guest_instruction_count(&self) -> Option<u64> {
+        self.last_guest_instruction_count
+    }
+
+    fn last_guest_cycle_count(&self) -> Option<u64> {
+        self.last_guest_cycle_count
+    }
+}
+
+impl NativeEmuInstance {
+    /// Like [`LpvmInstance::call_q32`], but selects the guest [`CycleModel`] for this invocation.
+    pub fn call_q32_with_cycle_model(
+        &mut self,
+        name: &str,
+        args: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, NativeError> {
         // Reset globals before each call to ensure fresh state
         self.reset_globals();
 
         self.last_debug = None;
         self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeEmuInstance::call_q32 requires FloatMode::Q32",
@@ -388,43 +449,10 @@ impl LpvmInstance for NativeEmuInstance {
             ))));
         }
 
-        let words = self.invoke_flat(name, args)?;
+        let words = self.invoke_flat(name, args, cycle_model)?;
         if gfn.return_type == LpsType::Void {
             return Ok(Vec::new());
         }
         Ok(words)
-    }
-
-    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
-        let (off, bytes) = encode_uniform_write(
-            &self.module.meta,
-            path,
-            value,
-            self.module.options.float_mode,
-        )
-        .map_err(|e| {
-            NativeError::Call(CallError::Unsupported(alloc::format!("set_uniform: {e}")))
-        })?;
-        self.vmctx_write_bytes(off, &bytes)
-    }
-
-    fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error> {
-        let (off, bytes) =
-            encode_uniform_write_q32(&self.module.meta, path, value).map_err(|e| {
-                NativeError::Call(CallError::Unsupported(alloc::format!(
-                    "set_uniform_q32: {e}"
-                )))
-            })?;
-        self.vmctx_write_bytes(off, &bytes)
-    }
-
-    fn debug_state(&self) -> Option<String> {
-        // Compile-time interleaved/disasm lives on [`NativeEmuModule::debug_info`]; filetests and
-        // tooling print that once after compile. Here we only surface per-run emulator output.
-        self.last_debug.clone()
-    }
-
-    fn last_guest_instruction_count(&self) -> Option<u64> {
-        self.last_guest_instruction_count
     }
 }

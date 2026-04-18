@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode};
+use super::{ExecutionResult, InstClass, LoggingMode};
 use crate::emu::{
     error::EmulatorError,
     logging::{InstLog, SystemKind},
@@ -98,6 +98,7 @@ fn execute_ecall<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: true,
+        class: InstClass::System,
         log,
     })
 }
@@ -121,6 +122,7 @@ fn execute_ebreak<M: LoggingMode>(
         new_pc: None,
         should_halt: true,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }
@@ -166,6 +168,7 @@ fn execute_fence<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Fence,
         log,
     })
 }
@@ -190,6 +193,7 @@ fn execute_fence_i<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Fence,
         log,
     })
 }
@@ -224,6 +228,7 @@ fn execute_csrrw<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }
@@ -257,6 +262,7 @@ fn execute_csrrs<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }
@@ -290,6 +296,7 @@ fn execute_csrrc<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }
@@ -323,6 +330,7 @@ fn execute_csrrwi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }
@@ -356,6 +364,7 @@ fn execute_csrrsi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }
@@ -389,6 +398,7 @@ fn execute_csrrci<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::System,
         log,
     })
 }

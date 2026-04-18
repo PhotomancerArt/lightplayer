@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 use lp_riscv_inst::{Gpr, format::TypeI};
 
@@ -136,6 +136,7 @@ fn execute_addi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -174,6 +175,7 @@ fn execute_slli<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -212,6 +214,7 @@ fn execute_srli<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -255,6 +258,7 @@ fn execute_srai<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -292,6 +296,7 @@ fn execute_andi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -329,6 +334,7 @@ fn execute_ori<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -366,6 +372,7 @@ fn execute_xori<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -403,6 +410,7 @@ fn execute_slti<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -441,6 +449,7 @@ fn execute_sltiu<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -482,6 +491,7 @@ fn execute_bclri<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -521,6 +531,7 @@ fn execute_bseti<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -560,6 +571,7 @@ fn execute_binvi<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -598,6 +610,7 @@ fn execute_bexti<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -637,6 +650,7 @@ fn execute_rori<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -677,6 +691,7 @@ fn execute_rev8<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -720,6 +735,7 @@ fn execute_brev8<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -764,6 +780,7 @@ fn execute_orcb<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -805,6 +822,7 @@ fn execute_clz<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -846,6 +864,7 @@ fn execute_ctz<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -883,6 +902,7 @@ fn execute_cpop<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -919,6 +939,7 @@ fn execute_sextb<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -955,6 +976,7 @@ fn execute_sexth<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -991,6 +1013,7 @@ fn execute_zexth<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }
@@ -1030,6 +1053,7 @@ fn execute_slliuw<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Alu,
         log,
     })
 }

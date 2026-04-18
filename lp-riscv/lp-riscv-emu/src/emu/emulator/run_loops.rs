@@ -92,6 +92,7 @@ impl Riscv32Emulator {
                 &mut self.regs,
                 &mut self.memory,
             )?;
+            self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
 
             // Update PC (2 bytes for compressed, 4 for standard)
             let pc_increment = if is_compressed { 2 } else { 4 };
@@ -195,6 +196,7 @@ impl Riscv32Emulator {
                 &mut self.regs,
                 &mut self.memory,
             )?;
+            self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
 
             // Update PC (2 bytes for compressed, 4 for standard)
             let pc_increment = if is_compressed { 2 } else { 4 };

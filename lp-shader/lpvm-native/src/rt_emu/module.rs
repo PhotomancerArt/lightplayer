@@ -62,6 +62,7 @@ impl LpvmModule for NativeEmuModule {
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
             last_guest_instruction_count: None,
+            last_guest_cycle_count: None,
             globals_offset,
             snapshot_offset,
             globals_size,
