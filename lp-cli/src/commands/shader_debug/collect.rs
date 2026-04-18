@@ -13,14 +13,14 @@ pub fn collect_fa_data(
     float_mode: FloatMode,
     func_filter: Option<&str>,
 ) -> Result<BackendDebugData> {
+    use lpvm_native::IsaTarget;
     use lpvm_native::abi::ModuleAbi;
     use lpvm_native::lower_ops;
     use lpvm_native::regalloc::allocate;
     use lpvm_native::regalloc::render::render_interleaved;
     use lpvm_native::isa::rv32::abi::func_abi_rv32;
-    use lpvm_native::isa::rv32::emit::emit_function;
 
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
+    let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, ir, sig);
 
     let sig_map: std::collections::BTreeMap<&str, &lps_frontend::LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
@@ -67,32 +67,12 @@ pub fn collect_fa_data(
             &lowered.symbols,
         );
 
-        // Emit to get machine code
-        let mut used_callee_saved = alloc_result.used_callee_saved;
-        if func_abi.is_sret() {
-            use lpvm_native::abi::PregSet;
-            use lpvm_native::isa::rv32::abi::S1;
-            used_callee_saved = used_callee_saved.union(PregSet::singleton(S1));
-        }
-        let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
-        let is_leaf = !contains_call(&lowered.vinsts);
-        let frame = lpvm_native::abi::FrameLayout::compute(
+        let spill_slots = alloc_result.spill_slots;
+        let emitted = lpvm_native::emit::emit_lowered_with_alloc(
+            &lowered,
             &func_abi,
-            alloc_result.spill_slots,
-            used_callee_saved,
-            &lowered.lpir_slots,
-            is_leaf,
+            alloc_result,
             module_abi.max_callee_sret_bytes(),
-            caller_outgoing_stack_bytes,
-        );
-
-        let emitted = emit_function(
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &alloc_result.output,
-            frame,
-            &lowered.symbols,
-            func_abi.is_sret(),
         )
         .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
 
@@ -115,7 +95,7 @@ pub fn collect_fa_data(
         let mut func_data = FunctionDebugData::new(func.name.clone());
         func_data.lpir_count = lpir_count;
         func_data.disasm_count = disasm_count;
-        func_data.spill_slots = Some(alloc_result.spill_slots as usize);
+        func_data.spill_slots = Some(spill_slots as usize);
         func_data.interleaved = Some(interleaved);
         func_data.disasm = disasm;
         func_data.has_vinst = true;
@@ -227,34 +207,3 @@ fn disassemble_raw(code: &[u8]) -> String {
     out
 }
 
-/// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
-fn max_outgoing_stack_bytes(vinsts: &[lpvm_native::vinst::VInst]) -> u32 {
-    use lpvm_native::isa::rv32::abi::ARG_REGS;
-    let mut max_bytes = 0u32;
-    for inst in vinsts {
-        if let lpvm_native::vinst::VInst::Call {
-            args,
-            callee_uses_sret,
-            ..
-        } = inst
-        {
-            let cap = if *callee_uses_sret {
-                ARG_REGS.len() - 1
-            } else {
-                ARG_REGS.len()
-            };
-            let n = args.len();
-            if n > cap {
-                let stack_words = (n - cap) as u32;
-                max_bytes = max_bytes.max(stack_words * 4);
-            }
-        }
-    }
-    max_bytes
-}
-
-/// Returns true if the function contains any call instructions.
-fn contains_call(vinsts: &[lpvm_native::vinst::VInst]) -> bool {
-    use lpvm_native::vinst::VInst;
-    vinsts.iter().any(|inst| matches!(inst, VInst::Call { .. }))
-}

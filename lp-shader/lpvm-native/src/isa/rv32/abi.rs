@@ -266,6 +266,7 @@ pub fn func_abi_rv32(sig: &LpsFnSig, total_param_slots: usize) -> crate::abi::Fu
         precolors,
         caller_saved_int(),
         callee_saved_int(),
+        crate::isa::IsaTarget::Rv32imac,
     )
 }
 

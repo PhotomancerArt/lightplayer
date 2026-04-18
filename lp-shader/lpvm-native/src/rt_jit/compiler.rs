@@ -8,6 +8,7 @@ use lps_shared::LpsModuleSig;
 
 use crate::compile::compile_module;
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::link::link_jit;
 use crate::native_options::NativeCompileOptions;
 use lpvm::ModuleDebugInfo;
@@ -37,6 +38,7 @@ pub fn compile_module_jit(
     builtin_table: &BuiltinTable,
     float_mode: lpir::FloatMode,
     _alloc_trace: bool,
+    isa: IsaTarget,
 ) -> Result<(JitBuffer, BTreeMap<String, usize>, ModuleDebugInfo), NativeError> {
     let options = NativeCompileOptions {
         float_mode,
@@ -51,7 +53,7 @@ pub fn compile_module_jit(
         "[native-fa] compile_module_jit: starting compile_module with {} functions",
         ir.functions.len()
     );
-    let compiled = compile_module(ir, sig, float_mode, options)?;
+    let compiled = compile_module(ir, sig, float_mode, options, isa)?;
     log::debug!(
         "[native-fa] compile_module_jit: compile_module complete, {} functions compiled",
         compiled.functions.len()
@@ -64,7 +66,7 @@ pub fn compile_module_jit(
     }
 
     // 3. Link JIT image with builtin resolution
-    let linked = link_jit(&compiled, |sym| {
+    let linked = link_jit(&compiled, isa, |sym| {
         // First check builtins
         if let Some(addr) = builtin_table.lookup(sym) {
             return Some(addr as u32);

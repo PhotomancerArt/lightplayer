@@ -8,6 +8,7 @@ use lps_shared::LpsModuleSig;
 
 use crate::compile::compile_module;
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::isa::rv32::debug::LineTable;
 use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
 
@@ -35,7 +36,7 @@ pub fn compile_module_asm_text(
     };
 
     // Compile module
-    let compiled = compile_module(ir, sig, float_mode, options)?;
+    let compiled = compile_module(ir, sig, float_mode, options, IsaTarget::Rv32imac)?;
 
     // Build a map from function name to LPIR function
     let mut out = String::new();

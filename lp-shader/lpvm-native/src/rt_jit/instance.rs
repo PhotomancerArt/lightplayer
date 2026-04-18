@@ -12,7 +12,7 @@ use lpvm::{
 };
 
 use crate::error::NativeError;
-use crate::isa::rv32::abi::func_abi_rv32;
+use crate::isa::IsaTarget;
 
 use super::call::rv32_jalr_a0_a7;
 use super::module::{NativeJitDirectCall, NativeJitModule};
@@ -175,7 +175,9 @@ impl NativeJitInstance {
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
 
         let slots = ir_func.total_param_slots() as usize;
-        let func_abi = func_abi_rv32(&gfn, slots);
+        let func_abi = match self.module.inner.isa {
+            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(&gfn, slots),
+        };
         let is_sret = func_abi.is_sret();
         let n_ret = ir_func.return_types.len();
 

@@ -29,9 +29,10 @@ pub struct NativeReloc {
     pub symbol: String,
 }
 
-/// Machine code for one function plus relocations and debug info.
+/// Raw RV32 machine code for one function plus relocations and debug info
+/// (internal hand-off to [`crate::emit::EmittedCode`]).
 #[derive(Clone, Debug)]
-pub struct EmittedCode {
+pub(crate) struct Rv32EmitOutput {
     /// RISC-V machine code bytes.
     pub code: Vec<u8>,
     /// Relocations for auipc+jalr call pairs.
@@ -883,9 +884,9 @@ impl<'a> EmitContext<'a> {
     }
 
     /// Finish emission and return the emitted code.
-    pub fn finish(mut self) -> Result<EmittedCode, AllocError> {
+    pub(crate) fn finish(mut self) -> Result<Rv32EmitOutput, AllocError> {
         self.resolve_branch_fixups()?;
-        Ok(EmittedCode {
+        Ok(Rv32EmitOutput {
             code: self.code,
             relocs: self.relocs,
             debug_lines: self.debug_lines,
@@ -894,14 +895,14 @@ impl<'a> EmitContext<'a> {
 }
 
 /// Emit a function to machine code.
-pub fn emit_function(
+pub(crate) fn emit_function(
     vinsts: &[VInst],
     vreg_pool: &[VReg],
     output: &AllocOutput,
     frame: FrameLayout,
     symbols: &ModuleSymbols,
     is_sret: bool,
-) -> Result<EmittedCode, AllocError> {
+) -> Result<Rv32EmitOutput, AllocError> {
     log::debug!(
         "[native-fa] emit_function: starting with {} vinsts, {} edits",
         vinsts.len(),

@@ -4,7 +4,6 @@
 //! freeing registers for defs, and recording spill/reload edits.
 
 use crate::abi::FuncAbi;
-use crate::isa::rv32::gpr::{self, PReg};
 use crate::regalloc::pool::RegPool;
 use crate::regalloc::spill::SpillAlloc;
 use crate::regalloc::trace::TraceEntry;
@@ -71,9 +70,9 @@ fn build_passthrough_set(
     vinsts: &[VInst],
     vreg_pool: &[VReg],
     func_abi: &FuncAbi,
-) -> Vec<Option<PReg>> {
+) -> Vec<Option<u8>> {
     let max_vreg = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize;
-    let mut passthrough: Vec<Option<PReg>> = vec![None; max_vreg + 1];
+    let mut passthrough: Vec<Option<u8>> = vec![None; max_vreg + 1];
     let mut disqualified = vec![false; max_vreg + 1];
 
     for &(vreg_idx, preg) in func_abi.precolors() {
@@ -92,14 +91,15 @@ fn build_passthrough_set(
             } => {
                 let arg_base = if *callee_uses_sret { 1 } else { 0 };
                 let call_args = args.vregs(vreg_pool);
+                let arg_regs = func_abi.arg_regs();
                 for (i, &arg_vreg) in call_args.iter().enumerate() {
                     let idx = arg_vreg.0 as usize;
                     if idx >= passthrough.len() || disqualified[idx] || passthrough[idx].is_none() {
                         continue;
                     }
                     let entry_reg = passthrough[idx].unwrap();
-                    let is_reg_pass = arg_base + i < gpr::ARG_REGS.len();
-                    if !is_reg_pass || gpr::ARG_REGS[arg_base + i] != entry_reg {
+                    let is_reg_pass = arg_base + i < arg_regs.len();
+                    if !is_reg_pass || arg_regs[arg_base + i].hw != entry_reg {
                         disqualified[idx] = true;
                     }
                 }
@@ -174,8 +174,8 @@ struct WalkState<'a> {
     /// edit so the spill slot always has the latest value at sub-boundaries.
     loop_carried: RegSet,
     /// Entry-parameter vregs that stay in their ABI register (never enter pool).
-    /// Indexed by vreg index; `Some(preg)` = passthrough to that ABI register.
-    passthrough: Vec<Option<PReg>>,
+    /// Indexed by vreg index; `Some(hw)` = passthrough to that ABI register.
+    passthrough: Vec<Option<u8>>,
 }
 
 impl<'a> WalkState<'a> {
@@ -297,6 +297,7 @@ impl<'a> WalkState<'a> {
 
             if inst.is_call() {
                 process_call(
+                    self.func_abi,
                     inst,
                     inst_idx,
                     inst_idx_u16,
@@ -316,6 +317,7 @@ impl<'a> WalkState<'a> {
                     inst_idx_u16,
                     offset,
                     self.vreg_pool,
+                    self.func_abi,
                     &mut self.pool,
                     &mut self.spill,
                     &mut self.allocs,
@@ -358,7 +360,7 @@ impl<'a> WalkState<'a> {
     /// region's backward walk will see the spill slot and direct its def there;
     /// the reload fills the register expected by the following region.
     fn boundary_reload_before(&mut self, anchor: u16) {
-        let occupied: Vec<(PReg, VReg)> = self.pool.iter_occupied().collect();
+        let occupied: Vec<(u8, VReg)> = self.pool.iter_occupied().collect();
         for (preg, vreg) in occupied {
             let slot = self.spill.get_or_assign(vreg);
             self.edits.push((
@@ -376,7 +378,7 @@ impl<'a> WalkState<'a> {
         self.edits.reverse();
         self.edits.sort_by_key(|(pt, _)| *pt);
 
-        let mut entry_precolors: Vec<(VReg, PReg)> = Vec::new();
+        let mut entry_precolors: Vec<(VReg, u8)> = Vec::new();
         for (vreg_idx, preg) in self.func_abi.precolors() {
             let vreg = VReg(*vreg_idx as u16);
             entry_precolors.push((vreg, preg.hw));
@@ -500,7 +502,7 @@ pub fn walk_linear(
     vreg_pool: &[VReg],
     func_abi: &FuncAbi,
 ) -> Result<AllocOutput, AllocError> {
-    walk_linear_with_pool(vinsts, vreg_pool, func_abi, RegPool::new())
+    walk_linear_with_pool(vinsts, vreg_pool, func_abi, RegPool::new(func_abi.isa()))
 }
 
 /// Walk a Linear region backward with a configured pool.
@@ -530,6 +532,7 @@ fn process_generic(
     inst_idx_u16: u16,
     offset: usize,
     vreg_pool: &[VReg],
+    func_abi: &FuncAbi,
     pool: &mut RegPool,
     spill: &mut SpillAlloc,
     allocs: &mut [Alloc],
@@ -561,8 +564,7 @@ fn process_generic(
             let src_has_home = pool.home(*src).is_some();
             pool.free(preg);
             if src_has_home {
-                allocs[use_idx] =
-                    alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
+                allocs[use_idx] = alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
             } else {
                 let evicted = pool.alloc_fixed(preg, *src);
                 if let Some(evicted_vreg) = evicted {
@@ -678,7 +680,10 @@ fn process_generic(
     // The emitter loads each into TEMP0 and stores to the sret buffer sequentially,
     // so no register conflicts are possible. This eliminates the entire class of
     // Ret operand collisions where later operands evict earlier ones.
-    let is_sret_ret = matches!(inst, VInst::Ret { vals, .. } if (vals.count as usize) > crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD);
+    let is_sret_ret = matches!(
+        inst,
+        VInst::Ret { vals, .. } if func_abi.isa().sret_uses_buffer_for(vals.count as u32)
+    );
     inst.for_each_use(vreg_pool, |use_vreg| {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
@@ -769,7 +774,7 @@ fn alloc_use(
 
 fn handle_eviction(
     evicted: Option<VReg>,
-    preg: PReg,
+    preg: u8,
     inst_idx: usize,
     inst_idx_u16: u16,
     spill: &mut SpillAlloc,
@@ -811,6 +816,7 @@ fn handle_eviction(
 ///   Before(call): saves first, then arg moves
 ///   After(call):  ret moves first, then restores
 fn process_call(
+    func_abi: &FuncAbi,
     inst: &VInst,
     inst_idx: usize,
     inst_idx_u16: u16,
@@ -821,8 +827,9 @@ fn process_call(
     allocs: &mut [Alloc],
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut TraceSink,
-    passthrough: &[Option<PReg>],
+    passthrough: &[Option<u8>],
 ) {
+    let isa = func_abi.isa();
     let (args_slice, rets_slice, callee_uses_sret) = match inst {
         VInst::Call {
             args,
@@ -847,7 +854,7 @@ fn process_call(
     // eviction restores must NOT target these, or they overwrite the return
     // value (regalloc2 avoids this by removing clobbers from available_pregs
     // before operand allocation; we filter at restore-emit time).
-    let mut ret_move_pool_regs: Vec<PReg> = Vec::new();
+    let mut ret_move_pool_regs: Vec<u8> = Vec::new();
 
     // ── Step 1: Defs (return values) ──
     let mut operand_idx: usize = 0;
@@ -855,7 +862,7 @@ fn process_call(
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        if callee_uses_sret || i >= gpr::RET_REGS.len() {
+        if callee_uses_sret || i >= isa.direct_ret_reg_count() {
             let alloc = if let Some(preg) = pool.home(ret_vreg) {
                 Alloc::Reg(preg)
             } else if let Some(slot) = spill.has_slot(ret_vreg) {
@@ -870,7 +877,7 @@ fn process_call(
             continue;
         }
 
-        let target = gpr::RET_REGS[i];
+        let target = isa.direct_ret_reg_hw(i).expect("ret slot within direct_ret_reg_count");
 
         allocs[alloc_idx] = Alloc::Reg(target);
 
@@ -927,7 +934,8 @@ fn process_call(
     // the registers from the LRU so they can't be reused during arg allocation
     // (matches regalloc2's remove_clobbers_from_available_pregs). Emit only
     // post-call reloads, no pre-call saves.
-    let clobbered: Vec<(PReg, VReg)> = gpr::CALLER_SAVED_POOL
+    let clobbered: Vec<(u8, VReg)> = isa
+        .caller_saved_pool_hw()
         .iter()
         .filter_map(|&preg| {
             pool.iter_occupied()
@@ -935,7 +943,7 @@ fn process_call(
                 .map(|(_, v)| (preg, v))
         })
         .collect();
-    let mut clobbered_pregs: Vec<PReg> = Vec::new();
+    let mut clobbered_pregs: Vec<u8> = Vec::new();
     for (preg, vreg) in &clobbered {
         let slot = spill.get_or_assign(*vreg);
         pool.evict(*preg);
@@ -975,16 +983,18 @@ fn process_call(
     let arg_base = if callee_uses_sret { 1 } else { 0 };
 
     // (vreg, target_arg_reg) for register-pass args — Before moves deferred.
-    let mut reg_pass_args: Vec<(VReg, PReg)> = Vec::new();
+    let mut reg_pass_args: Vec<(VReg, u8)> = Vec::new();
 
     // ── Phase A: allocate every arg vreg into the pool ──
     for (i, &arg_vreg) in args.iter().enumerate() {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        let is_reg_pass = arg_base + i < gpr::ARG_REGS.len();
+        let is_reg_pass = arg_base + i < isa.call_arg_reg_count();
         if is_reg_pass {
-            let target = gpr::ARG_REGS[arg_base + i];
+            let target = isa
+                .call_arg_reg_hw(arg_base + i)
+                .expect("arg slot within call_arg_reg_count");
 
             // Pass-through shortcut: vreg stays in its ABI register, no pool needed.
             let is_passthrough = passthrough
@@ -1095,7 +1105,7 @@ fn process_call(
                     alloc::format!(
                         "v{}: pool -> x{} (deferred)",
                         arg_vreg.0,
-                        gpr::ARG_REGS[arg_base + i]
+                        isa.call_arg_reg_hw(arg_base + i).unwrap_or(0)
                     )
                 } else {
                     alloc::format!(
@@ -1177,18 +1187,10 @@ fn process_call(
 mod tests {
     use super::*;
     use crate::debug::vinst;
-    use crate::isa::rv32::abi;
-    use lps_shared::{LpsFnSig, LpsType};
+    use crate::regalloc::test::abi_fixtures;
 
     fn make_abi() -> FuncAbi {
-        abi::func_abi_rv32(
-            &LpsFnSig {
-                name: alloc::string::String::from("test"),
-                return_type: LpsType::Void,
-                parameters: vec![],
-            },
-            0,
-        )
+        abi_fixtures::void_func_abi()
     }
 
     #[test]
@@ -1256,7 +1258,13 @@ mod tests {
             Ret i4";
         let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
         let output =
-            walk_linear_with_pool(&vinsts, &pool, &make_abi(), RegPool::with_capacity(2)).unwrap();
+            walk_linear_with_pool(
+                &vinsts,
+                &pool,
+                &make_abi(),
+                RegPool::with_capacity(crate::isa::IsaTarget::Rv32imac, 2),
+            )
+            .unwrap();
 
         // v2 must be spilled (only 2 regs, 3 live values at inst 3)
         assert!(

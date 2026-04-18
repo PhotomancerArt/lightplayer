@@ -9,6 +9,7 @@ use lpvm::FunctionDebugInfo;
 
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::vinst::ModuleSymbols;
 
 /// Relocation entry for a call site.
@@ -18,6 +19,8 @@ pub struct NativeReloc {
     pub offset: usize,
     /// Symbol name to resolve (builtin or function).
     pub symbol: String,
+    /// ELF / JIT relocation type (e.g. [`crate::isa::rv32::link::R_RISCV_CALL_PLT`]).
+    pub r_type: u32,
 }
 
 /// Output of one function's compilation.
@@ -50,6 +53,8 @@ pub struct CompileSession {
     pub symbols: ModuleSymbols,
     /// Module ABI for param/return locations.
     pub abi: ModuleAbi,
+    /// Target ISA for per-function ABI construction.
+    pub isa: IsaTarget,
     /// Floating point mode.
     pub float_mode: FloatMode,
     /// Compilation options.
@@ -60,12 +65,14 @@ impl CompileSession {
     /// Create a new compile session for a module.
     pub fn new(
         abi: ModuleAbi,
+        isa: IsaTarget,
         float_mode: FloatMode,
         options: crate::native_options::NativeCompileOptions,
     ) -> Self {
         Self {
             symbols: ModuleSymbols::default(),
             abi,
+            isa,
             float_mode,
             options,
         }
@@ -86,7 +93,11 @@ pub fn compile_function(
     );
 
     // Build function ABI (needed for both debug and non-debug paths)
-    let func_abi = crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
+    let func_abi = match session.isa {
+        IsaTarget::Rv32imac => {
+            crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize)
+        }
+    };
 
     // 1-4. Const-fold, lower, optimize, allocate, emit
     let (code, relocs, debug_lines, sections) = {
@@ -149,13 +160,14 @@ pub fn compile_module(
     sig: &lps_shared::LpsModuleSig,
     float_mode: FloatMode,
     options: crate::native_options::NativeCompileOptions,
+    isa: IsaTarget,
 ) -> Result<CompiledModule, NativeError> {
     log::debug!(
         "[native-fa] compile_module: building ABI for {n} functions",
         n = ir.functions.len(),
     );
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
-    let mut session = CompileSession::new(module_abi, float_mode, options);
+    let module_abi = ModuleAbi::from_ir_and_sig(isa, ir, sig);
+    let mut session = CompileSession::new(module_abi, isa, float_mode, options);
 
     let sig_map: alloc::collections::BTreeMap<&str, &LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
@@ -208,13 +220,14 @@ mod tests {
     #[test]
     fn test_compile_session_new() {
         let abi = ModuleAbi::from_ir_and_sig(
+            IsaTarget::Rv32imac,
             &LpirModule {
                 imports: vec![],
                 functions: Default::default(),
             },
             &LpsModuleSig::default(),
         );
-        let session = CompileSession::new(abi, lpir::FloatMode::Q32, Default::default());
+        let session = CompileSession::new(abi, IsaTarget::Rv32imac, lpir::FloatMode::Q32, Default::default());
         assert!(session.symbols.names.is_empty());
     }
 
@@ -225,7 +238,13 @@ mod tests {
             functions: BTreeMap::new(),
         };
         let sig = LpsModuleSig::default();
-        let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
+        let result = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
         // Should succeed with no functions
         let compiled = result.unwrap();
         assert!(compiled.functions.is_empty());
@@ -266,7 +285,13 @@ mod tests {
             }],
             ..Default::default()
         };
-        let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
+        let result = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
         assert!(
             result.is_ok(),
             "expected successful compilation, got: {result:?}",
