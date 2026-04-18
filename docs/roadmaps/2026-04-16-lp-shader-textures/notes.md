@@ -1,5 +1,30 @@
 # lp-shader Texture System — Design Notes
 
+## Decisions / history
+
+### Host execution: Wasmtime instead of Cranelift JIT (2026)
+
+For **host** CPU execution of `lp-shader` / LPIR (tests, future `lp-cli`,
+post-M4 consumers), we standardize on **Wasmtime** (`lpvm-wasm`) rather
+than the in-process **`lpvm-cranelift` JIT**. The JIT crate is **not
+deleted** and remains for legacy callers and a **single-instance Phase 2
+smoke test** (`render_texture_smoke.rs`) that guards the JIT trait
+implementation.
+
+**Reasons:** (1) Multi-`JITModule` / multi-instance use in one process has
+exhibited **non-deterministic state leakage** in Cranelift’s JIT backend,
+reproducing as flaky or order-dependent failures (including panics such as
+“function must be compiled before it can be finalized” under
+`--test-threads=1`); we have prior art disabling JIT in `lps-filetests` for
+similar issues. (2) Wasmtime uses Cranelift internally with **proper
+per-instance isolation**. (3) **32-bit guest pointers** on the host match
+RV32, emulator, and browser — removing the 64-bit-host-pointer ABI corner
+that complicated `call_render_texture` for the old default host path.
+
+`lp-engine` and `lpfx-cpu` still use the JIT until **M4 (consumer
+migration)** lands; M4 explicitly includes switching those stacks to
+Wasmtime through `lp-shader`.
+
 ## Q32 / unorm16 relationship
 
 Q16.16 represents 1.0 as 0x0001_0000 (65536).

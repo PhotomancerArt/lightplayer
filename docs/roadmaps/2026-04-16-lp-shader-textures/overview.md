@@ -43,6 +43,20 @@ lps-shared          (types, layout, TextureStorageFormat)
                        render_frame, texture buffer types
 ```
 
+### Host execution backend
+
+**Wasmtime** (`lpvm-wasm`, e.g. `WasmLpvmEngine`) is the **host execution
+backend** for new work: `lp-shader` unit tests, future `lp-cli` / authoring
+tools, and (after M4) `lp-engine` / `lpfx-cpu` CPU paths should run
+shaders through Wasmtime for deterministic, per-instance isolation and
+32-bit guest pointers consistent with RV32, the emulator, and the browser.
+
+The in-process **`lpvm-cranelift` JIT remains in the tree** but is
+**deprecated for new work**; it is still wired into `lp-engine` and
+`lpfx-cpu` until M4 completes. **Removal is a separate, later task.** A
+small **Phase 2 handwritten smoke test** in `lpvm-cranelift` stays as a
+regression guard for the JIT `call_render_texture` / trait shape.
+
 ### 2. Fragment shader as a first-class concept
 
 `compile_frag` produces a `FragModule` / `FragInstance` with `render_frame`,
@@ -162,6 +176,11 @@ effects, data textures.
 
 - **Migration scope**: lp-engine and lpfx-cpu both need to adopt the new API.
   The old paths can coexist during migration.
+
+## Milestones
+
+- **M2.0 — `render_frame` via synthetic `__render_texture`** — ✅ complete.
+  Implementation plan: [`docs/plans/2026-04-17-lp-shader-textures-stage-v/`](../../plans/2026-04-17-lp-shader-textures-stage-v/).
 
 ## Dependencies
 

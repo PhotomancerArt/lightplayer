@@ -5,16 +5,17 @@
 Land the small, self-contained prerequisites for M2.0 (synthetic
 `__render_texture`) as a single "grab-bag" plan:
 
-1. **`Store16` LPIR op** — new memory op that stores the low 16 bits of an
-   `i32` VReg to `base + offset`. Required to write unorm16 channels to
-   texture buffers cleanly.
+1. **Narrow memory ops** — six new LPIR ops: `Store8`, `Store16`,
+   `Load8U`, `Load8S`, `Load16U`, `Load16S`. Required to write unorm16
+   channels in M2.0 and to read narrow texture data in M3. Existing
+   `Store` and `Load` remain 32-bit (no rename).
 2. **`R16Unorm` and `Rgb16Unorm` texture formats** — new variants in
    `TextureStorageFormat`. Forces format-parameterized design in M2.0.
 3. **`compile_px` validation update** — `expected_return_type` covers all
    three formats with matching render return types.
-4. **LPIR programmatic-construction spike** — confirm existing `FunctionBuilder`
-   API is sufficient for M2.0's synthetic `__render_texture` synthesis,
-   or identify gaps.
+4. ~~LPIR builder spike~~ — dropped. `FunctionBuilder` already exists with
+   `synthesize_shader_init` as a working precedent. M2.0 planning will sketch
+   the `__render_texture` synthesis directly.
 
 ## Dependencies
 
@@ -132,6 +133,9 @@ channel writes; f32 → u16 conversion should be explicit (via
 **Suggested approach**: **i32 only.** Validator errors on f32 value VReg.
 Keeps semantics simple and avoids implicit truncation of float bits.
 
+**Answer**: i32 only. Validator rejects f32 value VReg. Float→int must be
+explicit via `FtoiSatU` or equivalent.
+
 ### Q3: Do we also need Store8?
 
 **Context**: No current consumer for Store8. Future `Rgba8Unorm` etc.
@@ -140,13 +144,28 @@ would need it, but nothing in M2.0 or the immediate roadmap does.
 **Suggested approach**: **Scope to Store16 only.** Add Store8 when a
 concrete consumer arrives.
 
-### Q4: Should M1.1 add a matching `Load16` op?
+**Answer**: Add Store8 too. We're touching all the same files anyway —
+adding the variant alongside Store16 is marginal extra code, and we'll
+likely need it (Rgba8 textures, byte-stride buffers, etc.). Same semantics
+(truncate to low 8 bits, i32-only value). RV32 instruction: `sb`.
+WASM: `i32.store8`. Cranelift: `istore8` via `builder.ins().istore8(...)`.
 
-**Context**: Symmetry with Store. Not needed for M2.0 (texture writes only).
-Needed for texture *reads* (M3), which is a separate milestone.
+### Q4: Add narrow loads (Load8U/S, Load16U/S) too?
 
-**Suggested approach**: **Store16 only for M1.1.** Add Load16 alongside
-texture read support when we get to it.
+**Context**: Symmetry with Store. Not strictly needed for M2.0 (texture
+writes only). Needed for M3 (texture reads). All these load variants are
+well-supported downstream:
+- WASM: `i32.load8_u`, `i32.load8_s`, `i32.load16_u`, `i32.load16_s`
+- RV32: `lb`, `lbu`, `lh`, `lhu`
+- Cranelift: `uload8`, `sload8`, `uload16`, `sload16`
+
+**Suggested approach**: Add all four (Load8U, Load8S, Load16U, Load16S).
+Same touch points as Store8/Store16 — cheaper to do in one pass than
+split across milestones.
+
+**Answer**: Add all four. Total of six new ops in M1.1: `Store8`,
+`Store16`, `Load8U`, `Load8S`, `Load16U`, `Load16S`. Existing `Store`
+and `Load` remain unchanged (32-bit, native-width).
 
 ### Q5: New texture formats — add both R16Unorm and Rgb16Unorm, or just R16Unorm?
 
@@ -158,6 +177,10 @@ awkward 3-channel stride (6 bpp).
 `TextureStorageFormat` is trivial (two enum arms, two match updates,
 two tests). Forces M2.0 to handle all stride patterns. Decision already
 made in roadmap planning.
+
+**Answer**: Add both. `R16Unorm` → `Float`, `Rgb16Unorm` → `Vec3`,
+`Rgba16Unorm` → `Vec4`. Update `bytes_per_pixel`, `channel_count`,
+`expected_return_type`, and validation tests.
 
 ### Q6: LPIR builder spike — plan deliverable or skip entirely?
 
@@ -172,6 +195,11 @@ half a phase.
 
 Output goes into a `lpir-builder-spike.md` doc in the plan directory.
 
+**Answer**: Drop. `FunctionBuilder` is already mature and
+`synthesize_shader_init` is a working precedent — no spike needed.
+M2.0 planning will sketch `__render_texture` synthesis directly using
+those examples.
+
 ### Q7: Where do Store16 tests live?
 
 **Context**: `lpir/tests/all_ops_roundtrip.rs` tests round-trip +
@@ -184,6 +212,12 @@ unit tests.
   `Store16 → VInst::Store16`.
 - Rely on `all_ops_roundtrip.rs` for Cranelift / WASM end-to-end.
 - No new filetest — filetests exercise Store16 only once M2.0 lands.
+
+**Answer**: Approved. All six new ops (`Store8`, `Store16`, `Load8U`,
+`Load8S`, `Load16U`, `Load16S`) get:
+- Round-trip + per-backend execution coverage in `all_ops_roundtrip.rs`
+- Unit tests in `lpvm-native/src/lower.rs` for `LpirOp → VInst` mapping
+- No new filetests in M1.1.
 
 ### Q8: Endianness concern for Store16 writes to texture buffers?
 
