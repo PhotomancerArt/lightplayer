@@ -67,4 +67,39 @@ impl IsaTarget {
             IsaTarget::Rv32imac => elf::EF_RISCV_FLOAT_ABI_SOFT,
         }
     }
+
+    /// Caller-saved GPR indices within the allocatable pool (clobbered across calls).
+    pub fn caller_saved_pool_hw(self) -> &'static [u8] {
+        match self {
+            IsaTarget::Rv32imac => crate::isa::rv32::gpr::CALLER_SAVED_POOL,
+        }
+    }
+
+    /// Hardware index for the `idx`-th scalar return register for direct (non-sret) returns.
+    pub fn direct_ret_reg_hw(self, idx: usize) -> Option<u8> {
+        match self {
+            IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.get(idx).copied(),
+        }
+    }
+
+    /// Count of direct return registers in the hardware ABI (e.g. 2 for RV32 a0–a1).
+    pub fn direct_ret_reg_count(self) -> usize {
+        match self {
+            IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.len(),
+        }
+    }
+
+    /// Hardware index for the `idx`-th incoming call argument register.
+    pub fn call_arg_reg_hw(self, idx: usize) -> Option<u8> {
+        match self {
+            IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.get(idx).copied(),
+        }
+    }
+
+    /// Number of argument registers in the hardware calling convention.
+    pub fn call_arg_reg_count(self) -> usize {
+        match self {
+            IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.len(),
+        }
+    }
 }

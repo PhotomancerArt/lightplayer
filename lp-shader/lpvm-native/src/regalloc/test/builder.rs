@@ -19,10 +19,12 @@
 
 use crate::abi::FuncAbi;
 use crate::debug::vinst;
+use crate::isa::IsaTarget;
 use crate::regalloc::AllocOutput;
 use crate::regalloc::pool::RegPool;
 use crate::regalloc::render::render_alloc_output;
 use crate::regalloc::walk::walk_linear_with_pool;
+
 use crate::isa::rv32::abi;
 use crate::vinst::{ModuleSymbols, VInst, VReg};
 use alloc::string::{String, ToString};
@@ -117,9 +119,10 @@ impl AllocTestBuilder {
     ) -> AllocTestResult {
         let func_abi = self.build_func_abi();
 
+        let isa = IsaTarget::Rv32imac;
         let pool = match self.pool_size {
-            Some(n) => RegPool::with_capacity(n),
-            None => RegPool::new(),
+            Some(n) => RegPool::with_capacity(isa, n),
+            None => RegPool::new(isa),
         };
 
         let output = walk_linear_with_pool(&vinsts, &vreg_pool, &func_abi, pool)
@@ -127,7 +130,7 @@ impl AllocTestBuilder {
 
         crate::regalloc::verify::verify_alloc(&vinsts, &vreg_pool, &output, &func_abi);
 
-        let rendered = render_alloc_output(&vinsts, &vreg_pool, &output, Some(&symbols));
+        let rendered = render_alloc_output(&vinsts, &vreg_pool, &output, Some(&symbols), isa);
 
         AllocTestResult { output, rendered }
     }
