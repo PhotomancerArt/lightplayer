@@ -13,6 +13,7 @@ pub fn collect_fa_data(
     float_mode: FloatMode,
     func_filter: Option<&str>,
 ) -> Result<BackendDebugData> {
+    use lpvm_native::IsaTarget;
     use lpvm_native::abi::ModuleAbi;
     use lpvm_native::lower_ops;
     use lpvm_native::regalloc::allocate;
@@ -20,7 +21,7 @@ pub fn collect_fa_data(
     use lpvm_native::isa::rv32::abi::func_abi_rv32;
     use lpvm_native::isa::rv32::emit::emit_function;
 
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
+    let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, ir, sig);
 
     let sig_map: std::collections::BTreeMap<&str, &lps_frontend::LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();

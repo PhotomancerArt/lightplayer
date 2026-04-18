@@ -7,6 +7,7 @@ use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
 
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::native_options::NativeCompileOptions;
 
 use super::builtins::BuiltinTable;
@@ -48,6 +49,7 @@ impl LpvmEngine for NativeJitEngine {
             &self.builtin_table,
             self.options.float_mode,
             self.options.alloc_trace,
+            IsaTarget::Rv32imac,
         )?;
         Ok(NativeJitModule {
             inner: Arc::new(NativeJitModuleInner {

@@ -38,6 +38,7 @@ pub mod rt_jit;
 pub mod isa;
 
 pub use abi::ModuleAbi;
+pub use isa::IsaTarget;
 pub use compile::{
     compile_function, compile_module, CompileSession, CompiledFunction, CompiledModule, NativeReloc,
 };

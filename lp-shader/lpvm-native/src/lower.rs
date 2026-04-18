@@ -1394,7 +1394,7 @@ mod tests {
 
     fn empty_ir_abi() -> (LpirModule, ModuleAbi) {
         let ir = LpirModule::default();
-        let abi = ModuleAbi::from_ir_and_sig(&ir, &LpsModuleSig::default());
+        let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &LpsModuleSig::default());
         (ir, abi)
     }
 
@@ -2109,7 +2109,7 @@ mod tests {
             functions: BTreeMap::from([(FuncId(0), func.clone())]),
         };
         let sig = LpsModuleSig::default();
-        let abi = ModuleAbi::from_ir_and_sig(&ir, &sig);
+        let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);
 
         let lowered = lower_ops(&func, &ir, &abi, FloatMode::Q32).expect("lower ok");
 

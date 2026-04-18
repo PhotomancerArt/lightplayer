@@ -9,6 +9,7 @@ use lpvm::FunctionDebugInfo;
 
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::vinst::ModuleSymbols;
 
 /// Relocation entry for a call site.
@@ -149,12 +150,13 @@ pub fn compile_module(
     sig: &lps_shared::LpsModuleSig,
     float_mode: FloatMode,
     options: crate::native_options::NativeCompileOptions,
+    isa: IsaTarget,
 ) -> Result<CompiledModule, NativeError> {
     log::debug!(
         "[native-fa] compile_module: building ABI for {n} functions",
         n = ir.functions.len(),
     );
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
+    let module_abi = ModuleAbi::from_ir_and_sig(isa, ir, sig);
     let mut session = CompileSession::new(module_abi, float_mode, options);
 
     let sig_map: alloc::collections::BTreeMap<&str, &LpsFnSig> =
@@ -208,6 +210,7 @@ mod tests {
     #[test]
     fn test_compile_session_new() {
         let abi = ModuleAbi::from_ir_and_sig(
+            IsaTarget::Rv32imac,
             &LpirModule {
                 imports: vec![],
                 functions: Default::default(),
@@ -225,7 +228,13 @@ mod tests {
             functions: BTreeMap::new(),
         };
         let sig = LpsModuleSig::default();
-        let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
+        let result = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
         // Should succeed with no functions
         let compiled = result.unwrap();
         assert!(compiled.functions.is_empty());
@@ -266,7 +275,13 @@ mod tests {
             }],
             ..Default::default()
         };
-        let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
+        let result = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
         assert!(
             result.is_ok(),
             "expected successful compilation, got: {result:?}",

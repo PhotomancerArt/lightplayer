@@ -10,6 +10,7 @@ use object::{
 
 use crate::compile::CompiledModule;
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 
 /// Linked JIT image with entry offsets.
 #[derive(Clone, Debug)]
@@ -79,11 +80,13 @@ fn patch_call_plt(
 /// Linked JIT image with all call sites patched.
 pub fn link_jit<F>(
     module: &CompiledModule,
+    isa: IsaTarget,
     mut resolve_symbol: F,
 ) -> Result<LinkedJitImage, NativeError>
 where
     F: FnMut(&str) -> Option<u32>,
 {
+    let _ = isa;
     // Concatenate all function code
     let mut code = Vec::new();
     let mut entries = BTreeMap::new();
@@ -137,7 +140,8 @@ where
 ///
 /// # Returns
 /// ELF object file as bytes.
-pub fn link_elf(module: &CompiledModule) -> Result<Vec<u8>, NativeError> {
+pub fn link_elf(module: &CompiledModule, isa: IsaTarget) -> Result<Vec<u8>, NativeError> {
+    let _ = isa;
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::Riscv32, Endianness::Little);
     obj.flags = FileFlags::Elf {
         os_abi: elf::ELFOSABI_NONE,
@@ -225,6 +229,7 @@ pub fn link_elf(module: &CompiledModule) -> Result<Vec<u8>, NativeError> {
 mod tests {
     use super::*;
     use crate::compile::NativeReloc;
+    use crate::isa::IsaTarget;
     use alloc::string::String;
     use alloc::vec;
 
@@ -246,7 +251,7 @@ mod tests {
         let module = simple_compiled_module();
 
         // Resolver returns a fixed address
-        let linked = link_jit(&module, |_sym| Some(0x1000)).unwrap();
+        let linked = link_jit(&module, IsaTarget::Rv32imac, |_sym| Some(0x1000)).unwrap();
 
         assert!(!linked.code.is_empty());
         assert_eq!(linked.entries.len(), 1);
@@ -256,7 +261,7 @@ mod tests {
     #[test]
     fn test_link_elf_basic() {
         let module = simple_compiled_module();
-        let elf = link_elf(&module).unwrap();
+        let elf = link_elf(&module, IsaTarget::Rv32imac).unwrap();
 
         // Check ELF magic
         assert_eq!(&elf[0..4], &[0x7f, b'E', b'L', b'F']);
@@ -301,7 +306,7 @@ mod tests {
         };
 
         // Custom resolver that returns the offset of "callee"
-        let linked = link_jit(&module, |sym| {
+        let linked = link_jit(&module, IsaTarget::Rv32imac, |sym| {
             if sym == "caller" {
                 Some(0x1000)
             } else if sym == "callee" {
