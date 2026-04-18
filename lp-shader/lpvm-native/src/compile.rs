@@ -19,6 +19,8 @@ pub struct NativeReloc {
     pub offset: usize,
     /// Symbol name to resolve (builtin or function).
     pub symbol: String,
+    /// ELF / JIT relocation type (e.g. [`crate::isa::rv32::link::R_RISCV_CALL_PLT`]).
+    pub r_type: u32,
 }
 
 /// Output of one function's compilation.

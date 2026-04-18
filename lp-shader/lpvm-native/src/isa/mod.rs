@@ -1,6 +1,5 @@
 pub mod rv32;
 
-use object::elf;
 use object::Architecture;
 
 /// The target ISA + sub-architecture for a compiled module.
@@ -64,7 +63,7 @@ impl IsaTarget {
     /// e_flags value for ELF header.
     pub fn elf_e_flags(self) -> u32 {
         match self {
-            IsaTarget::Rv32imac => elf::EF_RISCV_FLOAT_ABI_SOFT,
+            IsaTarget::Rv32imac => crate::isa::rv32::link::EF_RISCV_FLOAT_ABI_SOFT,
         }
     }
 

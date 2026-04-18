@@ -103,6 +103,7 @@ pub fn emit_lowered_with_alloc(
             .map(|r| NativeReloc {
                 offset: r.offset,
                 symbol: r.symbol,
+                r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
             })
             .collect(),
         debug_lines: emitted.debug_lines,
