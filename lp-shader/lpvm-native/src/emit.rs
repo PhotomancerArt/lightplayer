@@ -111,44 +111,6 @@ pub fn emit_lowered_with_alloc(
     })
 }
 
-/// Emit a sequence of VInsts to machine code.
-///
-/// This function is DEPRECATED - use `emit_lowered` instead.
-/// It constructs a minimal LoweredFunction wrapper for the given VInsts.
-pub fn emit_vinsts(
-    vinsts: &[VInst],
-    func_abi: &crate::abi::FuncAbi,
-    func: &lpir::IrFunction,
-    vreg_pool: &[crate::vinst::VReg],
-) -> Result<EmittedCode, NativeError> {
-    // Build a minimal LoweredFunction for the new allocator
-    let lpir_slots: Vec<(u32, u32)> = func
-        .slots
-        .iter()
-        .enumerate()
-        .map(|(id, decl)| (id as u32, decl.size))
-        .collect();
-    let mut lowered = crate::lower::LoweredFunction {
-        vinsts: vinsts.to_vec(),
-        vreg_pool: vreg_pool.to_vec(),
-        symbols: crate::vinst::ModuleSymbols::default(),
-        loop_regions: Vec::new(),
-        region_tree: crate::region::RegionTree::new(),
-        lpir_slots,
-    };
-
-    // Build a Linear region covering all instructions
-    if !vinsts.is_empty() {
-        let root = lowered.region_tree.push(crate::region::Region::Linear {
-            start: 0,
-            end: vinsts.len() as u16,
-        });
-        lowered.region_tree.root = root;
-    }
-
-    emit_lowered(&lowered, func_abi)
-}
-
 /// Returns true if the function contains any call instructions.
 fn contains_call(vinsts: &[VInst]) -> bool {
     vinsts.iter().any(|inst| matches!(inst, VInst::Call { .. }))

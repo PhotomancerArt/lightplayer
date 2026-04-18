@@ -19,7 +19,6 @@ pub fn collect_fa_data(
     use lpvm_native::regalloc::allocate;
     use lpvm_native::regalloc::render::render_interleaved;
     use lpvm_native::isa::rv32::abi::func_abi_rv32;
-    use lpvm_native::isa::rv32::emit::emit_function;
 
     let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, ir, sig);
 
@@ -68,32 +67,12 @@ pub fn collect_fa_data(
             &lowered.symbols,
         );
 
-        // Emit to get machine code
-        let mut used_callee_saved = alloc_result.used_callee_saved;
-        if let Some(p) = func_abi.sret_preservation_reg() {
-            use lpvm_native::abi::PregSet;
-            used_callee_saved = used_callee_saved.union(PregSet::singleton(p));
-        }
-        let caller_outgoing_stack_bytes =
-            lpvm_native::emit::max_outgoing_stack_bytes(&lowered.vinsts, &func_abi);
-        let is_leaf = !contains_call(&lowered.vinsts);
-        let frame = lpvm_native::abi::FrameLayout::compute(
+        let spill_slots = alloc_result.spill_slots;
+        let emitted = lpvm_native::emit::emit_lowered_with_alloc(
+            &lowered,
             &func_abi,
-            alloc_result.spill_slots,
-            used_callee_saved,
-            &lowered.lpir_slots,
-            is_leaf,
+            alloc_result,
             module_abi.max_callee_sret_bytes(),
-            caller_outgoing_stack_bytes,
-        );
-
-        let emitted = emit_function(
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &alloc_result.output,
-            frame,
-            &lowered.symbols,
-            func_abi.is_sret(),
         )
         .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
 
@@ -116,7 +95,7 @@ pub fn collect_fa_data(
         let mut func_data = FunctionDebugData::new(func.name.clone());
         func_data.lpir_count = lpir_count;
         func_data.disasm_count = disasm_count;
-        func_data.spill_slots = Some(alloc_result.spill_slots as usize);
+        func_data.spill_slots = Some(spill_slots as usize);
         func_data.interleaved = Some(interleaved);
         func_data.disasm = disasm;
         func_data.has_vinst = true;
@@ -228,8 +207,3 @@ fn disassemble_raw(code: &[u8]) -> String {
     out
 }
 
-/// Returns true if the function contains any call instructions.
-fn contains_call(vinsts: &[lpvm_native::vinst::VInst]) -> bool {
-    use lpvm_native::vinst::VInst;
-    vinsts.iter().any(|inst| matches!(inst, VInst::Call { .. }))
-}

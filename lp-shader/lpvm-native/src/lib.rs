@@ -43,7 +43,7 @@ pub use compile::{
     compile_function, compile_module, CompileSession, CompiledFunction, CompiledModule, NativeReloc,
 };
 pub use debug_asm::compile_module_asm_text;
-pub use emit::{emit_lowered_with_alloc, emit_vinsts, EmittedCode};
+pub use emit::{emit_lowered_with_alloc, EmittedCode};
 pub use error::{LowerError, NativeError};
 pub use link::{link_elf, link_jit, LinkedJitImage};
 pub use lower::{lower_lpir_op, lower_ops, LoopRegion, LoweredFunction};
