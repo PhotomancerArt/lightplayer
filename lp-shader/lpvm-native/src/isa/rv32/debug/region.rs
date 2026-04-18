@@ -107,10 +107,7 @@ pub fn format_region_tree(
             ));
         }
 
-        Region::Block {
-            body,
-            exit_label,
-        } => {
+        Region::Block { body, exit_label } => {
             lines.push(format!("{prefix}Block (exit={exit_label})"));
             lines.push(format!("{prefix}  body:"));
             lines.push(format_region_tree(

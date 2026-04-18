@@ -78,15 +78,13 @@ where
                             r_type: reloc.r_type,
                         };
                         crate::isa::rv32::link::patch_call_plt(
-                            &mut code,
-                            &abs_reloc,
-                            image_base,
-                            target,
+                            &mut code, &abs_reloc, image_base, target,
                         )?;
                     } else {
                         return Err(NativeError::Internal(alloc::format!(
                             "unsupported JIT relocation r_type {} for ISA {:?}",
-                            reloc.r_type, isa
+                            reloc.r_type,
+                            isa
                         )));
                     }
                 }

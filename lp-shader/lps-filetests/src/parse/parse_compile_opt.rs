@@ -30,9 +30,7 @@ pub fn parse_compile_opt_line(line: &str, line_number: usize) -> Result<Option<(
         ));
     }
     let comma = inner.find(',').ok_or_else(|| {
-        anyhow!(
-            "line {line_number}: `compile-opt` expects `key, value` (comma-separated)"
-        )
+        anyhow!("line {line_number}: `compile-opt` expects `key, value` (comma-separated)")
     })?;
     let key = inner[..comma].trim();
     let value = inner[comma + 1..].trim();
@@ -68,10 +66,16 @@ mod tests {
 
     #[test]
     fn not_directive() {
-        assert!(parse_compile_opt_line("// run: x() == 1", 1).unwrap().is_none());
-        assert!(parse_compile_opt_line("// @unimplemented(wasm.q32)", 1)
-            .unwrap()
-            .is_none());
+        assert!(
+            parse_compile_opt_line("// run: x() == 1", 1)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_compile_opt_line("// @unimplemented(wasm.q32)", 1)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

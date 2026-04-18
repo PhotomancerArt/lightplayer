@@ -300,6 +300,12 @@ pub enum LpirOp {
         dst: VReg,
         src: VReg,
     },
+    /// Bit-level inverse of [`LpirOp::FfromI32Bits`]: [`IrType::F32`] → [`IrType::I32`]
+    /// (`f32::to_bits` as `i32`; Q32 mode recovers the raw Q-encoded word).
+    IfromF32Bits {
+        dst: VReg,
+        src: VReg,
+    },
 
     // --- Select / copy ---
     Select {
@@ -484,6 +490,7 @@ impl LpirOp {
             | LpirOp::ItofS { dst, .. }
             | LpirOp::ItofU { dst, .. }
             | LpirOp::FfromI32Bits { dst, .. }
+            | LpirOp::IfromF32Bits { dst, .. }
             | LpirOp::Select { dst, .. }
             | LpirOp::Copy { dst, .. }
             | LpirOp::SlotAddr { dst, .. }

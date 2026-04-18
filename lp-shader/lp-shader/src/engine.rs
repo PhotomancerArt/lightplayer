@@ -26,22 +26,46 @@ impl<E: LpvmEngine> LpsEngine<E> {
     ///
     /// Validates the `render(vec2 pos)` signature against `output_format`.
     /// Returns `Validation` error if signature mismatch.
+    ///
+    /// Also synthesises a format-specific `__render_texture_<format>` function
+    /// (see [`crate::synth::render_texture`]); it is recorded in
+    /// [`LpsModuleSig::functions`] with [`lps_shared::LpsFnKind::Synthetic`].
+    /// Discover it with
+    /// `meta().functions.iter().filter(|f| f.kind == lps_shared::LpsFnKind::Synthetic)`.
     pub fn compile_px(
         &self,
         glsl: &str,
         output_format: TextureStorageFormat,
-    ) -> Result<LpsPxShader<E::Module>, LpsError> {
+    ) -> Result<LpsPxShader, LpsError>
+    where
+        E::Module: 'static,
+    {
         let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
-        let (ir, meta) = lps_frontend::lower(&naga).map_err(|e| LpsError::Lower(format!("{e}")))?;
+        let (mut ir, mut meta) =
+            lps_frontend::lower(&naga).map_err(|e| LpsError::Lower(format!("{e}")))?;
         drop(naga);
 
         let render_fn_index = validate_render_sig(&meta, output_format)?;
+
+        let render_texture_fn_name = crate::synth::synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            render_fn_index,
+            output_format,
+        )
+        .map_err(|e| LpsError::Compile(format!("synth render_texture: {e:?}")))?;
 
         let module = self
             .engine
             .compile(&ir, &meta)
             .map_err(|e| LpsError::Compile(format!("{e}")))?;
-        LpsPxShader::new(module, meta, output_format, render_fn_index)
+        LpsPxShader::new(
+            module,
+            meta,
+            output_format,
+            render_fn_index,
+            render_texture_fn_name,
+        )
     }
 
     /// Allocate a texture in the engine's shared memory.

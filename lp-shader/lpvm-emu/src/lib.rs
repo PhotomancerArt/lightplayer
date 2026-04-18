@@ -41,7 +41,7 @@ mod tests {
 
     use lpir::parse_module;
     use lps_shared::lps_value_f32::LpsValueF32;
-    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+    use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
     use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 
     use super::*;
@@ -83,6 +83,7 @@ mod tests {
                     },
                 ],
                 return_type: LpsType::Float,
+                kind: LpsFnKind::UserDefined,
             }],
             ..Default::default()
         };

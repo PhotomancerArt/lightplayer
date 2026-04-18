@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::isa::rv32::abi;
-use lps_shared::{LpsFnSig, LpsType};
+use lps_shared::{LpsFnKind, LpsFnSig, LpsType};
 
 /// Minimal void function ABI for allocator unit tests.
 pub fn void_func_abi() -> FuncAbi {
@@ -14,6 +14,7 @@ pub fn void_func_abi() -> FuncAbi {
             name: String::from("test"),
             return_type: LpsType::Void,
             parameters: Vec::new(),
+            kind: LpsFnKind::UserDefined,
         },
         0,
     )

@@ -646,11 +646,7 @@ fn format_edit(edit: &Edit, isa: IsaTarget) -> String {
             )
         }
         Edit::LoadIncomingArg { fp_offset, to } => {
-            format!(
-                "load_arg: [fp+{}] -> {}",
-                fp_offset,
-                format_alloc(*to, isa)
-            )
+            format!("load_arg: [fp+{}] -> {}", fp_offset, format_alloc(*to, isa))
         }
     }
 }

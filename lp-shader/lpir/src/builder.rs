@@ -225,7 +225,10 @@ impl FunctionBuilder {
         let end_idx = self.body.len();
         self.body.push(LpirOp::End);
         let after = (end_idx + 1) as u32;
-        let entry = self.block_stack.pop().expect("end_block without push_block");
+        let entry = self
+            .block_stack
+            .pop()
+            .expect("end_block without push_block");
         match entry {
             BlockEntry::Block { start_idx } => {
                 if let LpirOp::Block { end_offset } = &mut self.body[start_idx] {

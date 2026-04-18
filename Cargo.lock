@@ -3864,10 +3864,11 @@ dependencies = [
 name = "lp-shader"
 version = "40.0.0"
 dependencies = [
+ "lpir",
  "lps-frontend",
  "lps-shared",
  "lpvm",
- "lpvm-cranelift",
+ "lpvm-wasm",
 ]
 
 [[package]]

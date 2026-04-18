@@ -15,10 +15,10 @@ pub fn collect_fa_data(
 ) -> Result<BackendDebugData> {
     use lpvm_native::IsaTarget;
     use lpvm_native::abi::ModuleAbi;
+    use lpvm_native::isa::rv32::abi::func_abi_rv32;
     use lpvm_native::lower_ops;
     use lpvm_native::regalloc::allocate;
     use lpvm_native::regalloc::render::render_interleaved;
-    use lpvm_native::isa::rv32::abi::func_abi_rv32;
 
     let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, ir, sig);
 
@@ -41,6 +41,7 @@ pub fn collect_fa_data(
             name: func.name.clone(),
             return_type: lps_frontend::LpsType::Void,
             parameters: Vec::new(),
+            kind: lps_frontend::LpsFnKind::UserDefined,
         };
         let fn_sig = sig_map
             .get(func.name.as_str())
@@ -206,4 +207,3 @@ fn disassemble_raw(code: &[u8]) -> String {
 
     out
 }
-

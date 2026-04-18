@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{FloatMode, IrFunction, LpirModule};
-use lps_shared::LpsFnSig;
+use lps_shared::{LpsFnKind, LpsFnSig};
 use lpvm::FunctionDebugInfo;
 
 use crate::abi::ModuleAbi;
@@ -184,6 +184,7 @@ pub fn compile_module(
             name: func.name.clone(),
             return_type: lps_shared::LpsType::Void,
             parameters: Vec::new(),
+            kind: LpsFnKind::UserDefined,
         };
         let fn_sig = sig_map
             .get(func.name.as_str())
@@ -215,7 +216,7 @@ mod tests {
     use alloc::vec;
 
     use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
-    use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
+    use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType};
 
     #[test]
     fn test_compile_session_new() {
@@ -227,7 +228,12 @@ mod tests {
             },
             &LpsModuleSig::default(),
         );
-        let session = CompileSession::new(abi, IsaTarget::Rv32imac, lpir::FloatMode::Q32, Default::default());
+        let session = CompileSession::new(
+            abi,
+            IsaTarget::Rv32imac,
+            lpir::FloatMode::Q32,
+            Default::default(),
+        );
         assert!(session.symbols.names.is_empty());
     }
 
@@ -282,6 +288,7 @@ mod tests {
                 name: String::from("test"),
                 return_type: LpsType::Int,
                 parameters: vec![],
+                kind: LpsFnKind::UserDefined,
             }],
             ..Default::default()
         };

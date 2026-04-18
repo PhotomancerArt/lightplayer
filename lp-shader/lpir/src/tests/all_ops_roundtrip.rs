@@ -177,6 +177,11 @@ pub(crate) fn module_all_ops() -> LpirModule {
         dst: fbits_d,
         src: i1,
     });
+    let ibits_d = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::IfromF32Bits {
+        dst: ibits_d,
+        src: f1,
+    });
 
     let sel_c = b.alloc_vreg(IrType::I32);
     b.push(LpirOp::IconstI32 {

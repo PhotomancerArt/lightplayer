@@ -408,8 +408,7 @@ mod tests {
         let func_abi = abi_fixtures::void_func_abi();
 
         let output = walk_linear(&vinsts, &pool, &func_abi).unwrap();
-        let rendered =
-            render_alloc_output(&vinsts, &pool, &output, Some(&symbols), func_abi.isa());
+        let rendered = render_alloc_output(&vinsts, &pool, &output, Some(&symbols), func_abi.isa());
 
         // Normalize whitespace for comparison
         let expected_normalized = expected.trim().replace("\r\n", "\n");

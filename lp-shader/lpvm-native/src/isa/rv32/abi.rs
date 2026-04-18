@@ -303,6 +303,7 @@ mod tests {
             name: name.into(),
             return_type: ret,
             parameters: params.iter().cloned().collect(),
+            kind: lps_shared::LpsFnKind::UserDefined,
         }
     }
 

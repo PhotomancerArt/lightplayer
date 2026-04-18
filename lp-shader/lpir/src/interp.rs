@@ -693,6 +693,10 @@ fn eval_op(
             let v = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(f32::from_bits(v as u32)))?;
         }
+        LpirOp::IfromF32Bits { dst, src } => {
+            let v = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::I32(v.to_bits() as i32))?;
+        }
         LpirOp::Select {
             dst,
             cond,
@@ -761,38 +765,22 @@ fn eval_op(
             let i = val_i32(get_reg(regs, *value)?)?;
             write_u16(slot_mem, addr, i as u16)?;
         }
-        LpirOp::Load8U {
-            dst,
-            base,
-            offset,
-        } => {
+        LpirOp::Load8U { dst, base, offset } => {
             let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
             let b = read_u8(slot_mem, addr)?;
             set_reg(regs, *dst, Value::I32(b as i32))?;
         }
-        LpirOp::Load8S {
-            dst,
-            base,
-            offset,
-        } => {
+        LpirOp::Load8S { dst, base, offset } => {
             let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
             let b = read_u8(slot_mem, addr)?;
             set_reg(regs, *dst, Value::I32(b as i8 as i32))?;
         }
-        LpirOp::Load16U {
-            dst,
-            base,
-            offset,
-        } => {
+        LpirOp::Load16U { dst, base, offset } => {
             let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
             let w = read_u16(slot_mem, addr)?;
             set_reg(regs, *dst, Value::I32(w as i32))?;
         }
-        LpirOp::Load16S {
-            dst,
-            base,
-            offset,
-        } => {
+        LpirOp::Load16S { dst, base, offset } => {
             let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
             let w = read_u16(slot_mem, addr)?;
             set_reg(regs, *dst, Value::I32(w as i16 as i32))?;

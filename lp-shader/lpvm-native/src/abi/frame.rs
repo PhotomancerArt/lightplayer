@@ -178,13 +178,14 @@ mod tests {
     use super::*;
     use crate::abi::classify::entry_param_scalar_count;
     use crate::isa::rv32::abi as rv32;
-    use lps_shared::{LpsFnSig, LpsType};
+    use lps_shared::{LpsFnKind, LpsFnSig, LpsType};
 
     fn abi_float() -> FuncAbi {
         let sig = LpsFnSig {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         rv32::func_abi_rv32(&sig, entry_param_scalar_count(&sig))
     }

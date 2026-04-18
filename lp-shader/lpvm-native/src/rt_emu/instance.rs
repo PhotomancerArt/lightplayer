@@ -9,10 +9,12 @@ use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
 use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
+use lpir::lpir_module::IrFunction;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmInstance, decode_q32_return, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
+    CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
+    encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
+    q32_to_lps_value_f32, validate_render_texture_sig_ir,
 };
 use lpvm_cranelift::{CompileOptions, signature_for_ir_func};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_header};
@@ -20,6 +22,11 @@ use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_
 use crate::error::NativeError;
 
 use super::NativeEmuModule;
+
+pub(crate) struct RenderTextureEntry {
+    name: String,
+    entry_pc: u32,
+}
 
 /// Per-instance emulation state with VMContext.
 pub struct NativeEmuInstance {
@@ -34,6 +41,7 @@ pub struct NativeEmuInstance {
     pub(crate) snapshot_offset: usize,
     /// Size of globals region in bytes
     pub(crate) globals_size: usize,
+    pub(crate) render_texture_cache: Option<RenderTextureEntry>,
 }
 
 impl NativeEmuInstance {
@@ -112,28 +120,45 @@ impl NativeEmuInstance {
         }
     }
 
-    fn invoke_flat(
-        &mut self,
-        name: &str,
-        flat: &[i32],
-        cycle_model: CycleModel,
-    ) -> Result<Vec<i32>, NativeError> {
-        self.last_guest_instruction_count = None;
-        self.last_guest_cycle_count = None;
-        self.refresh_vmctx_header();
+    fn resolve_render_texture(&mut self, fn_name: &str) -> Result<u32, NativeError> {
+        if let Some(entry) = &self.render_texture_cache {
+            if entry.name == fn_name {
+                return Ok(entry.entry_pc);
+            }
+        }
 
-        let ir_func = self
+        let ir_fn = self
             .module
             .ir
             .functions
             .values()
-            .find(|f| f.name == name)
-            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(fn_name.into())))?;
+        validate_render_texture_sig_ir(ir_fn).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "render-texture sig invalid: {e}"
+            )))
+        })?;
 
-        let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
-        full.push(self.vmctx_guest as i32);
-        full.extend_from_slice(flat);
+        let entry = *self.module.load.symbol_map.get(fn_name).ok_or_else(|| {
+            CallError::Unsupported(format!("symbol `{fn_name}` not in linked RV32 image"))
+        })?;
 
+        self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            entry_pc: entry,
+        });
+        Ok(entry)
+    }
+
+    /// Run emulator at `entry` with full arg words (including vmctx in slot 0).
+    fn run_emulator_call(
+        &mut self,
+        ir_func: &IrFunction,
+        entry: u32,
+        full: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, NativeError> {
         let isa = riscv32_lpvm_reference_isa()
             .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{e}"))))?;
         let opts = self.cranelift_options();
@@ -145,9 +170,6 @@ impl NativeEmuInstance {
             &*isa,
         );
         let n_ret = ir_func.return_types.len();
-        let entry = *self.module.load.symbol_map.get(name).ok_or_else(|| {
-            CallError::Unsupported(format!("symbol `{name}` not in linked RV32 image"))
-        })?;
 
         let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
         let shared = self.module.arena.storage_arc();
@@ -167,9 +189,6 @@ impl NativeEmuInstance {
         let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
         emu.set_cycle_model(cycle_model);
 
-        // The emulator handles sret natively: call_function_with_struct_return
-        // allocates a buffer on the emulator stack, passes its address in a0
-        // (shifting other args), executes, and reads results back as DataValues.
         let has_sr = sig
             .params
             .iter()
@@ -222,7 +241,6 @@ impl NativeEmuInstance {
             Err(e) => {
                 self.last_guest_instruction_count = None;
                 self.last_guest_cycle_count = None;
-                // Capture full debug info including disassembly and instruction log
                 let mut debug_parts = Vec::new();
                 debug_parts.push(format!("=== Debug Info ==="));
                 debug_parts.push(format!("Error: {e:?}"));
@@ -238,6 +256,36 @@ impl NativeEmuInstance {
                 ))))
             }
         }
+    }
+
+    fn invoke_flat(
+        &mut self,
+        name: &str,
+        flat: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, NativeError> {
+        self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
+        self.refresh_vmctx_header();
+
+        let ir_func = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?
+            .clone();
+
+        let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
+        full.push(self.vmctx_guest as i32);
+        full.extend_from_slice(flat);
+
+        let entry = *self.module.load.symbol_map.get(name).ok_or_else(|| {
+            CallError::Unsupported(format!("symbol `{name}` not in linked RV32 image"))
+        })?;
+
+        self.run_emulator_call(&ir_func, entry, &full, cycle_model)
     }
 
     fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), NativeError> {
@@ -344,6 +392,47 @@ impl LpvmInstance for NativeEmuInstance {
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
         self.call_q32_with_cycle_model(name, args, CycleModel::default())
+    }
+
+    fn call_render_texture(
+        &mut self,
+        fn_name: &str,
+        texture: &mut LpvmBuffer,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
+        self.refresh_vmctx_header();
+
+        if self.module.options.float_mode != FloatMode::Q32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeEmuInstance::call_render_texture requires FloatMode::Q32",
+            ))));
+        }
+
+        let entry = self.resolve_render_texture(fn_name)?;
+        let ir_func = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(fn_name.into())))?
+            .clone();
+
+        let tex_offset = i32::try_from(texture.guest_base()).map_err(|_| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "texture guest base {:#x} exceeds i32 range",
+                texture.guest_base()
+            )))
+        })?;
+        let vmctx = self.vmctx_guest as i32;
+        let full = [vmctx, tex_offset, width as i32, height as i32];
+        self.run_emulator_call(&ir_func, entry, &full, CycleModel::default())?;
+        Ok(())
     }
 
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {

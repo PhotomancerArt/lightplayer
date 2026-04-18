@@ -66,6 +66,7 @@ impl LpvmModule for NativeEmuModule {
             globals_offset,
             snapshot_offset,
             globals_size,
+            render_texture_cache: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot

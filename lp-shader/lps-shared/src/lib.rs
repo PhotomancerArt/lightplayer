@@ -9,6 +9,8 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
 
 pub mod layout;
 pub mod lps_value_f32;
@@ -26,7 +28,7 @@ pub use lps_value_f32::LpsValueF32;
 pub use lps_value_q32::{
     LpsValueQ32, LpsValueQ32Error, lps_value_f32_to_q32, q32_to_lps_value_f32,
 };
-pub use sig::{FnParam, LpsFnSig, LpsModuleSig, ParamQualifier};
+pub use sig::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, ParamQualifier};
 pub use texture_buffer::TextureBuffer;
 pub use texture_format::TextureStorageFormat;
 pub use types::{LayoutRules, LpsType, StructMember};

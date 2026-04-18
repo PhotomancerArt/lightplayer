@@ -11,10 +11,12 @@ workspace = true
 [features]
 default = []
 std = []
-cranelift = ["dep:lpvm-cranelift"]
 
 [dependencies]
+lpir = { path = "../lpir" }
 lps-shared = { path = "../lps-shared" }
 lpvm = { path = "../lpvm" }
 lps-frontend = { path = "../lps-frontend" }
-lpvm-cranelift = { path = "../lpvm-cranelift", optional = true }
+
+[dev-dependencies]
+lpvm-wasm = { path = "../lpvm-wasm" }

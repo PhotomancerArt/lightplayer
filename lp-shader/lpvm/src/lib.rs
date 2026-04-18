@@ -50,3 +50,82 @@ pub use vmcontext::{
     DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_METADATA,
     VMCTX_OFFSET_TRAP_HANDLER, VmContext, VmContextHeader, minimal_vmcontext,
 };
+
+use lpir::{IrFunction, IrType};
+
+/// Verify an [`IrFunction`] has the shape required by [`LpvmInstance::call_render_texture`]:
+/// `(Pointer, I32, I32) -> ()` in LPIR, with implicit vmctx in vreg 0.
+pub fn validate_render_texture_sig_ir(ir: &IrFunction) -> Result<(), &'static str> {
+    if !ir.return_types.is_empty() {
+        return Err("render-texture function must return void");
+    }
+    if ir.param_count != 3 {
+        return Err("render-texture function must take 3 parameters");
+    }
+    // vreg_types[0] is vmctx (always Pointer); user params start at index 1.
+    let p0 = ir.vreg_types.get(1).copied();
+    let p1 = ir.vreg_types.get(2).copied();
+    let p2 = ir.vreg_types.get(3).copied();
+    if p0 != Some(IrType::Pointer) {
+        return Err("render-texture param 0 must be Pointer");
+    }
+    if p1 != Some(IrType::I32) {
+        return Err("render-texture param 1 must be I32 width");
+    }
+    if p2 != Some(IrType::I32) {
+        return Err("render-texture param 2 must be I32 height");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod validate_render_texture_tests {
+    use super::validate_render_texture_sig_ir;
+    use lpir::IrType;
+    use lpir::builder::FunctionBuilder;
+
+    fn make_ir_fn_with_param_types(
+        name: &str,
+        params: &[IrType],
+        rets: &[IrType],
+    ) -> lpir::IrFunction {
+        let mut fb = FunctionBuilder::new(name, rets);
+        for ty in params {
+            let _ = fb.add_param(*ty);
+        }
+        fb.push_return(&[]);
+        fb.finish()
+    }
+
+    #[test]
+    fn validate_render_texture_sig_ir_accepts_expected() {
+        let f = make_ir_fn_with_param_types(
+            "__render_texture_rgba16",
+            &[IrType::Pointer, IrType::I32, IrType::I32],
+            &[],
+        );
+        assert!(validate_render_texture_sig_ir(&f).is_ok());
+    }
+
+    #[test]
+    fn validate_render_texture_sig_ir_rejects_wrong_return() {
+        let f = make_ir_fn_with_param_types(
+            "bad",
+            &[IrType::Pointer, IrType::I32, IrType::I32],
+            &[IrType::I32],
+        );
+        assert!(validate_render_texture_sig_ir(&f).is_err());
+    }
+
+    #[test]
+    fn validate_render_texture_sig_ir_rejects_wrong_arity() {
+        let f = make_ir_fn_with_param_types("bad", &[IrType::Pointer, IrType::I32], &[]);
+        assert!(validate_render_texture_sig_ir(&f).is_err());
+    }
+
+    #[test]
+    fn validate_render_texture_sig_ir_rejects_non_pointer_first_param() {
+        let f = make_ir_fn_with_param_types("bad", &[IrType::I32, IrType::I32, IrType::I32], &[]);
+        assert!(validate_render_texture_sig_ir(&f).is_err());
+    }
+}

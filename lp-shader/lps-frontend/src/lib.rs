@@ -31,7 +31,7 @@ pub mod std_math_handler;
 pub use lower::lower;
 pub use lower_error::LowerError;
 
-pub use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+pub use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
 /// Back-compat alias; prefer [`ParamQualifier`].
 pub type GlslParamQualifier = ParamQualifier;
@@ -404,6 +404,29 @@ float test_main() {
         );
 
         lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn shader_init_is_marked_synthetic() {
+        let glsl = r#"
+        float gShared = 0.5;
+        vec4 render(vec2 pos) {
+            gShared = pos.x;
+            return vec4(gShared);
+        }
+    "#;
+        let naga = compile(glsl).unwrap();
+        let (_ir, meta) = super::lower(&naga).unwrap();
+
+        let init = meta
+            .functions
+            .iter()
+            .find(|f| f.name == "__shader_init")
+            .expect("expected __shader_init for module with non-const global");
+        assert_eq!(init.kind, LpsFnKind::Synthetic);
+
+        let render = meta.functions.iter().find(|f| f.name == "render").unwrap();
+        assert_eq!(render.kind, LpsFnKind::UserDefined);
     }
 
     #[test]

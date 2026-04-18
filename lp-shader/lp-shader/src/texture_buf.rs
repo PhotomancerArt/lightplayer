@@ -22,10 +22,7 @@ impl LpsTextureBuf {
         height: u32,
         format: TextureStorageFormat,
     ) -> Self {
-        debug_assert!(
-            buffer.size()
-                == width as usize * height as usize * format.bytes_per_pixel()
-        );
+        debug_assert!(buffer.size() == width as usize * height as usize * format.bytes_per_pixel());
         Self {
             buffer,
             width,

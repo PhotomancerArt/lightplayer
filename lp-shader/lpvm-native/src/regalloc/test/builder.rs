@@ -29,7 +29,7 @@ use crate::isa::rv32::abi;
 use crate::vinst::{ModuleSymbols, VInst, VReg};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lps_shared::{FnParam, LpsFnSig, LpsType, ParamQualifier};
+use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsType, ParamQualifier};
 
 /// Builder for allocation tests.
 pub struct AllocTestBuilder {
@@ -96,6 +96,7 @@ impl AllocTestBuilder {
                     name: String::from("test"),
                     return_type,
                     parameters: params,
+                    kind: LpsFnKind::UserDefined,
                 },
                 total_param_slots,
             )
@@ -105,6 +106,7 @@ impl AllocTestBuilder {
                     name: String::from("test"),
                     return_type,
                     parameters: Vec::new(),
+                    kind: LpsFnKind::UserDefined,
                 },
                 0,
             )

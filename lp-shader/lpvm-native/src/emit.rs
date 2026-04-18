@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 use crate::abi::{FrameLayout, FuncAbi, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::regalloc::{AllocOutput, AllocResult, allocate};
 use crate::isa::rv32::emit::emit_function;
+use crate::regalloc::{AllocOutput, AllocResult, allocate};
 use crate::vinst::VInst;
 
 /// Emission result containing machine code and metadata.
@@ -171,6 +171,7 @@ mod tests {
                 name: alloc::string::String::from("test"),
                 return_type: lps_shared::LpsType::Void,
                 parameters: vec![],
+                kind: lps_shared::LpsFnKind::UserDefined,
             },
             0,
         );

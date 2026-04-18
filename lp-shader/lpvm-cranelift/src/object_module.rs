@@ -82,7 +82,12 @@ pub fn object_bytes_from_ir(
             )))
         })?;
     let mut object_module = ObjectModule::new(builder);
-    lower_lpir_into_module(&mut object_module, ir, options.clone(), LpirFuncEmitOrder::Name)?;
+    lower_lpir_into_module(
+        &mut object_module,
+        ir,
+        options.clone(),
+        LpirFuncEmitOrder::Name,
+    )?;
     let product = object_module.finish();
     product
         .emit()

@@ -10,9 +10,9 @@ use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    CallError, LpsValueF32, LpvmInstance, LpvmModule, VmContext, decode_q32_return,
+    CallError, LpsValueF32, LpvmBuffer, LpvmInstance, LpvmModule, VmContext, decode_q32_return,
     encode_uniform_write, encode_uniform_write_q32, flat_q32_words_from_f32_args,
-    glsl_component_count, q32_to_lps_value_f32,
+    glsl_component_count, q32_to_lps_value_f32, validate_render_texture_sig_ir,
 };
 
 use crate::lpvm_module::CraneliftModule;
@@ -39,6 +39,11 @@ impl From<CallError> for InstanceError {
     }
 }
 
+struct RenderTextureEntry {
+    name: String,
+    code: *const u8,
+}
+
 /// Per-instance VMContext storage and [`LpvmInstance`] over a finalized [`CraneliftModule`].
 pub struct CraneliftInstance {
     module: Arc<CraneliftModule>,
@@ -49,6 +54,7 @@ pub struct CraneliftInstance {
     snapshot_offset: usize,
     /// Size of globals region in bytes
     globals_size: usize,
+    render_texture_cache: Option<RenderTextureEntry>,
 }
 
 impl CraneliftInstance {
@@ -72,6 +78,7 @@ impl CraneliftInstance {
             globals_offset,
             snapshot_offset,
             globals_size,
+            render_texture_cache: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot
@@ -149,6 +156,36 @@ impl CraneliftInstance {
         }
         self.vmctx_buf[offset..end].copy_from_slice(data);
         Ok(())
+    }
+
+    fn resolve_render_texture(&mut self, fn_name: &str) -> Result<*const u8, InstanceError> {
+        if let Some(entry) = &self.render_texture_cache {
+            if entry.name == fn_name {
+                return Ok(entry.code);
+            }
+        }
+
+        let ir_fn = self
+            .module
+            .ir_function(fn_name)
+            .ok_or_else(|| InstanceError::Call(CallError::MissingMetadata(fn_name.into())))?;
+        validate_render_texture_sig_ir(ir_fn).map_err(|e| {
+            InstanceError::Call(CallError::Unsupported(alloc::format!(
+                "render-texture sig invalid: {e}"
+            )))
+        })?;
+
+        let code = self.module.code_ptr(fn_name).ok_or_else(|| {
+            InstanceError::Call(CallError::Unsupported(alloc::format!(
+                "render-texture entry `{fn_name}` not in JIT image"
+            )))
+        })?;
+
+        self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            code,
+        });
+        Ok(code)
     }
 }
 
@@ -321,6 +358,34 @@ impl LpvmInstance for CraneliftInstance {
         }
 
         Ok(words)
+    }
+
+    fn call_render_texture(
+        &mut self,
+        fn_name: &str,
+        texture: &mut LpvmBuffer,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        if self.module.float_mode() != FloatMode::Q32 {
+            return Err(InstanceError::Unsupported(
+                "CraneliftInstance::call_render_texture requires FloatMode::Q32",
+            ));
+        }
+
+        let code = self.resolve_render_texture(fn_name)?;
+
+        let vmctx = self.vmctx_ptr() as usize;
+        let tex_ptr = texture.native_ptr();
+
+        unsafe {
+            type RenderFn = extern "C" fn(usize, *mut u8, i32, i32);
+            let f: RenderFn = core::mem::transmute(code);
+            f(vmctx, tex_ptr, width as i32, height as i32);
+        }
+        Ok(())
     }
 
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {

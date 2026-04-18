@@ -4,6 +4,27 @@
 //! **Primary API:** [`CraneliftEngine`], [`CraneliftModule`], [`CraneliftInstance`] implement
 //! [`lpvm::LpvmEngine`] / [`lpvm::LpvmModule`] / [`lpvm::LpvmInstance`]. [`jit_from_ir`] and
 //! [`jit`] are thin helpers over [`CraneliftModule::compile`].
+//!
+//! # Status: host JIT path is deprecated for new work
+//!
+//! `CraneliftEngine` (the in-process host JIT) is **deprecated as a host execution
+//! backend** for `lp-shader`. Use [`lpvm-wasm`](../lpvm_wasm/index.html)'s
+//! `WasmLpvmEngine` (wasmtime) instead. The crate is intentionally kept in the tree:
+//!
+//! - `lp-engine` and `lpfx-cpu` still depend on it; consumer migration to wasmtime
+//!   lands in M4 (see `docs/roadmaps/2026-04-16-lp-shader-textures/m4-consumer-migration.md`).
+//! - The `riscv32-object` path (RV32 object emission via `cranelift-object`) remains
+//!   in active use independent of the host JIT.
+//!
+//! Why deprecated: the in-process JIT exhibits non-deterministic state corruption
+//! when multiple `JITModule` instances are constructed in the same process
+//! (reproduces as "function must be compiled before it can be finalized" panics).
+//! Wasmtime uses cranelift internally with proper per-instance isolation, gives us
+//! 32-bit guest pointers (matching every other production backend), and removes
+//! the only surface where this bug bites users.
+//!
+//! Do not add new host-execution consumers of `CraneliftEngine`. New host code
+//! paths should go through `lpvm-wasm`.
 
 #![no_std]
 
@@ -95,12 +116,14 @@ mod tests_options {
 /// and executing it on the host is undefined — those cases are covered by `lpvm-emu` / fw-emu.
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    mod render_texture_smoke;
+
     use alloc::string::String;
     use core::mem;
 
     use lpir::parse_module;
     use lps_shared::lps_value_f32::LpsValueF32;
-    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+    use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
     use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 
     #[cfg(feature = "glsl")]
@@ -172,6 +195,7 @@ mod tests {
                         qualifier: ParamQualifier::In,
                     },
                 ],
+                kind: LpsFnKind::UserDefined,
             }],
             ..Default::default()
         };

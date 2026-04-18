@@ -56,6 +56,7 @@ pub struct WasmLpvmModule {
     pub(crate) exports: HashMap<String, crate::module::WasmExport>,
     pub(crate) shadow_stack_base: Option<i32>,
     pub(crate) opts: WasmOptions,
+    pub(crate) lpir: LpirModule,
 }
 
 impl WasmLpvmModule {
@@ -105,6 +106,7 @@ impl LpvmEngine for WasmLpvmEngine {
             exports,
             shadow_stack_base: artifact.wasm_module().shadow_stack_base,
             opts: self.compile_options.clone(),
+            lpir: ir.clone(),
         })
     }
 

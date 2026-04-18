@@ -110,35 +110,23 @@ impl CompilerConfig {
     pub fn apply(&mut self, key: &str, value: &str) -> Result<(), ConfigError> {
         match key.trim() {
             "inline.mode" => {
-                self.inline.mode = value
-                    .trim()
-                    .parse()
-                    .map_err(|_| invalid(key, value))?;
+                self.inline.mode = value.trim().parse().map_err(|_| invalid(key, value))?;
             }
             "inline.always_inline_single_site" => {
-                self.inline.always_inline_single_site = parse_bool(value).ok_or_else(|| invalid(key, value))?;
+                self.inline.always_inline_single_site =
+                    parse_bool(value).ok_or_else(|| invalid(key, value))?;
             }
             "inline.small_func_threshold" => {
-                self.inline.small_func_threshold = value
-                    .trim()
-                    .parse()
-                    .map_err(|_| invalid(key, value))?;
+                self.inline.small_func_threshold =
+                    value.trim().parse().map_err(|_| invalid(key, value))?;
             }
             "inline.max_growth_budget" => {
-                self.inline.max_growth_budget = Some(
-                    value
-                        .trim()
-                        .parse()
-                        .map_err(|_| invalid(key, value))?,
-                );
+                self.inline.max_growth_budget =
+                    Some(value.trim().parse().map_err(|_| invalid(key, value))?);
             }
             "inline.module_op_budget" => {
-                self.inline.module_op_budget = Some(
-                    value
-                        .trim()
-                        .parse()
-                        .map_err(|_| invalid(key, value))?,
-                );
+                self.inline.module_op_budget =
+                    Some(value.trim().parse().map_err(|_| invalid(key, value))?);
             }
             _ => {
                 return Err(ConfigError::UnknownKey {
@@ -187,7 +175,8 @@ mod tests {
     #[test]
     fn apply_always_inline_single_site() {
         let mut c = CompilerConfig::default();
-        c.apply("inline.always_inline_single_site", "false").unwrap();
+        c.apply("inline.always_inline_single_site", "false")
+            .unwrap();
         assert!(!c.inline.always_inline_single_site);
         c.apply("inline.always_inline_single_site", "true").unwrap();
         assert!(c.inline.always_inline_single_site);

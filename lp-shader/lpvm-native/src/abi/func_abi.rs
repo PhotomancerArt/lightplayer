@@ -192,7 +192,7 @@ impl ModuleAbi {
 mod tests {
     use alloc::vec;
 
-    use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
+    use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType};
 
     use crate::abi::classify::entry_param_scalar_count;
     use crate::isa::rv32::abi as rv32;
@@ -203,6 +203,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert!(!abi.is_sret());
@@ -215,6 +216,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Vec4,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let n = entry_param_scalar_count(&sig);
         let abi = rv32::func_abi_rv32(&sig, n);
@@ -228,6 +230,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.precolors(), &[(0u32, rv32::A0)]);
@@ -239,6 +242,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Vec4,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.precolors(), &[(0u32, rv32::A1)]);
@@ -250,6 +254,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         let a = abi.allocatable();
@@ -264,6 +269,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.precolor_of(0), Some(rv32::A0));
@@ -276,6 +282,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Vec4,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.precolor_of(0), Some(rv32::A1));
@@ -287,6 +294,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Mat4,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.sret_word_count(), Some(16));
@@ -298,6 +306,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.sret_word_count(), None);
@@ -309,6 +318,7 @@ mod tests {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.stack_alignment(), 16);
@@ -336,11 +346,13 @@ mod tests {
                     name: "f".into(),
                     return_type: LpsType::Vec4,
                     parameters: vec![],
+                    kind: LpsFnKind::UserDefined,
                 },
                 LpsFnSig {
                     name: "g".into(),
                     return_type: LpsType::Mat4,
                     parameters: vec![],
+                    kind: LpsFnKind::UserDefined,
                 },
             ],
             ..Default::default()

@@ -80,9 +80,8 @@ pub(crate) fn emit_memory(
                 MemFlags::new(),
                 val,
                 ptr,
-                i32::try_from(*offset).map_err(|_| {
-                    CompileError::unsupported("store16 offset does not fit in i32")
-                })?,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("store16 offset does not fit in i32"))?,
             );
         }
         LpirOp::Load8U { dst, base, offset } => {

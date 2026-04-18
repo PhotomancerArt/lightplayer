@@ -37,6 +37,8 @@ pub(crate) struct JitModule {
     pub(crate) call_conv: CallConv,
     pub(crate) pointer_type: types::Type,
     pub(crate) float_mode: FloatMode,
+    /// Retained for signature validation (e.g. `call_render_texture`) after lowering.
+    pub(crate) lpir_module: LpirModule,
 }
 
 // SAFETY: Finalized JIT code is immutable after `build_jit_module` returns. `JITModule` is not
@@ -72,6 +74,11 @@ impl JitModule {
     /// LPIR function names in module order (same indices as [`Self::finalized_ptr_by_index`]).
     pub fn func_names(&self) -> &[String] {
         &self.func_names
+    }
+
+    /// Source LPIR (including per-function `vreg_types` for validation).
+    pub fn lpir_module(&self) -> &LpirModule {
+        &self.lpir_module
     }
 }
 
@@ -141,6 +148,8 @@ pub(crate) fn build_jit_module(
         )))
     })?;
 
+    let lpir_module = ir.clone();
+
     Ok(JitModule {
         inner: jit_module,
         glsl_meta,
@@ -153,5 +162,6 @@ pub(crate) fn build_jit_module(
         call_conv: lowered.call_conv,
         pointer_type: lowered.pointer_type,
         float_mode: lowered.float_mode,
+        lpir_module,
     })
 }

@@ -564,7 +564,8 @@ fn process_generic(
             let src_has_home = pool.home(*src).is_some();
             pool.free(preg);
             if src_has_home {
-                allocs[use_idx] = alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
+                allocs[use_idx] =
+                    alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
             } else {
                 let evicted = pool.alloc_fixed(preg, *src);
                 if let Some(evicted_vreg) = evicted {
@@ -877,7 +878,9 @@ fn process_call(
             continue;
         }
 
-        let target = isa.direct_ret_reg_hw(i).expect("ret slot within direct_ret_reg_count");
+        let target = isa
+            .direct_ret_reg_hw(i)
+            .expect("ret slot within direct_ret_reg_count");
 
         allocs[alloc_idx] = Alloc::Reg(target);
 
@@ -1257,14 +1260,13 @@ mod tests {
             i4 = Add i3, i2\n\
             Ret i4";
         let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
-        let output =
-            walk_linear_with_pool(
-                &vinsts,
-                &pool,
-                &make_abi(),
-                RegPool::with_capacity(crate::isa::IsaTarget::Rv32imac, 2),
-            )
-            .unwrap();
+        let output = walk_linear_with_pool(
+            &vinsts,
+            &pool,
+            &make_abi(),
+            RegPool::with_capacity(crate::isa::IsaTarget::Rv32imac, 2),
+        )
+        .unwrap();
 
         // v2 must be spilled (only 2 regs, 3 live values at inst 3)
         assert!(

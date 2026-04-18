@@ -520,6 +520,24 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
+        LpirOp::IfromF32Bits { dst, src } => {
+            let f = use_v(builder, vars, *src);
+            match ctx.float_mode {
+                FloatMode::Q32 => {
+                    def_v(builder, vars, *dst, f);
+                }
+                FloatMode::F32 => {
+                    let slot = builder.func.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        4,
+                        4,
+                    ));
+                    builder.ins().stack_store(f, slot, 0);
+                    let bits = builder.ins().stack_load(types::I32, slot, 0);
+                    def_v(builder, vars, *dst, bits);
+                }
+            }
+        }
         LpirOp::Select {
             dst,
             cond,

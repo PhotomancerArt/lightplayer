@@ -774,6 +774,14 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_reinterpret_i32().local_set(dst.0);
             }
         },
+        LpirOp::IfromF32Bits { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0).local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0).i32_reinterpret_f32().local_set(dst.0);
+            }
+        },
         LpirOp::SlotAddr { dst, slot } => {
             let off = fctx
                 .slot_offsets

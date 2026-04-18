@@ -36,7 +36,9 @@ fn visible_call_arg_regs<'a>(
 enum Block {
     If,
     Else,
-    Loop { start_pc: usize },
+    Loop {
+        start_pc: usize,
+    },
     Switch,
     Case,
     /// Forward-only `block {` region (paired with `End`).
@@ -548,6 +550,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Lp
         LpirOp::ItofS { dst, src } => unary(out, st, ind, "itof_s", *dst, *src),
         LpirOp::ItofU { dst, src } => unary(out, st, ind, "itof_u", *dst, *src),
         LpirOp::FfromI32Bits { dst, src } => unary(out, st, ind, "ffrom_i32_bits", *dst, *src),
+        LpirOp::IfromF32Bits { dst, src } => unary(out, st, ind, "i_from_f32_bits", *dst, *src),
         LpirOp::Select {
             dst,
             cond,

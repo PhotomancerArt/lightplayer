@@ -635,6 +635,11 @@ pub fn lower_lpir_op(
             src: fa_vreg(*src),
             src_op: po,
         }),
+        LpirOp::IfromF32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov {
+            dst: fa_vreg(*dst),
+            src: fa_vreg(*src),
+            src_op: po,
+        }),
 
         LpirOp::Fadd { .. }
         | LpirOp::Fsub { .. }
@@ -660,7 +665,8 @@ pub fn lower_lpir_op(
         | LpirOp::ItofU { .. }
         | LpirOp::FtoiSatS { .. }
         | LpirOp::FtoiSatU { .. }
-        | LpirOp::FfromI32Bits { .. } => Err(LowerError::UnsupportedOp {
+        | LpirOp::FfromI32Bits { .. }
+        | LpirOp::IfromF32Bits { .. } => Err(LowerError::UnsupportedOp {
             description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
         }),
 
@@ -669,13 +675,11 @@ pub fn lower_lpir_op(
         | LpirOp::End
         | LpirOp::LoopStart { .. }
         | LpirOp::Block { .. }
-        | LpirOp::ExitBlock => {
-            Err(LowerError::UnsupportedOp {
-                description: String::from(
-                    "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Block/Else/End/ExitBlock)",
-                ),
-            })
-        }
+        | LpirOp::ExitBlock => Err(LowerError::UnsupportedOp {
+            description: String::from(
+                "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Block/Else/End/ExitBlock)",
+            ),
+        }),
         LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
             Err(LowerError::UnsupportedOp {
                 description: String::from(
@@ -1070,11 +1074,13 @@ impl<'a> LowerCtx<'a> {
                     current_linear_start = Some(self.out.len() as u16);
                 }
                 LpirOp::ExitBlock => {
-                    let exit_lbl = *self.block_exit_stack.last().ok_or_else(|| {
-                        LowerError::UnsupportedOp {
-                            description: String::from("exit_block outside block"),
-                        }
-                    })?;
+                    let exit_lbl =
+                        *self
+                            .block_exit_stack
+                            .last()
+                            .ok_or_else(|| LowerError::UnsupportedOp {
+                                description: String::from("exit_block outside block"),
+                            })?;
                     if current_linear_start.is_none() {
                         current_linear_start = Some(self.out.len() as u16);
                     }
@@ -1394,7 +1400,11 @@ mod tests {
 
     fn empty_ir_abi() -> (LpirModule, ModuleAbi) {
         let ir = LpirModule::default();
-        let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &LpsModuleSig::default());
+        let abi = ModuleAbi::from_ir_and_sig(
+            crate::isa::IsaTarget::Rv32imac,
+            &ir,
+            &LpsModuleSig::default(),
+        );
         (ir, abi)
     }
 
@@ -1771,6 +1781,24 @@ mod tests {
     #[test]
     fn lower_q32_ffrom_i32_bits_to_mov32() {
         let op = LpirOp::FfromI32Bits {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        assert!(matches!(
+            call_lower_op(&op, FloatMode::Q32, Some(2), &f, &ir, &abi).expect("ok"),
+            VInst::Mov {
+                dst: FaVReg(1),
+                src: FaVReg(0),
+                src_op,
+            } if unpack_src_op(src_op) == Some(2)
+        ));
+    }
+
+    #[test]
+    fn lower_q32_ifrom_f32_bits_to_mov32() {
+        let op = LpirOp::IfromF32Bits {
             dst: v(1),
             src: v(0),
         };

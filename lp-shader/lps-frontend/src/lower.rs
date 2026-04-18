@@ -12,8 +12,8 @@ use lpir::{
     ModuleBuilder, VMCTX_VREG, VReg,
 };
 use lps_shared::{
-    LayoutRules, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE, type_alignment,
-    type_size,
+    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE,
+    type_alignment, type_size,
 };
 use naga::{AddressSpace, Expression, Function, GlobalVariable, Handle, Module};
 
@@ -66,6 +66,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             name: info.name.clone(),
             parameters: info.params.clone(),
             return_type: info.return_type.clone(),
+            kind: LpsFnKind::UserDefined,
         });
         mb.add_function(ir);
     }
@@ -77,6 +78,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
                 name: String::from("__shader_init"),
                 parameters: vec![],
                 return_type: LpsType::Void,
+                kind: LpsFnKind::Synthetic,
             });
             mb.add_function(init_func);
         }

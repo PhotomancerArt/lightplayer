@@ -1033,6 +1033,10 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<LpirOp, ParseError> {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
+        "i_from_f32_bits" => Ok(LpirOp::IfromF32Bits {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
         "slot_addr" => {
             let name = parts[1].trim();
             let n = name

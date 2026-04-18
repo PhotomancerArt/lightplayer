@@ -4,9 +4,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::abi::FrameLayout;
-use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
 use crate::isa::rv32::encode::*;
 use crate::isa::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
+use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
 use crate::vinst::{AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
 
 /// Callee sret buffer pointer (saved from incoming a0).
@@ -982,7 +982,7 @@ mod tests {
     use super::*;
     use crate::debug::vinst;
     use crate::isa::rv32::abi;
-    use lps_shared::{LpsFnSig, LpsType};
+    use lps_shared::{LpsFnKind, LpsFnSig, LpsType};
 
     #[test]
     fn emit_iconst_ret_non_empty_machine_code() {
@@ -1007,6 +1007,7 @@ mod tests {
                 name: alloc::string::String::from("t"),
                 return_type: LpsType::Int,
                 parameters: vec![],
+                kind: LpsFnKind::UserDefined,
             },
             0,
         );

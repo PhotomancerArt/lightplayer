@@ -1,49 +1,128 @@
 //! Compiled pixel shader: module + instance, uniforms at render time.
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use core::cell::RefCell;
 
-use lps_shared::{LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureStorageFormat};
-use lpvm::LpvmInstance;
-use lpvm::LpvmModule;
+use lps_shared::{
+    LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat,
+};
+use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
 
 use crate::error::LpsError;
 use crate::texture_buf::LpsTextureBuf;
 
-/// A compiled pixel shader with internal execution state.
-///
-/// Combines module + instance internally. Uniforms are passed into [`Self::render_frame`],
-/// not stored as separate mutable state on this type (aside from the internal instance).
-///
-/// The instance lives in a [`RefCell`] so [`Self::render_frame`] can take `&self`: mutation
-/// goes through runtime borrow checks (panic if re-entrant). This type is `!Sync` as a result.
-pub struct LpsPxShader<M: LpvmModule> {
-    // Instance may depend on code owned by the module; keep both in one struct.
+/// Backend-erased operations on a compiled pixel shader's runtime instance.
+pub(crate) trait PxShaderBackend {
+    fn call_render_texture(
+        &mut self,
+        name: &str,
+        texture: &mut LpvmBuffer,
+        width: u32,
+        height: u32,
+    ) -> Result<(), LpsError>;
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), LpsError>;
+}
+
+/// Adapter erasing a concrete `(M: LpvmModule, M::Instance)` pair behind
+/// [`PxShaderBackend`]. Owns both: the module is retained for the lifetime
+/// of the instance (compiled code may be referenced by the instance).
+struct BackendAdapter<M: LpvmModule> {
     #[allow(dead_code, reason = "retain compiled module for instance lifetime")]
     module: M,
-    instance: RefCell<M::Instance>,
+    instance: M::Instance,
+}
+
+impl<M: LpvmModule + 'static> PxShaderBackend for BackendAdapter<M> {
+    fn call_render_texture(
+        &mut self,
+        name: &str,
+        texture: &mut LpvmBuffer,
+        width: u32,
+        height: u32,
+    ) -> Result<(), LpsError> {
+        self.instance
+            .call_render_texture(name, texture, width, height)
+            .map_err(|e| LpsError::Render(format!("call_render_texture `{name}`: {e}")))
+    }
+
+    fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), LpsError> {
+        self.instance
+            .set_uniform(path, value)
+            .map_err(|e| LpsError::Render(format!("set_uniform `{path}`: {e}")))
+    }
+}
+
+/// A compiled pixel shader with internal execution state.
+///
+/// Holds its backend instance behind [`Box<dyn PxShaderBackend>`] so the
+/// public type is monomorphic. [`Self::render_frame`] runs the per-pixel loop
+/// inside the synthesised `__render_texture_<format>` function via the
+/// backend's [`LpvmInstance::call_render_texture`] fast path.
+///
+/// The instance lives in a [`RefCell`] so [`Self::render_frame`] can
+/// take `&self`; mutation goes through runtime borrow checks (panic
+/// if re-entrant). This type is `!Sync` as a result.
+pub struct LpsPxShader {
+    inner: RefCell<Box<dyn PxShaderBackend>>,
     output_format: TextureStorageFormat,
     meta: LpsModuleSig,
-    /// Index of the `render` function in `meta.functions`.
+    /// Format-specific synthesised entry, e.g. `"__render_texture_rgba16"`.
+    render_texture_fn_name: String,
+    /// Index of `render` in `meta.functions` (preserved from compile_px).
     render_fn_index: usize,
 }
 
-impl<M: LpvmModule> LpsPxShader<M> {
-    pub(crate) fn new(
+impl LpsPxShader {
+    /// Construct from a backend-typed module + the synthesised metadata.
+    ///
+    /// Validates that the synthesised render-texture function exists
+    /// in `meta` with the expected signature shape before accepting.
+    pub(crate) fn new<M: LpvmModule + 'static>(
         module: M,
         meta: LpsModuleSig,
         output_format: TextureStorageFormat,
         render_fn_index: usize,
+        render_texture_fn_name: String,
     ) -> Result<Self, LpsError> {
+        let synth_sig = meta
+            .functions
+            .iter()
+            .find(|f| f.name == render_texture_fn_name)
+            .ok_or_else(|| {
+                LpsError::Compile(format!(
+                    "compile_px: synthesised function `{render_texture_fn_name}` missing from meta"
+                ))
+            })?;
+        if synth_sig.kind != LpsFnKind::Synthetic {
+            return Err(LpsError::Compile(format!(
+                "compile_px: function `{render_texture_fn_name}` is not marked Synthetic"
+            )));
+        }
+        if synth_sig.return_type != LpsType::Void {
+            return Err(LpsError::Compile(format!(
+                "compile_px: `{render_texture_fn_name}` must return void"
+            )));
+        }
+        if synth_sig.parameters.len() != 3 {
+            return Err(LpsError::Compile(format!(
+                "compile_px: `{render_texture_fn_name}` must take 3 parameters, found {}",
+                synth_sig.parameters.len()
+            )));
+        }
+
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;
+        let inner: Box<dyn PxShaderBackend> = Box::new(BackendAdapter { module, instance });
+
         Ok(Self {
-            module,
-            instance: RefCell::new(instance),
+            inner: RefCell::new(inner),
             output_format,
             meta,
+            render_texture_fn_name,
             render_fn_index,
         })
     }
@@ -60,7 +139,7 @@ impl<M: LpvmModule> LpsPxShader<M> {
         self.output_format
     }
 
-    /// Signature of the `render` function.
+    /// Signature of the user `render` function (not the synthesised loop).
     #[must_use]
     pub fn render_sig(&self) -> &LpsFnSig {
         &self.meta.functions[self.render_fn_index]
@@ -68,20 +147,34 @@ impl<M: LpvmModule> LpsPxShader<M> {
 
     /// Render one frame into the given texture buffer.
     ///
-    /// `uniforms` should be an [`LpsValueF32::Struct`] whose fields match
-    /// `meta().uniforms_type` when the shader declares uniforms.
-    ///
-    /// # M0 / roadmap M2
-    ///
-    /// This sets uniforms on the internal instance. The per-pixel loop and
-    /// writing pixels to `tex` are deferred to roadmap M2.
+    /// Pipeline: when the shader declares uniforms, `uniforms` must be an
+    /// [`LpsValueF32::Struct`] whose fields match `meta().uniforms_type`; those
+    /// values are applied first. Then the synthesised
+    /// `__render_texture_<format>` entry is invoked via
+    /// [`LpvmInstance::call_render_texture`], which runs the per-pixel guest
+    /// loop and writes packed **unorm16** channel data into the texture buffer
+    /// backing `tex`.
     pub fn render_frame(
         &self,
         uniforms: &LpsValueF32,
-        _tex: &mut LpsTextureBuf,
+        tex: &mut LpsTextureBuf,
     ) -> Result<(), LpsError> {
         self.apply_uniforms(uniforms)?;
-        Ok(())
+
+        if tex.format() != self.output_format {
+            return Err(LpsError::Render(format!(
+                "render_frame: texture format {:?} does not match shader output {:?}",
+                tex.format(),
+                self.output_format
+            )));
+        }
+
+        let w = tex.width();
+        let h = tex.height();
+        let mut buf = tex.buffer();
+        self.inner
+            .borrow_mut()
+            .call_render_texture(&self.render_texture_fn_name, &mut buf, w, h)
     }
 
     fn apply_uniforms(&self, uniforms: &LpsValueF32) -> Result<(), LpsError> {
@@ -105,7 +198,7 @@ impl<M: LpvmModule> LpsPxShader<M> {
             )));
         };
 
-        let mut inst = self.instance.borrow_mut();
+        let mut inner = self.inner.borrow_mut();
         for member in members {
             let name = member
                 .name
@@ -116,9 +209,7 @@ impl<M: LpvmModule> LpsPxShader<M> {
                 .find(|(n, _)| n == name)
                 .map(|(_, v)| v)
                 .ok_or_else(|| LpsError::Render(format!("missing uniform field `{name}`")))?;
-            inst
-                .set_uniform(name, value)
-                .map_err(|e| LpsError::Render(format!("set uniform `{name}`: {e}")))?;
+            inner.set_uniform(name, value)?;
         }
         Ok(())
     }

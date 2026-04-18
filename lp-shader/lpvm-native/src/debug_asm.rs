@@ -72,7 +72,7 @@ mod tests {
 
     use lpir::types::VRegRange;
     use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg};
-    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+    use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
     use super::*;
 
@@ -120,6 +120,7 @@ mod tests {
                         qualifier: ParamQualifier::In,
                     },
                 ],
+                kind: LpsFnKind::UserDefined,
             }],
             ..Default::default()
         };

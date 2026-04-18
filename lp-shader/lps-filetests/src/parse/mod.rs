@@ -83,12 +83,11 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
             continue;
         }
 
-        if let Some((key, value)) = parse_compile_opt::parse_compile_opt_line(&logical, line_number)?
+        if let Some((key, value)) =
+            parse_compile_opt::parse_compile_opt_line(&logical, line_number)?
         {
             if !seen_compile_opt_keys.insert(key.clone()) {
-                anyhow::bail!(
-                    "line {line_number}: duplicate `compile-opt` key {key:?}"
-                );
+                anyhow::bail!("line {line_number}: duplicate `compile-opt` key {key:?}");
             }
             config_overrides.push((key, value));
             continue;

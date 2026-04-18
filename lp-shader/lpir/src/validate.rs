@@ -163,11 +163,7 @@ fn validate_function_inner(
         match op {
             LpirOp::ExitBlock => {
                 if !has_enclosing_block(&stack) {
-                    errs.push(err_in_func(
-                        fname,
-                        op_i,
-                        "exit_block outside block",
-                    ));
+                    errs.push(err_in_func(fname, op_i, "exit_block outside block"));
                 }
             }
             LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
@@ -574,7 +570,8 @@ fn check_op_operands_defined(
         | LpirOp::IeqImm { src, .. } => check(*src, "src"),
         LpirOp::FtoiSatS { src, .. }
         | LpirOp::FtoiSatU { src, .. }
-        | LpirOp::ItofS { src, .. }
+        | LpirOp::IfromF32Bits { src, .. } => check(*src, "src"),
+        LpirOp::ItofS { src, .. }
         | LpirOp::ItofU { src, .. }
         | LpirOp::FfromI32Bits { src, .. } => check(*src, "src"),
         LpirOp::Select {
@@ -734,7 +731,8 @@ fn check_opcode_dst_types(
         | LpirOp::IshrUImm { dst, .. }
         | LpirOp::IeqImm { dst, .. }
         | LpirOp::FtoiSatS { dst, .. }
-        | LpirOp::FtoiSatU { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
+        | LpirOp::FtoiSatU { dst, .. }
+        | LpirOp::IfromF32Bits { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
 
         LpirOp::Select {
             dst,
@@ -868,7 +866,8 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::FtoiSatU { dst, .. }
         | LpirOp::ItofS { dst, .. }
         | LpirOp::ItofU { dst, .. }
-        | LpirOp::FfromI32Bits { dst, .. } => mark(*dst, defined),
+        | LpirOp::FfromI32Bits { dst, .. }
+        | LpirOp::IfromF32Bits { dst, .. } => mark(*dst, defined),
         LpirOp::Select { dst, .. } | LpirOp::Copy { dst, .. } => mark(*dst, defined),
         LpirOp::SlotAddr { dst, .. }
         | LpirOp::Load { dst, .. }
