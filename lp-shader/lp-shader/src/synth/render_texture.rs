@@ -1,11 +1,11 @@
-//! Synthesise `__render_texture_<format>`: nested y/x loops, incremental offsets (Shape B), Q32 → unorm16.
+//! Synthesise `__render_texture_<format>`: nested y/x loops, incremental offsets (Shape B), F32 → unorm16.
 
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{
-    CalleeRef, FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, builder::FunctionBuilder,
+    CalleeRef, FuncId, IrFunction, IrType, LpirModule, LpirOp, builder::FunctionBuilder,
     lpir_module::VMCTX_VREG,
 };
 use lps_shared::{
@@ -142,12 +142,11 @@ pub fn synthesise_render_texture(
             });
 
             for ch in 0..channels {
-                let q = fb.alloc_vreg(IrType::I32);
-                fb.push(LpirOp::IfromF32Bits {
-                    dst: q,
+                let unorm = fb.alloc_vreg(IrType::I32);
+                fb.push(LpirOp::FtoUnorm16 {
+                    dst: unorm,
                     src: color[ch],
                 });
-                let unorm = emit_q32_to_unorm16(&mut fb, q);
                 fb.push(LpirOp::Store16 {
                     base,
                     offset: (ch as u32) * 2,
@@ -220,66 +219,6 @@ fn module_globals_mutated(_module: &LpirModule) -> bool {
     true
 }
 
-fn emit_q32_to_unorm16(fb: &mut FunctionBuilder, value: VReg) -> VReg {
-    let zero = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IconstI32 {
-        dst: zero,
-        value: 0,
-    });
-    let max_v = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IconstI32 {
-        dst: max_v,
-        value: 65536,
-    });
-
-    let below_zero = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IltS {
-        dst: below_zero,
-        lhs: value,
-        rhs: zero,
-    });
-    let tmp = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::Select {
-        dst: tmp,
-        cond: below_zero,
-        if_true: zero,
-        if_false: value,
-    });
-
-    let above_max = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IgtS {
-        dst: above_max,
-        lhs: tmp,
-        rhs: max_v,
-    });
-    let clamped = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::Select {
-        dst: clamped,
-        cond: above_max,
-        if_true: max_v,
-        if_false: tmp,
-    });
-
-    let s16 = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IconstI32 {
-        dst: s16,
-        value: 16,
-    });
-    let shift = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::IshrU {
-        dst: shift,
-        lhs: clamped,
-        rhs: s16,
-    });
-    let unorm = fb.alloc_vreg(IrType::I32);
-    fb.push(LpirOp::Isub {
-        dst: unorm,
-        lhs: clamped,
-        rhs: shift,
-    });
-    unorm
-}
-
 fn emit_globals_reset(fb: &mut FunctionBuilder, meta: &LpsModuleSig) {
     let globals_addr = fb.alloc_vreg(IrType::I32);
     fb.push(LpirOp::IaddImm {
@@ -315,12 +254,8 @@ fn append_local_function(module: &mut LpirModule, func: IrFunction) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpir::builder::FunctionBuilder;
     use lpir::{CalleeRef, IrType, LpirModule, LpirOp};
     use lpvm::validate_render_texture_sig_ir;
-    use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
-    use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
-    use lpvm_wasm::{FloatMode, WasmOptions};
 
     #[test]
     fn synth_rgba16_appends_function_and_sig_in_lockstep() {
@@ -366,64 +301,24 @@ mod tests {
         validate_render_texture_sig_ir(synth_ir).expect("synth must satisfy validator");
     }
 
-    /// Q32 `0.5` is encoded as `32768` in the F32 register; `__render_texture_r16` must store
-    /// unorm16 `0x8000`, not `0` (which `FtoiSatS` would produce).
+    /// `__render_texture_*` must lower each channel with [`LpirOp::FtoUnorm16`], not a long
+    /// expand-in-IR sequence (correctness vs Q32 half-scale is covered by `lp-shader` e2e tests).
     #[test]
-    fn synth_r16_unorm_preserves_q32_half_bits() {
-        let mut render_fb = FunctionBuilder::new("render", &[IrType::F32]);
-        let _ = render_fb.add_param(IrType::F32);
-        let _ = render_fb.add_param(IrType::F32);
-        let q_bits = render_fb.alloc_vreg(IrType::I32);
-        render_fb.push(LpirOp::IconstI32 {
-            dst: q_bits,
-            value: 32768,
-        });
-        let color = render_fb.alloc_vreg(IrType::F32);
-        render_fb.push(LpirOp::FfromI32Bits {
-            dst: color,
-            src: q_bits,
-        });
-        render_fb.push_return(&[color]);
-        let render_fn = render_fb.finish();
-
-        let mut module = LpirModule::new();
-        super::append_local_function(&mut module, render_fn);
-
-        let mut meta = LpsModuleSig {
-            functions: alloc::vec![LpsFnSig {
-                name: String::from("render"),
-                return_type: LpsType::Float,
-                parameters: alloc::vec![FnParam {
-                    name: String::from("pos"),
-                    ty: LpsType::Vec2,
-                    qualifier: ParamQualifier::In,
-                }],
-                kind: LpsFnKind::UserDefined,
-            }],
-            ..Default::default()
-        };
-
-        let synth_name =
-            synthesise_render_texture(&mut module, &mut meta, 0, TextureStorageFormat::R16Unorm)
-                .expect("synth");
-
-        let engine = WasmLpvmEngine::new(WasmOptions {
-            float_mode: FloatMode::Q32,
-            ..Default::default()
-        })
-        .expect("WasmLpvmEngine::new");
-        let compiled = engine.compile(&module, &meta).expect("compile");
-        let mut instance = compiled.instantiate().expect("instantiate");
-        let mut buffer = engine.memory().alloc(16, 8).expect("alloc");
-        instance
-            .call_render_texture(&synth_name, &mut buffer, 1, 1)
-            .expect("call_render_texture");
-
-        unsafe {
-            let p = buffer.native_ptr();
-            let got = core::slice::from_raw_parts(p, 2);
-            assert_eq!(got, &[0x00, 0x80]);
-        }
+    fn synth_body_uses_fto_unorm16_per_channel() {
+        let (mut ir, mut meta) = make_stub_render_module(LpsType::Float);
+        let name =
+            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::R16Unorm).expect("synth");
+        let synth_fn = ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .expect("synth fn");
+        let fto = synth_fn
+            .body
+            .iter()
+            .filter(|op| matches!(op, LpirOp::FtoUnorm16 { .. }))
+            .count();
+        assert_eq!(fto, 1, "expected one FtoUnorm16 for R16");
     }
 
     /// Inliner regression sanity (Q7).

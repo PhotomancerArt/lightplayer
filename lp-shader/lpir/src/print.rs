@@ -550,7 +550,10 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Lp
         LpirOp::ItofS { dst, src } => unary(out, st, ind, "itof_s", *dst, *src),
         LpirOp::ItofU { dst, src } => unary(out, st, ind, "itof_u", *dst, *src),
         LpirOp::FfromI32Bits { dst, src } => unary(out, st, ind, "ffrom_i32_bits", *dst, *src),
-        LpirOp::IfromF32Bits { dst, src } => unary(out, st, ind, "i_from_f32_bits", *dst, *src),
+        LpirOp::FtoUnorm16 { dst, src } => unary(out, st, ind, "fto_unorm16", *dst, *src),
+        LpirOp::FtoUnorm8 { dst, src } => unary(out, st, ind, "fto_unorm8", *dst, *src),
+        LpirOp::Unorm16toF { dst, src } => unary(out, st, ind, "unorm16to_f", *dst, *src),
+        LpirOp::Unorm8toF { dst, src } => unary(out, st, ind, "unorm8to_f", *dst, *src),
         LpirOp::Select {
             dst,
             cond,

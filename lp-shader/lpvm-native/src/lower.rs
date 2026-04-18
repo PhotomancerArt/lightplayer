@@ -635,11 +635,38 @@ pub fn lower_lpir_op(
             src: fa_vreg(*src),
             src_op: po,
         }),
-        LpirOp::IfromF32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov {
-            dst: fa_vreg(*dst),
-            src: fa_vreg(*src),
-            src_op: po,
-        }),
+        LpirOp::FtoUnorm16 { dst, src } if float_mode == FloatMode::Q32 => sym_call(
+            symbols,
+            vreg_pool,
+            "__lp_lpir_fto_unorm16_q32",
+            &[*src],
+            &[*dst],
+            src_op,
+        ),
+        LpirOp::FtoUnorm8 { dst, src } if float_mode == FloatMode::Q32 => sym_call(
+            symbols,
+            vreg_pool,
+            "__lp_lpir_fto_unorm8_q32",
+            &[*src],
+            &[*dst],
+            src_op,
+        ),
+        LpirOp::Unorm16toF { dst, src } if float_mode == FloatMode::Q32 => sym_call(
+            symbols,
+            vreg_pool,
+            "__lp_lpir_unorm16_to_f_q32",
+            &[*src],
+            &[*dst],
+            src_op,
+        ),
+        LpirOp::Unorm8toF { dst, src } if float_mode == FloatMode::Q32 => sym_call(
+            symbols,
+            vreg_pool,
+            "__lp_lpir_unorm8_to_f_q32",
+            &[*src],
+            &[*dst],
+            src_op,
+        ),
 
         LpirOp::Fadd { .. }
         | LpirOp::Fsub { .. }
@@ -666,7 +693,10 @@ pub fn lower_lpir_op(
         | LpirOp::FtoiSatS { .. }
         | LpirOp::FtoiSatU { .. }
         | LpirOp::FfromI32Bits { .. }
-        | LpirOp::IfromF32Bits { .. } => Err(LowerError::UnsupportedOp {
+        | LpirOp::FtoUnorm16 { .. }
+        | LpirOp::FtoUnorm8 { .. }
+        | LpirOp::Unorm16toF { .. }
+        | LpirOp::Unorm8toF { .. } => Err(LowerError::UnsupportedOp {
             description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
         }),
 
@@ -1781,24 +1811,6 @@ mod tests {
     #[test]
     fn lower_q32_ffrom_i32_bits_to_mov32() {
         let op = LpirOp::FfromI32Bits {
-            dst: v(1),
-            src: v(0),
-        };
-        let f = empty_func();
-        let (ir, abi) = empty_ir_abi();
-        assert!(matches!(
-            call_lower_op(&op, FloatMode::Q32, Some(2), &f, &ir, &abi).expect("ok"),
-            VInst::Mov {
-                dst: FaVReg(1),
-                src: FaVReg(0),
-                src_op,
-            } if unpack_src_op(src_op) == Some(2)
-        ));
-    }
-
-    #[test]
-    fn lower_q32_ifrom_f32_bits_to_mov32() {
-        let op = LpirOp::IfromF32Bits {
             dst: v(1),
             src: v(0),
         };

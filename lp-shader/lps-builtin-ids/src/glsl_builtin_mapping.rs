@@ -77,11 +77,15 @@ pub fn lpir_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
         ("fnearest", 1) => Some(BuiltinId::LpLpirFnearestQ32),
         ("sqrt", 1) => Some(BuiltinId::LpLpirFsqrtQ32),
         ("fsub", 2) => Some(BuiltinId::LpLpirFsubQ32),
+        ("fto_unorm16", 1) => Some(BuiltinId::LpLpirFtoUnorm16Q32),
+        ("fto_unorm8", 1) => Some(BuiltinId::LpLpirFtoUnorm8Q32),
         ("ftoi_sat_s", 1) => Some(BuiltinId::LpLpirFtoiSatSQ32),
         ("ftoi_sat_u", 1) => Some(BuiltinId::LpLpirFtoiSatUQ32),
         ("ftrunc", 1) => Some(BuiltinId::LpLpirFtruncQ32),
         ("itof_s", 1) => Some(BuiltinId::LpLpirItofSQ32),
         ("itof_u", 1) => Some(BuiltinId::LpLpirItofUQ32),
+        ("unorm16_to_f", 1) => Some(BuiltinId::LpLpirUnorm16ToFQ32),
+        ("unorm8_to_f", 1) => Some(BuiltinId::LpLpirUnorm8ToFQ32),
         _ => None,
     }
 }

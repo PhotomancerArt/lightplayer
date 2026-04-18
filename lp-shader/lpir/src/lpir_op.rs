@@ -300,9 +300,28 @@ pub enum LpirOp {
         dst: VReg,
         src: VReg,
     },
-    /// Bit-level inverse of [`LpirOp::FfromI32Bits`]: [`IrType::F32`] → [`IrType::I32`]
-    /// (`f32::to_bits` as `i32`; Q32 mode recovers the raw Q-encoded word).
-    IfromF32Bits {
+    /// Normalized channel [`IrType::F32`] → [`IrType::I32`]: low 16 bits are UNORM16 (`0…65535`).
+    /// Saturates negative and out-of-range values to the nearest endpoint.
+    /// Q32: `imin(imax(src_as_i32, 0), 65535)`. F32: saturating cast after `clamp(src,0,1)*65535`.
+    FtoUnorm16 {
+        dst: VReg,
+        src: VReg,
+    },
+    /// Same as [`LpirOp::FtoUnorm16`] but low 8 bits are UNORM8 (`0…255`).
+    /// Q32: `imin(imax(src_as_i32 >> 8, 0), 255)`. F32: scale by `255.0` after clamp.
+    FtoUnorm8 {
+        dst: VReg,
+        src: VReg,
+    },
+    /// [`IrType::I32`] low 16 bits (UNORM16) → [`IrType::F32`] in `[0.0, 1.0]` (float) or Q32 lane.
+    /// Q32: `src & 0xFFFF` as F32 vreg. F32: `(src & 0xFFFF) as f32 / 65535.0`.
+    Unorm16toF {
+        dst: VReg,
+        src: VReg,
+    },
+    /// [`IrType::I32`] low 8 bits (UNORM8) → [`IrType::F32`] in `[0.0, 1.0]`.
+    /// Q32: `(src & 0xFF) << 8` as F32 vreg. F32: `(src & 0xFF) as f32 / 255.0`.
+    Unorm8toF {
         dst: VReg,
         src: VReg,
     },
@@ -487,10 +506,13 @@ impl LpirOp {
             | LpirOp::IeqImm { dst, .. }
             | LpirOp::FtoiSatS { dst, .. }
             | LpirOp::FtoiSatU { dst, .. }
+            | LpirOp::FtoUnorm16 { dst, .. }
+            | LpirOp::FtoUnorm8 { dst, .. }
             | LpirOp::ItofS { dst, .. }
             | LpirOp::ItofU { dst, .. }
             | LpirOp::FfromI32Bits { dst, .. }
-            | LpirOp::IfromF32Bits { dst, .. }
+            | LpirOp::Unorm16toF { dst, .. }
+            | LpirOp::Unorm8toF { dst, .. }
             | LpirOp::Select { dst, .. }
             | LpirOp::Copy { dst, .. }
             | LpirOp::SlotAddr { dst, .. }

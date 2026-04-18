@@ -693,9 +693,27 @@ fn eval_op(
             let v = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(f32::from_bits(v as u32)))?;
         }
-        LpirOp::IfromF32Bits { dst, src } => {
-            let v = val_f32(get_reg(regs, *src)?)?;
-            set_reg(regs, *dst, Value::I32(v.to_bits() as i32))?;
+        LpirOp::FtoUnorm16 { dst, src } => {
+            let f = val_f32(get_reg(regs, *src)?)?;
+            let q = f.to_bits() as i32;
+            let out = q.max(0).min(65535);
+            set_reg(regs, *dst, Value::I32(out))?;
+        }
+        LpirOp::FtoUnorm8 { dst, src } => {
+            let f = val_f32(get_reg(regs, *src)?)?;
+            let q = f.to_bits() as i32;
+            let out = (q >> 8).max(0).min(255);
+            set_reg(regs, *dst, Value::I32(out))?;
+        }
+        LpirOp::Unorm16toF { dst, src } => {
+            let i = val_i32(get_reg(regs, *src)?)?;
+            let bits = (i & 0xFFFF) as u32;
+            set_reg(regs, *dst, Value::F32(f32::from_bits(bits)))?;
+        }
+        LpirOp::Unorm8toF { dst, src } => {
+            let i = val_i32(get_reg(regs, *src)?)?;
+            let bits = ((i & 0xFF) << 8) as u32;
+            set_reg(regs, *dst, Value::F32(f32::from_bits(bits)))?;
         }
         LpirOp::Select {
             dst,

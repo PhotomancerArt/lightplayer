@@ -1028,6 +1028,18 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFtoUnorm16Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_fto_unorm16_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtoUnorm8Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_fto_unorm8_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFtoiSatSQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32(p0);
@@ -1055,6 +1067,18 @@ pub(super) fn dispatch_native_builtin(
         BuiltinId::LpLpirItofUQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::itof_u_q32::__lp_lpir_itof_u_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirUnorm16ToFQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_unorm16_to_f_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirUnorm8ToFQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_unorm8_to_f_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }

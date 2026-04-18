@@ -2,8 +2,8 @@ use alloc::string::String;
 use alloc::vec;
 
 use lps_shared::{LpsFnKind, LpsValueF32, TextureBuffer, TextureStorageFormat};
-use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::WasmOptions;
+use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 use crate::{LpsEngine, LpsError, LpsPxShader};
 

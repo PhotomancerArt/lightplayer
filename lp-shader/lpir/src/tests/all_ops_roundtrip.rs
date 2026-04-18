@@ -177,11 +177,17 @@ pub(crate) fn module_all_ops() -> LpirModule {
         dst: fbits_d,
         src: i1,
     });
-    let ibits_d = b.alloc_vreg(IrType::I32);
-    b.push(LpirOp::IfromF32Bits {
-        dst: ibits_d,
+    let fto16 = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::FtoUnorm16 {
+        dst: fto16,
         src: f1,
     });
+    let fto8 = b.alloc_vreg(IrType::I32);
+    b.push(LpirOp::FtoUnorm8 { dst: fto8, src: f2 });
+    let u16f = b.alloc_vreg(IrType::F32);
+    b.push(LpirOp::Unorm16toF { dst: u16f, src: i2 });
+    let u8f = b.alloc_vreg(IrType::F32);
+    b.push(LpirOp::Unorm8toF { dst: u8f, src: i2 });
 
     let sel_c = b.alloc_vreg(IrType::I32);
     b.push(LpirOp::IconstI32 {

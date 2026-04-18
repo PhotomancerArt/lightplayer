@@ -17,7 +17,7 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         lpfn::{color, generative, hash, math},
         lpir::{
             fadd_q32, fdiv_q32, float_misc_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32,
-            ftoi_sat_q32, itof_s_q32, itof_u_q32,
+            ftoi_sat_q32, itof_s_q32, itof_u_q32, unorm_conv_q32,
         },
         vm::get_fuel_q32,
     };
@@ -58,9 +58,13 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpLpirFsubQ32 => fsub_q32::__lp_lpir_fsub_q32 as *const u8,
         BuiltinId::LpLpirFtoiSatSQ32 => ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32 as *const u8,
         BuiltinId::LpLpirFtoiSatUQ32 => ftoi_sat_q32::__lp_lpir_ftoi_sat_u_q32 as *const u8,
+        BuiltinId::LpLpirFtoUnorm16Q32 => unorm_conv_q32::__lp_lpir_fto_unorm16_q32 as *const u8,
+        BuiltinId::LpLpirFtoUnorm8Q32 => unorm_conv_q32::__lp_lpir_fto_unorm8_q32 as *const u8,
         BuiltinId::LpLpirFtruncQ32 => float_misc_q32::__lp_lpir_ftrunc_q32 as *const u8,
         BuiltinId::LpLpirItofSQ32 => itof_s_q32::__lp_lpir_itof_s_q32 as *const u8,
         BuiltinId::LpLpirItofUQ32 => itof_u_q32::__lp_lpir_itof_u_q32 as *const u8,
+        BuiltinId::LpLpirUnorm16ToFQ32 => unorm_conv_q32::__lp_lpir_unorm16_to_f_q32 as *const u8,
+        BuiltinId::LpLpirUnorm8ToFQ32 => unorm_conv_q32::__lp_lpir_unorm8_to_f_q32 as *const u8,
         BuiltinId::LpLpfnFbm2F32 => generative::fbm::fbm2_f32::__lp_lpfn_fbm2_f32 as *const u8,
         BuiltinId::LpLpfnFbm2Q32 => generative::fbm::fbm2_q32::__lp_lpfn_fbm2_q32 as *const u8,
         BuiltinId::LpLpfnFbm3F32 => generative::fbm::fbm3_f32::__lp_lpfn_fbm3_f32 as *const u8,

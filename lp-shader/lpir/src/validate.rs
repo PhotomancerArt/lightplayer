@@ -570,10 +570,12 @@ fn check_op_operands_defined(
         | LpirOp::IeqImm { src, .. } => check(*src, "src"),
         LpirOp::FtoiSatS { src, .. }
         | LpirOp::FtoiSatU { src, .. }
-        | LpirOp::IfromF32Bits { src, .. } => check(*src, "src"),
+        | LpirOp::FtoUnorm16 { src, .. }
+        | LpirOp::FtoUnorm8 { src, .. } => check(*src, "src"),
         LpirOp::ItofS { src, .. }
         | LpirOp::ItofU { src, .. }
         | LpirOp::FfromI32Bits { src, .. } => check(*src, "src"),
+        LpirOp::Unorm16toF { src, .. } | LpirOp::Unorm8toF { src, .. } => check(*src, "src"),
         LpirOp::Select {
             cond,
             if_true,
@@ -689,7 +691,9 @@ fn check_opcode_dst_types(
         | LpirOp::FconstF32 { dst, .. }
         | LpirOp::ItofS { dst, .. }
         | LpirOp::ItofU { dst, .. }
-        | LpirOp::FfromI32Bits { dst, .. } => expect(*dst, IrType::F32, "float op result"),
+        | LpirOp::FfromI32Bits { dst, .. }
+        | LpirOp::Unorm16toF { dst, .. }
+        | LpirOp::Unorm8toF { dst, .. } => expect(*dst, IrType::F32, "float op result"),
 
         LpirOp::Iadd { dst, .. }
         | LpirOp::Isub { dst, .. }
@@ -732,7 +736,8 @@ fn check_opcode_dst_types(
         | LpirOp::IeqImm { dst, .. }
         | LpirOp::FtoiSatS { dst, .. }
         | LpirOp::FtoiSatU { dst, .. }
-        | LpirOp::IfromF32Bits { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
+        | LpirOp::FtoUnorm16 { dst, .. }
+        | LpirOp::FtoUnorm8 { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
 
         LpirOp::Select {
             dst,
@@ -864,10 +869,13 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::IeqImm { dst, .. } => mark(*dst, defined),
         LpirOp::FtoiSatS { dst, .. }
         | LpirOp::FtoiSatU { dst, .. }
+        | LpirOp::FtoUnorm16 { dst, .. }
+        | LpirOp::FtoUnorm8 { dst, .. }
         | LpirOp::ItofS { dst, .. }
         | LpirOp::ItofU { dst, .. }
         | LpirOp::FfromI32Bits { dst, .. }
-        | LpirOp::IfromF32Bits { dst, .. } => mark(*dst, defined),
+        | LpirOp::Unorm16toF { dst, .. }
+        | LpirOp::Unorm8toF { dst, .. } => mark(*dst, defined),
         LpirOp::Select { dst, .. } | LpirOp::Copy { dst, .. } => mark(*dst, defined),
         LpirOp::SlotAddr { dst, .. }
         | LpirOp::Load { dst, .. }

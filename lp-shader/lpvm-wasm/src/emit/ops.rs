@@ -774,12 +774,102 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_reinterpret_i32().local_set(dst.0);
             }
         },
-        LpirOp::IfromF32Bits { dst, src } => match fm {
+        LpirOp::FtoUnorm16 { dst, src } => match fm {
             FloatMode::Q32 => {
-                sink.local_get(src.0).local_set(dst.0);
+                sink.local_get(src.0)
+                    .i32_const(0)
+                    .local_get(src.0)
+                    .i32_const(0)
+                    .i32_gt_s()
+                    .select()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(65535)
+                    .local_get(dst.0)
+                    .i32_const(65535)
+                    .i32_lt_s()
+                    .select()
+                    .local_set(dst.0);
             }
             FloatMode::F32 => {
-                sink.local_get(src.0).i32_reinterpret_f32().local_set(dst.0);
+                sink.local_get(src.0)
+                    .f32_const(Ieee32::new(0.0f32.to_bits()))
+                    .f32_max()
+                    .f32_const(Ieee32::new(1.0f32.to_bits()))
+                    .f32_min()
+                    .f32_const(Ieee32::new(65535.0f32.to_bits()))
+                    .f32_mul()
+                    .i32_trunc_sat_f32_u()
+                    .local_set(dst.0);
+            }
+        },
+        LpirOp::FtoUnorm8 { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(8)
+                    .i32_shr_u()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(0)
+                    .local_get(dst.0)
+                    .i32_const(0)
+                    .i32_gt_s()
+                    .select()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(255)
+                    .local_get(dst.0)
+                    .i32_const(255)
+                    .i32_lt_s()
+                    .select()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .f32_const(Ieee32::new(0.0f32.to_bits()))
+                    .f32_max()
+                    .f32_const(Ieee32::new(1.0f32.to_bits()))
+                    .f32_min()
+                    .f32_const(Ieee32::new(255.0f32.to_bits()))
+                    .f32_mul()
+                    .i32_trunc_sat_f32_u()
+                    .local_set(dst.0);
+            }
+        },
+        LpirOp::Unorm16toF { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFFFF)
+                    .i32_and()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFFFF)
+                    .i32_and()
+                    .f32_convert_i32_u()
+                    .f32_const(Ieee32::new(65535.0f32.to_bits()))
+                    .f32_div()
+                    .local_set(dst.0);
+            }
+        },
+        LpirOp::Unorm8toF { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFF)
+                    .i32_and()
+                    .i32_const(8)
+                    .i32_shl()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFF)
+                    .i32_and()
+                    .f32_convert_i32_u()
+                    .f32_const(Ieee32::new(255.0f32.to_bits()))
+                    .f32_div()
+                    .local_set(dst.0);
             }
         },
         LpirOp::SlotAddr { dst, slot } => {

@@ -18,3 +18,4 @@ pub mod fsub_q32;
 pub mod ftoi_sat_q32;
 pub mod itof_s_q32;
 pub mod itof_u_q32;
+pub mod unorm_conv_q32;

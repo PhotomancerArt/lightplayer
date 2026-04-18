@@ -1033,7 +1033,19 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<LpirOp, ParseError> {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "i_from_f32_bits" => Ok(LpirOp::IfromF32Bits {
+        "fto_unorm16" => Ok(LpirOp::FtoUnorm16 {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "fto_unorm8" => Ok(LpirOp::FtoUnorm8 {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "unorm16to_f" => Ok(LpirOp::Unorm16toF {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "unorm8to_f" => Ok(LpirOp::Unorm8toF {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),

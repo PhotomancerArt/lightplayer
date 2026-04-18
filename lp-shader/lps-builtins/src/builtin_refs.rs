@@ -115,6 +115,10 @@ use crate::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32;
 use crate::builtins::lpir::ftoi_sat_q32::{__lp_lpir_ftoi_sat_s_q32, __lp_lpir_ftoi_sat_u_q32};
 use crate::builtins::lpir::itof_s_q32::__lp_lpir_itof_s_q32;
 use crate::builtins::lpir::itof_u_q32::__lp_lpir_itof_u_q32;
+use crate::builtins::lpir::unorm_conv_q32::{
+    __lp_lpir_fto_unorm8_q32, __lp_lpir_fto_unorm16_q32, __lp_lpir_unorm8_to_f_q32,
+    __lp_lpir_unorm16_to_f_q32,
+};
 use crate::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
 
 /// Reference all builtin functions to prevent dead code elimination.
@@ -157,11 +161,15 @@ pub fn ensure_builtins_referenced() {
         let _lpir_fnearest_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fnearest_q32;
         let _lpir_fsqrt_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fsqrt_q32;
         let _lpir_fsub_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fsub_q32;
+        let _lpir_fto_unorm16_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fto_unorm16_q32;
+        let _lpir_fto_unorm8_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fto_unorm8_q32;
         let _lpir_ftoi_sat_s_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ftoi_sat_s_q32;
         let _lpir_ftoi_sat_u_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ftoi_sat_u_q32;
         let _lpir_ftrunc_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ftrunc_q32;
         let _lpir_itof_s_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_itof_s_q32;
         let _lpir_itof_u_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_itof_u_q32;
+        let _lpir_unorm16_to_f_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_unorm16_to_f_q32;
+        let _lpir_unorm8_to_f_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_unorm8_to_f_q32;
         let _lpfn_fbm2_f32_fn: extern "C" fn(f32, f32, i32, u32) -> f32 = __lp_lpfn_fbm2_f32;
         let _lpfn_fbm2_q32_fn: extern "C" fn(i32, i32, i32, u32) -> i32 = __lp_lpfn_fbm2_q32;
         let _lpfn_fbm3_f32_fn: extern "C" fn(f32, f32, f32, i32, u32) -> f32 = __lp_lpfn_fbm3_f32;
@@ -315,11 +323,15 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&_lpir_fnearest_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fsqrt_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fsub_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fto_unorm16_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fto_unorm8_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_ftoi_sat_s_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_ftoi_sat_u_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_ftrunc_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_itof_s_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_itof_u_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_unorm16_to_f_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_unorm8_to_f_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_fbm2_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_fbm2_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_fbm3_f32_fn as *const _);
