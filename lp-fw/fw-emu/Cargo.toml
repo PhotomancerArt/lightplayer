@@ -21,7 +21,8 @@ log = { workspace = true, default-features = false }
 
 [features]
 default = []
-alloc-trace = ["lp-riscv-emu-guest/alloc-trace"]
+# Unified profile session (alloc + perf hooks); guest syscall path was renamed from `alloc-trace`.
+profile = ["lp-riscv-emu-guest/profile"]
 # Test command __test_unwind: runs catch_unwind test before server loop (for CI)
 test_unwind = []
 

@@ -18,14 +18,23 @@ log = { workspace = true, default-features = false }
 env_logger = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+rustc-demangle = { version = "0.1", optional = true }
 
 libc = { version = "0.2", optional = true }
 
 [features]
-std = ["env_logger", "log/std", "serde", "serde_json", "libc"]
+std = [
+    "env_logger",
+    "log/std",
+    "serde",
+    "serde_json",
+    "libc",
+    "rustc-demangle",
+]
 
 [dev-dependencies]
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-frontend = { workspace = true }
 cranelift-module = { workspace = true }
 lp-riscv-elf = { path = "../lp-riscv-elf", features = ["std"] }
+tempfile = "3"

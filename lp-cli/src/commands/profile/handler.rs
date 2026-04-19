@@ -1,28 +1,31 @@
-//! mem-profile command: load a project in the emulator with allocation tracing,
-//! tick N frames, stop, and write the trace output.
+//! `lp-cli profile` — run a workload under the emulator with unified profiling.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use lp_client::LpClient;
 use lp_client::transport_emu_serial::SerialEmuClientTransport;
 use lp_model::AsLpPath;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
-    alloc_trace::{TraceMetadata, TraceSymbol},
+    profile::alloc::AllocCollector,
+    profile::{Collector, SessionMetadata, TraceSymbol},
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::fs::{LpFs, LpFsStd};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use super::args::MemProfileArgs;
+use super::args::ProfileArgs;
 
-pub fn handle_mem_profile(args: MemProfileArgs) -> Result<()> {
+pub fn handle_profile(args: ProfileArgs) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(handle_mem_profile_async(args))
+    runtime.block_on(handle_profile_async(args))
 }
 
-async fn handle_mem_profile_async(args: MemProfileArgs) -> Result<()> {
+async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
+    validate_collectors(&args.collect)?;
+
     let dir = std::env::current_dir()
         .context("Failed to get current directory")?
         .join(&args.dir)
@@ -36,40 +39,48 @@ async fn handle_mem_profile_async(args: MemProfileArgs) -> Result<()> {
 
     let project_uid = read_project_uid(&dir)?;
 
-    // Build fw-emu with alloc-trace feature
-    eprintln!("Building fw-emu with alloc-trace...");
+    eprintln!("Building fw-emu (feature profile)...");
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
             .with_profile("release-emu")
             .with_backtrace_support(true)
-            .with_features(&["alloc-trace"]),
+            .with_features(&["profile"]),
     )
     .map_err(|e| anyhow::anyhow!("Failed to build fw-emu: {e}"))?;
 
-    // Load ELF
     let elf_data = std::fs::read(&fw_emu_path).context("Failed to read fw-emu ELF")?;
     let load_info = load_elf(&elf_data).map_err(|e| anyhow::anyhow!("Failed to load ELF: {e}"))?;
 
-    // Build trace directory: traces/YYYY-MM-DDTHH-MM-SS--<dir>--<note>/
-    let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
+    let timestamp_dir = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
     let dir_label = kebab_case(&args.dir.to_string_lossy());
-    let mut trace_dir_name = format!("{timestamp}--{dir_label}");
+    let mut profile_dir_name = format!("{timestamp_dir}--{dir_label}");
     if let Some(note) = &args.note {
         let note_kebab = kebab_case(note);
         if !note_kebab.is_empty() {
-            trace_dir_name = format!("{trace_dir_name}--{note_kebab}");
+            profile_dir_name = format!("{profile_dir_name}--{note_kebab}");
         }
     }
-    let trace_dir = std::path::PathBuf::from("traces").join(&trace_dir_name);
+    let trace_dir = std::path::PathBuf::from("profiles").join(&profile_dir_name);
 
-    let metadata = TraceMetadata {
-        version: 1,
+    std::fs::create_dir_all(&trace_dir).with_context(|| {
+        format!(
+            "Failed to create profile output directory {}",
+            trace_dir.display()
+        )
+    })?;
+
+    let heap_start = 0x8000_0000u32;
+    let heap_size = 320 * 1024;
+
+    let metadata = SessionMetadata {
+        schema_version: 1,
         timestamp: chrono::Utc::now().to_rfc3339(),
         project: project_uid.clone(),
+        workload: args.dir.display().to_string(),
+        note: args.note.clone(),
+        clock_source: "emu_estimated",
         frames_requested: args.frames,
-        heap_start: 0x80000000,
-        heap_size: 320 * 1024,
         symbols: load_info
             .symbol_list
             .iter()
@@ -81,16 +92,28 @@ async fn handle_mem_profile_async(args: MemProfileArgs) -> Result<()> {
             .collect(),
     };
 
-    // Create emulator with alloc tracing
+    let mut collectors: Vec<Box<dyn Collector>> = Vec::new();
+    for name in &args.collect {
+        let name = name.trim();
+        match name {
+            "alloc" => collectors.push(Box::new(AllocCollector::new(
+                &trace_dir,
+                heap_start,
+                heap_size,
+            )?)),
+            other => bail!("unknown collector '{other}'; supported: alloc"),
+        }
+    }
+
     let ram_size = load_info.ram.len();
     let mut emulator = Riscv32Emulator::new(load_info.code, load_info.ram)
         .with_log_level(LogLevel::None)
         .with_time_mode(TimeMode::Simulated(0))
         .with_allow_unaligned_access(true)
-        .with_alloc_trace(&trace_dir, &metadata)
-        .context("Failed to enable alloc trace")?;
+        .with_profile_session(trace_dir.clone(), &metadata, collectors)
+        .context("Failed to start profile session")?;
 
-    let sp_value = 0x80000000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
+    let sp_value = 0x8000_0000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
     emulator.set_register(Gpr::Sp, sp_value as i32);
     emulator.set_pc(load_info.entry_point);
 
@@ -101,7 +124,6 @@ async fn handle_mem_profile_async(args: MemProfileArgs) -> Result<()> {
 
     let client = LpClient::new(Box::new(transport));
 
-    // Run the workload, capturing any error so we can still flush + report
     let run_err = run_workload(&client, &emulator_arc, &dir, args.frames, &project_uid)
         .await
         .err();
@@ -110,32 +132,40 @@ async fn handle_mem_profile_async(args: MemProfileArgs) -> Result<()> {
         eprintln!("Workload stopped early: {e:#}");
     }
 
-    // Always flush trace
-    let event_count = {
+    let counts = {
         let mut emu = emulator_arc.lock().unwrap();
-        emu.finish_alloc_trace()
-            .context("Failed to flush trace")
-            .unwrap_or(0)
+        emu.finish_profile_session()
+            .context("Failed to flush profile session")?
     };
 
+    let event_count = counts
+        .iter()
+        .find(|(n, _)| n == "alloc")
+        .map(|(_, c)| *c)
+        .unwrap_or(0);
+
     eprintln!("Trace complete: {event_count} events");
-
-    // Always generate report
-    if event_count > 0 {
-        eprintln!("Analyzing trace...");
-        let report = crate::commands::heap_summary::analyze_trace_dir(&trace_dir, 20)?;
-        let rendered = report.render();
-
-        print!("{rendered}");
-
-        let report_path = trace_dir.join("report.txt");
-        std::fs::write(&report_path, &rendered)
-            .with_context(|| format!("Failed to write {}", report_path.display()))?;
-        eprintln!("Report written to {}", report_path.display());
-    }
+    eprintln!("Report written to {}", trace_dir.join("report.txt").display());
 
     println!("{}", trace_dir.display());
 
+    Ok(())
+}
+
+fn validate_collectors(names: &[String]) -> Result<()> {
+    let mut seen = HashSet::new();
+    for raw in names {
+        let name = raw.trim();
+        if name.is_empty() {
+            bail!("empty collector name in --collect");
+        }
+        if !seen.insert(name) {
+            bail!("duplicate collector '{name}' in --collect");
+        }
+        if name != "alloc" {
+            bail!("unknown collector '{name}'; supported: alloc");
+        }
+    }
     Ok(())
 }
 
@@ -233,7 +263,6 @@ fn kebab_case(s: &str) -> String {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect();
-    // Collapse runs of dashes and trim edges
     let mut result = String::new();
     for c in kebab.chars() {
         if c == '-' && result.ends_with('-') {

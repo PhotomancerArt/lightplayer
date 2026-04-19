@@ -24,4 +24,4 @@ Replaced heap-allocated LPFX function registry with a static `&[LpfnFn]` in ROM.
 - No trace captured yet post-merge.
 
 ## Outcome
-Kept. Implementation complete. Run `just mem-profile` (or equivalent) to capture a trace and confirm the lpfn hotspot is gone.
+Kept. Implementation complete. Run `just profile` (or `cargo run -p lp-cli -- profile …`) to capture a trace and confirm the lpfn hotspot is gone.

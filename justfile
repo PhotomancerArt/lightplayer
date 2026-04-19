@@ -426,18 +426,12 @@ decode-backtrace *addrs:
     fi
 
 # ============================================================================
-# Allocation tracing
+# Profiling (lp-cli profile)
 # ============================================================================
-# Run a project in the emulator with allocation tracing.
-# Outputs path to trace directory.
-# Default project: examples/mem-profile
-
-# Usage: just mem-profile [path/to/project] [--frames N] [--note "description"]
-mem-profile *args:
-    cargo run -p lp-cli -- mem-profile {{ args }}
-
-# Summarize heap allocations from a mem-profile output directory.
-
-# Usage: just heap-summary traces/2026-03-08-185520-simple-test [--top N]
-heap-summary trace_dir *args:
-    cargo run -p lp-cli -- heap-summary {{ trace_dir }} {{ args }}
+# Profile a project in the emulator with the unified profile collector(s).
+# Replaces mem-profile and heap-summary.
+# Default project: examples/basic
+# Default collectors: alloc
+# Usage: just profile [path/to/project] [--collect alloc] [--frames N] [--note "description"]
+profile *args:
+    cargo run -p lp-cli -- profile {{ args }}

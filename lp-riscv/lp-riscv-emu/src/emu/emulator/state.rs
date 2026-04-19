@@ -5,11 +5,20 @@ extern crate alloc;
 use super::super::{cycle_model::CycleModel, logging::LogLevel, memory::Memory};
 use crate::serial::host_serial::HostSerial;
 use crate::time::TimeMode;
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
+#[cfg(feature = "std")]
+use alloc::string::String;
 use alloc::vec::Vec;
 use cranelift_codegen::ir::TrapCode;
 
 #[cfg(feature = "std")]
+use std::path::PathBuf;
+#[cfg(feature = "std")]
 use std::time::Instant;
+
+#[cfg(feature = "std")]
+use crate::profile::{Collector, ProfileSession, SessionMetadata};
 
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
 pub const DEFAULT_RAM_START: u32 = 0x80000000;
@@ -34,9 +43,12 @@ pub struct Riscv32Emulator {
     pub(super) start_time: Option<Instant>,
     /// Time mode for controlling time advancement
     pub(super) time_mode: TimeMode,
-    /// Allocation tracer for memory debugging (only when std feature enabled)
+    /// Unified profiling session (alloc and future collectors); `std` only.
     #[cfg(feature = "std")]
-    pub(super) alloc_tracer: Option<crate::alloc_trace::AllocTracer>,
+    pub(super) profile_session: Option<ProfileSession>,
+    /// Trace directory root for this session (`std` only).
+    #[cfg(feature = "std")]
+    pub(super) profile_trace_dir: Option<PathBuf>,
 }
 
 impl Riscv32Emulator {
@@ -67,7 +79,9 @@ impl Riscv32Emulator {
             start_time: None,
             time_mode: TimeMode::RealTime,
             #[cfg(feature = "std")]
-            alloc_tracer: None,
+            profile_session: None,
+            #[cfg(feature = "std")]
+            profile_trace_dir: None,
         }
     }
 
@@ -101,7 +115,9 @@ impl Riscv32Emulator {
             start_time: None,
             time_mode: TimeMode::RealTime,
             #[cfg(feature = "std")]
-            alloc_tracer: None,
+            profile_session: None,
+            #[cfg(feature = "std")]
+            profile_trace_dir: None,
         }
     }
 
@@ -117,24 +133,27 @@ impl Riscv32Emulator {
         self
     }
 
-    /// Enable allocation tracing. Events are written to `heap-trace.jsonl` in `trace_dir`.
+    /// Attach a profiling session (creates `trace_dir`, writes `meta.json`, enables collectors).
     #[cfg(feature = "std")]
-    pub fn with_alloc_trace(
+    pub fn with_profile_session(
         mut self,
-        trace_dir: &std::path::Path,
-        metadata: &crate::alloc_trace::TraceMetadata,
-    ) -> Result<Self, std::io::Error> {
-        self.alloc_tracer = Some(crate::alloc_trace::AllocTracer::new(trace_dir, metadata)?);
+        trace_dir: PathBuf,
+        metadata: &SessionMetadata,
+        collectors: Vec<Box<dyn Collector>>,
+    ) -> std::io::Result<Self> {
+        self.profile_trace_dir = Some(trace_dir.clone());
+        self.profile_session = Some(ProfileSession::new(trace_dir, metadata, collectors)?);
         Ok(self)
     }
 
-    /// Flush and close the allocation tracer, returning the event count.
+    /// Finish the profiling session (flush collectors, write `report.txt`, print combined report).
+    ///
+    /// Returns per-collector event counts in session order.
     #[cfg(feature = "std")]
-    pub fn finish_alloc_trace(&mut self) -> Result<u64, std::io::Error> {
-        if let Some(ref mut tracer) = self.alloc_tracer {
-            tracer.finish()
-        } else {
-            Ok(0)
+    pub fn finish_profile_session(&mut self) -> std::io::Result<Vec<(String, u64)>> {
+        match self.profile_session.as_mut() {
+            Some(s) => s.finish(),
+            None => Ok(Vec::new()),
         }
     }
 

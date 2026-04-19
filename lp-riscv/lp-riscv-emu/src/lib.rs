@@ -25,7 +25,7 @@ pub mod serial;
 pub mod time;
 
 #[cfg(feature = "std")]
-pub mod alloc_trace;
+pub mod profile;
 #[cfg(feature = "std")]
 pub mod test_util;
 

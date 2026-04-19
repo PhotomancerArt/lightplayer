@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, heap_summary, mem_profile, serve, shader_debug, shader_lpir, upload};
+use commands::{create, dev, profile, serve, shader_debug, shader_lpir, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -56,26 +56,8 @@ enum Cli {
         #[arg(long)]
         uid: Option<String>,
     },
-    /// Run a project in the emulator with allocation tracing
-    MemProfile {
-        /// Project directory (default: examples/mem-profile)
-        #[arg(default_value = "examples/mem-profile")]
-        dir: std::path::PathBuf,
-        /// Number of frames to run
-        #[arg(long, default_value = "10")]
-        frames: u32,
-        /// Short note appended to trace directory name (kebab-cased)
-        #[arg(long)]
-        note: Option<String>,
-    },
-    /// Summarize heap allocations from a mem-profile output directory
-    HeapSummary {
-        /// Trace directory (e.g. traces/2026-03-08-185520-simple-test)
-        trace_dir: std::path::PathBuf,
-        /// Number of top entries to show in live/hotspot sections (default: 20)
-        #[arg(long, default_value = "20")]
-        top: usize,
-    },
+    /// Run a profiling session or compare profiles (`profile diff` is a stub in m0).
+    Profile(profile::ProfileCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {
         /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
@@ -116,12 +98,10 @@ fn main() -> Result<()> {
         Cli::Create { dir, name, uid } => {
             create::handle_create(create::CreateArgs { dir, name, uid })
         }
-        Cli::MemProfile { dir, frames, note } => {
-            mem_profile::handle_mem_profile(mem_profile::MemProfileArgs { dir, frames, note })
-        }
-        Cli::HeapSummary { trace_dir, top } => {
-            heap_summary::handle_heap_summary(&heap_summary::HeapSummaryArgs { trace_dir, top })
-        }
+        Cli::Profile(cli) => match cli.subcommand {
+            Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),
+            None => profile::handle_profile(cli.run),
+        },
         Cli::ShaderLpir {
             path,
             stats,

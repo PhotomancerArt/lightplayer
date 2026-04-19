@@ -160,7 +160,7 @@ These commands must pass for any change touching the shader pipeline:
 
 ```bash
 # Firmware emulator tests (real shader compilation + execution)
-cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
+cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
 
 # ESP32 builds with compiler included
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server

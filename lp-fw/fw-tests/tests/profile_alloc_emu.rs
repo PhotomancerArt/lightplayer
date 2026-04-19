@@ -1,4 +1,4 @@
-//! Integration test: verify allocation tracing produces valid output.
+//! Integration test: verify allocation profiling produces valid output.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,63 +14,70 @@ use lp_model::AsLpPath;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
-    alloc_trace::{TraceMetadata, TraceSymbol},
+    profile::alloc::AllocCollector,
+    profile::{Collector, SessionMetadata, TraceSymbol},
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
 use lp_shared::fs::LpFsMemory;
 
+const FRAMES: u32 = 3;
+const HEAP_START: u32 = 0x8000_0000;
+const HEAP_SIZE: u32 = 256 * 1024;
+
 #[tokio::test]
 #[test_log::test]
-async fn test_alloc_trace_produces_valid_output() {
-    // Build fw-emu with alloc-trace feature + frame pointers
-    log::info!("Building fw-emu with alloc-trace...");
+async fn test_profile_alloc_produces_valid_output() {
+    log::info!("Building fw-emu with profile...");
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
             .with_profile("release-emu")
             .with_backtrace_support(true)
-            .with_features(&["alloc-trace"]),
+            .with_features(&["profile"]),
     )
-    .expect("Failed to build fw-emu with alloc-trace");
+    .expect("Failed to build fw-emu with profile");
 
-    // Load ELF
     let elf_data = std::fs::read(&fw_emu_path).expect("Failed to read fw-emu ELF");
     let load_info = load_elf(&elf_data).expect("Failed to load ELF");
 
-    // Set up trace output directory
     let trace_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let trace_path = trace_dir.path().to_path_buf();
 
-    let metadata = TraceMetadata {
-        version: 1,
-        timestamp: "2026-03-08T00:00:00Z".to_string(),
-        project: "test-project".to_string(),
-        frames_requested: 3,
-        heap_start: 0x80000000,
-        heap_size: 256 * 1024,
+    let metadata = SessionMetadata {
+        schema_version: 1,
+        timestamp: "2026-01-01T00:00:00Z".into(),
+        project: "fw-tests".into(),
+        workload: "profile-alloc-emu".into(),
+        note: None,
+        clock_source: "emu_estimated",
+        frames_requested: FRAMES,
         symbols: load_info
             .symbol_list
             .iter()
             .map(|s| TraceSymbol {
+                name: s.name.clone(),
                 addr: s.addr,
                 size: s.size,
-                name: s.name.clone(),
             })
             .collect(),
     };
 
-    // Create emulator with alloc tracing
+    let alloc: Box<dyn Collector> = Box::new(
+        AllocCollector::new(trace_path.as_path(), HEAP_START, HEAP_SIZE)
+            .expect("AllocCollector::new"),
+    );
+
     let ram_size = load_info.ram.len();
     let mut emulator = Riscv32Emulator::new(load_info.code, load_info.ram)
         .with_log_level(LogLevel::Instructions)
         .with_time_mode(TimeMode::Simulated(0))
         .with_allow_unaligned_access(true)
-        .with_alloc_trace(&trace_path, &metadata)
-        .expect("Failed to enable alloc trace");
+        .with_profile_session(trace_path.clone(), &metadata, vec![alloc])
+        .expect("Failed to enable profile session");
 
-    let sp_value = 0x80000000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
+    let sp_value = 0x8000_0000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
     emulator.set_register(Gpr::Sp, sp_value as i32);
     emulator.set_pc(load_info.entry_point);
 
@@ -81,7 +88,6 @@ async fn test_alloc_trace_produces_valid_output() {
 
     let client = LpClient::new(Box::new(transport));
 
-    // Build a minimal project
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
     let texture_path = builder.texture().width(2).height(2).add(&mut builder);
@@ -90,7 +96,6 @@ async fn test_alloc_trace_produces_valid_output() {
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
 
-    // Sync project files to emulator
     let project_files = collect_project_files(&fs.borrow());
     let project_dir = "project";
     for (path, content) in project_files {
@@ -120,52 +125,69 @@ async fn test_alloc_trace_produces_valid_output() {
     sync_emu_project_view(&client, project_handle, &mut client_view).await;
     assert_shader_compiled_ok(&client_view, shader_path.as_str());
 
-    // Tick a few frames
-    for _ in 0..3 {
+    for _ in 0..FRAMES {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(40);
     }
 
-    // Stop all projects
     client
         .stop_all_projects()
         .await
         .expect("Failed to stop projects");
 
-    // Flush trace
-    let event_count = {
+    let counts = {
         let mut emu = emulator_arc.lock().unwrap();
-        emu.finish_alloc_trace().expect("Failed to flush trace")
+        emu.finish_profile_session()
+            .expect("Failed to finish profile session")
     };
 
-    // Assertions
+    let event_count = counts
+        .iter()
+        .find(|(name, _)| name == "alloc")
+        .map(|(_, c)| *c)
+        .unwrap_or(0);
+
     log::info!("Trace produced {} events", event_count);
     assert!(event_count > 0, "Should have recorded allocation events");
 
-    // Verify meta.json
     let meta_path = trace_path.join("meta.json");
     assert!(meta_path.exists(), "meta.json should exist");
     let meta_content = std::fs::read_to_string(&meta_path).expect("Failed to read meta.json");
     let meta: serde_json::Value =
         serde_json::from_str(&meta_content).expect("meta.json should be valid JSON");
-    assert_eq!(meta["version"], 1);
+    assert_eq!(meta["schema_version"], 1);
     assert!(
         meta["symbols"].as_array().unwrap().len() > 0,
         "Should have symbols"
     );
+    assert!(
+        meta["collectors"]["alloc"].is_object(),
+        "collectors.alloc should be present"
+    );
+    assert_eq!(
+        meta["collectors"]["alloc"]["heap_start"].as_u64(),
+        Some(HEAP_START as u64)
+    );
+    assert_eq!(
+        meta["collectors"]["alloc"]["heap_size"].as_u64(),
+        Some(HEAP_SIZE as u64)
+    );
 
-    // Verify heap-trace.jsonl
+    let report_path = trace_path.join("report.txt");
+    assert!(report_path.exists(), "report.txt should exist");
+    let report = std::fs::read_to_string(&report_path).expect("read report.txt");
+    assert!(!report.is_empty(), "report.txt should be non-empty");
+
     let trace_file_path = trace_path.join("heap-trace.jsonl");
     assert!(trace_file_path.exists(), "heap-trace.jsonl should exist");
     let trace_content =
         std::fs::read_to_string(&trace_file_path).expect("Failed to read heap-trace.jsonl");
     let lines: Vec<&str> = trace_content.lines().collect();
     assert!(
-        lines.len() > 0,
+        !lines.is_empty(),
         "heap-trace.jsonl should have at least one event"
     );
 
-    // Verify each line is valid JSON with expected fields
     let mut has_alloc = false;
     let mut has_dealloc = false;
     let mut prev_ic = 0u64;
@@ -209,7 +231,7 @@ async fn test_alloc_trace_produces_valid_output() {
     assert!(has_dealloc, "Should have at least one dealloc event");
 
     log::info!(
-        "Alloc trace test passed: {} events, {} lines in trace file",
+        "Profile alloc test passed: {} events, {} lines in trace file",
         event_count,
         lines.len()
     );

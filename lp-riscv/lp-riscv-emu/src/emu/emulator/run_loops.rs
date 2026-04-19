@@ -21,6 +21,32 @@ use lp_riscv_inst::Gpr;
 /// Default fuel for run() function
 const DEFAULT_FUEL: u64 = 100_000;
 
+/// Dispatches `SYSCALL_ALLOC_TRACE` through [`crate::profile::ProfileSession`] using disjoint
+/// borrows (session vs. regs/memory) so the caller does not hit the overlapping `&mut self` issue.
+#[cfg(feature = "std")]
+fn dispatch_profile_alloc_syscall(
+    profile_session: &mut Option<crate::profile::ProfileSession>,
+    pc: u32,
+    regs: &[i32; 32],
+    cycle_count: u64,
+    instruction_count: u64,
+    memory: &Memory,
+    syscall_id: u32,
+    args: &[u32],
+) -> crate::profile::SyscallAction {
+    let Some(session) = profile_session.as_mut() else {
+        return crate::profile::SyscallAction::Pass;
+    };
+    let mut ctx = crate::profile::EmuCtx {
+        pc,
+        regs,
+        cycle_count,
+        instruction_count,
+        memory,
+    };
+    session.dispatch_syscall(&mut ctx, syscall_id, args)
+}
+
 impl Riscv32Emulator {
     /// Internal run loop with tight loop and inline fuel checking.
     ///
@@ -405,70 +431,30 @@ impl Riscv32Emulator {
         } else if syscall_info.number == SYSCALL_ALLOC_TRACE {
             #[cfg(feature = "std")]
             {
-                if self.alloc_tracer.is_some() {
-                    let event_type = syscall_info.args[0];
-                    let frames = self.unwind_backtrace(self.pc, &self.regs);
-                    let ic = self.instruction_count;
+                use crate::profile::{HaltReason, SyscallAction};
 
-                    let event = match event_type {
-                        lp_riscv_emu_shared::ALLOC_TRACE_ALLOC => crate::alloc_trace::AllocEvent {
-                            t: "A",
-                            ptr: syscall_info.args[1] as u32,
-                            sz: syscall_info.args[2] as u32,
-                            ic,
-                            frames,
-                            free: syscall_info.args[3] as u32,
-                            old_ptr: None,
-                            old_sz: None,
-                        },
-                        lp_riscv_emu_shared::ALLOC_TRACE_DEALLOC => {
-                            crate::alloc_trace::AllocEvent {
-                                t: "D",
-                                ptr: syscall_info.args[1] as u32,
-                                sz: syscall_info.args[2] as u32,
-                                ic,
-                                frames,
-                                free: syscall_info.args[3] as u32,
-                                old_ptr: None,
-                                old_sz: None,
-                            }
-                        }
-                        lp_riscv_emu_shared::ALLOC_TRACE_REALLOC => {
-                            crate::alloc_trace::AllocEvent {
-                                t: "R",
-                                ptr: syscall_info.args[2] as u32,
-                                sz: syscall_info.args[4] as u32,
-                                ic,
-                                frames,
-                                free: syscall_info.args[5] as u32,
-                                old_ptr: Some(syscall_info.args[1] as u32),
-                                old_sz: Some(syscall_info.args[3] as u32),
-                            }
-                        }
-                        lp_riscv_emu_shared::ALLOC_TRACE_OOM => {
-                            let sz = syscall_info.args[2] as u32;
-                            let event = crate::alloc_trace::AllocEvent {
-                                t: "O",
-                                ptr: 0,
-                                sz,
-                                ic,
-                                frames,
-                                free: 0,
-                                old_ptr: None,
-                                old_sz: None,
-                            };
-                            self.alloc_tracer.as_mut().unwrap().record_event(&event);
-                            return Ok(StepResult::Oom(super::types::OomInfo {
-                                size: sz,
-                                pc: self.pc,
-                            }));
-                        }
-                        _ => {
-                            self.regs[Gpr::A0.num() as usize] = 0;
-                            return Ok(StepResult::Continue);
-                        }
-                    };
-                    self.alloc_tracer.as_mut().unwrap().record_event(&event);
+                let args_u32 = syscall_info.args.map(|a| a as u32);
+                match dispatch_profile_alloc_syscall(
+                    &mut self.profile_session,
+                    self.pc,
+                    &self.regs,
+                    self.cycle_count,
+                    self.instruction_count,
+                    &self.memory,
+                    SYSCALL_ALLOC_TRACE as u32,
+                    &args_u32,
+                ) {
+                    SyscallAction::Pass => {}
+                    SyscallAction::Handled => {
+                        self.regs[Gpr::A0.num() as usize] = 0;
+                        return Ok(StepResult::Continue);
+                    }
+                    SyscallAction::Halt(HaltReason::Oom { size }) => {
+                        return Ok(StepResult::Oom(super::types::OomInfo {
+                            size,
+                            pc: self.pc,
+                        }));
+                    }
                 }
             }
             self.regs[Gpr::A0.num() as usize] = 0;

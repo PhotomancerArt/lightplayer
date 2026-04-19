@@ -1,5 +1,5 @@
 // Re-export syscall constants from shared crate
-#[cfg(feature = "alloc-trace")]
+#[cfg(feature = "profile")]
 pub use lp_riscv_emu_shared::{
     ALLOC_TRACE_ALLOC, ALLOC_TRACE_DEALLOC, ALLOC_TRACE_OOM, ALLOC_TRACE_REALLOC,
 };
