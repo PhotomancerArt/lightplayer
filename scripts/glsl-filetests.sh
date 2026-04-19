@@ -44,6 +44,7 @@ SHOW_LIST=false
 REGEN_GEN_FILES=false
 TARGET_ARG=()
 TEST_ARGS=()
+FORCE_OPTS=()
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -92,7 +93,7 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
   --force-opt)
-    TEST_ARGS+=("--force-opt" "$2")
+    FORCE_OPTS+=("$2")
     shift 2
     ;;
   *)
@@ -168,6 +169,9 @@ EXAMPLES:
 
     # Baseline: mark all current failures @unimplemented(backend=jit), then re-run to get exit 0
     glsl-filetests.sh --target jit.q32 --mark-unimplemented --assume-yes
+
+    # A/B test inlining off
+    glsl-filetests.sh --force-opt inline.mode=never examples/
 
 PATTERN SYNTAX:
     *         Matches any sequence of characters
@@ -276,4 +280,8 @@ fi
 # This ensures cargo run picks up all compilation changes in the lps workspace
 # Pass all remaining arguments directly to the test runner
 # Pass through DEBUG environment variable for debug logging
+if [ ${#FORCE_OPTS[@]} -gt 0 ]; then
+  LPS_FILETEST_FORCE_OPT="$(IFS=','; echo "${FORCE_OPTS[*]}")"
+  export LPS_FILETEST_FORCE_OPT
+fi
 cargo run -p lps-filetests-app --bin lps-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"

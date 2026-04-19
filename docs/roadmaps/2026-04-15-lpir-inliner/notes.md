@@ -51,7 +51,7 @@ functions to eliminate).
 - 53 tests under `filetests/function/` covering call semantics
 - `call-simple`, `call-nested`, `call-multiple`, `call-order`, `call-return-value`
   are the direct call-graph tests
-- `debug/rainbow.glsl` is a real shader with many small helper calls
+- `examples/rainbow.glsl` is a real shader with many small helper calls
 - One compile per file per target; no per-test compile flag mechanism today
 - `NativeCompileOptions` has float_mode, debug_info, emu_trace, alloc_trace
 - Env var pattern exists: `LPVM_ALLOC_TRACE=1` → option field

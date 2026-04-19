@@ -147,4 +147,41 @@ production callers with a configured root set).
 
 ## Other follow-ups
 
-(Add additional future-work items here as they surface.)
+### CI optimization-profile sweeps (Target × OptProfile axis)
+
+Today `Target` only encodes backend / ISA / float mode. To get automatic
+regression detection on the inliner perf signal, we want the filetest
+harness to be able to run the same test under multiple
+`(target, opt-profile)` combinations and emit deltas.
+
+Concrete shape: extend `Target` (or add a parallel `OptProfile` axis)
+with named profiles like `o0` (no inlining, no const-fold), `o1`
+(default Auto), `o2` (always inline). CI runs the suite under each
+profile and asserts no unexpected pass/fail flips. Output table gets a
+new column or row per profile.
+
+Deferred from M4 because the surface area was larger than the ad-hoc
+`--force-opt` flag we ended up shipping (which is sufficient for
+human-driven A/B today).
+
+### Grow `examples/` corpus with more representative shaders
+
+The M4 outcome measurement leaned on a single shader
+(`examples/rainbow.glsl`). That's enough to confirm the pipeline works
+but not enough to drive heuristic tuning or catch regressions on real
+content. Write 3–5 more shaders that exercise different code-shapes:
+heavy palette/lookup, math-heavy fragment work, control-flow-heavy
+animation, etc. Bonus: include a shader that mirrors a real artist's
+output.
+
+### Triage `function/call-order.glsl` under `--force-opt inline.mode=always`
+
+Surfaced during M4 Phase 4 acceptance: this test is annotated
+`@unimplemented` for some target but starts passing when inlining is
+forced on. Either inlining is accidentally working around a real bug,
+or the `@unimplemented` annotation is stale. Quick triage:
+1. Run the file under default Auto and confirm the same `@unimplemented`
+   assertion still fires.
+2. Diff the LPIR between Auto and Always to identify which call site
+   gets inlined.
+3. Either delete the stale annotation or file a real bug.

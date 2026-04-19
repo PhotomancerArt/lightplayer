@@ -48,6 +48,8 @@ OPTIONS:
     --vinst            Show VInst/interleaved section
     --asm              Show assembly/disasm section
     --summary          Summary only (no detailed function output)
+    --compiler-opt     KEY=value LPIR compiler override (repeatable).
+                        Use `--compiler-opt` with no value after a FILE path to print valid keys.
 
 EXAMPLES:
     # Show debug output for all functions (rv32n backend)

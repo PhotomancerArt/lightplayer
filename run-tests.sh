@@ -53,7 +53,7 @@ export DEBUG=1
 (target/debug/lps-filetests-app test --target rv32fa.q32 control/while/nested_if.glsl &> docs/fa3-errors/control/while/nested_if.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 debug/palette-rainbow.glsl &> docs/fa3-errors/debug/palette-rainbow.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 debug/rainbow-noctrl.glsl &> docs/fa3-errors/debug/rainbow-noctrl.glsl)&
-(target/debug/lps-filetests-app test --target rv32fa.q32 debug/rainbow.glsl &> docs/fa3-errors/debug/rainbow.glsl)&
+(target/debug/lps-filetests-app test --target rv32fa.q32 examples/rainbow.glsl &> docs/fa3-errors/examples/rainbow.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 function/call-multiple.glsl &> docs/fa3-errors/function/call-multiple.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 function/call-order.glsl &> docs/fa3-errors/function/call-order.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 function/call-return-value.glsl &> docs/fa3-errors/function/call-return-value.glsl)&
