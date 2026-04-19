@@ -116,9 +116,25 @@ same LPIR.
 ## Validation
 
 ```bash
-cargo test -p lp-engine --features wasmtime  # or whatever the new feature is
-cargo build --features wasmtime -p fw-emu
-scripts/glsl-filetests.sh --concise            # no regressions
+# Host workspace
+cargo build --workspace \
+  --exclude fw-esp32 --exclude fw-emu \
+  --exclude lps-builtins-emu-app \
+  --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
+cargo test  --workspace --exclude fw-esp32 --exclude fw-emu \
+  --exclude lps-builtins-emu-app \
+  --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
+
+# RV32 firmware
+cargo check -p fw-emu   --target riscv32imac-unknown-none-elf --profile release-emu
+cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+
+# Wasm32 guest
+cargo check -p lp-engine --target wasm32-unknown-unknown
+
+# Filetests / CI gate
+scripts/glsl-filetests.sh --concise
+just ci
 ```
 
 End-to-end on `fw-emu`:
@@ -163,3 +179,10 @@ Document size/perf delta vs. the pre-swap baseline in
   it also swaps to Wasmtime is decided in M4c).
 - Wasmtime perf tuning (separate perf-tracing milestone the user has
   flagged for later).
+
+## Status
+
+Done. See `docs/plans-old/2026-04-19-m4b-host-backend-swap/`
+for the full implementation plan and `summary.md` for what
+landed. Perf snapshot:
+`docs/design/native/perf-report/2026-04-19-m4b-wasmtime-swap.md`.

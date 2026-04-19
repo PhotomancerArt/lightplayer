@@ -442,14 +442,14 @@ impl ShaderRuntime {
     }
 }
 
-#[cfg(all(test, feature = "cranelift"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_shader_runtime_creation() {
         let handle = lp_model::NodeHandle::new(0);
-        let graphics: Arc<dyn LpGraphics> = Arc::new(crate::CraneliftGraphics::new());
+        let graphics: Arc<dyn LpGraphics> = Arc::new(crate::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }

@@ -1,33 +1,33 @@
-//! RV32 native JIT backend for [`super::LpGraphics`] (`lpvm-native` `rt_jit`).
+//! Wasm32 guest graphics backend (`lpvm-wasm` `rt_browser`).
 //!
-//! Compiled when `cfg(target_arch = "riscv32")`. This is the only backend on
-//! firmware targets (`fw-emu`, `fw-esp32`).
+//! Compiled when `cfg(target_arch = "wasm32")`. Wraps
+//! [`lpvm_wasm::rt_browser::BrowserLpvmEngine`] which runs the
+//! emitted shader WASM via the host JS `WebAssembly.Module` /
+//! `Instance` API.
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::sync::Arc;
 
 use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
 use lps_shared::TextureBuffer;
-use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};
+use lpvm_wasm::WasmOptions;
+use lpvm_wasm::rt_browser::BrowserLpvmEngine;
 
 use super::lp_gfx::LpGraphics;
 use super::lp_shader::{LpShader, ShaderCompileOptions};
 use crate::error::Error;
 use crate::gfx::uniforms::build_uniforms;
 
-/// Graphics backend using in-process RV32 JIT (no Cranelift, no ELF link).
+/// Wasm32 guest shader graphics backed by `lpvm-wasm` + browser host.
 pub struct Graphics {
-    engine: LpsEngine<NativeJitEngine>,
+    engine: LpsEngine<BrowserLpvmEngine>,
 }
 
 impl Graphics {
-    #[must_use]
+    /// New guest graphics with default `WasmOptions`.
     pub fn new() -> Self {
-        lps_builtins::ensure_builtins_referenced();
-        let mut table = BuiltinTable::new();
-        table.populate();
-        let backend = NativeJitEngine::new(Arc::new(table), NativeCompileOptions::default());
+        let backend = BrowserLpvmEngine::new(WasmOptions::default())
+            .expect("BrowserLpvmEngine::new with default WasmOptions");
         Self {
             engine: LpsEngine::new(backend),
         }
@@ -53,14 +53,11 @@ impl LpGraphics for Graphics {
             .map_err(|e| Error::Other {
                 message: format!("{e}"),
             })?;
-
-        let _ = options.max_errors; // TODO: thread max_errors when front-end accepts it
-
-        Ok(Box::new(NativeJitShader { px }))
+        Ok(Box::new(WasmGuestShader { px }))
     }
 
     fn backend_name(&self) -> &'static str {
-        "lpvm-native::rt_jit"
+        "lpvm-wasm::rt_browser"
     }
 
     fn alloc_output_buffer(&self, width: u32, height: u32) -> Result<LpsTextureBuf, Error> {
@@ -72,11 +69,11 @@ impl LpGraphics for Graphics {
     }
 }
 
-struct NativeJitShader {
+struct WasmGuestShader {
     px: LpsPxShader,
 }
 
-impl LpShader for NativeJitShader {
+impl LpShader for WasmGuestShader {
     fn render(&mut self, buf: &mut LpsTextureBuf, time: f32) -> Result<(), Error> {
         let uniforms = build_uniforms(buf.width(), buf.height(), time);
         self.px

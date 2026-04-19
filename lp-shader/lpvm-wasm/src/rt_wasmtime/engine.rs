@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::format;
 use std::sync::Arc;
 
-use lpir::LpirModule;
+use lpir::{CompilerConfig, LpirModule};
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
@@ -33,9 +33,15 @@ impl WasmLpvmEngine {
         ensure_builtins_referenced();
         let mut config = wasmtime::Config::new();
         config.consume_fuel(true);
+        // Deferred wasmtime knobs (revisit when perf or sandboxing demands it):
+        //   - config.epoch_interruption(true) for cooperative cancellation
+        //   - config.parallel_compilation(true) for multi-threaded compile
+        //   - config.memory_reservation(...) / static_memory_maximum_size for
+        //     a bigger pre-mapped guard region than the default (~4 GiB)
+        // None of these change correctness; they are tuning knobs.
         let engine = Engine::new(&config)
             .map_err(|e| WasmError::runtime(format!("failed to create WASM engine: {e}")))?;
-        let runtime = WasmLpvmSharedRuntime::new(&engine)?;
+        let runtime = WasmLpvmSharedRuntime::new(&engine, compile_options.host_memory_pages)?;
         let memory = WasmtimeLpvmMemory::new(Arc::clone(&runtime));
         Ok(Self {
             engine,
@@ -81,6 +87,12 @@ impl WasmLpvmModule {
         }
         Ok(())
     }
+
+    /// Raw WASM module bytes produced at compile time (after validation).
+    #[must_use]
+    pub fn wasm_bytes(&self) -> &[u8] {
+        &self.wasm_bytes
+    }
 }
 
 impl LpvmEngine for WasmLpvmEngine {
@@ -106,6 +118,36 @@ impl LpvmEngine for WasmLpvmEngine {
             exports,
             shadow_stack_base: artifact.wasm_module().shadow_stack_base,
             opts: self.compile_options.clone(),
+            lpir: ir.clone(),
+        })
+    }
+
+    fn compile_with_config(
+        &self,
+        ir: &LpirModule,
+        meta: &LpsModuleSig,
+        config: &CompilerConfig,
+    ) -> Result<Self::Module, Self::Error> {
+        let mut opts = self.compile_options.clone();
+        opts.config = config.clone();
+        let artifact = compile_lpir(ir, meta, &opts)?;
+        let bytes = artifact.wasm_module().bytes.clone();
+        WasmLpvmModule::validate_shader(&self.engine, &bytes)?;
+        WasmLpvmModule::validate_memory_import(&self.engine, &bytes)?;
+        let exports: HashMap<_, _> = artifact
+            .wasm_module()
+            .exports
+            .iter()
+            .map(|e| (e.name.clone(), e.clone()))
+            .collect();
+        Ok(WasmLpvmModule {
+            engine: self.engine.clone(),
+            runtime: Arc::clone(&self.runtime),
+            wasm_bytes: bytes,
+            signatures: artifact.signatures().clone(),
+            exports,
+            shadow_stack_base: artifact.wasm_module().shadow_stack_base,
+            opts,
             lpir: ir.clone(),
         })
     }

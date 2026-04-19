@@ -1,37 +1,47 @@
-//! Cranelift JIT backend for [`super::LpGraphics`].
+//! Host graphics backend (`lpvm-wasm` `rt_wasmtime`).
+//!
+//! Compiled on every target except `riscv32` and `wasm32`. Wraps
+//! [`lpvm_wasm::rt_wasmtime::WasmLpvmEngine`], so all of LPIR → WASM →
+//! wasmtime JIT happens in-process. Pre-grows linear memory once
+//! per engine (see [`lpvm_wasm::WasmOptions::host_memory_pages`]) so
+//! cached `LpvmBuffer` host pointers stay valid.
 
-use crate::error::Error;
-use crate::gfx::lp_gfx::LpGraphics;
-use crate::gfx::lp_shader::{LpShader, ShaderCompileOptions};
-use crate::gfx::uniforms::build_uniforms;
 use alloc::boxed::Box;
 use alloc::format;
+
 use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
 use lps_shared::TextureBuffer;
-use lpvm_cranelift::{CompileOptions, CraneliftEngine};
+use lpvm_wasm::WasmOptions;
+use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
-/// Graphics backend using on-device/host Cranelift JIT.
-pub struct CraneliftGraphics {
-    engine: LpsEngine<CraneliftEngine>,
+use super::lp_gfx::LpGraphics;
+use super::lp_shader::{LpShader, ShaderCompileOptions};
+use crate::error::Error;
+use crate::gfx::uniforms::build_uniforms;
+
+/// Host shader graphics backed by `lpvm-wasm` + wasmtime.
+pub struct Graphics {
+    engine: LpsEngine<WasmLpvmEngine>,
 }
 
-impl CraneliftGraphics {
-    #[must_use]
+impl Graphics {
+    /// New host graphics with default `WasmOptions`.
     pub fn new() -> Self {
-        let backend = CraneliftEngine::new(CompileOptions::default());
+        let backend = WasmLpvmEngine::new(WasmOptions::default())
+            .expect("WasmLpvmEngine::new with default WasmOptions");
         Self {
             engine: LpsEngine::new(backend),
         }
     }
 }
 
-impl Default for CraneliftGraphics {
+impl Default for Graphics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LpGraphics for CraneliftGraphics {
+impl LpGraphics for Graphics {
     fn compile_shader(
         &self,
         source: &str,
@@ -44,11 +54,11 @@ impl LpGraphics for CraneliftGraphics {
             .map_err(|e| Error::Other {
                 message: format!("{e}"),
             })?;
-        Ok(Box::new(CraneliftShader { px }))
+        Ok(Box::new(HostShader { px }))
     }
 
     fn backend_name(&self) -> &'static str {
-        "cranelift"
+        "lpvm-wasm::rt_wasmtime"
     }
 
     fn alloc_output_buffer(&self, width: u32, height: u32) -> Result<LpsTextureBuf, Error> {
@@ -60,11 +70,11 @@ impl LpGraphics for CraneliftGraphics {
     }
 }
 
-struct CraneliftShader {
+struct HostShader {
     px: LpsPxShader,
 }
 
-impl LpShader for CraneliftShader {
+impl LpShader for HostShader {
     fn render(&mut self, buf: &mut LpsTextureBuf, time: f32) -> Result<(), Error> {
         let uniforms = build_uniforms(buf.width(), buf.height(), time);
         self.px

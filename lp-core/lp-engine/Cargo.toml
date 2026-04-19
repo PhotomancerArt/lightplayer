@@ -8,30 +8,17 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]
+default = ["std"]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
-# Cranelift JIT backend (`LpGraphics` / shader compilation)
-cranelift = ["dep:lpvm-cranelift"]
-# RV32 native JIT (`LpGraphics` via `lpvm-native` `rt_jit`; only on `target_arch = "riscv32"`)
-native-jit = ["dep:lpvm-native"]
-# Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
-cranelift-optimizer = ["cranelift", "lpvm-cranelift?/cranelift-optimizer"]
-# Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
-cranelift-verifier = ["cranelift", "lpvm-cranelift?/cranelift-verifier"]
 std = [
     "lp-shared/std",
-    "lpvm-cranelift?/std",
 ]
 
 [dependencies]
 unwinding = { version = "0.2", optional = true, default-features = false, features = ["panic"] }
 serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
-lpvm-cranelift = { path = "../../lp-shader/lpvm-cranelift", default-features = false, optional = true, features = ["glsl"] }
-# Note: lpvm-native's 'debug' feature (interleaved/disasm sections) is disabled
-# for firmware builds to reduce code size and improve compilation performance.
-lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, optional = true }
 lpir = { path = "../../lp-shader/lpir", default-features = false }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
 lpvm = { path = "../../lp-shader/lpvm", default-features = false }
@@ -44,6 +31,18 @@ lp-model = { path = "../lp-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 libm = "0.2"
+
+# Backend selection: exactly one LPVM engine is wired into `gfx::Graphics`,
+# chosen by target architecture rather than a Cargo feature.
+#   - riscv32       → lpvm-native (rt_jit)        — bare-metal firmware
+#   - everything else → lpvm-wasm (rt_wasmtime/rt_browser) — host or wasm32 guest
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+# Note: lpvm-native's 'debug' feature (interleaved/disasm sections) is disabled
+# for firmware builds to reduce code size and improve compilation performance.
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
+
+[target.'cfg(not(target_arch = "riscv32"))'.dependencies]
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
 
 [dev-dependencies]
 lp-shared = { path = "../lp-shared", default-features = false, features = ["std"] }

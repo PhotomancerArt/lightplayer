@@ -3756,8 +3756,8 @@ dependencies = [
  "lps-q32",
  "lps-shared",
  "lpvm",
- "lpvm-cranelift",
  "lpvm-native",
+ "lpvm-wasm",
  "serde",
  "unwinding",
 ]

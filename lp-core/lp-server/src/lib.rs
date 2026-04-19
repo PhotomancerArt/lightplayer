@@ -18,11 +18,7 @@ pub mod server;
 pub mod template;
 
 pub use error::ServerError;
-#[cfg(feature = "cranelift")]
-pub use lp_engine::CraneliftGraphics;
-#[cfg(all(target_arch = "riscv32", feature = "native-jit"))]
-pub use lp_engine::NativeJitGraphics;
-pub use lp_engine::{LpGraphics, LpShader, ShaderCompileOptions};
+pub use lp_engine::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use project::Project;
 pub use project_manager::ProjectManager;
 pub use server::{LpServer, MemoryStatsFn};

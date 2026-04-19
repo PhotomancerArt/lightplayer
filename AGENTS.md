@@ -203,8 +203,8 @@ is cheap and avoids the most common CI surprise.
 
 CI currently runs only the **ARM** validate job
 (`ubuntu-24.04-arm`). The x86_64 job is intentionally disabled in
-`pre-merge.yml`: the production target is RV32 (`lpvm-native`); the
-host-side JIT is `lpvm-cranelift` which is on the deprecation path
-(M4b swaps it for `lpvm-wasm`). x86_64-only Cranelift host failures
-are not worth gating on. Re-enable `validate-x64` after the M4b host
-backend swap.
+`pre-merge.yml`. The production target is RV32 (`lpvm-native`); the
+host-side path now runs through `lpvm-wasm` (wasmtime) per M4b. The
+x86_64 validate job has not yet been re-enabled — that re-enable is
+a separate change so this plan didn't churn the CI matrix at the
+same time as the backend swap.

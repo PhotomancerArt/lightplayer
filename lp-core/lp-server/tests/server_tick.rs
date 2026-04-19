@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_engine_client::ClientProjectView;
 use lp_model::{AsLpPath, AsLpPathBuf};
-use lp_server::{CraneliftGraphics, LpGraphics, LpServer};
+use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::ProjectBuilder;
 use lp_shared::fs::{LpFs, LpFsMemory};
 
@@ -81,7 +81,7 @@ fn test_server_tick_propagates_to_projects() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 
     // Create server with prepared filesystem
     let mut server = LpServer::new(
