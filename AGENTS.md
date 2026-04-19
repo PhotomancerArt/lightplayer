@@ -172,3 +172,39 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 cargo check -p lp-server
 cargo test -p lp-server --no-run
 ```
+
+## CI gate (run this before pushing)
+
+CI on `feature/*` branches runs `just check build-ci test` (see
+`.github/workflows/pre-merge.yml`). To avoid the round-trip of
+"push → wait 3 min → CI fails on lint → fix → repeat", run the same
+locally before every push:
+
+```bash
+rustup update nightly        # CI installs fresh nightly each run; do the same
+just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
+just build-ci                # host + rv32 builtins + emu-guest
+just test                    # cargo test + glsl filetests
+```
+
+Or, in one go: `just ci` (which is the parallel composition above).
+
+### Why nightly matters
+
+The workspace pins `nightly` (latest, via `rust-toolchain.toml`) — *not*
+a specific date. CI runs `rustup install nightly` fresh each run, so it
+sees the freshest lints (e.g. `float_literal_f32_fallback`,
+`question_mark`, `manual_clamp`, `clone_on_copy`,
+`allow_attributes_without_reason`). A stale local nightly will silently
+miss new lints that gate CI. `rustup update nightly` before `just check`
+is cheap and avoids the most common CI surprise.
+
+### Architecture coverage
+
+CI currently runs only the **ARM** validate job
+(`ubuntu-24.04-arm`). The x86_64 job is intentionally disabled in
+`pre-merge.yml`: the production target is RV32 (`lpvm-native`); the
+host-side JIT is `lpvm-cranelift` which is on the deprecation path
+(M4b swaps it for `lpvm-wasm`). x86_64-only Cranelift host failures
+are not worth gating on. Re-enable `validate-x64` after the M4b host
+backend swap.

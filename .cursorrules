@@ -14,6 +14,10 @@
 
 # Warnings: Fix warnings before committing. Don't just ignore them. If you can't fix them easily, ask for help.
 
+# CI gate: Before pushing, run `rustup update nightly && just check` (CI uses fresh nightly via rust-toolchain.toml=nightly; stale local nightlies miss new lints like float_literal_f32_fallback, question_mark, manual_clamp, clone_on_copy, allow_attributes_without_reason). Full local CI is `just ci` = `just check build-ci test`. See AGENTS.md "CI gate" section.
+
+# CI gate: Only `Validate (ARM)` runs on CI right now; x86_64 is intentionally disabled in .github/workflows/pre-merge.yml until the M4b host backend swap (cranelift -> wasmtime). Don't re-enable validate-x64 without that work landed.
+
 # Commits: Use Conventional Commits format: `<type>(<scope>): <description>`
 
 # - Types: feat, fix, chore, docs, refactor, etc.
