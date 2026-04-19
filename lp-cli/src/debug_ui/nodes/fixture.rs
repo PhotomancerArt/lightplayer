@@ -155,7 +155,11 @@ fn draw_mapping_overlay(
 
         // Draw circle outline (1px grey stroke) if enabled
         if show_strokes {
-            painter.circle_stroke(center, radius_pixels, egui::Stroke::new(1.0, stroke_color));
+            painter.circle_stroke(
+                center,
+                radius_pixels,
+                egui::Stroke::new(1.0_f32, stroke_color),
+            );
         }
 
         // Draw label if requested (just the channel number, no "Ch" prefix)

@@ -537,20 +537,18 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
     // `__lps_*` — GLSL imports; `__lp_lpir_*` / `__lp_lpfn_*` / `__lp_vm_*`
     let (builtin_module, rest) = if let Some(r) = func_name.strip_prefix("__lps_") {
         ("glsl", r)
-    } else if let Some(after_lp) = func_name.strip_prefix("__lp_") {
+    } else {
+        let after_lp = func_name.strip_prefix("__lp_")?;
         if let Some(r) = after_lp.strip_prefix("lpir_") {
             ("lpir", r)
         } else if let Some(r) = after_lp.strip_prefix("glsl_") {
             ("glsl", r)
         } else if let Some(r) = after_lp.strip_prefix("vm_") {
             ("vm", r)
-        } else if let Some(r) = after_lp.strip_prefix("lpfn_") {
-            ("lpfn", r)
         } else {
-            return None;
+            let r = after_lp.strip_prefix("lpfn_")?;
+            ("lpfn", r)
         }
-    } else {
-        return None;
     };
 
     let (fn_body, builtin_mode) = if let Some(s) = rest.strip_suffix("_q32") {
