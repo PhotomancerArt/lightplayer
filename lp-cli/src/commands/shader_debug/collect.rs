@@ -1,7 +1,7 @@
 //! Backend-specific data collectors for shader-debug.
 
 use anyhow::Result;
-use lpir::{FloatMode, LpirModule};
+use lpir::{CompilerConfig, FloatMode, LpirModule};
 use lps_frontend::LpsModuleSig;
 
 use super::types::{BackendDebugData, FunctionDebugData};
@@ -12,6 +12,7 @@ pub fn collect_fa_data(
     sig: &LpsModuleSig,
     float_mode: FloatMode,
     func_filter: Option<&str>,
+    compiler_config: &CompilerConfig,
 ) -> Result<BackendDebugData> {
     use lpvm_native::IsaTarget;
     use lpvm_native::LowerOpts;
@@ -50,10 +51,9 @@ pub fn collect_fa_data(
             .unwrap_or(&default_sig);
 
         // Lower and compile
-        let compile_cfg = lpir::CompilerConfig::default();
         let lower_opts = LowerOpts {
             float_mode,
-            q32: &compile_cfg.q32,
+            q32: &compiler_config.q32,
         };
         let lowered = lower_ops(func, ir, &module_abi, &lower_opts)
             .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;
@@ -120,11 +120,13 @@ pub fn collect_cranelift_data(
     float_mode: FloatMode,
     func_filter: Option<&str>,
     is_emu: bool,
+    compiler_config: &CompilerConfig,
 ) -> Result<BackendDebugData> {
     use lpvm_cranelift::{CompileOptions, link_object_with_builtins, object_bytes_from_ir};
 
     let options = CompileOptions {
         float_mode,
+        config: compiler_config.clone(),
         ..CompileOptions::default()
     };
 

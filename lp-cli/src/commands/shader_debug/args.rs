@@ -39,6 +39,19 @@ pub struct Args {
     /// Summary only - don't show detailed function output
     #[arg(long)]
     pub summary: bool,
+
+    /// Override compiler options. Format: `key=value`. Repeatable.
+    /// Use `--opt` alone (no value) to print valid keys and values.
+    /// Example: `-o q32.mul=wrapping -o inline.mode=never`.
+    #[arg(
+        short = 'o',
+        long = "opt",
+        value_name = "KEY=VALUE",
+        action = clap::ArgAction::Append,
+        num_args = 0..=1,
+        default_missing_value = "",
+    )]
+    pub opt: Vec<String>,
 }
 
 impl Args {
