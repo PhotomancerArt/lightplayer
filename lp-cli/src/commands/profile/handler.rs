@@ -1,6 +1,6 @@
 //! `lp-cli profile` — run a workload under the emulator with unified profiling.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use lp_client::LpClient;
 use lp_client::transport_emu_serial::SerialEmuClientTransport;
 use lp_riscv_elf::load_elf;
@@ -97,9 +97,7 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
         let name = name.trim();
         match name {
             "alloc" => collectors.push(Box::new(AllocCollector::new(
-                &trace_dir,
-                heap_start,
-                heap_size,
+                &trace_dir, heap_start, heap_size,
             )?)),
             "events" => collectors.push(Box::new(EventsCollector::new(&trace_dir)?)),
             other => bail!("unknown collector '{other}'; supported: alloc, events"),
@@ -126,14 +124,8 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
 
     let client = LpClient::new(Box::new(transport));
 
-    let workload_result = workload::run_workload(
-        &client,
-        &emulator_arc,
-        &dir,
-        &project_uid,
-        args.max_cycles,
-    )
-    .await;
+    let workload_result =
+        workload::run_workload(&client, &emulator_arc, &dir, &project_uid, args.max_cycles).await;
 
     if let Err(e) = &workload_result {
         eprintln!("Workload stopped early: {e:#}");
@@ -167,7 +159,10 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     for (name, n) in &counts {
         eprintln!("Trace complete: {name}: {n} events");
     }
-    eprintln!("Report written to {}", trace_dir.join("report.txt").display());
+    eprintln!(
+        "Report written to {}",
+        trace_dir.join("report.txt").display()
+    );
 
     println!("{}", trace_dir.display());
 

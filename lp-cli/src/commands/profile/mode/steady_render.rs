@@ -56,8 +56,7 @@ impl Gate for SteadyRenderGate {
         writeln!(w, "mode: steady-render")?;
         writeln!(
             w,
-            "warmup: {} frames; capture: {} frames",
-            STEADY_RENDER_WARMUP_FRAMES, STEADY_RENDER_CAPTURE_FRAMES
+            "warmup: {STEADY_RENDER_WARMUP_FRAMES} frames; capture: {STEADY_RENDER_CAPTURE_FRAMES} frames"
         )?;
         writeln!(w, "frame_begins observed: {}", self.frame_begins)?;
         writeln!(

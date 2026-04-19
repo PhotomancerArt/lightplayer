@@ -54,7 +54,7 @@ impl Riscv32Emulator {
         &mut self,
         syscall_info: &SyscallInfo,
     ) -> Result<StepResult, EmulatorError> {
-        use crate::profile::perf_event::{intern_known_name, MAX_EVENT_NAME_LEN};
+        use crate::profile::perf_event::{MAX_EVENT_NAME_LEN, intern_known_name};
         use crate::profile::{PerfEvent, PerfEventKind};
         use lp_riscv_inst::Gpr;
 
@@ -78,10 +78,7 @@ impl Riscv32Emulator {
         let name_len = name_len_u as usize;
         let mut bytes = Vec::with_capacity(name_len);
         for i in 0..name_len {
-            match self
-                .memory
-                .read_u8(name_ptr.wrapping_add(i as u32))
-            {
+            match self.memory.read_u8(name_ptr.wrapping_add(i as u32)) {
                 Ok(byte) => bytes.push(byte),
                 Err(e) => {
                     log::warn!("SYSCALL_PERF_EVENT: memory read failed: {e}");
@@ -547,10 +544,7 @@ impl Riscv32Emulator {
                         return Ok(StepResult::Continue);
                     }
                     SyscallAction::Halt(HaltReason::Oom { size }) => {
-                        return Ok(StepResult::Oom(super::types::OomInfo {
-                            size,
-                            pc: self.pc,
-                        }));
+                        return Ok(StepResult::Oom(super::types::OomInfo { size, pc: self.pc }));
                     }
                     SyscallAction::Halt(HaltReason::ProfileStop) => {
                         // Alloc trace syscall does not produce this; perf syscall (phase 5) will.

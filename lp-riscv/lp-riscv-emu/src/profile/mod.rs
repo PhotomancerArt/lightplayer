@@ -192,12 +192,7 @@ pub trait Collector: Send {
         serde_json::json!({})
     }
 
-    fn on_syscall(
-        &mut self,
-        _ctx: &mut EmuCtx<'_>,
-        _id: u32,
-        _args: &[u32],
-    ) -> SyscallAction {
+    fn on_syscall(&mut self, _ctx: &mut EmuCtx<'_>, _id: u32, _args: &[u32]) -> SyscallAction {
         SyscallAction::Pass
     }
 
@@ -356,9 +351,8 @@ impl ProfileSession {
             }
             writeln!(&mut buf, "=== {} ===", c.report_title())
                 .expect("writing to String cannot fail");
-            c.report_section(&mut buf).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, e)
-            })?;
+            c.report_section(&mut buf)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             buf.push('\n');
         }
 
@@ -423,12 +417,8 @@ mod tests {
         };
         let collectors: Vec<Box<dyn Collector>> =
             Vec::from([Box::new(NoopCollector) as Box<dyn Collector>]);
-        let mut session = ProfileSession::new(
-            tmp.path().to_path_buf(),
-            &metadata,
-            collectors,
-        )
-        .unwrap();
+        let mut session =
+            ProfileSession::new(tmp.path().to_path_buf(), &metadata, collectors).unwrap();
         assert!(tmp.path().join("meta.json").exists());
         let counts = session.finish().unwrap();
         assert_eq!(counts, Vec::from([("noop".to_string(), 0u64)]));
@@ -475,9 +465,10 @@ mod tests {
     #[test]
     fn session_dispatches_perf_event_and_records_stop() {
         let tmp = tempfile::tempdir().unwrap();
-        let collectors: Vec<Box<dyn Collector>> = Vec::from([Box::new(CountingCollector { n: 0 })
-            as Box<dyn Collector>]);
-        let mut s = ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+        let collectors: Vec<Box<dyn Collector>> =
+            Vec::from([Box::new(CountingCollector { n: 0 }) as Box<dyn Collector>]);
+        let mut s =
+            ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
         s.set_gate(Box::new(StopOnSecond { seen: 0 }));
         let evt = PerfEvent {
             cycle: 1,

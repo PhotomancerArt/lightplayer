@@ -132,8 +132,8 @@ fn lp_cli_profile_events_startup_smoke() {
         if line.trim().is_empty() {
             continue;
         }
-        let v: serde_json::Value = serde_json::from_str(line)
-            .unwrap_or_else(|e| panic!("bad jsonl: {line:?}: {e}"));
+        let v: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("bad jsonl: {line:?}: {e}"));
         assert!(
             v["cycle"].as_u64().is_some(),
             "each line should have numeric cycle: {v}"

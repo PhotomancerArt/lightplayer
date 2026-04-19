@@ -30,14 +30,14 @@ pub mod profile;
 pub mod test_util;
 
 // Re-exports for convenience
+#[cfg(feature = "std")]
+pub use emu::FrameOutcome;
 pub use emu::memory::{DEFAULT_RAM_START, Memory};
 pub use emu::{
     CycleModel, DEFAULT_SHARED_START, EmulatorError, InstClass, InstLog, LogLevel,
     MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator, StepResult, SyscallInfo,
     trap_code_to_string,
 };
-#[cfg(feature = "std")]
-pub use emu::FrameOutcome;
 pub use time::TimeMode;
 
 #[cfg(feature = "std")]

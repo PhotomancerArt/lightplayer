@@ -4,12 +4,7 @@ pub const MAX_EVENT_NAME_LEN: usize = 64;
 
 pub const EVENT_FRAME: &str = "frame";
 
-pub static KNOWN_EVENT_NAMES: &[&str] = &[
-    "frame",
-    "shader-compile",
-    "shader-link",
-    "project-load",
-];
+pub static KNOWN_EVENT_NAMES: &[&str] = &["frame", "shader-compile", "shader-link", "project-load"];
 
 /// Linear scan over [`KNOWN_EVENT_NAMES`]; returns the static slice on hit.
 pub fn intern_known_name(s: &str) -> Option<&'static str> {
@@ -57,7 +52,7 @@ impl PerfEventKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{intern_known_name, PerfEventKind, EVENT_FRAME};
+    use super::{EVENT_FRAME, PerfEventKind, intern_known_name};
 
     #[test]
     fn perf_event_kind_from_u32_round_trips() {

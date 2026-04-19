@@ -1,7 +1,7 @@
 // Default (no features) — emit calls compile to noop.
 #[test]
 fn noop_macros_compile() {
-    use lp_perf::{emit_begin, emit_end, emit_instant, EVENT_FRAME};
+    use lp_perf::{EVENT_FRAME, emit_begin, emit_end, emit_instant};
     emit_begin!(EVENT_FRAME);
     emit_end!(EVENT_FRAME);
     emit_instant!(EVENT_FRAME);
@@ -12,7 +12,7 @@ fn noop_macros_compile() {
 fn log_macros_emit_to_log() {
     use core::sync::atomic::{AtomicUsize, Ordering};
     use log::{LevelFilter, Log, Metadata, Record};
-    use lp_perf::{emit_begin, emit_end, emit_instant, EVENT_FRAME};
+    use lp_perf::{EVENT_FRAME, emit_begin, emit_end, emit_instant};
     use std::sync::Once;
 
     static INIT: Once = Once::new();

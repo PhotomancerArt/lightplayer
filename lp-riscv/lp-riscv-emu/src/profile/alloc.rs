@@ -306,9 +306,8 @@ struct AllocCollectorMetaJson {
 
 fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Result<AllocReport> {
     let meta_content = std::fs::read_to_string(meta_path)?;
-    let meta_root: MetaForAllocReport = serde_json::from_str(&meta_content).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("meta.json: {e}"))
-    })?;
+    let meta_root: MetaForAllocReport = serde_json::from_str(&meta_content)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("meta.json: {e}")))?;
 
     let alloc_val = meta_root.collectors.get("alloc").ok_or_else(|| {
         io::Error::new(
@@ -316,10 +315,15 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
             "meta.json: missing collectors.alloc",
         )
     })?;
-    let alloc_cfg: AllocCollectorMetaJson = serde_json::from_value(alloc_val.clone())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("collectors.alloc: {e}")))?;
+    let alloc_cfg: AllocCollectorMetaJson =
+        serde_json::from_value(alloc_val.clone()).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("collectors.alloc: {e}"))
+        })?;
 
-    let AllocCollectorMetaJson { heap_start, heap_size } = alloc_cfg;
+    let AllocCollectorMetaJson {
+        heap_start,
+        heap_size,
+    } = alloc_cfg;
     let _ = heap_start;
 
     let resolver = SymbolResolver::load(meta_path)?;
@@ -389,17 +393,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
         }
     }
 
-    Ok(
-        AllocReport::build(
-            heap_size,
-            &stats,
-            live,
-            peak_snapshot,
-            oom,
-            resolver,
-        )
-        .with_top(top),
-    )
+    Ok(AllocReport::build(heap_size, &stats, live, peak_snapshot, oom, resolver).with_top(top))
 }
 
 fn clone_live_map(live: &HashMap<u32, LiveAllocation>) -> HashMap<u32, LiveAllocation> {
@@ -733,7 +727,10 @@ impl SymbolResolver {
     fn load(meta_path: &Path) -> io::Result<Self> {
         let content = std::fs::read_to_string(meta_path)?;
         let meta: TraceMetaSymbols = serde_json::from_str(&content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("meta.json symbols: {e}"))
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("meta.json symbols: {e}"),
+            )
         })?;
 
         let mut symbols: Vec<(u32, u32, String, String)> = meta

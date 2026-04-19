@@ -5,7 +5,10 @@ use super::mode::ProfileMode;
 
 /// `lp-cli profile …` — run a session or `profile diff` (stub).
 #[derive(Debug, Parser)]
-#[command(name = "profile", about = "Run a profiling session or compare two profile directories.")]
+#[command(
+    name = "profile",
+    about = "Run a profiling session or compare two profile directories."
+)]
 pub struct ProfileCli {
     #[command(subcommand)]
     pub subcommand: Option<ProfileSubcommand>,
