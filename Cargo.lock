@@ -3908,12 +3908,14 @@ dependencies = [
 name = "lpfx-cpu"
 version = "40.0.0"
 dependencies = [
+ "lp-shader",
  "lpfx",
  "lpir",
- "lps-frontend",
+ "lps-builtins",
  "lps-shared",
  "lpvm",
- "lpvm-cranelift",
+ "lpvm-native",
+ "lpvm-wasm",
 ]
 
 [[package]]

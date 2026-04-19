@@ -7,6 +7,8 @@ layout(binding = 0) uniform int input_noise_fn;
 layout(binding = 0) uniform int input_palette;
 layout(binding = 0) uniform bool input_cycle_palettes;
 layout(binding = 0) uniform float input_cycle_time_s;
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 0) uniform float time;
 
 vec3 paletteHeatmap(float t) {
     vec3 r = t * 2.1 - vec3(1.8, 1.14, 0.3);
@@ -87,11 +89,11 @@ vec2 pick_noise(vec2 scaledCoord, float t) {
     return fbm_demo(scaledCoord, t);
 }
 
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+vec4 render(vec2 pos) {
     float t = time * input_speed;
     float s = 0.05 * input_zoom;
     vec2 center = outputSize * 0.5;
-    vec2 dir = fragCoord - center;
+    vec2 dir = pos - center;
     vec2 scaledCoord = center + dir * s;
 
     vec2 tv = pick_noise(scaledCoord, t);

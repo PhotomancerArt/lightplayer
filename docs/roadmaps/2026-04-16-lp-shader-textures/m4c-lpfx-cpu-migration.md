@@ -160,3 +160,16 @@ End-to-end:
   migration.
 - Removing `lpvm-cranelift` from the workspace.
 - M1 fragment-contract migration of `noise.fx` (separate milestone).
+
+## Status
+
+Done (2026-04-19). `lpfx-cpu` is a thin shim over `lp-shader`
+(`LpsEngine::compile_px` / `LpsPxShader::render_frame`) with the same
+target-arch LPVM backend selection as `lp-engine`; the `lpfx` parent
+API now uses `FxRenderInputs`, `defaults_from_manifest`, and
+`LpsTextureBuf` (retiring `CpuTexture` / `TextureFormat`); the canonical
+`noise.fx` GLSL uses `render(vec2 pos)` with `outputSize` / `time` as
+uniforms.
+
+See `docs/plans-old/2026-04-19-m4c-lpfx-cpu-migration/` for the full
+implementation plan and `summary.md` for what landed.

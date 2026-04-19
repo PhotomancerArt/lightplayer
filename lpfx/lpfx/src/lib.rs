@@ -6,21 +6,25 @@
 
 extern crate alloc;
 
+mod defaults;
 pub mod engine;
 mod error;
 mod input;
 mod manifest;
 mod module;
 mod parse;
+mod render_inputs;
 pub mod texture;
 
+pub use defaults::defaults_from_manifest;
 pub use engine::{FxEngine, FxInstance};
 pub use error::FxError;
 pub use input::{FxChoice, FxInputDef, FxInputType, FxPresentation, FxValue};
 pub use manifest::{FxManifest, FxMeta, FxResolution};
 pub use module::FxModule;
 pub use parse::parse_manifest;
-pub use texture::{CpuTexture, TextureFormat, TextureId};
+pub use render_inputs::FxRenderInputs;
+pub use texture::TextureId;
 
 #[cfg(test)]
 mod tests {
@@ -80,7 +84,7 @@ mod tests {
             FxError::ValidationError(msg) => {
                 assert!(msg.contains("choices"));
             }
-            other => panic!("unexpected: {}", other),
+            other => panic!("unexpected: {other}"),
         }
     }
 
