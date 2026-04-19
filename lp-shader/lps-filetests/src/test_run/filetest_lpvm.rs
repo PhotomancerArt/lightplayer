@@ -107,7 +107,10 @@ impl FiletestInstance {
     }
 
     /// Pre-encoded Q32 uniforms (filetests use [`Self::set_uniform`]; this mirrors `LpvmInstance`).
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "mirrors LpvmInstance::set_uniform_q32; filetests use f32 set_uniform only"
+    )]
     pub(crate) fn set_uniform_q32(
         &mut self,
         path: &str,

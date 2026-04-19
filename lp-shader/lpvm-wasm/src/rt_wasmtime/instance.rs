@@ -198,7 +198,7 @@ impl WasmLpvmInstance {
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<wasmtime::Func, WasmError> {
         if let Some(entry) = &self.render_texture_cache {
             if entry.name == fn_name {
-                return Ok(entry.func.clone());
+                return Ok(entry.func);
             }
         }
 
@@ -217,7 +217,7 @@ impl WasmLpvmInstance {
             .instance
             .get_func(store, fn_name)
             .ok_or_else(|| WasmError::runtime(format!("function `{fn_name}` not found")))?;
-        let func_ret = func.clone();
+        let func_ret = func;
         self.render_texture_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
             func,

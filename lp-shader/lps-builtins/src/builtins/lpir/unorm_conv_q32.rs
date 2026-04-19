@@ -11,13 +11,13 @@
 /// Saturating Q32 fixed-point word → low 16 bits as unorm16 (0…65535).
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fto_unorm16_q32(v: i32) -> i32 {
-    v.max(0).min(65535)
+    v.clamp(0, 65535)
 }
 
 /// Saturating Q32 fixed-point word → unorm8 (drops fractional precision below 8 bits).
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fto_unorm8_q32(v: i32) -> i32 {
-    (v >> 8).max(0).min(255)
+    (v >> 8).clamp(0, 255)
 }
 
 /// Low 16 bits of `v` as Q32-encoded F32 lane (same bit pattern as [`super::ftoi_sat_q32`] fractional space).
