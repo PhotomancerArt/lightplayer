@@ -18,9 +18,9 @@ use crate::isa::IsaTarget;
 use super::call::rv32_jalr_a0_a7;
 use super::module::{NativeJitDirectCall, NativeJitModule};
 
-struct RenderTextureEntry {
-    name: String,
-    entry_pc: usize,
+pub(crate) struct RenderTextureEntry {
+    pub(crate) name: String,
+    pub(crate) entry_pc: usize,
 }
 
 /// Per-instance state: [`NativeJitModule`] plus guest vmctx pointer.
@@ -33,7 +33,7 @@ pub struct NativeJitInstance {
     pub(crate) snapshot_offset: u32,
     /// Size of globals region in bytes
     pub(crate) globals_size: u32,
-    render_texture_cache: Option<RenderTextureEntry>,
+    pub(crate) render_texture_cache: Option<RenderTextureEntry>,
 }
 
 impl NativeJitInstance {
