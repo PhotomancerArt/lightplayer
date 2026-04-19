@@ -262,6 +262,33 @@ fn vregs_csv_pool(pool: &[VReg], slice: VRegSlice) -> String {
         .join(", ")
 }
 
+/// Watermark allocator for fresh temporary [`VReg`]s during lowering.
+///
+/// Initialized to `func.vreg_types.len() as u16` (i.e. one past the
+/// highest IR-declared vreg). Each [`Self::mint`] call returns a fresh
+/// [`VReg`] above the IR vreg space; ids never collide with IR vregs and
+/// never reset across LPIR ops within a function.
+///
+/// Used by [`crate::lower::lower_lpir_op`] when an op expands to
+/// multiple [`VInst`]s and needs intermediate registers.
+#[derive(Clone, Copy, Debug)]
+pub struct TempVRegs(u16);
+
+impl TempVRegs {
+    pub fn new(after_ir: u16) -> Self {
+        Self(after_ir)
+    }
+
+    pub fn mint(&mut self) -> VReg {
+        let v = VReg(self.0);
+        self.0 = self
+            .0
+            .checked_add(1)
+            .expect("lpvm-native: temp vreg space exhausted (u16)");
+        v
+    }
+}
+
 // ─── VInst ───────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq)]

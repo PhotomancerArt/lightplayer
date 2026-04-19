@@ -1,5 +1,12 @@
 //! Q32 unorm channel conversions (`FtoUnorm16` / `FtoUnorm8` / `Unorm16toF` / `Unorm8toF`), matching
 //! `lpvm-cranelift` Q32 lowerings.
+//!
+//! **Reference implementation.** The primary `lpvm-native` lowering inlines
+//! all four ops directly — see
+//! [`lpvm_native::lower::lower_lpir_op`](../../../../../lpvm-native/src/lower.rs).
+//! These helpers remain as the authoritative semantic reference and as a
+//! fallback for callers that reach them through `sym_call`. Inlined sites
+//! avoid the `jal` + caller-save overhead on the per-pixel hot path.
 
 /// Saturating Q32 fixed-point word → low 16 bits as unorm16 (0…65535).
 #[unsafe(no_mangle)]

@@ -50,8 +50,8 @@ pub use lower::{LoopRegion, LoweredFunction, lower_lpir_op, lower_ops};
 pub use native_options::NativeCompileOptions;
 pub use types::NativeType;
 pub use vinst::{
-    IcmpCond, IrVReg, LabelId, ModuleSymbols, SRC_OP_NONE, SymbolId, VInst, VReg, VRegSlice,
-    pack_src_op, unpack_src_op,
+    IcmpCond, IrVReg, LabelId, ModuleSymbols, SRC_OP_NONE, SymbolId, TempVRegs, VInst, VReg,
+    VRegSlice, pack_src_op, unpack_src_op,
 };
 
 #[cfg(feature = "emu")]

@@ -306,8 +306,8 @@ mod tests {
     #[test]
     fn synth_body_uses_fto_unorm16_per_channel() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Float);
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::R16Unorm).expect("synth");
+        let name = synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::R16Unorm)
+            .expect("synth");
         let synth_fn = ir
             .functions
             .values()
