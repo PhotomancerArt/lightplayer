@@ -27,6 +27,7 @@ lp-shared = { path = "../lp-core/lp-shared" }
 lp-engine-client = { path = "../lp-core/lp-engine-client" }
 lp-client = { path = "../lp-core/lp-client", features = ["ws", "serial", "emu"] }
 lp-riscv-emu = { path = "../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 serialport = "4.8"

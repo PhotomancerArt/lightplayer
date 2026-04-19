@@ -11,6 +11,7 @@ use crate::error::NativeError;
 use crate::isa::IsaTarget;
 use crate::link::link_jit;
 use crate::native_options::NativeCompileOptions;
+use lp_perf::EVENT_SHADER_LINK;
 use lpvm::ModuleDebugInfo;
 
 use super::buffer::JitBuffer;
@@ -58,15 +59,17 @@ pub fn compile_module_jit(
     }
 
     // 3. Link JIT image with builtin resolution
-    let linked = link_jit(&compiled, isa, |sym| {
+    lp_perf::emit_begin!(EVENT_SHADER_LINK);
+    let link_result = link_jit(&compiled, isa, |sym| {
         // First check builtins
         if let Some(addr) = builtin_table.lookup(sym) {
             return Some(addr as u32);
         }
         // Functions are resolved during link phase
         None
-    })
-    .map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
+    });
+    lp_perf::emit_end!(EVENT_SHADER_LINK);
+    let linked = link_result.map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
 
     // 4. Create JitBuffer from linked code
     let buffer = JitBuffer::from_code(linked.code);

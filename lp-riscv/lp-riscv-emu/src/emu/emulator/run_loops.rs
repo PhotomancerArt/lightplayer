@@ -13,8 +13,8 @@ use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use lp_riscv_emu_shared::{
     SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_LOG, SYSCALL_PANIC,
-    SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS,
-    SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
+    SYSCALL_PERF_EVENT, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE,
+    SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
 };
 use lp_riscv_inst::Gpr;
 
@@ -45,6 +45,82 @@ fn dispatch_profile_alloc_syscall(
         memory,
     };
     session.dispatch_syscall(&mut ctx, syscall_id, args)
+}
+
+#[cfg(feature = "std")]
+impl Riscv32Emulator {
+    /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`crate::profile::ProfileSession::on_perf_event`].
+    pub(super) fn handle_perf_event_syscall(
+        &mut self,
+        syscall_info: &SyscallInfo,
+    ) -> Result<StepResult, EmulatorError> {
+        use crate::profile::perf_event::{intern_known_name, MAX_EVENT_NAME_LEN};
+        use crate::profile::{PerfEvent, PerfEventKind};
+        use lp_riscv_inst::Gpr;
+
+        let name_ptr = syscall_info.args[0] as u32;
+        let name_len_u = syscall_info.args[1] as u32;
+        let kind_raw = syscall_info.args[2] as u32;
+
+        let kind = match PerfEventKind::from_u32(kind_raw) {
+            Some(k) => k,
+            None => {
+                log::warn!("SYSCALL_PERF_EVENT: invalid kind {kind_raw}");
+                self.regs[Gpr::A0.num() as usize] = 0;
+                return Ok(StepResult::Continue);
+            }
+        };
+        if name_len_u == 0 || (name_len_u as usize) > MAX_EVENT_NAME_LEN {
+            log::warn!("SYSCALL_PERF_EVENT: bad name_len {name_len_u}");
+            self.regs[Gpr::A0.num() as usize] = 0;
+            return Ok(StepResult::Continue);
+        }
+        let name_len = name_len_u as usize;
+        let mut bytes = Vec::with_capacity(name_len);
+        for i in 0..name_len {
+            match self
+                .memory
+                .read_u8(name_ptr.wrapping_add(i as u32))
+            {
+                Ok(byte) => bytes.push(byte),
+                Err(e) => {
+                    log::warn!("SYSCALL_PERF_EVENT: memory read failed: {e}");
+                    self.regs[Gpr::A0.num() as usize] = 0;
+                    return Ok(StepResult::Continue);
+                }
+            }
+        }
+        let name_str = match core::str::from_utf8(&bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                log::warn!("SYSCALL_PERF_EVENT: name not utf8");
+                self.regs[Gpr::A0.num() as usize] = 0;
+                return Ok(StepResult::Continue);
+            }
+        };
+        let interned = match intern_known_name(name_str) {
+            Some(s) => s,
+            None => {
+                log::warn!("SYSCALL_PERF_EVENT: unknown name {name_str:?}");
+                self.regs[Gpr::A0.num() as usize] = 0;
+                return Ok(StepResult::Continue);
+            }
+        };
+
+        let evt = PerfEvent {
+            cycle: self.cycle_count,
+            name: interned,
+            kind,
+        };
+        if let Some(session) = self.profile_session.as_mut() {
+            session.on_perf_event(&evt);
+            if session.pending_halt_reason().is_some() {
+                self.profile_stop_pending = true;
+            }
+        }
+        self.regs[Gpr::A0.num() as usize] = 0;
+        Ok(StepResult::Continue)
+    }
 }
 
 impl Riscv32Emulator {
@@ -163,7 +239,13 @@ impl Riscv32Emulator {
 
                 // Handle syscall
                 match self.handle_syscall(syscall_info)? {
-                    StepResult::Continue => continue,
+                    StepResult::Continue => {
+                        if self.profile_stop_pending {
+                            self.profile_stop_pending = false;
+                            return Ok(StepResult::ProfileStop);
+                        }
+                        continue;
+                    }
                     result => return Ok(result),
                 }
             } else {
@@ -270,7 +352,13 @@ impl Riscv32Emulator {
 
                 // Handle syscall
                 match self.handle_syscall(syscall_info)? {
-                    StepResult::Continue => continue,
+                    StepResult::Continue => {
+                        if self.profile_stop_pending {
+                            self.profile_stop_pending = false;
+                            return Ok(StepResult::ProfileStop);
+                        }
+                        continue;
+                    }
                     result => return Ok(result),
                 }
             } else {
@@ -428,6 +516,15 @@ impl Riscv32Emulator {
                 self.regs[Gpr::A0.num() as usize] = 0;
             }
             Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_PERF_EVENT {
+            #[cfg(feature = "std")]
+            {
+                return self.handle_perf_event_syscall(&syscall_info);
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                Ok(StepResult::Syscall(syscall_info))
+            }
         } else if syscall_info.number == SYSCALL_ALLOC_TRACE {
             #[cfg(feature = "std")]
             {
@@ -454,6 +551,10 @@ impl Riscv32Emulator {
                             size,
                             pc: self.pc,
                         }));
+                    }
+                    SyscallAction::Halt(HaltReason::ProfileStop) => {
+                        // Alloc trace syscall does not produce this; perf syscall (phase 5) will.
+                        unreachable!("alloc syscall cannot halt with ProfileStop");
                     }
                 }
             }
@@ -579,6 +680,14 @@ impl Riscv32Emulator {
                 StepResult::Continue => {
                     unreachable!("run() should not return Continue");
                 }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::InvalidInstruction {
+                        pc: self.pc,
+                        instruction: 0,
+                        reason: String::from("Unexpected profile stop in run_until_ebreak"),
+                        regs: self.regs,
+                    });
+                }
             }
         }
     }
@@ -624,6 +733,14 @@ impl Riscv32Emulator {
                 }
                 StepResult::Continue => {
                     unreachable!("run() should not return Continue");
+                }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::InvalidInstruction {
+                        pc: self.pc,
+                        instruction: 0,
+                        reason: String::from("Unexpected profile stop in run_until_ecall"),
+                        regs: self.regs,
+                    });
                 }
             }
         }
@@ -689,6 +806,14 @@ impl Riscv32Emulator {
                 }
                 StepResult::Continue => {
                     unreachable!("run() should not return Continue");
+                }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::InvalidInstruction {
+                        pc: self.pc,
+                        instruction: 0,
+                        reason: String::from("Unexpected profile stop in run_until_yield"),
+                        regs: self.regs,
+                    });
                 }
             }
         }

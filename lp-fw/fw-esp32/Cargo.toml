@@ -47,6 +47,7 @@ fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] 
 lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"], optional = true }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
 lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true, features = ["ser-write-json"] }
+lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }

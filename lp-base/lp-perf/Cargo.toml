@@ -1,0 +1,19 @@
+[package]
+name = "lp-perf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+syscall = ["dep:lp-riscv-emu-shared"]
+log     = ["dep:log"]
+
+[dependencies]
+lp-riscv-emu-shared = { path = "../../lp-riscv/lp-riscv-emu-shared", optional = true }
+log = { workspace = true, default-features = false, optional = true }
+
+[lints]
+workspace = true

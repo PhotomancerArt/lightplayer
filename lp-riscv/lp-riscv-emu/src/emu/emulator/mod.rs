@@ -18,5 +18,7 @@ mod run_loops;
 mod state;
 mod types;
 
+#[cfg(feature = "std")]
+pub use state::FrameOutcome;
 pub use state::{DEFAULT_RAM_START, DEFAULT_SHARED_START, Riscv32Emulator};
 pub use types::{OomInfo, PanicInfo, StepResult, SyscallInfo};

@@ -31,6 +31,20 @@ pub const SYSCALL_TIME_MS: i32 = 8;
 /// Args for realloc: a0=2, a1=old_ptr, a2=new_ptr, a3=old_size, a4=new_size, a5=free_bytes
 pub const SYSCALL_ALLOC_TRACE: i32 = 9;
 
+/// Syscall number for emitting a perf event from guest to host.
+///
+/// ABI: a0=name_ptr, a1=name_len, a2=kind (0=Begin, 1=End, 2=Instant).
+/// a3 reserved for a future `arg: u32` payload.
+pub const SYSCALL_PERF_EVENT: i32 = 10;
+
+/// Reserved for m5 JIT-symbol overlay (load).
+/// Not yet implemented; reserving the number to avoid collision in m2-m4.
+pub const SYSCALL_JIT_MAP_LOAD: i32 = 11;
+
+/// Reserved for m5 JIT-symbol overlay (unload).
+/// Not yet implemented; reserving the number to avoid collision in m2-m4.
+pub const SYSCALL_JIT_MAP_UNLOAD: i32 = 12;
+
 /// Allocation event type constants
 pub const ALLOC_TRACE_ALLOC: i32 = 0;
 pub const ALLOC_TRACE_DEALLOC: i32 = 1;

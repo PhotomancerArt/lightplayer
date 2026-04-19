@@ -10,11 +10,10 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 pub mod alloc;
+pub mod events;
+pub mod perf_event;
 
-/// Payload for future perf-event integration (m1).
-///
-/// m1 fills in.
-pub struct PerfEvent {}
+pub use perf_event::{PerfEvent, PerfEventKind};
 
 /// Instruction classification placeholder for [`Collector::on_instruction`].
 ///
@@ -38,7 +37,10 @@ pub struct SessionMetadata {
     pub workload: String,
     pub note: Option<String>,
     pub clock_source: &'static str,
-    pub frames_requested: u32,
+    pub mode: String,
+    pub max_cycles: u64,
+    pub cycles_used: u64,
+    pub terminated_by: String,
     pub symbols: Vec<TraceSymbol>,
 }
 
@@ -146,6 +148,31 @@ pub enum SyscallAction {
 /// Reasons the run loop may stop at collector request.
 pub enum HaltReason {
     Oom { size: u32 },
+    ProfileStop,
+}
+
+/// What a gate wants the session to do after observing an event.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum GateAction {
+    NoChange,
+    /// m1: logged only; m2 wires real enable/disable
+    Enable,
+    /// m1: logged only
+    Disable,
+    /// m1: triggers [`HaltReason::ProfileStop`]
+    Stop,
+}
+
+/// Trait implemented by `ProfileMode` state machines (in lp-cli).
+/// Lives here so [`ProfileSession`] can hold a `Box<dyn Gate>` without
+/// a circular dep.
+pub trait Gate: Send {
+    fn on_event(&mut self, evt: &PerfEvent) -> GateAction;
+    /// Called once at session end; lets gates emit a summary line
+    /// into the report. Default: no-op.
+    fn report_section(&self, _w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        Ok(())
+    }
 }
 
 /// Context passed to [`Collector::finish`].
@@ -192,6 +219,9 @@ pub trait Collector: Send {
 pub struct ProfileSession {
     trace_dir: PathBuf,
     collectors: Vec<Box<dyn Collector>>,
+    gate: Option<Box<dyn Gate>>,
+    /// Sticky; first halt reason wins.
+    halt_reason: Option<HaltReason>,
 }
 
 impl ProfileSession {
@@ -207,9 +237,19 @@ impl ProfileSession {
             collectors_map.insert(c.name().to_string(), c.meta_json());
         }
 
-        let mut meta_value = serde_json::to_value(metadata).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let mut meta_value = serde_json::json!({
+            "schema_version": metadata.schema_version,
+            "timestamp": metadata.timestamp,
+            "project": metadata.project,
+            "workload": metadata.workload,
+            "note": metadata.note,
+            "clock_source": metadata.clock_source,
+            "mode": metadata.mode,
+            "max_cycles": metadata.max_cycles,
+            "cycles_used": metadata.cycles_used,
+            "terminated_by": metadata.terminated_by,
+            "symbols": metadata.symbols,
+        });
         if let serde_json::Value::Object(ref mut obj) = meta_value {
             obj.insert(
                 "collectors".to_string(),
@@ -224,7 +264,58 @@ impl ProfileSession {
         Ok(Self {
             trace_dir,
             collectors,
+            gate: None,
+            halt_reason: None,
         })
+    }
+
+    pub fn set_gate(&mut self, gate: Box<dyn Gate>) {
+        self.gate = Some(gate);
+    }
+
+    /// Take the first halt reason produced during the session, if any.
+    /// Returns None if no gate ever requested a stop.
+    pub fn take_halt_reason(&mut self) -> Option<HaltReason> {
+        self.halt_reason.take()
+    }
+
+    /// Non-destructive peek at the pending halt reason. Used by the
+    /// run-loop syscall handler (phase 5) to check whether a stop
+    /// was requested without consuming it.
+    pub fn pending_halt_reason(&self) -> Option<&HaltReason> {
+        self.halt_reason.as_ref()
+    }
+
+    /// Dispatch a perf event to all collectors and the gate.
+    /// Called by the syscall handler (phase 5).
+    pub fn on_perf_event(&mut self, evt: &PerfEvent) {
+        for c in &mut self.collectors {
+            c.on_perf_event(evt);
+        }
+        if let Some(g) = self.gate.as_mut() {
+            match g.on_event(evt) {
+                GateAction::NoChange => {}
+                GateAction::Enable | GateAction::Disable => {
+                    // m1: log only; m2 wires real semantics.
+                    log::trace!(
+                        "gate transition (m1: noop): {:?} @ cycle {}",
+                        evt,
+                        evt.cycle
+                    );
+                }
+                GateAction::Stop => {
+                    if self.halt_reason.is_none() {
+                        self.halt_reason = Some(HaltReason::ProfileStop);
+                        log::debug!(
+                            "gate requested stop @ cycle {} ({} {:?})",
+                            evt.cycle,
+                            evt.name,
+                            evt.kind
+                        );
+                    }
+                }
+            }
+        }
     }
 
     pub fn dispatch_syscall(
@@ -271,8 +362,6 @@ impl ProfileSession {
             buf.push('\n');
         }
 
-        std::print!("{buf}");
-
         let report_path = self.trace_dir.join("report.txt");
         std::fs::write(&report_path, buf.as_bytes())?;
 
@@ -283,6 +372,22 @@ impl ProfileSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_metadata() -> SessionMetadata {
+        SessionMetadata {
+            schema_version: 1,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            project: "test".into(),
+            workload: "test".into(),
+            note: None,
+            clock_source: "emu_estimated",
+            mode: "steady-render".into(),
+            max_cycles: 0,
+            cycles_used: 0,
+            terminated_by: "running".into(),
+            symbols: Vec::new(),
+        }
+    }
 
     struct NoopCollector;
 
@@ -310,7 +415,10 @@ mod tests {
             workload: "test".into(),
             note: None,
             clock_source: "emu_estimated",
-            frames_requested: 0,
+            mode: "steady-render".into(),
+            max_cycles: 0,
+            cycles_used: 0,
+            terminated_by: "running".into(),
             symbols: Vec::new(),
         };
         let collectors: Vec<Box<dyn Collector>> =
@@ -325,5 +433,64 @@ mod tests {
         let counts = session.finish().unwrap();
         assert_eq!(counts, Vec::from([("noop".to_string(), 0u64)]));
         assert!(tmp.path().join("report.txt").exists());
+    }
+
+    struct CountingCollector {
+        n: u32,
+    }
+
+    impl Collector for CountingCollector {
+        fn name(&self) -> &'static str {
+            "count"
+        }
+
+        fn on_perf_event(&mut self, _: &PerfEvent) {
+            self.n += 1;
+        }
+
+        fn finish(&mut self, _: &FinishCtx) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+            writeln!(w, "{}", self.n)
+        }
+    }
+
+    struct StopOnSecond {
+        seen: u32,
+    }
+
+    impl Gate for StopOnSecond {
+        fn on_event(&mut self, _: &PerfEvent) -> GateAction {
+            self.seen += 1;
+            if self.seen == 2 {
+                GateAction::Stop
+            } else {
+                GateAction::NoChange
+            }
+        }
+    }
+
+    #[test]
+    fn session_dispatches_perf_event_and_records_stop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let collectors: Vec<Box<dyn Collector>> = Vec::from([Box::new(CountingCollector { n: 0 })
+            as Box<dyn Collector>]);
+        let mut s = ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+        s.set_gate(Box::new(StopOnSecond { seen: 0 }));
+        let evt = PerfEvent {
+            cycle: 1,
+            name: "frame",
+            kind: PerfEventKind::Begin,
+        };
+        s.on_perf_event(&evt);
+        assert!(s.take_halt_reason().is_none());
+        s.on_perf_event(&evt);
+        assert!(matches!(
+            s.take_halt_reason(),
+            Some(HaltReason::ProfileStop)
+        ));
+        assert!(s.take_halt_reason().is_none());
     }
 }

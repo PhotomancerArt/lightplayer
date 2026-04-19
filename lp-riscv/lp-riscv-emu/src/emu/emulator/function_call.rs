@@ -178,6 +178,14 @@ impl Riscv32Emulator {
                 StepResult::FuelExhausted(_) => {
                     unreachable!("step() should never return FuelExhausted");
                 }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::InvalidInstruction {
+                        pc: self.pc,
+                        instruction: 0,
+                        reason: String::from("Unexpected profile stop in function call"),
+                        regs: self.regs,
+                    });
+                }
             }
         }
 
@@ -349,6 +357,14 @@ impl Riscv32Emulator {
                 }
                 StepResult::FuelExhausted(_) => {
                     unreachable!("step() should never return FuelExhausted");
+                }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::InvalidInstruction {
+                        pc: self.pc,
+                        instruction: 0,
+                        reason: String::from("Unexpected profile stop in function call"),
+                        regs: self.regs,
+                    });
                 }
             }
         }

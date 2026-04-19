@@ -28,6 +28,7 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }
+lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 libm = "0.2"

@@ -52,7 +52,10 @@ async fn test_profile_alloc_produces_valid_output() {
         workload: "profile-alloc-emu".into(),
         note: None,
         clock_source: "emu_estimated",
-        frames_requested: FRAMES,
+        mode: "steady-render".into(),
+        max_cycles: u64::MAX,
+        cycles_used: 0,
+        terminated_by: "running".into(),
         symbols: load_info
             .symbol_list
             .iter()
@@ -156,6 +159,14 @@ async fn test_profile_alloc_produces_valid_output() {
     let meta: serde_json::Value =
         serde_json::from_str(&meta_content).expect("meta.json should be valid JSON");
     assert_eq!(meta["schema_version"], 1);
+    assert!(meta["mode"].as_str().is_some());
+    assert!(meta["max_cycles"].as_u64().is_some());
+    assert!(meta["cycles_used"].as_u64().is_some());
+    assert!(meta["terminated_by"].as_str().is_some());
+    assert!(
+        meta.get("frames_requested").is_none(),
+        "frames_requested removed in m1"
+    );
     assert!(
         meta["symbols"].as_array().unwrap().len() > 0,
         "Should have symbols"

@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    # lp-base workspace members
+    "lp-base/lp-perf",
     # lp-app workspace members
     "lp-core/lp-engine",
     "lp-core/lp-engine-client",

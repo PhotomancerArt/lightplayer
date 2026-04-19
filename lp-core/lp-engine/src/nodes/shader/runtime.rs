@@ -18,6 +18,7 @@ use lp_model::{
     nodes::shader::{ShaderConfig, ShaderState},
     project::FrameId,
 };
+use lp_perf::EVENT_SHADER_COMPILE;
 use lp_shared::fs::fs_event::FsChange;
 use lps_shared::TextureBuffer;
 #[cfg(feature = "panic-recovery")]
@@ -334,6 +335,13 @@ impl ShaderRuntime {
     }
 
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
+        lp_perf::emit_begin!(EVENT_SHADER_COMPILE);
+        let result = self.compile_shader_inner(glsl_source);
+        lp_perf::emit_end!(EVENT_SHADER_COMPILE);
+        result
+    }
+
+    fn compile_shader_inner(&mut self, glsl_source: &str) -> Result<(), Error> {
         log::info!(
             "Shader {} compilation starting ({} bytes)",
             self.node_handle.as_i32(),

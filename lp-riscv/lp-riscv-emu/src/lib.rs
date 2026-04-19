@@ -36,6 +36,8 @@ pub use emu::{
     MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator, StepResult, SyscallInfo,
     trap_code_to_string,
 };
+#[cfg(feature = "std")]
+pub use emu::FrameOutcome;
 pub use time::TimeMode;
 
 #[cfg(feature = "std")]

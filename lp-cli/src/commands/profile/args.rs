@@ -1,6 +1,8 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+use super::mode::ProfileMode;
+
 /// `lp-cli profile …` — run a session or `profile diff` (stub).
 #[derive(Debug, Parser)]
 #[command(name = "profile", about = "Run a profiling session or compare two profile directories.")]
@@ -24,13 +26,21 @@ pub struct ProfileArgs {
     #[arg(default_value = "examples/basic")]
     pub dir: PathBuf,
 
-    /// Collectors to enable (comma-separated). m0 supports: alloc.
-    #[arg(long, default_value = "alloc", value_delimiter = ',')]
+    /// Collectors to enable (comma-separated). m1 supports: alloc, events.
+    /// Default: events. (events is implicitly fed to the mode gate even
+    /// when not in this list, but events.jsonl is only written when
+    /// "events" is included here.)
+    #[arg(long, default_value = "events", value_delimiter = ',')]
     pub collect: Vec<String>,
 
-    /// Number of frames to advance the workload.
-    #[arg(long, default_value_t = 10)]
-    pub frames: u32,
+    /// Profile mode (state machine over the perf-event stream).
+    #[arg(long, value_enum, default_value_t = ProfileMode::SteadyRender)]
+    pub mode: ProfileMode,
+
+    /// Safety cap on emulated cycles. The run terminates with exit
+    /// code 0 and a warning if reached.
+    #[arg(long, default_value_t = 200_000_000)]
+    pub max_cycles: u64,
 
     /// Optional human-readable note appended to the profile dir.
     #[arg(long)]

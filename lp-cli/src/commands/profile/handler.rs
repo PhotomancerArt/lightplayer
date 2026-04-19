@@ -3,20 +3,21 @@
 use anyhow::{bail, Context, Result};
 use lp_client::LpClient;
 use lp_client::transport_emu_serial::SerialEmuClientTransport;
-use lp_model::AsLpPath;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
     profile::alloc::AllocCollector,
-    profile::{Collector, SessionMetadata, TraceSymbol},
+    profile::events::EventsCollector,
+    profile::{Collector, HaltReason, TraceSymbol},
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
-use lp_shared::fs::{LpFs, LpFsStd};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use super::args::ProfileArgs;
+use super::output;
+use super::workload;
 
 pub fn handle_profile(args: ProfileArgs) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
@@ -54,7 +55,8 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
 
     let timestamp_dir = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
     let dir_label = kebab_case(&args.dir.to_string_lossy());
-    let mut profile_dir_name = format!("{timestamp_dir}--{dir_label}");
+    let mode_slug = args.mode.slug();
+    let mut profile_dir_name = format!("{timestamp_dir}--{dir_label}--{mode_slug}");
     if let Some(note) = &args.note {
         let note_kebab = kebab_case(note);
         if !note_kebab.is_empty() {
@@ -73,15 +75,11 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     let heap_start = 0x8000_0000u32;
     let heap_size = 320 * 1024;
 
-    let metadata = SessionMetadata {
-        schema_version: 1,
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        project: project_uid.clone(),
-        workload: args.dir.display().to_string(),
-        note: args.note.clone(),
-        clock_source: "emu_estimated",
-        frames_requested: args.frames,
-        symbols: load_info
+    let metadata = output::build_initial_metadata(
+        project_uid.clone(),
+        args.dir.display().to_string(),
+        args.note.clone(),
+        load_info
             .symbol_list
             .iter()
             .map(|s| TraceSymbol {
@@ -90,7 +88,9 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
                 name: s.name.clone(),
             })
             .collect(),
-    };
+        args.mode,
+        args.max_cycles,
+    );
 
     let mut collectors: Vec<Box<dyn Collector>> = Vec::new();
     for name in &args.collect {
@@ -101,7 +101,8 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
                 heap_start,
                 heap_size,
             )?)),
-            other => bail!("unknown collector '{other}'; supported: alloc"),
+            "events" => collectors.push(Box::new(EventsCollector::new(&trace_dir)?)),
+            other => bail!("unknown collector '{other}'; supported: alloc, events"),
         }
     }
 
@@ -116,6 +117,7 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     let sp_value = 0x8000_0000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
     emulator.set_register(Gpr::Sp, sp_value as i32);
     emulator.set_pc(load_info.entry_point);
+    emulator.set_profile_gate(args.mode.build_gate());
 
     let emulator_arc = Arc::new(Mutex::new(emulator));
 
@@ -124,13 +126,23 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
 
     let client = LpClient::new(Box::new(transport));
 
-    let run_err = run_workload(&client, &emulator_arc, &dir, args.frames, &project_uid)
-        .await
-        .err();
+    let workload_result = workload::run_workload(
+        &client,
+        &emulator_arc,
+        &dir,
+        &project_uid,
+        args.max_cycles,
+    )
+    .await;
 
-    if let Some(ref e) = run_err {
+    if let Err(e) = &workload_result {
         eprintln!("Workload stopped early: {e:#}");
     }
+
+    let cycles_used = {
+        let emu = emulator_arc.lock().unwrap();
+        emu.get_cycle_count()
+    };
 
     let counts = {
         let mut emu = emulator_arc.lock().unwrap();
@@ -138,13 +150,23 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
             .context("Failed to flush profile session")?
     };
 
-    let event_count = counts
-        .iter()
-        .find(|(n, _)| n == "alloc")
-        .map(|(_, c)| *c)
-        .unwrap_or(0);
+    if let Ok(outcome) = &workload_result {
+        if let workload::WorkloadOutcome::GuestHalted(reason) = outcome {
+            match reason {
+                HaltReason::Oom { size } => {
+                    eprintln!("Guest halted: OOM (size {size})");
+                }
+                HaltReason::ProfileStop => {
+                    eprintln!("Guest halted: profile stop");
+                }
+            }
+        }
+        output::update_metadata_finish(&trace_dir, cycles_used, outcome)?;
+    }
 
-    eprintln!("Trace complete: {event_count} events");
+    for (name, n) in &counts {
+        eprintln!("Trace complete: {name}: {n} events");
+    }
     eprintln!("Report written to {}", trace_dir.join("report.txt").display());
 
     println!("{}", trace_dir.display());
@@ -162,50 +184,10 @@ fn validate_collectors(names: &[String]) -> Result<()> {
         if !seen.insert(name) {
             bail!("duplicate collector '{name}' in --collect");
         }
-        if name != "alloc" {
-            bail!("unknown collector '{name}'; supported: alloc");
+        if name != "alloc" && name != "events" {
+            bail!("unknown collector '{name}'; supported: alloc, events");
         }
     }
-    Ok(())
-}
-
-async fn run_workload(
-    client: &LpClient,
-    emulator_arc: &Arc<Mutex<Riscv32Emulator>>,
-    dir: &std::path::Path,
-    frames: u32,
-    project_uid: &str,
-) -> Result<()> {
-    eprintln!("Syncing project files...");
-    let local_fs = LpFsStd::new(dir.to_path_buf());
-    push_project_files(client, &local_fs, project_uid).await?;
-
-    eprintln!("Loading project...");
-    let project_path = format!("projects/{project_uid}");
-    client
-        .project_load(&project_path)
-        .await
-        .context("Failed to load project")?;
-
-    eprintln!("Running {frames} frames...");
-    for i in 0..frames {
-        {
-            let mut emu = emulator_arc.lock().unwrap();
-            emu.advance_time(40);
-        }
-
-        if (i + 1) % 10 == 0 || i + 1 == frames {
-            eprint!("\r  frame {}/{frames}", i + 1);
-        }
-    }
-    eprintln!();
-
-    eprintln!("Stopping project...");
-    client
-        .stop_all_projects()
-        .await
-        .context("Failed to stop projects")?;
-
     Ok(())
 }
 
@@ -219,41 +201,6 @@ fn read_project_uid(dir: &std::path::Path) -> Result<String> {
         .as_str()
         .context("project.json missing 'uid' field")?;
     Ok(uid.to_string())
-}
-
-async fn push_project_files(
-    client: &LpClient,
-    local_fs: &dyn LpFs,
-    project_uid: &str,
-) -> Result<()> {
-    let entries = local_fs
-        .list_dir("/".as_path(), true)
-        .map_err(|e| anyhow::anyhow!("Failed to list project files: {e:?}"))?;
-
-    for entry in entries {
-        if entry.as_str().ends_with('/') {
-            continue;
-        }
-        if local_fs.is_dir(entry.as_path()).unwrap_or(false) {
-            continue;
-        }
-        let content = local_fs
-            .read_file(entry.as_path())
-            .map_err(|e| anyhow::anyhow!("Failed to read {}: {e:?}", entry.as_str()))?;
-
-        let relative = if entry.as_str().starts_with('/') {
-            &entry.as_str()[1..]
-        } else {
-            entry.as_str()
-        };
-
-        let full_path = format!("/projects/{project_uid}/{relative}");
-        client
-            .fs_write(full_path.as_path(), content)
-            .await
-            .with_context(|| format!("Failed to write {full_path}"))?;
-    }
-    Ok(())
 }
 
 fn kebab_case(s: &str) -> String {

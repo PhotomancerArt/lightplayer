@@ -1,14 +1,13 @@
-//! Smoke test: `lp-cli profile --collect alloc` produces a valid trace directory.
-//!
-//! The subprocess must run with the repository workspace as `current_dir` so
-//! `ensure_binary_built` can locate the workspace root. Output is isolated by a
-//! unique `--note` and removed after assertions.
+//! Smoke test: `lp-cli profile --collect events --mode startup` end-to-end against
+//! `examples/basic`. Uses startup mode so the profile gate stops after the first
+//! frame completes (fast, like `profile_alloc_smoke`). Verifies `events.jsonl` and
+//! the m1 `meta.json` schema.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
-fn profile_alloc_smoke() {
+fn lp_cli_profile_events_startup_smoke() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("lp-cli crate should live one level under the workspace root");
@@ -18,7 +17,7 @@ fn profile_alloc_smoke() {
         .canonicalize()
         .expect("resolve examples/basic");
 
-    let note = format!("ci-smoke-{}", std::process::id());
+    let note = format!("ci-events-smoke-{}", std::process::id());
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
 
     let status = Command::new("cargo")
@@ -33,7 +32,7 @@ fn profile_alloc_smoke() {
             "profile",
             examples_basic.to_str().expect("utf8 examples"),
             "--collect",
-            "alloc",
+            "events",
             "--mode",
             "startup",
             "--note",
@@ -44,7 +43,7 @@ fn profile_alloc_smoke() {
 
     assert!(
         status.success(),
-        "cargo run -p lp-cli profile failed with {:?}",
+        "cargo run -p lp-cli profile (events) failed with {:?}",
         status.code()
     );
 
@@ -82,6 +81,12 @@ fn profile_alloc_smoke() {
     }
     let _cleanup = Cleanup { path: &dir };
 
+    let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    assert!(
+        dir_name.contains("startup"),
+        "trace dir should include mode slug 'startup': {dir_name}"
+    );
+
     let meta_path = dir.join("meta.json");
     assert!(meta_path.exists(), "missing {}", meta_path.display());
     assert!(std::fs::metadata(&meta_path).unwrap().len() > 0);
@@ -89,6 +94,22 @@ fn profile_alloc_smoke() {
     let meta: serde_json::Value =
         serde_json::from_reader(std::fs::File::open(&meta_path).unwrap()).unwrap();
     assert_eq!(meta["schema_version"], 1);
+    assert_eq!(meta["mode"].as_str(), Some("startup"));
+    assert!(
+        meta["max_cycles"].as_u64().is_some(),
+        "max_cycles should be a JSON number"
+    );
+    let cycles_used = meta["cycles_used"].as_u64().expect("cycles_used");
+    assert!(cycles_used > 0, "cycles_used should be > 0");
+    assert_eq!(
+        meta["terminated_by"].as_str(),
+        Some("profile_stop"),
+        "startup mode should end via profile gate (profile_stop)"
+    );
+    assert!(
+        meta.get("frames_requested").is_none(),
+        "frames_requested should be removed in m1"
+    );
     assert!(
         meta["symbols"]
             .as_array()
@@ -97,44 +118,47 @@ fn profile_alloc_smoke() {
         "symbols should be non-empty"
     );
     assert!(
-        meta["collectors"]["alloc"].is_object(),
-        "collectors.alloc should be an object"
+        meta["collectors"]["events"].is_object(),
+        "collectors.events should be an object"
     );
 
-    let heap_trace = dir.join("heap-trace.jsonl");
-    assert!(heap_trace.exists());
-    let trace = std::fs::read_to_string(&heap_trace).unwrap();
-    assert!(!trace.is_empty());
+    let events_path = dir.join("events.jsonl");
+    assert!(events_path.exists(), "events.jsonl missing");
+    let events_raw = std::fs::read_to_string(&events_path).unwrap();
+    assert!(!events_raw.is_empty(), "events.jsonl is empty");
 
-    let mut saw_shape = false;
-    for line in trace.lines() {
+    let mut saw_frame = false;
+    for line in events_raw.lines() {
         if line.trim().is_empty() {
             continue;
         }
-        let event: serde_json::Value = serde_json::from_str(line).expect("jsonl line");
-        if event.get("t").is_some()
-            && event.get("ptr").is_some()
-            && event.get("sz").is_some()
-            && event.get("ic").is_some()
-            && event.get("frames").is_some()
-            && event.get("free").is_some()
-        {
-            saw_shape = true;
-            break;
+        let v: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("bad jsonl: {line:?}: {e}"));
+        assert!(
+            v["cycle"].as_u64().is_some(),
+            "each line should have numeric cycle: {v}"
+        );
+        assert!(
+            v["name"].as_str().is_some(),
+            "each line should have name: {v}"
+        );
+        assert!(
+            v["kind"].as_str().is_some(),
+            "each line should have kind: {v}"
+        );
+        if v["name"].as_str() == Some("frame") {
+            saw_frame = true;
         }
     }
-    assert!(
-        saw_shape,
-        "expected at least one alloc event with t/ptr/sz/ic/frames/free"
-    );
+    assert!(saw_frame, "no 'frame' event in events.jsonl");
 
     let report_path = dir.join("report.txt");
-    assert!(report_path.exists());
+    assert!(report_path.exists(), "report.txt missing");
     let report = std::fs::read_to_string(&report_path).unwrap();
     assert!(!report.is_empty());
     let first_line = report.trim_end().lines().next().unwrap_or("");
     assert!(
-        first_line.starts_with("=== Heap Allocation ==="),
+        first_line.starts_with("=== Perf Events ==="),
         "unexpected report banner: {:?}",
         first_line.chars().take(80).collect::<String>()
     );
