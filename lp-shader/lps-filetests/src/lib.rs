@@ -378,6 +378,10 @@ struct FileSpec {
 /// marking to directives that already have `@unimplemented(<baseline>)`, so you can copy baseline
 /// markers onto another backend (e.g. `rv32c.q32` → `rv32n.q32`) without touching unrelated failures.
 /// Requires exactly one `--target`.
+///
+/// `force_opts` are applied after each file's `compile-opt(...)` directives (see
+/// [`test_run::compile::build_compiler_config`]). Parsed from `--force-opt` /
+/// `LPS_FILETEST_FORCE_OPT` in the `lps-filetests-app` binary only.
 pub fn run(
     files: &[String],
     fix_xfail: bool,
@@ -388,8 +392,12 @@ pub fn run(
     mark_unimplemented_if_baseline: Option<String>,
     target_spec: Option<&str>,
     output_override: Option<OutputMode>,
+    force_opts: &[(String, String)],
     perf_model: PerfModel,
 ) -> anyhow::Result<()> {
+    let _force_compiler_opts_guard =
+        crate::test_run::compile::ForceCompilerOptsGuard::install(force_opts);
+
     // Check environment variable if flag not provided
     let fix_xfail = fix_xfail
         || std::env::var("LP_FIX_XFAIL")

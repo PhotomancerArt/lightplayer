@@ -18,6 +18,9 @@ scripts/glsl-filetests.sh
 scripts/glsl-filetests.sh --target wasm.q32
 scripts/glsl-filetests.sh --target rv32c.q32
 
+# Override compiler options for the whole run (wins over per-file `// compile-opt(...)`)
+scripts/glsl-filetests.sh --force-opt q32.mul=wrapping --target wasm.q32
+
 # Full matrix (same as `just test-filetests` / `just test`)
 just test-filetests
 ```
