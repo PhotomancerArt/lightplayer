@@ -1,4 +1,9 @@
 //! Fixed-point 16.16 addition with overflow/saturation handling.
+//!
+//! Reference saturating implementation. Backends inline a 1-instruction
+//! wrapping `add` when the shader opts into
+//! `Q32Options { add_sub: Wrapping, .. }`. See
+//! `docs/plans-old/2026-04-18-q32-options-dispatch/00-design.md`.
 
 const MAX_FIXED: i32 = 0x7FFF_FFFF; // Maximum representable fixed-point value (not i32::MAX)
 const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value

@@ -12,7 +12,7 @@ default = ["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
 # Cranelift JIT backend (`LpGraphics` / shader compilation)
-cranelift = ["dep:lpvm-cranelift"]
+cranelift = ["dep:lpvm-cranelift", "dep:lpir"]
 # RV32 native JIT (`LpGraphics` via `lpvm-native` `rt_jit`; only on `target_arch = "riscv32"`)
 native-jit = ["dep:lpvm-native", "dep:lpir"]
 # Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled

@@ -95,6 +95,12 @@ pub fn encode_mul(rd: u32, rs1: u32, rs2: u32) -> u32 {
     encode_r_type(OP_OP, rd, F3_ADD, rs1, rs2, F7_MUL)
 }
 
+/// mulh rd, rs1, rs2 — high 32 bits of signed `rs1 * rs2` (M extension)
+#[inline]
+pub fn encode_mulh(rd: u32, rs1: u32, rs2: u32) -> u32 {
+    encode_r_type(OP_OP, rd, F3_SLL, rs1, rs2, F7_MUL)
+}
+
 /// and rd, rs1, rs2
 #[inline]
 pub fn encode_and(rd: u32, rs1: u32, rs2: u32) -> u32 {

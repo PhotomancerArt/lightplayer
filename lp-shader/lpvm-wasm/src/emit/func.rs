@@ -11,7 +11,8 @@ use crate::emit::control::{self, CtrlEntry, WasmOpenDepth};
 use crate::emit::imports;
 use crate::emit::memory;
 use crate::emit::ops::emit_op;
-use crate::emit::{EmitCtx, FuncEmitCtx};
+use crate::emit::{EmitCtx, FdivRecipLocals, FuncEmitCtx};
+use lps_q32::q32_options::DivMode;
 
 fn ir_type_to_val(ty: IrType, mode: FloatMode) -> ValType {
     match (ty, mode) {
@@ -19,6 +20,12 @@ fn ir_type_to_val(ty: IrType, mode: FloatMode) -> ValType {
         (IrType::F32, FloatMode::Q32) => ValType::I32,
         (IrType::F32, FloatMode::F32) => ValType::F32,
     }
+}
+
+fn func_needs_fdiv_recip_scratch(f: &IrFunction, mode: FloatMode, ctx: &EmitCtx<'_>) -> bool {
+    mode == FloatMode::Q32
+        && ctx.q32.div == DivMode::Reciprocal
+        && f.body.iter().any(|op| matches!(op, LpirOp::Fdiv { .. }))
 }
 
 fn func_needs_i64_scratch(f: &IrFunction, mode: FloatMode) -> bool {
@@ -99,6 +106,25 @@ pub(crate) fn encode_ir_function(
         None
     };
     func_ctx.i64_scratch = i64_scratch;
+
+    let fdiv_recip_scratch = if func_needs_fdiv_recip_scratch(f, mode, ctx) {
+        let base = (f.param_count as usize + 1 + local_types.len()) as u32;
+        for _ in 0..7 {
+            local_types.push(ValType::I32);
+        }
+        Some(FdivRecipLocals {
+            divisor: base,
+            dividend: base + 1,
+            sign: base + 2,
+            abs_dividend: base + 3,
+            abs_divisor: base + 4,
+            recip: base + 5,
+            quot: base + 6,
+        })
+    } else {
+        None
+    };
+    func_ctx.fdiv_recip_scratch = fdiv_recip_scratch;
 
     func_ctx.slot_offsets = memory::slot_offsets(f);
     let slot_frame = memory::aligned_frame_size(f);

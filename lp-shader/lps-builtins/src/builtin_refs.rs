@@ -104,6 +104,7 @@ use crate::builtins::lpfn::{
 };
 use crate::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32;
 use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fdiv_recip_q32::__lp_lpir_fdiv_recip_q32;
 use crate::builtins::lpir::float_misc_q32::{
     __lp_lpir_fabs_q32, __lp_lpir_fceil_q32, __lp_lpir_ffloor_q32, __lp_lpir_fmax_q32,
     __lp_lpir_fmin_q32, __lp_lpir_ftrunc_q32,
@@ -154,6 +155,7 @@ pub fn ensure_builtins_referenced() {
         let _lpir_fadd_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fadd_q32;
         let _lpir_fceil_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fceil_q32;
         let _lpir_fdiv_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fdiv_q32;
+        let _lpir_fdiv_recip_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fdiv_recip_q32;
         let _lpir_ffloor_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ffloor_q32;
         let _lpir_fmax_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fmax_q32;
         let _lpir_fmin_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fmin_q32;
@@ -316,6 +318,7 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&_lpir_fadd_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fceil_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fdiv_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fdiv_recip_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_ffloor_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fmax_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fmin_q32_fn as *const _);

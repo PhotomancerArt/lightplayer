@@ -10,6 +10,7 @@
 
 pub mod fadd_q32;
 pub mod fdiv_q32;
+pub mod fdiv_recip_q32;
 pub mod float_misc_q32;
 pub mod fmul_q32;
 pub mod fnearest_q32;

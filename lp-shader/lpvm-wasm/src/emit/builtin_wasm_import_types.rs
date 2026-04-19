@@ -44,6 +44,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
         BuiltinId::LpLpirFaddQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFceilQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFdivQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpirFdivRecipQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFfloorQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFmaxQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFminQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),

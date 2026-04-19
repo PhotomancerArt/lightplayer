@@ -16,6 +16,10 @@ pub enum MemoryStrategy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub float_mode: FloatMode,
+    /// Vestigial — cranelift codegen does not dispatch on Q32 mode.
+    /// Use `config.q32` for the real value once cranelift gains dispatch
+    /// (cranelift JIT is currently deprecated; WASM and native are the
+    /// supported paths). Engine glue keeps both fields in sync.
     pub q32_options: Q32Options,
     pub memory_strategy: MemoryStrategy,
     pub max_errors: Option<usize>,

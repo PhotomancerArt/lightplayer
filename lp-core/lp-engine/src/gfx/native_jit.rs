@@ -66,6 +66,10 @@ impl LpGraphics for NativeJitGraphics {
                 debug_info: false,
                 emu_trace_instructions: false,
                 alloc_trace: false,
+                config: lpir::CompilerConfig {
+                    q32: options.q32_options,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -86,7 +90,7 @@ impl LpGraphics for NativeJitGraphics {
                 message: format!("{e}"),
             })?;
 
-        let _ = (options.max_errors, options.q32_options);
+        let _ = options.max_errors; // TODO: thread max_errors when front-end accepts it
 
         Ok(Box::new(NativeJitShader {
             instance,

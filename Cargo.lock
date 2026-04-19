@@ -3918,6 +3918,7 @@ name = "lpir"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lps-q32",
 ]
 
 [[package]]
@@ -4088,6 +4089,7 @@ dependencies = [
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
+ "lps-q32",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",
@@ -4107,6 +4109,7 @@ dependencies = [
  "lps-builtin-ids",
  "lps-builtins",
  "lps-frontend",
+ "lps-q32",
  "lps-shared",
  "lpvm",
  "wasm-bindgen",

@@ -982,6 +982,13 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFdivRecipQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::fdiv_recip_q32::__lp_lpir_fdiv_recip_q32(p0, p1);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFfloorQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_ffloor_q32(p0);

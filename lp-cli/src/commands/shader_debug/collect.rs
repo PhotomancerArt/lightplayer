@@ -14,6 +14,7 @@ pub fn collect_fa_data(
     func_filter: Option<&str>,
 ) -> Result<BackendDebugData> {
     use lpvm_native::IsaTarget;
+    use lpvm_native::LowerOpts;
     use lpvm_native::abi::ModuleAbi;
     use lpvm_native::isa::rv32::abi::func_abi_rv32;
     use lpvm_native::lower_ops;
@@ -49,7 +50,12 @@ pub fn collect_fa_data(
             .unwrap_or(&default_sig);
 
         // Lower and compile
-        let lowered = lower_ops(func, ir, &module_abi, float_mode)
+        let compile_cfg = lpir::CompilerConfig::default();
+        let lower_opts = LowerOpts {
+            float_mode,
+            q32: &compile_cfg.q32,
+        };
+        let lowered = lower_ops(func, ir, &module_abi, &lower_opts)
             .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;
 
         let slots = func.total_param_slots() as usize;

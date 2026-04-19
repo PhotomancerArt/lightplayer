@@ -50,6 +50,10 @@ impl LpGraphics for CraneliftGraphics {
             memory_strategy: MemoryStrategy::Default,
             max_errors: options.max_errors,
             emu_trace_instructions: false,
+            config: lpir::CompilerConfig {
+                q32: options.q32_options,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let engine = CraneliftEngine::new(compile);

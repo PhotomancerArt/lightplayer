@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 
 use lpir::FloatMode;
 use lpir::LpirModule;
+use lps_q32::q32_options::Q32Options;
 
 use crate::module::EnvMemorySpec;
 use wasm_encoder::{
@@ -21,11 +22,25 @@ use wasm_encoder::{
     TypeSection, ValType,
 };
 
+/// Scratch locals for [`crate::emit::q32::emit_q32_fdiv_recip`] (reciprocal Q32 divide).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FdivRecipLocals {
+    pub divisor: u32,
+    pub dividend: u32,
+    pub sign: u32,
+    pub abs_dividend: u32,
+    pub abs_divisor: u32,
+    pub recip: u32,
+    pub quot: u32,
+}
+
 /// Per-module state threaded through op emission.
 pub(crate) struct EmitCtx<'a> {
     pub options: &'a crate::options::WasmOptions,
     pub import_remap: &'a [Option<u32>],
     pub filtered_import_count: u32,
+    /// Copied from [`lpir::CompilerConfig::q32`] for Q32 opcode lowering.
+    pub q32: Q32Options,
 }
 
 /// Per-function state (scratch local, shadow stack, slot layout).
@@ -43,6 +58,8 @@ pub(crate) struct FuncEmitCtx<'a> {
     /// After a return instruction, code is unreachable. Skip non-structural ops
     /// to avoid stack type errors, but still process End/Else for control stack balance.
     pub unreachable_mode: bool,
+    /// Present when reciprocal divide lowering needs temporaries (see [`encode_ir_function`](crate::emit::func::encode_ir_function)).
+    pub fdiv_recip_scratch: Option<FdivRecipLocals>,
 }
 
 pub(crate) fn emit_module(
@@ -144,6 +161,7 @@ pub(crate) fn emit_module(
         options,
         import_remap: &filtered.remap,
         filtered_import_count: filtered_fn_count,
+        q32: options.config.q32,
     };
 
     // $sp is global index 0 — only valid while it's the sole WASM global.
@@ -174,6 +192,7 @@ pub(crate) fn emit_module(
             slot_offsets: alloc::vec::Vec::new(),
             result_buffer_base_offset: 0,
             unreachable_mode: false,
+            fdiv_recip_scratch: None,
         };
         let wasm_fn = func::encode_ir_function(ir, f, &ctx, func_ctx)?;
         code.function(&wasm_fn);

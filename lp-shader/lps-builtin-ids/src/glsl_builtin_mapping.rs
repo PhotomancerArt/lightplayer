@@ -70,6 +70,7 @@ pub fn lpir_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
         ("fadd", 2) => Some(BuiltinId::LpLpirFaddQ32),
         ("fceil", 1) => Some(BuiltinId::LpLpirFceilQ32),
         ("fdiv", 2) => Some(BuiltinId::LpLpirFdivQ32),
+        ("fdiv_recip", 2) => Some(BuiltinId::LpLpirFdivRecipQ32),
         ("ffloor", 1) => Some(BuiltinId::LpLpirFfloorQ32),
         ("fmax", 2) => Some(BuiltinId::LpLpirFmaxQ32),
         ("fmin", 2) => Some(BuiltinId::LpLpirFminQ32),

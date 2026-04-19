@@ -479,6 +479,7 @@ impl<'a> EmitContext<'a> {
                     AluOp::Add => encode_add(rd, rs1, rs2),
                     AluOp::Sub => encode_sub(rd, rs1, rs2),
                     AluOp::Mul => encode_mul(rd, rs1, rs2),
+                    AluOp::MulH => encode_mulh(rd, rs1, rs2),
                     AluOp::And => encode_and(rd, rs1, rs2),
                     AluOp::Or => encode_or(rd, rs1, rs2),
                     AluOp::Xor => encode_xor(rd, rs1, rs2),

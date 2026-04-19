@@ -7,6 +7,7 @@ use lpir::{FloatMode, IrFunction, LpirModule};
 use lps_shared::{LpsFnKind, LpsFnSig};
 use lpvm::FunctionDebugInfo;
 
+use crate::LowerOpts;
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
@@ -107,7 +108,11 @@ pub fn compile_function(
             log::debug!("[native-fa] compile_function: folded {n_folded} LPIR constants");
         }
 
-        let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, session.float_mode)
+        let lower_opts = LowerOpts {
+            float_mode: session.float_mode,
+            q32: &session.options.config.q32,
+        };
+        let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, &lower_opts)
             .map_err(NativeError::Lower)?;
         log::debug!(
             "[native-fa] compile_function: lowered to {n} vinsts",

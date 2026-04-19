@@ -16,8 +16,8 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         },
         lpfn::{color, generative, hash, math},
         lpir::{
-            fadd_q32, fdiv_q32, float_misc_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32,
-            ftoi_sat_q32, itof_s_q32, itof_u_q32, unorm_conv_q32,
+            fadd_q32, fdiv_q32, fdiv_recip_q32, float_misc_q32, fmul_q32, fnearest_q32, fsqrt_q32,
+            fsub_q32, ftoi_sat_q32, itof_s_q32, itof_u_q32, unorm_conv_q32,
         },
         vm::get_fuel_q32,
     };
@@ -49,6 +49,7 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpLpirFaddQ32 => fadd_q32::__lp_lpir_fadd_q32 as *const u8,
         BuiltinId::LpLpirFceilQ32 => float_misc_q32::__lp_lpir_fceil_q32 as *const u8,
         BuiltinId::LpLpirFdivQ32 => fdiv_q32::__lp_lpir_fdiv_q32 as *const u8,
+        BuiltinId::LpLpirFdivRecipQ32 => fdiv_recip_q32::__lp_lpir_fdiv_recip_q32 as *const u8,
         BuiltinId::LpLpirFfloorQ32 => float_misc_q32::__lp_lpir_ffloor_q32 as *const u8,
         BuiltinId::LpLpirFmaxQ32 => float_misc_q32::__lp_lpir_fmax_q32 as *const u8,
         BuiltinId::LpLpirFminQ32 => float_misc_q32::__lp_lpir_fmin_q32 as *const u8,

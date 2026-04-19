@@ -22,6 +22,7 @@ pub mod emit;
 pub mod error;
 pub mod link;
 pub mod lower;
+pub mod lower_opts;
 pub mod native_options;
 pub mod opt;
 pub mod regalloc;
@@ -47,6 +48,7 @@ pub use error::{LowerError, NativeError};
 pub use isa::IsaTarget;
 pub use link::{LinkedJitImage, link_elf, link_jit};
 pub use lower::{LoopRegion, LoweredFunction, lower_lpir_op, lower_ops};
+pub use lower_opts::LowerOpts;
 pub use native_options::NativeCompileOptions;
 pub use types::NativeType;
 pub use vinst::{
