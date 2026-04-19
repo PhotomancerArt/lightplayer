@@ -1,4 +1,7 @@
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+
+vec4 render(vec2 pos) {
     // Pan through noise using time with oscillation to stay bounded
     // Oscillate between minZoom and maxZoom to avoid unbounded growth
     float panSpeed = .3;
@@ -11,7 +14,7 @@ vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
 
     // Scale from center: translate to center, scale, translate back
     vec2 center = outputSize * 0.5;
-    vec2 dir = fragCoord - center;
+    vec2 dir = pos - center;
     vec2 scaledCoord = center + dir * scale;
 
     return worley_demo(scaledCoord, time);

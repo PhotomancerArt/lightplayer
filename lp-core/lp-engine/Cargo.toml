@@ -12,9 +12,9 @@ default = ["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
 # Cranelift JIT backend (`LpGraphics` / shader compilation)
-cranelift = ["dep:lpvm-cranelift", "dep:lpir"]
+cranelift = ["dep:lpvm-cranelift"]
 # RV32 native JIT (`LpGraphics` via `lpvm-native` `rt_jit`; only on `target_arch = "riscv32"`)
-native-jit = ["dep:lpvm-native", "dep:lpir"]
+native-jit = ["dep:lpvm-native"]
 # Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
 cranelift-optimizer = ["cranelift", "lpvm-cranelift?/cranelift-optimizer"]
 # Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
@@ -32,7 +32,8 @@ lpvm-cranelift = { path = "../../lp-shader/lpvm-cranelift", default-features = f
 # Note: lpvm-native's 'debug' feature (interleaved/disasm sections) is disabled
 # for firmware builds to reduce code size and improve compilation performance.
 lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, optional = true }
-lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
+lpir = { path = "../../lp-shader/lpir", default-features = false }
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
 lpvm = { path = "../../lp-shader/lpvm", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 lps-frontend = { path = "../../lp-shader/lps-frontend", default-features = false }
@@ -41,6 +42,7 @@ log = { workspace = true, default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 libm = "0.2"
 
 [dev-dependencies]

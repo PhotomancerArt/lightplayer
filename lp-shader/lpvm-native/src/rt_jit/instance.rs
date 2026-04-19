@@ -478,12 +478,11 @@ impl LpvmInstance for NativeJitInstance {
 
         let entry = self.resolve_render_texture(fn_name)?;
 
-        let tex_offset = i32::try_from(texture.guest_base()).map_err(|_| {
-            NativeError::Call(CallError::Unsupported(alloc::format!(
-                "texture guest base {:#x} exceeds i32 range",
-                texture.guest_base()
-            )))
-        })?;
+        // Pass guest addresses as bit patterns: RV32 ABI registers are 32 bits
+        // wide and the JIT'd function reinterprets them as `*mut u8` regardless
+        // of sign. RV32 RAM lives at >=0x8000_0000 so a checked `i32::try_from`
+        // would always reject these even though the lowering is correct.
+        let tex_offset = (texture.guest_base() as u32) as i32;
         let vmctx = self.vmctx_guest as i32;
 
         #[cfg(target_arch = "riscv32")]

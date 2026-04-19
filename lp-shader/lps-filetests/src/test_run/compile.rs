@@ -17,15 +17,18 @@ pub(crate) struct ForceCompilerOptsGuard;
 
 impl ForceCompilerOptsGuard {
     pub(crate) fn install(opts: &[(String, String)]) -> Self {
-        *FORCED_COMPILER_OPTS.lock().expect("forced compiler opts mutex poisoned") =
-            Some(opts.to_vec());
+        *FORCED_COMPILER_OPTS
+            .lock()
+            .expect("forced compiler opts mutex poisoned") = Some(opts.to_vec());
         Self
     }
 }
 
 impl Drop for ForceCompilerOptsGuard {
     fn drop(&mut self) {
-        *FORCED_COMPILER_OPTS.lock().expect("forced compiler opts mutex poisoned") = None;
+        *FORCED_COMPILER_OPTS
+            .lock()
+            .expect("forced compiler opts mutex poisoned") = None;
     }
 }
 

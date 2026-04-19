@@ -311,4 +311,91 @@ mod tests {
         let module = result.unwrap();
         assert_eq!(module.functions.len(), 1, "expected 1 compiled function");
     }
+
+    /// Phase 0 regression: [`crate::native_options::NativeCompileOptions::config`] (e.g. Q32 mul
+    /// mode) must reach [`compile_module`]. `rt_jit::compile_module_jit` forwards the same
+    /// struct into here; if it rebuilt options from defaults, only float_mode would apply.
+    #[test]
+    fn compile_module_respects_q32_mul_mode_in_emitted_code() {
+        use lps_q32::q32_options::{MulMode, Q32Options};
+        use lps_shared::{FnParam, ParamQualifier};
+
+        let func = IrFunction {
+            name: String::from("q32_fmul"),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 2,
+            return_types: vec![IrType::F32],
+            vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32, IrType::F32],
+            slots: vec![],
+            body: vec![
+                LpirOp::Fmul {
+                    dst: VReg(3),
+                    lhs: VReg(1),
+                    rhs: VReg(2),
+                },
+                LpirOp::Return {
+                    values: VRegRange { start: 0, count: 1 },
+                },
+            ],
+            vreg_pool: vec![VReg(3)],
+        };
+        let ir = LpirModule {
+            imports: vec![],
+            functions: BTreeMap::from([(FuncId(0), func)]),
+        };
+        let sig = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("q32_fmul"),
+                return_type: LpsType::Float,
+                parameters: vec![
+                    FnParam {
+                        name: String::from("a"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("b"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                ],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        };
+
+        let mut opts_sat = crate::native_options::NativeCompileOptions::default();
+        opts_sat.float_mode = lpir::FloatMode::Q32;
+        opts_sat.config.q32.mul = MulMode::Saturating;
+
+        let mut opts_wrap = crate::native_options::NativeCompileOptions::default();
+        opts_wrap.float_mode = lpir::FloatMode::Q32;
+        opts_wrap.config.q32 = Q32Options {
+            mul: MulMode::Wrapping,
+            ..Default::default()
+        };
+
+        let sat = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            opts_sat,
+            IsaTarget::Rv32imac,
+        )
+        .expect("saturating mul compile");
+        let wrap = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            opts_wrap,
+            IsaTarget::Rv32imac,
+        )
+        .expect("wrapping mul compile");
+
+        assert_ne!(
+            sat.functions[0].code, wrap.functions[0].code,
+            "saturating fmul lowers to a builtin call; wrapping uses inline mul/mulh — code must differ"
+        );
+    }
 }

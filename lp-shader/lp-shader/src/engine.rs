@@ -3,6 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 
+use lpir::CompilerConfig;
 use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
 use lpvm::AllocError;
 use lpvm::LpvmEngine;
@@ -24,6 +25,8 @@ impl<E: LpvmEngine> LpsEngine<E> {
 
     /// Compile GLSL into a pixel shader.
     ///
+    /// `config` is passed to the LPVM backend on compile ([`LpvmEngine::compile_with_config`]).
+    ///
     /// Validates the `render(vec2 pos)` signature against `output_format`.
     /// Returns `Validation` error if signature mismatch.
     ///
@@ -36,6 +39,7 @@ impl<E: LpvmEngine> LpsEngine<E> {
         &self,
         glsl: &str,
         output_format: TextureStorageFormat,
+        config: &CompilerConfig,
     ) -> Result<LpsPxShader, LpsError>
     where
         E::Module: 'static,
@@ -57,7 +61,7 @@ impl<E: LpvmEngine> LpsEngine<E> {
 
         let module = self
             .engine
-            .compile(&ir, &meta)
+            .compile_with_config(&ir, &meta, config)
             .map_err(|e| LpsError::Compile(format!("{e}")))?;
         LpsPxShader::new(
             module,

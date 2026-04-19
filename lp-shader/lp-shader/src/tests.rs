@@ -19,7 +19,11 @@ fn compile_px_returns_monomorphic_lps_pxshader() {
     "#;
     let engine = test_engine();
     let shader: LpsPxShader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px should succeed for trivial shader");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert!(
@@ -36,7 +40,11 @@ fn compile_px_simple_shader() {
     let engine = test_engine();
     let glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert!(!shader.meta().functions.is_empty());
@@ -49,7 +57,11 @@ fn compile_px_with_uniforms() {
     let glsl = "layout(binding = 0) uniform float u_time;
 vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px");
     assert!(shader.meta().uniforms_type.is_some());
 }
@@ -57,7 +69,11 @@ vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
 #[test]
 fn compile_px_invalid_glsl_returns_parse_error() {
     let engine = test_engine();
-    let result = engine.compile_px("not valid glsl {{{", TextureStorageFormat::Rgba16Unorm);
+    let result = engine.compile_px(
+        "not valid glsl {{{",
+        TextureStorageFormat::Rgba16Unorm,
+        &lpir::CompilerConfig::default(),
+    );
     match result {
         Err(e) => assert!(matches!(e, LpsError::Parse(_))),
         Ok(_) => panic!("expected compile failure"),
@@ -101,7 +117,11 @@ fn render_frame_no_uniforms() {
     let engine = test_engine();
     let glsl = "vec4 render(vec2 pos) { return vec4(0.0); }";
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px");
     let mut tex = engine
         .alloc_texture(4, 4, TextureStorageFormat::Rgba16Unorm)
@@ -121,7 +141,11 @@ fn render_frame_sets_uniforms() {
     let glsl = "layout(binding = 0) uniform float u_time;
 vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px");
     let mut tex = engine
         .alloc_texture(4, 4, TextureStorageFormat::Rgba16Unorm)
@@ -142,7 +166,11 @@ fn render_frame_r16_constant_writes_expected_bytes() {
         float render(vec2 pos) { return 0.5; }
     "#;
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::R16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::R16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px R16");
     let mut tex = engine
         .alloc_texture(2, 2, TextureStorageFormat::R16Unorm)
@@ -171,7 +199,11 @@ fn render_frame_rgb16_constant_writes_expected_bytes() {
         vec3 render(vec2 pos) { return vec3(0.25, 0.5, 0.75); }
     "#;
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgb16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgb16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px Rgb16");
     let mut tex = engine
         .alloc_texture(2, 2, TextureStorageFormat::Rgb16Unorm)
@@ -203,7 +235,11 @@ fn render_frame_rgba16_constant_writes_expected_bytes() {
         vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.5, 1.0); }
     "#;
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px Rgba16");
     let mut tex = engine
         .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
@@ -242,7 +278,11 @@ fn render_frame_rgba16_gradient_verifies_pos_and_enumeration() {
         }
     "#;
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px");
     let (w, h) = (3u32, 2u32);
     let mut tex = engine
@@ -288,7 +328,11 @@ fn render_frame_rgba16_gradient_verifies_pos_and_enumeration() {
 fn compile_px_missing_render_returns_validation_error() {
     let engine = test_engine();
     let glsl = "float helper(float x) { return x * 2.0; }";
-    let result = engine.compile_px(glsl, TextureStorageFormat::Rgba16Unorm);
+    let result = engine.compile_px(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        &lpir::CompilerConfig::default(),
+    );
     match result {
         Err(LpsError::Validation(msg)) => {
             assert!(msg.contains("render"), "{msg}");
@@ -302,7 +346,11 @@ fn compile_px_missing_render_returns_validation_error() {
 fn compile_px_wrong_param_count_returns_validation_error() {
     let engine = test_engine();
     let glsl = "vec4 render(vec2 pos, float extra) { return vec4(0.0); }";
-    let result = engine.compile_px(glsl, TextureStorageFormat::Rgba16Unorm);
+    let result = engine.compile_px(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        &lpir::CompilerConfig::default(),
+    );
     match result {
         Err(LpsError::Validation(msg)) => {
             assert!(msg.contains("1 parameter"), "{msg}");
@@ -316,7 +364,11 @@ fn compile_px_wrong_param_count_returns_validation_error() {
 fn compile_px_wrong_param_type_returns_validation_error() {
     let engine = test_engine();
     let glsl = "vec4 render(float x) { return vec4(x); }";
-    let result = engine.compile_px(glsl, TextureStorageFormat::Rgba16Unorm);
+    let result = engine.compile_px(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        &lpir::CompilerConfig::default(),
+    );
     match result {
         Err(LpsError::Validation(msg)) => {
             assert!(msg.contains("vec2"), "{msg}");
@@ -330,7 +382,11 @@ fn compile_px_wrong_param_type_returns_validation_error() {
 fn compile_px_wrong_return_type_returns_validation_error() {
     let engine = test_engine();
     let glsl = "vec3 render(vec2 pos) { return vec3(0.0); }";
-    let result = engine.compile_px(glsl, TextureStorageFormat::Rgba16Unorm);
+    let result = engine.compile_px(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        &lpir::CompilerConfig::default(),
+    );
     match result {
         Err(LpsError::Validation(msg)) => {
             assert!(msg.contains("Vec4"), "{msg}");
@@ -346,7 +402,11 @@ fn compile_px_r16_accepts_float_return() {
     let glsl = "float render(vec2 pos) { return 0.5; }";
     assert!(
         engine
-            .compile_px(glsl, TextureStorageFormat::R16Unorm)
+            .compile_px(
+                glsl,
+                TextureStorageFormat::R16Unorm,
+                &lpir::CompilerConfig::default()
+            )
             .is_ok()
     );
 }
@@ -355,7 +415,11 @@ fn compile_px_r16_accepts_float_return() {
 fn compile_px_r16_rejects_vec4_return() {
     let engine = test_engine();
     let glsl = "vec4 render(vec2 pos) { return vec4(1.0); }";
-    match engine.compile_px(glsl, TextureStorageFormat::R16Unorm) {
+    match engine.compile_px(
+        glsl,
+        TextureStorageFormat::R16Unorm,
+        &lpir::CompilerConfig::default(),
+    ) {
         Err(LpsError::Validation(msg)) => assert!(msg.contains("return"), "{msg}"),
         Err(other) => panic!("wrong error: {other}"),
         Ok(_) => panic!("expected validation error"),
@@ -368,7 +432,11 @@ fn compile_px_rgb16_accepts_vec3_return() {
     let glsl = "vec3 render(vec2 pos) { return vec3(0.5); }";
     assert!(
         engine
-            .compile_px(glsl, TextureStorageFormat::Rgb16Unorm)
+            .compile_px(
+                glsl,
+                TextureStorageFormat::Rgb16Unorm,
+                &lpir::CompilerConfig::default()
+            )
             .is_ok()
     );
 }
@@ -377,7 +445,11 @@ fn compile_px_rgb16_accepts_vec3_return() {
 fn compile_px_rgb16_rejects_vec4_return() {
     let engine = test_engine();
     let glsl = "vec4 render(vec2 pos) { return vec4(1.0); }";
-    match engine.compile_px(glsl, TextureStorageFormat::Rgb16Unorm) {
+    match engine.compile_px(
+        glsl,
+        TextureStorageFormat::Rgb16Unorm,
+        &lpir::CompilerConfig::default(),
+    ) {
         Err(LpsError::Validation(msg)) => assert!(msg.contains("return"), "{msg}"),
         Err(other) => panic!("wrong error: {other}"),
         Ok(_) => panic!("expected validation error"),
@@ -396,7 +468,11 @@ vec4 render(vec2 pos) {
 }
 ";
     let shader = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
         .expect("compile_px");
     assert!(shader.meta().uniforms_type.is_some());
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);

@@ -52,17 +52,44 @@ pub trait NodeInitContext {
     fn now_ms(&self) -> Option<u64> {
         None
     }
-}
 
-use lp_shared::Texture;
+    /// Look up a texture node's configuration (dimensions, etc.).
+    fn get_texture_config(
+        &self,
+        handle: TextureHandle,
+    ) -> Result<lp_model::nodes::texture::TextureConfig, Error>;
+
+    /// Node handle of the shader that owns the shared CPU output buffer for this texture target.
+    ///
+    /// When multiple shaders write the same texture, they share one buffer (highest
+    /// `render_order`, then highest node id on ties). Only that node allocates
+    /// [`crate::nodes::ShaderRuntime::output_buffer`]; others write through
+    /// [`RenderContext::get_target_texture_pixels_mut`].
+    ///
+    /// During initialization, other shaders may not be registered in the graph yet; in that case
+    /// this returns `fallback_if_no_shader_yet` so the caller can allocate until peers appear.
+    fn texture_output_buffer_owner(
+        &self,
+        handle: TextureHandle,
+        fallback_if_no_shader_yet: NodeHandle,
+    ) -> NodeHandle;
+}
 
 /// Context for rendering
 pub trait RenderContext {
     /// Get texture (triggers lazy rendering if needed)
-    fn get_texture(&mut self, handle: TextureHandle) -> Result<&Texture, Error>;
+    fn get_texture(
+        &mut self,
+        handle: TextureHandle,
+    ) -> Result<&dyn lps_shared::TextureBuffer, Error>;
 
-    /// Get mutable texture (triggers lazy rendering if needed)
-    fn get_texture_mut(&mut self, handle: TextureHandle) -> Result<&mut Texture, Error>;
+    /// Mutable access to the shared output buffer for this texture (same allocation as
+    /// [`RenderContext::get_texture`]). Used by shader `render()` so all shaders targeting a
+    /// texture write the same pixels.
+    fn get_target_texture_pixels_mut(
+        &mut self,
+        handle: TextureHandle,
+    ) -> Result<&mut lp_shader::LpsTextureBuf, Error>;
 
     /// Get current frame time in seconds
     fn get_time(&self) -> f32;

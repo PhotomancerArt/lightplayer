@@ -483,9 +483,13 @@ non-trivial, separable effort.
 end-to-end tests inside `lp-shader`. The host consumers can migrate
 once their shader pipeline targets the new contract.
 
-**Answer:** Already covered by **M4 — Consumer Migration**
-(`docs/roadmaps/2026-04-16-lp-shader-textures/m4-consumer-migration.md`).
-M4's scope: lpfx-cpu, both lp-engine paths (`gfx/cranelift.rs`,
+**Answer:** Already covered by **M4 — Consumer Migration** (now split
+into M4a/b/c):
+- `docs/roadmaps/2026-04-16-lp-shader-textures/m4a-pixel-loop-migration.md`
+- `docs/roadmaps/2026-04-16-lp-shader-textures/m4b-host-backend-swap.md`
+- `docs/roadmaps/2026-04-16-lp-shader-textures/m4c-lpfx-cpu-migration.md`
+
+Combined scope: lpfx-cpu, both lp-engine paths (`gfx/cranelift.rs`,
 `gfx/native_jit.rs`), texture-type consolidation, `noise.fx` update.
 
 The "Migrate consumers" bullet that previously lived in

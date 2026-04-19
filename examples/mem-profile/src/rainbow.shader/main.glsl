@@ -74,7 +74,10 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
     return vec2(t, v);
 }
 
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+
+vec4 render(vec2 pos) {
     // Palette cycle: 5s per palette, 1s smooth transition to next
     float cyclePhase = mod(time, 5.0);
     float palette = floor(mod(time * 0.2, 5.0));
@@ -88,7 +91,7 @@ vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
 
     vec2 center = outputSize * 0.5;
-    vec2 dir = fragCoord - center;
+    vec2 dir = pos - center;
     vec2 scaledCoord = center + dir * scale;
 
     vec2 tv = prsd_demo(scaledCoord, time);

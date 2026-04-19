@@ -64,7 +64,8 @@ impl<M: LpvmModule + 'static> PxShaderBackend for BackendAdapter<M> {
 ///
 /// The instance lives in a [`RefCell`] so [`Self::render_frame`] can
 /// take `&self`; mutation goes through runtime borrow checks (panic
-/// if re-entrant). This type is `!Sync` as a result.
+/// if re-entrant). [`Send`]/[`Sync`] are implemented only for embedding in
+/// the single-threaded engine graph; do not call `render_frame` concurrently.
 pub struct LpsPxShader {
     inner: RefCell<Box<dyn PxShaderBackend>>,
     output_format: TextureStorageFormat,
@@ -214,3 +215,7 @@ impl LpsPxShader {
         Ok(())
     }
 }
+
+// SAFETY: Engine invokes `render_frame` from a single thread during rendering.
+unsafe impl Send for LpsPxShader {}
+unsafe impl Sync for LpsPxShader {}

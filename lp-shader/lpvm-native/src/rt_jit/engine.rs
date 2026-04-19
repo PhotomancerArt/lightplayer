@@ -47,8 +47,7 @@ impl LpvmEngine for NativeJitEngine {
             ir,
             meta,
             &self.builtin_table,
-            self.options.float_mode,
-            self.options.alloc_trace,
+            &self.options,
             IsaTarget::Rv32imac,
         )?;
         Ok(NativeJitModule {
@@ -58,6 +57,28 @@ impl LpvmEngine for NativeJitEngine {
                 buffer,
                 entry_offsets,
                 options: self.options.clone(),
+                isa: IsaTarget::Rv32imac,
+            }),
+        })
+    }
+
+    fn compile_with_config(
+        &self,
+        ir: &LpirModule,
+        meta: &LpsModuleSig,
+        config: &lpir::CompilerConfig,
+    ) -> Result<Self::Module, Self::Error> {
+        let mut opts = self.options.clone();
+        opts.config = config.clone();
+        let (buffer, entry_offsets, _debug_info) =
+            compile_module_jit(ir, meta, &self.builtin_table, &opts, IsaTarget::Rv32imac)?;
+        Ok(NativeJitModule {
+            inner: Arc::new(NativeJitModuleInner {
+                ir: ir.clone(),
+                meta: meta.clone(),
+                buffer,
+                entry_offsets,
+                options: opts,
                 isa: IsaTarget::Rv32imac,
             }),
         })

@@ -27,8 +27,7 @@ use super::builtins::BuiltinTable;
 /// * `ir` - LPIR module to compile
 /// * `sig` - Module signatures
 /// * `builtin_table` - Table of builtin function addresses
-/// * `float_mode` - Floating point mode
-/// * `alloc_trace` - Enable allocation tracing (TODO)
+/// * `options` - Native compile options (float mode, LPIR [`lpir::CompilerConfig`], etc.)
 ///
 /// # Returns
 /// (JitBuffer with executable code, entry offset map, debug info)
@@ -36,24 +35,17 @@ pub fn compile_module_jit(
     ir: &LpirModule,
     sig: &LpsModuleSig,
     builtin_table: &BuiltinTable,
-    float_mode: lpir::FloatMode,
-    _alloc_trace: bool,
+    options: &NativeCompileOptions,
     isa: IsaTarget,
 ) -> Result<(JitBuffer, BTreeMap<String, usize>, ModuleDebugInfo), NativeError> {
-    let options = NativeCompileOptions {
-        float_mode,
-        debug_info: false,
-        emu_trace_instructions: false,
-        alloc_trace: false,
-        ..Default::default()
-    };
+    let float_mode = options.float_mode;
 
     // 1. Compile module
     log::debug!(
         "[native-fa] compile_module_jit: starting compile_module with {} functions",
         ir.functions.len()
     );
-    let compiled = compile_module(ir, sig, float_mode, options, isa)?;
+    let compiled = compile_module(ir, sig, float_mode, options.clone(), isa)?;
     log::debug!(
         "[native-fa] compile_module_jit: compile_module complete, {} functions compiled",
         compiled.functions.len()

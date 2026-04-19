@@ -1,5 +1,6 @@
 //! `LpvmEngine` trait — compilation and shared memory.
 
+use lpir::CompilerConfig;
 use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 
@@ -26,6 +27,20 @@ pub trait LpvmEngine {
 
     /// Compile an LPIR module into a runnable module.
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error>;
+
+    /// Compile with an explicit per-call [`CompilerConfig`] (middle-end passes, Q32 mode, etc.).
+    ///
+    /// Default implementation ignores `config` and delegates to [`Self::compile`]. Backends that
+    /// honor per-call settings (e.g. Cranelift JIT, native RV32 JIT) must override; others may keep
+    /// the default until they gain config threading.
+    fn compile_with_config(
+        &self,
+        ir: &LpirModule,
+        meta: &LpsModuleSig,
+        _config: &CompilerConfig,
+    ) -> Result<Self::Module, Self::Error> {
+        self.compile(ir, meta)
+    }
 
     /// Shared memory allocator for this engine (textures, cross-shader data).
     fn memory(&self) -> &dyn LpvmMemory;

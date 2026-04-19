@@ -4,6 +4,11 @@ use crate::error::TextureError;
 use crate::util::formats::TextureFormat;
 
 /// Texture structure for managing pixel buffers
+#[deprecated(
+    since = "0.x.0",
+    note = "use lps_shared::TextureBuffer / LpsTextureBuf via lp-shader; \
+            will be removed once all texture sources migrate"
+)]
 #[derive(Debug, Clone)]
 pub struct Texture {
     width: u32,
@@ -12,6 +17,10 @@ pub struct Texture {
     data: alloc::vec::Vec<u8>,
 }
 
+#[allow(
+    deprecated,
+    reason = "deprecated Texture retained until callers migrate to LpsTextureBuf"
+)]
 impl Texture {
     /// Create a new texture with the given dimensions and format
     ///
@@ -268,7 +277,40 @@ impl Texture {
     }
 }
 
+#[allow(
+    deprecated,
+    reason = "deprecated Texture retained until callers migrate to LpsTextureBuf"
+)]
+impl lps_shared::TextureBuffer for Texture {
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn format(&self) -> lps_shared::TextureStorageFormat {
+        match self.format {
+            TextureFormat::Rgba16 => lps_shared::TextureStorageFormat::Rgba16Unorm,
+            other => unimplemented!(
+                "TextureFormat {:?} has no TextureStorageFormat mapping yet (only Rgba16 → Rgba16Unorm is wired during M4a)",
+                other,
+            ),
+        }
+    }
+
+    fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+}
+
 #[cfg(test)]
+#[allow(deprecated, reason = "tests cover deprecated Texture until removal")]
 mod tests {
     use super::*;
     use crate::util::formats::TextureFormat;

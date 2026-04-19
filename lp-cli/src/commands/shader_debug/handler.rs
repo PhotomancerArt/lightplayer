@@ -21,11 +21,21 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
         eprintln!("  inline.mode                          auto | always | never  (default auto)");
         eprintln!("  inline.always_inline_single_site     true | false           (default true)");
         eprintln!("  inline.small_func_threshold          <usize>                (default 20)");
-        eprintln!("  inline.max_growth_budget             <usize>                (default unlimited)");
-        eprintln!("  inline.module_op_budget              <usize>                (default unlimited)");
-        eprintln!("  q32.add_sub                          saturating | wrapping  (default saturating)");
-        eprintln!("  q32.mul                              saturating | wrapping  (default saturating)");
-        eprintln!("  q32.div                              saturating | reciprocal (default saturating)");
+        eprintln!(
+            "  inline.max_growth_budget             <usize>                (default unlimited)"
+        );
+        eprintln!(
+            "  inline.module_op_budget              <usize>                (default unlimited)"
+        );
+        eprintln!(
+            "  q32.add_sub                          saturating | wrapping  (default saturating)"
+        );
+        eprintln!(
+            "  q32.mul                              saturating | wrapping  (default saturating)"
+        );
+        eprintln!(
+            "  q32.div                              saturating | reciprocal (default saturating)"
+        );
         return Ok(());
     }
 
@@ -82,22 +92,12 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
             BackendTarget::Rv32fa => {
                 collect_fa_data(&ir, &sig, float_mode, func_filter, &compiler_config)?
             }
-            BackendTarget::Rv32 => collect_cranelift_data(
-                &ir,
-                &sig,
-                float_mode,
-                func_filter,
-                false,
-                &compiler_config,
-            )?,
-            BackendTarget::Emu => collect_cranelift_data(
-                &ir,
-                &sig,
-                float_mode,
-                func_filter,
-                true,
-                &compiler_config,
-            )?,
+            BackendTarget::Rv32 => {
+                collect_cranelift_data(&ir, &sig, float_mode, func_filter, false, &compiler_config)?
+            }
+            BackendTarget::Emu => {
+                collect_cranelift_data(&ir, &sig, float_mode, func_filter, true, &compiler_config)?
+            }
         };
         report.backends.push(backend_data);
     }

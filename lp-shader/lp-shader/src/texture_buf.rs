@@ -73,3 +73,8 @@ impl TextureBuffer for LpsTextureBuf {
         unsafe { core::slice::from_raw_parts_mut(self.buffer.native_ptr(), len) }
     }
 }
+
+// SAFETY: LPVM buffers are owned by the embedding engine's memory pool; LightPlayer
+// renders the node graph on one thread per runtime, so no concurrent access.
+unsafe impl Send for LpsTextureBuf {}
+unsafe impl Sync for LpsTextureBuf {}

@@ -181,6 +181,22 @@ effects, data textures.
 
 - **M2.0 — `render_frame` via synthetic `__render_texture`** — ✅ complete.
   Implementation plan: [`docs/plans/2026-04-17-lp-shader-textures-stage-v/`](../../plans/2026-04-17-lp-shader-textures-stage-v/).
+- **M4a — Pixel-loop migration** ([`m4a-pixel-loop-migration.md`](./m4a-pixel-loop-migration.md)) — ✅ complete.
+  Implementation plan: [`docs/plans-old/2026-04-19-m4a-pixel-loop-migration.md`](../../plans-old/2026-04-19-m4a-pixel-loop-migration.md).
+  Moved `lp-engine`'s hand-rolled per-pixel loops into `LpsPxShader::render_frame`.
+  Phase 4 (`gfx/native_jit.rs`) was rolled into Phase 3 in implementation;
+  both gfx wrappers now hold an `LpsEngine<…>` and delegate `render_frame`.
+- **M4b — Host backend swap** ([`m4b-host-backend-swap.md`](./m4b-host-backend-swap.md)).
+  Swap `lp-engine`'s host backend from `lpvm-cranelift` to Wasmtime via `lpvm-wasm`.
+  Mechanical after M4a; firmware (RV32) path unaffected.
+- **M4c — `lpfx-cpu` migration** ([`m4c-lpfx-cpu-migration.md`](./m4c-lpfx-cpu-migration.md)).
+  Same migration for the standalone `lpfx-cpu` consumer; deletes its
+  duplicate compile/render pipeline and consolidates texture types.
+- **M3 — Texture reads** ([`m3-texture-reads.md`](./m3-texture-reads.md)).
+  `texelFetch` builtin and `sampler2D` support. Deferred behind M4a/b/c
+  because there is no current consumer that produces textures another
+  shader could sample; revisit once M4 is done and multi-pass shaders
+  have a real use case.
 
 ## Dependencies
 
