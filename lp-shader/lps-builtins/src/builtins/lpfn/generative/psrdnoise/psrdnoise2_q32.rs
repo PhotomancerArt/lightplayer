@@ -44,16 +44,13 @@
 
 use crate::builtins::glsl::mod_q32::__lps_mod_q32;
 use crate::builtins::glsl::sincos_q32::lps_sincos_q32_pair;
+use crate::builtins::lpfn::generative::psrdnoise::grad_lut_q32::grad_base_cos_sin;
 use lps_q32::q32::Q32;
 use lps_q32::vec2_q32::Vec2Q32;
 
 /// Fixed-point constants
 const HALF: Q32 = Q32(0x00008000); // 0.5 in Q16.16
 const EIGHT: Q32 = Q32(0x00080000); // 8.0 in Q16.16
-
-/// Hash multiplier: 0.07482
-/// In Q16.16: 0.07482 * 65536 ≈ 4904
-const HASH_MULT_0_07482: Q32 = Q32(4904);
 
 /// Radial decay constant: 0.8
 /// In Q16.16: 0.8 * 65536 = 52429
@@ -157,31 +154,26 @@ fn psrdnoise2_tail(
     let hash_y = hash_corner(idx.iu_y, idx.iv_y);
     let hash_z = hash_corner(idx.iu_z, idx.iv_z);
 
-    let psi_x = Q32::from_fixed(
-        hash_x
-            .wrapping_mul(HASH_MULT_0_07482.0)
-            .wrapping_add(alpha.0),
-    );
-    let psi_y = Q32::from_fixed(
-        hash_y
-            .wrapping_mul(HASH_MULT_0_07482.0)
-            .wrapping_add(alpha.0),
-    );
-    let psi_z = Q32::from_fixed(
-        hash_z
-            .wrapping_mul(HASH_MULT_0_07482.0)
-            .wrapping_add(alpha.0),
-    );
+    let (sin_a, cos_a) = lps_sincos_q32_pair(alpha.to_fixed());
 
-    let (sin_x, cos_x) = lps_sincos_q32_pair(psi_x.to_fixed());
-    let (sin_y, cos_y) = lps_sincos_q32_pair(psi_y.to_fixed());
-    let (sin_z, cos_z) = lps_sincos_q32_pair(psi_z.to_fixed());
-    let gx_x = Q32::from_fixed(cos_x);
-    let gx_y = Q32::from_fixed(cos_y);
-    let gx_z = Q32::from_fixed(cos_z);
-    let gy_x = Q32::from_fixed(sin_x);
-    let gy_y = Q32::from_fixed(sin_y);
-    let gy_z = Q32::from_fixed(sin_z);
+    let (c0, s0) = grad_base_cos_sin(hash_x);
+    let gx_x_r = ((c0 as i64 * cos_a as i64 - s0 as i64 * sin_a as i64) >> 16) as i32;
+    let gy_x_r = ((s0 as i64 * cos_a as i64 + c0 as i64 * sin_a as i64) >> 16) as i32;
+
+    let (c1, s1) = grad_base_cos_sin(hash_y);
+    let gx_y_r = ((c1 as i64 * cos_a as i64 - s1 as i64 * sin_a as i64) >> 16) as i32;
+    let gy_y_r = ((s1 as i64 * cos_a as i64 + c1 as i64 * sin_a as i64) >> 16) as i32;
+
+    let (c2, s2) = grad_base_cos_sin(hash_z);
+    let gx_z_r = ((c2 as i64 * cos_a as i64 - s2 as i64 * sin_a as i64) >> 16) as i32;
+    let gy_z_r = ((s2 as i64 * cos_a as i64 + c2 as i64 * sin_a as i64) >> 16) as i32;
+
+    let gx_x = Q32::from_fixed(gx_x_r);
+    let gx_y = Q32::from_fixed(gx_y_r);
+    let gx_z = Q32::from_fixed(gx_z_r);
+    let gy_x = Q32::from_fixed(gy_x_r);
+    let gy_y = Q32::from_fixed(gy_y_r);
+    let gy_z = Q32::from_fixed(gy_z_r);
 
     let g0_x = gx_x;
     let g0_y = gy_x;
