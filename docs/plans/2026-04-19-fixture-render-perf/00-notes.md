@@ -179,9 +179,9 @@ Sibling files in this directory (`gamma.rs`, `entry.rs`, `accumulation.rs`,
 | 00 | Configure fastmath example + capture baseline profile | main | yes (`p0-baseline`) | done (`512455f6`) |
 | 01 | Accumulation: u32 multiply | yes | yes (`p1-u32mul`) | done (`3c6bc02c`) — saved 43k cycles |
 | 02 | Accumulation: u8→Q32 LUT | yes | yes (`p2-u8lut`) | **reverted** — see "Phase 02 retrospective" below |
-| 03 | ChannelLut module (new file, no integration) | yes | no (no behaviour change) | pending |
-| 04 | Wire ChannelLut into FixtureRuntime | yes | yes (`p4-channel-lut`) | pending |
-| 05 | Cleanup, validation, summary profile | supervised | yes (`p5-final`) | pending |
+| 03 | ChannelLut module (new file, no integration) | yes | no (no behaviour change) | **reverted** — see "Phase 04 retrospective" below |
+| 04 | Wire ChannelLut into FixtureRuntime | yes | yes (`p4-channel-lut`) | **reverted** — see "Phase 04 retrospective" below |
+| 05 | Cleanup, validation, summary profile | supervised | yes (`p5-final`) | skipped — plan closed early after phase 04 regression |
 
 All phases run sequentially. No parallel groups (each phase depends on
 the previous one being merged for accurate per-phase profile attribution).
@@ -229,6 +229,57 @@ bounds check, which costs more on RV32 than the magic multiply.
    point of the commit-per-phase strategy.
 
 Phase 03 and Phase 04 are independent of Phase 02 and proceed unchanged.
+
+## Phase 04 retrospective
+
+**Commits:** `5908e7bd` (phase 03 — ChannelLut module) + `d46da41e`
+(phase 04 — wire into `FixtureRuntime::render`). Reverted by `2fcf7aae`
++ `d4f16360`. In-source warning added at the per-channel loop in
+`lp-core/lp-engine/src/nodes/fixture/runtime.rs` so future readers don't
+relitigate this.
+
+**What we predicted:** the per-channel post-loop ran a Q32 multiply
+(brightness), a saturating cast, and a conditional gamma byte-LUT lookup
+per RGB channel. Collapsing that chain into a single
+`(brightness, gamma) → u16` lookup keyed on a 12-bit input bin (4096 ×
+u16 = 8 KB) should be a clean win — replace ~5 ops + 1 small load with
+1 larger load.
+
+**What actually happened:** post-LUT profile (`p4-channel-lut`)
+regressed `FixtureRuntime::render` self-cycles by **+55,244 (+0.6pp)**
+vs the `p0-baseline` measured at the start of the plan. Total
+attributed cycles also rose by ~54k. Every other top-20 entry was
+bit-identical; the delta is entirely in the per-channel post-loop.
+
+| metric | p0-baseline | p4-channel-lut | delta |
+| --- | --- | --- | --- |
+| `FixtureRuntime::render` self | 1,176,148 (14.8%) | 1,231,392 (15.4%) | **+55,244 (+0.6pp)** |
+| total attributed cycles | 7,948,854 | 8,002,411 | +53,557 |
+
+**Root cause (best read):** the pre-phase-04 chain was already cheap on
+RV32 — a Q32 multiply (`mulhu` + `mul`), a saturating cast (compare +
+shift), and a conditional 256-byte gamma LUT load that stays hot. The
+8 KB replacement table spans ~256 cache lines on the esp32c6 cycle
+model. Each channel stride touches a fresh line, and the load is not
+cheaper than the ops it replaces. The 256-byte gamma LUT wins precisely
+because it's small enough to stay resident.
+
+**Lessons (extending phase 02's):**
+
+1. **"LUT > arithmetic" is not free on this CPU model.** Two phases in
+   a row, the same intuition lost: replacing already-cheap inline
+   arithmetic with a memory load regressed. The gamma LUT works because
+   it's 256 bytes; a 8 KB LUT spans too many lines to amortize.
+2. **Smaller LUTs alias output.** An 8-bit (256-entry) input LUT was
+   the next-smaller option but would alias multiple Q32 accumulator
+   values to the same byte and regress visible output. There's no
+   middle ground here that's both correct and cache-friendly.
+3. **The pre-existing path was already well-tuned.** `apply_gamma` over
+   a 256-byte LUT + Q32 multiply is genuinely the right shape on RV32.
+   Don't fight it.
+4. **Phase 01 (u32 multiply, `3c6bc02c`) is the only real win** from
+   this plan — saved ~43k cycles in `FixtureRuntime::render` and is
+   landed. Plan closed early.
 
 ## Per-phase commit/profile flow
 

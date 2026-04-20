@@ -304,6 +304,27 @@ impl NodeRuntime for FixtureRuntime {
         // Write sampled values to output buffer (16-bit)
         let universe = 0u32;
         let channel_offset = 0u32;
+        // CAREFUL — do not "optimize" the per-channel transform below with a
+        // per-fixture LUT keyed on (brightness, gamma_correction).
+        //
+        // It looks attractive: collapse `ch * brightness → to_u16_saturating
+        // → optional apply_gamma` into a single load. We tried it
+        // (commits 5908e7bd + d46da41e, reverted in 2fcf7aae + d4f16360):
+        // a 12-bit (8 KB) input LUT regressed FixtureRuntime::render by
+        // ~+55k cycles (+0.6pp) on the esp32c6 cycle model.
+        //
+        // Why it lost:
+        //   - The arithmetic chain is already cheap on RV32: one Q32 multiply
+        //     (mulhu+mul), a saturating cast (cmp+shift), and a 256-byte
+        //     gamma byte-LUT load that stays hot.
+        //   - The 8 KB replacement table spans ~256 cache lines. Each channel
+        //     stride touches a fresh line, and the load is not cheaper than
+        //     the ops it replaces.
+        //   - Smaller (8-bit / 256-entry) inputs would alias multiple
+        //     accumulator values to the same byte and regress visible output.
+        //
+        // See docs/plans-old/2026-04-19-fixture-render-perf/00-notes.md
+        // "Phase 04 retrospective" for the full investigation.
         for channel in 0..=max_channel as usize {
             let r_q = ch_values_r[channel] * brightness;
             let g_q = ch_values_g[channel] * brightness;
