@@ -52,10 +52,6 @@ use lps_q32::vec2_q32::Vec2Q32;
 const HALF: Q32 = Q32(0x00008000); // 0.5 in Q16.16
 const EIGHT: Q32 = Q32(0x00080000); // 8.0 in Q16.16
 
-/// Period constant for hash: 289.0
-/// In Q16.16: 289.0 * 65536 = 18939904
-const PERIOD_289: Q32 = Q32(18939904);
-
 /// Hash multiplier: 0.07482
 /// In Q16.16: 0.07482 * 65536 ≈ 4904
 const HASH_MULT_0_07482: Q32 = Q32(4904);
@@ -68,11 +64,13 @@ const RADIAL_DECAY_0_8: Q32 = Q32(52429);
 /// In Q16.16: 10.9 * 65536 ≈ 714342
 const SCALE_10_9: Q32 = Q32(714342);
 
-/// Hash computation constants
-const HASH_CONST_51: Q32 = Q32(51 << 16); // 51.0
-const HASH_CONST_2: Q32 = Q32(2 << 16); // 2.0
-const HASH_CONST_34: Q32 = Q32(34 << 16); // 34.0
-const HASH_CONST_10: Q32 = Q32(10 << 16); // 10.0
+/// Integer hash for one simplex corner; values stay in `[0, 288]` (see GLSL reference path).
+#[inline(always)]
+fn hash_corner(iu: i32, iv: i32) -> i32 {
+    let h = iu.rem_euclid(289);
+    let h = ((h * 51 + 2) * h + iv).rem_euclid(289);
+    ((h * 34 + 10) * h).rem_euclid(289)
+}
 
 /// 2D Periodic Simplex Rotational Domain noise function.
 ///
@@ -163,57 +161,28 @@ pub fn lpfn_psrdnoise2(x: Vec2Q32, period: Vec2Q32, alpha: Q32, _seed: u32) -> (
         (i0_x_int, i1_x_int, i2_x_int, i0_y_int, i1_y_int, i2_y_int)
     };
 
-    // Compute one pseudo-random hash value for each corner
-    // hash = mod(iu, 289.0)
-    let hash_x = __lps_mod_q32(iu_x << 16, PERIOD_289.to_fixed());
-    let hash_y = __lps_mod_q32(iu_y << 16, PERIOD_289.to_fixed());
-    let hash_z = __lps_mod_q32(iu_z << 16, PERIOD_289.to_fixed());
-
-    // hash = mod((hash*51.0 + 2.0)*hash + iv, 289.0)
-    let hash_x = {
-        let temp = Q32::from_fixed(hash_x) * HASH_CONST_51 + HASH_CONST_2;
-        let temp = temp * Q32::from_fixed(hash_x) + Q32::from_i32(iv_x);
-        __lps_mod_q32(temp.to_fixed(), PERIOD_289.to_fixed())
-    };
-    let hash_y = {
-        let temp = Q32::from_fixed(hash_y) * HASH_CONST_51 + HASH_CONST_2;
-        let temp = temp * Q32::from_fixed(hash_y) + Q32::from_i32(iv_y);
-        __lps_mod_q32(temp.to_fixed(), PERIOD_289.to_fixed())
-    };
-    let hash_z = {
-        let temp = Q32::from_fixed(hash_z) * HASH_CONST_51 + HASH_CONST_2;
-        let temp = temp * Q32::from_fixed(hash_z) + Q32::from_i32(iv_z);
-        __lps_mod_q32(temp.to_fixed(), PERIOD_289.to_fixed())
-    };
-
-    // hash = mod((hash*34.0 + 10.0)*hash, 289.0)
-    let hash_x = {
-        let temp = Q32::from_fixed(hash_x) * HASH_CONST_34 + HASH_CONST_10;
-        __lps_mod_q32(
-            (temp * Q32::from_fixed(hash_x)).to_fixed(),
-            PERIOD_289.to_fixed(),
-        )
-    };
-    let hash_y = {
-        let temp = Q32::from_fixed(hash_y) * HASH_CONST_34 + HASH_CONST_10;
-        __lps_mod_q32(
-            (temp * Q32::from_fixed(hash_y)).to_fixed(),
-            PERIOD_289.to_fixed(),
-        )
-    };
-    let hash_z = {
-        let temp = Q32::from_fixed(hash_z) * HASH_CONST_34 + HASH_CONST_10;
-        __lps_mod_q32(
-            (temp * Q32::from_fixed(hash_z)).to_fixed(),
-            PERIOD_289.to_fixed(),
-        )
-    };
+    // Compute one pseudo-random hash value for each corner (integer path; avoids Q32 saturation).
+    let hash_x = hash_corner(iu_x, iv_x);
+    let hash_y = hash_corner(iu_y, iv_y);
+    let hash_z = hash_corner(iu_z, iv_z);
 
     // Pick a pseudo-random angle and add the desired rotation
-    // psi = hash * 0.07482 + alpha
-    let psi_x = Q32::from_fixed(hash_x) * HASH_MULT_0_07482 + alpha;
-    let psi_y = Q32::from_fixed(hash_y) * HASH_MULT_0_07482 + alpha;
-    let psi_z = Q32::from_fixed(hash_z) * HASH_MULT_0_07482 + alpha;
+    // psi = hash * 0.07482 + alpha  (hash integer in [0, 288], `4904` is Q16.16 for 0.07482)
+    let psi_x = Q32::from_fixed(
+        hash_x
+            .wrapping_mul(HASH_MULT_0_07482.0)
+            .wrapping_add(alpha.0),
+    );
+    let psi_y = Q32::from_fixed(
+        hash_y
+            .wrapping_mul(HASH_MULT_0_07482.0)
+            .wrapping_add(alpha.0),
+    );
+    let psi_z = Q32::from_fixed(
+        hash_z
+            .wrapping_mul(HASH_MULT_0_07482.0)
+            .wrapping_add(alpha.0),
+    );
 
     // gx = cos(psi), gy = sin(psi)
     let gx_x = Q32::from_fixed(__lps_cos_q32(psi_x.to_fixed()));
