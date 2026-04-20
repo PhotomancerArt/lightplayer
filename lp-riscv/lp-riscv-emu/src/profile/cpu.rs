@@ -224,6 +224,24 @@ fn format_pc_for_report(pc: u32, sym: Option<&dyn PcSymbolizer>) -> String {
     }
 }
 
+/// Sum per-PC stats into buckets keyed by containing symbol start (`entry_lo_for_pc`).
+///
+/// Summed `inclusive_cycles` can over-count real functions that were split into multiple
+/// shadow-stack "entries" inside one symbol: each fragment carried a full inclusive slice.
+fn collapse_func_stats_by_symbol(
+    func_stats: &HashMap<u32, FuncStats>,
+    sym: &dyn PcSymbolizer,
+) -> HashMap<u32, (u64, u64)> {
+    let mut out: HashMap<u32, (u64, u64)> = HashMap::new();
+    for (&pc, stats) in func_stats {
+        let canon = sym.entry_lo_for_pc(pc);
+        let e = out.entry(canon).or_insert((0, 0));
+        e.0 += stats.self_cycles;
+        e.1 += stats.inclusive_cycles;
+    }
+    out
+}
+
 impl CpuCollector {
     fn write_cpu_summary_text(
         &self,
@@ -239,31 +257,68 @@ impl CpuCollector {
         writeln!(w, "profiled_instructions={}", self.profiled_instructions)?;
         writeln!(w)?;
 
+        let aggregated: Option<HashMap<u32, (u64, u64)>> =
+            sym.map(|s| collapse_func_stats_by_symbol(&self.func_stats, s));
+
         writeln!(w, "Top 20 by self cycles:")?;
-        let mut by_self: Vec<_> = self.func_stats.iter().collect();
-        by_self.sort_by_key(|(_, s)| std::cmp::Reverse(s.self_cycles));
-        for (pc, stats) in by_self.iter().take(20) {
-            writeln!(
-                w,
-                "  {:>12}  {:>5.1}%  {}",
-                stats.self_cycles,
-                percent_of_total(stats.self_cycles, self.total_cycles_attributed),
-                format_pc_for_report(**pc, sym),
-            )?;
+        if let Some(agg) = &aggregated {
+            let mut rows: Vec<(u32, u64, u64)> = agg
+                .iter()
+                .map(|(&canon, &(self_c, incl_c))| (canon, self_c, incl_c))
+                .collect();
+            rows.sort_by_key(|(_, self_c, _)| std::cmp::Reverse(*self_c));
+            for (canon, self_c, _) in rows.into_iter().take(20) {
+                writeln!(
+                    w,
+                    "  {:>12}  {:>5.1}%  {}",
+                    self_c,
+                    percent_of_total(self_c, self.total_cycles_attributed),
+                    format_pc_for_report(canon, sym),
+                )?;
+            }
+        } else {
+            let mut by_self: Vec<_> = self.func_stats.iter().collect();
+            by_self.sort_by_key(|(_, s)| std::cmp::Reverse(s.self_cycles));
+            for (pc, stats) in by_self.iter().take(20) {
+                writeln!(
+                    w,
+                    "  {:>12}  {:>5.1}%  {}",
+                    stats.self_cycles,
+                    percent_of_total(stats.self_cycles, self.total_cycles_attributed),
+                    format_pc_for_report(**pc, sym),
+                )?;
+            }
         }
         writeln!(w)?;
 
         writeln!(w, "Top 20 by inclusive cycles:")?;
-        let mut by_incl: Vec<_> = self.func_stats.iter().collect();
-        by_incl.sort_by_key(|(_, s)| std::cmp::Reverse(s.inclusive_cycles));
-        for (pc, stats) in by_incl.iter().take(20) {
-            writeln!(
-                w,
-                "  {:>12}  {:>5.1}%  {}",
-                stats.inclusive_cycles,
-                percent_of_total(stats.inclusive_cycles, self.total_cycles_attributed),
-                format_pc_for_report(**pc, sym),
-            )?;
+        if let Some(agg) = &aggregated {
+            let mut rows: Vec<(u32, u64, u64)> = agg
+                .iter()
+                .map(|(&canon, &(self_c, incl_c))| (canon, self_c, incl_c))
+                .collect();
+            rows.sort_by_key(|(_, _, incl_c)| std::cmp::Reverse(*incl_c));
+            for (canon, _, incl_c) in rows.into_iter().take(20) {
+                writeln!(
+                    w,
+                    "  {:>12}  {:>5.1}%  {}",
+                    incl_c,
+                    percent_of_total(incl_c, self.total_cycles_attributed),
+                    format_pc_for_report(canon, sym),
+                )?;
+            }
+        } else {
+            let mut by_incl: Vec<_> = self.func_stats.iter().collect();
+            by_incl.sort_by_key(|(_, s)| std::cmp::Reverse(s.inclusive_cycles));
+            for (pc, stats) in by_incl.iter().take(20) {
+                writeln!(
+                    w,
+                    "  {:>12}  {:>5.1}%  {}",
+                    stats.inclusive_cycles,
+                    percent_of_total(stats.inclusive_cycles, self.total_cycles_attributed),
+                    format_pc_for_report(**pc, sym),
+                )?;
+            }
         }
         Ok(())
     }
@@ -272,7 +327,43 @@ impl CpuCollector {
 #[cfg(test)]
 mod tests {
     use super::super::GateAction;
+    use super::super::PcSymbolizer;
     use super::*;
+    use std::borrow::Cow;
+
+    fn extract_top_self_block(report: &str) -> &str {
+        let start = report.find("Top 20 by self cycles:").expect("self header")
+            + "Top 20 by self cycles:".len();
+        let rest = &report[start..];
+        let end = rest
+            .find("Top 20 by inclusive cycles:")
+            .expect("inclusive header");
+        &rest[..end]
+    }
+
+    struct IntervalSym {
+        lo: u32,
+        hi: u32,
+        name: &'static str,
+    }
+
+    impl PcSymbolizer for IntervalSym {
+        fn symbolize(&self, pc: u32) -> Cow<'_, str> {
+            if (self.lo..self.hi).contains(&pc) {
+                Cow::Borrowed(self.name)
+            } else {
+                Cow::Owned(format!("0x{pc:08x}"))
+            }
+        }
+
+        fn entry_lo_for_pc(&self, pc: u32) -> u32 {
+            if (self.lo..self.hi).contains(&pc) {
+                self.lo
+            } else {
+                pc
+            }
+        }
+    }
 
     #[test]
     fn gate_disabled_no_attribution() {
@@ -420,5 +511,80 @@ mod tests {
 
         assert_eq!(cpu.call_edges[&(0x1000, 0x2000)].count, 3);
         assert_eq!(cpu.func_stats[&0x2000].calls_in, 3);
+    }
+
+    #[test]
+    fn top_self_collapses_intra_function_pcs() {
+        const SYM: &str = "ZZZ_report_sym_collapsed";
+        let sym = IntervalSym {
+            lo: 0x5000,
+            hi: 0x6000,
+            name: SYM,
+        };
+
+        let mut cpu = CpuCollector::new("esp32c6");
+        cpu.func_stats.insert(
+            0x5004,
+            FuncStats {
+                self_cycles: 10,
+                inclusive_cycles: 0,
+                ..Default::default()
+            },
+        );
+        cpu.func_stats.insert(
+            0x5100,
+            FuncStats {
+                self_cycles: 20,
+                inclusive_cycles: 0,
+                ..Default::default()
+            },
+        );
+        cpu.total_cycles_attributed = 30;
+
+        let mut out = String::new();
+        cpu.write_cpu_summary_text(&mut out, Some(&sym as &dyn PcSymbolizer))
+            .unwrap();
+
+        let self_block = extract_top_self_block(&out);
+        assert_eq!(
+            self_block.matches(SYM).count(),
+            1,
+            "expected a single collapsed row: {self_block}"
+        );
+        let line = self_block
+            .lines()
+            .find(|l| l.contains(SYM))
+            .expect("row with symbol name");
+        let cycles = line.split_whitespace().next().expect("self cycles column");
+        assert_eq!(cycles, "30");
+    }
+
+    #[test]
+    fn top_self_keeps_pcs_distinct_when_no_symbolizer() {
+        let mut cpu = CpuCollector::new("esp32c6");
+        cpu.func_stats.insert(
+            0x5004,
+            FuncStats {
+                self_cycles: 10,
+                inclusive_cycles: 0,
+                ..Default::default()
+            },
+        );
+        cpu.func_stats.insert(
+            0x5100,
+            FuncStats {
+                self_cycles: 20,
+                inclusive_cycles: 0,
+                ..Default::default()
+            },
+        );
+        cpu.total_cycles_attributed = 30;
+
+        let mut out = String::new();
+        cpu.write_cpu_summary_text(&mut out, None).unwrap();
+
+        let self_block = extract_top_self_block(&out);
+        assert!(self_block.contains("0x00005004"));
+        assert!(self_block.contains("0x00005100"));
     }
 }
