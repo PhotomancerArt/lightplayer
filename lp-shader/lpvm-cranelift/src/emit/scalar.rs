@@ -520,6 +520,82 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
+        LpirOp::FtoUnorm16 { dst, src } => {
+            let a = use_v(builder, vars, *src);
+            match ctx.float_mode {
+                FloatMode::Q32 => {
+                    let out = crate::q32_emit::emit_fto_unorm16(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+                FloatMode::F32 => {
+                    let zero = builder.ins().f32const(0.0);
+                    let one = builder.ins().f32const(1.0);
+                    let scale = builder.ins().f32const(65535.0);
+                    def_v_expr(builder, vars, *dst, |bd| {
+                        let lo = bd.ins().fmax(a, zero);
+                        let c = bd.ins().fmin(lo, one);
+                        let p = bd.ins().fmul(c, scale);
+                        bd.ins().fcvt_to_uint_sat(types::I32, p)
+                    });
+                }
+            }
+        }
+        LpirOp::FtoUnorm8 { dst, src } => {
+            let a = use_v(builder, vars, *src);
+            match ctx.float_mode {
+                FloatMode::Q32 => {
+                    let out = crate::q32_emit::emit_fto_unorm8(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+                FloatMode::F32 => {
+                    let zero = builder.ins().f32const(0.0);
+                    let one = builder.ins().f32const(1.0);
+                    let scale = builder.ins().f32const(255.0);
+                    def_v_expr(builder, vars, *dst, |bd| {
+                        let lo = bd.ins().fmax(a, zero);
+                        let c = bd.ins().fmin(lo, one);
+                        let p = bd.ins().fmul(c, scale);
+                        bd.ins().fcvt_to_uint_sat(types::I32, p)
+                    });
+                }
+            }
+        }
+        LpirOp::Unorm16toF { dst, src } => {
+            let i = use_v(builder, vars, *src);
+            match ctx.float_mode {
+                FloatMode::Q32 => {
+                    let out = crate::q32_emit::emit_unorm16_to_f(builder, i);
+                    def_v(builder, vars, *dst, out);
+                }
+                FloatMode::F32 => {
+                    let mask = builder.ins().iconst(types::I32, 0xFFFF);
+                    def_v_expr(builder, vars, *dst, |bd| {
+                        let low = bd.ins().band(i, mask);
+                        let f = bd.ins().fcvt_from_uint(types::F32, low);
+                        let div = bd.ins().f32const(65535.0);
+                        bd.ins().fdiv(f, div)
+                    });
+                }
+            }
+        }
+        LpirOp::Unorm8toF { dst, src } => {
+            let i = use_v(builder, vars, *src);
+            match ctx.float_mode {
+                FloatMode::Q32 => {
+                    let out = crate::q32_emit::emit_unorm8_to_f(builder, i);
+                    def_v(builder, vars, *dst, out);
+                }
+                FloatMode::F32 => {
+                    let mask = builder.ins().iconst(types::I32, 0xFF);
+                    def_v_expr(builder, vars, *dst, |bd| {
+                        let low = bd.ins().band(i, mask);
+                        let f = bd.ins().fcvt_from_uint(types::F32, low);
+                        let div = bd.ins().f32const(255.0);
+                        bd.ins().fdiv(f, div)
+                    });
+                }
+            }
+        }
         LpirOp::Select {
             dst,
             cond,

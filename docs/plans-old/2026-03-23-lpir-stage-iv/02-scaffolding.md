@@ -35,7 +35,7 @@ mod lower_ctx;
 mod lower_expr;
 mod lower_stmt;
 mod lower_math;
-mod lower_lpfx;
+mod lower_lpfn;
 pub mod std_math_handler;
 ```
 
@@ -118,7 +118,7 @@ Create empty stub files so the crate compiles:
 - `lower_stmt.rs`:
   `pub(crate) fn lower_block(ctx: &mut LowerCtx, block: &Block) -> Result<(), LowerError> { todo!() }`
 - `lower_math.rs`: empty
-- `lower_lpfx.rs`: empty
+- `lower_lpfn.rs`: empty
 - `std_math_handler.rs`: empty struct implementing `ImportHandler` with `todo!()`
 
 ## Validate

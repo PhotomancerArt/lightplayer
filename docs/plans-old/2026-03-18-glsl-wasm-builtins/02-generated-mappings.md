@@ -6,8 +6,8 @@
   **:
     - `glsl_q32_math_builtin_id(name, ast_arg_count)` — standard math (`sin`, `atan` + 2 args →
       `LpQ32Atan2`, `roundEven`, …).
-    - `glsl_lpfx_q32_builtin_id(name, params: &[GlslParamKind])` — LPFX overloads from the same
-      metadata as `lpfx_fns.rs`.
+    - `glsl_lpfn_q32_builtin_id(name, params: &[GlslParamKind])` — LPFX overloads from the same
+      metadata as `lpfn_fns.rs`.
     - `GlslParamKind` — mirrors GLSL parameter types for LPFX resolution.
 - **`lib.rs`** (generated) adds `mod glsl_builtin_mapping` and re-exports the three items above.
 - Ensure regeneration is wired to **`scripts/build-builtins.sh`** so new builtins/LPFX entries do

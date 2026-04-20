@@ -107,6 +107,53 @@ runtime.
 on-device codegen path and is exercised by **`native-jit`** on `fw-esp32`/`fw-emu`
 and the **`rv32n.q32`** filetest target.
 
+## Building the workspace (cross-target)
+
+This workspace mixes host crates and bare-metal RV32 firmware crates
+(`fw-esp32`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
+The RV32 crates depend on `esp-rom-sys`, `esp-sync`, `esp32c6`, etc., which
+**do not compile for the host target** (they use RISC-V intrinsics, RV32
+interrupt vectors, and section attributes that LLVM rejects on Mach-O /
+ELF host targets).
+
+The `default-members` list in `Cargo.toml` excludes the RV32-only crates
+exactly so plain `cargo build` (no flags) works on host. **Never run
+`cargo build --workspace` or `cargo test --workspace`** — those force
+every member to build for the current target and will fail on the
+RV32-only crates with errors like:
+
+```
+error[E0599]: no method named `to_ascii_lowercase` found for type `i8`
+  --> .../esp-rom-sys-0.1.3/src/lib.rs
+rustc-LLVM ERROR: Global variable '__EXTERNAL_INTERRUPTS' has an invalid
+  section specifier '.rwtext': mach-o section specifier requires ...
+```
+
+Use these instead (all work on macOS):
+
+```bash
+just build-host         # cargo build (default-members, host)
+just build-rv32         # cargo build --target riscv32imac-... -p ...
+just build              # parallel: host + rv32
+```
+
+For targeted host validation of specific crates:
+
+```bash
+cargo build -p <crate>
+cargo test  -p <crate>
+```
+
+For workspace-wide host validation (excluding RV32-only members), use
+the same exclusion list the justfile uses for clippy:
+
+```bash
+cargo build --workspace \
+  --exclude fw-esp32 --exclude fw-emu \
+  --exclude lps-builtins-emu-app \
+  --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
+```
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:
@@ -125,3 +172,39 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 cargo check -p lp-server
 cargo test -p lp-server --no-run
 ```
+
+## CI gate (run this before pushing)
+
+CI on `feature/*` branches runs `just check build-ci test` (see
+`.github/workflows/pre-merge.yml`). To avoid the round-trip of
+"push → wait 3 min → CI fails on lint → fix → repeat", run the same
+locally before every push:
+
+```bash
+rustup update nightly        # CI installs fresh nightly each run; do the same
+just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
+just build-ci                # host + rv32 builtins + emu-guest
+just test                    # cargo test + glsl filetests
+```
+
+Or, in one go: `just ci` (which is the parallel composition above).
+
+### Why nightly matters
+
+The workspace pins `nightly` (latest, via `rust-toolchain.toml`) — *not*
+a specific date. CI runs `rustup install nightly` fresh each run, so it
+sees the freshest lints (e.g. `float_literal_f32_fallback`,
+`question_mark`, `manual_clamp`, `clone_on_copy`,
+`allow_attributes_without_reason`). A stale local nightly will silently
+miss new lints that gate CI. `rustup update nightly` before `just check`
+is cheap and avoids the most common CI surprise.
+
+### Architecture coverage
+
+CI currently runs only the **ARM** validate job
+(`ubuntu-24.04-arm`). The x86_64 job is intentionally disabled in
+`pre-merge.yml`. The production target is RV32 (`lpvm-native`); the
+host-side path now runs through `lpvm-wasm` (wasmtime) per M4b. The
+x86_64 validate job has not yet been re-enabled — that re-enable is
+a separate change so this plan didn't churn the CI matrix at the
+same time as the backend swap.

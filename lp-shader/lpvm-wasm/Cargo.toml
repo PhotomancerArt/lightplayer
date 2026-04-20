@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 lps-builtin-ids = { path = "../lps-builtin-ids" }
 lpir = { path = "../lpir" }
+lps-q32 = { path = "../lps-q32" }
 lps-shared = { path = "../lps-shared" }
 lps-builtins = { path = "../lps-builtins" }
 lpvm = { path = "../lpvm" }

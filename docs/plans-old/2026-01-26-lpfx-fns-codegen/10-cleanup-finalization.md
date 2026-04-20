@@ -2,15 +2,15 @@
 
 ## Description
 
-Final cleanup, verify generated code works, and remove manual `lpfx_fns.rs` maintenance.
+Final cleanup, verify generated code works, and remove manual `lpfn_fns.rs` maintenance.
 
 ## Implementation
 
-1. Run codegen and verify generated `lpfx_fns.rs`:
+1. Run codegen and verify generated `lpfn_fns.rs`:
    - Compare structure with original
    - Verify all functions are present
    - Verify code compiles
-2. Update `lpfx_fns.rs` header comment to indicate it's auto-generated
+2. Update `lpfn_fns.rs` header comment to indicate it's auto-generated
 3. Remove any temporary code or debug prints
 4. Fix all warnings
 5. Ensure all tests pass

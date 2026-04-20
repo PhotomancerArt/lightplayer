@@ -28,9 +28,9 @@ The GLSL source has three variants:
 **Suggested Answer:**
 Implement all three variants:
 
-- `lpfx_fbm(vec2 p, int octaves, uint seed)` - 2D FBM
-- `lpfx_fbm(vec3 p, int octaves, uint seed)` - 3D FBM
-- `lpfx_fbm(vec3 p, float tileLength, int octaves, uint seed)` - 3D tilable FBM
+- `lpfn_fbm(vec2 p, int octaves, uint seed)` - 2D FBM
+- `lpfn_fbm(vec3 p, int octaves, uint seed)` - 3D FBM
+- `lpfn_fbm(vec3 p, float tileLength, int octaves, uint seed)` - 3D tilable FBM
 
 This matches the pattern used by other noise functions (snoise, worley) which have multiple overloads.
 
@@ -141,7 +141,7 @@ This matches the pattern used by other noise functions.
 
 ## Dependencies Available
 
-- ✅ Hash functions: `lpfx_hash`, `lpfx_hash2`, `lpfx_hash3` (but different algorithm than GLSL random)
+- ✅ Hash functions: `lpfn_hash`, `lpfn_hash2`, `lpfn_hash3` (but different algorithm than GLSL random)
 - ✅ Sin functions: `__lp_q32_sin` available
 - ✅ Floor/fract: `Q32::to_i32()` (floor), `Q32::frac()` (fract), `Vec2Q32::floor()`, `Vec2Q32::fract()`, etc.
 - ❌ Mix/lerp: Not available, should be implemented as methods on Q32 and vector types: `mix(a, b, t) = a + t * (b - a)`

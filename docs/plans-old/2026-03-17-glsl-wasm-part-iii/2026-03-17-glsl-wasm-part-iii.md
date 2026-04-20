@@ -60,7 +60,7 @@ Missing (needed for rainbow.shader):
 - **Ternary** (`? :`)
 - **Const variables** (`const bool`)
 - **Builtin function calls** via WASM imports
-- **Out parameters** (for `lpfx_psrdnoise`)
+- **Out parameters** (for `lpfn_psrdnoise`)
 - **Compound assignment** (`+=`, `-=`, `*=`, `/=`)
 
 ## Known bugs to fix
@@ -166,7 +166,7 @@ Out/inout parameters require memory for passing mutable references.
 Allocate a WASM linear memory with a simple bump allocator. Out params
 get a pointer to a memory slot; the caller reads back after the call.
 
-This is only needed for `lpfx_psrdnoise` (which has a `gradient` out
+This is only needed for `lpfn_psrdnoise` (which has a `gradient` out
 parameter) in rainbow.shader. Implement as needed rather than up-front.
 
 ## Phases
@@ -282,8 +282,8 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
 2. Implement out/inout parameters: caller allocates memory slot, passes
    pointer as i32 param. Callee writes via `i32.store`. Caller reads
    back via `i32.load`.
-3. Implement LPFX function calls (`lpfx_worley`, `lpfx_fbm`,
-   `lpfx_psrdnoise`) as WASM imports, same as standard builtins.
+3. Implement LPFX function calls (`lpfn_worley`, `lpfn_fbm`,
+   `lpfn_psrdnoise`) as WASM imports, same as standard builtins.
 4. Handle LPFX vector returns (these return vec2/vec3 — need multi-value
    or memory-based returns from imports).
 5. Validate: LPFX tests passing.
@@ -364,7 +364,7 @@ codegen implementation. Risk areas:
 
 - **Out parameters and linear memory.** Introducing WASM memory adds
   complexity (memory management, load/store patterns). Only needed for
-  `lpfx_psrdnoise`'s gradient out param, so scope is limited.
+  `lpfn_psrdnoise`'s gradient out param, so scope is limited.
 
 - **Short-circuit evaluation.** `&&` and `||` require structured
   control flow (WASM `if`) to avoid evaluating the right operand when

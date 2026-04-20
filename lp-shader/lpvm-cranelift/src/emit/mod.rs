@@ -2,13 +2,16 @@
 
 use alloc::vec::Vec;
 
+use alloc::collections::BTreeMap;
 use cranelift_codegen::ir::{AbiParam, ArgumentPurpose, Signature, types};
 use cranelift_codegen::ir::{Block, FuncRef, InstBuilder, StackSlot, TrapCode, Value};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_frontend::{FunctionBuilder, Variable};
+
 use lpir::FloatMode;
 use lpir::lpir_module::{IrFunction, LpirModule};
 use lpir::lpir_op::LpirOp;
+use lpir::types::FuncId as LpirFuncId;
 use lpir::types::{IrType, VReg};
 
 use crate::error::CompileError;
@@ -34,6 +37,8 @@ pub(crate) struct EmitCtx<'a> {
     pub import_func_refs: &'a [FuncRef],
     pub slots: &'a [StackSlot],
     pub ir: &'a LpirModule,
+    /// Rank `0..functions.len()-1` for each [`LpirFuncId`] (BTreeMap key order).
+    pub func_id_to_ir_rank: &'a BTreeMap<LpirFuncId, usize>,
     pub pointer_type: types::Type,
     /// `SlotAddr` definition and transitive `Iadd` results use native pointer SSA type (see `vreg_wide_addr_chain`).
     pub vreg_wide_addr: Vec<bool>,
@@ -69,6 +74,9 @@ pub(crate) enum CtrlFrame {
         next_case_block: Block,
     },
     Default {
+        merge_block: Block,
+    },
+    Block {
         merge_block: Block,
     },
 }

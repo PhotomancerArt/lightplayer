@@ -92,7 +92,7 @@ during migration (extra compile time, not a correctness issue).
 ### Q4: Builtin strategy with Naga?
 
 **Context**: Naga already knows standard GLSL builtins (sin, cos, etc.) as
-`Expression::Math { fun: MathFunction::Sin, .. }`. Custom `lpfx_*` functions
+`Expression::Math { fun: MathFunction::Sin, .. }`. Custom `lpfn_*` functions
 are unknown to Naga.
 
 **Answer**: Two-part approach:
@@ -100,7 +100,7 @@ are unknown to Naga.
 - **Standard GLSL builtins**: Naga parses these into `MathFunction` variants.
   Backend maps `MathFunction` → inline WASM or `BuiltinId` import.
 - **LPFX builtins**: Prepend forward declarations (prototypes only, no bodies)
-  like `float lpfx_snoise(vec3 p);` before user source. Follow with `#line 1`
+  like `float lpfn_snoise(vec3 p);` before user source. Follow with `#line 1`
   to reset line numbering so user error messages stay correct. Backend
   recognizes calls by name and emits `BuiltinId` imports.
 
@@ -108,5 +108,5 @@ are unknown to Naga.
 
 **Answer**: Target `rainbow.glsl` as definition of done. It exercises scalars,
 vectors (vec2/vec3/vec4), swizzles, standard builtins (smoothstep, mix, sin,
-cos, atan), lpfx calls, and control flow (for loops). Once rainbow.glsl
+cos, atan), lpfn calls, and control flow (for loops). Once rainbow.glsl
 renders correctly in the web demo, Phase II is complete.

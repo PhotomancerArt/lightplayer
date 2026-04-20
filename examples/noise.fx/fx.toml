@@ -1,0 +1,58 @@
+[meta]
+name = "Noise"
+description = "Animated noise patterns with palette cycling"
+author = "lightplayer"
+tags = ["noise", "generative", "palette"]
+
+[resolution]
+width = 512
+height = 512
+
+[input.speed]
+type = "f32"
+label = "Speed"
+default = 1.0
+min = 0.0
+max = 10.0
+
+[input.zoom]
+type = "f32"
+label = "Zoom"
+default = 3.0
+min = 0.1
+max = 20.0
+
+[input.noise_fn]
+type = "i32"
+label = "Noise Function"
+default = 0
+ui = { choices = [
+  { value = 0, label = "PSRDnoise" },
+  { value = 1, label = "Worley" },
+  { value = 2, label = "FBM" },
+] }
+
+[input.palette]
+type = "i32"
+label = "Palette"
+default = 0
+ui = { choices = [
+  { value = 0, label = "Rainbow" },
+  { value = 1, label = "Sunset" },
+  { value = 2, label = "Ocean" },
+  { value = 3, label = "Fire" },
+  { value = 4, label = "Neon" },
+] }
+
+[input.cycle_palettes]
+type = "bool"
+label = "Cycle Palettes"
+default = false
+
+[input.cycle_time_s]
+type = "f32"
+label = "Cycle Time"
+default = 8.0
+min = 1.0
+max = 60.0
+unit = "s"

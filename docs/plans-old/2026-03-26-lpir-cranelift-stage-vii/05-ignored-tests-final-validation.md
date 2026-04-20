@@ -17,14 +17,14 @@ Re-check ignored tests, full validation sweep, grep for leftovers, write
 
 ### 1. Re-check ignored test
 
-In `lp-shader/lps-filetests/tests/lpfx_builtins_memory.rs`:
+In `lp-shader/lps-filetests/tests/lpfn_builtins_memory.rs`:
 
 - Remove `#[ignore = "..."]` from
-  `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it`.
+  `shader_lpfn_saturate_vec3_writes_scratch_then_reads_it`.
 - Run the test:
 
 ```bash
-cargo test -p lps-filetests --test lpfx_builtins_memory
+cargo test -p lps-filetests --test lpfn_builtins_memory
 ```
 
 - If it **passes**: leave it enabled.

@@ -10,6 +10,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
 use lpir::lpir_module::LpirModule;
+use lpir::types::FuncId as LpirFuncId;
 
 use crate::builtins::{self, LpirBuiltinFuncIds};
 use crate::compile_options::{CompileOptions, MemoryStrategy};
@@ -79,21 +80,23 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         None
     };
 
-    let indices: Vec<usize> = match (order, options.memory_strategy) {
+    let func_id_to_ir_rank: BTreeMap<LpirFuncId, usize> = ir
+        .functions
+        .keys()
+        .enumerate()
+        .map(|(i, k)| (*k, i))
+        .collect();
+
+    let indices: Vec<LpirFuncId> = match (order, options.memory_strategy) {
         (_, MemoryStrategy::LowMemory) => {
-            let mut v: Vec<usize> = (0..ir.functions.len()).collect();
-            v.sort_by(|a, b| {
-                ir.functions[*b]
-                    .body
-                    .len()
-                    .cmp(&ir.functions[*a].body.len())
-            });
+            let mut v: Vec<LpirFuncId> = ir.functions.keys().copied().collect();
+            v.sort_by(|a, b| ir.functions[b].body.len().cmp(&ir.functions[a].body.len()));
             v
         }
-        (LpirFuncEmitOrder::Source, _) => (0..ir.functions.len()).collect(),
+        (LpirFuncEmitOrder::Source, _) => ir.functions.keys().copied().collect(),
         (LpirFuncEmitOrder::Name, _) => {
-            let mut v: Vec<usize> = (0..ir.functions.len()).collect();
-            v.sort_by(|a, b| ir.functions[*a].name.cmp(&ir.functions[*b].name));
+            let mut v: Vec<LpirFuncId> = ir.functions.keys().copied().collect();
+            v.sort_by(|a, b| ir.functions[a].name.cmp(&ir.functions[b].name));
             v
         }
     };
@@ -106,12 +109,12 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
 
     let callee_struct_return: alloc::vec::Vec<bool> = ir
         .functions
-        .iter()
+        .values()
         .map(|f| emit::signature_uses_struct_return(module.isa(), f))
         .collect();
 
-    for &i in &indices {
-        let f = &ir.functions[i];
+    for &fid in &indices {
+        let f = &ir.functions[&fid];
         logical_return_words.insert(f.name.clone(), f.return_types.len());
         let sig = emit::signature_for_ir_func(f, call_conv, mode, pointer_type, module.isa());
         let id = module
@@ -133,16 +136,17 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         name_to_index.insert(name.clone(), j);
     }
 
-    // Map original function index -> FuncId for local calls (must match IrModule order).
+    // Map LPIR function rank (BTree key order) -> Cranelift FuncId for local calls.
     let mut id_at_ir: Vec<Option<FuncId>> = (0..ir.functions.len()).map(|_| None).collect();
-    for (emit_pos, &ir_idx) in indices.iter().enumerate() {
-        id_at_ir[ir_idx] = Some(func_ids[emit_pos]);
+    for (emit_pos, &fid) in indices.iter().enumerate() {
+        let r = func_id_to_ir_rank[&fid];
+        id_at_ir[r] = Some(func_ids[emit_pos]);
     }
 
     let mut ctx = module.make_context();
 
-    for (emit_pos, &ir_idx) in indices.iter().enumerate() {
-        let f = &ir.functions[ir_idx];
+    for (emit_pos, &fid) in indices.iter().enumerate() {
+        let f = &ir.functions[&fid];
         let fid = func_ids[emit_pos];
         ctx.clear();
         let uses_struct_return = emit::signature_uses_struct_return(module.isa(), f);
@@ -194,6 +198,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 import_func_refs: &import_func_refs,
                 slots: &slots,
                 ir,
+                func_id_to_ir_rank: &func_id_to_ir_rank,
                 pointer_type,
                 vreg_wide_addr,
                 float_mode: mode,

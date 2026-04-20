@@ -122,10 +122,10 @@ export DEBUG=1
 (target/debug/lps-filetests-app test --target rv32fa.q32 global/type-vector.glsl &> docs/fa3-errors/global/type-vector.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 global/uniform-no-init-error.glsl &> docs/fa3-errors/global/uniform-no-init-error.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 global/uniform-readonly.glsl &> docs/fa3-errors/global/uniform-readonly.glsl)&
-(target/debug/lps-filetests-app test --target rv32fa.q32 lpfx/lp_hsv2rgb.glsl &> docs/fa3-errors/lpfx/lp_hsv2rgb.glsl)&
-(target/debug/lps-filetests-app test --target rv32fa.q32 lpfx/lp_hue2rgb.glsl &> docs/fa3-errors/lpfx/lp_hue2rgb.glsl)&
-(target/debug/lps-filetests-app test --target rv32fa.q32 lpfx/lp_rgb2hsv.glsl &> docs/fa3-errors/lpfx/lp_rgb2hsv.glsl)&
-(target/debug/lps-filetests-app test --target rv32fa.q32 lpfx/lp_saturate.glsl &> docs/fa3-errors/lpfx/lp_saturate.glsl)&
+(target/debug/lps-filetests-app test --target rv32fa.q32 lpfn/lp_hsv2rgb.glsl &> docs/fa3-errors/lpfn/lp_hsv2rgb.glsl)&
+(target/debug/lps-filetests-app test --target rv32fa.q32 lpfn/lp_hue2rgb.glsl &> docs/fa3-errors/lpfn/lp_hue2rgb.glsl)&
+(target/debug/lps-filetests-app test --target rv32fa.q32 lpfn/lp_rgb2hsv.glsl &> docs/fa3-errors/lpfn/lp_rgb2hsv.glsl)&
+(target/debug/lps-filetests-app test --target rv32fa.q32 lpfn/lp_saturate.glsl &> docs/fa3-errors/lpfn/lp_saturate.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 matrix/mat2/incdec-matrix-column.glsl &> docs/fa3-errors/matrix/mat2/incdec-matrix-column.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 matrix/mat2/incdec-matrix-element.glsl &> docs/fa3-errors/matrix/mat2/incdec-matrix-element.glsl)&
 (target/debug/lps-filetests-app test --target rv32fa.q32 matrix/mat2/op-add-assign.glsl &> docs/fa3-errors/matrix/mat2/op-add-assign.glsl)&

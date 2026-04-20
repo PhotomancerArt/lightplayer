@@ -20,22 +20,22 @@ noise = "0.9"
 
 Add tests to each implementation file:
 
-1. **`lpfx_hash.rs` tests**
+1. **`lpfn_hash.rs` tests**
     - Test hash produces different outputs for different inputs
     - Test hash is deterministic (same input + seed = same output)
     - Test seed affects output
 
-2. **`lpfx_snoise1.rs` tests**
+2. **`lpfn_snoise1.rs` tests**
     - Compare against noise-rs Simplex 1D
     - Test output range (approximately [-1, 1])
     - Test continuity (small input changes produce small output changes)
 
-3. **`lpfx_snoise2.rs` tests**
+3. **`lpfn_snoise2.rs` tests**
     - Compare against noise-rs Simplex 2D
     - Test output range
     - Test continuity
 
-4. **`lpfx_snoise3.rs` tests**
+4. **`lpfn_snoise3.rs` tests**
     - Compare against noise-rs Simplex 3D
     - Test output range
     - Test continuity

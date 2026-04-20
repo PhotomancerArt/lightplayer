@@ -13,7 +13,7 @@ In `lp-shader/lps-compiler/src/frontend/codegen/lp_lib_fns.rs`:
 
 - Check `needs_q32_mapping()` to determine if function needs TestCase conversion
 - If `true` (simplex functions):
-    - Get TestCase name from `symbol_name()` (e.g., `"__lpfx_snoise3"`)
+    - Get TestCase name from `symbol_name()` (e.g., `"__lpfn_snoise3"`)
     - Flatten vector arguments (already done)
     - Emit TestCase call using pattern similar to `get_math_libcall()`
     - Create signature with `F32` types (before transform)

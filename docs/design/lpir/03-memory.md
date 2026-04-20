@@ -108,7 +108,7 @@ The callee writes a `vec3`-sized result through the first argument. A slot suppl
 func @noise_sample(v1:f32, v2:f32, v3:f32) -> f32 {
   slot ss0, 12
   v_ptr:ptr = slot_addr ss0
-  call @lpfx::noise3(v_ptr, v1, v2, v3)
+  call @lpfn::noise3(v_ptr, v1, v2, v3)
   v_rx:f32 = load v_ptr, 0
   v_ry:f32 = load v_ptr, 4
   v_rz:f32 = load v_ptr, 8

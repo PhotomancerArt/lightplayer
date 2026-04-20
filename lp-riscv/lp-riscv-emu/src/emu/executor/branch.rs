@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 use lp_riscv_inst::{Gpr, format::TypeB};
 
@@ -67,10 +67,16 @@ fn execute_beq<M: LoggingMode>(
     } else {
         None
     };
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -107,10 +113,16 @@ fn execute_bne<M: LoggingMode>(
     } else {
         None
     };
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -147,10 +159,16 @@ fn execute_blt<M: LoggingMode>(
     } else {
         None
     };
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -187,10 +205,16 @@ fn execute_bge<M: LoggingMode>(
     } else {
         None
     };
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -227,10 +251,16 @@ fn execute_bltu<M: LoggingMode>(
     } else {
         None
     };
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }
@@ -267,10 +297,16 @@ fn execute_bgeu<M: LoggingMode>(
     } else {
         None
     };
+    let branch_class = if taken {
+        InstClass::BranchTaken
+    } else {
+        InstClass::BranchNotTaken
+    };
     Ok(ExecutionResult {
         new_pc,
         should_halt: false,
         syscall: false,
+        class: branch_class,
         log,
     })
 }

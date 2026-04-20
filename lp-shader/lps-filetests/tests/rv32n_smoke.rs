@@ -6,7 +6,9 @@
 //! Note: The native backend currently does not support imports (builtin functions).
 //! This test constructs LPIR directly without imports.
 
-use lpir::{FloatMode, IrFunction, IrType, LpirModule, LpirOp, VReg, VRegRange};
+use std::collections::BTreeMap;
+
+use lpir::{FloatMode, FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, VRegRange};
 use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine};
@@ -40,7 +42,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
 
     let module = LpirModule {
         imports: vec![],
-        functions: vec![func],
+        functions: BTreeMap::from([(FuncId(0), func)]),
     };
 
     let sig = LpsModuleSig {
@@ -59,6 +61,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
                 },
             ],
             return_type: LpsType::Int,
+            kind: lps_shared::LpsFnKind::UserDefined,
         }],
         uniforms_type: None,
         globals_type: None,

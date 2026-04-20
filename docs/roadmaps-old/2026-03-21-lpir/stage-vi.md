@@ -19,7 +19,7 @@ Verify the web-demo still renders.
     - `filetests/scalar/arithmetic/`
     - `filetests/scalar/bool/`
     - `filetests/scalar/builtins/`
-    - `filetests/scalar/lpfx/`
+    - `filetests/scalar/lpfn/`
 - Verify web-demo (scalar rainbow.glsl) still renders
 - Debug and fix any discrepancies between interpreter results and WASM results
 - Remove or gate any dead code paths from the old emitter

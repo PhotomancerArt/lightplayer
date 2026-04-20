@@ -27,7 +27,7 @@ is trivial (VReg N → local N). Validate with wasmtime smoke tests.
 - Shadow stack for `slot`/`slot_addr`: mutable `$sp` global, per-function
   prologue/epilogue for functions with slot declarations, elided when no
   slots. LPFX scratch becomes ordinary slots — no global scratch region.
-- LPFX import handling: detect `call @lpfx_*` ops, generate WASM imports
+- LPFX import handling: detect `call @lpfn_*` ops, generate WASM imports
 - Deletion of `locals.rs` and `emit_vec.rs`
 - Simplification of `types.rs`
 - Wasmtime smoke tests: compile LPIR → WASM → run → verify

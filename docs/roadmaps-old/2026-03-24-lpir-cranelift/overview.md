@@ -47,7 +47,7 @@ naga::Module                                   ── existing, unchanged
   │   • scalarizes vectors
   │   • decomposes builtins (smoothstep → scalar math)
   │   • handles LPFX calls and out-pointer ABI
-  │   • resolves to glsl:: and lpfx:: imports
+  │   • resolves to glsl:: and lpfn:: imports
   │   • extracts GlslMetadata (typed params, qualifiers, return types)
   │
   ▼
@@ -60,7 +60,7 @@ IrModule + GlslMetadata                        ── LPIR (float-agnostic)
 WASM emitter            NEW: LPIR → CLIF emitter
 (lps-wasm)          (lpvm-cranelift)
   │ Q32: inline i64       │ Q32: builtin calls (__lp_lpir_*_q32)
-  │ glsl/lpfx: WASM       │ glsl/lpfx: Cranelift func refs
+  │ glsl/lpfn: WASM       │ glsl/lpfn: Cranelift func refs
   │   imports              │   via BuiltinId
   ▼                     ▼
 .wasm bytes             machine code
@@ -125,7 +125,7 @@ GLSL code: <fn>                     (module implied)
 Modules:
   lpir  — IR ops needing library impl (fdiv, sqrt, ftoi_sat, itof)
   glsl  — GLSL built-in functions (sin, cos, smoothstep, mix, pow)
-  lpfx  — LightPlayer effects (fbm, snoise, hash, psrdnoise)
+  lpfn  — LightPlayer effects (fbm, snoise, hash, psrdnoise)
 
 Mode suffix:
   _q32  — Q32 fixed-point representation
@@ -135,8 +135,8 @@ Mode suffix:
 Examples:
   __lp_lpir_fdiv_q32        LPIR fdiv op, Q32 implementation
   __lps_sin_q32         GLSL sin(), Q32 implementation
-  __lp_lpfx_fbm2_q32        LPFX fbm2, Q32 implementation
-  __lp_lpfx_hash11          LPFX hash11, mode-independent
+  __lp_lpfn_fbm2_q32        LPFX fbm2, Q32 implementation
+  __lp_lpfn_hash11          LPFX hash11, mode-independent
 ```
 
 BuiltinId becomes self-describing: given (module, name, mode) it derives

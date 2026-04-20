@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fix LP library functions (`lpfx_snoise1/2/3`, `lpfx_hash`) to follow the correct float→q32
+Fix LP library functions (`lpfn_snoise1/2/3`, `lpfn_hash`) to follow the correct float→q32
 conversion pattern. Currently, codegen directly calls builtins, bypassing the transform. Functions
 should emit TestCase calls that the q32 transform converts, matching the pattern used for `sin`/
 `cos`.
@@ -38,12 +38,12 @@ lp-shader/lps-builtin-gen-app/
 ```
 LpLibFn - # UPDATE: Add new methods
 ├── needs_q32_mapping(&self) -> bool - # NEW: Returns true for simplex functions, false for hash
-└── q32_name(&self) -> Option<&'static str> - # NEW: Returns Some("__lp_q32_lpfx_snoise3") or None
+└── q32_name(&self) -> Option<&'static str> - # NEW: Returns Some("__lp_q32_lpfn_snoise3") or None
 
 Existing methods (unchanged):
-├── symbol_name(&self) -> &'static str - # Returns "__lpfx_snoise3" (TestCase name)
+├── symbol_name(&self) -> &'static str - # Returns "__lpfn_snoise3" (TestCase name)
 ├── builtin_id(&self) -> BuiltinId - # Returns BuiltinId::LpSimplex3
-└── user_name(&self) -> &'static str - # Returns "lpfx_snoise3"
+└── user_name(&self) -> &'static str - # Returns "lpfn_snoise3"
 ```
 
 ### Codegen Changes (`frontend/codegen/lp_lib_fns.rs`)
@@ -53,7 +53,7 @@ emit_lp_lib_fn_call() - # UPDATE: Change implementation
 ├── OLD: Direct builtin call via get_builtin_func_ref()
 └── NEW: Emit TestCase call using LpLibFn::symbol_name()
     ├── Check if needs_q32_mapping() -> true
-    ├── Get TestCase name from symbol_name() (e.g., "__lpfx_snoise3")
+    ├── Get TestCase name from symbol_name() (e.g., "__lpfn_snoise3")
     ├── Flatten vector arguments
     ├── Emit TestCase call (similar to get_math_libcall() pattern)
     └── Let q32 transform handle conversion
@@ -63,7 +63,7 @@ emit_lp_lib_fn_call() - # UPDATE: Change implementation
 
 ```
 discover_builtins() - # UPDATE: Use LpLibFn enum as source of truth
-├── OLD: Prefix matching (__lp_q32_, __lpfx_hash_, __lpfx_snoise)
+├── OLD: Prefix matching (__lp_q32_, __lpfn_hash_, __lpfn_snoise)
 └── NEW: Read LpLibFn enum
     ├── For each LpLibFn variant:
     │   ├── Use LpLibFn::builtin_id() to get BuiltinId name (e.g., LpSimplex3)
@@ -83,7 +83,7 @@ BuiltinId - # UPDATE: Regenerate with correct names
 └── NEW: LpSimplex1, LpSimplex2, LpSimplex3 (matches LpLibFn::builtin_id())
 
 BuiltinId::LpSimplex3.name() - # UPDATE: Return actual function name
-└── Returns "__lp_q32_lpfx_snoise3" (actual implementation)
+└── Returns "__lp_q32_lpfn_snoise3" (actual implementation)
 ```
 
 ## Architecture Flow
@@ -91,37 +91,37 @@ BuiltinId::LpSimplex3.name() - # UPDATE: Return actual function name
 ### Current (Incorrect) Flow
 
 ```
-1. GLSL: lpfx_snoise3(vec3(1.0, 2.0, 3.0), 123u)
+1. GLSL: lpfn_snoise3(vec3(1.0, 2.0, 3.0), 123u)
 2. Codegen: emit_lp_lib_fn_call() → get_builtin_func_ref(BuiltinId::LpSimplex3)
-3. Direct call to __lp_q32_lpfx_snoise3 (bypasses transform)
+3. Direct call to __lp_q32_lpfn_snoise3 (bypasses transform)
 ```
 
 ### New (Correct) Flow
 
 ```
-1. GLSL: lpfx_snoise3(vec3(1.0, 2.0, 3.0), 123u)
+1. GLSL: lpfn_snoise3(vec3(1.0, 2.0, 3.0), 123u)
 2. Codegen: emit_lp_lib_fn_call()
    ├── Check needs_q32_mapping() → true
-   ├── Get symbol_name() → "__lpfx_snoise3"
+   ├── Get symbol_name() → "__lpfn_snoise3"
    ├── Flatten vec3 → (i32, i32, i32, u32)
-   └── Emit TestCase call to "__lpfx_snoise3"
+   └── Emit TestCase call to "__lpfn_snoise3"
 3. Q32 Transform: convert_call()
-   ├── Detect TestCase call to "__lpfx_snoise3"
-   ├── map_testcase_to_builtin("__lpfx_snoise3") → BuiltinId::LpSimplex3
-   ├── BuiltinId::LpSimplex3.name() → "__lp_q32_lpfx_snoise3"
-   ├── Look up "__lp_q32_lpfx_snoise3" in func_id_map
-   └── Create call to __lp_q32_lpfx_snoise3
-4. Runtime: Calls __lp_q32_lpfx_snoise3
+   ├── Detect TestCase call to "__lpfn_snoise3"
+   ├── map_testcase_to_builtin("__lpfn_snoise3") → BuiltinId::LpSimplex3
+   ├── BuiltinId::LpSimplex3.name() → "__lp_q32_lpfn_snoise3"
+   ├── Look up "__lp_q32_lpfn_snoise3" in func_id_map
+   └── Create call to __lp_q32_lpfn_snoise3
+4. Runtime: Calls __lp_q32_lpfn_snoise3
 ```
 
 ### Hash Functions Flow (Unchanged)
 
 ```
-1. GLSL: lpfx_hash(42u, 123u)
+1. GLSL: lpfn_hash(42u, 123u)
 2. Codegen: emit_lp_lib_fn_call()
    ├── Check needs_q32_mapping() → false
-   └── Direct builtin call to __lpfx_hash_1 (no TestCase conversion needed)
-3. Runtime: Calls __lpfx_hash_1
+   └── Direct builtin call to __lpfn_hash_1 (no TestCase conversion needed)
+3. Runtime: Calls __lpfn_hash_1
 ```
 
 ## Design Decisions
@@ -140,11 +140,11 @@ This ensures consistency across codegen, transform, and generator.
 
 ### 2. TestCase Names Represent Semantic Functions
 
-TestCase names like `"__lpfx_snoise3"` represent the semantic function (float version), not the
+TestCase names like `"__lpfn_snoise3"` represent the semantic function (float version), not the
 implementation. The transform decides which implementation to use based on the target:
 
-- Q32 target: `"__lpfx_snoise3"` → `__lp_q32_lpfx_snoise3`
-- Float target (future): `"__lpfx_snoise3"` → `__lp_float_lpfx_snoise3` (or similar)
+- Q32 target: `"__lpfn_snoise3"` → `__lp_q32_lpfn_snoise3`
+- Float target (future): `"__lpfn_snoise3"` → `__lp_float_lpfn_snoise3` (or similar)
 
 ### 3. Hash Functions Don't Need Conversion
 
@@ -174,9 +174,9 @@ impl LpLibFn {
     /// Get the q32 implementation name, if this function needs mapping
     pub fn q32_name(&self) -> Option<&'static str> {
         match self {
-            LpLibFn::Simplex1 => Some("__lp_q32_lpfx_snoise1"),
-            LpLibFn::Simplex2 => Some("__lp_q32_lpfx_snoise2"),
-            LpLibFn::Simplex3 => Some("__lp_q32_lpfx_snoise3"),
+            LpLibFn::Simplex1 => Some("__lp_q32_lpfn_snoise1"),
+            LpLibFn::Simplex2 => Some("__lp_q32_lpfn_snoise2"),
+            LpLibFn::Simplex3 => Some("__lp_q32_lpfn_snoise3"),
 
             // Hash functions don't have q32 versions
             LpLibFn::Hash1 => None,
@@ -200,7 +200,7 @@ impl LpLibFn {
 ```rust
 // Similar to get_math_libcall() but for LP library functions
 fn get_lp_lib_testcase_call(&mut self, lp_fn: LpLibFn, arg_count: usize) -> Result<FuncRef, GlslError> {
-    let testcase_name = lp_fn.symbol_name(); // e.g., "__lpfx_snoise3"
+    let testcase_name = lp_fn.symbol_name(); // e.g., "__lpfn_snoise3"
 
     // Create signature based on argument count
     let mut sig = Signature::new(CallConv::SystemV);
@@ -237,7 +237,7 @@ fn discover_lp_lib_functions() -> Vec<BuiltinInfo> {
         if let Some(func) = find_function_by_name(expected_name) {
             builtins.push(BuiltinInfo {
                 enum_variant: lp_fn.builtin_id().to_string(), // "LpSimplex3"
-                symbol_name: expected_name, // "__lp_q32_lpfx_snoise3"
+                symbol_name: expected_name, // "__lp_q32_lpfn_snoise3"
                 function_name: func.name,
                 param_count: func.param_count,
             });
@@ -250,8 +250,8 @@ fn discover_lp_lib_functions() -> Vec<BuiltinInfo> {
 
 ## Verification Points
 
-1. **Registry**: `BuiltinId::LpSimplex3.name()` returns `"__lp_q32_lpfx_snoise3"`
-2. **Mapping**: `map_testcase_to_builtin("__lpfx_snoise3")` returns `BuiltinId::LpSimplex3`
+1. **Registry**: `BuiltinId::LpSimplex3.name()` returns `"__lp_q32_lpfn_snoise3"`
+2. **Mapping**: `map_testcase_to_builtin("__lpfn_snoise3")` returns `BuiltinId::LpSimplex3`
 3. **Codegen**: `emit_lp_lib_fn_call()` emits TestCase calls for simplex functions
 4. **Transform**: `convert_call()` correctly converts TestCase calls to builtin calls
 5. **Hash**: Hash functions continue to work as direct builtin calls

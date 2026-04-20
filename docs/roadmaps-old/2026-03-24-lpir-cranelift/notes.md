@@ -46,7 +46,7 @@ feature parity with the existing Cranelift backend.
 - **`BuiltinId`** enum (generated): stable C symbol names for Q32 math
   and LPFX. Used by Cranelift for `declare_builtins` + JIT symbol lookup.
 - **LPIR imports**: `std.math` module (GLSL names: "sin", "cos", etc.) and
-  `lpfx` module (mangled names with Naga handle indices). String-based,
+  `lpfn` module (mangled names with Naga handle indices). String-based,
   resolved at emission time.
 - **WASM path**: LPIR `std.math` → `glsl_q32_math_builtin_id` → `BuiltinId`
   → WASM import with `BuiltinId::name()`.
@@ -115,8 +115,8 @@ Three modules:
   modes (fdiv, sqrt, ftoi_sat, itof). NOT LPIR imports — emitter-internal.
 - `glsl` — GLSL built-in functions (SPIR-V GLSL.std.450: sin, cos,
   smoothstep, mix, pow, etc.). LPIR imports as `glsl::sin`, `glsl::cos`.
-- `lpfx` — LightPlayer effects (fbm, snoise, hash, etc.). LPIR imports
-  as `lpfx::fbm2`, `lpfx::psrdnoise`.
+- `lpfn` — LightPlayer effects (fbm, snoise, hash, etc.). LPIR imports
+  as `lpfn::fbm2`, `lpfn::psrdnoise`.
 
 Mode suffix: `_q32` / `_f32` for functions that operate on float values.
 No suffix for mode-independent functions (integer-only, like hash).
@@ -196,7 +196,7 @@ removed when the LPIR pipeline replaces it.
 - All scalar LPIR ops (arithmetic, comparison, casts, constants, select, copy)
 - Structured CF → Cranelift CFG (if/loop/break/continue/return)
 - `glsl::*` import calls
-- `lpfx::*` import calls
+- `lpfn::*` import calls
 - Memory (slots, load/store, memcpy)
 - Multi-return (idiomatic Cranelift auto struct-return)
 

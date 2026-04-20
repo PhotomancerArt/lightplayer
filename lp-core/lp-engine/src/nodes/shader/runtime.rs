@@ -19,6 +19,7 @@ use lp_model::{
     project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
+use lps_shared::TextureBuffer;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
@@ -47,6 +48,7 @@ pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
     graphics: Arc<dyn LpGraphics>,
     shader: Option<Box<dyn LpShader>>,
+    output_buffer: Option<lp_shader::LpsTextureBuf>,
     texture_handle: Option<TextureHandle>,
     compilation_error: Option<String>,
     pub state: ShaderState,
@@ -60,6 +62,7 @@ impl ShaderRuntime {
             config: None,
             graphics,
             shader: None,
+            output_buffer: None,
             texture_handle: None,
             compilation_error: None,
             state: ShaderState::new(FrameId::default()),
@@ -100,6 +103,16 @@ impl ShaderRuntime {
     pub fn compilation_error(&self) -> Option<&str> {
         self.compilation_error.as_deref()
     }
+
+    pub fn output_buffer(&self) -> Option<&dyn lps_shared::TextureBuffer> {
+        self.output_buffer
+            .as_ref()
+            .map(|t| t as &dyn lps_shared::TextureBuffer)
+    }
+
+    pub fn output_buffer_mut(&mut self) -> Option<&mut lp_shader::LpsTextureBuf> {
+        self.output_buffer.as_mut()
+    }
 }
 
 impl NodeRuntime for ShaderRuntime {
@@ -110,6 +123,7 @@ impl NodeRuntime for ShaderRuntime {
         })?;
 
         self.resolve_texture_handle(&config, ctx)?;
+        self.sync_output_buffer_from_texture_node(ctx)?;
         let _ = self.load_and_compile_shader(&config, ctx);
 
         Ok(())
@@ -133,8 +147,8 @@ impl NodeRuntime for ShaderRuntime {
         }
 
         let time = ctx.get_time();
-        let texture = ctx.get_texture_mut(texture_handle)?;
-        shader.render(texture, time)
+        let buf = ctx.get_target_texture_pixels_mut(texture_handle)?;
+        shader.render(buf, time)
     }
 
     fn shed_optional_buffers(
@@ -194,9 +208,16 @@ impl NodeRuntime for ShaderRuntime {
             .map(|old| old.glsl_path != shader_config.glsl_path)
             .unwrap_or(true);
 
-        if glsl_path_changed {
+        let glsl_opts_changed = old_config
+            .as_ref()
+            .map(|old| old.glsl_opts != shader_config.glsl_opts)
+            .unwrap_or(true);
+
+        if glsl_path_changed || glsl_opts_changed {
             let _ = self.load_and_compile_shader(&new_config_clone, ctx);
         }
+
+        self.sync_output_buffer_from_texture_node(ctx)?;
 
         Ok(())
     }
@@ -241,6 +262,36 @@ impl NodeRuntime for ShaderRuntime {
 }
 
 impl ShaderRuntime {
+    fn sync_output_buffer_from_texture_node(
+        &mut self,
+        ctx: &dyn NodeInitContext,
+    ) -> Result<(), Error> {
+        let texture_handle = self.texture_handle.ok_or_else(|| Error::Other {
+            message: String::from("Texture handle not resolved"),
+        })?;
+        let owner = ctx.texture_output_buffer_owner(texture_handle, self.node_handle);
+        if owner != self.node_handle {
+            self.output_buffer = None;
+            return Ok(());
+        }
+        let cfg = ctx.get_texture_config(texture_handle)?;
+        let need_alloc = match &self.output_buffer {
+            None => true,
+            Some(buf) => buf.width() != cfg.width || buf.height() != cfg.height,
+        };
+        if need_alloc {
+            let buf = self
+                .graphics
+                .alloc_output_buffer(cfg.width, cfg.height)
+                .map_err(|e| Error::InvalidConfig {
+                    node_path: format!("shader-{}", self.node_handle.as_i32()),
+                    reason: format!("Failed to allocate shader output buffer: {e}"),
+                })?;
+            self.output_buffer = Some(buf);
+        }
+        Ok(())
+    }
+
     fn resolve_texture_handle(
         &mut self,
         config: &ShaderConfig,
@@ -306,6 +357,14 @@ impl ShaderRuntime {
             .as_ref()
             .map(|c| map_model_q32_options(&c.glsl_opts))
             .unwrap_or_default();
+
+        log::info!(
+            "Shader {} q32 options: add_sub={:?}, mul={:?}, div={:?}",
+            self.node_handle.as_i32(),
+            q32_options.add_sub,
+            q32_options.mul,
+            q32_options.div,
+        );
 
         let compile_opts = ShaderCompileOptions {
             q32_options,
@@ -383,14 +442,14 @@ impl ShaderRuntime {
     }
 }
 
-#[cfg(all(test, feature = "cranelift"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_shader_runtime_creation() {
         let handle = lp_model::NodeHandle::new(0);
-        let graphics: Arc<dyn LpGraphics> = Arc::new(crate::CraneliftGraphics::new());
+        let graphics: Arc<dyn LpGraphics> = Arc::new(crate::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }

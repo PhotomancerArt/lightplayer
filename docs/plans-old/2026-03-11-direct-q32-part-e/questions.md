@@ -6,14 +6,14 @@
 - `backend/transform/`: `apply_transform`, `transform_single_function`,
   `Q32Transform`, `TransformContext`, `Transform` trait, `IdentityTransform`
   — none called from production code, only from transform tests
-- `lp_lib_fns.rs`: dead file, not included in `mod.rs` (superseded by `lpfx_fns.rs`)
+- `lp_lib_fns.rs`: dead file, not included in `mod.rs` (superseded by `lpfn_fns.rs`)
 
 **Still used from `backend/transform/`:**
 - `Q32Options` (from `q32/options.rs`) — used by `numeric.rs`, `executable.rs`, `lib.rs`
 - `float_to_fixed16x16` (from `q32/types.rs`) — used by `numeric.rs`
 
 **Stale comments (referencing removed transform):**
-- `lpfx_fns.rs` lines 231–234, 253–254: "converted to q32 by transform"
+- `lpfn_fns.rs` lines 231–234, 253–254: "converted to q32 by transform"
 - `builtins/helpers.rs` line 30: "converted to q32 by transform when applicable"
 - `glsl_compiler.rs` lines 69, 137, 224, 292: "FLOAT signatures (no conversion)"
 - `numeric.rs` line 31: doc says `todo!()` but code uses `unreachable!()`

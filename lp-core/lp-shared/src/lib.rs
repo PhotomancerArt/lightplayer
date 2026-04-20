@@ -31,4 +31,8 @@ pub use error::{DisplayPipelineError, FsError, OutputError, TextureError};
 // Re-export TransportError from lp-model for convenience
 pub use lp_model::TransportError;
 pub use project::ProjectBuilder;
+#[allow(
+    deprecated,
+    reason = "deprecated Texture retained until callers migrate to LpsTextureBuf"
+)]
 pub use util::texture::Texture;

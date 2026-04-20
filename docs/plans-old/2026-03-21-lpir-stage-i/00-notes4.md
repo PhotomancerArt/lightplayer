@@ -36,7 +36,7 @@ Syntax:
 import @std.math::fsin(f32) -> f32
 import @std.math::fcos(f32) -> f32
 import @std.math::fmin(f32, f32) -> f32
-import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+import @lpfn::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
 import @lp.q32::q32_add(i32, i32) -> i32
 
 ; Local functions — no namespace qualifier
@@ -62,7 +62,7 @@ The emitter is configured with **providers** for import modules:
   or intrinsics.
 - `"lp.q32"` provider: only available in Q32 mode; provides fixed-point
   math functions.
-- `"lpfx"` provider: Lygia builtins, only if configured.
+- `"lpfn"` provider: Lygia builtins, only if configured.
 
 If a module is required by the IR but no provider is configured, the
 emitter returns an error. Signature mismatches are also errors.
@@ -86,7 +86,7 @@ for the functions it needs:
 - `Expression::Math { fun: Sin, .. }` → `import @std.math::fsin(f32) -> f32`
   + `call @std.math::fsin(v0)`.
 - Q32 builtins → `import @lp.q32::...` declarations.
-- LPFX calls → `import @lpfx::...` declarations.
+- LPFX calls → `import @lpfn::...` declarations.
 
 **Benefits**
 
@@ -98,7 +98,7 @@ for the functions it needs:
 - **Single calling mechanism**: `call` for everything — no `mathcall`
   vs `call` distinction.
 - **Namespace safety**: `@std.math::fsin` can't conflict with
-  `@lpfx::fsin` or a local `@fsin`.
+  `@lpfn::fsin` or a local `@fsin`.
 
 **What changes in the plan**
 

@@ -8,35 +8,33 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{
-    CalleeRef, FunctionBuilder, ImportDecl, IrFunction, IrType, LpirModule, LpirOp, ModuleBuilder,
-    VMCTX_VREG, VReg,
+    CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrFunction, IrType, LpirModule, LpirOp,
+    ModuleBuilder, VMCTX_VREG, VReg,
 };
 use lps_shared::{
-    LayoutRules, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE, type_alignment,
-    type_size,
+    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE,
+    type_alignment, type_size,
 };
 use naga::{AddressSpace, Expression, Function, GlobalVariable, Handle, Module};
 
 use crate::NagaModule;
 use crate::lower_ctx::{GlobalVarInfo, GlobalVarMap, LowerCtx};
 use crate::lower_error::LowerError;
-use crate::lower_lpfx;
+use crate::lower_lpfn;
 use crate::naga_types::naga_type_handle_to_lps;
 
 /// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
 ///
-/// Registers `@glsl::*`, `@lpir::*`, and `@lpfx::*` imports as needed, then emits one [`lpir::IrFunction`] per
+/// Registers `@glsl::*`, `@lpir::*`, and `@lpfn::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the
 /// scalar subset.
 pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
     let import_map = register_math_imports(&mut mb);
-    let lpfx_map = lower_lpfx::register_lpfx_imports(&mut mb, naga_module)?;
-    let import_count = mb.import_count();
-
+    let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
     for (i, (handle, _)) in naga_module.functions.iter().enumerate() {
-        func_map.insert(*handle, CalleeRef(import_count.saturating_add(i as u32)));
+        func_map.insert(*handle, CalleeRef::Local(FuncId(i as u16)));
     }
 
     // Walk global variables and compute layout for uniforms and globals.
@@ -57,7 +55,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             info.name.as_str(),
             &func_map,
             &import_map,
-            &lpfx_map,
+            &lpfn_map,
             global_map.clone(),
         )
         .map_err(|e| LowerError::InFunction {
@@ -68,6 +66,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             name: info.name.clone(),
             parameters: info.params.clone(),
             return_type: info.return_type.clone(),
+            kind: LpsFnKind::UserDefined,
         });
         mb.add_function(ir);
     }
@@ -79,6 +78,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
                 name: String::from("__shader_init"),
                 parameters: vec![],
                 return_type: LpsType::Void,
+                kind: LpsFnKind::Synthetic,
             });
             mb.add_function(init_func);
         }
@@ -358,7 +358,7 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
                 func_name: String::from(name),
                 param_types: params.to_vec(),
                 return_types: rets.to_vec(),
-                lpfx_glsl_params: None,
+                lpfn_glsl_params: None,
                 needs_vmctx,
             });
             m.insert(format!("{module}::{name}"), r);
@@ -397,11 +397,11 @@ fn lower_function(
     name: &str,
     func_map: &BTreeMap<Handle<Function>, CalleeRef>,
     import_map: &BTreeMap<String, CalleeRef>,
-    lpfx_map: &BTreeMap<Handle<Function>, CalleeRef>,
+    lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
     global_map: GlobalVarMap,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
-        module, func, name, func_map, import_map, lpfx_map, global_map,
+        module, func, name, func_map, import_map, lpfn_map, global_map,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

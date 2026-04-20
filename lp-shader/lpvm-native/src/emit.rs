@@ -2,11 +2,11 @@
 
 use alloc::vec::Vec;
 
-use crate::abi::{FrameLayout, PregSet};
+use crate::abi::{FrameLayout, FuncAbi, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
+use crate::isa::rv32::emit::emit_function;
 use crate::regalloc::{AllocOutput, AllocResult, allocate};
-use crate::rv32::emit::emit_function;
 use crate::vinst::VInst;
 
 /// Emission result containing machine code and metadata.
@@ -67,12 +67,12 @@ pub fn emit_lowered_with_alloc(
     caller_sret_bytes: u32,
 ) -> Result<EmittedCode, NativeError> {
     let mut used_callee_saved = alloc_result.used_callee_saved;
-    if func_abi.is_sret() {
-        // sret functions overwrite s1 in the prologue (mv s1, a0) so it must be
-        // saved/restored even though the allocator never assigns it.
-        used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::rv32::abi::S1));
+    if let Some(p) = func_abi.sret_preservation_reg() {
+        // sret functions preserve the designated GPR in the prologue; it must be
+        // saved/restored even when the allocator never assigns it.
+        used_callee_saved = used_callee_saved.union(PregSet::singleton(p));
     }
-    let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
+    let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts, func_abi);
     let is_leaf = !contains_call(&lowered.vinsts);
     let frame = FrameLayout::compute(
         func_abi,
@@ -103,49 +103,12 @@ pub fn emit_lowered_with_alloc(
             .map(|r| NativeReloc {
                 offset: r.offset,
                 symbol: r.symbol,
+                r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
             })
             .collect(),
         debug_lines: emitted.debug_lines,
         alloc_output: alloc_result.output,
     })
-}
-
-/// Emit a sequence of VInsts to machine code.
-///
-/// This function is DEPRECATED - use `emit_lowered` instead.
-/// It constructs a minimal LoweredFunction wrapper for the given VInsts.
-pub fn emit_vinsts(
-    vinsts: &[VInst],
-    func_abi: &crate::abi::FuncAbi,
-    func: &lpir::IrFunction,
-    vreg_pool: &[crate::vinst::VReg],
-) -> Result<EmittedCode, NativeError> {
-    // Build a minimal LoweredFunction for the new allocator
-    let lpir_slots: Vec<(u32, u32)> = func
-        .slots
-        .iter()
-        .enumerate()
-        .map(|(id, decl)| (id as u32, decl.size))
-        .collect();
-    let mut lowered = crate::lower::LoweredFunction {
-        vinsts: vinsts.to_vec(),
-        vreg_pool: vreg_pool.to_vec(),
-        symbols: crate::vinst::ModuleSymbols::default(),
-        loop_regions: Vec::new(),
-        region_tree: crate::region::RegionTree::new(),
-        lpir_slots,
-    };
-
-    // Build a Linear region covering all instructions
-    if !vinsts.is_empty() {
-        let root = lowered.region_tree.push(crate::region::Region::Linear {
-            start: 0,
-            end: vinsts.len() as u16,
-        });
-        lowered.region_tree.root = root;
-    }
-
-    emit_lowered(&lowered, func_abi)
 }
 
 /// Returns true if the function contains any call instructions.
@@ -154,8 +117,8 @@ fn contains_call(vinsts: &[VInst]) -> bool {
 }
 
 /// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
-fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
-    use crate::rv32::abi::ARG_REGS;
+pub fn max_outgoing_stack_bytes(vinsts: &[VInst], func_abi: &FuncAbi) -> u32 {
+    let arg_regs = func_abi.arg_regs();
     let mut max_bytes = 0u32;
     for inst in vinsts {
         if let VInst::Call {
@@ -165,9 +128,9 @@ fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
         } = inst
         {
             let cap = if *callee_uses_sret {
-                ARG_REGS.len() - 1
+                arg_regs.len() - 1
             } else {
-                ARG_REGS.len()
+                arg_regs.len()
             };
             let n = args.len();
             if n > cap {
@@ -203,16 +166,17 @@ mod tests {
             .push(crate::region::Region::Linear { start: 0, end: 0 });
         lowered.region_tree.root = root;
 
-        let abi = crate::rv32::abi::func_abi_rv32(
+        let abi = crate::isa::rv32::abi::func_abi_rv32(
             &lps_shared::LpsFnSig {
                 name: alloc::string::String::from("test"),
                 return_type: lps_shared::LpsType::Void,
                 parameters: vec![],
+                kind: lps_shared::LpsFnKind::UserDefined,
             },
             0,
         );
 
         let result = emit_lowered(&lowered, &abi);
-        assert!(result.is_ok(), "emit_lowered should succeed: {:?}", result);
+        assert!(result.is_ok(), "emit_lowered should succeed: {result:?}");
     }
 }

@@ -2,13 +2,13 @@
 
 ## Shipped
 
-- **psrdnoise seed:** `uint seed` on `lpfx_psrdnoise` overloads end-to-end (frontend LPFX sigs,
+- **psrdnoise seed:** `uint seed` on `lpfn_psrdnoise` overloads end-to-end (frontend LPFX sigs,
   Cranelift builtin registry arity, Rust `extern "C"` wrappers + GLSL strings in builtins,
   regenerated `builtin_wasm_import_types` / mapping). Example shaders updated with `0u` where
   needed.
 - **Q32 math:** `floor` and `fract` inlined in the WASM backend (`builtin_inline.rs`); trig/exp
   family covered by compile or link tests as planned.
-- **LPFX WASM calls:** `lpfx_call.rs` resolves overloads, flattens `In` args, passes `out` as `i32`
+- **LPFX WASM calls:** `lpfn_call.rs` resolves overloads, flattens `In` args, passes `out` as `i32`
   offsets into shared memory, calls imported builtins, loads scalar/vector results from scratch;
   `memory.rs` documents `LPFX_OUT_PARAM_BASE` / `LPFX_SCRATCH_BYTES`.
 - **Q32 context fixes:** Float vectors use i32 temps/locals (broadcast, conversion, binary paths) so

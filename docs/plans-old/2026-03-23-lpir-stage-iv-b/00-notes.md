@@ -19,7 +19,7 @@ vector/matrix types:
 - `lower_expr()` — no arms for Compose, Splat, Swizzle, AccessIndex
 - `lower_stmt()` Store — single Copy, not N copies for vector locals
 - `lower_math()` — scalar kind check fails on vector args
-- `lower_lpfx()` — explicitly rejects vector out-params
+- `lower_lpfn()` — explicitly rejects vector out-params
 
 ## Key design challenge
 
@@ -155,7 +155,7 @@ Suggested: B for now.
 
 ### Q5: LPFX vector out-parameters
 
-Some LPFX functions return vectors via out-pointers (e.g. `lpfx_hsv2rgb`
+Some LPFX functions return vectors via out-pointers (e.g. `lpfn_hsv2rgb`
 writes to a vec3 out-param). The current lowering errors on these.
 
 Options:
@@ -164,7 +164,7 @@ Options:
   load N components after call, map back to local VRegs.
 - B) Error for now. Focus on scalar-returning LPFX first.
 
-The web demo uses `lpfx_psrdnoise` which has an `out vec2 gradient`
+The web demo uses `lpfn_psrdnoise` which has an `out vec2 gradient`
 parameter. So vector out-params are needed for the demo.
 
 **Answer:** A. Implement fully. Slot of N*4 bytes, pass slot address,

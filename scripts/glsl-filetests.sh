@@ -91,6 +91,10 @@ while [[ $# -gt 0 ]]; do
     TEST_ARGS+=("--detail")
     shift
     ;;
+  --force-opt)
+    TEST_ARGS+=("--force-opt" "$2")
+    shift 2
+    ;;
   *)
     TEST_ARGS+=("$1")
     shift
@@ -120,6 +124,9 @@ OPTIONS:
     --fix               Remove @unimplemented annotations from tests that now pass
     --mark-unimplemented  Add @unimplemented(backend=…) to failing tests (baseline); use with --target
     --assume-yes        With --mark-unimplemented, skip the interactive confirmation
+    --force-opt KEY=VALUE   Force-override a compiler option across the suite (repeatable).
+                            Wins over per-file compile-opt(...) directives.
+                            Example: --force-opt inline.mode=never
 
 ENVIRONMENT:
     DEBUG=1             Show debug output (CLIF, WAT) when a test fails
@@ -127,6 +134,8 @@ ENVIRONMENT:
     LP_MARK_UNIMPLEMENTED=1  Same as --mark-unimplemented
     LP_FILETESTS_THREADS=N   Worker threads for concurrent filetests (default: num_cpus).
                         WASM and RV32 are thread-safe. Use N=1 when testing JIT to avoid segfaults.
+    LPS_FILETEST_FORCE_OPT   Comma-separated KEY=VALUE compiler overrides (same keys as
+                        compile-opt). CLI --force-opt wins on duplicate keys.
 
 PATTERNS:
     Patterns can be filenames, glob patterns, or directory paths.

@@ -9,15 +9,15 @@ Verify the complete flow from GLSL codegen → q32 transform → runtime works c
 ### 6.1 Test Simplex Functions
 
 Create or update tests that verify:
-- GLSL code with `lpfx_snoise3()` call compiles
-- Codegen emits TestCase call to `"__lpfx_snoise3"`
-- Transform converts to call to `__lp_q32_lpfx_snoise3`
+- GLSL code with `lpfn_snoise3()` call compiles
+- Codegen emits TestCase call to `"__lpfn_snoise3"`
+- Transform converts to call to `__lp_q32_lpfn_snoise3`
 - Runtime executes correctly and returns expected values
 
 ### 6.2 Test Hash Functions
 
 Verify hash functions still work:
-- GLSL code with `lpfx_hash()` call compiles
+- GLSL code with `lpfn_hash()` call compiles
 - Codegen uses direct builtin call (no TestCase conversion)
 - Runtime executes correctly
 

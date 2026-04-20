@@ -2,27 +2,27 @@
 
 ## Description
 
-Update `lps-builtin-gen-app` to generate multiple `LpfxFn` entries for functions with the same
+Update `lps-builtin-gen-app` to generate multiple `LpfnFn` entries for functions with the same
 GLSL name but different signatures. Add validation to ensure overloads have distinct parameter
 signatures.
 
 ## Implementation
 
-### File: `lp-shader/lps-builtin-gen-app/src/lpfx/generate.rs`
+### File: `lp-shader/lps-builtin-gen-app/src/lpfn/generate.rs`
 
-**Update `generate_lpfx_fns`:**
+**Update `generate_lpfn_fns`:**
 
 - Currently groups functions by GLSL name and uses first function's signature
-- Change to: For each group, create one `LpfxFn` entry per unique signature
+- Change to: For each group, create one `LpfnFn` entry per unique signature
 - Each entry should map to the correct `BuiltinId` for its signature
-- Update `format_lpfx_fn_impl` to handle individual function entries (not groups)
+- Update `format_lpfn_fn_impl` to handle individual function entries (not groups)
 
 **Add signature comparison:**
 
 - Helper function to compare function signatures (name + parameters)
 - Use this to identify unique signatures within a name group
 
-### File: `lp-shader/lps-builtin-gen-app/src/lpfx/validate.rs`
+### File: `lp-shader/lps-builtin-gen-app/src/lpfn/validate.rs`
 
 **Add validation:**
 
@@ -34,17 +34,17 @@ signatures.
 
 After updating the codegen tool:
 
-1. Run `scripts/build-builtins.sh` to regenerate `lpfx_fns.rs`
-2. Verify that `lpfx_hsv2rgb` has both vec3 and vec4 entries
+1. Run `scripts/build-builtins.sh` to regenerate `lpfn_fns.rs`
+2. Verify that `lpfn_hsv2rgb` has both vec3 and vec4 entries
 3. Check that all overloaded functions have multiple entries
 
 ## Success Criteria
 
-- Codegen tool generates multiple `LpfxFn` entries for overloaded functions
+- Codegen tool generates multiple `LpfnFn` entries for overloaded functions
 - Each entry correctly maps to its `BuiltinId`
 - Validation ensures distinct signatures for overloads
-- `lpfx_hsv2rgb` generates both vec3 and vec4 entries
-- `lpfx_fns.rs` regenerated successfully
+- `lpfn_hsv2rgb` generates both vec3 and vec4 entries
+- `lpfn_fns.rs` regenerated successfully
 - Code compiles without warnings
 - Code formatted with `cargo +nightly fmt`
 

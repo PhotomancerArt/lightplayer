@@ -3,7 +3,7 @@
 ## Scope of phase
 
 - Add **`lps-builtins-wasm`**: a thin crate that depends on `lps-builtins`, targets
-  `wasm32-unknown-unknown`, and exports every `__lp_q32_*` / `__lpfx_*` symbol the Rust side already
+  `wasm32-unknown-unknown`, and exports every `__lp_q32_*` / `__lpfn_*` symbol the Rust side already
   exposes (same pattern as `lps-builtins-emu-app` referencing symbols).
 - Configure the wasm build so the module **imports** linear memory (`env.memory`) instead of
   defining its own — implemented via `lps-builtins-wasm/build.rs` (`--import-memory` when

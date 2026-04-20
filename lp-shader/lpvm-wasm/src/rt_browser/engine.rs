@@ -63,6 +63,7 @@ pub struct BrowserLpvmModule {
     pub(crate) exports: HashMap<String, WasmExport>,
     pub(crate) shadow_stack_base: Option<i32>,
     pub(crate) opts: WasmOptions,
+    pub(crate) lpir: LpirModule,
 }
 
 impl LpvmEngine for BrowserLpvmEngine {
@@ -93,7 +94,8 @@ impl LpvmEngine for BrowserLpvmEngine {
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: wm.shadow_stack_base,
-            opts: self.compile_options,
+            opts: self.compile_options.clone(),
+            lpir: ir.clone(),
         })
     }
 

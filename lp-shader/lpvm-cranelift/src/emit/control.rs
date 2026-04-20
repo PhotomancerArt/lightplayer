@@ -91,6 +91,17 @@ pub(crate) fn emit_control(
             }
             _ => Err(CompileError::unsupported("else without matching if")),
         },
+        LpirOp::Block { .. } => {
+            let merge_block = builder.create_block();
+            ctrl_stack.push(CtrlFrame::Block { merge_block });
+            Ok(true)
+        }
+        LpirOp::ExitBlock => {
+            let merge = find_innermost_block_merge(ctrl_stack)?;
+            builder.ins().jump(merge, &[]);
+            switch_to_unreachable_tail(builder);
+            Ok(true)
+        }
         LpirOp::LoopStart {
             continuing_offset, ..
         } => {
@@ -215,10 +226,24 @@ pub(crate) fn emit_control(
                 builder.switch_to_block(merge_block);
                 Ok(true)
             }
+            Some(CtrlFrame::Block { merge_block }) => {
+                jump_if_unterminated(builder, merge_block);
+                builder.switch_to_block(merge_block);
+                Ok(true)
+            }
             None => Err(CompileError::unsupported("`end` with empty control stack")),
         },
         _ => Ok(false),
     }
+}
+
+fn find_innermost_block_merge(ctrl_stack: &[CtrlFrame]) -> Result<Block, CompileError> {
+    for frame in ctrl_stack.iter().rev() {
+        if let CtrlFrame::Block { merge_block } = frame {
+            return Ok(*merge_block);
+        }
+    }
+    Err(CompileError::unsupported("exit_block outside block"))
 }
 
 fn find_innermost_loop_exit(ctrl_stack: &[CtrlFrame]) -> Result<Block, CompileError> {

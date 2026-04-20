@@ -92,7 +92,7 @@ lps-wasm::emit_module()
 
 ### lps-frontend builtins.rs
 
-- `fn lpfx_prototypes() -> &'static str`: returns GLSL forward declarations
+- `fn lpfn_prototypes() -> &'static str`: returns GLSL forward declarations
   for all known LPFX functions
 - `fn prepend_builtins(source: &str) -> String`: prepends prototypes +
   `#line 1` before user source
@@ -127,9 +127,9 @@ lps-wasm::emit_module()
 
 - `fn emit_user_call(func_handle, arguments, result, ...)`: emits args,
   `call $idx`, stores result to temps if vector
-- `fn emit_lpfx_call(func_name, arguments, result, ...)`: same but
+- `fn emit_lpfn_call(func_name, arguments, result, ...)`: same but
   resolves to import index
-- `fn is_lpfx_function(name) -> bool`: checks `lpfx_` prefix
+- `fn is_lpfn_function(name) -> bool`: checks `lpfn_` prefix
 
 ### imports.rs — import section
 

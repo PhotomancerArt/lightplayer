@@ -80,7 +80,7 @@ based on the current codebase.
 - pow, exp, exp2, log, log2, inversesqrt, mod, round, roundEven
   → Same libcall path
 
-### lpfx_fns.rs
+### lpfn_fns.rs
 - All LPFX function calls (noise, hash, color conversion, etc.)
   → Float vs Q32 variant selection
 

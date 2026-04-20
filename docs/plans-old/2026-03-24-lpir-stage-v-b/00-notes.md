@@ -115,17 +115,17 @@ array test hits the unsupported type path.
 
 ### Missing feature 8: LPFX import overloads
 
-**Files:** `lpfx/lp_saturate.glsl`, `lpfx/lp_gnoise.glsl`,
-`lpfx/lp_fbm.glsl`, `lpfx/lp_hash.glsl`, `lpfx/lp_hsv2rgb.glsl`,
-`lpfx/lp_hue2rgb.glsl`, `lpfx/lp_psrdnoise.glsl`, `lpfx/lp_random.glsl`,
-`lpfx/lp_rgb2hsv.glsl`, `lpfx/lp_simplex2.glsl`, `lpfx/lp_simplex3.glsl`,
-`lpfx/lp_srandom.glsl`
+**Files:** `lpfn/lp_saturate.glsl`, `lpfn/lp_gnoise.glsl`,
+`lpfn/lp_fbm.glsl`, `lpfn/lp_hash.glsl`, `lpfn/lp_hsv2rgb.glsl`,
+`lpfn/lp_hue2rgb.glsl`, `lpfn/lp_psrdnoise.glsl`, `lpfn/lp_random.glsl`,
+`lpfn/lp_rgb2hsv.glsl`, `lpfn/lp_simplex2.glsl`, `lpfn/lp_simplex3.glsl`,
+`lpfn/lp_srandom.glsl`
 
-**Symptom:** `unsupported lpfx import 'lpfx_saturate_4' with [Float, Float,
+**Symptom:** `unsupported lpfn import 'lpfn_saturate_4' with [Float, Float,
 Float]` — certain LPFX function overloads with specific parameter type
 combinations aren't registered.
 
-**Root cause:** `lower_lpfx.rs` doesn't register all overload variants for
+**Root cause:** `lower_lpfn.rs` doesn't register all overload variants for
 LPFX functions. The vec4 and mixed-type overloads are missing.
 
 **Priority:** P1 — 12 test files, but this is LPFX-specific plumbing, not

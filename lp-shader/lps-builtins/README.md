@@ -9,8 +9,8 @@ can resolve the same names).
 
 - **`src/builtins/glsl/`** — GLSL scalar builtins (mostly `*_q32.rs`)
 - **`src/builtins/lpir/`** — LPIR helper ops (e.g. `fsqrt_q32`)
-- **`src/builtins/lpfx/`** — LightPlayer extension / generative functions (LPFX macros via
-  `lpfx-impl-macro`)
+- **`src/builtins/lpfn/`** — LightPlayer extension / generative functions (LPFX macros via
+  `lpfn-impl-macro`)
 - **`src/glsl/q32/`** — Q32 vector/matrix types and small helpers used by builtins
 - **`src/mem.rs`** — `memcpy` / `memset` / `memcmp` for `no_std`
 - **`src/host/`** — Debug / host interface when `std` or logging is enabled
@@ -30,7 +30,7 @@ writes:
 ## Adding a builtin
 
 1. Add the implementation under `src/builtins/` (follow existing patterns in `glsl/`, `lpir/`, or
-   `lpfx/`).
+   `lpfn/`).
 2. Regenerate boilerplate:
 
    ```bash

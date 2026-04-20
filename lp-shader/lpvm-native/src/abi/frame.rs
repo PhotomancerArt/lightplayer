@@ -4,6 +4,12 @@ use alloc::vec::Vec;
 
 use crate::abi::{FuncAbi, PReg, PregSet};
 
+#[inline]
+fn align_up(n: u32, align: u32) -> u32 {
+    debug_assert!(align.is_power_of_two());
+    (n.saturating_add(align - 1)) & !(align - 1)
+}
+
 /// Classifies a stack slot for debugging / tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotKind {
@@ -49,7 +55,7 @@ impl FrameLayout {
     /// `caller_outgoing_stack_bytes`: max contiguous bytes needed at `SP+0` for stack-passed
     /// call arguments (typically `max_stack_words * 4` over all calls); need not be aligned.
     pub fn compute(
-        _abi: &FuncAbi,
+        func_abi: &FuncAbi,
         spill_count: u32,
         used_callee_saved: PregSet,
         lpir_slot_sizes: &[(u32, u32)],
@@ -57,6 +63,7 @@ impl FrameLayout {
         caller_sret_bytes: u32,
         caller_outgoing_stack_bytes: u32,
     ) -> Self {
+        let alignment = func_abi.stack_alignment();
         let save_ra = !is_leaf;
         // Frame pointer is only needed when we have spills (for addressing) or
         // callee-saved registers to restore. Leaf functions with neither can
@@ -66,13 +73,13 @@ impl FrameLayout {
         let mut callee_list: Vec<PReg> = used_callee_saved.iter().collect();
         callee_list.sort_by_key(|p| (p.class as u8, p.hw));
 
-        let caller_arg_stack_size = (caller_outgoing_stack_bytes.saturating_add(15)) & !15u32;
+        let caller_arg_stack_size = align_up(caller_outgoing_stack_bytes, alignment);
         let spill_bytes = spill_count.saturating_mul(4);
         let lpir_bytes: u32 = lpir_slot_sizes.iter().map(|(_, s)| *s).sum();
         let sret_slot_size = if caller_sret_bytes == 0 {
             0u32
         } else {
-            (caller_sret_bytes.saturating_add(15)) & !15u32
+            align_up(caller_sret_bytes, alignment)
         };
         let spill_base_from_sp = caller_arg_stack_size as i32;
         let sret_slot_base_from_sp = (caller_arg_stack_size + spill_bytes + lpir_bytes) as i32;
@@ -86,7 +93,7 @@ impl FrameLayout {
             .saturating_add(callee_list.len() as u32 * 4);
 
         let raw_total = body_bytes.saturating_add(link_bytes);
-        let total_size = (raw_total.saturating_add(15)) & !15;
+        let total_size = align_up(raw_total, alignment);
 
         let mut lpir_slot_offsets = Vec::with_capacity(lpir_slot_sizes.len());
         let mut pos = (caller_arg_stack_size + spill_bytes) as i32;
@@ -170,14 +177,15 @@ mod tests {
 
     use super::*;
     use crate::abi::classify::entry_param_scalar_count;
-    use crate::rv32::abi as rv32;
-    use lps_shared::{LpsFnSig, LpsType};
+    use crate::isa::rv32::abi as rv32;
+    use lps_shared::{LpsFnKind, LpsFnSig, LpsType};
 
     fn abi_float() -> FuncAbi {
         let sig = LpsFnSig {
             name: "f".into(),
             return_type: LpsType::Float,
             parameters: vec![],
+            kind: LpsFnKind::UserDefined,
         };
         rv32::func_abi_rv32(&sig, entry_param_scalar_count(&sig))
     }
@@ -250,11 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn total_size_aligned_16() {
+    fn total_size_aligned() {
         let abi = abi_float();
+        let align = abi.stack_alignment();
         for spill in [0u32, 3, 5] {
             let frame = FrameLayout::compute(&abi, spill, PregSet::EMPTY, &[], false, 0, 0);
-            assert_eq!(frame.total_size % 16, 0);
+            assert_eq!(frame.total_size % align, 0);
         }
     }
 

@@ -2,17 +2,17 @@
 
 ## Description
 
-Discover all LPFX functions in the `lps-builtins/src/builtins/lpfx` directory that have
-`#[lpfx_impl(...)]` attributes.
+Discover all LPFX functions in the `lps-builtins/src/builtins/lpfn` directory that have
+`#[lpfn_impl(...)]` attributes.
 
 ## Implementation
 
 1. Create `lps-builtin-gen-app/src/discovery.rs` (or extend existing discovery)
 2. Add function to walk directory tree and find Rust files
 3. Parse Rust files using `syn::parse_file`
-4. Find all functions with `#[lpfx_impl]` attribute
+4. Find all functions with `#[lpfn_impl]` attribute
 5. Extract function name and map to `BuiltinId` (reuse existing logic)
-6. Return `LpfxFunctionInfo` structures
+6. Return `LpfnFunctionInfo` structures
 
 ## Success Criteria
 

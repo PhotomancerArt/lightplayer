@@ -37,7 +37,7 @@ A true integration test of Q32 dispatch requires the pipeline to be
 connected. This happens in Plan D. At that point, compile a shader with
 Q32 mode and verify:
 - Trig calls go to `__lp_q32_sin`, not `sinf`
-- LPFX calls go to `__lpfx_*_q32`, not `__lpfx_*_f32`
+- LPFX calls go to `__lpfn_*_q32`, not `__lpfn_*_f32`
 - `isinf` is expanded inline, not emitted as a call
 
 ## Validate

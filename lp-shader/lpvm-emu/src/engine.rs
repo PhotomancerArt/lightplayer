@@ -25,7 +25,7 @@ impl EmuEngine {
     }
 
     pub fn options(&self) -> CompileOptions {
-        self.options
+        self.options.clone()
     }
 }
 
@@ -40,7 +40,7 @@ impl LpvmEngine for EmuEngine {
             ir: ir.clone(),
             meta: meta.clone(),
             load,
-            options: self.options,
+            options: self.options.clone(),
             arena: self.arena.clone(),
             // Cranelift-based backends don't generate interleaved debug info;
             // disasm available via external tools

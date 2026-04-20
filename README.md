@@ -1,7 +1,7 @@
 # LightPlayer
 
 LightPlayer is a work-in-progress application for controlling visual effects on the esp32c6
-microcontroller and various other embedded and linux systems.
+microcontroller using GLSL shaders.
 
 GLSL shaders are used to define the visual effects, which are just-in-time (JIT) compiled to native
 RISC-V code on the target device.
@@ -39,19 +39,19 @@ To get started with development:
    ```
 
    This will:
-    - Check for required tools (Rust, Cargo, rustup, just)
-    - Verify Rust version meets minimum requirements (1.90.0+)
-    - Install the RISC-V target (`riscv32imac-unknown-none-elf`) if needed
-    - Set up git hooks (pre-commit hook runs `just check`)
+   - Check for required tools (Rust, Cargo, rustup, just)
+   - Verify Rust version meets minimum requirements (1.90.0+)
+   - Install the RISC-V target (`riscv32imac-unknown-none-elf`) if needed
+   - Set up git hooks (pre-commit hook runs `just check`)
 
 2. **Required tools:**
-    - Rust toolchain (1.90.0 or later) - [Install Rust](https://rustup.rs/)
-    - `just` - Task runner: `cargo install just` or via package manager
+   - Rust toolchain (1.90.0 or later) - [Install Rust](https://rustup.rs/)
+   - `just` - Task runner: `cargo install just` or via package manager
 
 3. **Common development commands:**
-    - `just fci` - Fix, check, build, and test the whole project. Do this before you submit a PR.
-    - `just fci-app` - Fix, check, build, and test the application.
-    - `just fci-glsl` - Fix, check, build, and test the GLSL compiler.
+   - `just fci` - Fix, check, build, and test the whole project. Do this before you submit a PR.
+   - `just fci-app` - Fix, check, build, and test the application.
+   - `just fci-glsl` - Fix, check, build, and test the GLSL compiler.
 
 See `just --list` for all available commands.
 
@@ -116,7 +116,7 @@ Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 - **`lps-filetests`** Collection of tests for GLSL spec compliance and correctness
 - **`lps-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
 - **`lps-filetests-app`** Filetest runner binary
-- **`lpfx-impl-macro`** Macros for builtin function implementations
+- **`lpfn-impl-macro`** Macros for builtin function implementations
 
 ## RISC-V Tooling (`lp-riscv/`)
 
@@ -146,9 +146,8 @@ LightPlayer would not be possible without the amazing work of these projects:
   **`[patch.crates-io]`** in the workspace `Cargo.toml` so naga `glsl-in` works on **`no_std`**
   targets
 - **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL parser (
-  [forked](https://github.com/light-player/glsl-parser) for spans; used by `lpvm` and
-  filetest helpers, not the main naga frontend)
-- **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfx
+  [forked](https://github.com/light-player/glsl-parser) for spans)
+- **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfn
   built-in functions)
 - **[DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler)** - HLSL compiler (
   compiler architecture inspiration)
@@ -163,4 +162,4 @@ LightPlayer would not be possible without the amazing work of these projects:
 ... and many more not listed. Thank you to everyone in the open source community for your work.
 
 Special thanks to @SeanConnell for his support and guidance throughout the development of
-LightPlayer.
+the project.

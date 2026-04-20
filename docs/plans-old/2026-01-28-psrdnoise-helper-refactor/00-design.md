@@ -28,7 +28,7 @@ lp-shader/lps-builtins/src/
 │   │   ├── vec4_q32.rs                         # UPDATE: Add floor(), fract(), step(), min(), max(), mod(), from_vec3_scalar(), extended swizzles
 │   │   └── q32.rs                              # EXISTING: Base Q32 type
 │   └── mod.rs                                  # UPDATE: Export fns module
-└── builtins/lpfx/generative/psrdnoise/
+└── builtins/lpfn/generative/psrdnoise/
     ├── psrdnoise2_q32.rs                       # UPDATE: Refactor to use vector helpers
     └── psrdnoise3_q32.rs                       # UPDATE: Refactor to use vector helpers
 ```

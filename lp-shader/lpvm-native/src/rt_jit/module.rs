@@ -8,6 +8,7 @@ use lpvm::{AllocError, LpvmMemory, LpvmModule};
 use lpvm::{DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE};
 
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::native_options::NativeCompileOptions;
 
 use super::buffer::JitBuffer;
@@ -20,6 +21,7 @@ pub(crate) struct NativeJitModuleInner {
     pub buffer: JitBuffer,
     pub entry_offsets: alloc::collections::BTreeMap<alloc::string::String, usize>,
     pub options: NativeCompileOptions,
+    pub isa: IsaTarget,
 }
 
 /// Cached function handle for fast calls (like cranelift's `DirectCall`).
@@ -56,18 +58,14 @@ impl NativeJitModule {
     pub fn direct_call(&self, name: &str) -> Option<NativeJitDirectCall> {
         let entry_offset = self.inner.entry_offsets.get(name).copied()?;
 
-        let ir_func_idx = self
-            .inner
-            .ir
-            .functions
-            .iter()
-            .position(|f| f.name == name)?;
-        let ir_func = &self.inner.ir.functions[ir_func_idx];
+        let ir_func = self.inner.ir.functions.values().find(|f| f.name == name)?;
 
         let gfn = self.inner.meta.functions.iter().find(|f| f.name == name)?;
 
         let slots = ir_func.total_param_slots() as usize;
-        let func_abi = crate::rv32::abi::func_abi_rv32(gfn, slots);
+        let func_abi = match self.inner.isa {
+            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, slots),
+        };
 
         Some(NativeJitDirectCall {
             entry_offset,
@@ -112,6 +110,7 @@ impl LpvmModule for NativeJitModule {
             globals_offset,
             snapshot_offset,
             globals_size,
+            render_texture_cache: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot

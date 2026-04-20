@@ -2,16 +2,17 @@
 
 use crate::abi::FuncAbi;
 use crate::abi::classify::{ArgLoc, ReturnMethod};
+use crate::isa::IsaTarget;
 use crate::regalloc::trace::TraceEntry;
 use crate::regalloc::{
     Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
 };
-use crate::rv32::gpr::reg_name;
 use crate::vinst::{IcmpCond, ModuleSymbols, VInst, VReg};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lpir::{IrFunction, LpirModule, LpirOp, print_module};
+use lpir::{FuncId, IrFunction, LpirModule, LpirOp, print_module};
 
 /// Indentation for LPIR body lines (after `; ` in the file).
 const IND_LP: &str = "    ";
@@ -32,9 +33,15 @@ fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &Fu
     }
     // Also update param_count to match ABI for printing
     f.param_count = (total_abi_slots.saturating_sub(1)) as u16; // exclude vmctx
+    let id = module
+        .functions
+        .iter()
+        .find(|(_, mf)| mf.name == func.name)
+        .map(|(k, _)| *k)
+        .unwrap_or(FuncId(0));
     let m = LpirModule {
         imports: module.imports.clone(),
-        functions: alloc::vec![f],
+        functions: BTreeMap::from([(id, f)]),
     };
     let s = print_module(&m);
     s.lines()
@@ -57,12 +64,11 @@ fn format_lpir_op_line(
     // Replace the function in the module while preserving all other functions
     // so that CalleeRef indices remain valid.
     let mut functions = module.functions.clone();
-    // Find which function we're replacing by name
-    if let Some(pos) = functions.iter().position(|mf| mf.name == func.name) {
-        functions[pos] = f;
+    if let Some((k, _)) = functions.iter().find(|(_, mf)| mf.name == func.name) {
+        let k = *k;
+        functions.insert(k, f);
     } else {
-        // If not found (shouldn't happen), append it
-        functions.push(f);
+        functions.insert(FuncId(0), f);
     }
     let m = LpirModule {
         imports: module.imports.clone(),
@@ -144,7 +150,7 @@ pub fn render_interleaved(
     let trace_by_vinst = trace_by_vinst_or_empty(output);
 
     lines.push(format_func_header_line(func, module, func_abi));
-    push_alloc_metadata_lines(&mut lines, func, output, func_abi);
+    push_alloc_metadata_lines(&mut lines, func, output, func_abi, func_abi.isa());
     lines.push(String::new());
 
     for (i, op) in func.body.iter().enumerate() {
@@ -167,6 +173,7 @@ pub fn render_interleaved(
                     output,
                     &trace_by_vinst,
                     symbols,
+                    func_abi.isa(),
                 );
             }
         }
@@ -195,6 +202,7 @@ pub fn render_interleaved(
             symbols,
             IND_LP,
             IND_VI,
+            func_abi.isa(),
         );
     }
 
@@ -210,6 +218,7 @@ fn push_vinst_snapshot_block(
     output: &AllocOutput,
     trace_by_vinst: &alloc::collections::BTreeMap<usize, Vec<&TraceEntry>>,
     symbols: &ModuleSymbols,
+    isa: IsaTarget,
 ) {
     push_vinst_snapshot_block_raw(
         lines,
@@ -221,6 +230,7 @@ fn push_vinst_snapshot_block(
         symbols,
         IND_VI,
         IND_VI,
+        isa,
     );
 }
 
@@ -234,6 +244,7 @@ fn push_vinst_snapshot_block_raw(
     symbols: &ModuleSymbols,
     indent_vinst: &str,
     _indent_edit_read: &str,
+    isa: IsaTarget,
 ) {
     let inst_idx_u16 = vinst_idx as u16;
     let offset = output.inst_alloc_offsets[vinst_idx] as usize;
@@ -266,13 +277,13 @@ fn push_vinst_snapshot_block_raw(
 
     // Before-edits, reads, VInst, and writes all at same indentation (part of one op)
     for edit in &before_edits {
-        lines.push(format!("{indent_vinst}; {}", format_edit(edit)));
+        lines.push(format!("{indent_vinst}; {}", format_edit(edit, isa)));
     }
     for (vreg, alloc) in use_vregs.iter().zip(use_allocs.iter()) {
         lines.push(format!(
             "{indent_vinst}; read: i{} <- {}",
             vreg.0,
-            format_alloc(*alloc)
+            format_alloc(*alloc, isa)
         ));
     }
     lines.push(format!(
@@ -283,7 +294,7 @@ fn push_vinst_snapshot_block_raw(
         lines.push(format!(
             "{indent_vinst}; write: i{} -> {}",
             vreg.0,
-            format_alloc(*alloc)
+            format_alloc(*alloc, isa)
         ));
     }
     if let Some(entries) = trace_by_vinst.get(&vinst_idx) {
@@ -295,7 +306,7 @@ fn push_vinst_snapshot_block_raw(
         }
     }
     for edit in &after_edits {
-        lines.push(format!("{indent_vinst}; {}", format_edit(edit)));
+        lines.push(format!("{indent_vinst}; {}", format_edit(edit, isa)));
     }
 }
 
@@ -305,6 +316,7 @@ pub fn render_alloc_output(
     vreg_pool: &[VReg],
     output: &AllocOutput,
     symbols: Option<&ModuleSymbols>,
+    isa: IsaTarget,
 ) -> String {
     let mut lines = Vec::new();
 
@@ -351,12 +363,16 @@ pub fn render_alloc_output(
             .collect();
 
         for edit in &before_edits {
-            lines.push(format!("; {}", format_edit(edit)));
+            lines.push(format!("; {}", format_edit(edit, isa)));
         }
 
         // Render read (use) allocations
         for (_i, (vreg, alloc)) in use_vregs.iter().zip(use_allocs.iter()).enumerate() {
-            lines.push(format!("; read: i{} <- {}", vreg.0, format_alloc(*alloc)));
+            lines.push(format!(
+                "; read: i{} <- {}",
+                vreg.0,
+                format_alloc(*alloc, isa)
+            ));
         }
 
         // Render the instruction
@@ -364,7 +380,11 @@ pub fn render_alloc_output(
 
         // Render write (def) allocations
         for (_i, (vreg, alloc)) in def_vregs.iter().zip(def_allocs.iter()).enumerate() {
-            lines.push(format!("; write: i{} -> {}", vreg.0, format_alloc(*alloc)));
+            lines.push(format!(
+                "; write: i{} -> {}",
+                vreg.0,
+                format_alloc(*alloc, isa)
+            ));
         }
 
         if let Some(entries) = trace_by_vinst.get(&inst_idx) {
@@ -383,7 +403,7 @@ pub fn render_alloc_output(
             .map(|(_, edit)| edit)
             .collect();
         for edit in &after_edits {
-            lines.push(format!("; {}", format_edit(edit)));
+            lines.push(format!("; {}", format_edit(edit, isa)));
         }
     }
 
@@ -470,6 +490,36 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             src, base, offset, ..
         } => {
             format!("Store32 i{}, i{}{:+}", src.0, base.0, offset)
+        }
+        VInst::Load8U {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load8U i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Load8S {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load8S i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Load16U {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load16U i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Load16S {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load16S i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Store8 {
+            src, base, offset, ..
+        } => {
+            format!("Store8 i{}, i{}{:+}", src.0, base.0, offset)
+        }
+        VInst::Store16 {
+            src, base, offset, ..
+        } => {
+            format!("Store16 i{}, i{}{:+}", src.0, base.0, offset)
         }
         VInst::SlotAddr { dst, slot, .. } => {
             format!("i{} = SlotAddr {}", dst.0, slot)
@@ -577,66 +627,38 @@ fn icmp_cond_str(cond: IcmpCond) -> &'static str {
 }
 
 /// Format an allocation as a string.
-fn format_alloc(alloc: Alloc) -> String {
+fn format_alloc(alloc: Alloc, isa: IsaTarget) -> String {
     match alloc {
-        Alloc::Reg(preg) => {
-            // Map PReg to ABI name
-            String::from(match preg {
-                5 => "t0",
-                6 => "t1",
-                7 => "t2",
-                8 => "s0",
-                9 => "s1",
-                10 => "a0",
-                11 => "a1",
-                12 => "a2",
-                13 => "a3",
-                14 => "a4",
-                15 => "a5",
-                16 => "a6",
-                17 => "a7",
-                18 => "s2",
-                19 => "s3",
-                20 => "s4",
-                21 => "s5",
-                22 => "s6",
-                23 => "s7",
-                24 => "s8",
-                25 => "s9",
-                26 => "s10",
-                27 => "s11",
-                28 => "t3",
-                29 => "t4",
-                30 => "t5",
-                31 => "t6",
-                _ => "??",
-            })
-        }
+        Alloc::Reg(preg) => format!("Reg({})", isa.reg_name(preg)),
         Alloc::Stack(slot) => format!("slot{slot}"),
         Alloc::None => String::from("none"),
     }
 }
 
 /// Format an edit as a string.
-fn format_edit(edit: &Edit) -> String {
+fn format_edit(edit: &Edit, isa: IsaTarget) -> String {
     match edit {
         Edit::Move { from, to } => {
-            format!("move: {} -> {}", format_alloc(*from), format_alloc(*to))
+            format!(
+                "move: {} -> {}",
+                format_alloc(*from, isa),
+                format_alloc(*to, isa)
+            )
         }
         Edit::LoadIncomingArg { fp_offset, to } => {
-            format!("load_arg: [fp+{}] -> {}", fp_offset, format_alloc(*to))
+            format!("load_arg: [fp+{}] -> {}", fp_offset, format_alloc(*to, isa))
         }
     }
 }
 
-fn format_arg_loc(loc: &ArgLoc) -> String {
+fn format_arg_loc(loc: &ArgLoc, isa: IsaTarget) -> String {
     match loc {
-        ArgLoc::Reg(p) => reg_name(p.hw).to_string(),
+        ArgLoc::Reg(p) => isa.reg_name(p.hw).to_string(),
         ArgLoc::Stack { offset, .. } => format!("stack+{offset}"),
     }
 }
 
-fn format_return_method(rm: &ReturnMethod) -> String {
+fn format_return_method(rm: &ReturnMethod, isa: IsaTarget) -> String {
     match rm {
         ReturnMethod::Void => String::from("void"),
         ReturnMethod::Direct { locs } => {
@@ -644,7 +666,7 @@ fn format_return_method(rm: &ReturnMethod) -> String {
                 String::from("void")
             } else {
                 locs.iter()
-                    .map(|l| format_arg_loc(l))
+                    .map(|l| format_arg_loc(l, isa))
                     .collect::<Vec<_>>()
                     .join(", ")
             }
@@ -655,8 +677,8 @@ fn format_return_method(rm: &ReturnMethod) -> String {
             word_count,
         } => format!(
             "sret ({word_count} words, ptr={}, preserved={})",
-            reg_name(ptr_reg.hw),
-            reg_name(preserved_reg.hw)
+            isa.reg_name(ptr_reg.hw),
+            isa.reg_name(preserved_reg.hw)
         ),
     }
 }
@@ -666,6 +688,7 @@ fn push_alloc_metadata_lines(
     _func: &IrFunction,
     output: &AllocOutput,
     func_abi: &FuncAbi,
+    isa: IsaTarget,
 ) {
     lines.push(format!("{IND_LP}; spill_slots: {}", output.num_spill_slots));
     // param_locs[0] is vmctx; user params start at index 1
@@ -678,13 +701,13 @@ fn push_alloc_metadata_lines(
             lines.push(format!(
                 "{IND_LP}; arg v{}: {}",
                 vreg_num,
-                format_arg_loc(&loc)
+                format_arg_loc(&loc, isa)
             ));
         }
     }
     lines.push(format!(
         "{IND_LP}; ret: {}",
-        format_return_method(func_abi.return_method())
+        format_return_method(func_abi.return_method(), isa)
     ));
     append_entry_trace_metadata_lines(lines, IND_LP, output);
 }
@@ -692,29 +715,22 @@ fn push_alloc_metadata_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abi::FuncAbi;
     use crate::debug::vinst;
+    use crate::regalloc::test::abi_fixtures;
     use crate::regalloc::walk;
-    use crate::rv32::abi;
-    use lps_shared::{LpsFnSig, LpsType};
-
-    fn make_abi() -> FuncAbi {
-        abi::func_abi_rv32(
-            &LpsFnSig {
-                name: alloc::string::String::from("test"),
-                return_type: LpsType::Void,
-                parameters: vec![],
-            },
-            0,
-        )
-    }
 
     #[test]
     fn render_simple_iconst() {
         let input = "i0 = IConst32 10\nRet i0";
         let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
-        let output = walk::walk_linear(&vinsts, &pool, &make_abi()).unwrap();
-        let rendered = render_alloc_output(&vinsts, &pool, &output, None);
+        let output = walk::walk_linear(&vinsts, &pool, &abi_fixtures::void_func_abi()).unwrap();
+        let rendered = render_alloc_output(
+            &vinsts,
+            &pool,
+            &output,
+            None,
+            abi_fixtures::void_func_abi().isa(),
+        );
 
         // Just check it doesn't panic and contains expected text
         assert!(rendered.contains("IConst32"));

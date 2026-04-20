@@ -22,7 +22,7 @@ pub fn declare_builtins<M: Module>(module: &mut M, pointer_type: Type) -> Result
 ```
 
 All 98 builtins declared unconditionally. In Q32 mode, the F32 variants
-of LPFX functions (LpfxSnoise1F32, LpfxFbm2F32, etc.) are never used.
+of LPFX functions (LpfnSnoise1F32, LpfnFbm2F32, etc.) are never used.
 Similarly, in a hypothetical float mode, LpQ32* builtins would be unused.
 
 ## Fix
@@ -37,9 +37,9 @@ impl BuiltinId {
     pub fn format(&self) -> Option<DecimalFormat> {
         match self {
             BuiltinId::LpQ32Add | ... => Some(DecimalFormat::Q32),
-            BuiltinId::LpfxSnoise1F32 | ... => Some(DecimalFormat::Float),
-            BuiltinId::LpfxHash1 | ... => None, // format-agnostic
-            BuiltinId::LpfxSnoise1Q32 | ... => Some(DecimalFormat::Q32),
+            BuiltinId::LpfnSnoise1F32 | ... => Some(DecimalFormat::Float),
+            BuiltinId::LpfnHash1 | ... => None, // format-agnostic
+            BuiltinId::LpfnSnoise1Q32 | ... => Some(DecimalFormat::Q32),
         }
     }
 }

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add support for vector return types (Vec2, Vec3, Vec4) in LPFX functions using StructReturn. Currently, LPFX functions only support scalar returns, causing a panic when encountering vector return types like `vec3 lpfx_hue2rgb(float hue)`.
+Add support for vector return types (Vec2, Vec3, Vec4) in LPFX functions using StructReturn. Currently, LPFX functions only support scalar returns, causing a panic when encountering vector return types like `vec3 lpfn_hue2rgb(float hue)`.
 
 ## Phases
 

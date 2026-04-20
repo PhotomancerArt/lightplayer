@@ -10,9 +10,9 @@
 
 ## Migrations
 
-- **`lps-builtins-gen-app`:** Local `lpfx/types.rs` + `signature_parse.rs` replace
+- **`lps-builtins-gen-app`:** Local `lpfn/types.rs` + `signature_parse.rs` replace
   `lps-frontend` types; `grouping.rs` replaces the old `generate.rs` LPFX table output. Stopped
-  generating `registry.rs`, `mapping.rs`, and `lpfx_fns.rs` (deleted targets).
+  generating `registry.rs`, `mapping.rs`, and `lpfn_fns.rs` (deleted targets).
 - **`lps-filetests`:** `TranslationUnit::parse` via `glsl::parser::Parse` instead of
   `CompilationPipeline::parse`.
 - **Workspace:** Dropped members/default-members and `profile.release.package.esp32-glsl-jit`;
@@ -33,7 +33,7 @@
 
 ## Tests
 
-- **`lpfx_builtins_memory`:** Fixed builtins WASM export name to `__lp_lpfx_saturate_vec3_q32`.
+- **`lpfn_builtins_memory`:** Fixed builtins WASM export name to `__lp_lpfn_saturate_vec3_q32`.
   Shader integration test remains **`#[ignore]`** — WASM import ABI mismatch for vec3 LPFX; see
   `docs/roadmaps/2026-03-25-lpir-features/`.
 

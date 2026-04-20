@@ -1,10 +1,11 @@
 //! Module and function containers.
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::lpir_op::LpirOp;
-use crate::types::{CalleeRef, IrType, VReg, VRegRange};
+use crate::types::{CalleeRef, FuncId, ImportId, IrType, VReg, VRegRange};
 
 /// VReg that holds the VMContext pointer for the current function. Always [`VReg`] `(0)`;
 /// user parameters use [`VReg`] `(1..)` in [`IrFunction::vreg_types`].
@@ -19,7 +20,7 @@ pub struct ImportDecl {
     pub return_types: Vec<IrType>,
     /// LPFX only: comma-separated logical GLSL parameter kinds for WASM builtin matching
     /// (e.g. `Vec2,Vec2,Float,Vec2,UInt`). When `None`, callers infer from [`Self::param_types`].
-    pub lpfx_glsl_params: Option<String>,
+    pub lpfn_glsl_params: Option<String>,
     /// When true, the native/WASM callee takes the VMContext pointer as its first argument
     /// (not represented in [`Self::param_types`]); lowering passes [`VMCTX_VREG`] first.
     pub needs_vmctx: bool,
@@ -72,14 +73,20 @@ impl IrFunction {
     }
 
     /// Whether this function's body contains any memory-accessing ops
-    /// (Load, Store, SlotAddr, Memcpy).
+    /// (word/narrow load/store, [`LpirOp::SlotAddr`], [`LpirOp::Memcpy`]).
     pub fn uses_memory(&self) -> bool {
         !self.slots.is_empty()
             || self.body.iter().any(|op| {
                 matches!(
                     op,
                     LpirOp::Load { .. }
+                        | LpirOp::Load8U { .. }
+                        | LpirOp::Load8S { .. }
+                        | LpirOp::Load16U { .. }
+                        | LpirOp::Load16S { .. }
                         | LpirOp::Store { .. }
+                        | LpirOp::Store8 { .. }
+                        | LpirOp::Store16 { .. }
                         | LpirOp::SlotAddr { .. }
                         | LpirOp::Memcpy { .. }
                 )
@@ -87,11 +94,11 @@ impl IrFunction {
     }
 }
 
-/// Full LPIR module: imports and local functions.
+/// Full LPIR module: imports and local functions (keyed by stable [`FuncId`]).
 #[derive(Clone, Debug, Default)]
 pub struct LpirModule {
     pub imports: Vec<ImportDecl>,
-    pub functions: Vec<IrFunction>,
+    pub functions: BTreeMap<FuncId, IrFunction>,
 }
 
 impl LpirModule {
@@ -109,28 +116,34 @@ impl LpirModule {
 
     /// `CalleeRef` for the import at `import_index` (0-based).
     pub fn callee_ref_import(import_index: u32) -> CalleeRef {
-        CalleeRef(import_index)
+        CalleeRef::Import(ImportId(import_index as u16))
     }
 
-    /// `CalleeRef` for the local function at `func_index` (0-based), given `import_count`.
-    pub fn callee_ref_function(import_count: u32, func_index: u32) -> CalleeRef {
-        CalleeRef(import_count + func_index)
+    /// `CalleeRef` for an existing local function id.
+    pub fn callee_ref_function(func_id: FuncId) -> CalleeRef {
+        CalleeRef::Local(func_id)
     }
 
     /// Resolve import index from `CalleeRef`, or `None` if it refers to a local function.
     pub fn callee_as_import(&self, callee: CalleeRef) -> Option<usize> {
-        let i = callee.0 as usize;
-        if i < self.imports.len() {
-            Some(i)
-        } else {
-            None
+        match callee {
+            CalleeRef::Import(ImportId(i)) => {
+                let i = i as usize;
+                if i < self.imports.len() {
+                    Some(i)
+                } else {
+                    None
+                }
+            }
+            CalleeRef::Local(_) => None,
         }
     }
 
-    /// Resolve local function index from `CalleeRef`, or `None` if it refers to an import.
-    pub fn callee_as_function(&self, callee: CalleeRef) -> Option<usize> {
-        let i = callee.0 as usize;
-        let n = self.imports.len();
-        if i >= n { Some(i - n) } else { None }
+    /// Resolve local function from `CalleeRef`, or `None` if import or unknown id.
+    pub fn callee_as_function(&self, callee: CalleeRef) -> Option<&IrFunction> {
+        match callee {
+            CalleeRef::Import(_) => None,
+            CalleeRef::Local(id) => self.functions.get(&id),
+        }
     }
 }

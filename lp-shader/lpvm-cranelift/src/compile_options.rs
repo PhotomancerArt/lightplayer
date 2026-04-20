@@ -1,6 +1,6 @@
 //! Shared compile options for JIT and object emission.
 
-use lpir::FloatMode;
+use lpir::{CompilerConfig, FloatMode};
 
 use lps_q32::q32_options::Q32Options;
 
@@ -13,15 +13,22 @@ pub enum MemoryStrategy {
 }
 
 /// Options for LPIR → Cranelift compilation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub float_mode: FloatMode,
+    /// Vestigial — cranelift codegen does not dispatch on Q32 mode.
+    /// Use `config.q32` for the real value once cranelift gains dispatch
+    /// (cranelift JIT is currently deprecated; WASM and native are the
+    /// supported paths). Engine glue keeps both fields in sync.
     pub q32_options: Q32Options,
     pub memory_strategy: MemoryStrategy,
     pub max_errors: Option<usize>,
     /// When true, the LPVM RV32 emulator enables instruction-level guest logging for debug dumps.
     /// Ignored by JIT and object-only compilation.
     pub emu_trace_instructions: bool,
+
+    /// Middle-end LPIR pass settings (inline, etc.).
+    pub config: CompilerConfig,
 }
 
 impl Default for CompileOptions {
@@ -32,6 +39,7 @@ impl Default for CompileOptions {
             memory_strategy: MemoryStrategy::default(),
             max_errors: None,
             emu_trace_instructions: false,
+            config: CompilerConfig::default(),
         }
     }
 }

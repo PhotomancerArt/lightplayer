@@ -9,18 +9,18 @@ proper exports.
 
 ### Create Directories
 
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/`
-- `lp-shader/lps-builtins/src/builtins/lpfx/math/`
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/`
+- `lp-shader/lps-builtins/src/builtins/lpfn/math/`
 
 ### Create Module Files
 
-1. `lpfx/color/mod.rs` - Module declaration for color module
-2. `lpfx/color/space/mod.rs` - Module declaration for color/space, will export HSV functions
-3. `lpfx/math/mod.rs` - Module declaration for math module, will export saturate
+1. `lpfn/color/mod.rs` - Module declaration for color module
+2. `lpfn/color/space/mod.rs` - Module declaration for color/space, will export HSV functions
+3. `lpfn/math/mod.rs` - Module declaration for math module, will export saturate
 
 ### Update Root Module
 
-Update `lpfx/mod.rs` to export the new `color` and `math` modules.
+Update `lpfn/mod.rs` to export the new `color` and `math` modules.
 
 ## Success Criteria
 

@@ -97,4 +97,6 @@ pub struct TestFile {
     pub clif_expectations: ClifExpectations,
     /// Error expectations for `test error` files (inline `expected-error` / `expected-error-code`).
     pub error_expectations: Vec<ErrorExpectation>,
+    /// `// compile-opt(key, value)` lines merged into [`lpir::CompilerConfig`] before compilation.
+    pub config_overrides: Vec<(String, String)>,
 }

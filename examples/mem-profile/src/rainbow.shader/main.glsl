@@ -46,20 +46,20 @@ vec3 applyPalette(float t, float palette) {
 
 // Naga GLSL-in resolves calls in source order; define helpers before render().
 vec2 worley_demo(vec2 scaledCoord, float time) {
-    float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
+    float noiseValue = lpfn_worley(scaledCoord * 2, 0u) / 2 + 0.5;
     float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
     return vec2(t, 1.0);
 }
 
 vec2 fbm_demo(vec2 scaledCoord, float time) {
-    float noiseValue = lpfx_fbm(scaledCoord, 3, 0u);
+    float noiseValue = lpfn_fbm(scaledCoord, 3, 0u);
     float t = mod(time * 0.1 + (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5 / 3.0, 1.0);
     return vec2(t, 1.0);
 }
 
 vec2 prsd_demo(vec2 scaledCoord, float time) {
     vec2 gradient;
-    float noiseValue = lpfx_psrdnoise(
+    float noiseValue = lpfn_psrdnoise(
         scaledCoord,
         vec2(0.0),
         time,
@@ -74,7 +74,10 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
     return vec2(t, v);
 }
 
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+
+vec4 render(vec2 pos) {
     // Palette cycle: 5s per palette, 1s smooth transition to next
     float cyclePhase = mod(time, 5.0);
     float palette = floor(mod(time * 0.2, 5.0));
@@ -88,7 +91,7 @@ vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
 
     vec2 center = outputSize * 0.5;
-    vec2 dir = fragCoord - center;
+    vec2 dir = pos - center;
     vec2 scaledCoord = center + dir * scale;
 
     vec2 tv = prsd_demo(scaledCoord, time);

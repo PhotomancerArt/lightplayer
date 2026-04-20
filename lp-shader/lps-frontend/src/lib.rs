@@ -16,7 +16,7 @@ mod lower_cast;
 mod lower_ctx;
 mod lower_error;
 mod lower_expr;
-mod lower_lpfx;
+mod lower_lpfn;
 mod lower_math;
 mod lower_math_geom;
 mod lower_math_helpers;
@@ -31,7 +31,7 @@ pub mod std_math_handler;
 pub use lower::lower;
 pub use lower_error::LowerError;
 
-pub use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+pub use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
 /// Back-compat alias; prefer [`ParamQualifier`].
 pub type GlslParamQualifier = ParamQualifier;
@@ -140,8 +140,12 @@ mod tests {
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
         assert_eq!(ir.functions.len(), 1);
-        assert_eq!(ir.functions[0].name, "add");
-        assert_eq!(ir.functions[0].param_count, 2);
+        let add = ir
+            .functions
+            .values()
+            .find(|f| f.name == "add")
+            .expect("add fn");
+        assert_eq!(add.param_count, 2);
     }
 
     #[test]
@@ -256,9 +260,9 @@ float test_main() {
     }
 
     #[test]
-    fn lower_lpfx_saturate_validates_and_interps() {
+    fn lower_lpfn_saturate_validates_and_interps() {
         use lpir::interpret;
-        let src = "float f(float x) { return lpfx_saturate(x); }";
+        let src = "float f(float x) { return lpfn_saturate(x); }";
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
@@ -279,7 +283,7 @@ float test_main() {
             func_name: &str,
             args: &[Value],
         ) -> Result<Vec<Value>, InterpError> {
-            if module_name == "lpfx" && func_name.starts_with("lpfx_saturate_") {
+            if module_name == "lpfn" && func_name.starts_with("lpfn_saturate_") {
                 let x = args[0]
                     .as_f32()
                     .ok_or_else(|| InterpError::Import(String::from("expected f32")))?;
@@ -307,7 +311,7 @@ float test_main() {
         // Verify the test function contains Load ops with VMCTX base
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let has_load_from_vmctx = test_func.body.iter().any(|op| {
@@ -346,7 +350,7 @@ float test_main() {
         // Verify the test function contains multiple Load ops
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let load_count = test_func
@@ -377,7 +381,7 @@ float test_main() {
         assert!(sig.globals_type.is_some(), "globals_type should be set");
 
         // Verify __shader_init function exists
-        let init_func = ir.functions.iter().find(|f| f.name == "__shader_init");
+        let init_func = ir.functions.values().find(|f| f.name == "__shader_init");
         assert!(
             init_func.is_some(),
             "__shader_init function should be synthesized"
@@ -403,6 +407,29 @@ float test_main() {
     }
 
     #[test]
+    fn shader_init_is_marked_synthetic() {
+        let glsl = r#"
+        float gShared = 0.5;
+        vec4 render(vec2 pos) {
+            gShared = pos.x;
+            return vec4(gShared);
+        }
+    "#;
+        let naga = compile(glsl).unwrap();
+        let (_ir, meta) = super::lower(&naga).unwrap();
+
+        let init = meta
+            .functions
+            .iter()
+            .find(|f| f.name == "__shader_init")
+            .expect("expected __shader_init for module with non-const global");
+        assert_eq!(init.kind, LpsFnKind::Synthetic);
+
+        let render = meta.functions.iter().find(|f| f.name == "render").unwrap();
+        assert_eq!(render.kind, LpsFnKind::UserDefined);
+    }
+
+    #[test]
     fn lower_global_write_emits_store_to_vmctx() {
         let src = "float my_global; void test() { my_global = 3.14; }";
         let naga = compile(src).unwrap();
@@ -411,7 +438,7 @@ float test_main() {
         // Verify the test function contains Store ops with VMCTX base
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let has_store_to_vmctx = test_func.body.iter().any(|op| {
@@ -440,7 +467,7 @@ float test_main() {
         // Verify the test function contains 3 Store ops (one per component)
         let test_func = ir
             .functions
-            .iter()
+            .values()
             .find(|f| f.name == "test")
             .expect("test function");
         let store_count = test_func

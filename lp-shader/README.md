@@ -75,7 +75,7 @@ tests / exec helpers
 - `lps-builtins/` — `extern "C"` builtin implementations (Q32 / f32, LPFX)
 - `lps-builtins-gen-app/` — Scans builtins; emits IDs, ABI, refs, WASM import types
 - `lps-builtins-emu-app/` — RISC-V guest linking all builtins (emulator filetests)
-- `lpfx-impl-macro/` — Proc-macros for LPFX builtin definitions
+- `lpfn-impl-macro/` — Proc-macros for LPFX builtin definitions
 
 ### Testing
 

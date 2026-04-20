@@ -2,7 +2,7 @@
 
 Date: 2026-03-31  
 Auditor: Agent  
-Scope: All functions in `lp-shader/lps-builtins/src/builtins/lpfx/`
+Scope: All functions in `lp-shader/lps-builtins/src/builtins/lpfn/`
 
 ## Executive Summary
 
@@ -194,7 +194,7 @@ function is MIT-licensed. The formula itself is basic arithmetic, not copyrighta
 
 - Our implementation references noise-rs (MIT/Apache-2.0), NOT LYGIA
 - Algorithm is from Steven Worley's 1996 SIGGRAPH paper (public domain concept)
-- We use our own lpfx_hash2 function
+- We use our own lpfn_hash2 function
 
 ### 9. COLOR SPACE Functions (`color/space/`)
 

@@ -6,28 +6,28 @@ Implement the `saturate` function which clamps values between 0 and 1. This is a
 
 ## Implementation
 
-### File: `lpfx/math/saturate_q32.rs`
+### File: `lpfn/math/saturate_q32.rs`
 
 Implement following the two-layer pattern:
 
 **Public Rust functions (can be inlined):**
-- `lpfx_saturate_q32(value: Q32) -> Q32` - Clamp single Q32 value to [0, 1]
-- `lpfx_saturate_vec3_q32(v: Vec3Q32) -> Vec3Q32` - Saturate each component of vec3
-- `lpfx_saturate_vec4_q32(v: Vec4Q32) -> Vec4Q32` - Saturate each component of vec4
+- `lpfn_saturate_q32(value: Q32) -> Q32` - Clamp single Q32 value to [0, 1]
+- `lpfn_saturate_vec3_q32(v: Vec3Q32) -> Vec3Q32` - Saturate each component of vec3
+- `lpfn_saturate_vec4_q32(v: Vec4Q32) -> Vec4Q32` - Saturate each component of vec4
 
 **Extern C wrappers (for compiler):**
-- `__lpfx_saturate_q32(value: i32) -> i32` - Wraps `lpfx_saturate_q32`
-- `__lpfx_saturate_vec3_q32(x: i32, y: i32, z: i32) -> (i32, i32, i32)` - Wraps `lpfx_saturate_vec3_q32`
-- `__lpfx_saturate_vec4_q32(x: i32, y: i32, z: i32, w: i32) -> (i32, i32, i32, i32)` - Wraps `lpfx_saturate_vec4_q32`
+- `__lpfn_saturate_q32(value: i32) -> i32` - Wraps `lpfn_saturate_q32`
+- `__lpfn_saturate_vec3_q32(x: i32, y: i32, z: i32) -> (i32, i32, i32)` - Wraps `lpfn_saturate_vec3_q32`
+- `__lpfn_saturate_vec4_q32(x: i32, y: i32, z: i32, w: i32) -> (i32, i32, i32, i32)` - Wraps `lpfn_saturate_vec4_q32`
 
 Each extern C wrapper should have:
-- `#[lpfx_impl_macro::lpfx_impl]` annotation with appropriate GLSL signature
+- `#[lpfn_impl_macro::lpfn_impl]` annotation with appropriate GLSL signature
 - `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
-- Convert expanded types to nice types, call the `lpfx_*` function, convert back
+- Convert expanded types to nice types, call the `lpfn_*` function, convert back
 
 ### Update Module
 
-Update `lpfx/math/mod.rs` to export `saturate_q32`.
+Update `lpfn/math/mod.rs` to export `saturate_q32`.
 
 ## Success Criteria
 

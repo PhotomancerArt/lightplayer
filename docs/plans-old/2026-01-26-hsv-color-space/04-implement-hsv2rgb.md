@@ -6,27 +6,27 @@ Implement the `hsv2rgb` function which converts HSV color space to RGB. This fun
 
 ## Implementation
 
-### File: `lpfx/color/space/hsv2rgb_q32.rs`
+### File: `lpfn/color/space/hsv2rgb_q32.rs`
 
 Implement following the two-layer pattern:
 
 **Public Rust functions:**
-- `lpfx_hsv2rgb_q32(hsv: Vec3Q32) -> Vec3Q32` - Convert HSV to RGB
-  - Algorithm: `((lpfx_hue2rgb_q32(hsv.x) - Vec3Q32::one()) * hsv.y + Vec3Q32::one()) * hsv.z`
-  - Uses `lpfx_hue2rgb_q32` (calls the public Rust function)
-- `lpfx_hsv2rgb_vec4_q32(hsv: Vec4Q32) -> Vec4Q32` - Convert HSV to RGB (preserves alpha)
-  - Applies `lpfx_hsv2rgb_q32` to RGB components, preserves alpha
+- `lpfn_hsv2rgb_q32(hsv: Vec3Q32) -> Vec3Q32` - Convert HSV to RGB
+  - Algorithm: `((lpfn_hue2rgb_q32(hsv.x) - Vec3Q32::one()) * hsv.y + Vec3Q32::one()) * hsv.z`
+  - Uses `lpfn_hue2rgb_q32` (calls the public Rust function)
+- `lpfn_hsv2rgb_vec4_q32(hsv: Vec4Q32) -> Vec4Q32` - Convert HSV to RGB (preserves alpha)
+  - Applies `lpfn_hsv2rgb_q32` to RGB components, preserves alpha
 
 **Extern C wrappers:**
-- `__lpfx_hsv2rgb_q32(x: i32, y: i32, z: i32) -> (i32, i32, i32)` - Wraps `lpfx_hsv2rgb_q32`
-- `__lpfx_hsv2rgb_vec4_q32(x: i32, y: i32, z: i32, w: i32) -> (i32, i32, i32, i32)` - Wraps `lpfx_hsv2rgb_vec4_q32`
-  - Both have `#[lpfx_impl_macro::lpfx_impl]` annotations with GLSL signatures
+- `__lpfn_hsv2rgb_q32(x: i32, y: i32, z: i32) -> (i32, i32, i32)` - Wraps `lpfn_hsv2rgb_q32`
+- `__lpfn_hsv2rgb_vec4_q32(x: i32, y: i32, z: i32, w: i32) -> (i32, i32, i32, i32)` - Wraps `lpfn_hsv2rgb_vec4_q32`
+  - Both have `#[lpfn_impl_macro::lpfn_impl]` annotations with GLSL signatures
   - Both have `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
-  - Convert expanded types to nice types, call the `lpfx_*` function, convert back
+  - Convert expanded types to nice types, call the `lpfn_*` function, convert back
 
 ### Update Module
 
-Update `lpfx/color/space/mod.rs` to export `hsv2rgb_q32`.
+Update `lpfn/color/space/mod.rs` to export `hsv2rgb_q32`.
 
 ## Success Criteria
 

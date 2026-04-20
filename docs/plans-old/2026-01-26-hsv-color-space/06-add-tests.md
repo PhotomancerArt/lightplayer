@@ -9,10 +9,10 @@ Add comprehensive tests for all HSV color space functions, covering basic conver
 ### Test Files
 
 Add test modules to each implementation file:
-- `lpfx/math/saturate_q32.rs` - Tests for saturate functions
-- `lpfx/color/space/hue2rgb_q32.rs` - Tests for hue2rgb
-- `lpfx/color/space/hsv2rgb_q32.rs` - Tests for hsv2rgb
-- `lpfx/color/space/rgb2hsv_q32.rs` - Tests for rgb2hsv
+- `lpfn/math/saturate_q32.rs` - Tests for saturate functions
+- `lpfn/color/space/hue2rgb_q32.rs` - Tests for hue2rgb
+- `lpfn/color/space/hsv2rgb_q32.rs` - Tests for hsv2rgb
+- `lpfn/color/space/rgb2hsv_q32.rs` - Tests for rgb2hsv
 
 ### Test Cases
 

@@ -12,7 +12,7 @@ plumbing, inline gentype builtins, `q32_builtin_link` smoke test.
 | [`00-design.md`](00-design.md)                                   | Architecture, file structure, component summary.                 |
 | [`01-fix-psrdnoise-seed.md`](01-fix-psrdnoise-seed.md)           | Phase 1: Fix psrdnoise seed parameter bug.                       |
 | [`02-math-gaps.md`](02-math-gaps.md)                             | Phase 2: Inline `floor`, `fract` Q32; verify `atan`/`cos`/`exp`. |
-| [`03-lpfx-call-emission.md`](03-lpfx-call-emission.md)           | Phase 3: LPFX FunCall dispatch, arg flattening, out params.      |
+| [`03-lpfn-call-emission.md`](03-lpfn-call-emission.md)           | Phase 3: LPFX FunCall dispatch, arg flattening, out params.      |
 | [`04-filetest-runner-rainbow.md`](04-filetest-runner-rainbow.md) | Phase 4: Filetest runner linking, Rainbow end-to-end.            |
 | [`05-cleanup-validation.md`](05-cleanup-validation.md)           | Phase 5: Cleanup, validation, plan closure.                      |
 

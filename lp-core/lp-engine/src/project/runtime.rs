@@ -998,14 +998,8 @@ impl ProjectRuntime {
                                 runtime.as_any().downcast_ref::<TextureRuntime>()
                             {
                                 // Clone state and update with current texture data
-                                let mut state = tex_runtime.state.clone();
-                                // Update texture_data from current texture if available
-                                if let Some(tex) = tex_runtime.texture() {
-                                    state.texture_data.set(self.frame_id, tex.data().to_vec());
-                                    state.width.set(self.frame_id, tex.width());
-                                    state.height.set(self.frame_id, tex.height());
-                                    state.format.set(self.frame_id, tex.format());
-                                }
+                                let state = tex_runtime.state.clone();
+                                // TODO(M4a): texture_data / live pixels should come from upstream shader buffer
                                 NodeState::Texture(state)
                             } else {
                                 // Fallback to empty state
@@ -1366,6 +1360,89 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
     fn now_ms(&self) -> Option<u64> {
         self.runtime.time_provider.as_ref().map(|t| t.now_ms())
     }
+
+    fn get_texture_config(
+        &self,
+        handle: crate::runtime::contexts::TextureHandle,
+    ) -> Result<lp_model::nodes::texture::TextureConfig, Error> {
+        let node_handle = handle.as_node_handle();
+        let entry = self
+            .runtime
+            .nodes
+            .get(&node_handle)
+            .ok_or_else(|| Error::NotFound {
+                path: format!("texture-{}", node_handle.as_i32()),
+            })?;
+
+        if entry.kind != NodeKind::Texture {
+            return Err(Error::WrongNodeKind {
+                specifier: format!("texture-{}", node_handle.as_i32()),
+                expected: NodeKind::Texture,
+                actual: entry.kind,
+            });
+        }
+
+        let runtime = entry.runtime.as_ref().ok_or_else(|| Error::Other {
+            message: format!("Texture node {} has no runtime", node_handle.as_i32()),
+        })?;
+
+        let tex_runtime = runtime
+            .as_any()
+            .downcast_ref::<TextureRuntime>()
+            .ok_or_else(|| Error::Other {
+                message: format!("Node {} is not a texture runtime", node_handle.as_i32()),
+            })?;
+
+        tex_runtime
+            .get_config()
+            .cloned()
+            .ok_or_else(|| Error::InvalidConfig {
+                node_path: format!("texture-{}", node_handle.as_i32()),
+                reason: String::from("Config not set"),
+            })
+    }
+
+    fn texture_output_buffer_owner(
+        &self,
+        handle: crate::runtime::contexts::TextureHandle,
+        fallback_if_no_shader_yet: NodeHandle,
+    ) -> NodeHandle {
+        texture_output_owner_handle(&self.runtime.nodes, handle)
+            .unwrap_or(fallback_if_no_shader_yet)
+    }
+}
+
+/// Shader node that owns the shared CPU buffer for a texture target (see [`texture_output_owner_handle`]).
+fn texture_output_owner_handle(
+    nodes: &BTreeMap<NodeHandle, NodeEntry>,
+    texture_handle: crate::runtime::contexts::TextureHandle,
+) -> Option<NodeHandle> {
+    let mut best: Option<(i32, NodeHandle)> = None;
+    for (h, entry) in nodes.iter() {
+        if entry.kind != NodeKind::Shader || entry.status != NodeStatus::Ok {
+            continue;
+        }
+        let Some(runtime) = entry.runtime.as_ref() else {
+            continue;
+        };
+        let Some(shader) = runtime.as_any().downcast_ref::<ShaderRuntime>() else {
+            continue;
+        };
+        if !shader.targets_texture(texture_handle) {
+            continue;
+        }
+        let ord = shader.render_order();
+        let replace = match best {
+            None => true,
+            Some((best_ord, best_h)) => {
+                ord > best_ord || (ord == best_ord && h.as_i32() > best_h.as_i32())
+            }
+        };
+        if replace {
+            best = Some((ord, *h));
+        }
+    }
+    best.map(|(_, h)| h)
 }
 
 /// Render context implementation
@@ -1380,8 +1457,7 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
     fn get_texture(
         &mut self,
         handle: crate::runtime::contexts::TextureHandle,
-    ) -> Result<&lp_shared::Texture, Error> {
-        // Ensure texture is rendered (lazy rendering)
+    ) -> Result<&dyn lps_shared::TextureBuffer, Error> {
         Self::ensure_texture_rendered(
             self.nodes,
             handle,
@@ -1390,42 +1466,25 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
             Rc::clone(&self.output_provider),
         )?;
 
-        // Get texture runtime
-        let node_handle = handle.as_node_handle();
-        let entry = self
-            .nodes
-            .get_mut(&node_handle)
-            .ok_or_else(|| Error::NotFound {
-                path: format!("texture-{}", node_handle.as_i32()),
-            })?;
+        let shader = Self::find_shader_for_texture(self.nodes, handle).ok_or_else(|| Error::Other {
+            message: format!(
+                "Texture {} has no shader writing to it; there are no shader-independent texture sources",
+                handle.as_node_handle().as_i32()
+            ),
+        })?;
 
-        // Ensure texture allocated (may have been shed before shader recompile)
-        if let Some(runtime) = &mut entry.runtime {
-            if let Some(tex_runtime) = runtime
-                .as_any_mut()
-                .downcast_mut::<crate::nodes::TextureRuntime>()
-            {
-                tex_runtime.ensure_texture()?;
-                return tex_runtime.texture().ok_or_else(|| Error::Other {
-                    message: "Texture not initialized".to_string(),
-                });
-            } else {
-                Err(Error::Other {
-                    message: "Texture runtime not found".to_string(),
-                })
-            }
-        } else {
-            Err(Error::Other {
-                message: "Runtime not initialized".to_string(),
-            })
-        }
+        shader.output_buffer().ok_or_else(|| Error::Other {
+            message: format!(
+                "Shader output buffer for texture {} is not allocated",
+                handle.as_node_handle().as_i32()
+            ),
+        })
     }
 
-    fn get_texture_mut(
+    fn get_target_texture_pixels_mut(
         &mut self,
         handle: crate::runtime::contexts::TextureHandle,
-    ) -> Result<&mut lp_shared::Texture, Error> {
-        // Ensure texture is rendered (lazy rendering)
+    ) -> Result<&mut lp_shader::LpsTextureBuf, Error> {
         Self::ensure_texture_rendered(
             self.nodes,
             handle,
@@ -1434,35 +1493,19 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
             Rc::clone(&self.output_provider),
         )?;
 
-        // Get texture runtime
-        let node_handle = handle.as_node_handle();
-        let entry = self
-            .nodes
-            .get_mut(&node_handle)
-            .ok_or_else(|| Error::NotFound {
-                path: format!("texture-{}", node_handle.as_i32()),
-            })?;
+        let shader = Self::find_shader_for_texture(self.nodes, handle).ok_or_else(|| Error::Other {
+            message: format!(
+                "Texture {} has no shader writing to it; there are no shader-independent texture sources",
+                handle.as_node_handle().as_i32()
+            ),
+        })?;
 
-        // Ensure texture allocated and get mutable reference
-        if let Some(runtime) = &mut entry.runtime {
-            if let Some(tex_runtime) = runtime
-                .as_any_mut()
-                .downcast_mut::<crate::nodes::TextureRuntime>()
-            {
-                tex_runtime.ensure_texture()?;
-                return tex_runtime.texture_mut().ok_or_else(|| Error::Other {
-                    message: "Texture not initialized".to_string(),
-                });
-            } else {
-                Err(Error::Other {
-                    message: "Texture runtime not found".to_string(),
-                })
-            }
-        } else {
-            Err(Error::Other {
-                message: "Runtime not initialized".to_string(),
-            })
-        }
+        shader.output_buffer_mut().ok_or_else(|| Error::Other {
+            message: format!(
+                "Shader output buffer for texture {} is not allocated",
+                handle.as_node_handle().as_i32()
+            ),
+        })
     }
 
     fn get_time(&self) -> f32 {
@@ -1600,8 +1643,7 @@ impl<'a> RenderContextImpl<'a> {
         );
 
         // Mark texture as rendering BEFORE calling shader.render() to prevent infinite recursion
-        // When shader.render() calls get_texture_mut(), it will see state_ver >= frame_id
-        // and skip re-rendering
+        // when the shader samples another texture via get_texture().
         if let Some(entry) = nodes.get_mut(&node_handle) {
             entry.state_ver = frame_id;
         }
@@ -1670,6 +1712,18 @@ impl<'a> RenderContextImpl<'a> {
         }
 
         Ok(())
+    }
+
+    /// Resolves the shader that owns the shared output buffer for this texture (see
+    /// [`texture_output_owner_handle`]).
+    fn find_shader_for_texture(
+        nodes: &mut BTreeMap<NodeHandle, NodeEntry>,
+        texture_handle: crate::runtime::contexts::TextureHandle,
+    ) -> Option<&mut ShaderRuntime> {
+        let best_h = texture_output_owner_handle(nodes, texture_handle)?;
+        let entry = nodes.get_mut(&best_h)?;
+        let runtime = entry.runtime.as_mut()?;
+        runtime.as_any_mut().downcast_mut::<ShaderRuntime>()
     }
 }
 

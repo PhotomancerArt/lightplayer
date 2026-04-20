@@ -94,6 +94,9 @@ pub fn extract_source_and_expectations(
     let skip_directives = !test_types.contains(&TestType::Error);
     for line in lines.iter().take(glsl_end) {
         let trimmed = line.trim();
+        if trimmed.starts_with("// compile-opt") {
+            continue;
+        }
         if skip_directives {
             if trimmed.starts_with("// test") || trimmed.starts_with("// target") {
                 continue;

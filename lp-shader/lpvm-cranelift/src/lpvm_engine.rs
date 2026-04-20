@@ -36,7 +36,19 @@ impl LpvmEngine for CraneliftEngine {
     type Error = CompilerError;
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        CraneliftModule::compile(ir, meta, self.options)
+        CraneliftModule::compile(ir, meta, self.options.clone())
+    }
+
+    fn compile_with_config(
+        &self,
+        ir: &LpirModule,
+        meta: &LpsModuleSig,
+        config: &lpir::CompilerConfig,
+    ) -> Result<Self::Module, Self::Error> {
+        let mut opts = self.options.clone();
+        opts.config = config.clone();
+        opts.q32_options = config.q32;
+        CraneliftModule::compile(ir, meta, opts)
     }
 
     fn memory(&self) -> &dyn LpvmMemory {

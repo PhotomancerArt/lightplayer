@@ -33,7 +33,7 @@ lp-shader/lps-filetests/src/test_run/
 └── wasm_runner.rs            # UPDATE: use lpvm-wasm instead
 
 lp-shader/lps-filetests/tests/
-└── lpfx_builtins_memory.rs   # UPDATE: use lpvm-wasm instantiate/link
+└── lpfn_builtins_memory.rs   # UPDATE: use lpvm-wasm instantiate/link
 
 lp-shader/legacy/
 ├── lps-exec/                 # DELETE entire crate

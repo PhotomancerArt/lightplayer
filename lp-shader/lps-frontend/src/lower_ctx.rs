@@ -81,7 +81,7 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) pointer_args: BTreeMap<u32, Handle<Type>>,
     pub func_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub import_map: BTreeMap<String, CalleeRef>,
-    pub lpfx_map: BTreeMap<Handle<Function>, CalleeRef>,
+    pub lpfn_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub return_types: Vec<IrType>,
     /// Map from Naga GlobalVariable handle to (vmctx_byte_offset, component_count, is_uniform).
     pub(crate) global_map: GlobalVarMap,
@@ -94,7 +94,7 @@ impl<'a> LowerCtx<'a> {
         name: &str,
         func_map: &BTreeMap<Handle<Function>, CalleeRef>,
         import_map: &BTreeMap<String, CalleeRef>,
-        lpfx_map: &BTreeMap<Handle<Function>, CalleeRef>,
+        lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
         global_map: GlobalVarMap,
     ) -> Result<Self, LowerError> {
         let return_types = func_return_ir_types(module, func)?;
@@ -217,7 +217,7 @@ impl<'a> LowerCtx<'a> {
             pointer_args,
             func_map: func_map.clone(),
             import_map: import_map.clone(),
-            lpfx_map: lpfx_map.clone(),
+            lpfn_map: lpfn_map.clone(),
             return_types,
             global_map,
         };

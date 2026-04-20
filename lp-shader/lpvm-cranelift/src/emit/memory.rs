@@ -54,6 +54,80 @@ pub(crate) fn emit_memory(
                     .map_err(|_| CompileError::unsupported("store offset does not fit in i32"))?,
             );
         }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = use_v(builder, vars, *value);
+            builder.ins().istore8(
+                MemFlags::new(),
+                val,
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("store8 offset does not fit in i32"))?,
+            );
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = use_v(builder, vars, *value);
+            builder.ins().istore16(
+                MemFlags::new(),
+                val,
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("store16 offset does not fit in i32"))?,
+            );
+        }
+        LpirOp::Load8U { dst, base, offset } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = builder.ins().uload8(
+                types::I32,
+                MemFlags::new(),
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("load8u offset does not fit in i32"))?,
+            );
+            def_v(builder, vars, *dst, val);
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = builder.ins().sload8(
+                types::I32,
+                MemFlags::new(),
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("load8s offset does not fit in i32"))?,
+            );
+            def_v(builder, vars, *dst, val);
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = builder.ins().uload16(
+                types::I32,
+                MemFlags::new(),
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("load16u offset does not fit in i32"))?,
+            );
+            def_v(builder, vars, *dst, val);
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = builder.ins().sload16(
+                types::I32,
+                MemFlags::new(),
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("load16s offset does not fit in i32"))?,
+            );
+            def_v(builder, vars, *dst, val);
+        }
         LpirOp::Memcpy {
             dst_addr,
             src_addr,

@@ -5,8 +5,7 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_model::{AsLpPath, AsLpPathBuf};
-use lp_server::LpServer;
-use lp_server::{CraneliftGraphics, LpGraphics};
+use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::fs::LpFsMemory;
 
 #[test]
@@ -14,7 +13,7 @@ fn test_fs_changes_not_repeated() {
     // Create server with memory filesystem
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let base_fs = Box::new(LpFsMemory::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
     let mut server = LpServer::new(
         output_provider.clone(),
         base_fs,

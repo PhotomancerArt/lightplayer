@@ -1,29 +1,29 @@
-# Phase 4: Update check_lpfx_fn_call to use new find_lpfx_fn
+# Phase 4: Update check_lpfn_fn_call to use new find_lpfn_fn
 
 ## Description
 
-Update `check_lpfx_fn_call` to use the new `find_lpfx_fn` signature that requires `arg_types`.
+Update `check_lpfn_fn_call` to use the new `find_lpfn_fn` signature that requires `arg_types`.
 Extract the return type from the resolved function.
 
 ## Implementation
 
-### File: `lp-shader/lps-compiler/src/frontend/semantic/lpfx/lpfx_fn_registry.rs`
+### File: `lp-shader/lps-compiler/src/frontend/semantic/lpfn/lpfn_fn_registry.rs`
 
-**Update `check_lpfx_fn_call`:**
+**Update `check_lpfn_fn_call`:**
 
-- Currently calls `find_lpfx_fn(name)` then validates types
-- Change to: Call `find_lpfx_fn(name, arg_types)` which does resolution
+- Currently calls `find_lpfn_fn(name)` then validates types
+- Change to: Call `find_lpfn_fn(name, arg_types)` which does resolution
 - Extract return type from the resolved function
 - Update error messages if needed (function already receives `arg_types`)
 
 **Remove duplicate validation:**
 
-- `find_lpfx_fn` now handles type matching, so `check_lpfx_fn_call` can be simplified
-- Keep `check_lpfx_fn_call` as a convenience wrapper that returns the return type
+- `find_lpfn_fn` now handles type matching, so `check_lpfn_fn_call` can be simplified
+- Keep `check_lpfn_fn_call` as a convenience wrapper that returns the return type
 
 ## Success Criteria
 
-- `check_lpfx_fn_call` uses new `find_lpfx_fn` signature
+- `check_lpfn_fn_call` uses new `find_lpfn_fn` signature
 - Return type correctly extracted from resolved function
 - Error messages updated appropriately
 - Code compiles without warnings

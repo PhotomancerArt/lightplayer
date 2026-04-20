@@ -20,11 +20,11 @@ Search the git diff and codebase for any remaining old-convention references:
 
 ```
 rg '__lp_q32_' lp-shader/     # should only appear in stale lps-cranelift
-rg '__lpfx_' lp-shader/       # same — only stale old cranelift
+rg '__lpfn_' lp-shader/       # same — only stale old cranelift
 rg 'std\.math' lp-shader/     # should be zero outside old cranelift
 rg 'StdMathHandler' lp-shader/  # should be zero (renamed)
 rg 'LpQ32' lp-shader/         # old variant names, should be zero outside old cranelift
-rg 'Lpfx[A-Z]' lp-shader/     # old lpfx variant names (LpfxFbm not LpLpfxFbm)
+rg 'Lpfn[A-Z]' lp-shader/     # old lpfn variant names (LpfnFbm not LpLpfnFbm)
 ```
 
 Any hits outside `lps-cranelift/` need fixing.
@@ -85,7 +85,7 @@ refactor(builtins): rename all builtins to __lp_<module>_<fn>_<mode> convention
 
 - Rename 29 Q32 math builtins: 6 to lpir module (fadd, fsub, fmul, fdiv,
   fsqrt, fnearest), 23 to glsl module (sin, cos, pow, etc.)
-- Rename 67 LPFX builtins: __lpfx_ prefix → __lp_lpfx_
+- Rename 67 LPFX builtins: __lpfn_ prefix → __lp_lpfn_
 - Make BuiltinId self-describing: add module(), fn_name(), mode() methods
 - Add Module and Mode enums to lps-builtin-ids
 - Split LPIR import module "std.math" into "glsl" and "lpir"

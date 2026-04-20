@@ -6,7 +6,10 @@ use std::format;
 use js_sys::{Function, Reflect, WebAssembly};
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
-use lpvm::{LpsValueF32, LpvmInstance, encode_uniform_write, encode_uniform_write_q32};
+use lpvm::{
+    LpsValueF32, LpvmBuffer, LpvmInstance, encode_uniform_write, encode_uniform_write_q32,
+    validate_render_texture_sig_ir,
+};
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::error::WasmError;
@@ -17,6 +20,12 @@ use super::link;
 use super::marshal::{
     build_js_args, build_js_args_q32_flat, js_result_to_lps_value, js_result_to_q32_words,
 };
+use lpir::LpirModule;
+
+struct RenderTextureEntry {
+    name: String,
+    func: Function,
+}
 
 pub struct BrowserLpvmInstance {
     instance: WebAssembly::Instance,
@@ -26,6 +35,8 @@ pub struct BrowserLpvmInstance {
     signatures: LpsModuleSig,
     shadow_stack_base: Option<i32>,
     float_mode: FloatMode,
+    lpir: LpirModule,
+    render_texture_cache: Option<RenderTextureEntry>,
 }
 
 impl BrowserLpvmInstance {
@@ -43,6 +54,8 @@ impl BrowserLpvmInstance {
             signatures: module.signatures.clone(),
             shadow_stack_base: module.shadow_stack_base,
             float_mode: module.opts.float_mode,
+            lpir: module.lpir.clone(),
+            render_texture_cache: None,
         })
     }
 
@@ -94,6 +107,36 @@ impl BrowserLpvmInstance {
         );
         view.copy_from(data);
         Ok(())
+    }
+
+    fn resolve_render_texture(&mut self, fn_name: &str) -> Result<Function, WasmError> {
+        if let Some(entry) = &self.render_texture_cache {
+            if entry.name == fn_name {
+                return Ok(entry.func.clone());
+            }
+        }
+
+        let ir_fn = self
+            .lpir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| WasmError::runtime(format!("function `{fn_name}` not in LPIR")))?;
+        validate_render_texture_sig_ir(ir_fn)
+            .map_err(|e| WasmError::runtime(format!("render-texture sig invalid: {e}")))?;
+
+        let func_val = Reflect::get(&self.exports_obj, &JsValue::from_str(fn_name))
+            .map_err(|e| WasmError::runtime(format!("get export {fn_name}: {e:?}")))?;
+        let func: Function = func_val
+            .dyn_into()
+            .map_err(|_| WasmError::runtime(format!("`{fn_name}` is not a function")))?;
+
+        let func_ret = func.clone();
+        self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            func,
+        });
+        Ok(func_ret)
     }
 
     pub fn js_instance(&self) -> &WebAssembly::Instance {
@@ -205,6 +248,39 @@ impl LpvmInstance for BrowserLpvmInstance {
         }
 
         js_result_to_q32_words(&return_ty, &result, self.float_mode)
+    }
+
+    fn call_render_texture(
+        &mut self,
+        fn_name: &str,
+        texture: &mut LpvmBuffer,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Self::Error> {
+        if self.float_mode != FloatMode::Q32 {
+            return Err(WasmError::runtime(
+                "BrowserLpvmInstance::call_render_texture requires FloatMode::Q32",
+            ));
+        }
+
+        let func = self.resolve_render_texture(fn_name)?;
+        let tex_offset = i32::try_from(texture.guest_base()).map_err(|_| {
+            WasmError::runtime(format!(
+                "texture guest base {:#x} exceeds i32 range",
+                texture.guest_base()
+            ))
+        })?;
+
+        let js_args = js_sys::Array::new();
+        js_args.push(&JsValue::from_f64(0.0));
+        js_args.push(&JsValue::from_f64(f64::from(tex_offset)));
+        js_args.push(&JsValue::from_f64(f64::from(width as i32)));
+        js_args.push(&JsValue::from_f64(f64::from(height as i32)));
+
+        self.prepare_call()?;
+        func.apply(&JsValue::NULL, &js_args)
+            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        Ok(())
     }
 
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {

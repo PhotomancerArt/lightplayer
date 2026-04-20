@@ -17,7 +17,7 @@ in Q32 mode.
 - Import resolution: LPIR `ImportDecl` → `BuiltinId` → Cranelift func ref
     - `glsl::sin` + Q32 → `__lps_sin_q32` → declared import, resolved
       via symbol lookup
-    - `lpfx::fbm2` + Q32 → `__lp_lpfx_fbm2_q32` → same path
+    - `lpfn::fbm2` + Q32 → `__lp_lpfn_fbm2_q32` → same path
     - Resolution logic shared with WASM emitter (from Stage I's BuiltinId)
 - Builtin declaration in JIT module:
     - Iterate relevant BuiltinIds for current float mode
@@ -78,8 +78,8 @@ in Q32 mode.
   signature info. Should BuiltinId carry signature metadata, or should the
   emitter derive it from LPIR `ImportDecl.param_types`/`return_types`?
   Using LPIR's declared types is simpler and avoids signature duplication.
-- **LPFX `lpfx_glsl_params` metadata**: The WASM emitter uses this to
-  resolve LPFX import overloads (`glsl_lpfx_q32_builtin_id` needs GLSL
+- **LPFX `lpfn_glsl_params` metadata**: The WASM emitter uses this to
+  resolve LPFX import overloads (`glsl_lpfn_q32_builtin_id` needs GLSL
   param kinds, not flat IrTypes). The Cranelift emitter needs the same
   resolution. Confirm this metadata survives through the LPIR module.
 - **Local function calls**: LPIR `Op::Call` with `CalleeRef` pointing to

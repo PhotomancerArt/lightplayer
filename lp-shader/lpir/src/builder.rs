@@ -1,11 +1,12 @@
 //! Stack-based builders for [`crate::lpir_module::IrFunction`] and [`crate::lpir_module::LpirModule`].
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
-use crate::types::{CalleeRef, IrType, SlotId, VReg, VRegRange};
+use crate::types::{CalleeRef, FuncId, ImportId, IrType, SlotId, VReg, VRegRange};
 
 /// Build a single function's IR (flat op stream + pools).
 pub struct FunctionBuilder {
@@ -32,6 +33,10 @@ enum BlockEntry {
     Loop {
         start_idx: usize,
         continuing_set: bool,
+    },
+    /// `LpirOp::Block` at `start_idx`; `end_offset` patched in [`FunctionBuilder::push_end_block`].
+    Block {
+        start_idx: usize,
     },
     Switch {
         start_idx: usize,
@@ -210,6 +215,36 @@ impl FunctionBuilder {
         }
     }
 
+    pub fn push_block(&mut self) {
+        let idx = self.body.len();
+        self.body.push(LpirOp::Block { end_offset: 0 });
+        self.block_stack.push(BlockEntry::Block { start_idx: idx });
+    }
+
+    pub fn end_block(&mut self) {
+        let end_idx = self.body.len();
+        self.body.push(LpirOp::End);
+        let after = (end_idx + 1) as u32;
+        let entry = self
+            .block_stack
+            .pop()
+            .expect("end_block without push_block");
+        match entry {
+            BlockEntry::Block { start_idx } => {
+                if let LpirOp::Block { end_offset } = &mut self.body[start_idx] {
+                    *end_offset = after;
+                } else {
+                    panic!("end_block: corrupted Block entry");
+                }
+            }
+            _ => panic!("end_block: expected Block"),
+        }
+    }
+
+    pub fn push_exit_block(&mut self) {
+        self.body.push(LpirOp::ExitBlock);
+    }
+
     pub fn push_switch(&mut self, selector: VReg) {
         let idx = self.body.len();
         self.body.push(LpirOp::SwitchStart {
@@ -301,6 +336,10 @@ impl FunctionBuilder {
         match self.block_stack.last() {
             Some(BlockEntry::If { .. }) | Some(BlockEntry::Else { .. }) => {
                 self.end_if();
+                Ok(())
+            }
+            Some(BlockEntry::Block { .. }) => {
+                self.end_block();
                 Ok(())
             }
             Some(BlockEntry::Loop { .. }) => {
@@ -402,15 +441,30 @@ impl FunctionBuilder {
 }
 
 /// Build an [`LpirModule`].
-#[derive(Default)]
 pub struct ModuleBuilder {
     imports: Vec<ImportDecl>,
-    functions: Vec<IrFunction>,
+    functions: BTreeMap<FuncId, IrFunction>,
+    next_func_id: u16,
+}
+
+impl Default for ModuleBuilder {
+    fn default() -> Self {
+        Self {
+            imports: Vec::new(),
+            functions: BTreeMap::new(),
+            next_func_id: 0,
+        }
+    }
 }
 
 impl ModuleBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Id that the next [`Self::add_function`] will assign (for parser self-reference).
+    pub fn next_local_func_id(&self) -> FuncId {
+        FuncId(self.next_func_id)
     }
 
     pub fn import_count(&self) -> u32 {
@@ -427,13 +481,15 @@ impl ModuleBuilder {
 
     pub fn add_import(&mut self, decl: ImportDecl) -> CalleeRef {
         self.imports.push(decl);
-        CalleeRef((self.imports.len() - 1) as u32)
+        let idx = (self.imports.len() - 1) as u16;
+        CalleeRef::Import(ImportId(idx))
     }
 
     pub fn add_function(&mut self, func: IrFunction) -> CalleeRef {
-        self.functions.push(func);
-        let import_n = self.imports.len() as u32;
-        CalleeRef(import_n + (self.functions.len() - 1) as u32)
+        let id = FuncId(self.next_func_id);
+        self.next_func_id = self.next_func_id.saturating_add(1);
+        self.functions.insert(id, func);
+        CalleeRef::Local(id)
     }
 
     pub fn finish(self) -> LpirModule {

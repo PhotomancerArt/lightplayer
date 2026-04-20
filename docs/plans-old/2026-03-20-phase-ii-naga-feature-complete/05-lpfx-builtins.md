@@ -2,9 +2,9 @@
 
 ## Scope
 
-Enable LPFX (`lpfx_*`) function calls by injecting GLSL prototypes into
+Enable LPFX (`lpfn_*`) function calls by injecting GLSL prototypes into
 `lps-frontend` and emitting them as WASM imports in `lps-wasm`. This
-unblocks the 13 `lpfx/` test files.
+unblocks the 13 `lpfn/` test files.
 
 ## Code Organization Reminders
 
@@ -25,20 +25,20 @@ match the signatures used by `lps-builtins-wasm`.
 /// GLSL forward declarations for all LPFX builtin functions.
 /// Prepended to user source so Naga can parse calls to them.
 pub const LPFX_PROTOTYPES: &str = r#"
-float lpfx_psrdnoise(vec2 pos, vec2 per, float rot, out vec2 gradient, uint quality);
-float lpfx_worley(vec2 pos, uint quality);
-float lpfx_fbm(vec2 pos, int octaves, uint quality);
-float lpfx_simplex1(float pos, uint quality);
-float lpfx_simplex2(vec2 pos, uint quality);
-float lpfx_simplex3(vec3 pos, uint quality);
-float lpfx_gnoise(vec2 pos, uint quality);
-float lpfx_random(vec2 pos, uint quality);
-float lpfx_srandom(vec2 pos, uint quality);
-float lpfx_hash(float pos, uint quality);
-float lpfx_saturate(float x);
-vec3 lpfx_hsv2rgb(vec3 hsv);
-vec3 lpfx_rgb2hsv(vec3 rgb);
-vec3 lpfx_hue2rgb(float hue);
+float lpfn_psrdnoise(vec2 pos, vec2 per, float rot, out vec2 gradient, uint quality);
+float lpfn_worley(vec2 pos, uint quality);
+float lpfn_fbm(vec2 pos, int octaves, uint quality);
+float lpfn_simplex1(float pos, uint quality);
+float lpfn_simplex2(vec2 pos, uint quality);
+float lpfn_simplex3(vec3 pos, uint quality);
+float lpfn_gnoise(vec2 pos, uint quality);
+float lpfn_random(vec2 pos, uint quality);
+float lpfn_srandom(vec2 pos, uint quality);
+float lpfn_hash(float pos, uint quality);
+float lpfn_saturate(float x);
+vec3 lpfn_hsv2rgb(vec3 hsv);
+vec3 lpfn_rgb2hsv(vec3 rgb);
+vec3 lpfn_hue2rgb(float hue);
 "#;
 ```
 
@@ -78,15 +78,15 @@ lines and adjusting error offsets manually.
 ### 4. LPFX function detection in lps-wasm
 
 In `imports.rs`, when scanning for required imports, also scan for
-`Statement::Call` where the called function's name starts with `lpfx_`.
+`Statement::Call` where the called function's name starts with `lpfn_`.
 
 Map LPFX function names to import names:
 
-- `lpfx_psrdnoise` → `__lp_psrdnoise`
-- `lpfx_worley` → `__lp_worley`
+- `lpfn_psrdnoise` → `__lp_psrdnoise`
+- `lpfn_worley` → `__lp_worley`
 - etc.
 
-The naming convention: strip `lpfx_` prefix, add `__lp_` prefix.
+The naming convention: strip `lpfn_` prefix, add `__lp_` prefix.
 
 ### 5. LPFX function call emission
 
@@ -112,8 +112,8 @@ pub fn emit_call(
     let called = &module.functions[target];
     let name = called.name.as_deref().unwrap_or("");
 
-    if name.starts_with("lpfx_") {
-        return emit_lpfx_call(name, arguments, result, module, func,
+    if name.starts_with("lpfn_") {
+        return emit_lpfn_call(name, arguments, result, module, func,
             wasm_fn, mode, alloc, imports);
     }
 
@@ -124,7 +124,7 @@ pub fn emit_call(
 
 ### 6. `out` parameter handling for LPFX
 
-`lpfx_psrdnoise` has an `out vec2 gradient` parameter. In Naga's IR,
+`lpfn_psrdnoise` has an `out vec2 gradient` parameter. In Naga's IR,
 `out` parameters are modeled as pointer arguments. The caller passes a
 `LocalVariable` pointer, and the callee writes through it.
 
@@ -157,7 +157,7 @@ fn extract_functions(module: &Module) -> Result<Vec<(Handle<Function>, FunctionI
     let mut out = Vec::new();
     for (handle, function) in module.functions.iter() {
         let Some(name) = function.name.clone() else { continue; };
-        if name == "main" || name.starts_with("lpfx_") {
+        if name == "main" || name.starts_with("lpfn_") {
             continue;
         }
         // ...
@@ -169,7 +169,7 @@ fn extract_functions(module: &Module) -> Result<Vec<(Handle<Function>, FunctionI
 ## Validate
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "lpfx/"
+scripts/glsl-filetests.sh --target wasm.q32 "lpfn/"
 scripts/glsl-filetests.sh --target wasm.q32
 cargo check -p lps-wasm
 cargo check -p lps-frontend

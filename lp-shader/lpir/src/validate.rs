@@ -9,7 +9,7 @@ use core::fmt;
 
 use crate::lpir_module::{IrFunction, LpirModule};
 use crate::lpir_op::LpirOp;
-use crate::types::{CalleeRef, IrType, VReg, VRegRange};
+use crate::types::{CalleeRef, ImportId, IrType, VReg, VRegRange};
 
 /// Validation issue.
 #[derive(Debug)]
@@ -59,7 +59,7 @@ pub fn validate_module(module: &LpirModule) -> Result<(), Vec<ValidationError>> 
     validate_imports(module, &mut errs);
     let mut entry = 0u32;
     let mut seen_names: Vec<&str> = Vec::new();
-    for f in &module.functions {
+    for f in module.functions.values() {
         if f.is_entry {
             entry += 1;
         }
@@ -109,11 +109,17 @@ enum StackEntry {
         loop_start: usize,
         continuing_offset: u32,
     },
+    /// Paired with [`LpirOp::End`] that closes the `Block` region.
+    Block,
     Switch {
         cases: BTreeSet<i32>,
         default_arm: bool,
     },
     Arm,
+}
+
+fn has_enclosing_block(stack: &[StackEntry]) -> bool {
+    stack.iter().rev().any(|e| matches!(e, StackEntry::Block))
 }
 
 fn validate_function_inner(
@@ -155,6 +161,11 @@ fn validate_function_inner(
         let op_i = Some(i);
 
         match op {
+            LpirOp::ExitBlock => {
+                if !has_enclosing_block(&stack) {
+                    errs.push(err_in_func(fname, op_i, "exit_block outside block"));
+                }
+            }
             LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
                 let innermost_loop = stack
                     .iter()
@@ -219,6 +230,31 @@ fn validate_function_inner(
                     loop_start: i,
                     continuing_offset: *continuing_offset,
                 });
+            }
+            LpirOp::Block { end_offset } => {
+                if *end_offset == 0 {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        "Block end_offset is zero (not patched)",
+                    ));
+                } else {
+                    let eo = *end_offset as usize;
+                    if eo > func.body.len() {
+                        errs.push(err_in_func(
+                            fname,
+                            op_i,
+                            "Block end_offset past function body",
+                        ));
+                    } else if eo <= i + 1 {
+                        errs.push(err_in_func(
+                            fname,
+                            op_i,
+                            "Block end_offset must follow block header",
+                        ));
+                    }
+                }
+                stack.push(StackEntry::Block);
             }
             LpirOp::SwitchStart { .. } => stack.push(StackEntry::Switch {
                 cases: BTreeSet::new(),
@@ -341,16 +377,6 @@ fn validate_call(
     results: VRegRange,
     errs: &mut Vec<ValidationError>,
 ) {
-    let total = module.imports.len() + module.functions.len();
-    if callee.0 as usize >= total {
-        errs.push(err_in_func(
-            fname,
-            op_i,
-            format!("callee index {} out of range", callee.0),
-        ));
-        return;
-    }
-
     let arg_slice = func.pool_slice(args);
     let res_slice = func.pool_slice(results);
 
@@ -359,8 +385,17 @@ fn validate_call(
     }
 
     let mut import_param_scratch: Vec<IrType> = Vec::new();
-    let (param_tys, ret_tys): (&[IrType], &[IrType]) =
-        if let Some(i) = module.callee_as_import(callee) {
+    let (param_tys, ret_tys): (&[IrType], &[IrType]) = match callee {
+        CalleeRef::Import(ImportId(i)) => {
+            let i = i as usize;
+            if i >= module.imports.len() {
+                errs.push(err_in_func(
+                    fname,
+                    op_i,
+                    format!("callee import index {i} out of range"),
+                ));
+                return;
+            }
             let imp = &module.imports[i];
             import_param_scratch.clear();
             if imp.needs_vmctx {
@@ -368,8 +403,16 @@ fn validate_call(
             }
             import_param_scratch.extend_from_slice(&imp.param_types);
             (import_param_scratch.as_slice(), imp.return_types.as_slice())
-        } else if let Some(i) = module.callee_as_function(callee) {
-            let fdef = &module.functions[i];
+        }
+        CalleeRef::Local(id) => {
+            let Some(fdef) = module.functions.get(&id) else {
+                errs.push(err_in_func(
+                    fname,
+                    op_i,
+                    format!("callee unknown local func {}", id.0),
+                ));
+                return;
+            };
             let vm = fdef.vmctx_vreg.0 as usize;
             let end = vm + 1 + fdef.param_count as usize;
             if end > fdef.vreg_types.len() {
@@ -381,14 +424,8 @@ fn validate_call(
                 return;
             }
             (&fdef.vreg_types[..end], fdef.return_types.as_slice())
-        } else {
-            errs.push(err_in_func(
-                fname,
-                op_i,
-                "internal: callee signature missing",
-            ));
-            return;
-        };
+        }
+    };
 
     if param_tys.len() != arg_slice.len() {
         errs.push(err_in_func(
@@ -533,9 +570,12 @@ fn check_op_operands_defined(
         | LpirOp::IeqImm { src, .. } => check(*src, "src"),
         LpirOp::FtoiSatS { src, .. }
         | LpirOp::FtoiSatU { src, .. }
-        | LpirOp::ItofS { src, .. }
+        | LpirOp::FtoUnorm16 { src, .. }
+        | LpirOp::FtoUnorm8 { src, .. } => check(*src, "src"),
+        LpirOp::ItofS { src, .. }
         | LpirOp::ItofU { src, .. }
         | LpirOp::FfromI32Bits { src, .. } => check(*src, "src"),
+        LpirOp::Unorm16toF { src, .. } | LpirOp::Unorm8toF { src, .. } => check(*src, "src"),
         LpirOp::Select {
             cond,
             if_true,
@@ -547,8 +587,14 @@ fn check_op_operands_defined(
             check(*if_false, "select if_false");
         }
         LpirOp::Copy { src, .. } => check(*src, "copy src"),
-        LpirOp::Load { base, .. } => check(*base, "load base"),
-        LpirOp::Store { base, value, .. } => {
+        LpirOp::Load { base, .. }
+        | LpirOp::Load8U { base, .. }
+        | LpirOp::Load8S { base, .. }
+        | LpirOp::Load16U { base, .. }
+        | LpirOp::Load16S { base, .. } => check(*base, "load base"),
+        LpirOp::Store { base, value, .. }
+        | LpirOp::Store8 { base, value, .. }
+        | LpirOp::Store16 { base, value, .. } => {
             check(*base, "store base");
             check(*value, "store value");
         }
@@ -580,7 +626,9 @@ fn check_op_operands_defined(
         | LpirOp::DefaultStart { .. }
         | LpirOp::End
         | LpirOp::Break
-        | LpirOp::Continue => {}
+        | LpirOp::Continue
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {}
     }
 }
 
@@ -643,7 +691,9 @@ fn check_opcode_dst_types(
         | LpirOp::FconstF32 { dst, .. }
         | LpirOp::ItofS { dst, .. }
         | LpirOp::ItofU { dst, .. }
-        | LpirOp::FfromI32Bits { dst, .. } => expect(*dst, IrType::F32, "float op result"),
+        | LpirOp::FfromI32Bits { dst, .. }
+        | LpirOp::Unorm16toF { dst, .. }
+        | LpirOp::Unorm8toF { dst, .. } => expect(*dst, IrType::F32, "float op result"),
 
         LpirOp::Iadd { dst, .. }
         | LpirOp::Isub { dst, .. }
@@ -685,7 +735,9 @@ fn check_opcode_dst_types(
         | LpirOp::IshrUImm { dst, .. }
         | LpirOp::IeqImm { dst, .. }
         | LpirOp::FtoiSatS { dst, .. }
-        | LpirOp::FtoiSatU { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
+        | LpirOp::FtoiSatU { dst, .. }
+        | LpirOp::FtoUnorm16 { dst, .. }
+        | LpirOp::FtoUnorm8 { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
 
         LpirOp::Select {
             dst,
@@ -727,6 +779,13 @@ fn check_opcode_dst_types(
             }
         }
         LpirOp::SlotAddr { dst, .. } => expect(*dst, IrType::I32, "slot_addr"),
+        LpirOp::Load8U { dst, .. }
+        | LpirOp::Load8S { dst, .. }
+        | LpirOp::Load16U { dst, .. }
+        | LpirOp::Load16S { dst, .. } => expect(*dst, IrType::I32, "narrow load result"),
+        LpirOp::Store8 { value, .. } | LpirOp::Store16 { value, .. } => {
+            expect(*value, IrType::I32, "narrow store value");
+        }
         LpirOp::Load { .. }
         | LpirOp::Store { .. }
         | LpirOp::Memcpy { .. }
@@ -741,7 +800,9 @@ fn check_opcode_dst_types(
         | LpirOp::Continue
         | LpirOp::BrIfNot { .. }
         | LpirOp::Call { .. }
-        | LpirOp::Return { .. } => {}
+        | LpirOp::Return { .. }
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {}
     }
 }
 
@@ -808,17 +869,28 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::IeqImm { dst, .. } => mark(*dst, defined),
         LpirOp::FtoiSatS { dst, .. }
         | LpirOp::FtoiSatU { dst, .. }
+        | LpirOp::FtoUnorm16 { dst, .. }
+        | LpirOp::FtoUnorm8 { dst, .. }
         | LpirOp::ItofS { dst, .. }
         | LpirOp::ItofU { dst, .. }
-        | LpirOp::FfromI32Bits { dst, .. } => mark(*dst, defined),
+        | LpirOp::FfromI32Bits { dst, .. }
+        | LpirOp::Unorm16toF { dst, .. }
+        | LpirOp::Unorm8toF { dst, .. } => mark(*dst, defined),
         LpirOp::Select { dst, .. } | LpirOp::Copy { dst, .. } => mark(*dst, defined),
-        LpirOp::SlotAddr { dst, .. } | LpirOp::Load { dst, .. } => mark(*dst, defined),
+        LpirOp::SlotAddr { dst, .. }
+        | LpirOp::Load { dst, .. }
+        | LpirOp::Load8U { dst, .. }
+        | LpirOp::Load8S { dst, .. }
+        | LpirOp::Load16U { dst, .. }
+        | LpirOp::Load16S { dst, .. } => mark(*dst, defined),
         LpirOp::Call { results, .. } => {
             for v in func.pool_slice(*results) {
                 mark(*v, defined);
             }
         }
         LpirOp::Store { .. }
+        | LpirOp::Store8 { .. }
+        | LpirOp::Store16 { .. }
         | LpirOp::Memcpy { .. }
         | LpirOp::IfStart { .. }
         | LpirOp::Else
@@ -830,7 +902,9 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::Break
         | LpirOp::Continue
         | LpirOp::BrIfNot { .. }
-        | LpirOp::Return { .. } => {}
+        | LpirOp::Return { .. }
+        | LpirOp::Block { .. }
+        | LpirOp::ExitBlock => {}
     }
 }
 

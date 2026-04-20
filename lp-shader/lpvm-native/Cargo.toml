@@ -28,6 +28,7 @@ emu = [
 
 [dependencies]
 lpir = { path = "../lpir" }
+lps-q32 = { path = "../lps-q32" }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
 lpvm = { path = "../lpvm" }
 lps-shared = { path = "../lps-shared" }

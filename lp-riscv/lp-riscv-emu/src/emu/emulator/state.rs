@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use super::super::{logging::LogLevel, memory::Memory};
+use super::super::{cycle_model::CycleModel, logging::LogLevel, memory::Memory};
 use crate::serial::host_serial::HostSerial;
 use crate::time::TimeMode;
 use alloc::vec::Vec;
@@ -22,6 +22,8 @@ pub struct Riscv32Emulator {
     pub(super) pc: u32,
     pub(super) memory: Memory,
     pub(super) instruction_count: u64,
+    pub(super) cycle_count: u64,
+    pub(super) cycle_model: CycleModel,
     pub(super) log_level: LogLevel,
     pub(super) log_buffer: Vec<super::super::logging::InstLog>,
     pub(super) traps: Vec<(u32, TrapCode)>, // sorted by offset (offset, trap_code) pairs
@@ -55,6 +57,8 @@ impl Riscv32Emulator {
             pc: 0,
             memory: Memory::with_default_addresses(code, ram),
             instruction_count: 0,
+            cycle_count: 0,
+            cycle_model: CycleModel::default(),
             log_level: LogLevel::None,
             log_buffer: Vec::new(),
             traps: trap_list,
@@ -87,6 +91,8 @@ impl Riscv32Emulator {
             pc: 0,
             memory,
             instruction_count: 0,
+            cycle_count: 0,
+            cycle_model: CycleModel::default(),
             log_level: LogLevel::None,
             log_buffer: Vec::new(),
             traps: trap_list,
@@ -135,6 +141,19 @@ impl Riscv32Emulator {
     /// Get the number of instructions executed so far.
     pub fn get_instruction_count(&self) -> u64 {
         self.instruction_count
+    }
+
+    /// Guest steps accumulated with the active [`CycleModel`] (see [`Self::cycle_model`]).
+    pub fn get_cycle_count(&self) -> u64 {
+        self.cycle_count
+    }
+
+    pub fn cycle_model(&self) -> CycleModel {
+        self.cycle_model
+    }
+
+    pub fn set_cycle_model(&mut self, model: CycleModel) {
+        self.cycle_model = model;
     }
 
     /// Drain all bytes from the serial output buffer

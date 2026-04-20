@@ -14,10 +14,10 @@
 [31m✗[0m [33m 6/ 7[0m [2mfunction/param-inout.glsl[0m [31m(1 unexpected)[0m [94m(323 inst)[0m
 [31m✗[0m [33m 8/ 9[0m [2mfunction/param-many.glsl[0m [31m(1 unexpected)[0m [94m(863 inst)[0m
 [31m✗[0m [33m 8/10[0m [2mfunction/param-mixed.glsl[0m [31m(2 unexpected)[0m [94m(1,168 inst)[0m
-[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_hsv2rgb.glsl[0m [31m(2 unexpected)[0m [94m(1,049 inst)[0m
-[31m✗[0m [33m 4/ 5[0m [2mlpfx/lp_hue2rgb.glsl[0m [31m(1 unexpected)[0m [94m(895 inst)[0m
-[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_rgb2hsv.glsl[0m [31m(1 unexpected)[0m [94m(1,992 inst)[0m
-[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_saturate.glsl[0m [31m(2 unexpected)[0m [94m(151 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfn/lp_hsv2rgb.glsl[0m [31m(2 unexpected)[0m [94m(1,049 inst)[0m
+[31m✗[0m [33m 4/ 5[0m [2mlpfn/lp_hue2rgb.glsl[0m [31m(1 unexpected)[0m [94m(895 inst)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfn/lp_rgb2hsv.glsl[0m [31m(1 unexpected)[0m [94m(1,992 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfn/lp_saturate.glsl[0m [31m(2 unexpected)[0m [94m(151 inst)[0m
 [31m✗[0m [33m 2/ 8[0m [2mmatrix/mat2/incdec-matrix-column.glsl[0m [31m(6 unexpected)[0m [94m(266 inst)[0m
 [31m✗[0m [33m 1/16[0m [2mmatrix/mat2/incdec-matrix-element.glsl[0m [31m(15 unexpected)[0m [94m(98 inst)[0m
 [31m✗[0m [33m 3/12[0m [2mmatrix/mat3/incdec-matrix-column.glsl[0m [31m(9 unexpected)[0m [94m(1,044 inst)[0m

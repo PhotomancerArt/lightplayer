@@ -8,7 +8,9 @@
 //!   i3 = IcmpImm Eq, i0, 42   // immediate comparison
 //!   i3 = Select i0, i1, i2    // cond, if_true, if_false
 //!   i1 = Load32 i0, 4          // base, offset (optional)
+//!   i1 = Load8U i0, 4          // narrow loads: Load8U / Load8S / Load16U / Load16S
 //!   Store32 i1, i0, 4          // src, base, offset
+//!   Store8 i1, i0, 1           // Store8 / Store16
 //!   (i2, i3) = Call mod (i0, i1)  // multi-ret and args
 //!   Ret i0                     // return values
 //!   Br @0                      // branch to label
@@ -355,11 +357,11 @@ fn parse_def_instruction(
             })
         }
 
-        "Load32" => {
+        "Load32" | "Load8U" | "Load8S" | "Load16U" | "Load16S" => {
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "Load32 needs 1 dst".into(),
+                    message: format!("{op} needs 1 dst"),
                 });
             }
             let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
@@ -372,12 +374,41 @@ fn parse_def_instruction(
             } else {
                 0
             };
-            Ok(VInst::Load32 {
-                dst: dsts[0],
-                base,
-                offset,
-                src_op: SRC_OP_NONE,
-            })
+            let dst = dsts[0];
+            let src_op = SRC_OP_NONE;
+            match op {
+                "Load32" => Ok(VInst::Load32 {
+                    dst,
+                    base,
+                    offset,
+                    src_op,
+                }),
+                "Load8U" => Ok(VInst::Load8U {
+                    dst,
+                    base,
+                    offset,
+                    src_op,
+                }),
+                "Load8S" => Ok(VInst::Load8S {
+                    dst,
+                    base,
+                    offset,
+                    src_op,
+                }),
+                "Load16U" => Ok(VInst::Load16U {
+                    dst,
+                    base,
+                    offset,
+                    src_op,
+                }),
+                "Load16S" => Ok(VInst::Load16S {
+                    dst,
+                    base,
+                    offset,
+                    src_op,
+                }),
+                _ => unreachable!(),
+            }
         }
 
         "SlotAddr" => {
@@ -472,6 +503,60 @@ fn parse_nodef_instruction(
             0
         };
         return Ok(VInst::Store32 {
+            src,
+            base,
+            offset,
+            src_op: SRC_OP_NONE,
+        });
+    }
+
+    // Store8 i1, i0, 1
+    if let Some(rest) = line.strip_prefix("Store8 ") {
+        let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 2 {
+            return Err(ParseError {
+                line: line_num,
+                message: "Store8 needs src, base[, offset]".into(),
+            });
+        }
+        let src = parse_ireg(parts[0])?;
+        let base = parse_ireg(parts[1])?;
+        let offset = if parts.len() > 2 {
+            parts[2].parse().map_err(|_| ParseError {
+                line: line_num,
+                message: format!("Invalid offset: {}", parts[2]),
+            })?
+        } else {
+            0
+        };
+        return Ok(VInst::Store8 {
+            src,
+            base,
+            offset,
+            src_op: SRC_OP_NONE,
+        });
+    }
+
+    // Store16 i1, i0, 2
+    if let Some(rest) = line.strip_prefix("Store16 ") {
+        let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 2 {
+            return Err(ParseError {
+                line: line_num,
+                message: "Store16 needs src, base[, offset]".into(),
+            });
+        }
+        let src = parse_ireg(parts[0])?;
+        let base = parse_ireg(parts[1])?;
+        let offset = if parts.len() > 2 {
+            parts[2].parse().map_err(|_| ParseError {
+                line: line_num,
+                message: format!("Invalid offset: {}", parts[2]),
+            })?
+        } else {
+            0
+        };
+        return Ok(VInst::Store16 {
             src,
             base,
             offset,
@@ -686,6 +771,60 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
                 format!("Store32 {}, {}", ireg(src), ireg(base))
             } else {
                 format!("Store32 {}, {}, {}", ireg(src), ireg(base), offset)
+            }
+        }
+        VInst::Load8U {
+            dst, base, offset, ..
+        } => {
+            if *offset == 0 {
+                format!("{} = Load8U {}", ireg(dst), ireg(base))
+            } else {
+                format!("{} = Load8U {}, {}", ireg(dst), ireg(base), offset)
+            }
+        }
+        VInst::Load8S {
+            dst, base, offset, ..
+        } => {
+            if *offset == 0 {
+                format!("{} = Load8S {}", ireg(dst), ireg(base))
+            } else {
+                format!("{} = Load8S {}, {}", ireg(dst), ireg(base), offset)
+            }
+        }
+        VInst::Load16U {
+            dst, base, offset, ..
+        } => {
+            if *offset == 0 {
+                format!("{} = Load16U {}", ireg(dst), ireg(base))
+            } else {
+                format!("{} = Load16U {}, {}", ireg(dst), ireg(base), offset)
+            }
+        }
+        VInst::Load16S {
+            dst, base, offset, ..
+        } => {
+            if *offset == 0 {
+                format!("{} = Load16S {}", ireg(dst), ireg(base))
+            } else {
+                format!("{} = Load16S {}, {}", ireg(dst), ireg(base), offset)
+            }
+        }
+        VInst::Store8 {
+            src, base, offset, ..
+        } => {
+            if *offset == 0 {
+                format!("Store8 {}, {}", ireg(src), ireg(base))
+            } else {
+                format!("Store8 {}, {}, {}", ireg(src), ireg(base), offset)
+            }
+        }
+        VInst::Store16 {
+            src, base, offset, ..
+        } => {
+            if *offset == 0 {
+                format!("Store16 {}, {}", ireg(src), ireg(base))
+            } else {
+                format!("Store16 {}, {}, {}", ireg(src), ireg(base), offset)
             }
         }
         VInst::SlotAddr { dst, slot, .. } => {

@@ -66,7 +66,7 @@ uses. Fix any remaining gaps:
 
 - `rainbow.glsl` uses: `vec2`, `vec3`, `vec4`, `clamp`, `mod`, `floor`,
   `exp`, `cos`, `sin`, `atan`, `mix`, `smoothstep`, `fract`, `abs`,
-  `lpfx_psrdnoise`, `lpfx_worley`, `lpfx_fbm`, `out` parameters,
+  `lpfn_psrdnoise`, `lpfn_worley`, `lpfn_fbm`, `out` parameters,
   user function calls, if/else control flow
 
 ### 5. Handle `debug/rainbow.glsl` differences

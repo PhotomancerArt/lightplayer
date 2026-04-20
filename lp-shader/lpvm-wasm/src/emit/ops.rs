@@ -5,26 +5,28 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{IrFunction, IrType, LpirModule, LpirOp};
+use lpir::{CalleeRef, FuncId, ImportId, IrFunction, IrType, LpirModule, LpirOp};
+use lps_q32::q32_options::{AddSubMode, DivMode, MulMode};
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
 use crate::emit::FuncEmitCtx;
 use crate::emit::control::{
-    CtrlEntry, WasmOpenDepth, innermost_loop_break_depth, innermost_loop_continue_depth,
-    innermost_switch_selector, switch_merge_open_depth, unwind_ctrl_after_return,
+    CtrlEntry, WasmOpenDepth, innermost_fwd_block_exit_depth, innermost_loop_break_depth,
+    innermost_loop_continue_depth, innermost_switch_selector, switch_merge_open_depth,
+    unwind_ctrl_after_return,
 };
 use crate::emit::imports;
 use crate::emit::memory;
 use crate::emit::q32;
 
-fn wasm_func_index(ctx: &FuncEmitCtx<'_>, callee: lpir::CalleeRef) -> Result<u32, String> {
+fn wasm_func_index(ctx: &FuncEmitCtx<'_>, callee: CalleeRef) -> Result<u32, String> {
     let m = ctx.module;
-    let k = callee.0 as usize;
-    if k < m.import_remap.len() {
-        m.import_remap[k].ok_or_else(|| format!("call to pruned import {k}"))
-    } else {
-        let j = callee.0 - m.full_import_count;
-        Ok(m.filtered_import_count + j)
+    match callee {
+        CalleeRef::Import(ImportId(i)) => {
+            let k = i as usize;
+            m.import_remap[k].ok_or_else(|| format!("call to pruned import {k}"))
+        }
+        CalleeRef::Local(FuncId(id)) => Ok(m.filtered_import_count + id as u32),
     }
 }
 
@@ -56,6 +58,7 @@ pub(crate) fn emit_op(
         op,
         LpirOp::End
             | LpirOp::Else
+            | LpirOp::Block { .. }
             | LpirOp::SwitchStart { .. }
             | LpirOp::CaseStart { .. }
             | LpirOp::DefaultStart { .. }
@@ -276,6 +279,17 @@ pub(crate) fn emit_op(
         LpirOp::Copy { dst, src } => {
             sink.local_get(src.0).local_set(dst.0);
         }
+        LpirOp::Block { .. } => {
+            sink.block(BlockType::Empty);
+            *wasm_open += 1;
+            ctrl.push(CtrlEntry::FwdBlock {
+                after_open_wasm_depth: *wasm_open,
+            });
+        }
+        LpirOp::ExitBlock => {
+            let d = innermost_fwd_block_exit_depth(ctrl, *wasm_open)?;
+            sink.br(d);
+        }
         LpirOp::IfStart { cond, .. } => {
             sink.local_get(cond.0).if_(BlockType::Empty);
             *wasm_open += 1;
@@ -329,6 +343,10 @@ pub(crate) fn emit_op(
                     *wasm_open = wasm_open.saturating_sub(2);
                 }
                 Some(CtrlEntry::Switch { .. }) => {
+                    sink.end();
+                    *wasm_open = wasm_open.saturating_sub(1);
+                }
+                Some(CtrlEntry::FwdBlock { .. }) => {
                     sink.end();
                     *wasm_open = wasm_open.saturating_sub(1);
                 }
@@ -409,16 +427,18 @@ pub(crate) fn emit_op(
             results,
         } => {
             let idx = wasm_func_index(fctx, *callee)?;
-            let callee_usize = callee.0 as usize;
-            let is_import = callee_usize < fctx.module.full_import_count as usize;
+            let (is_import, import_idx) = match *callee {
+                CalleeRef::Import(ImportId(i)) => (true, i as usize),
+                CalleeRef::Local(_) => (false, 0),
+            };
             let is_result_ptr =
-                is_import && imports::import_uses_result_pointer_abi(ir, callee_usize);
+                is_import && imports::import_uses_result_pointer_abi(ir, import_idx);
 
             let all_args = func.pool_slice(*args);
             let import_needs_vmctx = is_import
                 && ir
                     .imports
-                    .get(callee_usize)
+                    .get(import_idx)
                     .map(|d| d.needs_vmctx)
                     .unwrap_or(false);
             let args_to_pass =
@@ -470,12 +490,15 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fadd { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => {
-                let s = fctx
-                    .i64_scratch
-                    .ok_or_else(|| String::from("internal: Q32 Fadd without i64 scratch local"))?;
-                q32::emit_q32_fadd(sink, lhs.0, rhs.0, dst.0, s);
-            }
+            FloatMode::Q32 => match fctx.module.q32.add_sub {
+                AddSubMode::Saturating => {
+                    let s = fctx.i64_scratch.ok_or_else(|| {
+                        String::from("internal: Q32 Fadd without i64 scratch local")
+                    })?;
+                    q32::emit_q32_fadd(sink, lhs.0, rhs.0, dst.0, s);
+                }
+                AddSubMode::Wrapping => q32::emit_q32_fadd_wrap(sink, lhs.0, rhs.0, dst.0),
+            },
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -484,12 +507,15 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fsub { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => {
-                let s = fctx
-                    .i64_scratch
-                    .ok_or_else(|| String::from("internal: Q32 Fsub without i64 scratch local"))?;
-                q32::emit_q32_fsub(sink, lhs.0, rhs.0, dst.0, s);
-            }
+            FloatMode::Q32 => match fctx.module.q32.add_sub {
+                AddSubMode::Saturating => {
+                    let s = fctx.i64_scratch.ok_or_else(|| {
+                        String::from("internal: Q32 Fsub without i64 scratch local")
+                    })?;
+                    q32::emit_q32_fsub(sink, lhs.0, rhs.0, dst.0, s);
+                }
+                AddSubMode::Wrapping => q32::emit_q32_fsub_wrap(sink, lhs.0, rhs.0, dst.0),
+            },
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -498,12 +524,15 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fmul { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => {
-                let s = fctx
-                    .i64_scratch
-                    .ok_or_else(|| String::from("internal: Q32 Fmul without i64 scratch local"))?;
-                q32::emit_q32_fmul(sink, lhs.0, rhs.0, dst.0, s);
-            }
+            FloatMode::Q32 => match fctx.module.q32.mul {
+                MulMode::Saturating => {
+                    let s = fctx.i64_scratch.ok_or_else(|| {
+                        String::from("internal: Q32 Fmul without i64 scratch local")
+                    })?;
+                    q32::emit_q32_fmul(sink, lhs.0, rhs.0, dst.0, s);
+                }
+                MulMode::Wrapping => q32::emit_q32_fmul_wrap(sink, lhs.0, rhs.0, dst.0),
+            },
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -512,9 +541,15 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fdiv { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => {
-                q32::emit_q32_fdiv(sink, lhs.0, rhs.0, dst.0);
-            }
+            FloatMode::Q32 => match fctx.module.q32.div {
+                DivMode::Saturating => q32::emit_q32_fdiv(sink, lhs.0, rhs.0, dst.0),
+                DivMode::Reciprocal => {
+                    let loc = fctx.fdiv_recip_scratch.as_ref().ok_or_else(|| {
+                        String::from("internal: Q32 Fdiv reciprocal without scratch locals")
+                    })?;
+                    q32::emit_q32_fdiv_recip(sink, lhs.0, rhs.0, dst.0, loc);
+                }
+            },
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -755,6 +790,104 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_reinterpret_i32().local_set(dst.0);
             }
         },
+        LpirOp::FtoUnorm16 { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(0)
+                    .local_get(src.0)
+                    .i32_const(0)
+                    .i32_gt_s()
+                    .select()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(65535)
+                    .local_get(dst.0)
+                    .i32_const(65535)
+                    .i32_lt_s()
+                    .select()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .f32_const(Ieee32::new(0.0f32.to_bits()))
+                    .f32_max()
+                    .f32_const(Ieee32::new(1.0f32.to_bits()))
+                    .f32_min()
+                    .f32_const(Ieee32::new(65535.0f32.to_bits()))
+                    .f32_mul()
+                    .i32_trunc_sat_f32_u()
+                    .local_set(dst.0);
+            }
+        },
+        LpirOp::FtoUnorm8 { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(8)
+                    .i32_shr_u()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(0)
+                    .local_get(dst.0)
+                    .i32_const(0)
+                    .i32_gt_s()
+                    .select()
+                    .local_set(dst.0);
+                sink.local_get(dst.0)
+                    .i32_const(255)
+                    .local_get(dst.0)
+                    .i32_const(255)
+                    .i32_lt_s()
+                    .select()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .f32_const(Ieee32::new(0.0f32.to_bits()))
+                    .f32_max()
+                    .f32_const(Ieee32::new(1.0f32.to_bits()))
+                    .f32_min()
+                    .f32_const(Ieee32::new(255.0f32.to_bits()))
+                    .f32_mul()
+                    .i32_trunc_sat_f32_u()
+                    .local_set(dst.0);
+            }
+        },
+        LpirOp::Unorm16toF { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFFFF)
+                    .i32_and()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFFFF)
+                    .i32_and()
+                    .f32_convert_i32_u()
+                    .f32_const(Ieee32::new(65535.0f32.to_bits()))
+                    .f32_div()
+                    .local_set(dst.0);
+            }
+        },
+        LpirOp::Unorm8toF { dst, src } => match fm {
+            FloatMode::Q32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFF)
+                    .i32_and()
+                    .i32_const(8)
+                    .i32_shl()
+                    .local_set(dst.0);
+            }
+            FloatMode::F32 => {
+                sink.local_get(src.0)
+                    .i32_const(0xFF)
+                    .i32_and()
+                    .f32_convert_i32_u()
+                    .f32_const(Ieee32::new(255.0f32.to_bits()))
+                    .f32_div()
+                    .local_set(dst.0);
+            }
+        },
         LpirOp::SlotAddr { dst, slot } => {
             let off = fctx
                 .slot_offsets
@@ -781,6 +914,22 @@ pub(crate) fn emit_op(
                 _ => return Err(String::from("Load: unsupported vreg type")),
             }
         }
+        LpirOp::Load8U { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 0);
+            sink.local_get(base.0).i32_load8_u(m).local_set(dst.0);
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 0);
+            sink.local_get(base.0).i32_load8_s(m).local_set(dst.0);
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 1);
+            sink.local_get(base.0).i32_load16_u(m).local_set(dst.0);
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let m = memory::mem_arg0(*offset, 1);
+            sink.local_get(base.0).i32_load16_s(m).local_set(dst.0);
+        }
         LpirOp::Store {
             base,
             offset,
@@ -796,6 +945,22 @@ pub(crate) fn emit_op(
                 }
                 _ => return Err(String::from("Store: unsupported vreg type")),
             }
+        }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let m = memory::mem_arg0(*offset, 0);
+            sink.local_get(base.0).local_get(value.0).i32_store8(m);
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let m = memory::mem_arg0(*offset, 1);
+            sink.local_get(base.0).local_get(value.0).i32_store16(m);
         }
         LpirOp::Memcpy {
             dst_addr,

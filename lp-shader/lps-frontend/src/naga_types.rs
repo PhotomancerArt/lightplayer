@@ -57,7 +57,7 @@ fn extract_functions(
         let Some(name) = function.name.clone() else {
             continue;
         };
-        if name.starts_with("lpfx_") {
+        if name.starts_with("lpfn_") {
             continue;
         }
         if name.starts_with("__lp_") {

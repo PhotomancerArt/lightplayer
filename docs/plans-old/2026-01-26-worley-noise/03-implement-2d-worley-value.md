@@ -9,8 +9,8 @@ nearest cell.
 
 ### Files to Create
 
-1. **`lps-builtins/src/builtins/lpfx/worley/worley2_value_q32.rs`**
-    - `__lpfx_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32`
+1. **`lps-builtins/src/builtins/lpfn/worley/worley2_value_q32.rs`**
+    - `__lpfn_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32`
     - 2D Worley noise returning hash value
 
 ### Algorithm Reference
@@ -28,7 +28,7 @@ Key components:
 
 1. Reuse the same algorithm as distance variant to find nearest cell
 2. Track which cell (`seed_cell`) contains the nearest feature point
-3. Hash the `seed_cell` coordinates using `__lpfx_hash_2`
+3. Hash the `seed_cell` coordinates using `__lpfn_hash_2`
 4. Normalize hash to [0, 1] range (divide by max hash value)
 5. Scale to [-1, 1] range: `value * 2.0 - 1.0`
 6. Return Q32 fixed-point value
@@ -36,9 +36,9 @@ Key components:
 ## Success Criteria
 
 - Function compiles without errors
-- Function has `#[lpfx_impl_macro::lpfx_impl]` attribute with correct GLSL signature
+- Function has `#[lpfn_impl_macro::lpfn_impl]` attribute with correct GLSL signature
 - Function has `#[unsafe(no_mangle)]` attribute and `pub extern "C"` signature
-- Function uses `__lpfx_hash_2` from hash module
+- Function uses `__lpfn_hash_2` from hash module
 - Output values are in approximately [-1, 1] range (Q32)
 - Basic test verifies function produces different outputs for different inputs
 - Test verifies value variant produces different output than distance variant

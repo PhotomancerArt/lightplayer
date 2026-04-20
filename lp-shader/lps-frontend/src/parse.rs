@@ -9,11 +9,11 @@ use crate::naga_types::{CompileError, NagaModule, naga_module_from_parsed};
 /// LPFX preamble and `#line 1` sent to Naga before the user snippet (same layout as [`compile`]).
 const LPFX_PREFIX: &str = concat!(
     "#version 450 core\n",
-    include_str!("lpfx_prologue.glsl"),
+    include_str!("lpfn_prologue.glsl"),
     "\n#line 1\n",
 );
 
-fn prepend_lpfx_prototypes(source: &str) -> String {
+fn prepend_lpfn_prototypes(source: &str) -> String {
     let mut s = String::from(LPFX_PREFIX);
     s.push_str(source);
     s
@@ -28,7 +28,7 @@ pub fn user_snippet_first_physical_line() -> usize {
 /// Full GLSL source passed to Naga: LPFX preamble, user snippet, then optional synthesized
 /// `void main() {}` when the user did not define `void main`.
 pub fn prepared_glsl_for_compile(user_snippet: &str) -> String {
-    let source = prepend_lpfx_prototypes(user_snippet);
+    let source = prepend_lpfn_prototypes(user_snippet);
     ensure_vertex_entry_point(&source)
 }
 

@@ -6,7 +6,7 @@ Bring `lpvm-native` from the current M1-style subset to the point where we can *
 
 Representative shader / regression net:
 
-- `lp-shader/lps-filetests/filetests/debug/rainbow.glsl` (same shape as `examples/basic/src/rainbow.shader/main.glsl`: `vec4` entry, LPFX `lpfx_psrdnoise` with out-param `gradient`, many builtins).
+- `lp-shader/lps-filetests/filetests/debug/rainbow.glsl` (same shape as `examples/basic/src/rainbow.shader/main.glsl`: `vec4` entry, LPFX `lpfn_psrdnoise` with out-param `gradient`, many builtins).
 
 Primary technical references:
 
@@ -72,7 +72,7 @@ _Status: **answered**._
 
 **Context:** Numbers can match with a wrong ABI in edge cases; structural comparison catches layout mistakes early but is more work.
 
-**Suggested answer:** **Both** where cheap: filetests as the regression net; spot-check or automated comparison of symbol/relocation / calling pattern for `rainbow_main` and `lpfx_psrdnoise` call sites against Cranelift once per milestone.
+**Suggested answer:** **Both** where cheap: filetests as the regression net; spot-check or automated comparison of symbol/relocation / calling pattern for `rainbow_main` and `lpfn_psrdnoise` call sites against Cranelift once per milestone.
 
 **Answer (user):** Move forward **without a structural oracle for now**. Rely on **filetest numeric parity** as the correctness signal. If/when issues arise, add Cranelift assembly dump support to `lp-cli` for manual comparison—accepting that exact instruction sequences won't match (different register allocators), but call patterns and stack layouts should be verifiable.
 

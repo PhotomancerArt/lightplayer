@@ -20,15 +20,15 @@ scripts/build-builtins.sh
 
 This will:
 
-- Discover all new `__lpfx_*` functions with `#[lpfx_impl_macro::lpfx_impl]` attributes
-- Generate entries in `lpfx_fns.rs`
+- Discover all new `__lpfn_*` functions with `#[lpfn_impl_macro::lpfn_impl]` attributes
+- Generate entries in `lpfn_fns.rs`
 - Generate entries in `BuiltinId` enum
 - Update the builtin registry
 
 ## Success Criteria
 
 - Builtin generator runs successfully
-- All new functions appear in `lpfx_fns.rs`
+- All new functions appear in `lpfn_fns.rs`
 - All new functions have `BuiltinId` enum variants
 - Code compiles without errors
 

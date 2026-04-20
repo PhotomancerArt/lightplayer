@@ -29,14 +29,14 @@ Callers are all in the codegen (context.rs, helpers.rs) — update them to
 use the new location. The WASM backend will have its own equivalent
 mapping (GLSL Type → WASM value type).
 
-### 2. `frontend/semantic/lpfx/lpfx_sig.rs` — Cranelift signature building
+### 2. `frontend/semantic/lpfn/lpfn_sig.rs` — Cranelift signature building
 
-`lpfx_sig.rs` contains functions that build `cranelift_codegen::ir::Signature`
+`lpfn_sig.rs` contains functions that build `cranelift_codegen::ir::Signature`
 objects and work with `cranelift_codegen::ir::Value`. This is codegen
 support code that was placed in the semantic directory.
 
-**Fix**: Move `lpfx_sig.rs` to `lps-cranelift` (into the codegen
-directory alongside `lpfx_fns.rs`). It's only used by the Cranelift
+**Fix**: Move `lpfn_sig.rs` to `lps-cranelift` (into the codegen
+directory alongside `lpfn_fns.rs`). It's only used by the Cranelift
 codegen path.
 
 ### 3. `frontend/src_loc_manager.rs` — `cranelift_codegen::ir::SourceLoc`
@@ -61,7 +61,7 @@ lps-frontend/src/
 ├── pipeline.rs               # from frontend/pipeline.rs
 ├── src_loc.rs                # from frontend/src_loc.rs (GlSourceMap, GlSourceLoc)
 ├── src_loc_manager.rs        # from frontend/src_loc_manager.rs (decoupled from Cranelift)
-└── semantic/                 # from frontend/semantic/ (all files except lpfx_sig.rs)
+└── semantic/                 # from frontend/semantic/ (all files except lpfn_sig.rs)
     ├── mod.rs                #   TypedShader, TypedFunction, SemanticAnalyzer
     ├── types.rs              #   Type enum (without to_cranelift_type)
     ├── functions.rs          #   FunctionRegistry, FunctionSignature, Parameter
@@ -72,8 +72,8 @@ lps-frontend/src/
     ├── scope.rs
     ├── builtins.rs
     ├── validator.rs
-    ├── lpfx/                 #   mod.rs, lpfx_fn.rs, lpfx_fn_registry.rs, lpfx_fns.rs
-    │                         #   (NOT lpfx_sig.rs — that moves to cranelift)
+    ├── lpfn/                 #   mod.rs, lpfn_fn.rs, lpfn_fn_registry.rs, lpfn_fns.rs
+    │                         #   (NOT lpfn_sig.rs — that moves to cranelift)
     └── passes/               #   mod.rs, global_const_pass.rs, function_registry.rs,
                               #   function_extraction.rs, function_signature.rs,
                               #   validation.rs
@@ -82,7 +82,7 @@ lps-frontend/src/
 ## What stays in lps-cranelift (renamed from lps-compiler)
 
 Everything currently in `frontend/codegen/`, `frontend/glsl_compiler.rs`,
-`backend/`, and `exec/`. Plus `lpfx_sig.rs` moved from semantic to codegen.
+`backend/`, and `exec/`. Plus `lpfn_sig.rs` moved from semantic to codegen.
 
 The crate adds `lps-frontend` as a dependency and re-imports from it
 where needed.
@@ -142,8 +142,8 @@ crate's public API.
    function in the codegen (e.g. `codegen/types.rs` or as methods on
    `CodegenContext`). Update all callers in the codegen.
 
-2. Move `lpfx_sig.rs` from `frontend/semantic/lpfx/` to
-   `frontend/codegen/`. Update imports in `codegen/lpfx_fns.rs` and
+2. Move `lpfn_sig.rs` from `frontend/semantic/lpfn/` to
+   `frontend/codegen/`. Update imports in `codegen/lpfn_fns.rs` and
    anywhere else that uses it.
 
 3. Replace `cranelift_codegen::ir::SourceLoc` in `src_loc_manager.rs`

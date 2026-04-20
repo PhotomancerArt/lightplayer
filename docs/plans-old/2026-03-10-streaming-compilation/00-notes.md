@@ -60,7 +60,7 @@ Peak occurs during `fastalloc::run` (regalloc) inside `define_function`. At peak
 - Module declarations/metadata: ~17 KB
 - Frontend metadata in GlModule (dead weight): ~10-15 KB
 - Collections (ChunkedVec/Map): ~28 KB
-- Non-compilation baseline (server, fs, lpfx): ~17 KB
+- Non-compilation baseline (server, fs, lpfn): ~17 KB
 - Compiled machine code: ~6 KB
 
 ### Test shader

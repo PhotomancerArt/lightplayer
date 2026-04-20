@@ -83,7 +83,7 @@ fn test_streaming_matches_batch_rainbow_shader() {
 }
 ```
 
-Note: The rainbow shader calls `lpfx_*` builtins. If these aren't available in
+Note: The rainbow shader calls `lpfn_*` builtins. If these aren't available in
 the test environment, use a self-contained multi-function shader instead:
 
 ```rust

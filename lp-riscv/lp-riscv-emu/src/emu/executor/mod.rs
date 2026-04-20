@@ -4,6 +4,8 @@ extern crate alloc;
 
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 
+pub use crate::emu::cycle_model::InstClass;
+
 /// Trait for compile-time logging mode control.
 pub trait LoggingMode {
     /// Whether logging is enabled for this mode.
@@ -33,6 +35,8 @@ pub struct ExecutionResult {
     pub should_halt: bool,
     /// Whether a syscall was encountered (ECALL)
     pub syscall: bool,
+    /// Cost class for the active [`crate::emu::CycleModel`].
+    pub class: InstClass,
     /// Log entry for this instruction (None if logging is disabled)
     pub log: Option<InstLog>,
 }

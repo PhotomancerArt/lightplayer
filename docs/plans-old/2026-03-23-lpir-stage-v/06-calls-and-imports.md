@@ -2,7 +2,7 @@
 
 ## Scope
 
-Implement `imports.rs` — resolve `@std.math` and `@lpfx` imports to
+Implement `imports.rs` — resolve `@std.math` and `@lpfn` imports to
 `builtins` WASM imports. Implement `Call` op emission. After this phase,
 user function calls, math builtins, and LPFX calls all work.
 
@@ -41,18 +41,18 @@ For each `ImportDecl` in `ir.imports`:
    Use `BuiltinId::name()` for the WASM import name under the `builtins`
    module.
 
-2. **`@lpfx::*`** — map to Q32 LPFX builtins:
+2. **`@lpfn::*`** — map to Q32 LPFX builtins:
 
    | LPIR import | BuiltinId | WASM name |
       |-------------|-----------|-----------|
-   | `@lpfx::lpfx_hash1` | `LpfxHash1` | `__lpfx_hash_1` |
-   | `@lpfx::lpfx_snoise2` | `LpfxSnoise2Q32` | `__lpfx_snoise2_q32` |
+   | `@lpfn::lpfn_hash1` | `LpfnHash1` | `__lpfn_hash_1` |
+   | `@lpfn::lpfn_snoise2` | `LpfnSnoise2Q32` | `__lpfn_snoise2_q32` |
    | etc. | | |
 
    Name mapping: use `lps_builtin_ids` resolution functions.
 
-   WASM signature: look up via `q32_lpfx_wasm_signature(bid)` from the
-   existing `lpfx.rs` logic (moved to `imports.rs` or referenced from
+   WASM signature: look up via `q32_lpfn_wasm_signature(bid)` from the
+   existing `lpfn.rs` logic (moved to `imports.rs` or referenced from
    `lps-builtin-ids`).
 
 3. Any unresolved import → `Err("unsupported import @module::name")`.

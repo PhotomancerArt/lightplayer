@@ -1,4 +1,9 @@
 //! Fixed-point 16.16 division.
+//!
+//! Reference saturating implementation (one i64 div). Faster reciprocal-
+//! multiply path lives in [`super::fdiv_recip_q32`] and is selected when
+//! the shader opts into `Q32Options { div: Reciprocal, .. }`. See
+//! `docs/plans-old/2026-04-18-q32-options-dispatch/00-design.md`.
 
 const MAX_FIXED: i32 = 0x7FFF_FFFF; // Maximum representable fixed-point value
 const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value

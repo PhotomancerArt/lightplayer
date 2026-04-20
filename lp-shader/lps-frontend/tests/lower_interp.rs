@@ -422,8 +422,8 @@ fn interp_pow() {
 }
 
 #[test]
-fn interp_lpfx_saturate() {
-    let glsl = "float f(float x) { return lpfx_saturate(x); }";
+fn interp_lpfn_saturate() {
+    let glsl = "float f(float x) { return lpfn_saturate(x); }";
     let mut h = CombinedImports::default();
     let ir = compile_and_lower(glsl);
     let out = interpret(&ir, "f", &[Value::F32(1.5)], &mut h).expect("interp");
@@ -571,7 +571,7 @@ impl ImportHandler for CombinedImports {
         func_name: &str,
         args: &[Value],
     ) -> Result<Vec<Value>, InterpError> {
-        if module_name == "lpfx" && func_name.starts_with("lpfx_saturate_") {
+        if module_name == "lpfn" && func_name.starts_with("lpfn_saturate_") {
             let x = args[0]
                 .as_f32()
                 .ok_or_else(|| InterpError::Import("expected f32".into()))?;

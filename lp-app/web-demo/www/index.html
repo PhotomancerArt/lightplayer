@@ -245,151 +245,151 @@
 
   const LPFX_COMPLETIONS = [
     {
-      v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',
-      c: 'float lpfx_fbm(vec2 p, int octaves, uint seed)',
+      v: 'lpfn_fbm(${1:p}, ${2:octaves}, ${3:seed})',
+      c: 'float lpfn_fbm(vec2 p, int octaves, uint seed)',
       d: 'Fractal Brownian Motion (2D)'
     },
     {
-      v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',
-      c: 'float lpfx_fbm(vec3 p, int octaves, uint seed)',
+      v: 'lpfn_fbm(${1:p}, ${2:octaves}, ${3:seed})',
+      c: 'float lpfn_fbm(vec3 p, int octaves, uint seed)',
       d: 'Fractal Brownian Motion (3D)'
     },
     {
-      v: 'lpfx_fbm(${1:p}, ${2:tileLength}, ${3:octaves}, ${4:seed})',
-      c: 'float lpfx_fbm(vec3 p, float tileLength, int octaves, uint seed)',
+      v: 'lpfn_fbm(${1:p}, ${2:tileLength}, ${3:octaves}, ${4:seed})',
+      c: 'float lpfn_fbm(vec3 p, float tileLength, int octaves, uint seed)',
       d: 'FBM tileable (3D)'
     },
     {
-      v: 'lpfx_gnoise(${1:x}, ${2:seed})',
-      c: 'float lpfx_gnoise(float x, uint seed)',
+      v: 'lpfn_gnoise(${1:x}, ${2:seed})',
+      c: 'float lpfn_gnoise(float x, uint seed)',
       d: 'Gradient noise (1D)'
     },
     {
-      v: 'lpfx_gnoise(${1:p}, ${2:seed})',
-      c: 'float lpfx_gnoise(vec2 p, uint seed)',
+      v: 'lpfn_gnoise(${1:p}, ${2:seed})',
+      c: 'float lpfn_gnoise(vec2 p, uint seed)',
       d: 'Gradient noise (2D)'
     },
     {
-      v: 'lpfx_gnoise(${1:p}, ${2:seed})',
-      c: 'float lpfx_gnoise(vec3 p, uint seed)',
+      v: 'lpfn_gnoise(${1:p}, ${2:seed})',
+      c: 'float lpfn_gnoise(vec3 p, uint seed)',
       d: 'Gradient noise (3D)'
     },
     {
-      v: 'lpfx_gnoise(${1:p}, ${2:tileLength}, ${3:seed})',
-      c: 'float lpfx_gnoise(vec3 p, float tileLength, uint seed)',
+      v: 'lpfn_gnoise(${1:p}, ${2:tileLength}, ${3:seed})',
+      c: 'float lpfn_gnoise(vec3 p, float tileLength, uint seed)',
       d: 'Gradient noise tileable (3D)'
     },
     {
-      v: 'lpfx_hash(${1:x}, ${2:seed})',
-      c: 'uint lpfx_hash(uint x, uint seed)',
+      v: 'lpfn_hash(${1:x}, ${2:seed})',
+      c: 'uint lpfn_hash(uint x, uint seed)',
       d: 'Integer hash (1D)'
     },
     {
-      v: 'lpfx_hash(${1:xy}, ${2:seed})',
-      c: 'uint lpfx_hash(uvec2 xy, uint seed)',
+      v: 'lpfn_hash(${1:xy}, ${2:seed})',
+      c: 'uint lpfn_hash(uvec2 xy, uint seed)',
       d: 'Integer hash (2D)'
     },
     {
-      v: 'lpfx_hash(${1:xyz}, ${2:seed})',
-      c: 'uint lpfx_hash(uvec3 xyz, uint seed)',
+      v: 'lpfn_hash(${1:xyz}, ${2:seed})',
+      c: 'uint lpfn_hash(uvec3 xyz, uint seed)',
       d: 'Integer hash (3D)'
     },
-    {v: 'lpfx_hsv2rgb(${1:hsv})', c: 'vec3 lpfx_hsv2rgb(vec3 hsv)', d: 'HSV to RGB'},
-    {v: 'lpfx_hsv2rgb(${1:hsv})', c: 'vec4 lpfx_hsv2rgb(vec4 hsv)', d: 'HSV to RGB (vec4)'},
-    {v: 'lpfx_hue2rgb(${1:hue})', c: 'vec3 lpfx_hue2rgb(float hue)', d: 'Hue to RGB'},
+    {v: 'lpfn_hsv2rgb(${1:hsv})', c: 'vec3 lpfn_hsv2rgb(vec3 hsv)', d: 'HSV to RGB'},
+    {v: 'lpfn_hsv2rgb(${1:hsv})', c: 'vec4 lpfn_hsv2rgb(vec4 hsv)', d: 'HSV to RGB (vec4)'},
+    {v: 'lpfn_hue2rgb(${1:hue})', c: 'vec3 lpfn_hue2rgb(float hue)', d: 'Hue to RGB'},
     {
-      v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
-      c: 'float lpfx_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)',
+      v: 'lpfn_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
+      c: 'float lpfn_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)',
       d: 'Periodic simplex rotation-derivative noise (2D)'
     },
     {
-      v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
-      c: 'float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)',
+      v: 'lpfn_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
+      c: 'float lpfn_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)',
       d: 'Periodic simplex rotation-derivative noise (3D)'
     },
     {
-      v: 'lpfx_random(${1:x}, ${2:seed})',
-      c: 'float lpfx_random(float x, uint seed)',
+      v: 'lpfn_random(${1:x}, ${2:seed})',
+      c: 'float lpfn_random(float x, uint seed)',
       d: 'Pseudo-random [0,1] (1D)'
     },
     {
-      v: 'lpfx_random(${1:p}, ${2:seed})',
-      c: 'float lpfx_random(vec2 p, uint seed)',
+      v: 'lpfn_random(${1:p}, ${2:seed})',
+      c: 'float lpfn_random(vec2 p, uint seed)',
       d: 'Pseudo-random [0,1] (2D)'
     },
     {
-      v: 'lpfx_random(${1:p}, ${2:seed})',
-      c: 'float lpfx_random(vec3 p, uint seed)',
+      v: 'lpfn_random(${1:p}, ${2:seed})',
+      c: 'float lpfn_random(vec3 p, uint seed)',
       d: 'Pseudo-random [0,1] (3D)'
     },
-    {v: 'lpfx_rgb2hsv(${1:rgb})', c: 'vec3 lpfx_rgb2hsv(vec3 rgb)', d: 'RGB to HSV'},
-    {v: 'lpfx_rgb2hsv(${1:rgb})', c: 'vec4 lpfx_rgb2hsv(vec4 rgb)', d: 'RGB to HSV (vec4)'},
-    {v: 'lpfx_saturate(${1:x})', c: 'float lpfx_saturate(float x)', d: 'Clamp to [0,1]'},
-    {v: 'lpfx_saturate(${1:v})', c: 'vec3 lpfx_saturate(vec3 v)', d: 'Clamp to [0,1] (vec3)'},
-    {v: 'lpfx_saturate(${1:v})', c: 'vec4 lpfx_saturate(vec4 v)', d: 'Clamp to [0,1] (vec4)'},
+    {v: 'lpfn_rgb2hsv(${1:rgb})', c: 'vec3 lpfn_rgb2hsv(vec3 rgb)', d: 'RGB to HSV'},
+    {v: 'lpfn_rgb2hsv(${1:rgb})', c: 'vec4 lpfn_rgb2hsv(vec4 rgb)', d: 'RGB to HSV (vec4)'},
+    {v: 'lpfn_saturate(${1:x})', c: 'float lpfn_saturate(float x)', d: 'Clamp to [0,1]'},
+    {v: 'lpfn_saturate(${1:v})', c: 'vec3 lpfn_saturate(vec3 v)', d: 'Clamp to [0,1] (vec3)'},
+    {v: 'lpfn_saturate(${1:v})', c: 'vec4 lpfn_saturate(vec4 v)', d: 'Clamp to [0,1] (vec4)'},
     {
-      v: 'lpfx_snoise(${1:x}, ${2:seed})',
-      c: 'float lpfx_snoise(float x, uint seed)',
+      v: 'lpfn_snoise(${1:x}, ${2:seed})',
+      c: 'float lpfn_snoise(float x, uint seed)',
       d: 'Simplex noise (1D)'
     },
     {
-      v: 'lpfx_snoise(${1:p}, ${2:seed})',
-      c: 'float lpfx_snoise(vec2 p, uint seed)',
+      v: 'lpfn_snoise(${1:p}, ${2:seed})',
+      c: 'float lpfn_snoise(vec2 p, uint seed)',
       d: 'Simplex noise (2D)'
     },
     {
-      v: 'lpfx_snoise(${1:p}, ${2:seed})',
-      c: 'float lpfx_snoise(vec3 p, uint seed)',
+      v: 'lpfn_snoise(${1:p}, ${2:seed})',
+      c: 'float lpfn_snoise(vec3 p, uint seed)',
       d: 'Simplex noise (3D)'
     },
     {
-      v: 'lpfx_srandom(${1:x}, ${2:seed})',
-      c: 'float lpfx_srandom(float x, uint seed)',
+      v: 'lpfn_srandom(${1:x}, ${2:seed})',
+      c: 'float lpfn_srandom(float x, uint seed)',
       d: 'Signed random [-1,1] (1D)'
     },
     {
-      v: 'lpfx_srandom(${1:p}, ${2:seed})',
-      c: 'float lpfx_srandom(vec2 p, uint seed)',
+      v: 'lpfn_srandom(${1:p}, ${2:seed})',
+      c: 'float lpfn_srandom(vec2 p, uint seed)',
       d: 'Signed random [-1,1] (2D)'
     },
     {
-      v: 'lpfx_srandom(${1:p}, ${2:seed})',
-      c: 'float lpfx_srandom(vec3 p, uint seed)',
+      v: 'lpfn_srandom(${1:p}, ${2:seed})',
+      c: 'float lpfn_srandom(vec3 p, uint seed)',
       d: 'Signed random [-1,1] (3D)'
     },
     {
-      v: 'lpfx_srandom3_tile(${1:p}, ${2:tileLength}, ${3:seed})',
-      c: 'vec3 lpfx_srandom3_tile(vec3 p, float tileLength, uint seed)',
+      v: 'lpfn_srandom3_tile(${1:p}, ${2:tileLength}, ${3:seed})',
+      c: 'vec3 lpfn_srandom3_tile(vec3 p, float tileLength, uint seed)',
       d: 'Signed random vec3 tileable'
     },
     {
-      v: 'lpfx_srandom3_vec(${1:p}, ${2:seed})',
-      c: 'vec3 lpfx_srandom3_vec(vec3 p, uint seed)',
+      v: 'lpfn_srandom3_vec(${1:p}, ${2:seed})',
+      c: 'vec3 lpfn_srandom3_vec(vec3 p, uint seed)',
       d: 'Signed random vec3'
     },
     {
-      v: 'lpfx_worley(${1:p}, ${2:seed})',
-      c: 'float lpfx_worley(vec2 p, uint seed)',
+      v: 'lpfn_worley(${1:p}, ${2:seed})',
+      c: 'float lpfn_worley(vec2 p, uint seed)',
       d: 'Worley (cellular) noise (2D)'
     },
     {
-      v: 'lpfx_worley(${1:p}, ${2:seed})',
-      c: 'float lpfx_worley(vec3 p, uint seed)',
+      v: 'lpfn_worley(${1:p}, ${2:seed})',
+      c: 'float lpfn_worley(vec3 p, uint seed)',
       d: 'Worley (cellular) noise (3D)'
     },
     {
-      v: 'lpfx_worley_value(${1:p}, ${2:seed})',
-      c: 'float lpfx_worley_value(vec2 p, uint seed)',
+      v: 'lpfn_worley_value(${1:p}, ${2:seed})',
+      c: 'float lpfn_worley_value(vec2 p, uint seed)',
       d: 'Worley value noise (2D)'
     },
     {
-      v: 'lpfx_worley_value(${1:p}, ${2:seed})',
-      c: 'float lpfx_worley_value(vec3 p, uint seed)',
+      v: 'lpfn_worley_value(${1:p}, ${2:seed})',
+      c: 'float lpfn_worley_value(vec3 p, uint seed)',
       d: 'Worley value noise (3D)'
     },
   ];
 
-  const lpfxCompleter = {
+  const lpfnCompleter = {
     getCompletions(_editor, _session, _pos, _prefix, callback) {
       callback(null, LPFX_COMPLETIONS.map(e => ({
         caption: e.c,
@@ -399,7 +399,7 @@
       })));
     },
   };
-  editor.completers = [lpfxCompleter, ...editor.completers];
+  editor.completers = [lpfnCompleter, ...editor.completers];
 
   // ── Texture sizes ─────────────────────────────────────────────────
   /** log2 from 4..1024 in half-integer steps: 2^2, 2^2.5, ..., 2^10 (rounded). */

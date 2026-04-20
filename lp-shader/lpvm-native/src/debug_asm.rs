@@ -8,8 +8,9 @@ use lps_shared::LpsModuleSig;
 
 use crate::compile::compile_module;
 use crate::error::NativeError;
-use crate::rv32::debug::LineTable;
-use crate::rv32::debug::disasm::{DisasmOptions, disassemble_function};
+use crate::isa::IsaTarget;
+use crate::isa::rv32::debug::LineTable;
+use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
 
 /// Emit annotated assembly for every function in `ir` (concatenated).
 ///
@@ -31,15 +32,16 @@ pub fn compile_module_asm_text(
         debug_info: true,
         emu_trace_instructions: false,
         alloc_trace: false,
+        ..Default::default()
     };
 
     // Compile module
-    let compiled = compile_module(ir, sig, float_mode, options)?;
+    let compiled = compile_module(ir, sig, float_mode, options, IsaTarget::Rv32imac)?;
 
     // Build a map from function name to LPIR function
     let mut out = String::new();
 
-    for func in &ir.functions {
+    for func in ir.functions.values() {
         // Find the compiled function
         let compiled_func = compiled
             .functions
@@ -66,9 +68,11 @@ mod tests {
     use alloc::string::String;
     use alloc::vec;
 
+    use alloc::collections::BTreeMap;
+
     use lpir::types::VRegRange;
-    use lpir::{IrFunction, IrType, LpirModule, LpirOp, VReg};
-    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+    use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg};
+    use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
     use super::*;
 
@@ -76,26 +80,29 @@ mod tests {
     fn compile_module_asm_contains_lpir() {
         let ir = LpirModule {
             imports: vec![],
-            functions: vec![IrFunction {
-                name: String::from("add"),
-                is_entry: true,
-                vmctx_vreg: VReg(0),
-                param_count: 2,
-                return_types: vec![IrType::I32],
-                vreg_types: vec![IrType::I32, IrType::I32, IrType::I32, IrType::I32],
-                slots: vec![],
-                body: vec![
-                    LpirOp::Iadd {
-                        dst: VReg(3),
-                        lhs: VReg(1),
-                        rhs: VReg(2),
-                    },
-                    LpirOp::Return {
-                        values: VRegRange { start: 0, count: 1 },
-                    },
-                ],
-                vreg_pool: vec![VReg(3)],
-            }],
+            functions: BTreeMap::from([(
+                FuncId(0),
+                IrFunction {
+                    name: String::from("add"),
+                    is_entry: true,
+                    vmctx_vreg: VReg(0),
+                    param_count: 2,
+                    return_types: vec![IrType::I32],
+                    vreg_types: vec![IrType::I32, IrType::I32, IrType::I32, IrType::I32],
+                    slots: vec![],
+                    body: vec![
+                        LpirOp::Iadd {
+                            dst: VReg(3),
+                            lhs: VReg(1),
+                            rhs: VReg(2),
+                        },
+                        LpirOp::Return {
+                            values: VRegRange { start: 0, count: 1 },
+                        },
+                    ],
+                    vreg_pool: vec![VReg(3)],
+                },
+            )]),
         };
         let sig = LpsModuleSig {
             functions: vec![LpsFnSig {
@@ -113,7 +120,9 @@ mod tests {
                         qualifier: ParamQualifier::In,
                     },
                 ],
+                kind: LpsFnKind::UserDefined,
             }],
+            ..Default::default()
         };
 
         let result = compile_module_asm_text(
@@ -125,8 +134,7 @@ mod tests {
         );
         assert!(
             result.is_ok(),
-            "expected successful compilation, got: {:?}",
-            result
+            "expected successful compilation, got: {result:?}",
         );
         let asm_text = result.unwrap();
         assert!(!asm_text.is_empty(), "expected non-empty assembly text");

@@ -54,7 +54,7 @@ lp-shader/legacy/lpvm-cranelift/
     │   via glsl_q32_math_ │        │                              │
     │   builtin_id / lpir_ │        │ 2. declare_builtins:         │
     │   q32_builtin_id /   │        │    BuiltinId::all()          │
-    │   glsl_lpfx_q32_     │        │    filter by FloatMode       │
+    │   glsl_lpfn_q32_     │        │    filter by FloatMode       │
     │   builtin_id         │        │    → Linkage::Import         │
     │                      │        │                              │
     │ get_function_pointer │        │ 3. Per-function:             │
@@ -122,7 +122,7 @@ lp-shader/legacy/lpvm-cranelift/
 ### `builtins.rs` — builtin declaration and resolution
 
 - `resolve_import(decl: &ImportDecl, mode: FloatMode) → Result<BuiltinId>`:
-  dispatches on `decl.module_name` ("glsl"/"lpir"/"lpfx"), calls into
+  dispatches on `decl.module_name` ("glsl"/"lpir"/"lpfn"), calls into
   `lps-builtin-ids` mapping functions. Same logic as WASM emitter's
   `resolve_builtin_id`.
 - `declare_builtins(module: &mut JITModule, mode: FloatMode)`: iterates

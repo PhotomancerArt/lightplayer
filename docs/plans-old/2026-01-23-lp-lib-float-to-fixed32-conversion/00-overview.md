@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fix LP library functions (`lpfx_snoise1/2/3`, `lpfx_hash`) to follow the correct float→q32
+Fix LP library functions (`lpfn_snoise1/2/3`, `lpfn_hash`) to follow the correct float→q32
 conversion pattern. Currently, codegen directly calls builtins, bypassing the transform. Functions
 should emit TestCase calls that the q32 transform converts, matching the pattern used for `sin`/
 `cos`.

@@ -73,7 +73,7 @@ feat(lpvm-cranelift): Q32 emission, builtins, and import resolution
 - Q32 casts: ftoi/itof via shift+clamp (ported from old crate)
 - Q32 comparisons: fcmp → icmp (signed)
 - Q32 builtin calls: fadd, fsub, fmul, fdiv, fsqrt, fnearest
-- glsl/lpfx import calls via BuiltinId resolution
+- glsl/lpfn import calls via BuiltinId resolution
 - End-to-end Q32 tests including sin import
 ```
 

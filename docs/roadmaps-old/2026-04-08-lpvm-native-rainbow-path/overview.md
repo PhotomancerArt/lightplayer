@@ -73,7 +73,7 @@ Two paths:
 **ABI Compliance (M1)**: Match Cranelift's RV32 calling convention for LPIR:
 - Multi-scalar returns in a0-a1 (vec2), a0-a3 (vec4)
 - `sret` pointer in a0 for large returns (>4 scalars)
-- Out-parameters (pointer arguments) for builtins like `lpfx_psrdnoise`
+- Out-parameters (pointer arguments) for builtins like `lpfn_psrdnoise`
 - Stack spill slots with proper alignment
 
 **Lowering Coverage (M2)**: Rainbow LPIR requires:

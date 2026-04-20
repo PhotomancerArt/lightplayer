@@ -26,15 +26,15 @@ scripts/build-builtins.sh
 Check `lp-shader/lps-compiler/src/backend/builtins/registry.rs`:
 
 - Should have `LpSimplex1`, `LpSimplex2`, `LpSimplex3` variants (not `Q32LpSimplex*`)
-- `BuiltinId::LpSimplex3.name()` should return `"__lp_q32_lpfx_snoise3"`
-- `BuiltinId::LpHash1.name()` should return `"__lpfx_hash_1"` (unchanged)
+- `BuiltinId::LpSimplex3.name()` should return `"__lp_q32_lpfn_snoise3"`
+- `BuiltinId::LpHash1.name()` should return `"__lpfn_hash_1"` (unchanged)
 
 ### 4.3 Verify Function Pointer Mapping
 
 Check `get_function_pointer()`:
 
-- `BuiltinId::LpSimplex3` should map to `q32::__lp_q32_lpfx_snoise3`
-- Hash functions should map correctly to `q32::__lpfx_hash_*` or `shared::__lpfx_hash_*`
+- `BuiltinId::LpSimplex3` should map to `q32::__lp_q32_lpfn_snoise3`
+- Hash functions should map correctly to `q32::__lpfn_hash_*` or `shared::__lpfn_hash_*`
 
 ### 4.4 Fix Any Compilation Errors
 
@@ -46,7 +46,7 @@ If registry changes cause compilation errors:
 ## Success Criteria
 
 - Registry has correct `BuiltinId` variant names (`LpSimplex3`, not `Q32LpSimplex3`)
-- `BuiltinId::LpSimplex3.name()` returns `"__lp_q32_lpfx_snoise3"`
+- `BuiltinId::LpSimplex3.name()` returns `"__lp_q32_lpfn_snoise3"`
 - All code compiles without errors
 - Code formatted with `cargo +nightly fmt`
 

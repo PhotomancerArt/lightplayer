@@ -60,7 +60,7 @@ Update doc comments on changed functions to reflect vector support:
 - `lower_expr.rs` header: remove "(scalar subset)" from module doc.
 - `lower_stmt.rs` header: update if needed.
 - `lower_math.rs` header: update to mention vector math.
-- `lower_lpfx.rs` header: remove "(scalar subset)" from module doc.
+- `lower_lpfn.rs` header: remove "(scalar subset)" from module doc.
 
 ## Validate
 

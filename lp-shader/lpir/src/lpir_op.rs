@@ -300,6 +300,31 @@ pub enum LpirOp {
         dst: VReg,
         src: VReg,
     },
+    /// Normalized channel [`IrType::F32`] → [`IrType::I32`]: low 16 bits are UNORM16 (`0…65535`).
+    /// Saturates negative and out-of-range values to the nearest endpoint.
+    /// Q32: `imin(imax(src_as_i32, 0), 65535)`. F32: saturating cast after `clamp(src,0,1)*65535`.
+    FtoUnorm16 {
+        dst: VReg,
+        src: VReg,
+    },
+    /// Same as [`LpirOp::FtoUnorm16`] but low 8 bits are UNORM8 (`0…255`).
+    /// Q32: `imin(imax(src_as_i32 >> 8, 0), 255)`. F32: scale by `255.0` after clamp.
+    FtoUnorm8 {
+        dst: VReg,
+        src: VReg,
+    },
+    /// [`IrType::I32`] low 16 bits (UNORM16) → [`IrType::F32`] in `[0.0, 1.0]` (float) or Q32 lane.
+    /// Q32: `src & 0xFFFF` as F32 vreg. F32: `(src & 0xFFFF) as f32 / 65535.0`.
+    Unorm16toF {
+        dst: VReg,
+        src: VReg,
+    },
+    /// [`IrType::I32`] low 8 bits (UNORM8) → [`IrType::F32`] in `[0.0, 1.0]`.
+    /// Q32: `(src & 0xFF) << 8` as F32 vreg. F32: `(src & 0xFF) as f32 / 255.0`.
+    Unorm8toF {
+        dst: VReg,
+        src: VReg,
+    },
 
     // --- Select / copy ---
     Select {
@@ -327,6 +352,42 @@ pub enum LpirOp {
         base: VReg,
         offset: u32,
         value: VReg,
+    },
+    /// 8-bit store: writes the low 8 bits of `value` to `[base + offset]`.
+    Store8 {
+        base: VReg,
+        offset: u32,
+        value: VReg,
+    },
+    /// 16-bit store: writes the low 16 bits of `value` to `[base + offset]`.
+    Store16 {
+        base: VReg,
+        offset: u32,
+        value: VReg,
+    },
+    /// 8-bit zero-extending load: `dst = u8[base + offset]`.
+    Load8U {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
+    /// 8-bit sign-extending load: `dst = i8[base + offset]` (sign-extended to i32).
+    Load8S {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
+    /// 16-bit zero-extending load.
+    Load16U {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
+    },
+    /// 16-bit sign-extending load.
+    Load16S {
+        dst: VReg,
+        base: VReg,
+        offset: u32,
     },
     Memcpy {
         dst_addr: VReg,
@@ -361,12 +422,21 @@ pub enum LpirOp {
     },
     End,
 
+    /// Forward-only region: [`LpirOp::ExitBlock`] jumps to the instruction at `end_offset`
+    /// (first op after the matching [`LpirOp::End`]). Closed by [`LpirOp::End`], same pattern
+    /// as `IfStart` / `LoopStart` / `SwitchStart`.
+    Block {
+        end_offset: u32,
+    },
+
     // --- Control flow jumps ---
     Break,
     Continue,
     BrIfNot {
         cond: VReg,
     },
+    /// Jump to the end of the nearest enclosing [`LpirOp::Block`] (skips `If`/`Loop`/`Switch` frames).
+    ExitBlock,
 
     // --- Call / return ---
     Call {
@@ -436,16 +506,26 @@ impl LpirOp {
             | LpirOp::IeqImm { dst, .. }
             | LpirOp::FtoiSatS { dst, .. }
             | LpirOp::FtoiSatU { dst, .. }
+            | LpirOp::FtoUnorm16 { dst, .. }
+            | LpirOp::FtoUnorm8 { dst, .. }
             | LpirOp::ItofS { dst, .. }
             | LpirOp::ItofU { dst, .. }
             | LpirOp::FfromI32Bits { dst, .. }
+            | LpirOp::Unorm16toF { dst, .. }
+            | LpirOp::Unorm8toF { dst, .. }
             | LpirOp::Select { dst, .. }
             | LpirOp::Copy { dst, .. }
             | LpirOp::SlotAddr { dst, .. }
             | LpirOp::Load { dst, .. }
+            | LpirOp::Load8U { dst, .. }
+            | LpirOp::Load8S { dst, .. }
+            | LpirOp::Load16U { dst, .. }
+            | LpirOp::Load16S { dst, .. }
             | LpirOp::FconstF32 { dst, .. }
             | LpirOp::IconstI32 { dst, .. } => Some(*dst),
             LpirOp::Store { .. }
+            | LpirOp::Store8 { .. }
+            | LpirOp::Store16 { .. }
             | LpirOp::Memcpy { .. }
             | LpirOp::Return { .. }
             | LpirOp::Call { .. }
@@ -458,7 +538,9 @@ impl LpirOp {
             | LpirOp::BrIfNot { .. }
             | LpirOp::SwitchStart { .. }
             | LpirOp::CaseStart { .. }
-            | LpirOp::DefaultStart { .. } => None,
+            | LpirOp::DefaultStart { .. }
+            | LpirOp::Block { .. }
+            | LpirOp::ExitBlock => None,
         }
     }
 }

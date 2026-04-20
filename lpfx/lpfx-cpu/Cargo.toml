@@ -1,0 +1,37 @@
+[package]
+name = "lpfx-cpu"
+description = "CPU rendering backend for lpfx effect modules (no_std + alloc)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "lpfx/std",
+    "lp-shader/std",
+    "lps-shared/std",
+]
+
+[dependencies]
+lpfx       = { path = "../lpfx",                          default-features = false }
+lp-shader  = { path = "../../lp-shader/lp-shader",        default-features = false }
+lps-shared = { path = "../../lp-shader/lps-shared",       default-features = false }
+lpvm       = { path = "../../lp-shader/lpvm",             default-features = false }
+lpir       = { path = "../../lp-shader/lpir",             default-features = false }
+lps-builtins = { path = "../../lp-shader/lps-builtins",   default-features = false }
+
+# Backend selection: exactly one LPVM engine is wired into `CpuFxEngine`,
+# chosen by target architecture rather than a Cargo feature.
+#   - riscv32       → lpvm-native (rt_jit)        — bare-metal firmware
+#   - everything else → lpvm-wasm (rt_wasmtime/rt_browser) — host or wasm32 guest
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
+
+[target.'cfg(not(target_arch = "riscv32"))'.dependencies]
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }

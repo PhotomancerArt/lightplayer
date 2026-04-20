@@ -12,6 +12,7 @@ fn two_instances_same_engine_share_memory() {
     let (ir, meta) = lower(&naga).expect("lower");
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
+        ..Default::default()
     };
     let engine = WasmLpvmEngine::new(opts).expect("engine");
     let module = engine.compile(&ir, &meta).expect("compile");
@@ -43,6 +44,7 @@ fn engine_memory_alloc_smoke() {
     let (ir, meta) = lower(&naga).expect("lower");
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
+        ..Default::default()
     };
     let engine = WasmLpvmEngine::new(opts).expect("engine");
     let _module = engine.compile(&ir, &meta).expect("compile");
@@ -59,6 +61,7 @@ fn engine_memory_alloc_smoke() {
 fn zero_alloc_errors() {
     let engine = WasmLpvmEngine::new(WasmOptions {
         float_mode: FloatMode::Q32,
+        ..Default::default()
     })
     .expect("engine");
     let err = engine.memory().alloc(0, 8).unwrap_err();

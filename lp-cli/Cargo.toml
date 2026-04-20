@@ -35,6 +35,8 @@ chrono = "0.4"
 rustc-demangle = "0.1"
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
+lps-shared = { path = "../lp-shader/lps-shared" }
+lp-shader = { path = "../lp-shader/lp-shader" }
 # `debug` enables interleaved alloc rendering for `shader-debug` and related tooling.
 lpvm-native = { path = "../lp-shader/lpvm-native", features = ["debug"] }
 lpvm-cranelift = { path = "../lp-shader/lpvm-cranelift", features = ["riscv32-object"] }

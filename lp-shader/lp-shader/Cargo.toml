@@ -1,0 +1,22 @@
+[package]
+name = "lp-shader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "High-level shader compilation and texture API"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+std = []
+
+[dependencies]
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }
+lpvm = { path = "../lpvm" }
+lps-frontend = { path = "../lps-frontend" }
+
+[dev-dependencies]
+lpvm-wasm = { path = "../lpvm-wasm" }

@@ -6,38 +6,38 @@ Add filetests for all new functions to verify they work correctly. Create test f
 
 ## Implementation
 
-### File: `lps-filetests/filetests/lpfx/lp_random.glsl` (NEW)
+### File: `lps-filetests/filetests/lpfn/lp_random.glsl` (NEW)
 
 Add tests for random functions:
 
-- Test `lpfx_random` with various inputs
+- Test `lpfn_random` with various inputs
 - Test deterministic behavior (same input = same output)
 - Test different seeds produce different outputs
 
-### File: `lps-filetests/filetests/lpfx/lp_srandom.glsl` (NEW)
+### File: `lps-filetests/filetests/lpfn/lp_srandom.glsl` (NEW)
 
 Add tests for srandom functions:
 
-- Test `lpfx_srandom` with various inputs
+- Test `lpfn_srandom` with various inputs
 - Test output range is approximately [-1, 1]
-- Test `lpfx_srandom3_tile` with tiling
+- Test `lpfn_srandom3_tile` with tiling
 
-### File: `lps-filetests/filetests/lpfx/lp_gnoise.glsl` (NEW)
+### File: `lps-filetests/filetests/lpfn/lp_gnoise.glsl` (NEW)
 
 Add tests for gnoise functions:
 
-- Test `lpfx_gnoise` with various inputs
+- Test `lpfn_gnoise` with various inputs
 - Test output range is approximately [-1, 1] (or [0, 1] for tilable)
-- Test `lpfx_gnoise3_tile` with tiling
+- Test `lpfn_gnoise3_tile` with tiling
 
-### File: `lps-filetests/filetests/lpfx/lp_fbm.glsl` (NEW)
+### File: `lps-filetests/filetests/lpfn/lp_fbm.glsl` (NEW)
 
 Add tests for fbm functions:
 
-- Test `lpfx_fbm` with various octaves (1, 2, 4, 8)
+- Test `lpfn_fbm` with various octaves (1, 2, 4, 8)
 - Test output range
 - Test that more octaves produce more detail
-- Test `lpfx_fbm3_tile` with tiling
+- Test `lpfn_fbm3_tile` with tiling
 
 ## Success Criteria
 

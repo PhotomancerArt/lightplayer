@@ -27,7 +27,7 @@ lp-shader/
 │       ├── pipeline.rs
 │       ├── src_loc.rs
 │       ├── src_loc_manager.rs
-│       └── semantic/              # types, functions, type_check, lpfx, passes, etc.
+│       └── semantic/              # types, functions, type_check, lpfn, passes, etc.
 ├── lps-cranelift/             # RENAMED from lps-compiler
 │   └── ...                        # codegen, backend, exec; depends on frontend + builtin-ids
 ├── lps-compiler/              # DELETED (renamed to cranelift)
@@ -44,12 +44,12 @@ lps-frontend    lps-cranelift
     ↑                    |
     |                    |
     +--------------------+
-         (frontend depends on builtin-ids for LpfxFn; cranelift depends on both)
+         (frontend depends on builtin-ids for LpfnFn; cranelift depends on both)
 ```
 
 - **lps-builtin-ids**: Enum `BuiltinId`, `name()`, `builtin_id_from_name()`, `all()`. No
   format(), no Cranelift, no lp-model.
-- **lps-frontend**: Error, pipeline, src_loc, semantic (including lpfx with BuiltinId from
+- **lps-frontend**: Error, pipeline, src_loc, semantic (including lpfn with BuiltinId from
   builtin-ids). DEFAULT_MAX_ERRORS.
 - **lps-cranelift**: Re-exports BuiltinId from builtin-ids, adds format(), signature(),
   declare_*. Depends on frontend + builtin-ids.
@@ -89,7 +89,7 @@ builtin-ids minimal: no_std, no cranelift, no lp-model.
 5. Update lps-compiler Cargo.toml: add `lps-builtin-ids` dependency.
 
 6. Update compiler's backend/builtins to use `lps_builtin_ids::BuiltinId` (or re-export). Update
-   lpfx_fns.rs gen to use `lps_builtin_ids::BuiltinId`.
+   lpfn_fns.rs gen to use `lps_builtin_ids::BuiltinId`.
 
 **Validate**: `cargo run -p lps-builtins-gen-app`, `cargo build -p lps-compiler`,
 `cargo test -p lps-compiler --features std`
@@ -115,7 +115,7 @@ first; helpers at bottom. Keep related functionality grouped.
     - `frontend/pipeline.rs` → `pipeline.rs`
     - `frontend/src_loc.rs` → `src_loc.rs`
     - `frontend/src_loc_manager.rs` → `src_loc_manager.rs`
-    - `frontend/semantic/` → `semantic/` (entire dir, including lpfx)
+    - `frontend/semantic/` → `semantic/` (entire dir, including lpfn)
 
 3. Fix imports in moved files:
     - `crate::` → `lps_frontend::` or `crate::` (internal)
@@ -130,8 +130,8 @@ first; helpers at bottom. Keep related functionality grouped.
 
 6. Add lps-frontend to workspace.
 
-7. Update gen-app: change `lpfx_fns_path` from `lps-compiler/.../semantic/lpfx/lpfx_fns.rs` to
-   `lps-frontend/.../semantic/lpfx/lpfx_fns.rs`. Ensure generated code uses
+7. Update gen-app: change `lpfn_fns_path` from `lps-compiler/.../semantic/lpfn/lpfn_fns.rs` to
+   `lps-frontend/.../semantic/lpfn/lpfn_fns.rs`. Ensure generated code uses
    `lps_builtin_ids::BuiltinId`. Re-run gen-app.
 
 **Validate**: `cargo run -p lps-builtins-gen-app`, `cargo build -p lps-frontend`

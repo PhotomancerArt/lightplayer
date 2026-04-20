@@ -79,7 +79,7 @@ lp-shader/
 │   └── src/
 │       ├── lib.rs           #   public API (unchanged interface)
 │       ├── emit.rs          #   REWRITE: IrFunction → wasm_encoder
-│       ├── lpfx.rs          #   UPDATE: LPFX import detection
+│       ├── lpfn.rs          #   UPDATE: LPFX import detection
 │       ├── options.rs       #   unchanged
 │       ├── types.rs         #   UPDATE: simplify
 │       ├── locals.rs        #   DELETE

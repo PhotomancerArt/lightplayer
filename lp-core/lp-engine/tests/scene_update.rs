@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_engine::{CraneliftGraphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
+use lp_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lp_model::AsLpPath;
 use lp_shared::ProjectBuilder;
 use lp_shared::fs::LpFsMemory;
@@ -25,7 +25,7 @@ fn test_node_json_modification() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
     let mut runtime =
@@ -103,7 +103,7 @@ fn test_main_glsl_modification() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
     let mut runtime =
@@ -130,7 +130,9 @@ fn test_main_glsl_modification() {
         .write_file_mut(
             "/src/shader-1.shader/main.glsl".as_path(),
             r#"
-                vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+                layout(binding = 0) uniform vec2 outputSize;
+                layout(binding = 1) uniform float time;
+                vec4 render(vec2 pos) {
                     return vec4(0.0, mod(time, 1.0), 0.0, 1.0);  // Green instead of red
                 }
             "#
@@ -186,7 +188,7 @@ fn test_node_deletion() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
     let mut runtime =

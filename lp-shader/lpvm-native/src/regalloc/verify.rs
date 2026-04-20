@@ -5,7 +5,6 @@
 
 use crate::abi::FuncAbi;
 use crate::regalloc::{Alloc, AllocOutput};
-use crate::rv32::gpr;
 use crate::vinst::{VInst, VReg};
 use alloc::vec::Vec;
 
@@ -21,7 +20,7 @@ pub fn verify_alloc(
     verify_no_double_reg_assignment(vinsts, vreg_pool, output);
     verify_edits_sorted(output);
     verify_allocs_within_pool(vinsts, vreg_pool, output, func_abi);
-    verify_call_abi(vinsts, vreg_pool, output);
+    verify_call_abi(vinsts, vreg_pool, output, func_abi);
 }
 
 /// Every use operand must be allocated to Reg or Stack, never None.
@@ -72,7 +71,7 @@ fn verify_no_double_reg_assignment(vinsts: &[VInst], vreg_pool: &[VReg], output:
         let mut num_defs: usize = 0;
         inst.for_each_def(vreg_pool, |_| num_defs += 1);
 
-        let mut use_regs: Vec<(VReg, gpr::PReg)> = Vec::new();
+        let mut use_regs: Vec<(VReg, u8)> = Vec::new();
         let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |use_vreg| {
             let alloc = output.allocs[offset + num_defs + use_idx];
@@ -112,6 +111,7 @@ fn verify_allocs_within_pool(
     output: &AllocOutput,
     func_abi: &FuncAbi,
 ) {
+    let isa = func_abi.isa();
     let mut precolored_regs: Vec<u8> = Vec::new();
     for (_vreg_idx, preg) in func_abi.precolors() {
         precolored_regs.push(preg.hw);
@@ -133,9 +133,9 @@ fn verify_allocs_within_pool(
         inst.for_each_def(vreg_pool, |_def_vreg| {
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
-                let allowed = gpr::pool_contains(preg)
+                let allowed = isa.is_in_allocatable_pool(preg)
                     || is_precolored_reg(preg)
-                    || (is_call && !callee_uses_sret && def_idx < gpr::RET_REGS.len());
+                    || (is_call && !callee_uses_sret && def_idx < isa.direct_ret_reg_count());
                 assert!(
                     allowed,
                     "inst {inst_idx}: def allocated to non-allocatable register x{preg}"
@@ -149,9 +149,9 @@ fn verify_allocs_within_pool(
         inst.for_each_use(vreg_pool, |_use_vreg| {
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
-                let allowed = gpr::pool_contains(preg)
+                let allowed = isa.is_in_allocatable_pool(preg)
                     || is_precolored_reg(preg)
-                    || (is_call && arg_base + use_idx < gpr::ARG_REGS.len());
+                    || (is_call && arg_base + use_idx < isa.call_arg_reg_count());
                 assert!(
                     allowed,
                     "inst {inst_idx}: use allocated to non-allocatable register x{preg}"
@@ -165,7 +165,8 @@ fn verify_allocs_within_pool(
 
 /// Call-specific ABI checks: ret operands in RET_REGS, arg operands in ARG_REGS.
 /// For sret calls: rets are generic (not constrained to RET_REGS), args shifted by 1.
-fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
+fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput, func_abi: &FuncAbi) {
+    let isa = func_abi.isa();
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let callee_uses_sret = match inst {
             VInst::Call {
@@ -179,8 +180,7 @@ fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
         if !callee_uses_sret {
             let mut def_idx: usize = 0;
             inst.for_each_def(vreg_pool, |_def_vreg| {
-                if def_idx < gpr::RET_REGS.len() {
-                    let expected = gpr::RET_REGS[def_idx];
+                if let Some(expected) = isa.direct_ret_reg_hw(def_idx) {
                     let actual = output.allocs[offset + def_idx];
                     assert!(
                         actual == Alloc::Reg(expected),
@@ -197,8 +197,7 @@ fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
         let arg_base = if callee_uses_sret { 1 } else { 0 };
         let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |_use_vreg| {
-            if arg_base + use_idx < gpr::ARG_REGS.len() {
-                let expected = gpr::ARG_REGS[arg_base + use_idx];
+            if let Some(expected) = isa.call_arg_reg_hw(arg_base + use_idx) {
                 let actual = output.allocs[offset + num_defs + use_idx];
                 assert!(
                     actual == Alloc::Reg(expected),

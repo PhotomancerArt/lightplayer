@@ -9,14 +9,14 @@
 
 ## Remaining scope
 
-- **`Expr::FunCall`:** After type constructors and user functions, handle remaining `is_builtin_function` / `is_lpfx_fn`.
+- **`Expr::FunCall`:** After type constructors and user functions, handle remaining `is_builtin_function` / `is_lpfn_fn`.
 - **Inline builtins (match Cranelift):** Extend `builtin_inline.rs` — e.g. `floor`, `exp` where they are compositions / simple op sequences; no import. **`q32_builtin_import_suppressed`** in `builtin_scan` must stay aligned with anything inlined so unused `__lp_q32_*` imports are not emitted (e.g. `mod` uses inline Q32, not `LpQ32Mod`).
-- **LPFX imports:** Pointer / struct-return signatures (`06-lpfx-out-params.md`).
+- **LPFX imports:** Pointer / struct-return signatures (`06-lpfn-out-params.md`).
 - **Q32:** Ensure inline paths use fixed `emit_q32_*` helpers where applicable (mul/div/add sat already exist).
 
 ## Code organization reminders
 
-- Split large match tables: `inline.rs` vs `import.rs` or by family (common, trig, lpfx).
+- Split large match tables: `inline.rs` vs `import.rs` or by family (common, trig, lpfn).
 - Tests first in test modules; helpers at bottom.
 
 ## Implementation details

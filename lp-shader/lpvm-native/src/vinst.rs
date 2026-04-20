@@ -105,6 +105,8 @@ pub enum AluOp {
     Add,
     Sub,
     Mul,
+    /// High half of signed `rs1 * rs2` (RISC-V `mulh`).
+    MulH,
     And,
     Or,
     Xor,
@@ -123,6 +125,7 @@ impl AluOp {
             AluOp::Add => "Add",
             AluOp::Sub => "Sub",
             AluOp::Mul => "Mul",
+            AluOp::MulH => "MulH",
             AluOp::And => "And",
             AluOp::Or => "Or",
             AluOp::Xor => "Xor",
@@ -141,6 +144,7 @@ impl AluOp {
             AluOp::Add => "+",
             AluOp::Sub => "-",
             AluOp::Mul => "*",
+            AluOp::MulH => "*h",
             AluOp::And => "&",
             AluOp::Or => "|",
             AluOp::Xor => "^",
@@ -159,6 +163,7 @@ impl AluOp {
             "Add" => Some(AluOp::Add),
             "Sub" => Some(AluOp::Sub),
             "Mul" => Some(AluOp::Mul),
+            "MulH" => Some(AluOp::MulH),
             "And" => Some(AluOp::And),
             "Or" => Some(AluOp::Or),
             "Xor" => Some(AluOp::Xor),
@@ -262,6 +267,33 @@ fn vregs_csv_pool(pool: &[VReg], slice: VRegSlice) -> String {
         .join(", ")
 }
 
+/// Watermark allocator for fresh temporary [`VReg`]s during lowering.
+///
+/// Initialized to `func.vreg_types.len() as u16` (i.e. one past the
+/// highest IR-declared vreg). Each [`Self::mint`] call returns a fresh
+/// [`VReg`] above the IR vreg space; ids never collide with IR vregs and
+/// never reset across LPIR ops within a function.
+///
+/// Used by [`crate::lower::lower_lpir_op`] when an op expands to
+/// multiple [`VInst`]s and needs intermediate registers.
+#[derive(Clone, Copy, Debug)]
+pub struct TempVRegs(u16);
+
+impl TempVRegs {
+    pub fn new(after_ir: u16) -> Self {
+        Self(after_ir)
+    }
+
+    pub fn mint(&mut self) -> VReg {
+        let v = VReg(self.0);
+        self.0 = self
+            .0
+            .checked_add(1)
+            .expect("lpvm-native: temp vreg space exhausted (u16)");
+        v
+    }
+}
+
 // ─── VInst ───────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -335,6 +367,48 @@ pub enum VInst {
         offset: i32,
         src_op: u16,
     },
+    /// 8-bit store: `[base + offset] = src` (low 8 bits).
+    Store8 {
+        src: VReg,
+        base: VReg,
+        offset: i32,
+        src_op: u16,
+    },
+    /// 16-bit store: `[base + offset] = src` (low 16 bits).
+    Store16 {
+        src: VReg,
+        base: VReg,
+        offset: i32,
+        src_op: u16,
+    },
+    /// Zero-extending byte load: `dst = u8[base + offset]`.
+    Load8U {
+        dst: VReg,
+        base: VReg,
+        offset: i32,
+        src_op: u16,
+    },
+    /// Sign-extending byte load: `dst = i8[base + offset]`.
+    Load8S {
+        dst: VReg,
+        base: VReg,
+        offset: i32,
+        src_op: u16,
+    },
+    /// Zero-extending halfword load.
+    Load16U {
+        dst: VReg,
+        base: VReg,
+        offset: i32,
+        src_op: u16,
+    },
+    /// Sign-extending halfword load.
+    Load16S {
+        dst: VReg,
+        base: VReg,
+        offset: i32,
+        src_op: u16,
+    },
     /// Compute address of LPIR stack slot.
     SlotAddr { dst: VReg, slot: u32, src_op: u16 },
     /// Word-aligned memcpy.
@@ -376,6 +450,12 @@ impl VInst {
             | VInst::Mov { src_op, .. }
             | VInst::Load32 { src_op, .. }
             | VInst::Store32 { src_op, .. }
+            | VInst::Store8 { src_op, .. }
+            | VInst::Store16 { src_op, .. }
+            | VInst::Load8U { src_op, .. }
+            | VInst::Load8S { src_op, .. }
+            | VInst::Load16U { src_op, .. }
+            | VInst::Load16S { src_op, .. }
             | VInst::SlotAddr { src_op, .. }
             | VInst::MemcpyWords { src_op, .. }
             | VInst::IConst32 { src_op, .. }
@@ -397,9 +477,15 @@ impl VInst {
             | VInst::Select { dst, .. }
             | VInst::Mov { dst, .. }
             | VInst::Load32 { dst, .. }
+            | VInst::Load8U { dst, .. }
+            | VInst::Load8S { dst, .. }
+            | VInst::Load16U { dst, .. }
+            | VInst::Load16S { dst, .. }
             | VInst::SlotAddr { dst, .. }
             | VInst::IConst32 { dst, .. } => f(*dst),
             VInst::Store32 { .. }
+            | VInst::Store8 { .. }
+            | VInst::Store16 { .. }
             | VInst::MemcpyWords { .. }
             | VInst::Label(..)
             | VInst::Br { .. }
@@ -444,8 +530,14 @@ impl VInst {
                 f(*src)
             }
             VInst::Mov { src, .. } => f(*src),
-            VInst::Load32 { base, .. } => f(*base),
-            VInst::Store32 { src, base, .. } => {
+            VInst::Load32 { base, .. }
+            | VInst::Load8U { base, .. }
+            | VInst::Load8S { base, .. }
+            | VInst::Load16U { base, .. }
+            | VInst::Load16S { base, .. } => f(*base),
+            VInst::Store32 { src, base, .. }
+            | VInst::Store8 { src, base, .. }
+            | VInst::Store16 { src, base, .. } => {
                 f(*src);
                 f(*base);
             }
@@ -489,6 +581,12 @@ impl VInst {
             VInst::Mov { .. } => "Mov",
             VInst::Load32 { .. } => "Load32",
             VInst::Store32 { .. } => "Store32",
+            VInst::Store8 { .. } => "Store8",
+            VInst::Store16 { .. } => "Store16",
+            VInst::Load8U { .. } => "Load8U",
+            VInst::Load8S { .. } => "Load8S",
+            VInst::Load16U { .. } => "Load16U",
+            VInst::Load16S { .. } => "Load16S",
             VInst::SlotAddr { .. } => "SlotAddr",
             VInst::MemcpyWords { .. } => "MemcpyWords",
             VInst::IConst32 { .. } => "IConst32",
@@ -553,9 +651,27 @@ impl VInst {
             VInst::Load32 {
                 dst, base, offset, ..
             } => format!("v{} = [v{}{:+}]", dst.0, base.0, offset),
+            VInst::Load8U {
+                dst, base, offset, ..
+            } => format!("v{} = u8[v{}{:+}]", dst.0, base.0, offset),
+            VInst::Load8S {
+                dst, base, offset, ..
+            } => format!("v{} = i8[v{}{:+}]", dst.0, base.0, offset),
+            VInst::Load16U {
+                dst, base, offset, ..
+            } => format!("v{} = u16[v{}{:+}]", dst.0, base.0, offset),
+            VInst::Load16S {
+                dst, base, offset, ..
+            } => format!("v{} = i16[v{}{:+}]", dst.0, base.0, offset),
             VInst::Store32 {
                 src, base, offset, ..
             } => format!("[v{}{:+}] = v{}", base.0, offset, src.0),
+            VInst::Store8 {
+                src, base, offset, ..
+            } => format!("[v{}{:+}] = v{} (8)", base.0, offset, src.0),
+            VInst::Store16 {
+                src, base, offset, ..
+            } => format!("[v{}{:+}] = v{} (16)", base.0, offset, src.0),
             VInst::SlotAddr { dst, slot, .. } => format!("v{} = &slot({})", dst.0, slot),
             VInst::MemcpyWords {
                 dst_base,

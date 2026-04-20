@@ -4,11 +4,13 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{FloatMode, IrFunction, LpirModule};
-use lps_shared::LpsFnSig;
+use lps_shared::{LpsFnKind, LpsFnSig};
 use lpvm::FunctionDebugInfo;
 
+use crate::LowerOpts;
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 use crate::vinst::ModuleSymbols;
 
 /// Relocation entry for a call site.
@@ -18,6 +20,8 @@ pub struct NativeReloc {
     pub offset: usize,
     /// Symbol name to resolve (builtin or function).
     pub symbol: String,
+    /// ELF / JIT relocation type (e.g. [`crate::isa::rv32::link::R_RISCV_CALL_PLT`]).
+    pub r_type: u32,
 }
 
 /// Output of one function's compilation.
@@ -50,6 +54,8 @@ pub struct CompileSession {
     pub symbols: ModuleSymbols,
     /// Module ABI for param/return locations.
     pub abi: ModuleAbi,
+    /// Target ISA for per-function ABI construction.
+    pub isa: IsaTarget,
     /// Floating point mode.
     pub float_mode: FloatMode,
     /// Compilation options.
@@ -60,12 +66,14 @@ impl CompileSession {
     /// Create a new compile session for a module.
     pub fn new(
         abi: ModuleAbi,
+        isa: IsaTarget,
         float_mode: FloatMode,
         options: crate::native_options::NativeCompileOptions,
     ) -> Self {
         Self {
             symbols: ModuleSymbols::default(),
             abi,
+            isa,
             float_mode,
             options,
         }
@@ -80,30 +88,35 @@ pub fn compile_function(
     fn_sig: &LpsFnSig,
 ) -> Result<CompiledFunction, NativeError> {
     log::debug!(
-        "[native-fa] compile_function: lowering {} ({} ops)",
-        func.name,
-        func.body.len()
+        "[native-fa] compile_function: lowering {name} ({ops} ops)",
+        name = func.name,
+        ops = func.body.len(),
     );
 
     // Build function ABI (needed for both debug and non-debug paths)
-    let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
+    let func_abi = match session.isa {
+        IsaTarget::Rv32imac => {
+            crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize)
+        }
+    };
 
     // 1-4. Const-fold, lower, optimize, allocate, emit
     let (code, relocs, debug_lines, sections) = {
         let mut func_opt = func.clone();
         let n_folded = lpir::const_fold::fold_constants(&mut func_opt);
         if n_folded > 0 {
-            log::debug!(
-                "[native-fa] compile_function: folded {} LPIR constants",
-                n_folded
-            );
+            log::debug!("[native-fa] compile_function: folded {n_folded} LPIR constants");
         }
 
-        let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, session.float_mode)
+        let lower_opts = LowerOpts {
+            float_mode: session.float_mode,
+            q32: &session.options.config.q32,
+        };
+        let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, &lower_opts)
             .map_err(NativeError::Lower)?;
         log::debug!(
-            "[native-fa] compile_function: lowered to {} vinsts",
-            lowered.vinsts.len()
+            "[native-fa] compile_function: lowered to {n} vinsts",
+            n = lowered.vinsts.len(),
         );
 
         crate::opt::fold_immediates(&mut lowered);
@@ -112,8 +125,8 @@ pub fn compile_function(
         let emitted =
             crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
         log::debug!(
-            "[native-fa] compile_function: emitted {} bytes",
-            emitted.code.len()
+            "[native-fa] compile_function: emitted {n} bytes",
+            n = emitted.code.len(),
         );
 
         let code = emitted.code;
@@ -152,29 +165,31 @@ pub fn compile_module(
     sig: &lps_shared::LpsModuleSig,
     float_mode: FloatMode,
     options: crate::native_options::NativeCompileOptions,
+    isa: IsaTarget,
 ) -> Result<CompiledModule, NativeError> {
     log::debug!(
-        "[native-fa] compile_module: building ABI for {} functions",
-        ir.functions.len()
+        "[native-fa] compile_module: building ABI for {n} functions",
+        n = ir.functions.len(),
     );
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
-    let mut session = CompileSession::new(module_abi, float_mode, options);
+    let module_abi = ModuleAbi::from_ir_and_sig(isa, ir, sig);
+    let mut session = CompileSession::new(module_abi, isa, float_mode, options);
 
     let sig_map: alloc::collections::BTreeMap<&str, &LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut functions = Vec::with_capacity(ir.functions.len());
-    for (idx, func) in ir.functions.iter().enumerate() {
+    for (idx, func) in ir.functions.values().enumerate() {
         log::debug!(
-            "[native-fa] compile_module: compiling function {}/{}: {}",
-            idx + 1,
-            ir.functions.len(),
-            func.name
+            "[native-fa] compile_module: compiling function {cur}/{total}: {name}",
+            cur = idx + 1,
+            total = ir.functions.len(),
+            name = func.name,
         );
         let default_sig = LpsFnSig {
             name: func.name.clone(),
             return_type: lps_shared::LpsType::Void,
             parameters: Vec::new(),
+            kind: LpsFnKind::UserDefined,
         };
         let fn_sig = sig_map
             .get(func.name.as_str())
@@ -183,14 +198,14 @@ pub fn compile_module(
         let compiled = compile_function(&mut session, func, ir, fn_sig)?;
         functions.push(compiled);
         log::debug!(
-            "[native-fa] compile_module: function {} complete",
-            func.name
+            "[native-fa] compile_module: function {name} complete",
+            name = func.name,
         );
     }
 
     log::debug!(
-        "[native-fa] compile_module: all {} functions compiled",
-        functions.len()
+        "[native-fa] compile_module: all {n} functions compiled",
+        n = functions.len(),
     );
     Ok(CompiledModule {
         functions,
@@ -201,21 +216,29 @@ pub fn compile_module(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::vec;
-    use lpir::{IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
-    use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
+
+    use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
+    use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType};
 
     #[test]
     fn test_compile_session_new() {
         let abi = ModuleAbi::from_ir_and_sig(
+            IsaTarget::Rv32imac,
             &LpirModule {
                 imports: vec![],
-                functions: vec![],
+                functions: Default::default(),
             },
-            &LpsModuleSig { functions: vec![] },
+            &LpsModuleSig::default(),
         );
-        let session = CompileSession::new(abi, lpir::FloatMode::Q32, Default::default());
+        let session = CompileSession::new(
+            abi,
+            IsaTarget::Rv32imac,
+            lpir::FloatMode::Q32,
+            Default::default(),
+        );
         assert!(session.symbols.names.is_empty());
     }
 
@@ -223,10 +246,16 @@ mod tests {
     fn test_compile_module_empty() {
         let ir = LpirModule {
             imports: vec![],
-            functions: vec![],
+            functions: BTreeMap::new(),
         };
-        let sig = LpsModuleSig { functions: vec![] };
-        let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
+        let sig = LpsModuleSig::default();
+        let result = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
         // Should succeed with no functions
         let compiled = result.unwrap();
         assert!(compiled.functions.is_empty());
@@ -236,40 +265,137 @@ mod tests {
     fn test_compile_simple_iconst() {
         let ir = LpirModule {
             imports: vec![],
-            functions: vec![IrFunction {
-                name: String::from("test"),
-                is_entry: true,
-                vmctx_vreg: VReg(0),
-                param_count: 0,
-                return_types: vec![IrType::I32],
-                vreg_types: vec![IrType::I32],
-                slots: vec![],
-                body: vec![
-                    LpirOp::IconstI32 {
-                        dst: VReg(0),
-                        value: 42,
-                    },
-                    LpirOp::Return {
-                        values: VRegRange { start: 0, count: 1 },
-                    },
-                ],
-                vreg_pool: vec![VReg(0)],
-            }],
+            functions: BTreeMap::from([(
+                FuncId(0),
+                IrFunction {
+                    name: String::from("test"),
+                    is_entry: true,
+                    vmctx_vreg: VReg(0),
+                    param_count: 0,
+                    return_types: vec![IrType::I32],
+                    vreg_types: vec![IrType::I32],
+                    slots: vec![],
+                    body: vec![
+                        LpirOp::IconstI32 {
+                            dst: VReg(0),
+                            value: 42,
+                        },
+                        LpirOp::Return {
+                            values: VRegRange { start: 0, count: 1 },
+                        },
+                    ],
+                    vreg_pool: vec![VReg(0)],
+                },
+            )]),
         };
         let sig = LpsModuleSig {
             functions: vec![LpsFnSig {
                 name: String::from("test"),
                 return_type: LpsType::Int,
                 parameters: vec![],
+                kind: LpsFnKind::UserDefined,
             }],
+            ..Default::default()
         };
-        let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
+        let result = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
         assert!(
             result.is_ok(),
-            "expected successful compilation, got: {:?}",
-            result
+            "expected successful compilation, got: {result:?}",
         );
         let module = result.unwrap();
         assert_eq!(module.functions.len(), 1, "expected 1 compiled function");
+    }
+
+    /// Phase 0 regression: [`crate::native_options::NativeCompileOptions::config`] (e.g. Q32 mul
+    /// mode) must reach [`compile_module`]. `rt_jit::compile_module_jit` forwards the same
+    /// struct into here; if it rebuilt options from defaults, only float_mode would apply.
+    #[test]
+    fn compile_module_respects_q32_mul_mode_in_emitted_code() {
+        use lps_q32::q32_options::{MulMode, Q32Options};
+        use lps_shared::{FnParam, ParamQualifier};
+
+        let func = IrFunction {
+            name: String::from("q32_fmul"),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 2,
+            return_types: vec![IrType::F32],
+            vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32, IrType::F32],
+            slots: vec![],
+            body: vec![
+                LpirOp::Fmul {
+                    dst: VReg(3),
+                    lhs: VReg(1),
+                    rhs: VReg(2),
+                },
+                LpirOp::Return {
+                    values: VRegRange { start: 0, count: 1 },
+                },
+            ],
+            vreg_pool: vec![VReg(3)],
+        };
+        let ir = LpirModule {
+            imports: vec![],
+            functions: BTreeMap::from([(FuncId(0), func)]),
+        };
+        let sig = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("q32_fmul"),
+                return_type: LpsType::Float,
+                parameters: vec![
+                    FnParam {
+                        name: String::from("a"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("b"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                ],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        };
+
+        let mut opts_sat = crate::native_options::NativeCompileOptions::default();
+        opts_sat.float_mode = lpir::FloatMode::Q32;
+        opts_sat.config.q32.mul = MulMode::Saturating;
+
+        let mut opts_wrap = crate::native_options::NativeCompileOptions::default();
+        opts_wrap.float_mode = lpir::FloatMode::Q32;
+        opts_wrap.config.q32 = Q32Options {
+            mul: MulMode::Wrapping,
+            ..Default::default()
+        };
+
+        let sat = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            opts_sat,
+            IsaTarget::Rv32imac,
+        )
+        .expect("saturating mul compile");
+        let wrap = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            opts_wrap,
+            IsaTarget::Rv32imac,
+        )
+        .expect("wrapping mul compile");
+
+        assert_ne!(
+            sat.functions[0].code, wrap.functions[0].code,
+            "saturating fmul lowers to a builtin call; wrapping uses inline mul/mulh — code must differ"
+        );
     }
 }

@@ -88,7 +88,7 @@ cargo +nightly fmt -p lps-wasm
 ### Dead code audit
 
 Verify no remnants of the old emitter remain:
-- No references to `locals.rs`, `emit_vec.rs`, `lpfx.rs`, `types.rs`
+- No references to `locals.rs`, `emit_vec.rs`, `lpfn.rs`, `types.rs`
 - No unused imports of `naga::*` types
 - No unused `wasm-encoder` instruction imports
 

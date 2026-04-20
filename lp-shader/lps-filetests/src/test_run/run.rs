@@ -2,6 +2,7 @@
 
 use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
+use crate::perf_model::PerfModel;
 use crate::targets::Target;
 use crate::test_run::{TestCaseStats, run_detail};
 use anyhow::Result;
@@ -23,6 +24,7 @@ pub fn run_test_file_with_line_filter(
     output_mode: OutputMode,
     targets: &[&Target],
     suppress_rerun: bool,
+    perf_model: PerfModel,
 ) -> Result<(
     Result<()>,
     PerTargetStats,
@@ -72,6 +74,7 @@ pub fn run_test_file_with_line_filter(
             output_mode,
             target,
             suppress_rerun,
+            perf_model,
         )?;
 
         let target_name = target.name();
@@ -85,6 +88,7 @@ pub fn run_test_file_with_line_filter(
         combined_stats.unsupported += stats.unsupported;
         if targets.len() == 1 {
             combined_stats.guest_instructions_total = stats.guest_instructions_total;
+            combined_stats.guest_cycles_total = stats.guest_cycles_total;
         }
         per_target.insert(target_name.clone(), stats);
 
@@ -116,7 +120,14 @@ pub fn run_test_file_with_line_filter(
 /// Run all tests in a test file (single target for backward compat).
 pub fn run_test_file(test_file: &TestFile, path: &Path) -> Result<()> {
     let targets: Vec<&Target> = crate::targets::DEFAULT_TARGETS.iter().collect();
-    let (result, _, _, _, _, _, _) =
-        run_test_file_with_line_filter(test_file, path, None, OutputMode::Detail, &targets, false)?;
+    let (result, _, _, _, _, _, _) = run_test_file_with_line_filter(
+        test_file,
+        path,
+        None,
+        OutputMode::Detail,
+        &targets,
+        false,
+        PerfModel::default(),
+    )?;
     result
 }

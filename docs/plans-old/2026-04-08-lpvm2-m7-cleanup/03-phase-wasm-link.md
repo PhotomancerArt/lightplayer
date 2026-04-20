@@ -4,7 +4,7 @@
 
 The file `lps-filetests/src/test_run/wasm_link.rs` provides wasmtime-based
 linking for builtins + shader WASM. It's currently used by
-`tests/lpfx_builtins_memory.rs`. We need to migrate that test to use `lpvm-wasm`'s
+`tests/lpfn_builtins_memory.rs`. We need to migrate that test to use `lpvm-wasm`'s
 instantiate/link path instead, then delete `wasm_link.rs`.
 
 ## Current State
@@ -17,7 +17,7 @@ Provides:
 - `shared_env_memory_type()` - memory type for env.memory
 
 Used by:
-- `lps-filetests/tests/lpfx_builtins_memory.rs`
+- `lps-filetests/tests/lpfn_builtins_memory.rs`
 
 ### `lpvm-wasm` path
 
@@ -52,7 +52,7 @@ If the test is specifically testing builtins memory, we might:
 
 ## Code Changes
 
-### `lps-filetests/tests/lpfx_builtins_memory.rs`
+### `lps-filetests/tests/lpfn_builtins_memory.rs`
 
 **Current imports:**
 ```rust
@@ -109,7 +109,7 @@ deleting it entirely instead of migrating.
 
 ## Files to Modify
 
-- `lps-filetests/tests/lpfx_builtins_memory.rs` - migrate to lpvm-wasm or delete
+- `lps-filetests/tests/lpfn_builtins_memory.rs` - migrate to lpvm-wasm or delete
 - `lps-filetests/src/test_run/mod.rs` - remove `pub mod wasm_link;`
 
 ## Files to Delete
@@ -125,7 +125,7 @@ deleting it entirely instead of migrating.
 ## Validate
 
 ```bash
-cargo test -p lps-filetests --test lpfx_builtins_memory  # should pass or be removed
+cargo test -p lps-filetests --test lpfn_builtins_memory  # should pass or be removed
 cargo check -p lps-filetests --lib
 cargo test -p lps-filetests
 ```

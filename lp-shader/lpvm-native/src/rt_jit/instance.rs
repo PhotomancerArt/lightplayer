@@ -7,15 +7,21 @@ use alloc::vec::Vec;
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmInstance, decode_q32_return, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
+    CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
+    encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
+    q32_to_lps_value_f32, validate_render_texture_sig_ir,
 };
 
 use crate::error::NativeError;
-use crate::rv32::abi::func_abi_rv32;
+use crate::isa::IsaTarget;
 
 use super::call::rv32_jalr_a0_a7;
 use super::module::{NativeJitDirectCall, NativeJitModule};
+
+pub(crate) struct RenderTextureEntry {
+    pub(crate) name: String,
+    pub(crate) entry_pc: usize,
+}
 
 /// Per-instance state: [`NativeJitModule`] plus guest vmctx pointer.
 pub struct NativeJitInstance {
@@ -27,6 +33,7 @@ pub struct NativeJitInstance {
     pub(crate) snapshot_offset: u32,
     /// Size of globals region in bytes
     pub(crate) globals_size: u32,
+    pub(crate) render_texture_cache: Option<RenderTextureEntry>,
 }
 
 impl NativeJitInstance {
@@ -72,6 +79,41 @@ impl NativeJitInstance {
         unsafe {
             core::ptr::copy_nonoverlapping(globals_ptr, snapshot_ptr, self.globals_size as usize);
         }
+    }
+
+    fn resolve_render_texture(&mut self, fn_name: &str) -> Result<usize, NativeError> {
+        if let Some(entry) = &self.render_texture_cache {
+            if entry.name == fn_name {
+                return Ok(entry.entry_pc);
+            }
+        }
+
+        let ir_fn = self
+            .module
+            .inner
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
+        validate_render_texture_sig_ir(ir_fn).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "render-texture sig invalid: {e}"
+            )))
+        })?;
+
+        let entry_off = self.module.entry_offset(fn_name).ok_or_else(|| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "symbol `{fn_name}` not in JIT image"
+            )))
+        })?;
+        let entry_pc = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
+
+        self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            entry_pc,
+        });
+        Ok(entry_pc)
     }
 
     /// Fast direct call using cached handle (zero lookups, zero allocations).
@@ -155,15 +197,14 @@ impl NativeJitInstance {
     }
 
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
-        let idx = self
+        let ir_func = self
             .module
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let ir_func = &self.module.inner.ir.functions[idx];
 
         let gfn = self
             .module
@@ -176,7 +217,9 @@ impl NativeJitInstance {
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
 
         let slots = ir_func.total_param_slots() as usize;
-        let func_abi = func_abi_rv32(&gfn, slots);
+        let func_abi = match self.module.inner.isa {
+            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(&gfn, slots),
+        };
         let is_sret = func_abi.is_sret();
         let n_ret = ir_func.return_types.len();
 
@@ -331,15 +374,14 @@ impl LpvmInstance for NativeJitInstance {
         }
 
         let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
-        let idx = self
+        let ir_func = self
             .module
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let ir_func = &self.module.inner.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
         if flat.len() != param_count {
             return Err(NativeError::Call(CallError::Unsupported(format!(
@@ -383,15 +425,14 @@ impl LpvmInstance for NativeJitInstance {
             }
         }
 
-        let idx = self
+        let ir_func = self
             .module
             .inner
             .ir
             .functions
-            .iter()
-            .position(|f| f.name == name)
+            .values()
+            .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let ir_func = &self.module.inner.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
 
         let expected_words: usize = gfn
@@ -418,6 +459,55 @@ impl LpvmInstance for NativeJitInstance {
             return Ok(Vec::new());
         }
         Ok(words)
+    }
+
+    fn call_render_texture(
+        &mut self,
+        fn_name: &str,
+        texture: &mut LpvmBuffer,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        if self.module.inner.options.float_mode != FloatMode::Q32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeJitInstance::call_render_texture requires FloatMode::Q32",
+            ))));
+        }
+
+        let entry = self.resolve_render_texture(fn_name)?;
+
+        // Pass guest addresses as bit patterns: RV32 ABI registers are 32 bits
+        // wide and the JIT'd function reinterprets them as `*mut u8` regardless
+        // of sign. RV32 RAM lives at >=0x8000_0000 so a checked `i32::try_from`
+        // would always reject these even though the lowering is correct.
+        let tex_offset = (texture.guest_base() as u32) as i32;
+        let vmctx = self.vmctx_guest as i32;
+
+        #[cfg(target_arch = "riscv32")]
+        unsafe {
+            crate::rt_jit::call::rv32_jalr_a0_a7(
+                entry,
+                vmctx,
+                tex_offset,
+                width as i32,
+                height as i32,
+                0,
+                0,
+                0,
+                0,
+            );
+        }
+        #[cfg(not(target_arch = "riscv32"))]
+        {
+            let _ = (entry, vmctx, tex_offset, width, height);
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeJitInstance::call_render_texture requires riscv32 host",
+            ))));
+        }
+
+        Ok(())
     }
 
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {

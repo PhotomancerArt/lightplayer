@@ -6,9 +6,9 @@ Validate discovered LPFX functions for consistency, proper pairing, and correctn
 
 ## Implementation
 
-1. Create `lps-builtin-gen-app/src/lpfx/validate.rs`
+1. Create `lps-builtin-gen-app/src/lpfn/validate.rs`
 2. Implement validation functions:
-    - `validate_lpfx_functions()` - main validation entry point
+    - `validate_lpfn_functions()` - main validation entry point
     - `validate_decimal_pairs()` - ensure all decimal functions have f32/q32 pairs
     - `validate_signature_consistency()` - ensure f32 and q32 signatures match
     - `validate_builtin_ids()` - ensure BuiltinId references are valid

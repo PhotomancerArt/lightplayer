@@ -12,9 +12,9 @@ import plumbing, inline gentype builtins, `q32_builtin_link` smoke test.
 Remaining work:
 
 1. **Math gaps** — `floor`, `fract` (Q32), `atan(y,x)` codegen paths
-2. **LPFX call emission** — FunCall dispatch + flattened arg emission for `lpfx_worley`, `lpfx_fbm`,
-   `lpfx_psrdnoise`
-3. **Out parameter support** — `lpfx_psrdnoise`'s `out vec2 gradient` needs memory pointers +
+2. **LPFX call emission** — FunCall dispatch + flattened arg emission for `lpfn_worley`, `lpfn_fbm`,
+   `lpfn_psrdnoise`
+3. **Out parameter support** — `lpfn_psrdnoise`'s `out vec2 gradient` needs memory pointers +
    post-call loads
 4. **Filetest runner** — `wasm_runner.rs` needs builtins.wasm + shared memory + linker
 5. **Rainbow integration** — compile + run full shader, fix remaining gaps
@@ -52,7 +52,7 @@ imports → **error**. No LPFX path — falls to error branch.
 - `floor` Q32: inline `sshr(a, 16)` then `ishl(result, 16)` — arithmetic right shift zeros
   fractional bits, left shift restores position. Simple, no import needed.
 - `fract` Q32: `x - floor(x)` — per-component, uses inline `emit_float_floor` then `emit_float_sub`.
-- LPFX calls: `find_lpfx_fn(name, &param_types)` → validate → flatten args (in params as components,
+- LPFX calls: `find_lpfn_fn(name, &param_types)` → validate → flatten args (in params as components,
   out/inout as pointers) → call. Vector returns use sret pointer prepended as first param.
 - `build_call_signature` builds Cranelift signature from GLSL params (in → expanded, out → pointer).
   Does **not** include hidden extern "C" params like `seed`.
@@ -62,15 +62,15 @@ imports → **error**. No LPFX path — falls to error branch.
 **psrdnoise2 Q32 extern "C" signature** (from `psrdnoise2_q32.rs`):
 
 ```
-__lpfx_psrdnoise2_q32(x: i32, y: i32, period_x: i32, period_y: i32, alpha: i32, gradient_out: *mut i32, seed: u32) -> i32
+__lpfn_psrdnoise2_q32(x: i32, y: i32, period_x: i32, period_y: i32, alpha: i32, gradient_out: *mut i32, seed: u32) -> i32
 ```
 
 7 params: 5 scalar values + 1 gradient pointer + 1 seed. Returns scalar.
 
-**GLSL signature**: `float lpfx_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient)` — 4
+**GLSL signature**: `float lpfn_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient)` — 4
 GLSL params, no seed.
 
-**Generated `wasm_import_val_types(LpfxPsrdnoise2Q32)`**: 7× i32 → 1× i32. Matches the extern "C"
+**Generated `wasm_import_val_types(LpfnPsrdnoise2Q32)`**: 7× i32 → 1× i32. Matches the extern "C"
 function including seed.
 
 **Cranelift `build_call_signature`**: builds from GLSL params only (no seed) → 6 params. This means
@@ -93,9 +93,9 @@ This needs to be resolved before implementing psrdnoise codegen.
 | `floor`                                           | **Gap**           | Cranelift inlines as shift/shift                                |
 | `fract`                                           | **Gap**           | Q32 not implemented; `x - floor(x)` in Cranelift                |
 | `atan(y,x)`                                       | **Gap**           | 2-arg → `LpQ32Atan2`; should map via `glsl_q32_math_builtin_id` |
-| `lpfx_worley`                                     | **Gap**           | No FunCall dispatch; scalar return, seed in GLSL args           |
-| `lpfx_fbm`                                        | **Gap**           | No FunCall dispatch; scalar return, seed in GLSL args           |
-| `lpfx_psrdnoise`                                  | **Gap**           | No FunCall dispatch; out param + hidden seed                    |
+| `lpfn_worley`                                     | **Gap**           | No FunCall dispatch; scalar return, seed in GLSL args           |
+| `lpfn_fbm`                                        | **Gap**           | No FunCall dispatch; scalar return, seed in GLSL args           |
+| `lpfn_psrdnoise`                                  | **Gap**           | No FunCall dispatch; out param + hidden seed                    |
 
 ## Questions
 
@@ -112,7 +112,7 @@ exist?). The inline approach avoids an import, matches Cranelift, and is simple.
 
 ### Q2: psrdnoise seed param — mismatch between GLSL (no seed) and extern "C" (has seed)
 
-**Context:** The generated `wasm_import_val_types(LpfxPsrdnoise2Q32)` includes 7 i32 params (
+**Context:** The generated `wasm_import_val_types(LpfnPsrdnoise2Q32)` includes 7 i32 params (
 matching the extern "C" ABI which includes `seed: u32`). But the GLSL signature has 4 params and no
 seed. When the WASM codegen emits `call` to the psrdnoise import, it needs 7 values on the stack.
 From the GLSL args: vec2 → 2, vec2 → 2, float → 1, out vec2 → 1 pointer = 6 values. The 7th (seed)
@@ -131,14 +131,14 @@ the generated import types include seed. Options: (a) Codegen injects `i32.const
 b) Regenerate import types without seed for psrdnoise; (c) Add seed to the GLSL signature (breaking
 change). Option (a) is simplest.
 
-**Finding:** Cranelift's `signature_for_builtin` declares `LpfxPsrdnoise2Q32` with **6 params** (no
+**Finding:** Cranelift's `signature_for_builtin` declares `LpfnPsrdnoise2Q32` with **6 params** (no
 seed). The actual extern "C" function has 7 (including `seed: u32`). Cranelift calls with 6 args;
 the 7th register has garbage. This "works" on native because the seed just produces a
 different-but-valid permutation — UB that happens to be harmless. All other LPFX functions (worley,
 fbm, etc.) already expose seed as a normal GLSL parameter.
 
-**Decision:** Fix the bug properly — add `seed: UInt` to the `lpfx_psrdnoise` GLSL signature in
-`lpfx_fns.rs` (both vec2 and vec3 overloads). Update Cranelift registry to declare 7 params. Update
+**Decision:** Fix the bug properly — add `seed: UInt` to the `lpfn_psrdnoise` GLSL signature in
+`lpfn_fns.rs` (both vec2 and vec3 overloads). Update Cranelift registry to declare 7 params. Update
 all GLSL shader calls to pass `0u` as seed. The WASM generated import types (7 params) are already
 correct. This makes psrdnoise consistent with worley/fbm and eliminates the UB.
 
@@ -149,11 +149,11 @@ fundamentally different pattern from LPFX (pre-flattened, mixed types, out param
 params). Putting LPFX logic in the same file would make it large and mix two distinct calling
 conventions.
 
-**Suggested answer:** New `lpfx_call.rs` alongside `builtin_call.rs`. FunCall dispatch adds an
-`is_lpfx_fn` branch that calls into it.
+**Suggested answer:** New `lpfn_call.rs` alongside `builtin_call.rs`. FunCall dispatch adds an
+`is_lpfn_fn` branch that calls into it.
 
-**Decision:** Separate `lpfx_call.rs`, matching Cranelift's approach (which has `lpfx_fns.rs` +
-`lpfx_sig.rs` separate from the math builtins). Signature types are already handled by the generated
+**Decision:** Separate `lpfn_call.rs`, matching Cranelift's approach (which has `lpfn_fns.rs` +
+`lpfn_sig.rs` separate from the math builtins). Signature types are already handled by the generated
 `builtin_wasm_import_types.rs`, so we only need one new file for call emission + arg flattening +
 out-param handling.
 

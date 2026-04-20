@@ -2,8 +2,8 @@
 
 ## Scope
 
-Implement `lower_lpfx.rs` — detection of LPFX calls, creation of
-`@lpfx::name` imports, and out-parameter ABI handling via LPIR slots.
+Implement `lower_lpfn.rs` — detection of LPFX calls, creation of
+`@lpfn::name` imports, and out-parameter ABI handling via LPIR slots.
 Remove the `todo!()` stub in `lower_stmt.rs` for LPFX calls.
 
 ## Code Organization Reminders
@@ -14,14 +14,14 @@ Remove the `todo!()` stub in `lower_stmt.rs` for LPFX calls.
 
 ## Background
 
-LPFX functions are Naga functions whose names start with `lpfx_`. They
-are declared in `lpfx_prologue.glsl` (included by `compile()`). The
+LPFX functions are Naga functions whose names start with `lpfn_`. They
+are declared in `lpfn_prologue.glsl` (included by `compile()`). The
 Naga module contains these as regular functions with bodies that are
 empty stubs — the real implementations live in `lps-builtins`.
 
 In the WASM emitter, LPFX calls go through `lps-builtin-ids` to
 resolve to a `BuiltinId`, then emit a WASM import call. The LPIR
-lowering is similar but float-mode-unaware: we create `@lpfx::name`
+lowering is similar but float-mode-unaware: we create `@lpfn::name`
 imports and let the downstream emitter decide how to dispatch them.
 
 Key difference from std.math: some LPFX functions return vectors via
@@ -29,17 +29,17 @@ out-pointers. In LPIR, these become slot-based out-params.
 
 ## Implementation Details
 
-### `lower_lpfx.rs` — module-level collection
+### `lower_lpfn.rs` — module-level collection
 
 ```rust
-pub(crate) fn collect_lpfx_imports(
+pub(crate) fn collect_lpfn_imports(
     module: &naga::Module,
     functions: &[(Handle<Function>, FunctionInfo)],
-) -> Vec<LpfxImport>
+) -> Vec<LpfnImport>
 
-pub(crate) struct LpfxImport {
+pub(crate) struct LpfnImport {
     pub callee_handle: Handle<Function>,
-    pub name: String,           // e.g. "lpfx_hash1"
+    pub name: String,           // e.g. "lpfn_hash1"
     pub param_types: Vec<IrType>,
     pub return_types: Vec<IrType>,
     pub has_out_params: bool,
@@ -47,8 +47,8 @@ pub(crate) struct LpfxImport {
 ```
 
 Walk all user function bodies recursively (like the WASM emitter's
-`collect_lpfx_builtin_ids`). For each `Statement::Call` where the callee
-name starts with `lpfx_`:
+`collect_lpfn_builtin_ids`). For each `Statement::Call` where the callee
+name starts with `lpfn_`:
 
 - Inspect callee argument types. Pointer-typed args are out-parameters.
 - Scalar args → `IrType::F32` or `IrType::I32`.
@@ -64,16 +64,16 @@ Collect unique LPFX functions (by callee handle). Create one
 
 Before lowering functions:
 
-1. Call `collect_lpfx_imports()`.
-2. For each `LpfxImport`:
-    - `mb.add_import(ImportDecl { module_name: "lpfx", func_name: name, ... })`
-    - Store the mapping: `lpfx_handle → CalleeRef`.
+1. Call `collect_lpfn_imports()`.
+2. For each `LpfnImport`:
+    - `mb.add_import(ImportDecl { module_name: "lpfn", func_name: name, ... })`
+    - Store the mapping: `lpfn_handle → CalleeRef`.
 3. Pass this mapping into each function's `LowerCtx`.
 
-### Per-call lowering — `lower_lpfx.rs`
+### Per-call lowering — `lower_lpfn.rs`
 
 ```rust
-pub(crate) fn lower_lpfx_call(
+pub(crate) fn lower_lpfn_call(
     ctx: &mut LowerCtx,
     callee_handle: Handle<Function>,
     arguments: &[Handle<Expression>],
@@ -83,7 +83,7 @@ pub(crate) fn lower_lpfx_call(
 
 Steps:
 
-1. Look up the LPFX import's `CalleeRef` from `ctx.lpfx_map`.
+1. Look up the LPFX import's `CalleeRef` from `ctx.lpfn_map`.
 2. For each argument:
     - If the callee declares this as a pointer-typed arg (out-param):
         - Allocate a slot: `ctx.fb.alloc_slot(N * 4)` where N is the
@@ -119,9 +119,9 @@ Steps:
 
    Actually, since this is scalar-only scope, LPFX functions that return
    vectors via out-pointers are not yet fully supported. We should:
-    - Support scalar-returning LPFX (e.g. `lpfx_hash1`, noise functions
+    - Support scalar-returning LPFX (e.g. `lpfn_hash1`, noise functions
       that return scalar) fully.
-    - For vector-returning LPFX (e.g. `lpfx_hsv2rgb`): emit
+    - For vector-returning LPFX (e.g. `lpfn_hsv2rgb`): emit
       `LowerError::UnsupportedExpression("LPFX vector out-param")` for now.
 
 6. If `result` is `Some(expr_handle)`:
@@ -133,8 +133,8 @@ In the `Statement::Call` match arm, replace the LPFX `todo!()`:
 
 ```rust
 let callee_name = module.functions[*function].name.as_deref().unwrap_or("");
-if callee_name.starts_with("lpfx_") {
-    return lower_lpfx::lower_lpfx_call(ctx, *function, arguments, *result);
+if callee_name.starts_with("lpfn_") {
+    return lower_lpfn::lower_lpfn_call(ctx, *function, arguments, *result);
 }
 ```
 
@@ -146,4 +146,4 @@ cargo +nightly fmt -p lps-frontend -- --check
 ```
 
 After this phase, GLSL programs with scalar LPFX calls (hash, noise)
-lower to complete LPIR with `@lpfx::...` imports.
+lower to complete LPIR with `@lpfn::...` imports.

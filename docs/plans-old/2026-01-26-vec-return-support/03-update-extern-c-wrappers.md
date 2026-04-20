@@ -9,22 +9,22 @@ pointer parameter and write all components to memory.
 
 ### Files to Update
 
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/hue2rgb_q32.rs`
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/hue2rgb_f32.rs`
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/hsv2rgb_q32.rs`
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/hsv2rgb_f32.rs`
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/rgb2hsv_q32.rs`
-- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/rgb2hsv_f32.rs`
-- `lp-shader/lps-builtins/src/builtins/lpfx/math/saturate_q32.rs` (vec3/vec4 variants)
-- `lp-shader/lps-builtins/src/builtins/lpfx/math/saturate_f32.rs` (vec3/vec4 variants)
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/hue2rgb_q32.rs`
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/hue2rgb_f32.rs`
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/hsv2rgb_q32.rs`
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/hsv2rgb_f32.rs`
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/rgb2hsv_q32.rs`
+- `lp-shader/lps-builtins/src/builtins/lpfn/color/space/rgb2hsv_f32.rs`
+- `lp-shader/lps-builtins/src/builtins/lpfn/math/saturate_q32.rs` (vec3/vec4 variants)
+- `lp-shader/lps-builtins/src/builtins/lpfn/math/saturate_f32.rs` (vec3/vec4 variants)
 
 ### Pattern for Each Wrapper
 
 Change from:
 
 ```rust
-pub extern "C" fn __lpfx_hue2rgb_q32(hue: i32) -> i32 {
-    let result = lpfx_hue2rgb_q32(Q32::from_fixed(hue));
+pub extern "C" fn __lpfn_hue2rgb_q32(hue: i32) -> i32 {
+    let result = lpfn_hue2rgb_q32(Q32::from_fixed(hue));
     result.x.to_fixed()
 }
 ```
@@ -32,8 +32,8 @@ pub extern "C" fn __lpfx_hue2rgb_q32(hue: i32) -> i32 {
 To:
 
 ```rust
-pub extern "C" fn __lpfx_hue2rgb_q32(result_ptr: *mut i32, hue: i32) {
-    let result = lpfx_hue2rgb_q32(Q32::from_fixed(hue));
+pub extern "C" fn __lpfn_hue2rgb_q32(result_ptr: *mut i32, hue: i32) {
+    let result = lpfn_hue2rgb_q32(Q32::from_fixed(hue));
     unsafe {
         *result_ptr.offset(0) = result.x.to_fixed();
         *result_ptr.offset(1) = result.y.to_fixed();

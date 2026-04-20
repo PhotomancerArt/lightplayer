@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use cranelift_codegen::ir::Signature;
 use lpir::FloatMode;
-use lpir::lpir_module::LpirModule;
+use lpir::lpir_module::{IrFunction, LpirModule};
 use lps_shared::LpsModuleSig;
 
 use crate::compile_options::CompileOptions;
@@ -90,5 +90,19 @@ impl CraneliftModule {
     /// Get all function names in this module.
     pub fn function_names(&self) -> Vec<&str> {
         self.0.func_names().iter().map(|s| s.as_str()).collect()
+    }
+
+    /// Local function by name (IR-level; includes `vreg_types`).
+    pub fn ir_function(&self, name: &str) -> Option<&IrFunction> {
+        self.0
+            .lpir_module()
+            .functions
+            .values()
+            .find(|f| f.name == name)
+    }
+
+    /// Full LPIR retained from compilation.
+    pub fn lpir_module(&self) -> &LpirModule {
+        self.0.lpir_module()
     }
 }

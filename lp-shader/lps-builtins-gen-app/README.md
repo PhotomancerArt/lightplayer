@@ -1,6 +1,6 @@
 # lps-builtins-gen-app
 
-Scans **`lps-builtins`** (`src/builtins/glsl/`, `lpir/`, `lpfx/`) and emits the glue every
+Scans **`lps-builtins`** (`src/builtins/glsl/`, `lpir/`, `lpfn/`) and emits the glue every
 other crate expects: **`BuiltinId`**, backend ABI glue, WASM import metadata, and `mod.rs`
 stubs so the compiler and tests stay in sync.
 
@@ -34,10 +34,10 @@ hash paths in that script), then builds `lps-builtins-emu-app` and `lps-builtins
 
 ## How discovery works
 
-1. Walk `lps-builtins/src/builtins/{glsl,lpir,lpfx}/` for `#[unsafe(no_mangle)] pub extern "C"`
+1. Walk `lps-builtins/src/builtins/{glsl,lpir,lpfn}/` for `#[unsafe(no_mangle)] pub extern "C"`
    functions (naming convention `__lp_q32_*` and related).
 2. Parse with `syn`, build `BuiltinInfo` (symbol, module path, arity, etc.).
-3. For LPFX, additional parsing under `builtins/lpfx/` feeds overload tables in
+3. For LPFX, additional parsing under `builtins/lpfn/` feeds overload tables in
    `glsl_builtin_mapping.rs`.
 4. Emit the files above, then run `cargo +nightly fmt` on the workspace root for the touched paths.
 

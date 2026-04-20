@@ -1,5 +1,4 @@
 use crate::error::Error;
-use lp_shared::Texture;
 
 /// Backend-agnostic compile options understood by `lp-engine`.
 pub struct ShaderCompileOptions {
@@ -18,10 +17,19 @@ impl Default for ShaderCompileOptions {
     }
 }
 
-/// A compiled, runnable shader (pixel loop lives here to avoid per-pixel dynamic dispatch).
+impl ShaderCompileOptions {
+    pub fn to_compiler_config(&self) -> lpir::CompilerConfig {
+        lpir::CompilerConfig {
+            q32: self.q32_options,
+            ..Default::default()
+        }
+    }
+}
+
+/// A compiled, runnable shader (pixel loop lives in `lp_shader::LpsPxShader::render_frame`).
 pub trait LpShader: Send + Sync {
-    /// Run the shader `render` entry point into an RGBA16 texture.
-    fn render(&mut self, texture: &mut Texture, time: f32) -> Result<(), Error>;
+    /// Run the shader into an RGBA16 texture buffer allocated from the same graphics engine.
+    fn render(&mut self, texture: &mut lp_shader::LpsTextureBuf, time: f32) -> Result<(), Error>;
 
     fn has_render(&self) -> bool;
 }

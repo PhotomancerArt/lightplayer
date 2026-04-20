@@ -2,12 +2,12 @@
 
 ## Description
 
-Update `emit_lp_lib_fn_call()` in `lpfx_fns.rs` to handle StructReturn for vector returns. This
+Update `emit_lp_lib_fn_call()` in `lpfn_fns.rs` to handle StructReturn for vector returns. This
 includes allocating a stack slot, passing the pointer, and loading return values after the call.
 
 ## Changes
 
-### `lp-shader/lps-compiler/src/frontend/codegen/lpfx_fns.rs`
+### `lp-shader/lps-compiler/src/frontend/codegen/lpfn_fns.rs`
 
 - Update `emit_lp_lib_fn_call()` to:
     - Check if function uses StructReturn (check signature)

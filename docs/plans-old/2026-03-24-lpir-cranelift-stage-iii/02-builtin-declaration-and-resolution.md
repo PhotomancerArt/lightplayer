@@ -37,7 +37,7 @@ Same logic as WASM emitter's `resolve_builtin_id` in
 ```rust
 use lps_builtin_ids::{
     BuiltinId, glsl_builtin_mapping::{
-        glsl_q32_math_builtin_id, lpir_q32_builtin_id, glsl_lpfx_q32_builtin_id,
+        glsl_q32_math_builtin_id, lpir_q32_builtin_id, glsl_lpfn_q32_builtin_id,
         GlslParamKind,
     },
 };
@@ -65,12 +65,12 @@ pub(crate) fn resolve_import(
                     format!("unsupported lpir import `{}` (arity {ac})", decl.func_name)
                 ))
         }
-        ("lpfx", FloatMode::Q32) => {
-            let base = lpfx_strip_suffix(&decl.func_name)?;
-            let kinds = lpfx_glsl_kinds_from_decl(decl)?;
-            glsl_lpfx_q32_builtin_id(base, &kinds)
+        ("lpfn", FloatMode::Q32) => {
+            let base = lpfn_strip_suffix(&decl.func_name)?;
+            let kinds = lpfn_glsl_kinds_from_decl(decl)?;
+            glsl_lpfn_q32_builtin_id(base, &kinds)
                 .ok_or_else(|| CompileError::unsupported(
-                    format!("unsupported lpfx import `{}`", decl.func_name)
+                    format!("unsupported lpfn import `{}`", decl.func_name)
                 ))
         }
         (m, _) => Err(CompileError::unsupported(
@@ -80,9 +80,9 @@ pub(crate) fn resolve_import(
 }
 ```
 
-Port `lpfx_strip_suffix` and `lpfx_glsl_kinds_from_decl` from the WASM
+Port `lpfn_strip_suffix` and `lpfn_glsl_kinds_from_decl` from the WASM
 emitter (small string helpers for LPFX overload resolution using
-`ImportDecl.lpfx_glsl_params`).
+`ImportDecl.lpfn_glsl_params`).
 
 #### declare_builtins
 

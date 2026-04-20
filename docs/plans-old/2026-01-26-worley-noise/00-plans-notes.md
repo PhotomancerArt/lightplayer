@@ -48,7 +48,7 @@ The reference implementation is in `/Users/yona/dev/photomancer/oss/noise-rs/src
 - Value: A hash value (0-1) based on the nearest cell's hash
 
 **Question**: How should we handle return types?
-- Option A: Two separate functions per dimension (e.g., `lpfx_worley2_distance`, `lpfx_worley2_value`)
+- Option A: Two separate functions per dimension (e.g., `lpfn_worley2_distance`, `lpfn_worley2_value`)
 - Option B: Single function with a parameter to select return type
 - Option C: Just implement Distance return type (most common use case)
 
@@ -56,31 +56,31 @@ The reference implementation is in `/Users/yona/dev/photomancer/oss/noise-rs/src
 
 ### Q4: Function Naming Convention
 
-**Context**: Simplex noise uses `lpfx_snoise1`, `lpfx_snoise2`, `lpfx_snoise3`. Worley noise needs to distinguish distance vs value.
+**Context**: Simplex noise uses `lpfn_snoise1`, `lpfn_snoise2`, `lpfn_snoise3`. Worley noise needs to distinguish distance vs value.
 
 **Question**: What naming convention should we use?
-- Option A: `lpfx_worley2_distance`, `lpfx_worley2_value`, `lpfx_worley3_distance`, `lpfx_worley3_value`
-- Option B: `lpfx_worley2d`, `lpfx_worley2v`, `lpfx_worley3d`, `lpfx_worley3v` (shorter)
-- Option C: `lpfx_worley2_dist`, `lpfx_worley2_val`, `lpfx_worley3_dist`, `lpfx_worley3_val` (abbreviated)
+- Option A: `lpfn_worley2_distance`, `lpfn_worley2_value`, `lpfn_worley3_distance`, `lpfn_worley3_value`
+- Option B: `lpfn_worley2d`, `lpfn_worley2v`, `lpfn_worley3d`, `lpfn_worley3v` (shorter)
+- Option C: `lpfn_worley2_dist`, `lpfn_worley2_val`, `lpfn_worley3_dist`, `lpfn_worley3_val` (abbreviated)
 
 **Suggested Answer**: Option A - Full names are clearer and more readable. Matches the pattern of being explicit about what the function does.
 
-**UPDATED**: Base name for distance, `_value` suffix for value - matches lygia convention. `lpfx_worley2` returns distance, `lpfx_worley2_value` returns hash value.
+**UPDATED**: Base name for distance, `_value` suffix for value - matches lygia convention. `lpfn_worley2` returns distance, `lpfn_worley2_value` returns hash value.
 
-**ANSWERED**: Base name for distance, `_value` suffix for value - `lpfx_worley2`, `lpfx_worley2_value`, `lpfx_worley3`, `lpfx_worley3_value`. This matches lygia's convention where the base function returns distance.
+**ANSWERED**: Base name for distance, `_value` suffix for value - `lpfn_worley2`, `lpfn_worley2_value`, `lpfn_worley3`, `lpfn_worley3_value`. This matches lygia's convention where the base function returns distance.
 
 ### Q5: Distance Function Parameter
 
 **Context**: The reference implementation takes a distance function as a closure/function pointer. In GLSL, we can't pass functions as parameters.
 
 **Question**: How should we handle distance function selection?
-- Option A: Separate functions for each distance function (e.g., `lpfx_worley2_euclidean_distance`, `lpfx_worley2_euclidean_squared_distance`)
+- Option A: Separate functions for each distance function (e.g., `lpfn_worley2_euclidean_distance`, `lpfn_worley2_euclidean_squared_distance`)
 - Option B: Use a numeric parameter (0=euclidean, 1=euclidean_squared) - but this is less type-safe
 - Option C: Just implement euclidean_squared (fastest, most common) and skip the parameter
 
-**Suggested Answer**: Option A - Separate functions for each distance function. This is type-safe, clear, and matches GLSL's lack of function pointers. If we only implement euclidean and euclidean_squared, we'd have: `lpfx_worley2_euclidean_distance`, `lpfx_worley2_euclidean_value`, `lpfx_worley2_euclidean_squared_distance`, `lpfx_worley2_euclidean_squared_value`, etc.
+**Suggested Answer**: Option A - Separate functions for each distance function. This is type-safe, clear, and matches GLSL's lack of function pointers. If we only implement euclidean and euclidean_squared, we'd have: `lpfn_worley2_euclidean_distance`, `lpfn_worley2_euclidean_value`, `lpfn_worley2_euclidean_squared_distance`, `lpfn_worley2_euclidean_squared_value`, etc.
 
-**UPDATED**: Since we're only implementing euclidean_squared, the function names can be simplified. We can drop the distance function name from the function name since there's only one option. This gives us: `lpfx_worley2_distance`, `lpfx_worley2_value`, `lpfx_worley3_distance`, `lpfx_worley3_value`.
+**UPDATED**: Since we're only implementing euclidean_squared, the function names can be simplified. We can drop the distance function name from the function name since there's only one option. This gives us: `lpfn_worley2_distance`, `lpfn_worley2_value`, `lpfn_worley3_distance`, `lpfn_worley3_value`.
 
 ### Q6: Initial Implementation Scope
 
@@ -91,9 +91,9 @@ The reference implementation is in `/Users/yona/dev/photomancer/oss/noise-rs/src
 - Option B: 2D and 3D euclidean_squared (8 functions: 2 dimensions × 1 distance × 2 return types)
 - Option C: 2D and 3D with both euclidean and euclidean_squared (16 functions: 2 dimensions × 2 distances × 2 return types)
 
-**Suggested Answer**: Option B - 2D and 3D with euclidean_squared. This gives a complete 2D/3D set with the fastest distance function. Euclidean can be added later if needed. This results in 4 functions: `lpfx_worley2_euclidean_squared_distance`, `lpfx_worley2_euclidean_squared_value`, `lpfx_worley3_euclidean_squared_distance`, `lpfx_worley3_euclidean_squared_value`.
+**Suggested Answer**: Option B - 2D and 3D with euclidean_squared. This gives a complete 2D/3D set with the fastest distance function. Euclidean can be added later if needed. This results in 4 functions: `lpfn_worley2_euclidean_squared_distance`, `lpfn_worley2_euclidean_squared_value`, `lpfn_worley3_euclidean_squared_distance`, `lpfn_worley3_euclidean_squared_value`.
 
-**UPDATED**: With just euclidean_squared, we have 4 functions: `lpfx_worley2` (distance), `lpfx_worley2_value`, `lpfx_worley3` (distance), `lpfx_worley3_value`. Base name returns distance (primary use case), `_value` suffix returns hash value.
+**UPDATED**: With just euclidean_squared, we have 4 functions: `lpfn_worley2` (distance), `lpfn_worley2_value`, `lpfn_worley3` (distance), `lpfn_worley3_value`. Base name returns distance (primary use case), `_value` suffix returns hash value.
 
 ### Q7: Return Value Range
 

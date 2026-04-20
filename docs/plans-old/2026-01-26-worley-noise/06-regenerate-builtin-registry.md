@@ -3,7 +3,7 @@
 ## Description
 
 Run the builtin generator to automatically register the new Worley noise functions in the builtin
-system. The generator scans `lpfx/worley/` directory and adds functions to the `BuiltinId` enum.
+system. The generator scans `lpfn/worley/` directory and adds functions to the `BuiltinId` enum.
 
 ## Implementation
 
@@ -25,13 +25,13 @@ system. The generator scans `lpfx/worley/` directory and adds functions to the `
 
 - Builtin generator runs without errors
 - All four Worley functions are registered in `BuiltinId` enum
-- Function signatures are correctly parsed from `#[lpfx_impl_macro::lpfx_impl]` attributes
+- Function signatures are correctly parsed from `#[lpfn_impl_macro::lpfn_impl]` attributes
 - Code compiles without errors
 - Code formatted with `cargo +nightly fmt`
 
 ## Notes
 
-- The builtin generator should automatically discover functions with `#[lpfx_impl_macro::lpfx_impl]`
+- The builtin generator should automatically discover functions with `#[lpfn_impl_macro::lpfn_impl]`
   attributes
 - If generator needs updates, those should be done in this phase
 - Verify that the generator correctly handles the `_value` suffix in function names

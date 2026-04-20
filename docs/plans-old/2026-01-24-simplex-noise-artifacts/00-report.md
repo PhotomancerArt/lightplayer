@@ -10,7 +10,7 @@ for 2D and 3D simplex noise that cause discontinuities at cell boundaries.
 
 ### 1. **Sign Error in 2D Offset Calculation** (CRITICAL)
 
-**Location**: `lps-builtins/src/builtins/q32/lpfx_snoise2.rs:98-99`
+**Location**: `lps-builtins/src/builtins/q32/lpfn_snoise2.rs:98-99`
 
 **Current (WRONG)**:
 
@@ -37,7 +37,7 @@ diagonal artifacts.
 
 ### 2. **Sign Error in 3D Offset Calculations** (CRITICAL)
 
-**Location**: `lps-builtins/src/builtins/q32/lpfx_snoise3.rs:163-165`
+**Location**: `lps-builtins/src/builtins/q32/lpfn_snoise3.rs:163-165`
 
 **Current (WRONG)**:
 
@@ -65,17 +65,17 @@ let offset2 = offset1 - order1.numcast().unwrap() + unskew_factor;
 
 ### 3. **Additional Sign Errors in offset3 and offset4** (CRITICAL)
 
-**2D offset3** (`lpfx_snoise2.rs:102-103`):
+**2D offset3** (`lpfn_snoise2.rs:102-103`):
 
 - Current (WRONG): `offset3_x = offset1_x - Q32::ONE - (TWO * UNSKEW_FACTOR_2D)`
 - Should be: `offset3_x = offset1_x - Q32::ONE + (TWO * UNSKEW_FACTOR_2D)`
 
-**3D offset3** (`lpfx_snoise3.rs:167-169`):
+**3D offset3** (`lpfn_snoise3.rs:167-169`):
 
 - Current (WRONG): `offset3_x = offset1_x - order2_x - (TWO * UNSKEW_FACTOR_3D)`
 - Should be: `offset3_x = offset1_x - order2_x + (TWO * UNSKEW_FACTOR_3D)`
 
-**3D offset4** (`lpfx_snoise3.rs:171-173`):
+**3D offset4** (`lpfn_snoise3.rs:171-173`):
 
 - Current (WRONG): `offset4_x = offset1_x - Q32::ONE - Q32::ONE - (THREE * UNSKEW_FACTOR_3D)`
 - Should be: `offset4_x = offset1_x - Q32::ONE - Q32::ONE + (THREE * UNSKEW_FACTOR_3D)`

@@ -55,12 +55,12 @@ The gen-app uses these from `lps-frontend`:
 - `semantic::functions::ParamQualifier` — enum (In, Out, InOut)
 - `semantic::passes::function_signature::extract_function_signature` — function
 
-**Action:** Create a new module `lps-builtins-gen-app/src/lpfx/types.rs`
+**Action:** Create a new module `lps-builtins-gen-app/src/lpfn/types.rs`
 with inlined versions of these types. Only include the variants/fields actually
 used by the gen-app. The types are simple data structs with no complex logic.
 
 ```rust
-// src/lpfx/type
+// src/lpfn/type
 
 /// GLSL type (subset needed for builtin signature parsing)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -119,10 +119,10 @@ version in `types.rs` or `glsl_parse.rs`.
 **Update imports** in:
 
 - `src/main.rs` — `use lps_frontend::semantic::types::Type` →
-  `use crate::lpfx::types::Type`
-- `src/lpfx/glsl_parse.rs` — replace `lps_frontend` imports with local
-- `src/lpfx/validate.rs` — same
-- `src/lpfx/generate.rs` — same
+  `use crate::lpfn::types::Type`
+- `src/lpfn/glsl_parse.rs` — replace `lps_frontend` imports with local
+- `src/lpfn/validate.rs` — same
+- `src/lpfn/generate.rs` — same
 
 Drop `lps-frontend` from `lps-builtins-gen-app/Cargo.toml`.
 
@@ -132,9 +132,9 @@ Delete or comment out these generation calls and their functions:
 
 - `generate_registry(...)` — writes into `lps-cranelift/` (deleted)
 - `generate_testcase_mapping(...)` — writes into `lps-cranelift/` (deleted)
-- `generate_lpfx_fns_file(...)` — writes into `lps-frontend/` (deleted)
+- `generate_lpfn_fns_file(...)` — writes into `lps-frontend/` (deleted)
 
-Remove `registry_path`, `mapping_rs_path`, `lpfx_fns_path` from the
+Remove `registry_path`, `mapping_rs_path`, `lpfn_fns_path` from the
 `format_generated_files` call.
 
 Delete the corresponding `generate_*` function bodies at the bottom of

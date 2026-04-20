@@ -1,7 +1,7 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
-use lp_riscv_emu::LogLevel;
-use lpir::{FloatMode as LpirFloatMode, LpirModule};
+use lp_riscv_emu::{CycleModel, LogLevel};
+use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpsValueQ32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
@@ -79,11 +79,20 @@ impl FiletestInstance {
         }
     }
 
-    pub(crate) fn call_q32_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, String> {
+    pub(crate) fn call_q32_flat(
+        &mut self,
+        name: &str,
+        flat: &[i32],
+        cycle_model: CycleModel,
+    ) -> Result<Vec<i32>, String> {
         match self {
             Self::Jit(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
-            Self::Emu(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
-            Self::NativeFa(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
+            Self::Emu(i) => i
+                .call_q32_with_cycle_model(name, flat, cycle_model)
+                .map_err(|e| e.to_string()),
+            Self::NativeFa(i) => i
+                .call_q32_with_cycle_model(name, flat, cycle_model)
+                .map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
         }
     }
@@ -98,7 +107,10 @@ impl FiletestInstance {
     }
 
     /// Pre-encoded Q32 uniforms (filetests use [`Self::set_uniform`]; this mirrors `LpvmInstance`).
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "mirrors LpvmInstance::set_uniform_q32; filetests use f32 set_uniform only"
+    )]
     pub(crate) fn set_uniform_q32(
         &mut self,
         path: &str,
@@ -129,6 +141,15 @@ impl FiletestInstance {
             Self::Wasm(i) => i.last_guest_instruction_count(),
         }
     }
+
+    pub(crate) fn last_guest_cycle_count(&self) -> Option<u64> {
+        match self {
+            Self::Jit(i) => i.last_guest_cycle_count(),
+            Self::Emu(i) => i.last_guest_cycle_count(),
+            Self::NativeFa(i) => i.last_guest_cycle_count(),
+            Self::Wasm(i) => i.last_guest_cycle_count(),
+        }
+    }
 }
 
 fn lower_glsl(source: &str) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
@@ -141,6 +162,7 @@ impl CompiledShader {
         source: &str,
         target: &Target,
         emu_log_level: LogLevel,
+        compiler_config: &CompilerConfig,
     ) -> anyhow::Result<Self> {
         let (ir, meta) = lower_glsl(source)?;
         let fm = match target.float_mode {
@@ -150,6 +172,7 @@ impl CompiledShader {
         let opts = CompileOptions {
             float_mode: fm,
             emu_trace_instructions: emu_log_level == LogLevel::Instructions,
+            config: compiler_config.clone(),
             ..Default::default()
         };
         match target.backend {
@@ -167,13 +190,18 @@ impl CompiledShader {
                     float_mode: fm,
                     emu_trace_instructions: opts.emu_trace_instructions,
                     alloc_trace,
+                    config: compiler_config.clone(),
                     ..Default::default()
                 };
                 let engine = FaEmuEngine::new(native_opts);
                 Ok(Self::NativeFa(engine.compile(&ir, &meta)?))
             }
             Backend::Wasm => {
-                let wasm_opts = LpvmWasmOptions { float_mode: fm };
+                let wasm_opts = LpvmWasmOptions {
+                    float_mode: fm,
+                    config: compiler_config.clone(),
+                    ..Default::default()
+                };
                 let engine = WasmLpvmEngine::new(wasm_opts).map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(Self::Wasm(engine.compile(&ir, &meta)?))
             }

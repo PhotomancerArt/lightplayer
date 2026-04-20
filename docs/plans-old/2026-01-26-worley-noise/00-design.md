@@ -9,7 +9,7 @@ point in a grid.
 ## File Structure
 
 ```
-lp-shader/lps-builtins/src/builtins/lpfx/
+lp-shader/lps-builtins/src/builtins/lpfn/
 ├── hash.rs                    # EXISTING: Hash functions
 ├── simplex/                    # EXISTING: Simplex noise functions
 │   └── ...
@@ -30,35 +30,35 @@ LP library functions map user-facing names to internal implementation functions:
 
 ```
 User-facing name                    Internal symbol name (auto-registered)
-lpfx_worley2(vec2 p, uint seed)     -> __lpfx_worley2_q32(i32 x, i32 y, u32 seed) -> i32
-lpfx_worley2_value(vec2 p, uint seed) -> __lpfx_worley2_value_q32(i32 x, i32 y, u32 seed) -> i32
-lpfx_worley3(vec3 p, uint seed)     -> __lpfx_worley3_q32(i32 x, i32 y, i32 z, u32 seed) -> i32
-lpfx_worley3_value(vec3 p, uint seed) -> __lpfx_worley3_value_q32(i32 x, i32 y, i32 z, u32 seed) -> i32
+lpfn_worley2(vec2 p, uint seed)     -> __lpfn_worley2_q32(i32 x, i32 y, u32 seed) -> i32
+lpfn_worley2_value(vec2 p, uint seed) -> __lpfn_worley2_value_q32(i32 x, i32 y, u32 seed) -> i32
+lpfn_worley3(vec3 p, uint seed)     -> __lpfn_worley3_q32(i32 x, i32 y, i32 z, u32 seed) -> i32
+lpfn_worley3_value(vec3 p, uint seed) -> __lpfn_worley3_value_q32(i32 x, i32 y, i32 z, u32 seed) -> i32
 ```
 
 Internal functions are automatically registered by `lps-builtin-gen-app` which scans
-`lps-builtins/src/builtins/lpfx/` and adds them to the `BuiltinId` enum.
+`lps-builtins/src/builtins/lpfn/` and adds them to the `BuiltinId` enum.
 
-### Builtin Implementations (`lps-builtins/src/builtins/lpfx/worley/`)
+### Builtin Implementations (`lps-builtins/src/builtins/lpfn/worley/`)
 
 ```
 worley2_q32.rs:
-  __lpfx_worley2_q32(x: i32, y: i32, seed: u32) -> i32
+  __lpfn_worley2_q32(x: i32, y: i32, seed: u32) -> i32
     - Returns euclidean squared distance to nearest feature point
     - Range: approximately [-1, 1] (Q32 fixed-point)
 
 worley2_value_q32.rs:
-  __lpfx_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32
+  __lpfn_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32
     - Returns hash value of nearest cell
     - Range: approximately [-1, 1] (Q32 fixed-point)
 
 worley3_q32.rs:
-  __lpfx_worley3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32
+  __lpfn_worley3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32
     - Returns euclidean squared distance to nearest feature point
     - Range: approximately [-1, 1] (Q32 fixed-point)
 
 worley3_value_q32.rs:
-  __lpfx_worley3_value_q32(x: i32, y: i32, z: i32, seed: u32) -> i32
+  __lpfn_worley3_value_q32(x: i32, y: i32, z: i32, seed: u32) -> i32
     - Returns hash value of nearest cell
     - Range: approximately [-1, 1] (Q32 fixed-point)
 ```
@@ -69,8 +69,8 @@ worley3_value_q32.rs:
 
 Worley noise functions follow the same pattern as Simplex noise:
 
-- Implemented in `lps-builtins/src/builtins/lpfx/worley/` subdirectory
-- Use `#[lpfx_impl_macro::lpfx_impl]` attribute for auto-registration
+- Implemented in `lps-builtins/src/builtins/lpfn/worley/` subdirectory
+- Use `#[lpfn_impl_macro::lpfn_impl]` attribute for auto-registration
 - Functions are automatically discovered and registered by `lps-builtin-gen-app`
 
 ### 2. Distance Function
@@ -85,8 +85,8 @@ Only euclidean squared distance is implemented:
 
 Two variants per dimension:
 
-- Base function (`lpfx_worley2`, `lpfx_worley3`): Returns distance to nearest feature point
-- Value variant (`lpfx_worley2_value`, `lpfx_worley3_value`): Returns hash value of nearest cell
+- Base function (`lpfn_worley2`, `lpfn_worley3`): Returns distance to nearest feature point
+- Value variant (`lpfn_worley2_value`, `lpfn_worley3_value`): Returns hash value of nearest cell
 
 This matches lygia's convention where the base function returns distance.
 
@@ -113,7 +113,7 @@ Key components:
 
 ### 6. Hash Function Usage
 
-Uses existing `__lpfx_hash_2` and `__lpfx_hash_3` functions from `lpfx::hash` module, same as
+Uses existing `__lpfn_hash_2` and `__lpfn_hash_3` functions from `lpfn::hash` module, same as
 Simplex noise.
 
 ### 7. Q32 Fixed-Point Considerations
@@ -128,18 +128,18 @@ Simplex noise.
 ### GLSL User-Facing Signatures
 
 ```glsl
-float lpfx_worley2(vec2 p, uint seed);
-float lpfx_worley2_value(vec2 p, uint seed);
-float lpfx_worley3(vec3 p, uint seed);
-float lpfx_worley3_value(vec3 p, uint seed);
+float lpfn_worley2(vec2 p, uint seed);
+float lpfn_worley2_value(vec2 p, uint seed);
+float lpfn_worley3(vec3 p, uint seed);
+float lpfn_worley3_value(vec3 p, uint seed);
 ```
 
 ### Internal Signatures (flattened)
 
-- `__lpfx_worley2_q32(x: i32, y: i32, seed: u32) -> i32`
-- `__lpfx_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32`
-- `__lpfx_worley3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
-- `__lpfx_worley3_value_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
+- `__lpfn_worley2_q32(x: i32, y: i32, seed: u32) -> i32`
+- `__lpfn_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32`
+- `__lpfn_worley3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
+- `__lpfn_worley3_value_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
 
 **Return values:**
 
@@ -153,7 +153,7 @@ Worley noise requires:
 
 1. Cell determination (floor coordinates)
 2. Near/far cell selection (based on fractional coordinates > 0.5)
-3. Feature point generation using hash function (call `__lpfx_hash_*` functions)
+3. Feature point generation using hash function (call `__lpfn_hash_*` functions)
 4. Distance calculation (euclidean squared)
 5. Range optimization (only check cells within distance range)
 6. Scaling to [-1, 1] range
@@ -180,14 +180,14 @@ Reference implementation: noise-rs `worley_2d` and `worley_3d` functions.
 ### Module Declaration
 
 Worley noise functions are declared as builtins via the existing builtin system. The internal
-`__lpfx_worley*` functions are registered automatically by `lps-builtin-gen-app` which scans the
-`lpfx/worley/` directory.
+`__lpfn_worley*` functions are registered automatically by `lps-builtin-gen-app` which scans the
+`lpfn/worley/` directory.
 
 ### Function Call Codegen
 
 When emitting a function call:
 
-1. Check if name starts with `lpfx_`
+1. Check if name starts with `lpfn_`
 2. Lookup `LpLibFnId` by name (auto-generated from function attributes)
 3. Flatten vector arguments to scalars
 4. Get `FuncRef` from module

@@ -4,12 +4,11 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use object::write::{Object, Relocation, StandardSection, Symbol, SymbolId, SymbolSection};
-use object::{
-    Architecture, BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf,
-};
+use object::{BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf};
 
-use crate::compile::CompiledModule;
+use crate::compile::{CompiledModule, NativeReloc};
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 
 /// Linked JIT image with entry offsets.
 #[derive(Clone, Debug)]
@@ -18,55 +17,6 @@ pub struct LinkedJitImage {
     pub code: Vec<u8>,
     /// Function name → offset in code.
     pub entries: BTreeMap<String, usize>,
-}
-
-/// Patch auipc+jalr call sequence at given offset.
-///
-/// Standard RISC-V `R_RISCV_CALL_PLT` style fixup.
-fn patch_call_plt(
-    code: &mut [u8],
-    auipc_offset: usize,
-    image_base: usize,
-    target_addr: u32,
-) -> Result<(), NativeError> {
-    let off = auipc_offset;
-    if off.saturating_add(8) > code.len() {
-        return Err(NativeError::Internal(String::from(
-            "relocation overruns code buffer",
-        )));
-    }
-
-    let pc = image_base.wrapping_add(off) as u32;
-
-    let auipc_word = u32::from_le_bytes(
-        code[off..off + 4]
-            .try_into()
-            .map_err(|_| NativeError::Internal(String::from("auipc read")))?,
-    );
-    let jalr_word = u32::from_le_bytes(
-        code[off + 4..off + 8]
-            .try_into()
-            .map_err(|_| NativeError::Internal(String::from("jalr read")))?,
-    );
-
-    // Verify auipc+jalr encoding
-    if (auipc_word & 0x7f) != 0x17 || (jalr_word & 0x7f) != 0x67 {
-        return Err(NativeError::Internal(format!(
-            "expected auipc+jalr at offset {off}, got 0x{auipc_word:08x} 0x{jalr_word:08x}"
-        )));
-    }
-
-    let pcrel = target_addr.wrapping_sub(pc);
-    let new_hi20 = ((pcrel >> 12).wrapping_add(u32::from((pcrel & 0x800) != 0))) & 0xFFFFF;
-    let new_lo12 = pcrel & 0xFFF;
-
-    let new_auipc = (auipc_word & 0xFFF) | (new_hi20 << 12);
-    let new_jalr = (jalr_word & 0xFFFFF) | (new_lo12 << 20);
-
-    code[off..off + 4].copy_from_slice(&new_auipc.to_le_bytes());
-    code[off + 4..off + 8].copy_from_slice(&new_jalr.to_le_bytes());
-
-    Ok(())
 }
 
 /// Resolve all relocations and produce a JIT-ready image.
@@ -79,6 +29,7 @@ fn patch_call_plt(
 /// Linked JIT image with all call sites patched.
 pub fn link_jit<F>(
     module: &CompiledModule,
+    isa: IsaTarget,
     mut resolve_symbol: F,
 ) -> Result<LinkedJitImage, NativeError>
 where
@@ -118,7 +69,26 @@ where
             };
 
             let absolute_offset = func_base + reloc.offset;
-            patch_call_plt(&mut code, absolute_offset, image_base, target)?;
+            match isa {
+                IsaTarget::Rv32imac => {
+                    if reloc.r_type == crate::isa::rv32::link::R_RISCV_CALL_PLT {
+                        let abs_reloc = NativeReloc {
+                            offset: absolute_offset,
+                            symbol: String::new(),
+                            r_type: reloc.r_type,
+                        };
+                        crate::isa::rv32::link::patch_call_plt(
+                            &mut code, &abs_reloc, image_base, target,
+                        )?;
+                    } else {
+                        return Err(NativeError::Internal(alloc::format!(
+                            "unsupported JIT relocation r_type {} for ISA {:?}",
+                            reloc.r_type,
+                            isa
+                        )));
+                    }
+                }
+            }
         }
     }
 
@@ -137,12 +107,14 @@ where
 ///
 /// # Returns
 /// ELF object file as bytes.
-pub fn link_elf(module: &CompiledModule) -> Result<Vec<u8>, NativeError> {
-    let mut obj = Object::new(BinaryFormat::Elf, Architecture::Riscv32, Endianness::Little);
+pub fn link_elf(module: &CompiledModule, isa: IsaTarget) -> Result<Vec<u8>, NativeError> {
+    let arch = isa.elf_architecture();
+    let e_flags = isa.elf_e_flags();
+    let mut obj = Object::new(BinaryFormat::Elf, arch, Endianness::Little);
     obj.flags = FileFlags::Elf {
         os_abi: elf::ELFOSABI_NONE,
         abi_version: 0,
-        e_flags: elf::EF_RISCV_FLOAT_ABI_SOFT,
+        e_flags,
     };
 
     let text = obj.section_id(StandardSection::Text);
@@ -207,8 +179,7 @@ pub fn link_elf(module: &CompiledModule) -> Result<Vec<u8>, NativeError> {
                     offset: func_off + reloc.offset as u64,
                     symbol: target_sym_id,
                     flags: object::RelocationFlags::Elf {
-                        // Standard R_RISCV_CALL_PLT is 17
-                        r_type: 17,
+                        r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
                     },
                     addend: 0,
                 },
@@ -225,6 +196,7 @@ pub fn link_elf(module: &CompiledModule) -> Result<Vec<u8>, NativeError> {
 mod tests {
     use super::*;
     use crate::compile::NativeReloc;
+    use crate::isa::IsaTarget;
     use alloc::string::String;
     use alloc::vec;
 
@@ -246,7 +218,7 @@ mod tests {
         let module = simple_compiled_module();
 
         // Resolver returns a fixed address
-        let linked = link_jit(&module, |_sym| Some(0x1000)).unwrap();
+        let linked = link_jit(&module, IsaTarget::Rv32imac, |_sym| Some(0x1000)).unwrap();
 
         assert!(!linked.code.is_empty());
         assert_eq!(linked.entries.len(), 1);
@@ -256,7 +228,7 @@ mod tests {
     #[test]
     fn test_link_elf_basic() {
         let module = simple_compiled_module();
-        let elf = link_elf(&module).unwrap();
+        let elf = link_elf(&module, IsaTarget::Rv32imac).unwrap();
 
         // Check ELF magic
         assert_eq!(&elf[0..4], &[0x7f, b'E', b'L', b'F']);
@@ -285,6 +257,7 @@ mod tests {
                     relocs: vec![NativeReloc {
                         offset: 0,
                         symbol: String::from("callee"),
+                        r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
                     }],
                     debug_lines: vec![],
                     debug_info: lpvm::FunctionDebugInfo::new("caller"),
@@ -301,7 +274,7 @@ mod tests {
         };
 
         // Custom resolver that returns the offset of "callee"
-        let linked = link_jit(&module, |sym| {
+        let linked = link_jit(&module, IsaTarget::Rv32imac, |sym| {
             if sym == "caller" {
                 Some(0x1000)
             } else if sym == "callee" {

@@ -1,9 +1,9 @@
-# Design: Auto-generate lpfx_fns.rs
+# Design: Auto-generate lpfn_fns.rs
 
 ## Overview
 
-Extend `lps-builtin-gen-app` to automatically generate `lpfx_fns.rs` by discovering LPFX
-functions annotated with `#[lpfx_impl(...)]` attributes, parsing their GLSL signatures, and
+Extend `lps-builtin-gen-app` to automatically generate `lpfn_fns.rs` by discovering LPFX
+functions annotated with `#[lpfn_impl(...)]` attributes, parsing their GLSL signatures, and
 generating the registry code.
 
 ## Architecture
@@ -12,13 +12,13 @@ The codegen will be organized into clean, well-separated modules:
 
 ```
 lps-builtin-gen-app/src/
-├── main.rs                    # UPDATE: Add lpfx_fns generation
+├── main.rs                    # UPDATE: Add lpfn_fns generation
 ├── discovery.rs               # NEW: Discover LPFX functions with attributes
-├── lpfx/
+├── lpfn/
 │   ├── mod.rs                # NEW: LPFX codegen module
-│   ├── parse.rs              # NEW: Parse #[lpfx_impl] attributes
+│   ├── parse.rs              # NEW: Parse #[lpfn_impl] attributes
 │   ├── validate.rs           # NEW: Validate consistency and pairs
-│   ├── generate.rs           # NEW: Generate lpfx_fns.rs code
+│   ├── generate.rs           # NEW: Generate lpfn_fns.rs code
 │   └── errors.rs             # NEW: Error types and messages
 ```
 
@@ -27,23 +27,23 @@ lps-builtin-gen-app/src/
 ### Discovery Module (`discovery.rs`)
 
 ```
-discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, Error>
-  # NEW: Walk directory tree, find all functions with #[lpfx_impl] attribute
+discover_lpfn_functions(dir: &Path) -> Result<Vec<LpfnFunctionInfo>, Error>
+  # NEW: Walk directory tree, find all functions with #[lpfn_impl] attribute
 
-LpfxFunctionInfo - # NEW: Information about a discovered LPFX function
-├── rust_fn_name: String      # NEW: Rust function name (e.g., "__lpfx_snoise3_f32")
+LpfnFunctionInfo - # NEW: Information about a discovered LPFX function
+├── rust_fn_name: String      # NEW: Rust function name (e.g., "__lpfn_snoise3_f32")
 ├── builtin_id: BuiltinId     # NEW: Corresponding BuiltinId enum variant
-├── attribute: LpfxAttribute  # NEW: Parsed attribute information
+├── attribute: LpfnAttribute  # NEW: Parsed attribute information
 └── file_path: PathBuf        # NEW: Source file path
 ```
 
-### Parse Module (`lpfx/parse.rs`)
+### Parse Module (`lpfn/parse.rs`)
 
 ```
-parse_lpfx_attribute(attr: &Attribute) -> Result<LpfxAttribute, Error>
-  # NEW: Parse #[lpfx_impl(...)] attribute
+parse_lpfn_attribute(attr: &Attribute) -> Result<LpfnAttribute, Error>
+  # NEW: Parse #[lpfn_impl(...)] attribute
 
-LpfxAttribute - # NEW: Parsed attribute information
+LpfnAttribute - # NEW: Parsed attribute information
 ├── variant: Option<Variant>  # NEW: None = non-decimal, Some(f32/q32) = decimal
 └── glsl_signature: String    # NEW: GLSL signature string
 
@@ -55,35 +55,35 @@ Variant - # NEW: Decimal format variant
 └── Q32
 ```
 
-### Validate Module (`lpfx/validate.rs`)
+### Validate Module (`lpfn/validate.rs`)
 
 ```
-validate_lpfx_functions(functions: &[LpfxFunctionInfo]) -> Result<(), Error>
+validate_lpfn_functions(functions: &[LpfnFunctionInfo]) -> Result<(), Error>
   # NEW: Validate all discovered functions
 
-validate_decimal_pairs(functions: &[LpfxFunctionInfo]) -> Result<(), Error>
+validate_decimal_pairs(functions: &[LpfnFunctionInfo]) -> Result<(), Error>
   # NEW: Ensure all decimal functions have matching f32/q32 pairs
 
-validate_signature_consistency(functions: &[LpfxFunctionInfo]) -> Result<(), Error>
+validate_signature_consistency(functions: &[LpfnFunctionInfo]) -> Result<(), Error>
   # NEW: Ensure f32 and q32 variants have matching signatures
 
 Error - # NEW: Validation error with clear messages
 ```
 
-### Generate Module (`lpfx/generate.rs`)
+### Generate Module (`lpfn/generate.rs`)
 
 ```
-generate_lpfx_fns(functions: &[LpfxFunctionInfo]) -> String
-  # NEW: Generate lpfx_fns.rs source code
+generate_lpfn_fns(functions: &[LpfnFunctionInfo]) -> String
+  # NEW: Generate lpfn_fns.rs source code
 
-group_functions_by_name(functions: &[LpfxFunctionInfo]) -> HashMap<String, Vec<&LpfxFunctionInfo>>
+group_functions_by_name(functions: &[LpfnFunctionInfo]) -> HashMap<String, Vec<&LpfnFunctionInfo>>
   # NEW: Group functions by GLSL name for pairing
 ```
 
-### Error Module (`lpfx/errors.rs`)
+### Error Module (`lpfn/errors.rs`)
 
 ```
-LpfxCodegenError - # NEW: Error type for codegen
+LpfnCodegenError - # NEW: Error type for codegen
 ├── MissingAttribute(function_name: String)
 ├── InvalidSignature(function_name: String, error: String)
 ├── MissingPair(function_name: String, missing_variant: Variant)
@@ -93,8 +93,8 @@ LpfxCodegenError - # NEW: Error type for codegen
 
 ## Data Flow
 
-1. **Discovery**: Walk `lps-builtins/src/builtins/lpfx` directory, find all functions with
-   `#[lpfx_impl]` attribute
+1. **Discovery**: Walk `lps-builtins/src/builtins/lpfn` directory, find all functions with
+   `#[lpfn_impl]` attribute
 2. **Parsing**: Parse attributes to extract variant and GLSL signature, parse GLSL signatures to
    `FunctionSignature`
 3. **Validation**:
@@ -102,17 +102,17 @@ LpfxCodegenError - # NEW: Error type for codegen
     - Ensure decimal functions have both f32 and q32 variants
     - Ensure f32 and q32 signatures match
     - Validate BuiltinId references
-4. **Generation**: Generate `lpfx_fns.rs` with `init_functions()` containing all `LpfxFn` structures
+4. **Generation**: Generate `lpfn_fns.rs` with `init_functions()` containing all `LpfnFn` structures
 5. **Formatting**: Run `cargo fmt` on generated file
 
 ## Implementation Details
 
 ### Attribute Parsing
 
-The `#[lpfx_impl(...)]` attribute can have two forms:
+The `#[lpfn_impl(...)]` attribute can have two forms:
 
-- `#[lpfx_impl("signature")]` - Non-decimal function
-- `#[lpfx_impl(variant, "signature")]` - Decimal function (variant is `f32` or `q32`)
+- `#[lpfn_impl("signature")]` - Non-decimal function
+- `#[lpfn_impl(variant, "signature")]` - Decimal function (variant is `f32` or `q32`)
 
 Parse using `syn::Attribute::parse_args()` to extract:
 
@@ -137,19 +137,19 @@ For decimal functions:
 1. Group all functions by parsed GLSL function name
 2. For each GLSL function name, find f32 and q32 variants
 3. Validate signatures match
-4. Create `LpfxFnImpl::Decimal { float_impl, q32_impl }`
+4. Create `LpfnFnImpl::Decimal { float_impl, q32_impl }`
 
 For non-decimal functions:
 
-1. Create `LpfxFnImpl::NonDecimal(builtin_id)`
+1. Create `LpfnFnImpl::NonDecimal(builtin_id)`
 
 ### Code Generation
 
-Generate Rust code as a string, maintaining the same structure as current `lpfx_fns.rs`:
+Generate Rust code as a string, maintaining the same structure as current `lpfn_fns.rs`:
 
-- `lpfx_fns()` function with caching logic
-- `init_functions()` that returns array of `LpfxFn`
-- Each `LpfxFn` with `glsl_sig` and `impls` fields
+- `lpfn_fns()` function with caching logic
+- `init_functions()` that returns array of `LpfnFn`
+- Each `LpfnFn` with `glsl_sig` and `impls` fields
 
 ## Error Handling
 

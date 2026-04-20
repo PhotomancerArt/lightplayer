@@ -44,6 +44,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
         BuiltinId::LpLpirFaddQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFceilQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFdivQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpirFdivRecipQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFfloorQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFmaxQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFminQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
@@ -51,20 +52,24 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
         BuiltinId::LpLpirFnearestQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFsqrtQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFsubQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpirFtoUnorm16Q32 => (vec![ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpirFtoUnorm8Q32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFtoiSatSQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFtoiSatUQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirFtruncQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirItofSQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpLpirItofUQ32 => (vec![ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxFbm2F32 => (
+        BuiltinId::LpLpirUnorm16ToFQ32 => (vec![ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpirUnorm8ToFQ32 => (vec![ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnFbm2F32 => (
             vec![ValType::F32, ValType::F32, ValType::I32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxFbm2Q32 => (
+        BuiltinId::LpLpfnFbm2Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxFbm3F32 => (
+        BuiltinId::LpLpfnFbm3F32 => (
             vec![
                 ValType::F32,
                 ValType::F32,
@@ -74,7 +79,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxFbm3Q32 => (
+        BuiltinId::LpLpfnFbm3Q32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -84,7 +89,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxFbm3TileF32 => (
+        BuiltinId::LpLpfnFbm3TileF32 => (
             vec![
                 ValType::F32,
                 ValType::F32,
@@ -95,7 +100,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxFbm3TileQ32 => (
+        BuiltinId::LpLpfnFbm3TileQ32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -106,25 +111,25 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxGnoise1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
-        BuiltinId::LpLpfxGnoise1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxGnoise2F32 => (
+        BuiltinId::LpLpfnGnoise1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
+        BuiltinId::LpLpfnGnoise1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnGnoise2F32 => (
             vec![ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxGnoise2Q32 => (
+        BuiltinId::LpLpfnGnoise2Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxGnoise3F32 => (
+        BuiltinId::LpLpfnGnoise3F32 => (
             vec![ValType::F32, ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxGnoise3Q32 => (
+        BuiltinId::LpLpfnGnoise3Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxGnoise3TileF32 => (
+        BuiltinId::LpLpfnGnoise3TileF32 => (
             vec![
                 ValType::F32,
                 ValType::F32,
@@ -134,7 +139,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxGnoise3TileQ32 => (
+        BuiltinId::LpLpfnGnoise3TileQ32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -144,24 +149,24 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxHash1 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxHash2 => (
+        BuiltinId::LpLpfnHash1 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnHash2 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxHash3 => (
+        BuiltinId::LpLpfnHash3 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxHsv2rgbF32 => (
+        BuiltinId::LpLpfnHsv2rgbF32 => (
             vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxHsv2rgbQ32 => (
+        BuiltinId::LpLpfnHsv2rgbQ32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxHsv2rgbVec4F32 => (
+        BuiltinId::LpLpfnHsv2rgbVec4F32 => (
             vec![
                 ValType::I32,
                 ValType::F32,
@@ -171,7 +176,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxHsv2rgbVec4Q32 => (
+        BuiltinId::LpLpfnHsv2rgbVec4Q32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -181,9 +186,9 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxHue2rgbF32 => (vec![ValType::I32, ValType::F32], Vec::new()),
-        BuiltinId::LpLpfxHue2rgbQ32 => (vec![ValType::I32, ValType::I32], Vec::new()),
-        BuiltinId::LpLpfxPsrdnoise2F32 => (
+        BuiltinId::LpLpfnHue2rgbF32 => (vec![ValType::I32, ValType::F32], Vec::new()),
+        BuiltinId::LpLpfnHue2rgbQ32 => (vec![ValType::I32, ValType::I32], Vec::new()),
+        BuiltinId::LpLpfnPsrdnoise2F32 => (
             vec![
                 ValType::F32,
                 ValType::F32,
@@ -195,7 +200,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxPsrdnoise2Q32 => (
+        BuiltinId::LpLpfnPsrdnoise2Q32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -207,7 +212,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxPsrdnoise3F32 => (
+        BuiltinId::LpLpfnPsrdnoise3F32 => (
             vec![
                 ValType::F32,
                 ValType::F32,
@@ -221,7 +226,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxPsrdnoise3Q32 => (
+        BuiltinId::LpLpfnPsrdnoise3Q32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -235,33 +240,33 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxRandom1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
-        BuiltinId::LpLpfxRandom1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxRandom2F32 => (
+        BuiltinId::LpLpfnRandom1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
+        BuiltinId::LpLpfnRandom1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnRandom2F32 => (
             vec![ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxRandom2Q32 => (
+        BuiltinId::LpLpfnRandom2Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxRandom3F32 => (
+        BuiltinId::LpLpfnRandom3F32 => (
             vec![ValType::F32, ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxRandom3Q32 => (
+        BuiltinId::LpLpfnRandom3Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxRgb2hsvF32 => (
+        BuiltinId::LpLpfnRgb2hsvF32 => (
             vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxRgb2hsvQ32 => (
+        BuiltinId::LpLpfnRgb2hsvQ32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxRgb2hsvVec4F32 => (
+        BuiltinId::LpLpfnRgb2hsvVec4F32 => (
             vec![
                 ValType::I32,
                 ValType::F32,
@@ -271,7 +276,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxRgb2hsvVec4Q32 => (
+        BuiltinId::LpLpfnRgb2hsvVec4Q32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -281,17 +286,17 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSaturateF32 => (vec![ValType::F32], vec![ValType::F32]),
-        BuiltinId::LpLpfxSaturateQ32 => (vec![ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxSaturateVec3F32 => (
+        BuiltinId::LpLpfnSaturateF32 => (vec![ValType::F32], vec![ValType::F32]),
+        BuiltinId::LpLpfnSaturateQ32 => (vec![ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnSaturateVec3F32 => (
             vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSaturateVec3Q32 => (
+        BuiltinId::LpLpfnSaturateVec3Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSaturateVec4F32 => (
+        BuiltinId::LpLpfnSaturateVec4F32 => (
             vec![
                 ValType::I32,
                 ValType::F32,
@@ -301,7 +306,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSaturateVec4Q32 => (
+        BuiltinId::LpLpfnSaturateVec4Q32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -311,43 +316,43 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSnoise1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
-        BuiltinId::LpLpfxSnoise1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxSnoise2F32 => (
+        BuiltinId::LpLpfnSnoise1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
+        BuiltinId::LpLpfnSnoise1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnSnoise2F32 => (
             vec![ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxSnoise2Q32 => (
+        BuiltinId::LpLpfnSnoise2Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxSnoise3F32 => (
+        BuiltinId::LpLpfnSnoise3F32 => (
             vec![ValType::F32, ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxSnoise3Q32 => (
+        BuiltinId::LpLpfnSnoise3Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxSrandom1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
-        BuiltinId::LpLpfxSrandom1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-        BuiltinId::LpLpfxSrandom2F32 => (
+        BuiltinId::LpLpfnSrandom1F32 => (vec![ValType::F32, ValType::I32], vec![ValType::F32]),
+        BuiltinId::LpLpfnSrandom1Q32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpLpfnSrandom2F32 => (
             vec![ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxSrandom2Q32 => (
+        BuiltinId::LpLpfnSrandom2Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxSrandom3F32 => (
+        BuiltinId::LpLpfnSrandom3F32 => (
             vec![ValType::F32, ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxSrandom3Q32 => (
+        BuiltinId::LpLpfnSrandom3Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxSrandom3TileF32 => (
+        BuiltinId::LpLpfnSrandom3TileF32 => (
             vec![
                 ValType::I32,
                 ValType::F32,
@@ -358,7 +363,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSrandom3TileQ32 => (
+        BuiltinId::LpLpfnSrandom3TileQ32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -369,7 +374,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSrandom3VecF32 => (
+        BuiltinId::LpLpfnSrandom3VecF32 => (
             vec![
                 ValType::I32,
                 ValType::F32,
@@ -379,7 +384,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxSrandom3VecQ32 => (
+        BuiltinId::LpLpfnSrandom3VecQ32 => (
             vec![
                 ValType::I32,
                 ValType::I32,
@@ -389,35 +394,35 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
-        BuiltinId::LpLpfxWorley2F32 => (
+        BuiltinId::LpLpfnWorley2F32 => (
             vec![ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxWorley2Q32 => (
+        BuiltinId::LpLpfnWorley2Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxWorley2ValueF32 => (
+        BuiltinId::LpLpfnWorley2ValueF32 => (
             vec![ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxWorley2ValueQ32 => (
+        BuiltinId::LpLpfnWorley2ValueQ32 => (
             vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxWorley3F32 => (
+        BuiltinId::LpLpfnWorley3F32 => (
             vec![ValType::F32, ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxWorley3Q32 => (
+        BuiltinId::LpLpfnWorley3Q32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
-        BuiltinId::LpLpfxWorley3ValueF32 => (
+        BuiltinId::LpLpfnWorley3ValueF32 => (
             vec![ValType::F32, ValType::F32, ValType::F32, ValType::I32],
             vec![ValType::F32],
         ),
-        BuiltinId::LpLpfxWorley3ValueQ32 => (
+        BuiltinId::LpLpfnWorley3ValueQ32 => (
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),

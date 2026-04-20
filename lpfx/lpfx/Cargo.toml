@@ -1,0 +1,22 @@
+[package]
+name = "lpfx"
+description = "LightPlayer effect modules: manifest types and parsing (no_std + alloc)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+
+[dev-dependencies]
+lps-frontend = { path = "../../lp-shader/lps-frontend" }
+
+[lints]
+workspace = true

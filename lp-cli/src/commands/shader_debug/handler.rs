@@ -1,7 +1,10 @@
 //! Handler for `shader-debug`.
 
 use anyhow::{Context, Result};
-use lpir::{FloatMode, validate_module};
+use lp_shader::synth::{SynthError, synthesise_render_texture};
+use lpir::{CompilerConfig, FloatMode, LpirModule, validate_module};
+use lps_frontend::LpsModuleSig;
+use lps_shared::TextureStorageFormat;
 
 use super::args::Args;
 use super::collect::{collect_cranelift_data, collect_fa_data};
@@ -9,11 +12,46 @@ use super::display::{print_comparison_table, print_detailed_view, print_help_tex
 use super::types::{BackendTarget, DebugReport};
 
 pub fn handle_shader_debug(args: Args) -> Result<()> {
+    let has_empty_opt = args.opt.iter().any(String::is_empty);
+    if has_empty_opt {
+        if args.opt.iter().any(|s| !s.is_empty()) {
+            anyhow::bail!(
+                "`--opt` without KEY=value prints valid keys and values; do not mix with other `--opt` flags on the same command"
+            );
+        }
+        eprintln!("Valid keys for `-o KEY=VALUE` / `--opt KEY=VALUE`:");
+        eprintln!();
+        eprintln!("  inline.mode                          auto | always | never  (default auto)");
+        eprintln!("  inline.always_inline_single_site     true | false           (default true)");
+        eprintln!("  inline.small_func_threshold          <usize>                (default 20)");
+        eprintln!(
+            "  inline.max_growth_budget             <usize>                (default unlimited)"
+        );
+        eprintln!(
+            "  inline.module_op_budget              <usize>                (default unlimited)"
+        );
+        eprintln!(
+            "  q32.add_sub                          saturating | wrapping  (default saturating)"
+        );
+        eprintln!(
+            "  q32.mul                              saturating | wrapping  (default saturating)"
+        );
+        eprintln!(
+            "  q32.div                              saturating | reciprocal (default saturating)"
+        );
+        return Ok(());
+    }
+
     let src = std::fs::read_to_string(&args.input)
         .with_context(|| format!("read {}", args.input.display()))?;
 
     let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
-    let (ir, sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+    let (mut ir, mut sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+
+    let synth_formats = args
+        .render_texture_formats()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    apply_render_texture_synth(&mut ir, &mut sig, &synth_formats);
 
     if let Err(errs) = validate_module(&ir) {
         anyhow::bail!(
@@ -31,6 +69,18 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
         _ => anyhow::bail!("invalid --float-mode (use q32 or f32)"),
     };
 
+    let mut compiler_config = CompilerConfig::default();
+    for opt in &args.opt {
+        let (key, value) = opt.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!(
+                "--opt expects KEY=VALUE, got: {opt:?} (use `--opt` alone to list valid keys and values)"
+            )
+        })?;
+        compiler_config
+            .apply(key, value)
+            .map_err(|e| anyhow::anyhow!("invalid --opt: {e}"))?;
+    }
+
     // Parse targets
     let targets = args.targets();
     if targets.is_empty() {
@@ -47,11 +97,15 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
 
     for target in &targets {
         let backend_data = match target {
-            BackendTarget::Rv32fa => collect_fa_data(&ir, &sig, float_mode, func_filter)?,
-            BackendTarget::Rv32 => {
-                collect_cranelift_data(&ir, &sig, float_mode, func_filter, false)?
+            BackendTarget::Rv32fa => {
+                collect_fa_data(&ir, &sig, float_mode, func_filter, &compiler_config)?
             }
-            BackendTarget::Emu => collect_cranelift_data(&ir, &sig, float_mode, func_filter, true)?,
+            BackendTarget::Rv32 => {
+                collect_cranelift_data(&ir, &sig, float_mode, func_filter, false, &compiler_config)?
+            }
+            BackendTarget::Emu => {
+                collect_cranelift_data(&ir, &sig, float_mode, func_filter, true, &compiler_config)?
+            }
         };
         report.backends.push(backend_data);
     }
@@ -70,4 +124,38 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     print_comparison_table(&report);
 
     Ok(())
+}
+
+/// Append `__render_texture_<format>` for each requested format. Best-effort:
+/// missing or wrong-arity `render` is a non-fatal info message so the tool
+/// stays useful for inputs that aren't full pixel shaders (e.g. LPIR
+/// snippets, helper-only files).
+fn apply_render_texture_synth(
+    ir: &mut LpirModule,
+    sig: &mut LpsModuleSig,
+    formats: &[TextureStorageFormat],
+) {
+    if formats.is_empty() {
+        return;
+    }
+
+    let Some(render_idx) = sig.functions.iter().position(|f| f.name == "render") else {
+        eprintln!(
+            "info: --render-texture skipped (no `render` function in this input; \
+             pass --render-texture none to silence)"
+        );
+        return;
+    };
+
+    for &format in formats {
+        match synthesise_render_texture(ir, sig, render_idx, format) {
+            Ok(name) => eprintln!("info: synthesised {name}"),
+            Err(SynthError::RenderFunctionMissing) => eprintln!(
+                "info: --render-texture {format:?} skipped (render arity does not match channel count)",
+            ),
+            Err(SynthError::InvalidRenderFnIndex) => eprintln!(
+                "info: --render-texture {format:?} skipped (internal: render index invalidated)",
+            ),
+        }
+    }
 }

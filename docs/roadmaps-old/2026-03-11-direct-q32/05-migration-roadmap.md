@@ -84,7 +84,7 @@ expansions) select the right implementation based on numeric mode.
    `backend/transform/q32/calls.rs` into a shared location.
 3. Update `builtins/trigonometric.rs` (sin, cos, tan, etc.) and
    `builtins/common.rs` (pow, exp, log, etc.) to use the new helpers.
-4. Update `lpfx_fns.rs` to select float vs Q32 variant directly.
+4. Update `lpfn_fns.rs` to select float vs Q32 variant directly.
 5. Add Q32 inline expansions for fract, sign, isinf, isnan to the
    corresponding builtin emission functions.
 6. Test: compile shaders with Q32 direct emission, verify correct builtin

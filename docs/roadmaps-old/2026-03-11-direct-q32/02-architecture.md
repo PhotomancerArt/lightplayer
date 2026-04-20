@@ -166,7 +166,7 @@ pow, etc.), the codegen already has a separate dispatch path:
 
 - `emit_builtin_call` in `builtins/mod.rs`
 - `get_math_libcall` / `get_math_libcall_2arg` in `builtins/helpers.rs`
-- LPFX functions via `emit_lp_lib_fn_call` in `lpfx_fns.rs`
+- LPFX functions via `emit_lp_lib_fn_call` in `lpfn_fns.rs`
 
 These paths would become numeric-format-aware through a separate mechanism
 (see 03-builtin-dispatch.md), not through the trait. The trait stays focused

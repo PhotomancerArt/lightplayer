@@ -48,10 +48,10 @@ This causes incorrect positioning of simplex corners, leading to discontinuities
 
 ## Files to Modify
 
-1. `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs`
-2. `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise3.rs`
+1. `lp-shader/lps-builtins/src/builtins/q32/lpfn_snoise2.rs`
+2. `lp-shader/lps-builtins/src/builtins/q32/lpfn_snoise3.rs`
 3. `lp-shader/lps-builtins/Cargo.toml` (add features)
-4. `lp-shader/lps-builtins/src/builtins/shared/lpfx_hash.rs` (conditional compilation)
+4. `lp-shader/lps-builtins/src/builtins/shared/lpfn_hash.rs` (conditional compilation)
 5. New: `lp-shader/lps-builtins/src/builtins/shared/test_hash.rs`
 
 ## Success Criteria

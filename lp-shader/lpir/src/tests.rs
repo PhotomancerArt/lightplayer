@@ -3,6 +3,9 @@
 #[path = "tests/all_ops_roundtrip.rs"]
 mod all_ops_roundtrip;
 
+#[path = "tests/block_ops.rs"]
+mod block_ops;
+
 #[path = "tests/interp.rs"]
 mod interp;
 
@@ -218,12 +221,12 @@ fn parse_error_display() {
 #[test]
 fn round_trip_noise_sample() {
     assert_round_trip(
-        "import @lpfx::noise3(i32, f32, f32, f32)
+        "import @lpfn::noise3(i32, f32, f32, f32)
 
 func @noise_sample(v1:f32, v2:f32, v3:f32) -> f32 {
   slot ss0, 12
   v4:i32 = slot_addr ss0
-  call @lpfx::noise3(v4, v1, v2, v3)
+  call @lpfn::noise3(v4, v1, v2, v3)
   v5:f32 = load v4, 0
   v6:f32 = load v4, 4
   v7:f32 = load v4, 8
@@ -261,6 +264,90 @@ fn round_trip_arr_dyn() {
   v5:i32 = iadd v2, v4
   v6:f32 = load v5, 0
   return v6
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_store8() {
+    assert_round_trip(
+        "func @s8(v1:i32) {
+  slot ss0, 4
+  v2:i32 = slot_addr ss0
+  store8 v2, 0, v1
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_store16() {
+    assert_round_trip(
+        "func @s16(v1:i32) {
+  slot ss0, 4
+  v2:i32 = slot_addr ss0
+  store16 v2, 0, v1
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load8u() {
+    assert_round_trip(
+        "func @l8u() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 7
+  store8 v1, 0, v2
+  v3:i32 = load8u v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load8s() {
+    assert_round_trip(
+        "func @l8s() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0
+  store8 v1, 0, v2
+  v3:i32 = load8s v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load16u() {
+    assert_round_trip(
+        "func @l16u() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 13330
+  store16 v1, 0, v2
+  v3:i32 = load16u v1, 0
+  return v3
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_load16s() {
+    assert_round_trip(
+        "func @l16s() -> i32 {
+  slot ss0, 4
+  v1:i32 = slot_addr ss0
+  v2:i32 = iconst.i32 0
+  store16 v1, 0, v2
+  v3:i32 = load16s v1, 0
+  return v3
 }
 ",
     );

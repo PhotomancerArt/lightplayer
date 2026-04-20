@@ -36,7 +36,7 @@ Syntax:
 import @std.math::fmin(f32, f32) -> f32
 import @std.math::fmax(f32, f32) -> f32
 import @lp.q32::q32_add(i32, i32) -> i32
-import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+import @lpfn::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
 
 func @example(v0:f32, v1:f32) -> f32 {
   v2:f32 = call @std.math::fmin(v0, v1)
@@ -49,7 +49,7 @@ func @example(v0:f32, v1:f32) -> f32 {
   libcalls or intrinsics.
 - Provider for `lp.q32`: only available in Q32 mode; provides fixed-point
   math functions.
-- Provider for `lpfx`: Lygia builtins, only if configured.
+- Provider for `lpfn`: Lygia builtins, only if configured.
 - Unresolved module → emitter error. Signature mismatch → emitter error.
 
 **Benefits over a closed MathFunc enum**:
@@ -58,7 +58,7 @@ func @example(v0:f32, v1:f32) -> f32 {
 - Context-aware: Q32 mode configures `lp.q32`; f32 mode doesn't.
 - Testable: test harness provides only the modules it needs (or none).
 - Single calling mechanism: `call` for everything.
-- Namespace safety: `@std.math::fsin` can't conflict with `@lpfx::fsin`.
+- Namespace safety: `@std.math::fsin` can't conflict with `@lpfn::fsin`.
 
 ### 2. Well-known Module: `std.math`
 

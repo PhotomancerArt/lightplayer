@@ -4,12 +4,30 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{LayoutRules, LpsType, VMCTX_HEADER_SIZE};
 
+/// Whether a function in `LpsModuleSig.functions` is user-authored
+/// or synthesised by the toolchain.
+///
+/// Today the toolchain emits two synthetic families: `__shader_init` (constant
+/// global initialisation from the `lps-frontend` lower pass) and
+/// `__render_texture_<format>` (pixel loop + Q32→unorm16 stores from
+/// `lp-shader`'s synthesis — see `lp-shader/lp-shader/src/synth/render_texture.rs`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LpsFnKind {
+    /// Lowered from user GLSL.
+    #[default]
+    UserDefined,
+    /// Synthesised by the toolchain — e.g. `__shader_init` (frontend lower) or
+    /// `__render_texture_<format>` (`lp-shader`). Convention: name begins with `__`.
+    Synthetic,
+}
+
 /// Signature for LightPlayer Shader functions
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LpsFnSig {
     pub name: String,
     pub return_type: LpsType,
     pub parameters: Vec<FnParam>,
+    pub kind: LpsFnKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,9 +44,12 @@ pub enum ParamQualifier {
     InOut,
 }
 
-/// Full module metadata from GLSL lowering (one entry per user function).
+/// Full module metadata from GLSL lowering through compile.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LpsModuleSig {
+    /// One entry per function in the module — user-authored *and*
+    /// toolchain-synthesised. Filter via [`LpsFnSig::kind`] to distinguish;
+    /// e.g. `f.kind == LpsFnKind::UserDefined` for user code only.
     pub functions: Vec<LpsFnSig>,
     /// Struct type describing the uniforms region layout (std430).
     /// Members correspond to `uniform` declarations. `None` if no uniforms.
@@ -104,6 +125,7 @@ mod tests {
                     },
                 ],
                 return_type: LpsType::Float,
+                kind: LpsFnKind::UserDefined,
             }],
             uniforms_type: None,
             globals_type: None,
@@ -111,6 +133,12 @@ mod tests {
         assert_eq!(m.functions[0].name, "add");
         assert_eq!(m.functions[0].parameters.len(), 2);
         assert_eq!(m.functions[0].return_type, LpsType::Float);
+        assert_eq!(m.functions[0].kind, LpsFnKind::UserDefined);
+    }
+
+    #[test]
+    fn fn_kind_default_is_user_defined() {
+        assert_eq!(LpsFnKind::default(), LpsFnKind::UserDefined);
     }
 
     #[test]

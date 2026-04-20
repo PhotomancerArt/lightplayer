@@ -9,8 +9,8 @@ the nearest feature point.
 
 ### Files to Create
 
-1. **`lps-builtins/src/builtins/lpfx/worley/worley2_q32.rs`**
-    - `__lpfx_worley2_q32(x: i32, y: i32, seed: u32) -> i32`
+1. **`lps-builtins/src/builtins/lpfn/worley/worley2_q32.rs`**
+    - `__lpfn_worley2_q32(x: i32, y: i32, seed: u32) -> i32`
     - 2D Worley noise returning distance
 
 ### Algorithm Reference
@@ -21,7 +21,7 @@ Key components:
 
 - Cell determination (floor coordinates)
 - Near/far cell selection based on fractional coordinates > 0.5
-- Feature point generation using hash function (call `__lpfx_hash_2`)
+- Feature point generation using hash function (call `__lpfn_hash_2`)
 - Distance calculation (euclidean squared - no sqrt)
 - Range optimization (only check cells within distance range)
 - Scaling to approximately [-1, 1] range (Q32 fixed-point)
@@ -48,9 +48,9 @@ Key components:
 ## Success Criteria
 
 - Function compiles without errors
-- Function has `#[lpfx_impl_macro::lpfx_impl]` attribute with correct GLSL signature
+- Function has `#[lpfn_impl_macro::lpfn_impl]` attribute with correct GLSL signature
 - Function has `#[unsafe(no_mangle)]` attribute and `pub extern "C"` signature
-- Function uses `__lpfx_hash_2` from hash module
+- Function uses `__lpfn_hash_2` from hash module
 - Output values are in approximately [-1, 1] range (Q32)
 - Basic test verifies function produces different outputs for different inputs
 - Code formatted with `cargo +nightly fmt`

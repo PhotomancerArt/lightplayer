@@ -1,6 +1,7 @@
 //! Test file parsing.
 
 pub mod parse_annotation;
+pub mod parse_compile_opt;
 pub mod parse_expected_error;
 pub mod parse_run;
 pub mod parse_set_uniform;
@@ -17,6 +18,7 @@ pub use test_type::{
 };
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Strip `/* … */` segments from one line, updating cross-line block-comment state.
@@ -64,6 +66,8 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
     let mut trap_expectations = Vec::new();
     let mut pending_annotations: Vec<crate::targets::Annotation> = Vec::new();
     let mut pending_set_uniforms: Vec<SetUniform> = Vec::new();
+    let mut config_overrides: Vec<(String, String)> = Vec::new();
+    let mut seen_compile_opt_keys: HashSet<String> = HashSet::new();
 
     let mut in_block_comment = false;
     for (line_num, line) in lines.iter().enumerate() {
@@ -76,6 +80,16 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         }
 
         if parse_target::parse_target_directive(&logical).is_some() {
+            continue;
+        }
+
+        if let Some((key, value)) =
+            parse_compile_opt::parse_compile_opt_line(&logical, line_number)?
+        {
+            if !seen_compile_opt_keys.insert(key.clone()) {
+                anyhow::bail!("line {line_number}: duplicate `compile-opt` key {key:?}");
+            }
+            config_overrides.push((key, value));
             continue;
         }
 
@@ -127,6 +141,7 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         test_types,
         clif_expectations,
         error_expectations,
+        config_overrides,
     })
 }
 
@@ -171,5 +186,26 @@ float f() { return 2.0; }
         let tf = parse_test_file(&p).unwrap();
         let _ = std::fs::remove_file(&p);
         assert_eq!(tf.run_directives.len(), 1);
+    }
+
+    #[test]
+    fn duplicate_compile_opt_key_errors() {
+        let p = std::env::temp_dir().join(format!(
+            "lps_ft_dup_compile_opt_{}.glsl",
+            std::process::id()
+        ));
+        std::fs::write(
+            &p,
+            r"// test run
+// compile-opt(inline.mode, never)
+// compile-opt(inline.mode, always)
+float f() { return 1.0; }
+// run: f() ~= 1.0
+",
+        )
+        .unwrap();
+        let r = parse_test_file(&p);
+        let _ = std::fs::remove_file(&p);
+        assert!(r.is_err(), "expected duplicate key error");
     }
 }

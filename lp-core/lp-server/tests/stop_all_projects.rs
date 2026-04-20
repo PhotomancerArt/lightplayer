@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_model::{AsLpPath, AsLpPathBuf, ClientMessage, ClientRequest};
-use lp_server::{CraneliftGraphics, LpGraphics, LpServer, handlers::handle_client_message};
+use lp_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
 use lp_shared::ProjectBuilder;
 use lp_shared::fs::{LpFs, LpFsMemory};
 
@@ -79,7 +79,7 @@ fn test_stop_all_projects() {
     // Create output provider
     let output_provider: Rc<RefCell<dyn lp_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 
     // Create server with prepared filesystem
     let mut server = LpServer::new(

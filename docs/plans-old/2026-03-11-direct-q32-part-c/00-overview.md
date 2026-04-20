@@ -19,7 +19,7 @@ Three call paths exist in the codegen, all hardcoded to float:
 
 1. **Math libcalls** — `get_math_libcall("sinf")` → TestCase("sinf") with
    f32 signature. Transform rewrites to `__lp_q32_sin`.
-2. **LPFX functions** — `get_lpfx_testcase_call(func, float_impl, ...)` →
+2. **LPFX functions** — `get_lpfn_testcase_call(func, float_impl, ...)` →
    TestCase with float sig. Transform rewrites to q32_impl.
 3. **Inline builtins** — `sign`, `fract`, `isinf`, `isnan` use
    `emit_float_*` helpers. Transform rewrites calls inline.
@@ -42,7 +42,7 @@ Add `DecimalFormat` awareness to `CodegenContext` (it already has
 | `backend/builtins/` | Move `map_testcase_to_builtin` here from transform |
 | `builtins/trigonometric.rs` | Use new helpers for all trig functions |
 | `builtins/common.rs` | Q32 branches for inline builtins; use new helpers for libcalls |
-| `lpfx_fns.rs` | Select float vs Q32 variant based on numeric mode |
+| `lpfn_fns.rs` | Select float vs Q32 variant based on numeric mode |
 | `numeric.rs` | Fill in Plan B `todo!()` stubs for saturating ops + sqrt |
 
 ## Non-scope

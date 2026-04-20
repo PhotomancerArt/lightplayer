@@ -19,7 +19,7 @@ the three-tiered math strategy from the design doc.
 In the `Statement::Call` match arm:
 
 1. Check if the callee is an LPFX function → delegate to Phase 6 (stub
-   for now with `todo!()` behind an `if name.starts_with("lpfx_")` guard).
+   for now with `todo!()` behind an `if name.starts_with("lpfn_")` guard).
 2. Check if the callee is a math-only function (no body — these are Naga
    internal stubs). If so, skip (math is handled at expression level).
 3. Otherwise, this is a user function call:

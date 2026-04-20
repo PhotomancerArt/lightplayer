@@ -10,3 +10,4 @@ workspace = true
 
 [dependencies]
 libm = "0.2"
+lps-q32 = { path = "../lps-q32" }

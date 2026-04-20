@@ -18,7 +18,7 @@ all targets.
    - Only used in `lp-engine/src/gfx/cranelift.rs` via `jit()` function
 
 3. **Clean up `lps-filetests`:**
-   - `wasm_link.rs` - still required by `tests/lpfx_builtins_memory.rs`
+   - `wasm_link.rs` - still required by `tests/lpfn_builtins_memory.rs`
    - Migrate that test to use `lpvm-wasm` instantiate/link path instead
 
 4. **Update documentation:**
@@ -56,7 +56,7 @@ lp-shader/legacy/
 ### Current API Usage
 
 - `lp-engine/src/gfx/cranelift.rs` uses `lpvm_cranelift::jit()` and `JitModule`
-- `lp-shader/lps-filetests/src/test_run/wasm_link.rs` used by `tests/lpfx_builtins_memory.rs`
+- `lp-shader/lps-filetests/src/test_run/wasm_link.rs` used by `tests/lpfn_builtins_memory.rs`
 - `lp-shader/lpvm-emu/src/emu_run.rs` has `glsl_q32_call_emulated` vs `EmuInstance::call` paths
 
 ### Architecture Changes Needed
@@ -88,10 +88,10 @@ GLSL → lps-frontend → LPIR → CraneliftEngine (LpvmEngine) → CraneliftMod
 
 ### Q2: What to do with `wasm_link.rs` in `lps-filetests`?
 
-**Context:** `lps-filetests/src/test_run/wasm_link.rs` provides wasmtime linking for builtins + shader WASM. It's used by `tests/lpfx_builtins_memory.rs`. The new `lpvm-wasm` crate has its own instantiate/link path that could replace this.
+**Context:** `lps-filetests/src/test_run/wasm_link.rs` provides wasmtime linking for builtins + shader WASM. It's used by `tests/lpfn_builtins_memory.rs`. The new `lpvm-wasm` crate has its own instantiate/link path that could replace this.
 
 **Options:**
-- A) Migrate `lpfx_builtins_memory.rs` to use `lpvm-wasm` path, then delete `wasm_link.rs`
+- A) Migrate `lpfn_builtins_memory.rs` to use `lpvm-wasm` path, then delete `wasm_link.rs`
 - B) Keep `wasm_link.rs` as a filetest-specific helper (rename to something clearer)
 - C) Extract shared wasmtime helper into `lpvm-wasm` and use from both places
 

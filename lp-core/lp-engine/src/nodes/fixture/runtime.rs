@@ -7,11 +7,12 @@ use crate::nodes::fixture::mapping::{
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
 use lp_shared::fs::fs_event::FsChange;
 use lps_q32::q32::ToQ32;
+use lps_shared::TextureStorageFormat;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
@@ -266,7 +267,14 @@ impl NodeRuntime for FixtureRuntime {
 
         // Accumulate channel values using format-specific sampling
         let texture_data = texture.data();
-        let texture_format = texture.format();
+        let texture_format = match texture.format() {
+            TextureStorageFormat::Rgba16Unorm => lp_model::nodes::texture::TextureFormat::Rgba16,
+            other => {
+                return Err(Error::Other {
+                    message: format!("Fixture unsupported texture storage format: {other:?}"),
+                });
+            }
+        };
         let accumulators = accumulate_from_mapping(
             &mapping.entries,
             texture_data,

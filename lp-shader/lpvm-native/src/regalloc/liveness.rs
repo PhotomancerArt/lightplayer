@@ -115,6 +115,8 @@ pub fn analyze_liveness(
                 live_out: RegSet::new(),
             }
         }
+
+        Region::Block { body, .. } => analyze_liveness(tree, *body, vinsts, pool),
     }
 }
 
@@ -164,6 +166,9 @@ pub fn defs_in_region(
         }
         Region::Loop { header, body, .. } => {
             out = out.union(&defs_in_region(tree, *header, vinsts, vreg_pool));
+            out = out.union(&defs_in_region(tree, *body, vinsts, vreg_pool));
+        }
+        Region::Block { body, .. } => {
             out = out.union(&defs_in_region(tree, *body, vinsts, vreg_pool));
         }
     }

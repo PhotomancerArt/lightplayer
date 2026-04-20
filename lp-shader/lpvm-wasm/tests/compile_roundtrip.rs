@@ -21,6 +21,7 @@ fn wasmtime_accepts_emitted_float_add_f32() {
     let (ir, meta) = lower(&naga).expect("lower");
     let opts = WasmOptions {
         float_mode: FloatMode::F32,
+        ..Default::default()
     };
     let art = compile_lpir(&ir, &meta, &opts).expect("emit");
     let engine = Engine::default();

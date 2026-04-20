@@ -11,7 +11,7 @@ compile but `emit_module` returns an error stub.
 - `src/emit.rs` — 1970-line Naga-direct emitter
 - `src/emit_vec.rs` — vector lowering
 - `src/locals.rs` — complex local allocation
-- `src/lpfx.rs` — LPFX resolution from Naga
+- `src/lpfn.rs` — LPFX resolution from Naga
 - `src/types.rs` — Naga type → WASM type mapping
 
 ## New files
@@ -63,7 +63,7 @@ pub mod module;
 pub mod options;
 ```
 
-Remove `emit_vec`, `locals`, `lpfx`, `types` module declarations.
+Remove `emit_vec`, `locals`, `lpfn`, `types` module declarations.
 
 Update `glsl_wasm()` to call the new pipeline:
 

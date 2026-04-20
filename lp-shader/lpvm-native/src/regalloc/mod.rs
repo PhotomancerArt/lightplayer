@@ -26,10 +26,11 @@ pub mod walk;
 pub mod test;
 
 /// Allocation location for a virtual register operand.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alloc {
-    /// Allocated to a physical register.
-    Reg(crate::rv32::gpr::PReg),
+    /// Allocated to a physical register (hardware GPR index; semantics from [`FuncAbi::isa()`]).
+    Reg(u8),
     /// Spilled to stack slot.
     Stack(u8),
     /// No allocation (dead, or never used).
@@ -45,7 +46,7 @@ impl Alloc {
         matches!(self, Alloc::Stack(_))
     }
 
-    pub fn reg(self) -> Option<crate::rv32::gpr::PReg> {
+    pub fn reg(self) -> Option<u8> {
         match self {
             Alloc::Reg(r) => Some(r),
             _ => None,
@@ -187,6 +188,8 @@ impl core::fmt::Display for AllocError {
 
 impl core::error::Error for AllocError {}
 
+const _: () = assert!(core::mem::size_of::<Alloc>() == 2);
+
 /// Result of register allocation.
 #[derive(Debug, Clone)]
 pub struct AllocResult {
@@ -196,15 +199,15 @@ pub struct AllocResult {
     pub used_callee_saved: crate::abi::PregSet,
 }
 
-/// Collect callee-saved pool GPRs (x18–x27) used in `output` for prologue/epilogue.
-fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
+/// Collect callee-saved pool GPRs used in `output` for prologue/epilogue.
+fn used_callee_saved_from_output(output: &AllocOutput, func_abi: &FuncAbi) -> crate::abi::PregSet {
     use crate::abi::PReg as AbiPReg;
-    use crate::rv32::gpr;
 
     let mut set = crate::abi::PregSet::EMPTY;
-    let mut insert = |r: crate::rv32::gpr::PReg| {
-        if gpr::is_callee_saved_pool_gpr(r) {
-            set.insert(AbiPReg::int(r));
+    let mut insert = |hw: u8| {
+        let p = AbiPReg::int(hw);
+        if func_abi.allocatable().contains(p) && !func_abi.is_caller_saved_pool(p) {
+            set.insert(p);
         }
     };
 
@@ -275,10 +278,10 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
         tree,
         root,
         func_abi,
-        RegPool::new(),
+        RegPool::new(func_abi.isa()),
     )?;
     let spill_slots = output.num_spill_slots;
-    let used_callee_saved = used_callee_saved_from_output(&output);
+    let used_callee_saved = used_callee_saved_from_output(&output, func_abi);
 
     log::debug!(
         "[native-fa] allocate: complete, {} spill slots, {} edits",
@@ -297,7 +300,6 @@ mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
     use crate::vinst::{AluOp, ModuleSymbols, SRC_OP_NONE, VInst, VReg};
-    use alloc::string::String;
     use alloc::vec::Vec;
 
     fn make_linear_lowered() -> LoweredFunction {
@@ -374,14 +376,7 @@ mod tests {
     #[test]
     fn allocator_works_for_linear_regions() {
         let lowered = make_linear_lowered();
-        let func_abi = crate::rv32::abi::func_abi_rv32(
-            &lps_shared::LpsFnSig {
-                name: String::from("test"),
-                return_type: lps_shared::LpsType::Void,
-                parameters: Vec::new(),
-            },
-            0,
-        );
+        let func_abi = crate::regalloc::test::abi_fixtures::void_func_abi();
         let result = allocate(&lowered, &func_abi);
         assert!(result.is_ok(), "allocator should work for Linear regions");
         let alloc_result = result.unwrap();
@@ -405,24 +400,15 @@ mod tests {
     fn expect_alloc(input: &str, expected: &str) {
         use crate::debug::vinst;
         use crate::regalloc::render::render_alloc_output;
+        use crate::regalloc::test::abi_fixtures;
         use crate::regalloc::walk::walk_linear;
-        use crate::rv32::abi;
-        use lps_shared::{LpsFnSig, LpsType};
 
         let (vinsts, symbols, pool) = vinst::parse(input).unwrap();
 
-        // Create a simple ABI with no params
-        let func_abi = abi::func_abi_rv32(
-            &LpsFnSig {
-                name: String::from("test"),
-                return_type: LpsType::Void,
-                parameters: Vec::new(),
-            },
-            0,
-        );
+        let func_abi = abi_fixtures::void_func_abi();
 
         let output = walk_linear(&vinsts, &pool, &func_abi).unwrap();
-        let rendered = render_alloc_output(&vinsts, &pool, &output, Some(&symbols));
+        let rendered = render_alloc_output(&vinsts, &pool, &output, Some(&symbols), func_abi.isa());
 
         // Normalize whitespace for comparison
         let expected_normalized = expected.trim().replace("\r\n", "\n");
@@ -430,26 +416,25 @@ mod tests {
 
         assert_eq!(
             actual_normalized, expected_normalized,
-            "Allocation output mismatch\nInput:\n{}\nActual:\n{}",
-            input, actual_normalized
+            "Allocation output mismatch\nInput:\n{input}\nActual:\n{actual_normalized}",
         );
     }
 
     #[test]
     fn snapshot_simple_iconst_ret() {
         #[cfg(feature = "debug")]
-        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\n; read: i0 <- t4\nRet i0\n; trace: alloc: v0 -> t29";
+        let expected = "i0 = IConst32 10\n; write: i0 -> Reg(t4)\n; ---------------------------\n; read: i0 <- Reg(t4)\nRet i0\n; trace: alloc: v0 -> t29";
         #[cfg(not(feature = "debug"))]
-        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\n; read: i0 <- t4\nRet i0";
+        let expected = "i0 = IConst32 10\n; write: i0 -> Reg(t4)\n; ---------------------------\n; read: i0 <- Reg(t4)\nRet i0";
         expect_alloc("i0 = IConst32 10\nRet i0", expected);
     }
 
     #[test]
     fn snapshot_binary_add() {
         #[cfg(feature = "debug")]
-        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add i0, i1\n; write: i2 -> t4\n; trace: alloc: v0 -> t29\n; trace: alloc: v1 -> t30\n; ---------------------------\n; read: i2 <- t4\nRet i2\n; trace: alloc: v2 -> t29";
+        let expected = "i0 = IConst32 10\n; write: i0 -> Reg(t4)\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> Reg(t5)\n; ---------------------------\n; read: i0 <- Reg(t4)\n; read: i1 <- Reg(t5)\ni2 = Add i0, i1\n; write: i2 -> Reg(t4)\n; trace: alloc: v0 -> t29\n; trace: alloc: v1 -> t30\n; ---------------------------\n; read: i2 <- Reg(t4)\nRet i2\n; trace: alloc: v2 -> t29";
         #[cfg(not(feature = "debug"))]
-        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add i0, i1\n; write: i2 -> t4\n; ---------------------------\n; read: i2 <- t4\nRet i2";
+        let expected = "i0 = IConst32 10\n; write: i0 -> Reg(t4)\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> Reg(t5)\n; ---------------------------\n; read: i0 <- Reg(t4)\n; read: i1 <- Reg(t5)\ni2 = Add i0, i1\n; write: i2 -> Reg(t4)\n; ---------------------------\n; read: i2 <- Reg(t4)\nRet i2";
         expect_alloc(
             "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add i0, i1\nRet i2",
             expected,

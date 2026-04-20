@@ -19,7 +19,7 @@ and passes across all targets.
   - ✅ **M5 phase 8** complete: `call_q32`, `debug_state`, filetest migration,
     plan moved to `docs/plans-done/`.
   - **`lps-filetests` / `wasm_link.rs`:** still required by
-    `tests/lpfx_builtins_memory.rs` (wasmtime builtins + `env.memory`). Either
+    `tests/lpfn_builtins_memory.rs` (wasmtime builtins + `env.memory`). Either
     migrate that test to the **`lpvm-wasm`** instantiate/link path or extract a
     tiny shared wasmtime helper, then **delete** `wasm_link.rs` and any duplicate
     linker logic.

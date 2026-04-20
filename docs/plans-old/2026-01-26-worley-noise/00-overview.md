@@ -5,8 +5,8 @@
 Implement Worley noise (cellular noise) functions for the LP builtin library, following the same pattern as Simplex noise. Worley noise generates cellular patterns based on the distance to the nearest feature point in a grid.
 
 The implementation includes:
-- 2D Worley noise (`lpfx_worley2`, `lpfx_worley2_value`)
-- 3D Worley noise (`lpfx_worley3`, `lpfx_worley3_value`)
+- 2D Worley noise (`lpfn_worley2`, `lpfn_worley2_value`)
+- 3D Worley noise (`lpfn_worley3`, `lpfn_worley3_value`)
 - Integration with the existing builtin system (auto-registered via macro)
 - Tests comparing against noise-rs reference implementation
 

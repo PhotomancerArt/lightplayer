@@ -4,7 +4,7 @@
 
 **Context**: We need to annotate LPFX functions with their GLSL signatures so the codegen can extract them. The `#[]` things are called "attributes" in Rust.
 
-**Decision**: Use `#[lpfx_impl("float lpfx_snoise3(vec3 p, u32 seed)")]` - indicating this is an implementation, and we can use the GLSL parser to parse the declaration string.
+**Decision**: Use `#[lpfn_impl("float lpfn_snoise3(vec3 p, u32 seed)")]` - indicating this is an implementation, and we can use the GLSL parser to parse the declaration string.
 
 **Rationale**:
 - Uses existing GLSL parsing infrastructure
@@ -19,9 +19,9 @@
 **Decision**: Use consistent syntax with variant type for decimal functions:
 
 **Syntax**:
-- Non-decimal: `#[lpfx_impl("uint lpfx_hash1(uint x, uint seed)")]` - just the signature string (note: GLSL uses 'uint' not 'u32')
-- Decimal f32: `#[lpfx_impl(f32, "float lpfx_snoise3(vec3 p, uint seed)")]` - variant type + signature
-- Decimal q32: `#[lpfx_impl(q32, "float lpfx_snoise3(vec3 p, uint seed)")]` - variant type + signature
+- Non-decimal: `#[lpfn_impl("uint lpfn_hash1(uint x, uint seed)")]` - just the signature string (note: GLSL uses 'uint' not 'u32')
+- Decimal f32: `#[lpfn_impl(f32, "float lpfn_snoise3(vec3 p, uint seed)")]` - variant type + signature
+- Decimal q32: `#[lpfn_impl(q32, "float lpfn_snoise3(vec3 p, uint seed)")]` - variant type + signature
 
 **Note**: GLSL syntax uses `uint` for unsigned integers, not `u32`. The attributes should use standard GLSL syntax.
 
@@ -34,10 +34,10 @@
 
 ## Q3: Correlating f32 and q32 implementations
 
-**Context**: We need to correlate `__lpfx_snoise3_f32` with `__lpfx_snoise3_q32` to generate the `LpfxFnImpl::Decimal { float_impl, q32_impl }` structure.
+**Context**: We need to correlate `__lpfn_snoise3_f32` with `__lpfn_snoise3_q32` to generate the `LpfnFnImpl::Decimal { float_impl, q32_impl }` structure.
 
 **Decision**: Both f32 and q32 have the same GLSL signature in their attributes. Codegen will:
-1. Find all functions with `#[lpfx_impl(...)]` attribute
+1. Find all functions with `#[lpfn_impl(...)]` attribute
 2. Parse the attribute to determine variant (none = non-decimal, f32/q32 = decimal)
 3. Parse the GLSL signature string from the attribute
 4. For decimal functions, match f32 and q32 by comparing the parsed function names from their GLSL signatures
@@ -50,9 +50,9 @@
 
 ## Q4: Non-decimal functions
 
-**Context**: Hash functions (`lpfx_hash1`, `lpfx_hash2`, `lpfx_hash3`) don't have decimal variants - they're `LpfxFnImpl::NonDecimal`.
+**Context**: Hash functions (`lpfn_hash1`, `lpfn_hash2`, `lpfn_hash3`) don't have decimal variants - they're `LpfnFnImpl::NonDecimal`.
 
-**Decision**: Yes, non-decimal functions use the same attribute format but without a variant specifier: `#[lpfx_impl("u32 lpfx_hash1(u32 x, u32 seed)")]`
+**Decision**: Yes, non-decimal functions use the same attribute format but without a variant specifier: `#[lpfn_impl("u32 lpfn_hash1(u32 x, u32 seed)")]`
 
 **Rationale**:
 - Consistent syntax across all LPFX functions
@@ -73,15 +73,15 @@
 
 ## Q6: Codegen output format
 
-**Context**: The codegen will generate `lpfx_fns.rs` with the `init_functions()` function.
+**Context**: The codegen will generate `lpfn_fns.rs` with the `init_functions()` function.
 
 **Question**: Should the generated code maintain the same structure as the current manual implementation?
 
 **Suggested approach**: Yes, maintain the same structure:
-- Keep the `lpfx_fns()` function with the same caching logic
+- Keep the `lpfn_fns()` function with the same caching logic
 - Keep `init_functions()` that returns the array
-- Generate the same `LpfxFn` structures
-- This minimizes changes to code that uses `lpfx_fns()`
+- Generate the same `LpfnFn` structures
+- This minimizes changes to code that uses `lpfn_fns()`
 
 ## Q7: Error handling
 
@@ -95,7 +95,7 @@
 - Clean, well-separated architecture
 
 **Error cases to handle**:
-- Missing `#[lpfx_impl(...)]` attribute on LPFX function
+- Missing `#[lpfn_impl(...)]` attribute on LPFX function
 - Invalid GLSL signature syntax
 - Decimal function missing f32 or q32 variant
 - f32 and q32 signatures don't match (same function name but different signatures)

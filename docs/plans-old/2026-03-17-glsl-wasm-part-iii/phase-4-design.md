@@ -120,7 +120,7 @@ for func in &functions {
 | File | Changes |
 |------|---------|
 | `codegen/mod.rs` | Build func_index_map, pass to emit_function |
-| `codegen/expr/mod.rs` | FunCall: dispatch to user function when not constructor/builtin/lpfx |
+| `codegen/expr/mod.rs` | FunCall: dispatch to user function when not constructor/builtin/lpfn |
 | `codegen/expr/function.rs` | New: emit_user_function_call |
 | `codegen/context.rs` | Add func_index_map to context (or pass separately) |
 | `codegen/stmt/declaration.rs` | Handle const (no code change if same as regular init) |

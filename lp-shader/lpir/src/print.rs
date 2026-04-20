@@ -8,14 +8,16 @@ use core::fmt::Write as _;
 
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
+use crate::types::ImportId;
 use crate::types::{CalleeRef, IrType, VReg};
 
 fn callee_needs_vmctx_operand(module: &LpirModule, callee: CalleeRef) -> bool {
-    let import_count = module.imports.len() as u32;
-    if callee.0 >= import_count {
-        true
-    } else {
-        module.imports[callee.0 as usize].needs_vmctx
+    match callee {
+        CalleeRef::Local(_) => true,
+        CalleeRef::Import(ImportId(i)) => module
+            .imports
+            .get(i as usize)
+            .is_some_and(|imp| imp.needs_vmctx),
     }
 }
 
@@ -34,9 +36,13 @@ fn visible_call_arg_regs<'a>(
 enum Block {
     If,
     Else,
-    Loop { start_pc: usize },
+    Loop {
+        start_pc: usize,
+    },
     Switch,
     Case,
+    /// Forward-only `block {` region (paired with `End`).
+    Blk,
 }
 
 /// Print a full module in LPIR text form.
@@ -49,7 +55,7 @@ pub fn print_module(module: &LpirModule) -> String {
     if !module.imports.is_empty() && !module.functions.is_empty() {
         let _ = writeln!(out);
     }
-    for (i, f) in module.functions.iter().enumerate() {
+    for (i, (_, f)) in module.functions.iter().enumerate() {
         if i > 0 {
             let _ = writeln!(out);
         }
@@ -235,6 +241,16 @@ fn print_op_at(
             *depth += 1;
             *pc += 1;
         }
+        LpirOp::Block { .. } => {
+            let _ = writeln!(out, "{ind}block {{");
+            stack.push(Block::Blk);
+            *depth += 1;
+            *pc += 1;
+        }
+        LpirOp::ExitBlock => {
+            let _ = writeln!(out, "{ind}exit_block");
+            *pc += 1;
+        }
         LpirOp::End => {
             let _ = writeln!(out, "{}}}", indent_str(*depth - 1));
             *depth -= 1;
@@ -312,6 +328,30 @@ fn print_op_at(
             let _ = writeln!(out);
             *pc += 1;
         }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let _ = write!(out, "{ind}store8 ");
+            fmt_vreg(st, out, *base);
+            let _ = write!(out, ", {offset}, ");
+            fmt_vreg(st, out, *value);
+            let _ = writeln!(out);
+            *pc += 1;
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let _ = write!(out, "{ind}store16 ");
+            fmt_vreg(st, out, *base);
+            let _ = write!(out, ", {offset}, ");
+            fmt_vreg(st, out, *value);
+            let _ = writeln!(out);
+            *pc += 1;
+        }
         LpirOp::Memcpy {
             dst_addr,
             src_addr,
@@ -335,8 +375,7 @@ fn callee_name(module: &LpirModule, callee: crate::types::CalleeRef) -> (&str, &
     if let Some(i) = module.callee_as_import(callee) {
         let imp = &module.imports[i];
         (imp.module_name.as_str(), imp.func_name.as_str())
-    } else if let Some(i) = module.callee_as_function(callee) {
-        let f = &module.functions[i];
+    } else if let Some(f) = module.callee_as_function(callee) {
         ("", f.name.as_str())
     } else {
         ("?", "?")
@@ -511,6 +550,10 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Lp
         LpirOp::ItofS { dst, src } => unary(out, st, ind, "itof_s", *dst, *src),
         LpirOp::ItofU { dst, src } => unary(out, st, ind, "itof_u", *dst, *src),
         LpirOp::FfromI32Bits { dst, src } => unary(out, st, ind, "ffrom_i32_bits", *dst, *src),
+        LpirOp::FtoUnorm16 { dst, src } => unary(out, st, ind, "fto_unorm16", *dst, *src),
+        LpirOp::FtoUnorm8 { dst, src } => unary(out, st, ind, "fto_unorm8", *dst, *src),
+        LpirOp::Unorm16toF { dst, src } => unary(out, st, ind, "unorm16to_f", *dst, *src),
+        LpirOp::Unorm8toF { dst, src } => unary(out, st, ind, "unorm8to_f", *dst, *src),
         LpirOp::Select {
             dst,
             cond,
@@ -543,6 +586,34 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Lp
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = load ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load8U { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load8u ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load8s ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load16u ");
+            fmt_vreg(st, out, *base);
+            let _ = writeln!(out, ", {offset}");
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = load16s ");
             fmt_vreg(st, out, *base);
             let _ = writeln!(out, ", {offset}");
         }

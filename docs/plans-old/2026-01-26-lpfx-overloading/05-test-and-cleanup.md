@@ -2,14 +2,14 @@
 
 ## Description
 
-Regenerate `lpfx_fns.rs`, run filetests to verify overload resolution works, fix any issues, and clean up any temporary code or warnings.
+Regenerate `lpfn_fns.rs`, run filetests to verify overload resolution works, fix any issues, and clean up any temporary code or warnings.
 
 ## Implementation
 
 ### Regenerate Builtins
 
-1. Run `scripts/build-builtins.sh` to regenerate `lpfx_fns.rs`
-2. Verify that `lpfx_hsv2rgb` has both vec3 and vec4 entries
+1. Run `scripts/build-builtins.sh` to regenerate `lpfn_fns.rs`
+2. Verify that `lpfn_hsv2rgb` has both vec3 and vec4 entries
 3. Check that all overloaded functions have multiple entries
 
 ### Fix CI Issues
@@ -19,9 +19,9 @@ Regenerate `lpfx_fns.rs`, run filetests to verify overload resolution works, fix
 
 ### Run Tests
 
-1. Run all lpfx filetests: `scripts/glsl-filetests.sh lpfx/lp_`
-2. Verify both `lpfx_hsv2rgb(vec3)` and `lpfx_hsv2rgb(vec4)` work correctly
-3. Ensure all lpfx filetests pass
+1. Run all lpfn filetests: `scripts/glsl-filetests.sh lpfn/lp_`
+2. Verify both `lpfn_hsv2rgb(vec3)` and `lpfn_hsv2rgb(vec4)` work correctly
+3. Ensure all lpfn filetests pass
 
 ### Cleanup
 
@@ -32,10 +32,10 @@ Regenerate `lpfx_fns.rs`, run filetests to verify overload resolution works, fix
 
 ## Success Criteria
 
-- `lpfx_fns.rs` regenerated with multiple entries for overloaded functions
+- `lpfn_fns.rs` regenerated with multiple entries for overloaded functions
 - `just fix ci` passes without errors
-- All lpfx filetests pass (`scripts/glsl-filetests.sh lpfx/lp_`)
-- Both `lpfx_hsv2rgb(vec3)` and `lpfx_hsv2rgb(vec4)` work correctly
+- All lpfn filetests pass (`scripts/glsl-filetests.sh lpfn/lp_`)
+- Both `lpfn_hsv2rgb(vec3)` and `lpfn_hsv2rgb(vec4)` work correctly
 - No warnings in codebase
 - Code formatted with `cargo +nightly fmt`
 - All code compiles successfully

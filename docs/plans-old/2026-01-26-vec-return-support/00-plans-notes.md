@@ -24,7 +24,7 @@
 
 ### Q4: How should we handle the extern C wrappers for vector returns?
 
-**Context:** The extern C wrappers (like `__lpfx_hue2rgb_q32`) currently return only `result.x.to_fixed()` (the first component). For proper vector returns, we need to return all components. However, `extern "C"` functions can't return multiple values directly in C.
+**Context:** The extern C wrappers (like `__lpfn_hue2rgb_q32`) currently return only `result.x.to_fixed()` (the first component). For proper vector returns, we need to return all components. However, `extern "C"` functions can't return multiple values directly in C.
 
 **Answer:** Use StructReturn (pointer parameter) for vector returns in the extern C wrappers. This is the standard C way to return structs/vectors. The wrapper will take a pointer parameter and write all components to memory. The compiler will handle allocating the buffer and loading the values.
 

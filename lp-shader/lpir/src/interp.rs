@@ -85,7 +85,7 @@ pub fn interpret_with_depth(
 ) -> Result<Vec<Value>, InterpError> {
     let func = module
         .functions
-        .iter()
+        .values()
         .find(|f| f.name == func_name)
         .ok_or_else(|| InterpError::FunctionNotFound(func_name.to_string()))?;
     let mut full = alloc::vec![Value::I32(0); 1];
@@ -177,11 +177,34 @@ fn exec_func(
                 });
                 pc += 1;
             }
+            LpirOp::Block { end_offset } => {
+                ctrl.push(Ctrl::Block {
+                    exit: *end_offset as usize,
+                });
+                pc += 1;
+            }
+            LpirOp::ExitBlock => {
+                let mut found = false;
+                while let Some(c) = ctrl.pop() {
+                    if let Ctrl::Block { exit } = c {
+                        pc = exit;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return Err(InterpError::Internal("exit_block outside block".into()));
+                }
+            }
             LpirOp::End => match ctrl.last() {
                 Some(Ctrl::Loop { exit, head, .. }) if *exit == pc + 1 => {
                     pc = *head + 1;
                 }
                 Some(Ctrl::If { .. }) => {
+                    ctrl.pop();
+                    pc += 1;
+                }
+                Some(Ctrl::Block { .. }) => {
                     ctrl.pop();
                     pc += 1;
                 }
@@ -268,8 +291,7 @@ fn exec_func(
                 let res = if let Some(ii) = module.callee_as_import(*callee) {
                     let imp = &module.imports[ii];
                     imports.call(imp.module_name.as_str(), imp.func_name.as_str(), &call_args)?
-                } else if let Some(fi) = module.callee_as_function(*callee) {
-                    let callee_fn = &module.functions[fi];
+                } else if let Some(callee_fn) = module.callee_as_function(*callee) {
                     if call_args.len() != 1 + callee_fn.param_count as usize {
                         return Err(InterpError::Internal(format!(
                             "local call arg count {} != 1 + callee param_count {}",
@@ -307,6 +329,10 @@ enum Ctrl {
     Loop {
         head: usize,
         continuing: usize,
+        exit: usize,
+    },
+    /// `exit` is the merge PC (first instruction after the closing [`LpirOp::End`]).
+    Block {
         exit: usize,
     },
     SwitchArm {
@@ -667,6 +693,28 @@ fn eval_op(
             let v = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(f32::from_bits(v as u32)))?;
         }
+        LpirOp::FtoUnorm16 { dst, src } => {
+            let f = val_f32(get_reg(regs, *src)?)?;
+            let q = f.to_bits() as i32;
+            let out = q.max(0).min(65535);
+            set_reg(regs, *dst, Value::I32(out))?;
+        }
+        LpirOp::FtoUnorm8 { dst, src } => {
+            let f = val_f32(get_reg(regs, *src)?)?;
+            let q = f.to_bits() as i32;
+            let out = (q >> 8).max(0).min(255);
+            set_reg(regs, *dst, Value::I32(out))?;
+        }
+        LpirOp::Unorm16toF { dst, src } => {
+            let i = val_i32(get_reg(regs, *src)?)?;
+            let bits = (i & 0xFFFF) as u32;
+            set_reg(regs, *dst, Value::F32(f32::from_bits(bits)))?;
+        }
+        LpirOp::Unorm8toF { dst, src } => {
+            let i = val_i32(get_reg(regs, *src)?)?;
+            let bits = ((i & 0xFF) << 8) as u32;
+            set_reg(regs, *dst, Value::F32(f32::from_bits(bits)))?;
+        }
         LpirOp::Select {
             dst,
             cond,
@@ -717,6 +765,44 @@ fn eval_op(
                 Value::I32(i) => write_u32(slot_mem, addr, i as u32)?,
             }
         }
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let i = val_i32(get_reg(regs, *value)?)?;
+            write_u8(slot_mem, addr, i as u8)?;
+        }
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let i = val_i32(get_reg(regs, *value)?)?;
+            write_u16(slot_mem, addr, i as u16)?;
+        }
+        LpirOp::Load8U { dst, base, offset } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let b = read_u8(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(b as i32))?;
+        }
+        LpirOp::Load8S { dst, base, offset } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let b = read_u8(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(b as i8 as i32))?;
+        }
+        LpirOp::Load16U { dst, base, offset } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let w = read_u16(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(w as i32))?;
+        }
+        LpirOp::Load16S { dst, base, offset } => {
+            let addr = val_i32(get_reg(regs, *base)?)? as usize + *offset as usize;
+            let w = read_u16(slot_mem, addr)?;
+            set_reg(regs, *dst, Value::I32(w as i16 as i32))?;
+        }
         LpirOp::Memcpy {
             dst_addr,
             src_addr,
@@ -761,12 +847,43 @@ fn read_u32(mem: &[u8], addr: usize) -> Result<u32, InterpError> {
     ]))
 }
 
+fn read_u8(mem: &[u8], addr: usize) -> Result<u8, InterpError> {
+    if addr + 1 > mem.len() {
+        return Err(InterpError::Internal("load oob".into()));
+    }
+    Ok(mem[addr])
+}
+
+fn read_u16(mem: &[u8], addr: usize) -> Result<u16, InterpError> {
+    if addr + 2 > mem.len() {
+        return Err(InterpError::Internal("load oob".into()));
+    }
+    Ok(u16::from_le_bytes([mem[addr], mem[addr + 1]]))
+}
+
 fn write_u32(mem: &mut [u8], addr: usize, v: u32) -> Result<(), InterpError> {
     if addr + 4 > mem.len() {
         return Err(InterpError::Internal("store oob".into()));
     }
     let b = v.to_le_bytes();
     mem[addr..addr + 4].copy_from_slice(&b);
+    Ok(())
+}
+
+fn write_u8(mem: &mut [u8], addr: usize, v: u8) -> Result<(), InterpError> {
+    if addr + 1 > mem.len() {
+        return Err(InterpError::Internal("store oob".into()));
+    }
+    mem[addr] = v;
+    Ok(())
+}
+
+fn write_u16(mem: &mut [u8], addr: usize, v: u16) -> Result<(), InterpError> {
+    if addr + 2 > mem.len() {
+        return Err(InterpError::Internal("store oob".into()));
+    }
+    let b = v.to_le_bytes();
+    mem[addr..addr + 2].copy_from_slice(&b);
     Ok(())
 }
 

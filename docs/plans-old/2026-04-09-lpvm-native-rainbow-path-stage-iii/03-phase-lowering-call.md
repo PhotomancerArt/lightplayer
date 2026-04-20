@@ -178,7 +178,7 @@ fn lower_call_direct_return() {
         func_name: String::from("add"),
         param_types: vec![lpir::IrType::I32, lpir::IrType::I32],
         return_types: vec![lpir::IrType::I32],
-        lpfx_glsl_params: None,
+        lpfn_glsl_params: None,
         needs_vmctx: false,
     });
     

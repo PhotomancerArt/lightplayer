@@ -34,7 +34,7 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
             func_name: String::from(name),
             param_types: params.to_vec(),
             return_types: rets.to_vec(),
-            lpfx_glsl_params: None,
+            lpfn_glsl_params: None,
         });
         m.insert(format!("{module}::{name}"), r);
     };
@@ -116,13 +116,13 @@ only the callers that construct keys.
 fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
     match decl.module_name.as_str() {
         "std.math" => { ... }
-        "lpfx" => { ... }
+        "lpfn" => { ... }
         m => Err(...)
     }
 }
 ```
 
-Update to match on `"glsl"`, `"lpir"`, and `"lpfx"`:
+Update to match on `"glsl"`, `"lpir"`, and `"lpfn"`:
 
 ```rust
 fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
@@ -137,7 +137,7 @@ fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
             lpir_q32_builtin_id(decl.func_name.as_str(), ac)
                 .ok_or_else(|| format!("unsupported lpir import `{}`", decl.func_name))
         }
-        "lpfx" => {
+        "lpfn" => {
             // ... same as before, just updated variant names ...
         }
         m => Err(format!("unsupported import module `{m}`")),

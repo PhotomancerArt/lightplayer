@@ -19,7 +19,7 @@ lp-shader/lps-frontend/
     ├── lower_expr.rs             # NEW: expression lowering (Naga Expression → LPIR ops)
     ├── lower_stmt.rs             # NEW: statement lowering (Naga Statement → LPIR ops)
     ├── lower_math.rs             # NEW: math builtin decomposition + std.math imports
-    ├── lower_lpfx.rs             # NEW: LPFX detection, import creation, out-param ABI
+    ├── lower_lpfn.rs             # NEW: LPFX detection, import creation, out-param ABI
     └── std_math_handler.rs       # NEW: StdMathHandler (ImportHandler for tests)
 
 lp-shader/lps-frontend/tests/
@@ -46,7 +46,7 @@ NagaModule { module, functions }
 lower(&NagaModule) ─────────────── lower.rs (new)
   │
   ├─ ModuleBuilder::new()
-  ├─ collect LPFX imports ──────── lower_lpfx.rs
+  ├─ collect LPFX imports ──────── lower_lpfn.rs
   ├─ collect std.math imports ──── lower_math.rs
   │
   ├─ for each user function:
@@ -86,7 +86,7 @@ pub fn lower(naga: &NagaModule) -> Result<IrModule, LowerError>
 ```
 
 Orchestrates the lowering. Builds the module-level import table (std.math +
-lpfx), then lowers each user function. Returns `IrModule` or `LowerError`.
+lpfn), then lowers each user function. Returns `IrModule` or `LowerError`.
 
 ### `lower_ctx.rs` — per-function context
 
@@ -145,10 +145,10 @@ Three tiers:
 round, sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh,
 acosh, atanh, exp, log, exp2, log2, pow, inversesqrt, fma, ldexp
 
-### `lower_lpfx.rs` — LPFX handling
+### `lower_lpfn.rs` — LPFX handling
 
-Detects `lpfx_*` calls via name + parameter type matching (reuses
-`lps-builtin-ids` for resolution). Creates `@lpfx::name(...)` import
+Detects `lpfn_*` calls via name + parameter type matching (reuses
+`lps-builtin-ids` for resolution). Creates `@lpfn::name(...)` import
 declarations. For out-parameters: allocates slots via `alloc_slot`, passes
 slot address as i32 arg, loads results from slot after call.
 

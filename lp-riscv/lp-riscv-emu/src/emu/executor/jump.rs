@@ -1,6 +1,6 @@
 //! Jump and immediate generation instruction execution (JAL, JALR, LUI, AUIPC)
 
-use super::{ExecutionResult, LoggingMode, read_reg};
+use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 use lp_riscv_inst::{
     Gpr,
@@ -95,6 +95,7 @@ fn execute_jal<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
+        class: InstClass::Jal,
         log,
     })
 }
@@ -136,6 +137,7 @@ fn execute_jalr<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
+        class: InstClass::Jalr,
         log,
     })
 }
@@ -177,6 +179,7 @@ fn execute_lui<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Lui,
         log,
     })
 }
@@ -213,6 +216,7 @@ fn execute_auipc<M: LoggingMode>(
         new_pc: None,
         should_halt: false,
         syscall: false,
+        class: InstClass::Auipc,
         log,
     })
 }

@@ -10,6 +10,7 @@ pub mod discovery;
 pub mod mutation;
 pub mod output_mode;
 pub mod parse;
+pub mod perf_model;
 pub mod runner;
 pub mod targets;
 pub mod test_compile;
@@ -28,6 +29,7 @@ use walkdir::WalkDir;
 
 use crate::mutation::{MutationAction, MutationPlan};
 use crate::parse::RunDirective;
+use crate::perf_model::PerfModel;
 use crate::targets::{
     AnnotationKind, DEFAULT_TARGETS, Disposition, Target, directive_disposition,
     parse_target_filters,
@@ -159,8 +161,14 @@ fn plan_unexpected_pass_fixes(
 /// Run a single filetest.
 pub fn run_filetest(path: &Path) -> Result<()> {
     let targets: Vec<&Target> = DEFAULT_TARGETS.iter().collect();
-    let (result, _, _, _, _, _, _) =
-        run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets, false)?;
+    let (result, _, _, _, _, _, _) = run_filetest_with_line_filter(
+        path,
+        None,
+        OutputMode::Detail,
+        &targets,
+        false,
+        PerfModel::default(),
+    )?;
     result
 }
 
@@ -202,6 +210,7 @@ pub fn run_filetest_with_line_filter(
     output_mode: OutputMode,
     targets: &[&Target],
     suppress_rerun: bool,
+    perf_model: PerfModel,
 ) -> Result<(
     Result<()>,
     test_run::PerTargetStats,
@@ -306,6 +315,7 @@ pub fn run_filetest_with_line_filter(
             output_mode,
             targets,
             suppress_rerun,
+            perf_model,
         )?;
         Ok((
             result,
@@ -368,6 +378,10 @@ struct FileSpec {
 /// marking to directives that already have `@unimplemented(<baseline>)`, so you can copy baseline
 /// markers onto another backend (e.g. `rv32c.q32` → `rv32n.q32`) without touching unrelated failures.
 /// Requires exactly one `--target`.
+///
+/// `force_opts` are applied after each file's `compile-opt(...)` directives (see
+/// [`test_run::compile::build_compiler_config`]). Parsed from `--force-opt` /
+/// `LPS_FILETEST_FORCE_OPT` in the `lps-filetests-app` binary only.
 pub fn run(
     files: &[String],
     fix_xfail: bool,
@@ -378,7 +392,12 @@ pub fn run(
     mark_unimplemented_if_baseline: Option<String>,
     target_spec: Option<&str>,
     output_override: Option<OutputMode>,
+    force_opts: &[(String, String)],
+    perf_model: PerfModel,
 ) -> anyhow::Result<()> {
+    let _force_compiler_opts_guard =
+        crate::test_run::compile::ForceCompilerOptsGuard::install(force_opts);
+
     // Check environment variable if flag not provided
     let fix_xfail = fix_xfail
         || std::env::var("LP_FIX_XFAIL")
@@ -531,6 +550,7 @@ pub fn run(
                 output_mode,
                 &active_targets,
                 mark_mode_active,
+                perf_model,
             )
         })) {
             Ok(Ok((r, pt, s, up, fl, cfm, cf))) => (r, pt, s, up, fl, cfm, cf, true),
@@ -622,6 +642,7 @@ pub fn run(
                         has_unexpected_failures,
                         harness_completed,
                         compile_failed_t,
+                        perf_model,
                     );
                     let counts_colored = if colors::should_color() && !counts_str.is_empty() {
                         format!("{}{}{}", counts_color, counts_str, colors::RESET)
@@ -659,6 +680,7 @@ pub fn run(
                     has_unexpected_failures,
                     harness_completed,
                     any_compile_failed,
+                    perf_model,
                 );
                 let status_marker = if colors::should_color() {
                     format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
@@ -695,6 +717,7 @@ pub fn run(
                     fix_xfail,
                     &per_target,
                     &compile_fail_table,
+                    perf_model,
                 )
             );
 
@@ -789,6 +812,7 @@ pub fn run(
                         has_unexpected_failures,
                         harness_completed,
                         compile_failed_t,
+                        perf_model,
                     );
                     let counts_colored = if colors::should_color() && !counts_str.is_empty() {
                         format!("{}{}{}", counts_color, counts_str, colors::RESET)
@@ -826,6 +850,7 @@ pub fn run(
                     has_unexpected_failures,
                     harness_completed,
                     any_compile_failed,
+                    perf_model,
                 );
                 let status_marker = if colors::should_color() {
                     format!("{}{}{} ", colors::RED, "✗", colors::RESET)
@@ -862,6 +887,7 @@ pub fn run(
                     fix_xfail,
                     &per_target,
                     &compile_fail_table,
+                    perf_model,
                 )
             );
 
@@ -1007,6 +1033,7 @@ pub fn run(
             output_mode,
             &active_targets,
             mark_mode_active,
+            perf_model,
         );
         next_test += 1;
     }
@@ -1116,6 +1143,7 @@ pub fn run(
                             has_unexpected_failures,
                             harness_completed,
                             compile_failed_t,
+                            perf_model,
                         );
                         let counts_colored = if colors::should_color() && !counts_str.is_empty() {
                             format!("{}{}{}", counts_color, counts_str, colors::RESET)
@@ -1160,6 +1188,7 @@ pub fn run(
                         has_unexpected_failures,
                         harness_completed,
                         any_compile_failed,
+                        perf_model,
                     );
                     let (status_marker, _) = if file_actually_failed {
                         (
@@ -1379,6 +1408,7 @@ pub fn run(
             fix_xfail,
             &per_target_aggregate,
             &per_target_compile_fail_files,
+            perf_model,
         )
     );
 
@@ -1575,13 +1605,14 @@ fn format_decimal_with_commas(n: u64) -> String {
     out
 }
 
-/// Smallest positive `guest_instructions_total` among targets (for relative perf column).
-fn min_positive_guest_instructions(
+/// Smallest positive value for the active perf metric among targets (for relative perf column).
+fn min_positive_perf_metric(
     per_target: &BTreeMap<String, test_run::TestCaseStats>,
+    perf: PerfModel,
 ) -> Option<u64> {
     per_target
         .values()
-        .map(|s| s.guest_instructions_total)
+        .map(|s| perf.metric_value(s))
         .filter(|&t| t > 0)
         .min()
 }
@@ -1620,6 +1651,7 @@ fn format_file_counts(
     has_unexpected_failures: bool,
     harness_completed: bool,
     whole_file_compile_failed: bool,
+    perf: PerfModel,
 ) -> (String, String) {
     let counts_str = if !harness_completed && stats.total > 0 {
         // Worker used `count_test_cases` only (panic or `run_filetest` error): avoid `0/total`.
@@ -1679,11 +1711,12 @@ fn format_file_counts(
     if !harness_completed && stats.total > 0 {
         suffix_parts.push("(harness error; LP_FILETESTS_HARNESS_LOG=1)".to_string());
     }
-    if stats.guest_instructions_total > 0 {
-        let part = format!(
-            "({} inst)",
-            format_decimal_with_commas(stats.guest_instructions_total)
-        );
+    let perf_val = perf.metric_value(stats);
+    if perf_val > 0 {
+        let part = match perf {
+            PerfModel::Insts => format!("({} inst)", format_decimal_with_commas(perf_val)),
+            PerfModel::Esp32c6 => format!("({} est. cyc.)", format_decimal_with_commas(perf_val)),
+        };
         suffix_parts.push(if colors::should_color() {
             format!("{}{}{}", colors::BLUE, part, colors::RESET)
         } else {
@@ -1704,6 +1737,7 @@ fn format_file_counts(
 fn format_target_table(
     per_target: &BTreeMap<String, test_run::TestCaseStats>,
     compile_fail_files: &BTreeMap<String, usize>,
+    perf: PerfModel,
 ) -> String {
     if per_target.is_empty() {
         return String::new();
@@ -1723,24 +1757,23 @@ fn format_target_table(
     let col_unsupported = 11;
     let col_compile_fail = 12;
 
-    let fastest_inst = min_positive_guest_instructions(per_target);
-    let show_perf = fastest_inst.is_some();
-    let fastest = fastest_inst.unwrap_or(0);
+    let fastest_metric = min_positive_perf_metric(per_target, perf);
+    let show_perf = fastest_metric.is_some();
+    let fastest = fastest_metric.unwrap_or(0);
+    let perf_hdr = perf.column_header();
 
     let (col_sigma_inst, col_vs_fast) = if show_perf {
-        let mut w_inst = "total inst".len();
+        let mut w_inst = perf_hdr.len();
         let mut w_rel = "vs fastest".len();
         for s in per_target.values() {
-            let inst_cell = if s.guest_instructions_total > 0 {
-                format!(
-                    "{} inst",
-                    format_decimal_with_commas(s.guest_instructions_total)
-                )
+            let v = perf.metric_value(s);
+            let inst_cell = if v > 0 {
+                format!("{}", format_decimal_with_commas(v))
             } else {
                 "—".to_string()
             };
             w_inst = w_inst.max(inst_cell.len());
-            let rel_cell = format_inst_vs_fastest(s.guest_instructions_total, fastest);
+            let rel_cell = format_inst_vs_fastest(v, fastest);
             w_rel = w_rel.max(rel_cell.len());
         }
         (w_inst, w_rel)
@@ -1754,7 +1787,7 @@ fn format_target_table(
     let header = if show_perf {
         format!(
             "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}  {:>col_compile_fail$}  {:>col_sigma_inst$}  {:>col_vs_fast$}",
-            "", "pass", "fail", "unimpl", "unsupported", "compile-fail", "total inst", "vs fastest"
+            "", "pass", "fail", "unimpl", "unsupported", "compile-fail", perf_hdr, "vs fastest"
         )
     } else {
         format!(
@@ -1807,19 +1840,17 @@ fn format_target_table(
         };
 
         if show_perf {
-            let inst_cell = if s.guest_instructions_total > 0 {
-                format!(
-                    "{} inst",
-                    format_decimal_with_commas(s.guest_instructions_total)
-                )
+            let v = perf.metric_value(s);
+            let inst_cell = if v > 0 {
+                format!("{}", format_decimal_with_commas(v))
             } else {
                 "—".to_string()
             };
             let inst_padded = format!("{inst_cell:>col_sigma_inst$}");
-            let rel_cell = format_inst_vs_fastest(s.guest_instructions_total, fastest);
+            let rel_cell = format_inst_vs_fastest(v, fastest);
             let rel_padded = format!("{rel_cell:>col_vs_fast$}");
 
-            let color = perf_summary_color(s.guest_instructions_total, fastest);
+            let color = perf_summary_color(v, fastest);
             let inst_cell_out = if with_color {
                 if let Some(c) = color {
                     format!("{}{inst_padded}{}", c, colors::RESET)
@@ -1865,6 +1896,7 @@ fn format_results_summary(
     fix_enabled: bool,
     per_target: &BTreeMap<String, test_run::TestCaseStats>,
     compile_fail_files: &BTreeMap<String, usize>,
+    perf: PerfModel,
 ) -> String {
     let seconds = elapsed.as_secs_f64();
     let time_str = if seconds < 1.0 {
@@ -1889,7 +1921,7 @@ fn format_results_summary(
     let mut result = String::new();
 
     if !per_target.is_empty() {
-        result.push_str(&format_target_table(per_target, compile_fail_files));
+        result.push_str(&format_target_table(per_target, compile_fail_files, perf));
         result.push('\n');
     }
 
@@ -1982,7 +2014,8 @@ mod format_summary_tests {
         let mut stats = test_run::TestCaseStats::default();
         stats.total = 6;
         stats.unimplemented = 6;
-        let (_, parentheticals) = format_file_counts(&stats, false, true, true);
+        let (_, parentheticals) =
+            format_file_counts(&stats, false, true, true, PerfModel::default());
         let cf = parentheticals.find("compile-fail").expect("compile-fail");
         let un = parentheticals
             .find("6 unimplemented")
@@ -2035,7 +2068,7 @@ mod format_summary_tests {
         per_target.insert("rv32n.q32".to_string(), b);
         per_target.insert("wasm.q32".to_string(), c);
         let cf: BTreeMap<String, usize> = BTreeMap::new();
-        let table = format_target_table(&per_target, &cf);
+        let table = format_target_table(&per_target, &cf, PerfModel::Insts);
         assert!(
             table.contains("total inst"),
             "expected total inst column: {table}"
@@ -2044,8 +2077,8 @@ mod format_summary_tests {
             table.contains("vs fastest"),
             "expected vs fastest column: {table}"
         );
-        assert!(table.contains("178 inst"));
-        assert!(table.contains("246 inst"));
+        assert!(table.contains("178"));
+        assert!(table.contains("246"));
         assert!(table.contains("1.00×"));
         assert!(table.contains("1.38×"));
     }

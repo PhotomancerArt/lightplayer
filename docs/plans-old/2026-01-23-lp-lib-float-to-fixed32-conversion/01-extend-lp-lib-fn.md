@@ -12,9 +12,9 @@ is. This keeps the source of truth in `LpLibFn` for conversion requirements.
 In `lp-shader/lps-compiler/src/frontend/semantic/lp_lib_fns.rs`:
 
 - Add `q32_name(&self) -> Option<&'static str>` method to `LpLibFn` impl
-- Return `Some("__lp_q32_lpfx_snoise1")` for `Simplex1`
-- Return `Some("__lp_q32_lpfx_snoise2")` for `Simplex2`
-- Return `Some("__lp_q32_lpfx_snoise3")` for `Simplex3`
+- Return `Some("__lp_q32_lpfn_snoise1")` for `Simplex1`
+- Return `Some("__lp_q32_lpfn_snoise2")` for `Simplex2`
+- Return `Some("__lp_q32_lpfn_snoise3")` for `Simplex3`
 - Return `None` for hash functions (they don't need q32 conversion)
 
 ### 1.2 Add `needs_q32_mapping()` Method
@@ -30,7 +30,7 @@ In the same file:
 Add tests to verify:
 
 - `LpLibFn::Simplex1.needs_q32_mapping()` returns `true`
-- `LpLibFn::Simplex1.q32_name()` returns `Some("__lp_q32_lpfx_snoise1")`
+- `LpLibFn::Simplex1.q32_name()` returns `Some("__lp_q32_lpfn_snoise1")`
 - `LpLibFn::Hash1.needs_q32_mapping()` returns `false`
 - `LpLibFn::Hash1.q32_name()` returns `None`
 

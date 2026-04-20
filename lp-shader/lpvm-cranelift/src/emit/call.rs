@@ -4,6 +4,7 @@ use cranelift_codegen::ir::{ArgumentPurpose, InstBuilder, MemFlags, StackSlotDat
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::lpir_module::IrFunction;
 use lpir::lpir_op::LpirOp;
+use lpir::types::{CalleeRef, ImportId};
 
 use super::{EmitCtx, def_v, ir_type_for_mode, use_v};
 use crate::builtins::is_import_result_ptr_builtin;
@@ -22,26 +23,26 @@ pub(crate) fn emit_call(
             args,
             results,
         } => {
-            let import_count = ctx.ir.imports.len() as u32;
-            let func_ref = if callee.0 < import_count {
-                *ctx.import_func_refs
-                    .get(callee.0 as usize)
-                    .ok_or_else(|| CompileError::unsupported("call to unknown import index"))?
-            } else {
-                let local_idx = (callee.0 - import_count) as usize;
-                *ctx.func_refs.get(local_idx).ok_or_else(|| {
-                    CompileError::unsupported("call to unknown local function index")
-                })?
+            let func_ref = match *callee {
+                CalleeRef::Import(ImportId(i)) => *ctx
+                    .import_func_refs
+                    .get(i as usize)
+                    .ok_or_else(|| CompileError::unsupported("call to unknown import index"))?,
+                CalleeRef::Local(id) => {
+                    let rank = *ctx.func_id_to_ir_rank.get(&id).ok_or_else(|| {
+                        CompileError::unsupported("call to unknown local func id")
+                    })?;
+                    *ctx.func_refs.get(rank).ok_or_else(|| {
+                        CompileError::unsupported("call to unknown local function index")
+                    })?
+                }
             };
-            if callee.0 >= import_count {
-                let local_idx = (callee.0 - import_count) as usize;
-                if ctx
-                    .callee_struct_return
-                    .get(local_idx)
-                    .copied()
-                    .unwrap_or(false)
-                {
-                    let callee_ir = &ctx.ir.functions[local_idx];
+            if let CalleeRef::Local(id) = *callee {
+                let rank = ctx.func_id_to_ir_rank[&id];
+                if ctx.callee_struct_return.get(rank).copied().unwrap_or(false) {
+                    let callee_ir = ctx.ir.functions.get(&id).ok_or_else(|| {
+                        CompileError::unsupported("missing local callee IR for struct return")
+                    })?;
                     let ret_n = callee_ir.return_types.len();
                     let size_bytes = ret_n.checked_mul(4).ok_or_else(|| {
                         CompileError::unsupported("callee return buffer size overflow")
@@ -91,8 +92,8 @@ pub(crate) fn emit_call(
             // Handle builtins that use manual result-pointer ABI (e.g., LPFX functions that
             // return vectors via out-pointer). These are imports where the Cranelift signature
             // has no returns, but the LPIR import declaration expects multiple return values.
-            if callee.0 < import_count {
-                let import_idx = callee.0 as usize;
+            if let CalleeRef::Import(ImportId(i)) = *callee {
+                let import_idx = i as usize;
                 let import_decl = &ctx.ir.imports[import_idx];
                 if is_import_result_ptr_builtin(import_decl, ctx.pointer_type) {
                     let ret_n = import_decl.return_types.len();

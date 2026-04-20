@@ -45,7 +45,7 @@ pub fn handle_shader_lpir(args: ShaderLpirArgs) -> Result<()> {
             args.path.display(),
             ir.functions.len()
         )?;
-        for f in &ir.functions {
+        for f in ir.functions.values() {
             let vregs = f.vreg_types.len();
             let ops = f.body.len();
             writeln!(
@@ -55,10 +55,10 @@ pub fn handle_shader_lpir(args: ShaderLpirArgs) -> Result<()> {
                 slots = f.slots.len(),
             )?;
         }
-        let total_ops: usize = ir.functions.iter().map(|f| f.body.len()).sum();
+        let total_ops: usize = ir.functions.values().map(|f| f.body.len()).sum();
         let max_vregs = ir
             .functions
-            .iter()
+            .values()
             .map(|f| f.vreg_types.len())
             .max()
             .unwrap_or(0);

@@ -37,7 +37,7 @@ align_layout(layout):
 | 17 B      | 20 B             | +3 B     |
 | 24 B      | 24 B             | 0        |
 
-For **143 allocations** averaging ~28 B requested (e.g. lpfx_fns): if many are under 16 B, actual heap usage is higher than the traced `sz`. A rough worst case: 50 tiny allocs × 12 B overhead ≈ **600 B** of untracked overhead from that hotspot alone.
+For **143 allocations** averaging ~28 B requested (e.g. lpfn_fns): if many are under 16 B, actual heap usage is higher than the traced `sz`. A rough worst case: 50 tiny allocs × 12 B overhead ≈ **600 B** of untracked overhead from that hotspot alone.
 
 ---
 
@@ -68,24 +68,24 @@ The heap-summary profiler records `layout.size()` — the **requested** size fro
 
 ---
 
-## 3. lpfx_fns::init_functions Hotspot
+## 3. lpfn_fns::init_functions Hotspot
 
 ### Current Pattern
 
 - **143 allocations**, 4,068 bytes reported
-- Uses `Vec<LpfxFn>` built from many `String::from(...)` and `vec![Parameter {...}]`
-- Each `LpfxFn` has:
+- Uses `Vec<LpfnFn>` built from many `String::from(...)` and `vec![Parameter {...}]`
+- Each `LpfnFn` has:
   - `FunctionSignature { name: String, return_type, parameters: Vec<Parameter> }`
   - Each `Parameter { name: String, ty, qualifier }`
 - Allocated once at first access, then `Box::leak` for `'static`
 
 ### Allocation Breakdown (approximate)
 
-- ~27 LpfxFn entries
+- ~27 LpfnFn entries
 - ~27 `String` (function names)
 - ~27 `Vec<Parameter>`
 - ~70+ `String` (parameter names)
-- 1 `Vec<LpfxFn>` + 1 `Box<[LpfxFn]>` (via `into_boxed_slice`)
+- 1 `Vec<LpfnFn>` + 1 `Box<[LpfnFn]>` (via `into_boxed_slice`)
 
 Total ≈ 143 allocations, dominated by small strings and vectors.
 
@@ -106,9 +106,9 @@ Total ≈ 143 allocations, dominated by small strings and vectors.
 Replace heap allocations with `const`/`static` data in ROM (flash):
 
 ```rust
-struct LpfxFnStatic {
+struct LpfnFnStatic {
     glsl_sig: FunctionSignatureRef,
-    impls: LpfxFnImpl,
+    impls: LpfnFnImpl,
 }
 struct FunctionSignatureRef {
     name: &'static str,
@@ -121,10 +121,10 @@ struct ParameterRef {
     qualifier: ParamQualifier,
 }
 
-static LPFX_FNS: &[LpfxFnStatic] = &[
-    LpfxFnStatic {
+static LPFX_FNS: &[LpfnFnStatic] = &[
+    LpfnFnStatic {
         glsl_sig: FunctionSignatureRef {
-            name: "lpfx_fbm",
+            name: "lpfn_fbm",
             return_type: Type::Float,
             parameters: &[
                 ParameterRef { name: "p", ty: Type::Vec2, qualifier: ParamQualifier::In },
@@ -132,25 +132,25 @@ static LPFX_FNS: &[LpfxFnStatic] = &[
                 ParameterRef { name: "seed", ty: Type::UInt, qualifier: ParamQualifier::In },
             ],
         },
-        impls: LpfxFnImpl::Decimal { float_impl: BuiltinId::LpfxFbm2F32, q32_impl: BuiltinId::LpfxFbm2Q32 },
+        impls: LpfnFnImpl::Decimal { float_impl: BuiltinId::LpfnFbm2F32, q32_impl: BuiltinId::LpfnFbm2Q32 },
     },
     // ...
 ];
 ```
 
 - **Savings:** 0 heap bytes, 0 allocations.
-- **Effort:** Generator changes, and either a parallel `LpfxFnRef` type or adapting `LpfxFn` to hold refs. Consumers already use `&str` comparison and iteration; `return_type` is `Type` (Copy).
+- **Effort:** Generator changes, and either a parallel `LpfnFnRef` type or adapting `LpfnFn` to hold refs. Consumers already use `&str` comparison and iteration; `return_type` is `Type` (Copy).
 
 ### Option B: Single Arena Allocation
 
-Allocate one large block and bump within it to build all strings and parameter arrays, then construct the `Vec<LpfxFn>`:
+Allocate one large block and bump within it to build all strings and parameter arrays, then construct the `Vec<LpfnFn>`:
 
 - **Savings:** 143 allocs → 1 alloc; ~2 KB of rounding overhead → ~16 B.
 - **Effort:** Custom arena or manual layout in `init_functions`.
 
 ### Option C: Batch with `Vec::with_capacity`
 
-Pre-size the main `Vec<LpfxFn>` and inner `Vec`s; strings still allocate individually. Helps a bit but does not remove the main cost.
+Pre-size the main `Vec<LpfnFn>` and inner `Vec`s; strings still allocate individually. Helps a bit but does not remove the main cost.
 
 ---
 
@@ -160,5 +160,5 @@ Pre-size the main `Vec<LpfxFn>` and inner `Vec`s; strings still allocate individ
 |-------|--------|
 | **Allocator overhead** | linked_list_allocator rounds to min 16 B (32-bit); no per-block metadata on allocations. |
 | **Profiler** | Tracks requested size only; undercounts heap use for small allocs. Add optional overhead estimate. |
-| **lpfx_fns hotspot** | 143 allocs, 4 KB; worth optimizing under memory pressure. |
+| **lpfn_fns hotspot** | 143 allocs, 4 KB; worth optimizing under memory pressure. |
 | **Recommended fix** | Use static refs (Option A) for LPFX registry; add allocator-rounding estimate to heap-summary. |

@@ -1,7 +1,7 @@
 //! Backend-specific data collectors for shader-debug.
 
 use anyhow::Result;
-use lpir::{FloatMode, LpirModule};
+use lpir::{CompilerConfig, FloatMode, LpirModule};
 use lps_frontend::LpsModuleSig;
 
 use super::types::{BackendDebugData, FunctionDebugData};
@@ -12,22 +12,24 @@ pub fn collect_fa_data(
     sig: &LpsModuleSig,
     float_mode: FloatMode,
     func_filter: Option<&str>,
+    compiler_config: &CompilerConfig,
 ) -> Result<BackendDebugData> {
+    use lpvm_native::IsaTarget;
+    use lpvm_native::LowerOpts;
     use lpvm_native::abi::ModuleAbi;
+    use lpvm_native::isa::rv32::abi::func_abi_rv32;
     use lpvm_native::lower_ops;
     use lpvm_native::regalloc::allocate;
     use lpvm_native::regalloc::render::render_interleaved;
-    use lpvm_native::rv32::abi::func_abi_rv32;
-    use lpvm_native::rv32::emit::emit_function;
 
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
+    let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, ir, sig);
 
     let sig_map: std::collections::BTreeMap<&str, &lps_frontend::LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut backend_data = BackendDebugData::new("rv32n");
 
-    for func in &ir.functions {
+    for func in ir.functions.values() {
         // Filter if specified
         if let Some(name) = func_filter {
             if func.name != name {
@@ -41,6 +43,7 @@ pub fn collect_fa_data(
             name: func.name.clone(),
             return_type: lps_frontend::LpsType::Void,
             parameters: Vec::new(),
+            kind: lps_frontend::LpsFnKind::UserDefined,
         };
         let fn_sig = sig_map
             .get(func.name.as_str())
@@ -48,7 +51,11 @@ pub fn collect_fa_data(
             .unwrap_or(&default_sig);
 
         // Lower and compile
-        let lowered = lower_ops(func, ir, &module_abi, float_mode)
+        let lower_opts = LowerOpts {
+            float_mode,
+            q32: &compiler_config.q32,
+        };
+        let lowered = lower_ops(func, ir, &module_abi, &lower_opts)
             .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;
 
         let slots = func.total_param_slots() as usize;
@@ -67,32 +74,12 @@ pub fn collect_fa_data(
             &lowered.symbols,
         );
 
-        // Emit to get machine code
-        let mut used_callee_saved = alloc_result.used_callee_saved;
-        if func_abi.is_sret() {
-            use lpvm_native::abi::PregSet;
-            use lpvm_native::rv32::abi::S1;
-            used_callee_saved = used_callee_saved.union(PregSet::singleton(S1));
-        }
-        let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
-        let is_leaf = !contains_call(&lowered.vinsts);
-        let frame = lpvm_native::abi::FrameLayout::compute(
+        let spill_slots = alloc_result.spill_slots;
+        let emitted = lpvm_native::emit::emit_lowered_with_alloc(
+            &lowered,
             &func_abi,
-            alloc_result.spill_slots,
-            used_callee_saved,
-            &lowered.lpir_slots,
-            is_leaf,
+            alloc_result,
             module_abi.max_callee_sret_bytes(),
-            caller_outgoing_stack_bytes,
-        );
-
-        let emitted = emit_function(
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &alloc_result.output,
-            frame,
-            &lowered.symbols,
-            func_abi.is_sret(),
         )
         .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
 
@@ -115,7 +102,7 @@ pub fn collect_fa_data(
         let mut func_data = FunctionDebugData::new(func.name.clone());
         func_data.lpir_count = lpir_count;
         func_data.disasm_count = disasm_count;
-        func_data.spill_slots = Some(alloc_result.spill_slots as usize);
+        func_data.spill_slots = Some(spill_slots as usize);
         func_data.interleaved = Some(interleaved);
         func_data.disasm = disasm;
         func_data.has_vinst = true;
@@ -133,11 +120,13 @@ pub fn collect_cranelift_data(
     float_mode: FloatMode,
     func_filter: Option<&str>,
     is_emu: bool,
+    compiler_config: &CompilerConfig,
 ) -> Result<BackendDebugData> {
     use lpvm_cranelift::{CompileOptions, link_object_with_builtins, object_bytes_from_ir};
 
     let options = CompileOptions {
         float_mode,
+        config: compiler_config.clone(),
         ..CompileOptions::default()
     };
 
@@ -150,7 +139,7 @@ pub fn collect_cranelift_data(
     let backend_name = if is_emu { "emu" } else { "rv32c" };
     let mut backend_data = BackendDebugData::new(backend_name);
 
-    for func in &ir.functions {
+    for func in ir.functions.values() {
         if let Some(name) = func_filter {
             if func.name != name {
                 continue;
@@ -225,36 +214,4 @@ fn disassemble_raw(code: &[u8]) -> String {
     }
 
     out
-}
-
-/// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
-fn max_outgoing_stack_bytes(vinsts: &[lpvm_native::vinst::VInst]) -> u32 {
-    use lpvm_native::rv32::abi::ARG_REGS;
-    let mut max_bytes = 0u32;
-    for inst in vinsts {
-        if let lpvm_native::vinst::VInst::Call {
-            args,
-            callee_uses_sret,
-            ..
-        } = inst
-        {
-            let cap = if *callee_uses_sret {
-                ARG_REGS.len() - 1
-            } else {
-                ARG_REGS.len()
-            };
-            let n = args.len();
-            if n > cap {
-                let stack_words = (n - cap) as u32;
-                max_bytes = max_bytes.max(stack_words * 4);
-            }
-        }
-    }
-    max_bytes
-}
-
-/// Returns true if the function contains any call instructions.
-fn contains_call(vinsts: &[lpvm_native::vinst::VInst]) -> bool {
-    use lpvm_native::vinst::VInst;
-    vinsts.iter().any(|inst| matches!(inst, VInst::Call { .. }))
 }

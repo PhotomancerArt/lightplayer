@@ -39,7 +39,7 @@ Migrated filetests from the legacy `GlslExecutable` abstraction to the new `Lpvm
 
 ### wasm_link Note
 
-`wasm_link.rs` remains in the codebase for `tests/lpfx_builtins_memory.rs`. It will be removed in M6 when builtins memory migrates to the new engine.
+`wasm_link.rs` remains in the codebase for `tests/lpfn_builtins_memory.rs`. It will be removed in M6 when builtins memory migrates to the new engine.
 
 ### Target Matrix Reality Check
 

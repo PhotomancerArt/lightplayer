@@ -115,12 +115,12 @@ growth within chunks — a small overhead.
 | 8,208 | 2 | `fmt::write` | Vec grow |
 | 6,816 | 2 | `server_loop::run_server_loop` | Vec grow |
 | 5,242 | 14 | `LpFsMemory::write_file` | direct + rehash + String clone |
-| 4,068 | 143 | `lpfx_fns::init_functions` | direct |
+| 4,068 | 143 | `lpfn_fns::init_functions` | direct |
 | 3,272 | 1 | `LpFsMemory::read_file` | direct |
 
 The `fmt::write` entry (8 KB in just 2 allocs) is notable — these are format buffers
 that grew large. The server loop holds 6.8 KB in 2 large buffers (likely serial I/O
-buffers). `lpfx_fns::init_functions` registers 143 function pointers — small but
+buffers). `lpfn_fns::init_functions` registers 143 function pointers — small but
 numerous.
 
 ---
@@ -167,7 +167,7 @@ numerous.
   `ShaderRuntime::load_and_compile_shader` is two copies of the full shader source.
   Pass by reference instead.
 
-- **Shrink `lpfx_fns::init_functions`.** 143 allocs at 4 KB — could use a static
+- **Shrink `lpfn_fns::init_functions`.** 143 allocs at 4 KB — could use a static
   array or a single allocation instead of per-function entries.
 
 ### Medium-term (cranelift-side changes)

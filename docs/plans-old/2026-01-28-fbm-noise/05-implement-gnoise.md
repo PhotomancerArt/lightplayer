@@ -6,16 +6,16 @@ Implement gradient noise (gnoise) functions. These use random values at grid cel
 
 ## Implementation
 
-### File: `builtins/lpfx/generative/gnoise/mod.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/mod.rs` (NEW)
 
 Create module file exporting gnoise functions.
 
-### File: `builtins/lpfx/generative/gnoise/gnoise1_q32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise1_q32.rs` (NEW)
 
 Implement 1D gradient noise:
 
-- `lpfx_gnoise1(x: Q32, seed: u32) -> Q32` - Public Rust function
-- `__lpfx_gnoise1_q32(x: i32, seed: u32) -> i32` - Extern C wrapper
+- `lpfn_gnoise1(x: Q32, seed: u32) -> Q32` - Public Rust function
+- `__lpfn_gnoise1_q32(x: i32, seed: u32) -> i32` - Extern C wrapper
 
 Algorithm:
 
@@ -24,18 +24,18 @@ Algorithm:
 3. `u = smoothstep(0.0, 1.0, f)` (or use cubic)
 4. `mix(a, b, u)`
 
-### File: `builtins/lpfx/generative/gnoise/gnoise1_f32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise1_f32.rs` (NEW)
 
 Implement f32 wrapper:
 
-- `__lpfx_gnoise1_f32(x: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
+- `__lpfn_gnoise1_f32(x: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
 
-### File: `builtins/lpfx/generative/gnoise/gnoise2_q32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise2_q32.rs` (NEW)
 
 Implement 2D gradient noise:
 
-- `lpfx_gnoise2(p: Vec2Q32, seed: u32) -> Q32` - Public Rust function
-- `__lpfx_gnoise2_q32(x: i32, y: i32, seed: u32) -> i32` - Extern C wrapper
+- `lpfn_gnoise2(p: Vec2Q32, seed: u32) -> Q32` - Public Rust function
+- `__lpfn_gnoise2_q32(x: i32, y: i32, seed: u32) -> i32` - Extern C wrapper
 
 Algorithm:
 
@@ -44,18 +44,18 @@ Algorithm:
 3. `u = cubic(f)`
 4. Bilinear interpolation: `mix(mix(a, b, u.x), mix(c, d, u.x), u.y)` with proper cross terms
 
-### File: `builtins/lpfx/generative/gnoise/gnoise2_f32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise2_f32.rs` (NEW)
 
 Implement f32 wrapper:
 
-- `__lpfx_gnoise2_f32(x: f32, y: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
+- `__lpfn_gnoise2_f32(x: f32, y: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
 
-### File: `builtins/lpfx/generative/gnoise/gnoise3_q32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise3_q32.rs` (NEW)
 
 Implement 3D gradient noise:
 
-- `lpfx_gnoise3(p: Vec3Q32, seed: u32) -> Q32` - Public Rust function
-- `__lpfx_gnoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32` - Extern C wrapper
+- `lpfn_gnoise3(p: Vec3Q32, seed: u32) -> Q32` - Public Rust function
+- `__lpfn_gnoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32` - Extern C wrapper
 
 Algorithm:
 
@@ -64,18 +64,18 @@ Algorithm:
 3. `u = quintic(f)`
 4. Trilinear interpolation using nested mixes
 
-### File: `builtins/lpfx/generative/gnoise/gnoise3_f32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise3_f32.rs` (NEW)
 
 Implement f32 wrapper:
 
-- `__lpfx_gnoise3_f32(x: f32, y: f32, z: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
+- `__lpfn_gnoise3_f32(x: f32, y: f32, z: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
 
-### File: `builtins/lpfx/generative/gnoise/gnoise3_tile_q32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise3_tile_q32.rs` (NEW)
 
 Implement 3D tilable gradient noise:
 
-- `lpfx_gnoise3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Q32` - Public Rust function
-- `__lpfx_gnoise3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, seed: u32) -> i32` - Extern C wrapper
+- `lpfn_gnoise3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Q32` - Public Rust function
+- `__lpfn_gnoise3_tile_q32(x: i32, y: i32, z: i32, tile_length: i32, seed: u32) -> i32` - Extern C wrapper
 
 Algorithm:
 
@@ -85,13 +85,13 @@ Algorithm:
 4. Trilinear interpolation
 5. Normalize result to [0, 1] range: `(noise_value * 0.5 + 0.5)`
 
-### File: `builtins/lpfx/generative/gnoise/gnoise3_tile_f32.rs` (NEW)
+### File: `builtins/lpfn/generative/gnoise/gnoise3_tile_f32.rs` (NEW)
 
 Implement f32 wrapper:
 
-- `__lpfx_gnoise3_tile_f32(x: f32, y: f32, z: f32, tile_length: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
+- `__lpfn_gnoise3_tile_f32(x: f32, y: f32, z: f32, tile_length: f32, seed: u32) -> f32` - Converts to q32, calls q32 version, converts back
 
-### File: `builtins/lpfx/generative/mod.rs` (UPDATE)
+### File: `builtins/lpfn/generative/mod.rs` (UPDATE)
 
 Export `gnoise` module.
 
@@ -99,7 +99,7 @@ Export `gnoise` module.
 
 - All gnoise functions implemented (1D, 2D, 3D, 3D tilable)
 - All functions have both q32 and f32 implementations
-- Functions use `#[lpfx_impl_macro::lpfx_impl]` attribute
+- Functions use `#[lpfn_impl_macro::lpfn_impl]` attribute
 - Functions use `#[unsafe(no_mangle)]` and `pub extern "C"`
 - Code structure matches GLSL source closely
 - Code compiles without errors

@@ -195,12 +195,15 @@ vec3 hsv_to_rgb(float h, float s, float v) {
     return rgb;
 }
 
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+
+vec4 render(vec2 pos) {
     // Center of texture
     vec2 center = outputSize * 0.5;
     
     // Direction from center to fragment
-    vec2 dir = fragCoord - center;
+    vec2 dir = pos - center;
     
     // Calculate angle (atan2 gives angle in [-PI, PI])
     float angle = atan(dir.y, dir.x);
@@ -479,12 +482,15 @@ vec3 hsv_to_rgb(float h, float s, float v) {
     return rgb;
 }
 
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+
+vec4 render(vec2 pos) {
     // Center of texture
     vec2 center = outputSize * 0.5;
     
     // Direction from center to fragment
-    vec2 dir = fragCoord - center;
+    vec2 dir = pos - center;
     
     // Calculate angle (atan2 gives angle in [-PI, PI])
     float angle = atan(dir.y, dir.x);

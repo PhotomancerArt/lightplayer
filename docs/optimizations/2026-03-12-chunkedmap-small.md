@@ -23,4 +23,4 @@ Reduced ChunkedHashMap initial capacity / bucket size so small maps (e.g. a few 
 - No regression; allocation patterns similar. `RawTable::reserve_rehash` and ChunkedHashMap allocations slightly different but net neutral.
 
 ## Outcome
-Kept. Consolidation pass; maintains the gains from chunkedvec-dynamic. Future work: lpfx static registry to eliminate the 143-init allocation hotspot.
+Kept. Consolidation pass; maintains the gains from chunkedvec-dynamic. Future work: lpfn static registry to eliminate the 143-init allocation hotspot.

@@ -94,6 +94,38 @@ pub(crate) fn emit_to_uint(builder: &mut FunctionBuilder, v: Value) -> Value {
 /// negative when interpreted as signed; clamp **unsigned** magnitude to the same
 /// integer range as [`emit_from_sint`] (Q16.16 max ~32767) before shifting, so
 /// `4294967295u` maps to 32767.0 rather than `ishl(-1, 16)` → -1.0.
+/// Q32 F32 lane (raw `i32`) → UNORM16 in low 16 bits (`0…65535`).
+pub(crate) fn emit_fto_unorm16(builder: &mut FunctionBuilder, v: Value) -> Value {
+    let zero = builder.ins().iconst(types::I32, 0);
+    let maxv = builder.ins().iconst(types::I32, 65535);
+    let t = builder.ins().smax(v, zero);
+    builder.ins().smin(t, maxv)
+}
+
+/// Q32 F32 lane → UNORM8 in low 8 bits (`0…255`).
+pub(crate) fn emit_fto_unorm8(builder: &mut FunctionBuilder, v: Value) -> Value {
+    let eight = builder.ins().iconst(types::I32, 8);
+    let shifted = builder.ins().ushr(v, eight);
+    let zero = builder.ins().iconst(types::I32, 0);
+    let maxv = builder.ins().iconst(types::I32, 255);
+    let t = builder.ins().smax(shifted, zero);
+    builder.ins().smin(t, maxv)
+}
+
+/// UNORM16 in low 16 bits of `i32` → Q32 F32 lane (masked word).
+pub(crate) fn emit_unorm16_to_f(builder: &mut FunctionBuilder, v: Value) -> Value {
+    let mask = builder.ins().iconst(types::I32, 0xFFFF);
+    builder.ins().band(v, mask)
+}
+
+/// UNORM8 in low 8 bits → Q32 F32 lane at Q16.16 fractional position.
+pub(crate) fn emit_unorm8_to_f(builder: &mut FunctionBuilder, v: Value) -> Value {
+    let mask = builder.ins().iconst(types::I32, 0xFF);
+    let low = builder.ins().band(v, mask);
+    let eight = builder.ins().iconst(types::I32, 8);
+    builder.ins().ishl(low, eight)
+}
+
 pub(crate) fn emit_from_uint(builder: &mut FunctionBuilder, v: Value) -> Value {
     let shift = builder.ins().iconst(types::I32, Q32_SHIFT);
     let zero = builder.ins().iconst(types::I32, 0);

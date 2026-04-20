@@ -3691,9 +3691,11 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-server",
+ "lp-shader",
  "lp-shared",
  "lpir",
  "lps-frontend",
+ "lps-shared",
  "lpvm-cranelift",
  "lpvm-native",
  "notify",
@@ -3748,14 +3750,16 @@ dependencies = [
  "log",
  "lp-engine-client",
  "lp-model",
+ "lp-shader",
  "lp-shared",
  "lpir",
  "lps-builtins",
  "lps-frontend",
  "lps-q32",
+ "lps-shared",
  "lpvm",
- "lpvm-cranelift",
  "lpvm-native",
+ "lpvm-wasm",
  "serde",
  "unwinding",
 ]
@@ -3861,6 +3865,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-shader"
+version = "40.0.0"
+dependencies = [
+ "lpir",
+ "lps-frontend",
+ "lps-shared",
+ "lpvm",
+ "lpvm-wasm",
+]
+
+[[package]]
 name = "lp-shared"
 version = "40.0.0"
 dependencies = [
@@ -3868,12 +3883,13 @@ dependencies = [
  "libm",
  "log",
  "lp-model",
+ "lps-shared",
  "serde",
  "tempfile",
 ]
 
 [[package]]
-name = "lpfx-impl-macro"
+name = "lpfn-impl-macro"
 version = "40.0.0"
 dependencies = [
  "proc-macro2",
@@ -3882,10 +3898,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpfx"
+version = "40.0.0"
+dependencies = [
+ "lps-frontend",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "lpfx-cpu"
+version = "40.0.0"
+dependencies = [
+ "lp-shader",
+ "lpfx",
+ "lpir",
+ "lps-builtins",
+ "lps-shared",
+ "lpvm",
+ "lpvm-native",
+ "lpvm-wasm",
+]
+
+[[package]]
 name = "lpir"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lps-q32",
 ]
 
 [[package]]
@@ -3897,7 +3937,7 @@ name = "lps-builtins"
 version = "40.0.0"
 dependencies = [
  "log",
- "lpfx-impl-macro",
+ "lpfn-impl-macro",
  "lps-builtin-ids",
  "lps-q32",
  "lpvm",
@@ -4056,6 +4096,7 @@ dependencies = [
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
+ "lps-q32",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",
@@ -4075,6 +4116,7 @@ dependencies = [
  "lps-builtin-ids",
  "lps-builtins",
  "lps-frontend",
+ "lps-q32",
  "lps-shared",
  "lpvm",
  "wasm-bindgen",

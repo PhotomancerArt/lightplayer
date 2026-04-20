@@ -79,7 +79,7 @@ Current state:
 
 **Question**: How should native/LPFX functions support out parameters?
 
-**Context**: Need to implement `psrdnoise` which likely has out parameters. Native functions are registered via `lpfx_sig.rs` and `build_call_signature()`.
+**Context**: Need to implement `psrdnoise` which likely has out parameters. Native functions are registered via `lpfn_sig.rs` and `build_call_signature()`.
 
 **Suggested Answer**:
 

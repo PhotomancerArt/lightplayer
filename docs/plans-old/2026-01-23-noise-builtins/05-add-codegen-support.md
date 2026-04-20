@@ -14,7 +14,7 @@ Create new module with:
    ```rust
    fn get_lp_lib_fn_id(name: &str, arg_count: usize) -> Option<BuiltinId>
    ```
-   Maps `lpfx_hash(1 arg)` -> `BuiltinId::LpHash1`, etc.
+   Maps `lpfn_hash(1 arg)` -> `BuiltinId::LpHash1`, etc.
 
 2. **Main codegen function**
    ```rust

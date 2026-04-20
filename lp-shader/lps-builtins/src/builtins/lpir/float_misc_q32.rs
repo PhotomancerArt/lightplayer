@@ -1,6 +1,13 @@
 //! Q32 `fabs` / `fmin` / `fmax` / `ffloor` / `fceil` / `ftrunc`.
 //!
 //! Rounding ops match `lpvm-wasm` `emit_q32_ffloor` / `emit_q32_fceil` / `emit_q32_ftrunc`.
+//!
+//! **Reference implementation.** The primary `lpvm-native` lowering inlines
+//! `fabs`, `fmin`, and `fmax` directly — see
+//! [`lpvm_native::lower::lower_lpir_op`](../../../../../lpvm-native/src/lower.rs).
+//! These helpers remain as the authoritative semantic reference and as a
+//! fallback for callers that reach them through `sym_call`. Rounding ops
+//! (`ffloor`/`fceil`/`ftrunc`) are still routed through `sym_call`.
 
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fabs_q32(v: i32) -> i32 {

@@ -11,10 +11,10 @@ exported and documented.
 
 The builtin generator should have already updated this file, but verify:
 
-- `mod lpfx_hash;` is included
-- `mod lpfx_snoise1;` is included
-- `mod lpfx_snoise2;` is included
-- `mod lpfx_snoise3;` is included
+- `mod lpfn_hash;` is included
+- `mod lpfn_snoise1;` is included
+- `mod lpfn_snoise2;` is included
+- `mod lpfn_snoise3;` is included
 - `pub use` statements for all functions are present
 
 ### Documentation

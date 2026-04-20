@@ -2,23 +2,23 @@
 
 ## Description
 
-Create Simplex noise implementations in three files: `lpfx_snoise1.rs`, `lpfx_snoise2.rs`, and
-`lpfx_snoise3.rs`. These implement 1D, 2D, and 3D Simplex noise using Q32 fixed-point arithmetic.
+Create Simplex noise implementations in three files: `lpfn_snoise1.rs`, `lpfn_snoise2.rs`, and
+`lpfn_snoise3.rs`. These implement 1D, 2D, and 3D Simplex noise using Q32 fixed-point arithmetic.
 
 ## Implementation
 
 ### Files to Create
 
-1. **`lps-builtins/src/builtins/q32/lpfx_snoise1.rs`**
-    - `__lpfx_snoise1(x: i32, seed: u32) -> i32`
+1. **`lps-builtins/src/builtins/q32/lpfn_snoise1.rs`**
+    - `__lpfn_snoise1(x: i32, seed: u32) -> i32`
     - 1D Simplex noise
 
-2. **`lps-builtins/src/builtins/q32/lpfx_snoise2.rs`**
-    - `__lpfx_snoise2(x: i32, y: i32, seed: u32) -> i32`
+2. **`lps-builtins/src/builtins/q32/lpfn_snoise2.rs`**
+    - `__lpfn_snoise2(x: i32, y: i32, seed: u32) -> i32`
     - 2D Simplex noise
 
-3. **`lps-builtins/src/builtins/q32/lpfx_snoise3.rs`**
-    - `__lpfx_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32`
+3. **`lps-builtins/src/builtins/q32/lpfn_snoise3.rs`**
+    - `__lpfn_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32`
     - 3D Simplex noise
 
 ### Algorithm Reference
@@ -29,7 +29,7 @@ Key components:
 
 - Skew/unskew factors for coordinate transformation
 - Simplex cell determination
-- Gradient selection using hash function (call `__lpfx_hash_*` functions)
+- Gradient selection using hash function (call `__lpfn_hash_*` functions)
 - Smooth interpolation using quintic curve
 - Scaling to approximately [-1, 1] range (Q32 fixed-point)
 

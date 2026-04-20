@@ -164,174 +164,174 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxFbm2F32 => {
+        BuiltinId::LpLpfnFbm2F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32(
+            let r = lps_builtins::builtins::lpfn::generative::fbm::fbm2_f32::__lp_lpfn_fbm2_f32(
                 p0, p1, p2, p3,
             );
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxFbm2Q32 => {
+        BuiltinId::LpLpfnFbm2Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::fbm::fbm2_q32::__lp_lpfx_fbm2_q32(
+            let r = lps_builtins::builtins::lpfn::generative::fbm::fbm2_q32::__lp_lpfn_fbm2_q32(
                 p0, p1, p2, p3,
             );
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxFbm3F32 => {
+        BuiltinId::LpLpfnFbm3F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::fbm::fbm3_f32::__lp_lpfx_fbm3_f32(
+            let r = lps_builtins::builtins::lpfn::generative::fbm::fbm3_f32::__lp_lpfn_fbm3_f32(
                 p0, p1, p2, p3, p4,
             );
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxFbm3Q32 => {
+        BuiltinId::LpLpfnFbm3Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::fbm::fbm3_q32::__lp_lpfx_fbm3_q32(
+            let r = lps_builtins::builtins::lpfn::generative::fbm::fbm3_q32::__lp_lpfn_fbm3_q32(
                 p0, p1, p2, p3, p4,
             );
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxFbm3TileF32 => {
+        BuiltinId::LpLpfnFbm3TileF32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_i32();
             let p5 = params[5].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::fbm::fbm3_tile_f32::__lp_lpfx_fbm3_tile_f32(p0, p1, p2, p3, p4, p5);
+            let r = lps_builtins::builtins::lpfn::generative::fbm::fbm3_tile_f32::__lp_lpfn_fbm3_tile_f32(p0, p1, p2, p3, p4, p5);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxFbm3TileQ32 => {
+        BuiltinId::LpLpfnFbm3TileQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32();
             let p5 = params[5].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::fbm::fbm3_tile_q32::__lp_lpfx_fbm3_tile_q32(p0, p1, p2, p3, p4, p5);
+            let r = lps_builtins::builtins::lpfn::generative::fbm::fbm3_tile_q32::__lp_lpfn_fbm3_tile_q32(p0, p1, p2, p3, p4, p5);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise1F32 => {
+        BuiltinId::LpLpfnGnoise1F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise1_f32::__lp_lpfx_gnoise1_f32(p0, p1);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise1_f32::__lp_lpfn_gnoise1_f32(p0, p1);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise1Q32 => {
+        BuiltinId::LpLpfnGnoise1Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise1_q32::__lp_lpfx_gnoise1_q32(p0, p1);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise1_q32::__lp_lpfn_gnoise1_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise2F32 => {
+        BuiltinId::LpLpfnGnoise2F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise2_f32::__lp_lpfx_gnoise2_f32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise2_f32::__lp_lpfn_gnoise2_f32(p0, p1, p2);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise2Q32 => {
+        BuiltinId::LpLpfnGnoise2Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise2_q32::__lp_lpfx_gnoise2_q32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise2_q32::__lp_lpfn_gnoise2_q32(p0, p1, p2);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise3F32 => {
+        BuiltinId::LpLpfnGnoise3F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_f32::__lp_lpfx_gnoise3_f32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise3_f32::__lp_lpfn_gnoise3_f32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise3Q32 => {
+        BuiltinId::LpLpfnGnoise3Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_q32::__lp_lpfx_gnoise3_q32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise3_q32::__lp_lpfn_gnoise3_q32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise3TileF32 => {
+        BuiltinId::LpLpfnGnoise3TileF32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_tile_f32::__lp_lpfx_gnoise3_tile_f32(p0, p1, p2, p3, p4);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise3_tile_f32::__lp_lpfn_gnoise3_tile_f32(p0, p1, p2, p3, p4);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxGnoise3TileQ32 => {
+        BuiltinId::LpLpfnGnoise3TileQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_tile_q32::__lp_lpfx_gnoise3_tile_q32(p0, p1, p2, p3, p4);
+            let r = lps_builtins::builtins::lpfn::generative::gnoise::gnoise3_tile_q32::__lp_lpfn_gnoise3_tile_q32(p0, p1, p2, p3, p4);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxHash1 => {
+        BuiltinId::LpLpfnHash1 => {
             let p0 = params[0].unwrap_i32() as u32;
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::hash::__lp_lpfx_hash_1(p0, p1);
+            let r = lps_builtins::builtins::lpfn::hash::__lp_lpfn_hash_1(p0, p1);
             results[0] = wasmtime::Val::I32(r as i32);
             Ok(())
         }
-        BuiltinId::LpLpfxHash2 => {
+        BuiltinId::LpLpfnHash2 => {
             let p0 = params[0].unwrap_i32() as u32;
             let p1 = params[1].unwrap_i32() as u32;
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::hash::__lp_lpfx_hash_2(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::hash::__lp_lpfn_hash_2(p0, p1, p2);
             results[0] = wasmtime::Val::I32(r as i32);
             Ok(())
         }
-        BuiltinId::LpLpfxHash3 => {
+        BuiltinId::LpLpfnHash3 => {
             let p0 = params[0].unwrap_i32() as u32;
             let p1 = params[1].unwrap_i32() as u32;
             let p2 = params[2].unwrap_i32() as u32;
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::hash::__lp_lpfx_hash_3(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::hash::__lp_lpfn_hash_3(p0, p1, p2, p3);
             results[0] = wasmtime::Val::I32(r as i32);
             Ok(())
         }
-        BuiltinId::LpLpfxHsv2rgbF32 => {
+        BuiltinId::LpLpfnHsv2rgbF32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
-            lps_builtins::builtins::lpfx::color::space::hsv2rgb_f32::__lp_lpfx_hsv2rgb_f32(
+            lps_builtins::builtins::lpfn::color::space::hsv2rgb_f32::__lp_lpfn_hsv2rgb_f32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -343,14 +343,14 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxHsv2rgbQ32 => {
+        BuiltinId::LpLpfnHsv2rgbQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
-            lps_builtins::builtins::lpfx::color::space::hsv2rgb_q32::__lp_lpfx_hsv2rgb_q32(
+            lps_builtins::builtins::lpfn::color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_q32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -362,7 +362,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxHsv2rgbVec4F32 => {
+        BuiltinId::LpLpfnHsv2rgbVec4F32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 4];
@@ -370,7 +370,7 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_f32();
-            lps_builtins::builtins::lpfx::color::space::hsv2rgb_f32::__lp_lpfx_hsv2rgb_vec4_f32(
+            lps_builtins::builtins::lpfn::color::space::hsv2rgb_f32::__lp_lpfn_hsv2rgb_vec4_f32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -383,7 +383,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxHsv2rgbVec4Q32 => {
+        BuiltinId::LpLpfnHsv2rgbVec4Q32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 4];
@@ -391,7 +391,7 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32();
-            lps_builtins::builtins::lpfx::color::space::hsv2rgb_q32::__lp_lpfx_hsv2rgb_vec4_q32(
+            lps_builtins::builtins::lpfn::color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_vec4_q32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -404,12 +404,12 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxHue2rgbF32 => {
+        BuiltinId::LpLpfnHue2rgbF32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
-            lps_builtins::builtins::lpfx::color::space::hue2rgb_f32::__lp_lpfx_hue2rgb_f32(
+            lps_builtins::builtins::lpfn::color::space::hue2rgb_f32::__lp_lpfn_hue2rgb_f32(
                 buf_0.as_mut_ptr(),
                 p1,
             );
@@ -419,12 +419,12 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxHue2rgbQ32 => {
+        BuiltinId::LpLpfnHue2rgbQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
-            lps_builtins::builtins::lpfx::color::space::hue2rgb_q32::__lp_lpfx_hue2rgb_q32(
+            lps_builtins::builtins::lpfn::color::space::hue2rgb_q32::__lp_lpfn_hue2rgb_q32(
                 buf_0.as_mut_ptr(),
                 p1,
             );
@@ -434,7 +434,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxPsrdnoise2F32 => {
+        BuiltinId::LpLpfnPsrdnoise2F32 => {
             let mem = linked_env_memory;
             let off_5 = params[5].unwrap_i32() as u32 as usize;
             let mut buf_5 = [0f32; 2];
@@ -444,7 +444,7 @@ pub(super) fn dispatch_native_builtin(
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_f32();
             let p6 = params[6].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise2_f32::__lp_lpfx_psrdnoise2_f32(p0, p1, p2, p3, p4, buf_5.as_mut_ptr(), p6);
+            let r = lps_builtins::builtins::lpfn::generative::psrdnoise::psrdnoise2_f32::__lp_lpfn_psrdnoise2_f32(p0, p1, p2, p3, p4, buf_5.as_mut_ptr(), p6);
             results[0] = wasmtime::Val::F32(r.to_bits());
             for (i, v) in buf_5.iter().enumerate() {
                 mem.write(&mut caller, off_5 + i * 4, &v.to_le_bytes())
@@ -452,7 +452,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxPsrdnoise2Q32 => {
+        BuiltinId::LpLpfnPsrdnoise2Q32 => {
             let mem = linked_env_memory;
             let off_5 = params[5].unwrap_i32() as u32 as usize;
             let mut buf_5 = [0i32; 2];
@@ -462,7 +462,7 @@ pub(super) fn dispatch_native_builtin(
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32();
             let p6 = params[6].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise2_q32::__lp_lpfx_psrdnoise2_q32(p0, p1, p2, p3, p4, buf_5.as_mut_ptr(), p6);
+            let r = lps_builtins::builtins::lpfn::generative::psrdnoise::psrdnoise2_q32::__lp_lpfn_psrdnoise2_q32(p0, p1, p2, p3, p4, buf_5.as_mut_ptr(), p6);
             results[0] = wasmtime::Val::I32(r);
             for (i, v) in buf_5.iter().enumerate() {
                 mem.write(&mut caller, off_5 + i * 4, &v.to_le_bytes())
@@ -470,7 +470,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxPsrdnoise3F32 => {
+        BuiltinId::LpLpfnPsrdnoise3F32 => {
             let mem = linked_env_memory;
             let off_7 = params[7].unwrap_i32() as u32 as usize;
             let mut buf_7 = [0f32; 3];
@@ -482,7 +482,7 @@ pub(super) fn dispatch_native_builtin(
             let p5 = params[5].unwrap_f32();
             let p6 = params[6].unwrap_f32();
             let p8 = params[8].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise3_f32::__lp_lpfx_psrdnoise3_f32(p0, p1, p2, p3, p4, p5, p6, buf_7.as_mut_ptr(), p8);
+            let r = lps_builtins::builtins::lpfn::generative::psrdnoise::psrdnoise3_f32::__lp_lpfn_psrdnoise3_f32(p0, p1, p2, p3, p4, p5, p6, buf_7.as_mut_ptr(), p8);
             results[0] = wasmtime::Val::F32(r.to_bits());
             for (i, v) in buf_7.iter().enumerate() {
                 mem.write(&mut caller, off_7 + i * 4, &v.to_le_bytes())
@@ -490,7 +490,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxPsrdnoise3Q32 => {
+        BuiltinId::LpLpfnPsrdnoise3Q32 => {
             let mem = linked_env_memory;
             let off_7 = params[7].unwrap_i32() as u32 as usize;
             let mut buf_7 = [0i32; 3];
@@ -502,7 +502,7 @@ pub(super) fn dispatch_native_builtin(
             let p5 = params[5].unwrap_i32();
             let p6 = params[6].unwrap_i32();
             let p8 = params[8].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise3_q32::__lp_lpfx_psrdnoise3_q32(p0, p1, p2, p3, p4, p5, p6, buf_7.as_mut_ptr(), p8);
+            let r = lps_builtins::builtins::lpfn::generative::psrdnoise::psrdnoise3_q32::__lp_lpfn_psrdnoise3_q32(p0, p1, p2, p3, p4, p5, p6, buf_7.as_mut_ptr(), p8);
             results[0] = wasmtime::Val::I32(r);
             for (i, v) in buf_7.iter().enumerate() {
                 mem.write(&mut caller, off_7 + i * 4, &v.to_le_bytes())
@@ -510,62 +510,62 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxRandom1F32 => {
+        BuiltinId::LpLpfnRandom1F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::random::random1_f32::__lp_lpfx_random1_f32(p0, p1);
+            let r = lps_builtins::builtins::lpfn::generative::random::random1_f32::__lp_lpfn_random1_f32(p0, p1);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxRandom1Q32 => {
+        BuiltinId::LpLpfnRandom1Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::random::random1_q32::__lp_lpfx_random1_q32(p0, p1);
+            let r = lps_builtins::builtins::lpfn::generative::random::random1_q32::__lp_lpfn_random1_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxRandom2F32 => {
+        BuiltinId::LpLpfnRandom2F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::random::random2_f32::__lp_lpfx_random2_f32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::random::random2_f32::__lp_lpfn_random2_f32(p0, p1, p2);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxRandom2Q32 => {
+        BuiltinId::LpLpfnRandom2Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::random::random2_q32::__lp_lpfx_random2_q32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::random::random2_q32::__lp_lpfn_random2_q32(p0, p1, p2);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxRandom3F32 => {
+        BuiltinId::LpLpfnRandom3F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::random::random3_f32::__lp_lpfx_random3_f32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::random::random3_f32::__lp_lpfn_random3_f32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxRandom3Q32 => {
+        BuiltinId::LpLpfnRandom3Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::random::random3_q32::__lp_lpfx_random3_q32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::random::random3_q32::__lp_lpfn_random3_q32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxRgb2hsvF32 => {
+        BuiltinId::LpLpfnRgb2hsvF32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
-            lps_builtins::builtins::lpfx::color::space::rgb2hsv_f32::__lp_lpfx_rgb2hsv_f32(
+            lps_builtins::builtins::lpfn::color::space::rgb2hsv_f32::__lp_lpfn_rgb2hsv_f32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -577,14 +577,14 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxRgb2hsvQ32 => {
+        BuiltinId::LpLpfnRgb2hsvQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
-            lps_builtins::builtins::lpfx::color::space::rgb2hsv_q32::__lp_lpfx_rgb2hsv_q32(
+            lps_builtins::builtins::lpfn::color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_q32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -596,7 +596,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxRgb2hsvVec4F32 => {
+        BuiltinId::LpLpfnRgb2hsvVec4F32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 4];
@@ -604,7 +604,7 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_f32();
-            lps_builtins::builtins::lpfx::color::space::rgb2hsv_f32::__lp_lpfx_rgb2hsv_vec4_f32(
+            lps_builtins::builtins::lpfn::color::space::rgb2hsv_f32::__lp_lpfn_rgb2hsv_vec4_f32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -617,7 +617,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxRgb2hsvVec4Q32 => {
+        BuiltinId::LpLpfnRgb2hsvVec4Q32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 4];
@@ -625,7 +625,7 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32();
-            lps_builtins::builtins::lpfx::color::space::rgb2hsv_q32::__lp_lpfx_rgb2hsv_vec4_q32(
+            lps_builtins::builtins::lpfn::color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_vec4_q32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -638,26 +638,26 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSaturateF32 => {
+        BuiltinId::LpLpfnSaturateF32 => {
             let p0 = params[0].unwrap_f32();
-            let r = lps_builtins::builtins::lpfx::math::saturate_f32::__lp_lpfx_saturate_f32(p0);
+            let r = lps_builtins::builtins::lpfn::math::saturate_f32::__lp_lpfn_saturate_f32(p0);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxSaturateQ32 => {
+        BuiltinId::LpLpfnSaturateQ32 => {
             let p0 = params[0].unwrap_i32();
-            let r = lps_builtins::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_q32(p0);
+            let r = lps_builtins::builtins::lpfn::math::saturate_q32::__lp_lpfn_saturate_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxSaturateVec3F32 => {
+        BuiltinId::LpLpfnSaturateVec3F32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
-            lps_builtins::builtins::lpfx::math::saturate_f32::__lp_lpfx_saturate_vec3_f32(
+            lps_builtins::builtins::lpfn::math::saturate_f32::__lp_lpfn_saturate_vec3_f32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -669,14 +669,14 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSaturateVec3Q32 => {
+        BuiltinId::LpLpfnSaturateVec3Q32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
-            lps_builtins::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_vec3_q32(
+            lps_builtins::builtins::lpfn::math::saturate_q32::__lp_lpfn_saturate_vec3_q32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -688,7 +688,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSaturateVec4F32 => {
+        BuiltinId::LpLpfnSaturateVec4F32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 4];
@@ -696,7 +696,7 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_f32();
-            lps_builtins::builtins::lpfx::math::saturate_f32::__lp_lpfx_saturate_vec4_f32(
+            lps_builtins::builtins::lpfn::math::saturate_f32::__lp_lpfn_saturate_vec4_f32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -709,7 +709,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSaturateVec4Q32 => {
+        BuiltinId::LpLpfnSaturateVec4Q32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 4];
@@ -717,7 +717,7 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32();
-            lps_builtins::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_vec4_q32(
+            lps_builtins::builtins::lpfn::math::saturate_q32::__lp_lpfn_saturate_vec4_q32(
                 buf_0.as_mut_ptr(),
                 p1,
                 p2,
@@ -730,103 +730,103 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSnoise1F32 => {
+        BuiltinId::LpLpfnSnoise1F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::snoise::snoise1_f32::__lp_lpfx_snoise1_f32(p0, p1);
+            let r = lps_builtins::builtins::lpfn::generative::snoise::snoise1_f32::__lp_lpfn_snoise1_f32(p0, p1);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxSnoise1Q32 => {
+        BuiltinId::LpLpfnSnoise1Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::snoise::snoise1_q32::__lp_lpfx_snoise1_q32(p0, p1);
+            let r = lps_builtins::builtins::lpfn::generative::snoise::snoise1_q32::__lp_lpfn_snoise1_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxSnoise2F32 => {
+        BuiltinId::LpLpfnSnoise2F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::snoise::snoise2_f32::__lp_lpfx_snoise2_f32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::snoise::snoise2_f32::__lp_lpfn_snoise2_f32(p0, p1, p2);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxSnoise2Q32 => {
+        BuiltinId::LpLpfnSnoise2Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::snoise::snoise2_q32::__lp_lpfx_snoise2_q32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::snoise::snoise2_q32::__lp_lpfn_snoise2_q32(p0, p1, p2);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxSnoise3F32 => {
-            let p0 = params[0].unwrap_f32();
-            let p1 = params[1].unwrap_f32();
-            let p2 = params[2].unwrap_f32();
-            let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::snoise::snoise3_f32::__lp_lpfx_snoise3_f32(p0, p1, p2, p3);
-            results[0] = wasmtime::Val::F32(r.to_bits());
-            Ok(())
-        }
-        BuiltinId::LpLpfxSnoise3Q32 => {
-            let p0 = params[0].unwrap_i32();
-            let p1 = params[1].unwrap_i32();
-            let p2 = params[2].unwrap_i32();
-            let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::snoise::snoise3_q32::__lp_lpfx_snoise3_q32(p0, p1, p2, p3);
-            results[0] = wasmtime::Val::I32(r);
-            Ok(())
-        }
-        BuiltinId::LpLpfxSrandom1F32 => {
-            let p0 = params[0].unwrap_f32();
-            let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::srandom::srandom1_f32::__lp_lpfx_srandom1_f32(p0, p1);
-            results[0] = wasmtime::Val::F32(r.to_bits());
-            Ok(())
-        }
-        BuiltinId::LpLpfxSrandom1Q32 => {
-            let p0 = params[0].unwrap_i32();
-            let p1 = params[1].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::srandom::srandom1_q32::__lp_lpfx_srandom1_q32(p0, p1);
-            results[0] = wasmtime::Val::I32(r);
-            Ok(())
-        }
-        BuiltinId::LpLpfxSrandom2F32 => {
-            let p0 = params[0].unwrap_f32();
-            let p1 = params[1].unwrap_f32();
-            let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::srandom::srandom2_f32::__lp_lpfx_srandom2_f32(p0, p1, p2);
-            results[0] = wasmtime::Val::F32(r.to_bits());
-            Ok(())
-        }
-        BuiltinId::LpLpfxSrandom2Q32 => {
-            let p0 = params[0].unwrap_i32();
-            let p1 = params[1].unwrap_i32();
-            let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::srandom::srandom2_q32::__lp_lpfx_srandom2_q32(p0, p1, p2);
-            results[0] = wasmtime::Val::I32(r);
-            Ok(())
-        }
-        BuiltinId::LpLpfxSrandom3F32 => {
+        BuiltinId::LpLpfnSnoise3F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::srandom::srandom3_f32::__lp_lpfx_srandom3_f32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::snoise::snoise3_f32::__lp_lpfn_snoise3_f32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxSrandom3Q32 => {
+        BuiltinId::LpLpfnSnoise3Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::srandom::srandom3_q32::__lp_lpfx_srandom3_q32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::snoise::snoise3_q32::__lp_lpfn_snoise3_q32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxSrandom3TileF32 => {
+        BuiltinId::LpLpfnSrandom1F32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_i32() as u32;
+            let r = lps_builtins::builtins::lpfn::generative::srandom::srandom1_f32::__lp_lpfn_srandom1_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
+        BuiltinId::LpLpfnSrandom1Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32() as u32;
+            let r = lps_builtins::builtins::lpfn::generative::srandom::srandom1_q32::__lp_lpfn_srandom1_q32(p0, p1);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpfnSrandom2F32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_i32() as u32;
+            let r = lps_builtins::builtins::lpfn::generative::srandom::srandom2_f32::__lp_lpfn_srandom2_f32(p0, p1, p2);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
+        BuiltinId::LpLpfnSrandom2Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32();
+            let p2 = params[2].unwrap_i32() as u32;
+            let r = lps_builtins::builtins::lpfn::generative::srandom::srandom2_q32::__lp_lpfn_srandom2_q32(p0, p1, p2);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpfnSrandom3F32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_f32();
+            let p3 = params[3].unwrap_i32() as u32;
+            let r = lps_builtins::builtins::lpfn::generative::srandom::srandom3_f32::__lp_lpfn_srandom3_f32(p0, p1, p2, p3);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
+        BuiltinId::LpLpfnSrandom3Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32();
+            let p2 = params[2].unwrap_i32();
+            let p3 = params[3].unwrap_i32() as u32;
+            let r = lps_builtins::builtins::lpfn::generative::srandom::srandom3_q32::__lp_lpfn_srandom3_q32(p0, p1, p2, p3);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpfnSrandom3TileF32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
@@ -835,14 +835,14 @@ pub(super) fn dispatch_native_builtin(
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_f32();
             let p5 = params[5].unwrap_i32() as u32;
-            lps_builtins::builtins::lpfx::generative::srandom::srandom3_tile_f32::__lp_lpfx_srandom3_tile_f32(buf_0.as_mut_ptr(), p1, p2, p3, p4, p5);
+            lps_builtins::builtins::lpfn::generative::srandom::srandom3_tile_f32::__lp_lpfn_srandom3_tile_f32(buf_0.as_mut_ptr(), p1, p2, p3, p4, p5);
             for (i, v) in buf_0.iter().enumerate() {
                 mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
                     .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSrandom3TileQ32 => {
+        BuiltinId::LpLpfnSrandom3TileQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
@@ -851,14 +851,14 @@ pub(super) fn dispatch_native_builtin(
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32();
             let p5 = params[5].unwrap_i32() as u32;
-            lps_builtins::builtins::lpfx::generative::srandom::srandom3_tile_q32::__lp_lpfx_srandom3_tile_q32(buf_0.as_mut_ptr(), p1, p2, p3, p4, p5);
+            lps_builtins::builtins::lpfn::generative::srandom::srandom3_tile_q32::__lp_lpfn_srandom3_tile_q32(buf_0.as_mut_ptr(), p1, p2, p3, p4, p5);
             for (i, v) in buf_0.iter().enumerate() {
                 mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
                     .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSrandom3VecF32 => {
+        BuiltinId::LpLpfnSrandom3VecF32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
@@ -866,14 +866,14 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_f32();
             let p4 = params[4].unwrap_i32() as u32;
-            lps_builtins::builtins::lpfx::generative::srandom::srandom3_vec_f32::__lp_lpfx_srandom3_vec_f32(buf_0.as_mut_ptr(), p1, p2, p3, p4);
+            lps_builtins::builtins::lpfn::generative::srandom::srandom3_vec_f32::__lp_lpfn_srandom3_vec_f32(buf_0.as_mut_ptr(), p1, p2, p3, p4);
             for (i, v) in buf_0.iter().enumerate() {
                 mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
                     .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
             }
             Ok(())
         }
-        BuiltinId::LpLpfxSrandom3VecQ32 => {
+        BuiltinId::LpLpfnSrandom3VecQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
@@ -881,78 +881,78 @@ pub(super) fn dispatch_native_builtin(
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32();
             let p4 = params[4].unwrap_i32() as u32;
-            lps_builtins::builtins::lpfx::generative::srandom::srandom3_vec_q32::__lp_lpfx_srandom3_vec_q32(buf_0.as_mut_ptr(), p1, p2, p3, p4);
+            lps_builtins::builtins::lpfn::generative::srandom::srandom3_vec_q32::__lp_lpfn_srandom3_vec_q32(buf_0.as_mut_ptr(), p1, p2, p3, p4);
             for (i, v) in buf_0.iter().enumerate() {
                 mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
                     .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
             }
             Ok(())
         }
-        BuiltinId::LpLpfxWorley2F32 => {
+        BuiltinId::LpLpfnWorley2F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley2_f32::__lp_lpfx_worley2_f32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley2_f32::__lp_lpfn_worley2_f32(p0, p1, p2);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxWorley2Q32 => {
+        BuiltinId::LpLpfnWorley2Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley2_q32::__lp_lpfx_worley2_q32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley2_q32::__lp_lpfn_worley2_q32(p0, p1, p2);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxWorley2ValueF32 => {
+        BuiltinId::LpLpfnWorley2ValueF32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley2_value_f32::__lp_lpfx_worley2_value_f32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley2_value_f32::__lp_lpfn_worley2_value_f32(p0, p1, p2);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxWorley2ValueQ32 => {
+        BuiltinId::LpLpfnWorley2ValueQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley2_value_q32::__lp_lpfx_worley2_value_q32(p0, p1, p2);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley2_value_q32::__lp_lpfn_worley2_value_q32(p0, p1, p2);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxWorley3F32 => {
+        BuiltinId::LpLpfnWorley3F32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley3_f32::__lp_lpfx_worley3_f32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley3_f32::__lp_lpfn_worley3_f32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxWorley3Q32 => {
+        BuiltinId::LpLpfnWorley3Q32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley3_q32::__lp_lpfx_worley3_q32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley3_q32::__lp_lpfn_worley3_q32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
-        BuiltinId::LpLpfxWorley3ValueF32 => {
+        BuiltinId::LpLpfnWorley3ValueF32 => {
             let p0 = params[0].unwrap_f32();
             let p1 = params[1].unwrap_f32();
             let p2 = params[2].unwrap_f32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley3_value_f32::__lp_lpfx_worley3_value_f32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley3_value_f32::__lp_lpfn_worley3_value_f32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
-        BuiltinId::LpLpfxWorley3ValueQ32 => {
+        BuiltinId::LpLpfnWorley3ValueQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let p2 = params[2].unwrap_i32();
             let p3 = params[3].unwrap_i32() as u32;
-            let r = lps_builtins::builtins::lpfx::generative::worley::worley3_value_q32::__lp_lpfx_worley3_value_q32(p0, p1, p2, p3);
+            let r = lps_builtins::builtins::lpfn::generative::worley::worley3_value_q32::__lp_lpfn_worley3_value_q32(p0, p1, p2, p3);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
@@ -979,6 +979,13 @@ pub(super) fn dispatch_native_builtin(
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let r = lps_builtins::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32(p0, p1);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFdivRecipQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::fdiv_recip_q32::__lp_lpir_fdiv_recip_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
@@ -1028,6 +1035,18 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFtoUnorm16Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_fto_unorm16_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtoUnorm8Q32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_fto_unorm8_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFtoiSatSQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32(p0);
@@ -1055,6 +1074,18 @@ pub(super) fn dispatch_native_builtin(
         BuiltinId::LpLpirItofUQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::itof_u_q32::__lp_lpir_itof_u_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirUnorm16ToFQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_unorm16_to_f_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirUnorm8ToFQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_unorm8_to_f_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
