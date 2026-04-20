@@ -1,5 +1,4 @@
 use crate::error::Error;
-use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
     MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
     generate_mapping_points,
@@ -11,8 +10,9 @@ use alloc::{boxed::Box, format, string::String, vec::Vec};
 use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
 use lp_shared::fs::fs_event::FsChange;
-use lps_q32::q32::ToQ32;
 use lps_shared::TextureStorageFormat;
+
+use super::channel_lut::ChannelLut;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
@@ -31,6 +31,10 @@ pub struct FixtureRuntime {
     brightness: u8,
     /// Enable gamma correction, defaults to true
     gamma_correction: bool,
+    /// Lazily built per-channel transform LUT. Invalidated when
+    /// brightness or gamma_correction changes; shed by
+    /// shed_optional_buffers.
+    channel_lut: Option<ChannelLut>,
 }
 
 impl FixtureRuntime {
@@ -53,6 +57,7 @@ impl FixtureRuntime {
             precomputed_mapping: None,
             brightness: 64,
             gamma_correction: true,
+            channel_lut: None,
         }
     }
 
@@ -298,30 +303,36 @@ impl NodeRuntime for FixtureRuntime {
         let mut lamp_colors = Vec::new();
         lamp_colors.resize((max_channel as usize + 1) * 3, 0);
 
-        let brightness = self.brightness.to_q32() / 255.to_q32();
         let frame_id = ctx.frame_id(); // Get frame_id before mutable borrows
+
+        // Build / fetch the per-fixture channel transform LUT. The LUT
+        // collapses brightness × to_u16_saturating × (optional gamma) into a
+        // single load. Invalidated by update_config when brightness or
+        // gamma_correction changes; shed by shed_optional_buffers.
+        let lut = self.channel_lut.get_or_insert_with(|| {
+            ChannelLut::build(self.brightness, self.gamma_correction)
+        });
 
         // Write sampled values to output buffer (16-bit)
         let universe = 0u32;
         let channel_offset = 0u32;
         for channel in 0..=max_channel as usize {
-            let r_q = ch_values_r[channel] * brightness;
-            let g_q = ch_values_g[channel] * brightness;
-            let b_q = ch_values_b[channel] * brightness;
+            let r = lut.lookup(ch_values_r[channel]);
+            let g = lut.lookup(ch_values_g[channel]);
+            let b = lut.lookup(ch_values_b[channel]);
 
-            let mut r = r_q.to_u16_saturating();
-            let mut g = g_q.to_u16_saturating();
-            let mut b = b_q.to_u16_saturating();
-
+            // lamp_colors stores the pre-gamma 8-bit byte for state extraction
+            // (matches current behaviour: high byte of the saturated u16 BEFORE
+            // gamma).
+            //
+            // CAREFUL: the LUT's u16 output is POST-gamma. To recover the
+            // pre-gamma byte we'd need a separate LUT — out of scope for this
+            // phase. For now, derive the lamp_colors byte from the LUT's u16
+            // output (post-gamma). This is a behaviour change and is documented
+            // in the commit message; see the "Behaviour change" note below.
             lamp_colors[channel * 3] = (r >> 8) as u8;
             lamp_colors[channel * 3 + 1] = (g >> 8) as u8;
             lamp_colors[channel * 3 + 2] = (b >> 8) as u8;
-
-            if self.gamma_correction {
-                r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-                g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-                b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-            }
 
             let start_ch = channel_offset + (channel as u32) * 3;
             let buffer = ctx.get_output(output_handle, universe, start_ch, 3)?;
@@ -341,6 +352,7 @@ impl NodeRuntime for FixtureRuntime {
         self.precomputed_mapping = None;
         self.mapping.clear();
         self.mapping.shrink_to_fit();
+        self.channel_lut = None;
         Ok(())
     }
 
@@ -380,8 +392,14 @@ impl NodeRuntime for FixtureRuntime {
         self.config = Some(fixture_config.clone());
         self.color_order = fixture_config.color_order;
         self.transform = fixture_config.transform;
-        self.brightness = fixture_config.brightness.unwrap_or(64);
-        self.gamma_correction = fixture_config.gamma_correction.unwrap_or(true);
+
+        let new_brightness = fixture_config.brightness.unwrap_or(64);
+        let new_gamma = fixture_config.gamma_correction.unwrap_or(true);
+        if new_brightness != self.brightness || new_gamma != self.gamma_correction {
+            self.channel_lut = None;
+        }
+        self.brightness = new_brightness;
+        self.gamma_correction = new_gamma;
 
         // Re-resolve handles if they changed
         if texture_changed {
@@ -436,6 +454,70 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lp_model::nodes::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
+
+    /// Parity check: `ChannelLut::lookup` matches the pre–phase-04 per-channel transform
+    /// evaluated at the **bin lower edge** for the saturated accumulator (same quantization
+    /// as `ChannelLut::build` / `lookup`).
+    #[test]
+    fn channel_lut_wiring_matches_old_per_channel_chain_sample() {
+        use crate::nodes::fixture::channel_lut::ChannelLut;
+        use crate::nodes::fixture::gamma::apply_gamma;
+        use lps_q32::q32::{Q32, ToQ32};
+
+        fn old_per_channel_transform(ch_q32: Q32, brightness: u8, gamma: bool) -> u16 {
+            let brightness_q = brightness.to_q32() / 255.to_q32();
+            let r_q = ch_q32 * brightness_q;
+            let mut r = r_q.to_u16_saturating();
+            if gamma {
+                r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
+            }
+            r
+        }
+
+        fn saturated_u32(ch: Q32) -> u32 {
+            let raw = ch.0;
+            if raw < 0 {
+                0
+            } else {
+                (raw as u32).min(Q32::ONE.0 as u32 - 1)
+            }
+        }
+
+        /// Lower Q32 edge of the 12-bit bin used by `ChannelLut::lookup` (mirrors `channel_lut::bin_to_q32`).
+        fn bin_lower_q32(sat: u32) -> Q32 {
+            let idx = (sat >> 4) as usize;
+            let raw = ((idx as i32) << 4).min(Q32::ONE.0 - 1);
+            Q32(raw)
+        }
+
+        for &brightness in &[0u8, 1, 64, 127, 255] {
+            for &gamma in &[false, true] {
+                let lut = ChannelLut::build(brightness, gamma);
+                for &raw in &[
+                    -1i32,
+                    0,
+                    1,
+                    1024,
+                    16_384,
+                    32_768,
+                    49_152,
+                    65_535,
+                    65_519,
+                    i32::MAX,
+                ] {
+                    let q = Q32(raw);
+                    let sat = saturated_u32(q);
+                    let expected =
+                        old_per_channel_transform(bin_lower_q32(sat), brightness, gamma);
+                    assert_eq!(
+                        lut.lookup(q),
+                        expected,
+                        "brightness={brightness} gamma={gamma} raw={raw}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_fixture_runtime_creation() {
