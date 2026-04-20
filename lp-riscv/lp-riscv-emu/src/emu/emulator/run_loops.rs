@@ -178,23 +178,16 @@ impl Riscv32Emulator {
                 e
             })?;
 
-            // Check if compressed instruction (bits [1:0] != 0b11)
-            let is_compressed = (inst_word & 0x3) != 0x3;
-
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
 
+            let pc = self.pc;
             // Execute using fast path (no logging)
-            let exec_result = decode_execute::<LoggingDisabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?;
-            self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
+            let exec_result =
+                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            self.after_execute(pc, &exec_result);
 
-            // Update PC (2 bytes for compressed, 4 for standard)
-            let pc_increment = if is_compressed { 2 } else { 4 };
+            let pc_increment = u32::from(exec_result.inst_size);
             self.pc = exec_result
                 .new_pc
                 .unwrap_or(self.pc.wrapping_add(pc_increment));
@@ -288,23 +281,16 @@ impl Riscv32Emulator {
                 e
             })?;
 
-            // Check if compressed instruction (bits [1:0] != 0b11)
-            let is_compressed = (inst_word & 0x3) != 0x3;
-
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
 
+            let pc = self.pc;
             // Execute using logging path
-            let exec_result = decode_execute::<LoggingEnabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?;
-            self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
+            let exec_result =
+                decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            self.after_execute(pc, &exec_result);
 
-            // Update PC (2 bytes for compressed, 4 for standard)
-            let pc_increment = if is_compressed { 2 } else { 4 };
+            let pc_increment = u32::from(exec_result.inst_size);
             self.pc = exec_result
                 .new_pc
                 .unwrap_or(self.pc.wrapping_add(pc_increment));
@@ -630,6 +616,12 @@ impl Riscv32Emulator {
     /// * `Ok(StepResult::FuelExhausted(count))` - Fuel exhausted (instructions executed)
     /// * `Err(EmulatorError)` - Error occurred (memory access violation, etc.)
     pub fn run_fuel(&mut self, fuel: u64) -> Result<StepResult, EmulatorError> {
+        #[cfg(feature = "std")]
+        {
+            if let Some(session) = self.profile_session.as_mut() {
+                session.start();
+            }
+        }
         self.run_inner(fuel)
     }
 
@@ -675,10 +667,8 @@ impl Riscv32Emulator {
                     unreachable!("run() should not return Continue");
                 }
                 StepResult::ProfileStop => {
-                    return Err(EmulatorError::InvalidInstruction {
+                    return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        instruction: 0,
-                        reason: String::from("Unexpected profile stop in run_until_ebreak"),
                         regs: self.regs,
                     });
                 }
@@ -729,10 +719,8 @@ impl Riscv32Emulator {
                     unreachable!("run() should not return Continue");
                 }
                 StepResult::ProfileStop => {
-                    return Err(EmulatorError::InvalidInstruction {
+                    return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        instruction: 0,
-                        reason: String::from("Unexpected profile stop in run_until_ecall"),
                         regs: self.regs,
                     });
                 }
@@ -802,10 +790,8 @@ impl Riscv32Emulator {
                     unreachable!("run() should not return Continue");
                 }
                 StepResult::ProfileStop => {
-                    return Err(EmulatorError::InvalidInstruction {
+                    return Err(EmulatorError::ProfileStopped {
                         pc: self.pc,
-                        instruction: 0,
-                        reason: String::from("Unexpected profile stop in run_until_yield"),
                         regs: self.regs,
                     });
                 }

@@ -1,5 +1,9 @@
 # Milestone 2: CPU Collector + Outputs
 
+**Status: landed** — see the implementation plan at
+[`docs/plans/2026-04-19-cpu-profile-m2-cpu-collector/`](../../plans/2026-04-19-cpu-profile-m2-cpu-collector/)
+(after closeout, the same tree is archived under `docs/plans-old/2026-04-19-cpu-profile-m2-cpu-collector/`).
+
 ## Goal
 
 Add per-function cycle attribution on top of m1's gate/event
@@ -389,3 +393,135 @@ Implementation order:
 11. Wire all of the above into `lp-cli/src/commands/profile/handler.rs`.
 12. End-to-end test against `examples/basic`. Inspect flame chart for
     plausibility.
+
+## Post-Landing: Measured Overhead & Follow-up Work
+
+### Measured per-instruction overhead (2026-04-19)
+
+Discovered while investigating slow integration tests on `examples/basic
+--mode startup`:
+
+| Run                          | Wall time      | Notes                          |
+| ---                          | ---            | ---                            |
+| `--collect alloc` (m1)       | ~176s, full    | Pre-m2 baseline.               |
+| `--collect cpu` (m2)         | >16min, killed | Reached the same ~90M-cycle progress checkpoint as alloc. |
+
+The cpu run was killed in-flight, so the lower bound on slowdown is
+**~5-6×** versus the alloc baseline — the true ratio is likely larger.
+Same workload, same `--mode startup` shutdown path, only the collector
+differs.
+
+### Where the overhead comes from
+
+For every executed RISC-V instruction with `--collect cpu`:
+
+1. `Riscv32Emulator::after_execute` performs an `Option::as_mut()` check
+   on `profile_session` and computes `target_pc` from
+   `ExecutionResult::new_pc`/`inst_size`.
+2. Virtual call into `ProfileSession::dispatch_instruction`, then
+   `Vec` iter + dyn-trait call into each `Collector::on_instruction`.
+3. `CpuCollector::on_instruction_inner` performs **a `HashMap<u32, _>`
+   lookup** (`SipHash`) to bump `func_stats[stat_pc].self_cycles`.
+   This is the dominant cost — ~30-50ns per instruction on its own.
+
+The HashMap-per-instruction lookup is the primary hotspot. Per-class
+`match` and shadow-stack push/pop on call/return are negligible by
+comparison.
+
+### Important: events- and alloc-only runs also regressed slightly
+
+Even when only `events` or `alloc` collectors are registered,
+`dispatch_instruction` is now called per instruction. Their default
+`on_instruction` is a no-op, but the `Option` check, `target_pc`
+compute, vec iter, and per-collector dyn-call are still paid. Spot-check
+`profile_events_steady_render_smoke` runtime if regressions matter for
+m1 use cases.
+
+When **no** collector is enabled, `profile_session` is `None` and
+`after_execute` short-circuits at the `Option` check — zero overhead.
+
+### Acceptable for now
+
+- Callgrind itself slows programs by 50-100×; a ~5-10× cost for full
+  per-PC attribution is in line with prior art.
+- Default `--mode startup` workloads complete inside a single test
+  timeout window; CI cost is finite and manageable.
+- The per-instruction work is the same architecture every cycle-level
+  profiler uses (per-PC accumulator behind a per-instruction dispatch).
+
+### Follow-up optimization ideas (defer until measured pain)
+
+The natural place to revisit these is when adding the second wave of
+collectors (already noted under "Run loop tech debt" in
+[overview.md → Risks](./overview.md#risks)) or if cpu profile turn-around
+becomes a developer-experience problem.
+
+1. **Replace `HashMap<u32, FuncStats>` with `Vec<FuncStats>` indexed by
+   symbol-id.** Resolve PC → symbol-id once on `push_frame` (or lazily
+   per-PC with a small LRU), then use array indexing on the hot path.
+   Estimated 3-5× speedup on the cpu hot path; this is the single
+   biggest win.
+2. **Hoist a `cpu_active: bool` (or per-collector mask) onto
+   `ProfileSession`** so events-only / alloc-only modes skip the inner
+   `dispatch_instruction` loop entirely. Restores the m1 baseline for
+   non-cpu collectors.
+3. **Specialize the run loop** with a dedicated `run_with_profile`
+   variant so the `Option` check happens once per loop iteration, not
+   per instruction. Aligns with the JIT trampoline pattern already in
+   use for the fast/logging split.
+4. **Bucket call-site PCs to function-entry PCs cheaper than `Symbolizer`
+   does today.** `PcSymbolizer::entry_lo_for_pc` is currently a
+   per-instruction call when reporting; this could be a once-per-frame
+   computation if symbol ranges are precomputed into a sorted `Vec`.
+
+None of these are blockers for m3 (diff) or m4 (hardware correlation).
+Reassess once we have the second-wave collectors (`cpu-log`, `syscalls`,
+`ir-stats`) on the table or once `examples/basic --collect cpu`
+turn-around becomes a dev-loop bottleneck.
+
+### Test-infrastructure follow-up (action item)
+
+The current end-to-end coverage in `lp-cli/tests/profile_cpu_smoke.rs`
+boots the **full fw-emu stack** (cargo build + JIT compile + project
+load + first-frame render + clean shutdown) three times in series.
+Combined with the m2 per-instruction overhead above, each test takes
+several minutes; the file as a whole gates the lp-cli test suite at
+~10-15 min. This is the wrong shape for mainline CI.
+
+**Decision (2026-04-19):** mainline tests for the cpu collector must
+**not** boot fw-emu. Specialized end-to-end tests can exist, but they
+must be isolated (e.g. `#[ignore]`-gated, run one at a time on demand
+or in a separate nightly job).
+
+What to do instead — exact prior art exists in
+`lp-riscv-emu/tests/abi_tests.rs`, `stack_args_tests.rs`,
+`guest_app_tests.rs`, `trap_tests.rs`:
+
+- Compile a **tiny synthetic RV32 program** with cranelift (the helpers
+  in `abi_tests.rs::compile_function` are already the template) with a
+  known call structure (e.g. `main → foo → bar → ret`, plus a tail
+  call and a recursion case).
+- Run through `Riscv32Emulator` directly, with a `ProfileSession`
+  carrying a `CpuCollector` (force-enabled or driven by a synthetic
+  `profile:start` event — no `--mode startup` machinery needed).
+- Assert against `CpuCollector` internals: `func_stats[foo_pc]`,
+  `call_edges[(main_pc, foo_pc)]`, `inclusive_cycles` arithmetic.
+  These tests run in milliseconds.
+
+What stays as `#[ignore]`-gated end-to-end:
+
+- The current `profile_cpu_smoke.rs` trio (`profile_cpu_default_smoke`,
+  `profile_cpu_uniform_model`, `profile_cpu_with_alloc`) — useful for
+  pre-release validation that the full stack still produces a parseable
+  trace dir, but not for every `cargo test`. Mark `#[ignore]` and
+  document the `cargo test -- --ignored --test-threads=1` invocation
+  near the test module.
+
+Out of scope for the m2 follow-up but worth flagging:
+
+- The same "don't boot fw-emu in mainline tests" principle should also
+  apply to **events** and **alloc** smoke tests
+  (`profile_alloc_smoke`, `profile_events_steady_render_smoke`). They
+  predate this decision and were tolerable at one collector each, but
+  they're now ~3-min each in serial. Consider porting them to the
+  small-program harness too as part of m6 cleanup.

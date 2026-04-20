@@ -1,3 +1,14 @@
+//! Slow integration tests that boot the full `fw-emu` firmware stack.
+//!
+//! These are gated behind `#[ignore]` because they take minutes per test
+//! once per-instruction CPU profiling is enabled, which made `cargo test`
+//! mainline runs unbearable. Run explicitly with:
+//!
+//!     cargo test -p fw-tests --test profile_alloc_emu -- --include-ignored
+//!
+//! See docs/roadmaps/2026-04-19-cpu-profile/m6-validation-docs.md for the
+//! testing-strategy decision recorded 2026-04-19.
+//!
 //! Integration test: verify allocation profiling produces valid output.
 
 use std::cell::RefCell;
@@ -28,6 +39,7 @@ const HEAP_SIZE: u32 = 256 * 1024;
 
 #[tokio::test]
 #[test_log::test]
+#[ignore = "boots fw-emu; slow with profile feature — run explicitly with `cargo test -- --ignored` or `--include-ignored`"]
 async fn test_profile_alloc_produces_valid_output() {
     log::info!("Building fw-emu with profile...");
     let fw_emu_path = ensure_binary_built(
@@ -53,6 +65,7 @@ async fn test_profile_alloc_produces_valid_output() {
         note: None,
         clock_source: "emu_estimated",
         mode: "steady-render".into(),
+        cycle_model: "esp32c6".into(),
         max_cycles: u64::MAX,
         cycles_used: 0,
         terminated_by: "running".into(),

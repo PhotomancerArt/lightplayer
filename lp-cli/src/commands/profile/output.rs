@@ -17,6 +17,7 @@ pub fn build_initial_metadata(
     symbols: Vec<lp_riscv_emu::profile::TraceSymbol>,
     mode: ProfileMode,
     max_cycles: u64,
+    cycle_model: String,
 ) -> SessionMetadata {
     SessionMetadata {
         schema_version: 1,
@@ -26,6 +27,7 @@ pub fn build_initial_metadata(
         note,
         clock_source: "emu_estimated",
         mode: mode.slug().to_string(),
+        cycle_model,
         max_cycles,
         // Placeholders; rewritten via update_metadata_finish() after run.
         cycles_used: 0,

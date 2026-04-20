@@ -14,6 +14,9 @@ impl StartupGate {
 
 impl Gate for StartupGate {
     fn on_event(&mut self, evt: &PerfEvent) -> GateAction {
+        if evt.name == lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START {
+            return GateAction::Enable;
+        }
         if evt.name == EVENT_FRAME && evt.kind == PerfEventKind::End {
             if self.first_frame_ended {
                 return GateAction::NoChange;
@@ -32,7 +35,7 @@ impl Gate for StartupGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_riscv_emu::profile::PerfEvent;
+    use lp_riscv_emu::profile::{PerfEvent, PerfEventKind};
 
     #[test]
     fn stops_on_first_frame_end() {
@@ -43,5 +46,16 @@ mod tests {
             kind: PerfEventKind::End,
         };
         assert_eq!(g.on_event(&frame_end), GateAction::Stop);
+    }
+
+    #[test]
+    fn enables_on_profile_start() {
+        let mut g = StartupGate::new();
+        let evt = PerfEvent {
+            cycle: 0,
+            name: lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START,
+            kind: PerfEventKind::Instant,
+        };
+        assert_eq!(g.on_event(&evt), GateAction::Enable);
     }
 }

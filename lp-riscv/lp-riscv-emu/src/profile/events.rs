@@ -1,5 +1,6 @@
 //! JSONL perf event sink (`events.jsonl`).
 
+use std::any::Any;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -33,6 +34,14 @@ impl EventsCollector {
 }
 
 impl Collector for EventsCollector {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "events"
     }

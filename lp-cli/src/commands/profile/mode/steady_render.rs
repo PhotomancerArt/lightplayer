@@ -137,4 +137,15 @@ mod tests {
             GateAction::NoChange
         );
     }
+
+    #[test]
+    fn does_not_enable_on_profile_start() {
+        let mut g = SteadyRenderGate::new();
+        let evt = PerfEvent {
+            cycle: 0,
+            name: lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START,
+            kind: PerfEventKind::Instant,
+        };
+        assert_eq!(g.on_event(&evt), GateAction::NoChange);
+    }
 }

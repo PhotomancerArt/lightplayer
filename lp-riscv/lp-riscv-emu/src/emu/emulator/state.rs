@@ -2,7 +2,9 @@
 
 extern crate alloc;
 
-use super::super::{cycle_model::CycleModel, logging::LogLevel, memory::Memory};
+use super::super::{
+    cycle_model::CycleModel, executor::ExecutionResult, logging::LogLevel, memory::Memory,
+};
 use crate::serial::host_serial::HostSerial;
 use crate::time::TimeMode;
 #[cfg(feature = "std")]
@@ -157,6 +159,11 @@ impl Riscv32Emulator {
         self
     }
 
+    pub fn with_cycle_model(mut self, model: CycleModel) -> Self {
+        self.cycle_model = model;
+        self
+    }
+
     /// Allow misaligned memory access (matches embedded targets like ESP32).
     pub fn with_allow_unaligned_access(mut self, allow: bool) -> Self {
         self.memory.set_allow_unaligned_access(allow);
@@ -176,13 +183,25 @@ impl Riscv32Emulator {
         Ok(self)
     }
 
+    /// Take the active profiling session after emitting `profile:end` at the current cycle.
+    ///
+    /// The emulator's session slot is cleared. Call [`crate::profile::ProfileSession::finish`] or
+    /// [`crate::profile::ProfileSession::finish_with_symbolizer`] on the returned value to flush
+    /// collectors and write `report.txt`.
+    #[cfg(feature = "std")]
+    pub fn take_profile_session(&mut self) -> Option<ProfileSession> {
+        let mut session = self.profile_session.take()?;
+        session.end(self.cycle_count);
+        Some(session)
+    }
+
     /// Finish the profiling session (flush collectors, write `report.txt`).
     ///
     /// Returns per-collector event counts in session order.
     #[cfg(feature = "std")]
     pub fn finish_profile_session(&mut self) -> std::io::Result<Vec<(String, u64)>> {
-        match self.profile_session.as_mut() {
-            Some(s) => s.finish(),
+        match self.take_profile_session() {
+            Some(mut s) => s.finish(),
             None => Ok(Vec::new()),
         }
     }
@@ -204,6 +223,25 @@ impl Riscv32Emulator {
     /// Guest steps accumulated with the active [`CycleModel`] (see [`Self::cycle_model`]).
     pub fn get_cycle_count(&self) -> u64 {
         self.cycle_count
+    }
+
+    /// Post-`decode_execute` cycle accounting (shared by run loops and single-step execution).
+    #[inline(always)]
+    pub(super) fn after_execute(&mut self, pc: u32, exec_result: &ExecutionResult) {
+        let class = exec_result.class;
+        let cost = self.cycle_model.cycles_for(class);
+        self.cycle_count += cost as u64;
+        #[cfg(feature = "std")]
+        {
+            if let Some(profile) = self.profile_session.as_mut() {
+                let target_pc = exec_result
+                    .new_pc
+                    .unwrap_or(pc.wrapping_add(exec_result.inst_size as u32));
+                profile.dispatch_instruction(pc, target_pc, class, cost as u32);
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        let _ = pc;
     }
 
     pub fn cycle_model(&self) -> CycleModel {

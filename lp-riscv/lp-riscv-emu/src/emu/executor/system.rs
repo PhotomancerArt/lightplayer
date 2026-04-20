@@ -99,6 +99,7 @@ fn execute_ecall<M: LoggingMode>(
         should_halt: false,
         syscall: true,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -123,6 +124,7 @@ fn execute_ebreak<M: LoggingMode>(
         should_halt: true,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -169,6 +171,7 @@ fn execute_fence<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Fence,
+        inst_size: 4,
         log,
     })
 }
@@ -194,6 +197,7 @@ fn execute_fence_i<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Fence,
+        inst_size: 4,
         log,
     })
 }
@@ -229,6 +233,7 @@ fn execute_csrrw<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -263,6 +268,7 @@ fn execute_csrrs<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -297,6 +303,7 @@ fn execute_csrrc<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -331,6 +338,7 @@ fn execute_csrrwi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -365,6 +373,7 @@ fn execute_csrrsi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }
@@ -399,6 +408,7 @@ fn execute_csrrci<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::System,
+        inst_size: 4,
         log,
     })
 }

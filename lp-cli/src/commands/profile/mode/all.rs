@@ -10,7 +10,10 @@ impl AllGate {
 }
 
 impl Gate for AllGate {
-    fn on_event(&mut self, _evt: &PerfEvent) -> GateAction {
+    fn on_event(&mut self, evt: &PerfEvent) -> GateAction {
+        if evt.name == lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START {
+            return GateAction::Enable;
+        }
         GateAction::NoChange
     }
 
@@ -53,5 +56,16 @@ mod tests {
         for evt in &events {
             assert_eq!(g.on_event(evt), GateAction::NoChange);
         }
+    }
+
+    #[test]
+    fn enables_on_profile_start() {
+        let mut g = AllGate::new();
+        let evt = PerfEvent {
+            cycle: 0,
+            name: lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START,
+            kind: PerfEventKind::Instant,
+        };
+        assert_eq!(g.on_event(&evt), GateAction::Enable);
     }
 }

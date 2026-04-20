@@ -4,7 +4,19 @@ pub const MAX_EVENT_NAME_LEN: usize = 64;
 
 pub const EVENT_FRAME: &str = "frame";
 
-pub static KNOWN_EVENT_NAMES: &[&str] = &["frame", "shader-compile", "shader-link", "project-load"];
+/// Host-only synthetic marker: session began (see [`crate::profile::ProfileSession::start`]).
+pub const EVENT_PROFILE_START: &str = "profile:start";
+/// Host-only synthetic marker: session ended (see [`crate::profile::ProfileSession::end`]).
+pub const EVENT_PROFILE_END: &str = "profile:end";
+
+pub static KNOWN_EVENT_NAMES: &[&str] = &[
+    "frame",
+    "shader-compile",
+    "shader-link",
+    "project-load",
+    "profile:start",
+    "profile:end",
+];
 
 /// Linear scan over [`KNOWN_EVENT_NAMES`]; returns the static slice on hit.
 pub fn intern_known_name(s: &str) -> Option<&'static str> {
@@ -74,5 +86,15 @@ mod tests {
         assert_eq!(s, EVENT_FRAME);
         assert_eq!(s, "frame");
         assert!(intern_known_name("xyz").is_none());
+    }
+
+    #[test]
+    fn intern_known_name_profile_markers_round_trip() {
+        use super::{EVENT_PROFILE_END, EVENT_PROFILE_START};
+
+        let s = intern_known_name("profile:start").expect("profile:start is known");
+        assert_eq!(s, EVENT_PROFILE_START);
+        let e = intern_known_name("profile:end").expect("profile:end is known");
+        assert_eq!(e, EVENT_PROFILE_END);
     }
 }

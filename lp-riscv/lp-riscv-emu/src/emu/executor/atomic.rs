@@ -113,6 +113,7 @@ fn execute_lr_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }
@@ -186,6 +187,7 @@ fn execute_sc_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }
@@ -277,6 +279,7 @@ fn execute_amoswap_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }
@@ -369,6 +372,7 @@ fn execute_amoadd_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }
@@ -461,6 +465,7 @@ fn execute_amoxor_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }
@@ -553,6 +558,7 @@ fn execute_amoand_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }
@@ -645,6 +651,7 @@ fn execute_amoor_w<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Atomic,
+        inst_size: 4,
         log,
     })
 }

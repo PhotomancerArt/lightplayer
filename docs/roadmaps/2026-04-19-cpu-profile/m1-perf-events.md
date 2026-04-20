@@ -1,5 +1,8 @@
 # Milestone 1: Perf-Event System + ProfileMode
 
+**Post-m2 note:** `lp-cli`'s default `--collect` value is now `cpu` (m2).
+Use `--collect events` explicitly for an events-only trace.
+
 ## Goal
 
 Establish the perf-event infrastructure that gates every collector from
@@ -139,8 +142,9 @@ steady-state render. No CPU attribution yet — that's m2.
 
   ```
   lp-cli profile [DIR=examples/basic]
-                 [--collect events]                       # default; cpu/alloc still valid
+                 [--collect cpu,events,alloc]              # default: cpu (m2+); m1 shipped with events as default
                  [--mode {steady-render,compile,startup,all}=steady-render]
+                 [--cycle-model {esp32c6,uniform}=esp32c6] # m2+
                  [--note STR]
                  [--max-cycles N=200_000_000]             # safety cap
   ```

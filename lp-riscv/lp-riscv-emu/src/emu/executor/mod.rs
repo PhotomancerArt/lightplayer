@@ -37,6 +37,8 @@ pub struct ExecutionResult {
     pub syscall: bool,
     /// Cost class for the active [`crate::emu::CycleModel`].
     pub class: InstClass,
+    /// Instruction width in bytes: `2` for compressed (RVC), `4` for 32-bit.
+    pub inst_size: u8,
     /// Log entry for this instruction (None if logging is disabled)
     pub log: Option<InstLog>,
 }

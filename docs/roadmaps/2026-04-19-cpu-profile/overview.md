@@ -173,7 +173,15 @@ microarchitecture.
 - **Run loop tech debt**: per-instruction inline `Option<&mut
   Collector>` checks scale poorly past ~3 collectors. Acknowledged as
   deferred; revisit when the second wave of collectors arrives, not
-  now.
+  now. **Update (post-m2):** measured. `--collect cpu` runs `examples/basic
+  --mode startup` at ≥5-6× the wall time of the m1 alloc baseline on
+  the same workload; the dominant cost is `HashMap<u32, FuncStats>`
+  lookup per instruction in `CpuCollector::on_instruction_inner`.
+  Events-/alloc-only runs also pay a small per-instruction dispatch
+  cost (vec iter + dyn-call) that didn't exist in m1. Concrete
+  optimization options (per-symbol-id `Vec`, `cpu_active` short-circuit,
+  specialized profile-on run loop) are written up under
+  [m2 → Post-Landing: Measured Overhead](./m2-cpu-collector.md#post-landing-measured-overhead--follow-up-work).
 - **JIT symbol staleness during hot-reload**: m4 ships only `LOAD`
   (not `_UNLOAD`). If hot-reload lands before `_UNLOAD` is
   implemented, stale symbols could shadow new modules. Mitigated by
@@ -195,9 +203,10 @@ microarchitecture.
   initial event emission points (`frame`, `shader-compile`,
   `shader-link`, `project-load`). `SYSCALL_PERF_EVENT`.
   `EventsCollector` writes `events.jsonl`. `ProfileMode` enum + state
-  machines, `--mode` flag. Standalone deliverable: `lp-cli profile
+  machines, `--mode` flag. Standalone deliverable (m1): `lp-cli profile
   --collect events --mode steady-render` produces a perf-event
-  timeline. Prerequisite for both m2 (CPU) and m4 (Hardware).
+  timeline (`--collect events` is explicit today; the CLI default is
+  `cpu` as of m2). Prerequisite for both m2 (CPU) and m4 (Hardware).
 - **[m2 — CPU collector + outputs](./m2-cpu-collector.md).**
   `InstClass` extension with call/return-aware variants. `CpuCollector`
   (shadow stack + callgrind data model). Per-instruction hot-path

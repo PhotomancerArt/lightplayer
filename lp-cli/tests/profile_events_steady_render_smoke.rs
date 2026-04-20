@@ -1,3 +1,14 @@
+//! Slow integration tests that boot the full `fw-emu` firmware stack (via `lp-cli profile`).
+//!
+//! These are gated behind `#[ignore]` because they take minutes per test
+//! once per-instruction CPU profiling is enabled, which made `cargo test`
+//! mainline runs unbearable. Run explicitly with:
+//!
+//!     cargo test -p lp-cli --test profile_events_steady_render_smoke -- --include-ignored
+//!
+//! See docs/roadmaps/2026-04-19-cpu-profile/m6-validation-docs.md for the
+//! testing-strategy decision recorded 2026-04-19.
+//!
 //! Smoke test: `lp-cli profile --collect events --mode startup` end-to-end against
 //! `examples/basic`. Uses startup mode so the profile gate stops after the first
 //! frame completes (fast, like `profile_alloc_smoke`). Verifies `events.jsonl` and
@@ -7,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
+#[ignore = "boots fw-emu; slow with profile feature — run explicitly with `cargo test -- --ignored` or `--include-ignored`"]
 fn lp_cli_profile_events_startup_smoke() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

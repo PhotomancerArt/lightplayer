@@ -91,11 +91,17 @@ fn execute_jal<M: LoggingMode>(
     } else {
         None
     };
+    let class = if rd.num() == 0 {
+        InstClass::JalTail
+    } else {
+        InstClass::JalCall
+    };
     Ok(ExecutionResult {
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
-        class: InstClass::Jal,
+        class,
+        inst_size: 4,
         log,
     })
 }
@@ -133,11 +139,19 @@ fn execute_jalr<M: LoggingMode>(
     } else {
         None
     };
+    let class = if rd.num() != 0 {
+        InstClass::JalrCall
+    } else if rs1.num() == 1 && imm == 0 {
+        InstClass::JalrReturn
+    } else {
+        InstClass::JalrIndirect
+    };
     Ok(ExecutionResult {
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
-        class: InstClass::Jalr,
+        class,
+        inst_size: 4,
         log,
     })
 }
@@ -180,6 +194,7 @@ fn execute_lui<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Lui,
+        inst_size: 4,
         log,
     })
 }
@@ -217,6 +232,7 @@ fn execute_auipc<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Auipc,
+        inst_size: 4,
         log,
     })
 }
@@ -227,7 +243,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::emu::executor::LoggingDisabled;
+    use crate::emu::executor::{InstClass, LoggingDisabled};
     use crate::emu::memory::Memory;
     use lp_riscv_inst::{Gpr, encode};
 
@@ -242,7 +258,79 @@ mod tests {
 
         assert_eq!(regs[1], 4); // PC + 4
         assert_eq!(result.new_pc, Some(8));
+        assert_eq!(result.class, InstClass::JalCall);
+        assert_eq!(result.inst_size, 4);
         assert!(result.log.is_none());
+    }
+
+    #[test]
+    fn classifies_jal_call_when_rd_nonzero() {
+        let mut regs = [0i32; 32];
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+        let inst = 0x0080_00ef;
+        let result =
+            decode_execute_jal::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+        assert_eq!(result.class, InstClass::JalCall);
+        assert_eq!(result.inst_size, 4);
+    }
+
+    #[test]
+    fn classifies_jal_tail_when_rd_zero() {
+        let mut regs = [0i32; 32];
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+        let inst = 0x0080_006f;
+        let result =
+            decode_execute_jal::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+        assert_eq!(result.class, InstClass::JalTail);
+        assert_eq!(result.inst_size, 4);
+    }
+
+    #[test]
+    fn classifies_jalr_call_when_rd_nonzero() {
+        let mut regs = [0i32; 32];
+        regs[6] = 0x2000;
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+        let inst = encode::jalr(Gpr::new(5), Gpr::new(6), 0);
+        let result =
+            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+        assert_eq!(result.class, InstClass::JalrCall);
+        assert_eq!(result.inst_size, 4);
+    }
+
+    #[test]
+    fn classifies_jalr_return_for_canonical_ret() {
+        let mut regs = [0i32; 32];
+        regs[1] = 0x3000;
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+        let inst = 0x0000_8067;
+        let result =
+            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+        assert_eq!(result.class, InstClass::JalrReturn);
+        assert_eq!(result.inst_size, 4);
+    }
+
+    #[test]
+    fn classifies_jalr_indirect_otherwise() {
+        let mut regs = [0i32; 32];
+        regs[5] = 0x4000;
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+        let inst = 0x0002_8067;
+        let result =
+            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+        assert_eq!(result.class, InstClass::JalrIndirect);
+        assert_eq!(result.inst_size, 4);
+    }
+
+    #[test]
+    fn classifies_jalr_indirect_when_rs1_is_ra_but_imm_nonzero() {
+        let mut regs = [0i32; 32];
+        regs[1] = 0x5000;
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+        let inst = 0x0040_8067;
+        let result =
+            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+        assert_eq!(result.class, InstClass::JalrIndirect);
+        assert_eq!(result.inst_size, 4);
     }
 
     #[test]

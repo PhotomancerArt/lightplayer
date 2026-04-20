@@ -390,6 +390,7 @@ fn execute_c_addi4spn<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -457,6 +458,7 @@ fn execute_c_lw<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 2,
         log,
     })
 }
@@ -524,6 +526,7 @@ fn execute_c_sw<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Store,
+        inst_size: 2,
         log,
     })
 }
@@ -563,6 +566,7 @@ fn execute_c_addi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -593,6 +597,7 @@ fn execute_c_nop<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -625,7 +630,8 @@ fn execute_c_jal<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
-        class: InstClass::Jal,
+        class: InstClass::JalCall,
+        inst_size: 2,
         log,
     })
 }
@@ -663,6 +669,7 @@ fn execute_c_li<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -699,6 +706,7 @@ fn execute_c_addi16sp<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -734,6 +742,7 @@ fn execute_c_lui<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Lui,
+        inst_size: 2,
         log,
     })
 }
@@ -774,6 +783,7 @@ fn execute_c_srli<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -814,6 +824,7 @@ fn execute_c_srai<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -853,6 +864,7 @@ fn execute_c_andi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -893,6 +905,7 @@ fn execute_c_sub<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -933,6 +946,7 @@ fn execute_c_xor<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -973,6 +987,7 @@ fn execute_c_or<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -1013,6 +1028,7 @@ fn execute_c_and<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -1043,7 +1059,8 @@ fn execute_c_j<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
-        class: InstClass::Jal,
+        class: InstClass::JalTail,
+        inst_size: 2,
         log,
     })
 }
@@ -1089,6 +1106,7 @@ fn execute_c_beqz<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 2,
         log,
     })
 }
@@ -1134,6 +1152,7 @@ fn execute_c_bnez<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 2,
         log,
     })
 }
@@ -1174,6 +1193,7 @@ fn execute_c_slli<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -1240,6 +1260,7 @@ fn execute_c_lwsp<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 2,
         log,
     })
 }
@@ -1267,11 +1288,17 @@ fn execute_c_jr<M: LoggingMode>(
         None
     };
 
+    let class = if rs.num() == 1 {
+        InstClass::JalrReturn
+    } else {
+        InstClass::JalrIndirect
+    };
     Ok(ExecutionResult {
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
-        class: InstClass::Jalr,
+        class,
+        inst_size: 2,
         log,
     })
 }
@@ -1310,6 +1337,7 @@ fn execute_c_mv<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -1343,7 +1371,8 @@ fn execute_c_jalr<M: LoggingMode>(
         new_pc: Some(target),
         should_halt: false,
         syscall: false,
-        class: InstClass::Jalr,
+        class: InstClass::JalrCall,
+        inst_size: 2,
         log,
     })
 }
@@ -1384,6 +1413,7 @@ fn execute_c_add<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 2,
         log,
     })
 }
@@ -1450,6 +1480,7 @@ fn execute_c_swsp<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Store,
+        inst_size: 2,
         log,
     })
 }
@@ -1476,6 +1507,7 @@ fn execute_c_ebreak<M: LoggingMode>(
         should_halt: true,
         syscall: false,
         class: InstClass::System,
+        inst_size: 2,
         log,
     })
 }
@@ -1535,7 +1567,7 @@ mod tests {
     use crate::emu::memory::Memory;
     use alloc::vec;
 
-    use super::super::{LoggingDisabled, LoggingEnabled};
+    use super::super::{InstClass, LoggingDisabled, LoggingEnabled};
 
     #[test]
     fn test_c_addi() {
@@ -1649,5 +1681,139 @@ mod tests {
 
         assert_eq!(regs[10], 10);
         assert!(result.log.is_none()); // Fast path has no logging
+    }
+
+    #[test]
+    fn classifies_c_j_as_jal_tail() {
+        let mut regs = [0i32; 32];
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0xa011u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::JalTail);
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn classifies_c_jal_as_jal_call() {
+        let mut regs = [0i32; 32];
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        // Same CJ offset layout as `c.j +8` in `0xa011`, but `funct3` = `001` (`C.JAL`).
+        let inst = (0xa011 & !(0x7u16 << 13)) | (0b001u16 << 13);
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::JalCall);
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn classifies_c_jr_ra_as_jalr_return() {
+        let mut regs = [0i32; 32];
+        regs[1] = 0x2000;
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0x8082u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::JalrReturn);
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn classifies_c_jr_other_as_jalr_indirect() {
+        let mut regs = [0i32; 32];
+        regs[5] = 0x3000;
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0x8282u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::JalrIndirect);
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn classifies_c_jalr_as_jalr_call() {
+        let mut regs = [0i32; 32];
+        regs[5] = 0x4000;
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0x9282u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::JalrCall);
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn classifies_c_jalr_ra_as_jalr_call() {
+        let mut regs = [0i32; 32];
+        regs[1] = 0x5000;
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0x9082u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::JalrCall);
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn compressed_c_beqz_has_inst_size_two() {
+        let mut regs = [0i32; 32];
+        regs[8] = 0;
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0xc001u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.inst_size, 2);
+    }
+
+    #[test]
+    fn compressed_c_addi_has_inst_size_two() {
+        let mut regs = [0i32; 32];
+        regs[10] = 5;
+        let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
+        let inst = 0x0515u16;
+        let result = decode_execute_compressed::<LoggingDisabled>(
+            inst as u32,
+            0x1000,
+            &mut regs,
+            &mut memory,
+        )
+        .unwrap();
+        assert_eq!(result.class, InstClass::Alu);
+        assert_eq!(result.inst_size, 2);
     }
 }

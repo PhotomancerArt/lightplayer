@@ -1,5 +1,15 @@
-//! Smoke test: `lp-cli profile --collect alloc` produces a valid trace directory.
+//! Slow integration tests that boot the full `fw-emu` firmware stack (via `lp-cli profile`).
 //!
+//! These are gated behind `#[ignore]` because they take minutes per test
+//! once per-instruction CPU profiling is enabled, which made `cargo test`
+//! mainline runs unbearable. Run explicitly with:
+//!
+//!     cargo test -p lp-cli --test profile_alloc_smoke -- --include-ignored
+//!
+//! See docs/roadmaps/2026-04-19-cpu-profile/m6-validation-docs.md for the
+//! testing-strategy decision recorded 2026-04-19.
+//!
+//! Smoke test: `lp-cli profile --collect alloc` produces a valid trace directory.
 //! The subprocess must run with the repository workspace as `current_dir` so
 //! `ensure_binary_built` can locate the workspace root. Output is isolated by a
 //! unique `--note` and removed after assertions.
@@ -8,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
+#[ignore = "boots fw-emu; slow with profile feature — run explicitly with `cargo test -- --ignored` or `--include-ignored`"]
 fn profile_alloc_smoke() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

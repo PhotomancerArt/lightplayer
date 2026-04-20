@@ -16,6 +16,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use super::{Collector, EmuCtx, FinishCtx, HaltReason, SyscallAction};
+use std::any::Any;
 
 /// A single allocation event, serialized as one JSON line in `heap-trace.jsonl`.
 #[derive(Debug, Serialize)]
@@ -73,6 +74,14 @@ impl AllocCollector {
 }
 
 impl Collector for AllocCollector {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn name(&self) -> &'static str {
         "alloc"
     }

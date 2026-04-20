@@ -82,24 +82,17 @@ impl Riscv32Emulator {
         };
 
         // Execute instruction using new executor
+        let pc = self.pc;
         let exec_result = match self.log_level {
-            LogLevel::None => decode_execute::<LoggingDisabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?,
-            _ => decode_execute::<LoggingEnabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?,
+            LogLevel::None => {
+                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?
+            }
+            _ => decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?,
         };
-        self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
+        self.after_execute(pc, &exec_result);
 
-        // Update PC (2 bytes for compressed, 4 for standard)
-        let pc_increment = if is_compressed { 2 } else { 4 };
+        // Fall-through PC step matches the decoded instruction width (2 or 4 bytes).
+        let pc_increment = u32::from(exec_result.inst_size);
         self.pc = exec_result
             .new_pc
             .unwrap_or(self.pc.wrapping_add(pc_increment));

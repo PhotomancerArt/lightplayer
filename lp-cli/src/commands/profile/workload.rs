@@ -77,7 +77,10 @@ pub async fn run_workload(
             FrameOutcome::Yielded => continue,
             FrameOutcome::ProfileStop => {
                 eprintln!();
-                try_stop_projects(client).await;
+                // Don't bother with stopAllProjects: the profile gate has
+                // halted the emulator's run loop, so any further RPC will
+                // just trigger an EmulatorError::ProfileStopped during
+                // teardown. The trace data we want is already collected.
                 return Ok(WorkloadOutcome::ProfileStopped);
             }
             FrameOutcome::Halted(reason) => {

@@ -64,6 +64,21 @@ feature is production infrastructure."
     to `feature = "profile"`.
   - The old `lp-riscv-emu/src/alloc_trace.rs` module if not
     fully removed in m0.
+  - **Mainline tests that boot fw-emu** (decision recorded
+    2026-04-19; see [m2 → Test-infrastructure follow-up](./m2-cpu-collector.md#test-infrastructure-follow-up-action-item)).
+    Concrete targets:
+    - `lp-cli/tests/profile_cpu_smoke.rs` (3 tests, ~10-15 min serial) →
+      mark `#[ignore]` and document the on-demand invocation.
+    - `lp-cli/tests/profile_alloc_smoke.rs` (~3 min) → same treatment.
+    - `lp-cli/tests/profile_events_steady_render_smoke.rs` → same
+      treatment.
+    Replace the lost mainline coverage with small-program tests in
+    `lp-riscv-emu/tests/` modeled on `abi_tests.rs` /
+    `guest_app_tests.rs`: tiny cranelift-compiled RV32 fixtures with
+    known call structures, run directly through `Riscv32Emulator` +
+    `ProfileSession`, asserting against `CpuCollector` / `EventsCollector`
+    / `AllocCollector` internals. These run in milliseconds and stay in
+    the default `cargo test` path.
 
 - **Documentation home: `docs/design/native/fw-profile/`.**
   New directory with the following files:
@@ -160,6 +175,14 @@ feature is production infrastructure."
   in the heat of building each milestone; doing it last as a
   dedicated activity catches what would otherwise become
   permanent cruft.
+
+- **No mainline tests boot fw-emu.** Mainline coverage for collectors
+  exercises `Riscv32Emulator` + `ProfileSession` directly against tiny
+  cranelift-compiled fixtures (the `abi_tests.rs` pattern) — no project
+  load, no JIT shader compile, no driven frames. End-to-end tests that
+  do boot fw-emu are valuable for pre-release validation but live behind
+  `#[ignore]` and run one at a time. Decided 2026-04-19 after the m2
+  smoke tests turned `cargo test -p lp-cli` into a 15+ minute loop.
 
 ## Deliverables
 

@@ -27,6 +27,8 @@ pub mod time;
 #[cfg(feature = "std")]
 pub mod profile;
 #[cfg(feature = "std")]
+pub use profile::{CpuCollector, PcSymbolizer};
+#[cfg(feature = "std")]
 pub mod test_util;
 
 // Re-exports for convenience

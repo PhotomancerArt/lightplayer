@@ -111,6 +111,7 @@ fn execute_add<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -150,6 +151,7 @@ fn execute_sub<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -189,6 +191,7 @@ fn execute_mul<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Mul,
+        inst_size: 4,
         log,
     })
 }
@@ -232,6 +235,7 @@ fn execute_mulh<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Mul,
+        inst_size: 4,
         log,
     })
 }
@@ -275,6 +279,7 @@ fn execute_mulhsu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Mul,
+        inst_size: 4,
         log,
     })
 }
@@ -318,6 +323,7 @@ fn execute_mulhu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Mul,
+        inst_size: 4,
         log,
     })
 }
@@ -366,6 +372,7 @@ fn execute_div<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::DivRem,
+        inst_size: 4,
         log,
     })
 }
@@ -413,6 +420,7 @@ fn execute_divu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::DivRem,
+        inst_size: 4,
         log,
     })
 }
@@ -460,6 +468,7 @@ fn execute_rem<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::DivRem,
+        inst_size: 4,
         log,
     })
 }
@@ -507,6 +516,7 @@ fn execute_remu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::DivRem,
+        inst_size: 4,
         log,
     })
 }
@@ -546,6 +556,7 @@ fn execute_slt<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -585,6 +596,7 @@ fn execute_sltu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -624,6 +636,7 @@ fn execute_xor<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -663,6 +676,7 @@ fn execute_or<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -702,6 +716,7 @@ fn execute_and<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -742,6 +757,7 @@ fn execute_sll<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -782,6 +798,7 @@ fn execute_srl<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -823,6 +840,7 @@ fn execute_sra<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -864,6 +882,7 @@ fn execute_rol<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -905,6 +924,7 @@ fn execute_ror<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -944,6 +964,7 @@ fn execute_andn<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -983,6 +1004,7 @@ fn execute_orn<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1022,6 +1044,7 @@ fn execute_xnor<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1061,6 +1084,7 @@ fn execute_min<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1102,6 +1126,7 @@ fn execute_minu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1141,6 +1166,7 @@ fn execute_max<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1182,6 +1208,7 @@ fn execute_maxu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1223,6 +1250,7 @@ fn execute_bclr<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1263,6 +1291,7 @@ fn execute_bext<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1304,6 +1333,7 @@ fn execute_binv<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1345,6 +1375,7 @@ fn execute_bset<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1384,6 +1415,7 @@ fn execute_sh1add<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1423,6 +1455,7 @@ fn execute_sh2add<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1462,6 +1495,7 @@ fn execute_sh3add<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }

@@ -5,20 +5,21 @@ use ::alloc::boxed::Box;
 use ::alloc::string::{String, ToString};
 use ::alloc::vec::Vec;
 use serde::Serialize;
+use std::any::Any;
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 pub mod alloc;
+pub mod cpu;
 pub mod events;
 pub mod perf_event;
 
-pub use perf_event::{PerfEvent, PerfEventKind};
+pub use perf_event::{EVENT_PROFILE_END, EVENT_PROFILE_START, PerfEvent, PerfEventKind};
 
-/// Instruction classification placeholder for [`Collector::on_instruction`].
-///
-/// m1 fills in.
-pub struct InstClass {}
+pub use crate::emu::cycle_model::InstClass;
+pub use cpu::CpuCollector;
 
 /// A symbol entry shared across profile metadata (`meta.json`).
 #[derive(Debug, Clone, Serialize)]
@@ -38,6 +39,7 @@ pub struct SessionMetadata {
     pub note: Option<String>,
     pub clock_source: &'static str,
     pub mode: String,
+    pub cycle_model: String,
     pub max_cycles: u64,
     pub cycles_used: u64,
     pub terminated_by: String,
@@ -180,8 +182,23 @@ pub struct FinishCtx<'a> {
     pub trace_dir: &'a Path,
 }
 
+/// Resolve guest PCs to labels for profile reports (implemented in `lp-cli` via ELF symbols).
+pub trait PcSymbolizer {
+    fn symbolize(&self, pc: u32) -> Cow<'_, str>;
+
+    /// Bucket a call-site PC into a stable "containing symbol" lower bound (defaults to `pc`).
+    fn entry_lo_for_pc(&self, pc: u32) -> u32 {
+        let _ = self;
+        pc
+    }
+}
+
 /// One enabled trace sink (alloc, cpu, …).
-pub trait Collector: Send {
+pub trait Collector: Send + Any {
+    fn as_any(&self) -> &dyn Any;
+
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
     fn name(&self) -> &'static str;
 
     fn report_title(&self) -> &'static str {
@@ -196,13 +213,32 @@ pub trait Collector: Send {
         SyscallAction::Pass
     }
 
-    fn on_instruction(&mut self, _pc: u32, _kind: InstClass, _cycles: u32) {}
+    /// Called by [`ProfileSession::on_perf_event`] after running the gate.
+    fn on_gate_action(&mut self, _action: GateAction) {}
+
+    /// Called once per executed instruction when a profile session is active.
+    ///
+    /// `target_pc` is the next PC after this instruction
+    /// (`new_pc` from the decoder, or `pc + inst_size` when `new_pc` is `None`).
+    fn on_instruction(&mut self, _pc: u32, _target_pc: u32, _class: InstClass, _cycles: u32) {}
 
     fn on_perf_event(&mut self, _evt: &PerfEvent) {}
 
-    fn finish(&mut self, ctx: &FinishCtx) -> std::io::Result<()>;
+    fn finish(&mut self, ctx: &FinishCtx<'_>) -> std::io::Result<()>;
 
     fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result;
+
+    /// Like [`Self::report_section`] but may substitute symbol names when `sym` is present.
+    ///
+    /// Default ignores `sym` and delegates to [`Self::report_section`].
+    fn report_section_symbolized(
+        &self,
+        w: &mut dyn std::fmt::Write,
+        sym: Option<&dyn PcSymbolizer>,
+    ) -> std::fmt::Result {
+        let _ = sym;
+        self.report_section(w)
+    }
 
     /// Events recorded by this collector since construction (after [`Self::finish`], still valid).
     fn event_count(&self) -> u64 {
@@ -217,6 +253,8 @@ pub struct ProfileSession {
     gate: Option<Box<dyn Gate>>,
     /// Sticky; first halt reason wins.
     halt_reason: Option<HaltReason>,
+    /// Idempotent guard for [`ProfileSession::start`].
+    started: bool,
 }
 
 impl ProfileSession {
@@ -240,6 +278,7 @@ impl ProfileSession {
             "note": metadata.note,
             "clock_source": metadata.clock_source,
             "mode": metadata.mode,
+            "cycle_model": metadata.cycle_model,
             "max_cycles": metadata.max_cycles,
             "cycles_used": metadata.cycles_used,
             "terminated_by": metadata.terminated_by,
@@ -261,11 +300,39 @@ impl ProfileSession {
             collectors,
             gate: None,
             halt_reason: None,
+            started: false,
         })
     }
 
     pub fn set_gate(&mut self, gate: Box<dyn Gate>) {
         self.gate = Some(gate);
+    }
+
+    /// Emit a synthetic `profile:start` perf event once per session (idempotent).
+    ///
+    /// Intended when the guest run loop begins; gives collectors a timeline marker and gates a
+    /// uniform boot hook for [`GateAction::Enable`].
+    pub fn start(&mut self) {
+        if self.started {
+            return;
+        }
+        self.started = true;
+        let evt = PerfEvent {
+            cycle: 0,
+            name: perf_event::EVENT_PROFILE_START,
+            kind: PerfEventKind::Instant,
+        };
+        self.on_perf_event(&evt);
+    }
+
+    /// Emit a synthetic `profile:end` perf event at `final_cycle` (every call; not idempotent).
+    pub fn end(&mut self, final_cycle: u64) {
+        let evt = PerfEvent {
+            cycle: final_cycle,
+            name: perf_event::EVENT_PROFILE_END,
+            kind: PerfEventKind::Instant,
+        };
+        self.on_perf_event(&evt);
     }
 
     /// Take the first halt reason produced during the session, if any.
@@ -287,29 +354,43 @@ impl ProfileSession {
         for c in &mut self.collectors {
             c.on_perf_event(evt);
         }
-        if let Some(g) = self.gate.as_mut() {
-            match g.on_event(evt) {
-                GateAction::NoChange => {}
-                GateAction::Enable | GateAction::Disable => {
-                    // m1: log only; m2 wires real semantics.
-                    log::trace!(
-                        "gate transition (m1: noop): {:?} @ cycle {}",
-                        evt,
-                        evt.cycle
-                    );
-                }
-                GateAction::Stop => {
-                    if self.halt_reason.is_none() {
-                        self.halt_reason = Some(HaltReason::ProfileStop);
-                        log::debug!(
-                            "gate requested stop @ cycle {} ({} {:?})",
-                            evt.cycle,
-                            evt.name,
-                            evt.kind
-                        );
-                    }
-                }
+        let action = self
+            .gate
+            .as_mut()
+            .map(|g| g.on_event(evt))
+            .unwrap_or(GateAction::NoChange);
+
+        match action {
+            GateAction::NoChange => {}
+            GateAction::Enable | GateAction::Disable => {
+                // m1: log only; m2 wires real semantics via [`Collector::on_gate_action`].
+                log::trace!(
+                    "gate transition (m1: noop): {:?} @ cycle {}",
+                    evt,
+                    evt.cycle
+                );
             }
+            GateAction::Stop => {}
+        }
+
+        for c in &mut self.collectors {
+            c.on_gate_action(action);
+        }
+
+        if matches!(action, GateAction::Stop) && self.halt_reason.is_none() {
+            self.halt_reason = Some(HaltReason::ProfileStop);
+            log::debug!(
+                "gate requested stop @ cycle {} ({} {:?})",
+                evt.cycle,
+                evt.name,
+                evt.kind
+            );
+        }
+    }
+
+    pub fn dispatch_instruction(&mut self, pc: u32, target_pc: u32, class: InstClass, cycles: u32) {
+        for c in &mut self.collectors {
+            c.on_instruction(pc, target_pc, class, cycles);
         }
     }
 
@@ -328,7 +409,18 @@ impl ProfileSession {
         SyscallAction::Pass
     }
 
+    pub fn collectors(&self) -> &[Box<dyn Collector>] {
+        &self.collectors
+    }
+
     pub fn finish(&mut self) -> std::io::Result<Vec<(String, u64)>> {
+        self.finish_with_symbolizer(None)
+    }
+
+    pub fn finish_with_symbolizer(
+        &mut self,
+        sym: Option<&dyn PcSymbolizer>,
+    ) -> std::io::Result<Vec<(String, u64)>> {
         for c in &mut self.collectors {
             let ctx = FinishCtx {
                 trace_dir: &self.trace_dir,
@@ -351,7 +443,7 @@ impl ProfileSession {
             }
             writeln!(&mut buf, "=== {} ===", c.report_title())
                 .expect("writing to String cannot fail");
-            c.report_section(&mut buf)
+            c.report_section_symbolized(&mut buf, sym)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             buf.push('\n');
         }
@@ -366,6 +458,7 @@ impl ProfileSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn test_metadata() -> SessionMetadata {
         SessionMetadata {
@@ -376,6 +469,7 @@ mod tests {
             note: None,
             clock_source: "emu_estimated",
             mode: "steady-render".into(),
+            cycle_model: "esp32c6".into(),
             max_cycles: 0,
             cycles_used: 0,
             terminated_by: "running".into(),
@@ -386,11 +480,19 @@ mod tests {
     struct NoopCollector;
 
     impl Collector for NoopCollector {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
         fn name(&self) -> &'static str {
             "noop"
         }
 
-        fn finish(&mut self, _: &FinishCtx) -> std::io::Result<()> {
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
             Ok(())
         }
 
@@ -410,6 +512,7 @@ mod tests {
             note: None,
             clock_source: "emu_estimated",
             mode: "steady-render".into(),
+            cycle_model: "esp32c6".into(),
             max_cycles: 0,
             cycles_used: 0,
             terminated_by: "running".into(),
@@ -430,6 +533,14 @@ mod tests {
     }
 
     impl Collector for CountingCollector {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
         fn name(&self) -> &'static str {
             "count"
         }
@@ -438,7 +549,7 @@ mod tests {
             self.n += 1;
         }
 
-        fn finish(&mut self, _: &FinishCtx) -> std::io::Result<()> {
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
             Ok(())
         }
 
@@ -483,5 +594,195 @@ mod tests {
             Some(HaltReason::ProfileStop)
         ));
         assert!(s.take_halt_reason().is_none());
+    }
+
+    type InsRecord = (u32, u32, InstClass, u32);
+
+    /// Two collectors append into the same `Vec` so we can assert both saw `on_instruction`.
+    struct InstructionTapShared {
+        name: &'static str,
+        shared: Arc<Mutex<Vec<InsRecord>>>,
+    }
+
+    impl Collector for InstructionTapShared {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn on_instruction(&mut self, pc: u32, target_pc: u32, class: InstClass, cycles: u32) {
+            self.shared
+                .lock()
+                .expect("test mutex")
+                .push((pc, target_pc, class, cycles));
+        }
+
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+            writeln!(w, "{}", self.shared.lock().expect("test mutex").len())
+        }
+    }
+
+    struct GateActionRecorder {
+        shared: Arc<Mutex<Vec<GateAction>>>,
+    }
+
+    impl Collector for GateActionRecorder {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn name(&self) -> &'static str {
+            "gate_rec"
+        }
+
+        fn on_gate_action(&mut self, action: GateAction) {
+            self.shared.lock().expect("test mutex").push(action);
+        }
+
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+            writeln!(w, "{}", self.shared.lock().expect("test mutex").len())
+        }
+    }
+
+    struct AlwaysEnableGate;
+
+    impl Gate for AlwaysEnableGate {
+        fn on_event(&mut self, _: &PerfEvent) -> GateAction {
+            GateAction::Enable
+        }
+    }
+
+    struct PerfEventRecorder {
+        events: Arc<Mutex<Vec<(&'static str, PerfEventKind, u64)>>>,
+    }
+
+    impl Collector for PerfEventRecorder {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn name(&self) -> &'static str {
+            "perf_rec"
+        }
+
+        fn on_perf_event(&mut self, evt: &PerfEvent) {
+            self.events
+                .lock()
+                .expect("test mutex")
+                .push((evt.name, evt.kind, evt.cycle));
+        }
+
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+            writeln!(w, "{}", self.events.lock().expect("test mutex").len())
+        }
+    }
+
+    #[test]
+    fn session_start_emits_profile_start_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared = Arc::new(Mutex::new(Vec::<(&'static str, PerfEventKind, u64)>::new()));
+        let collectors: Vec<Box<dyn Collector>> = Vec::from([Box::new(PerfEventRecorder {
+            events: Arc::clone(&shared),
+        }) as Box<dyn Collector>]);
+        let mut session =
+            ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+        session.set_gate(Box::new(AlwaysEnableGate));
+        session.start();
+        session.start();
+        let v = shared.lock().expect("test mutex");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].0, perf_event::EVENT_PROFILE_START);
+        assert_eq!(v[0].1, PerfEventKind::Instant);
+        assert_eq!(v[0].2, 0);
+    }
+
+    #[test]
+    fn session_end_emits_profile_end_event_with_cycle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared = Arc::new(Mutex::new(Vec::<(&'static str, PerfEventKind, u64)>::new()));
+        let collectors: Vec<Box<dyn Collector>> = Vec::from([Box::new(PerfEventRecorder {
+            events: Arc::clone(&shared),
+        }) as Box<dyn Collector>]);
+        let mut session =
+            ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+        session.end(12_345);
+        let v = shared.lock().expect("test mutex");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].0, perf_event::EVENT_PROFILE_END);
+        assert_eq!(v[0].1, PerfEventKind::Instant);
+        assert_eq!(v[0].2, 12_345);
+    }
+
+    #[test]
+    fn dispatch_instruction_fans_out_to_all_collectors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared = Arc::new(Mutex::new(Vec::<InsRecord>::new()));
+        let want = (0x1000u32, 0x1004u32, InstClass::Alu, 1u32);
+        let collectors: Vec<Box<dyn Collector>> = Vec::from([
+            Box::new(InstructionTapShared {
+                name: "ins_tap_0",
+                shared: Arc::clone(&shared),
+            }) as Box<dyn Collector>,
+            Box::new(InstructionTapShared {
+                name: "ins_tap_1",
+                shared: Arc::clone(&shared),
+            }) as Box<dyn Collector>,
+        ]);
+        let mut session =
+            ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+
+        session.dispatch_instruction(want.0, want.1, want.2, want.3);
+
+        let v = shared.lock().expect("test mutex");
+        assert_eq!(&v[..], &[want, want]);
+    }
+
+    #[test]
+    fn on_perf_event_fans_out_gate_action() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared = Arc::new(Mutex::new(Vec::<GateAction>::new()));
+        let collectors: Vec<Box<dyn Collector>> = Vec::from([Box::new(GateActionRecorder {
+            shared: Arc::clone(&shared),
+        }) as Box<dyn Collector>]);
+        let mut session =
+            ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+        session.set_gate(Box::new(AlwaysEnableGate));
+
+        let evt = PerfEvent {
+            cycle: 7,
+            name: "frame",
+            kind: PerfEventKind::Begin,
+        };
+        session.on_perf_event(&evt);
+
+        let g = shared.lock().expect("test mutex");
+        assert_eq!(&g[..], &[GateAction::Enable]);
     }
 }
