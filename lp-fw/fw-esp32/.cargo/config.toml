@@ -1,0 +1,29 @@
+[target.'cfg(target_arch = "riscv32")']
+runner    = "espflash flash --chip esp32c6 --monitor --after hard-reset"
+rustflags = [
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "force-frame-pointers",
+  "-C", "force-unwind-tables=yes",
+  "-C", "panic=unwind",               # Override target's default panic=abort
+  "-C", "link-arg=--gc-sections",     # Remove unused sections
+  "-C", "link-arg=-znoseparate-code",  # Don't separate code segments (lld syntax: -z<option>)
+]
+
+[target.'cfg(target_arch = "xtensa")']
+runner    = "espflash flash --monitor"
+rustflags = [
+  # GNU LD
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+
+  # LLD
+  # "-C", "link-arg=-Tlinkall.x",
+  # "-C", "linker=rust-lld",
+]
+
+[env]
+ESP_LOG = "info"
+# littlefs2-sys bindgen needs stdint.h when targeting bare-metal; use host's stdint
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
