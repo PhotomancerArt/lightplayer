@@ -177,10 +177,11 @@ async fn jit_symbols_round_trip_to_meta_and_symbolizer() {
     );
 
     let symbolizer = symbolizer_from_meta_json_str(&meta_content).expect("symbolizer from meta");
+    let expected_display = format!("[jit] {EXPECTED_JIT_FN}");
     assert_eq!(
         symbolizer.lookup(pc).as_ref(),
-        EXPECTED_JIT_FN,
-        "Symbolizer should resolve mid-function PC to JIT name"
+        expected_display,
+        "Symbolizer should resolve mid-function PC to JIT name with [jit] prefix"
     );
 }
 

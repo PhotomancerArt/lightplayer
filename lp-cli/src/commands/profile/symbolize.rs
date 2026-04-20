@@ -139,12 +139,18 @@ fn build_dynamic_intervals(symbols: &[DynamicSymbol]) -> Vec<(u32, u32, String)>
             let lo = u32::try_from(d.addr).ok()?;
             let size = u32::try_from(d.size).ok()?;
             let hi = lo.saturating_add(size);
-            Some((lo, hi, d.name.clone()))
+            Some((lo, hi, format!("{JIT_DISPLAY_PREFIX}{}", d.name)))
         })
         .collect();
     v.sort_unstable_by_key(|(lo, _, _)| *lo);
     v
 }
+
+/// Visual prefix applied to JIT-emitted (dynamic) symbol names so they're
+/// distinguishable from static ELF symbols in reports and flame charts.
+/// Pre-baked into each dynamic interval's `String` so [`Symbolizer::lookup`]
+/// can still return `Cow::Borrowed`.
+const JIT_DISPLAY_PREFIX: &str = "[jit] ";
 
 fn lookup_interval<S: AsRef<str>>(intervals: &[(u32, u32, S)], pc: u32) -> Option<&str> {
     if pc == 0 {
@@ -208,9 +214,9 @@ mod tests {
     }
 
     #[test]
-    fn lookup_dynamic_symbol_resolves() {
+    fn lookup_dynamic_symbol_resolves_with_jit_prefix() {
         let s = for_test(vec![], vec![dyn_sym(0x8000_0000, 0x40, "palette_warm")]);
-        assert_eq!(s.lookup(0x8000_0010).as_ref(), "palette_warm");
+        assert_eq!(s.lookup(0x8000_0010).as_ref(), "[jit] palette_warm");
     }
 
     #[test]
@@ -225,7 +231,7 @@ mod tests {
             vec![sym(0x1000, 0x10, "static_fn")],
             vec![dyn_sym(0x8000_0000, 0x10, "dyn_fn")],
         );
-        assert_eq!(s.lookup(0x8000_0008).as_ref(), "dyn_fn");
+        assert_eq!(s.lookup(0x8000_0008).as_ref(), "[jit] dyn_fn");
     }
 
     #[test]
@@ -238,7 +244,7 @@ mod tests {
         }"#;
         let sym = symbolizer_from_meta_json_str(json).expect("parse meta");
         assert_eq!(sym.lookup(0x1000).as_ref(), "rom_fn");
-        assert_eq!(sym.lookup(0x8000_0008).as_ref(), "jit_shader");
+        assert_eq!(sym.lookup(0x8000_0008).as_ref(), "[jit] jit_shader");
     }
 
     fn fixture() -> Vec<TraceSymbol> {

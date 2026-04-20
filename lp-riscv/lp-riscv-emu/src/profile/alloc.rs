@@ -60,7 +60,7 @@ mod tests {
     }"#,
         )
         .expect("parse");
-        assert_eq!(resolver.resolve(0x8000_0010), "palette_warm");
+        assert_eq!(resolver.resolve(0x8000_0010), "[jit] palette_warm");
     }
 
     #[test]
@@ -806,6 +806,11 @@ fn fmt_num(n: u64) -> String {
 
 // --- Symbol resolver (mirrors lp-cli profile heap_analysis/resolver) ---
 
+/// Visual prefix applied to JIT-emitted (dynamic) symbol display names so they
+/// stand out from static ELF symbols in heap-summary reports. Mirrors the same
+/// constant in `lp-cli/src/commands/profile/symbolize.rs`.
+const JIT_DISPLAY_PREFIX: &str = "[jit] ";
+
 #[derive(Debug, Deserialize)]
 struct TraceMetaSymbols {
     symbols: Vec<SymbolEntry>,
@@ -873,7 +878,7 @@ impl SymbolResolver {
             }
             let end = addr.saturating_add(size);
             let full = Self::demangle_name(&d.name);
-            let display = Self::shorten_demangled(&full);
+            let display = format!("{JIT_DISPLAY_PREFIX}{}", Self::shorten_demangled(&full));
             symbols.push((addr, end, full, display));
         }
 
