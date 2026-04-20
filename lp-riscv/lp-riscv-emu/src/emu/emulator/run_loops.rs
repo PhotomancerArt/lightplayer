@@ -12,7 +12,8 @@ use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use lp_riscv_emu_shared::{
-    SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_LOG, SYSCALL_PANIC,
+    SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_JIT_MAP_LOAD,
+    SYSCALL_JIT_MAP_UNLOAD, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_PERF_EVENT,
     SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS,
     SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
 };
@@ -20,6 +21,163 @@ use lp_riscv_inst::Gpr;
 
 /// Default fuel for run() function
 const DEFAULT_FUEL: u64 = 100_000;
+
+/// Dispatches `SYSCALL_ALLOC_TRACE` through [`crate::profile::ProfileSession`] using disjoint
+/// borrows (session vs. regs/memory) so the caller does not hit the overlapping `&mut self` issue.
+#[cfg(feature = "std")]
+fn dispatch_profile_alloc_syscall(
+    profile_session: &mut Option<crate::profile::ProfileSession>,
+    pc: u32,
+    regs: &[i32; 32],
+    cycle_count: u64,
+    instruction_count: u64,
+    memory: &Memory,
+    syscall_id: u32,
+    args: &[u32],
+) -> crate::profile::SyscallAction {
+    let Some(session) = profile_session.as_mut() else {
+        return crate::profile::SyscallAction::Pass;
+    };
+    let mut ctx = crate::profile::EmuCtx {
+        pc,
+        regs,
+        cycle_count,
+        instruction_count,
+        memory,
+    };
+    session.dispatch_syscall(&mut ctx, syscall_id, args)
+}
+
+/// Reads a `JitSymbolEntry` array from guest memory and forwards to
+/// [`crate::profile::ProfileSession::on_jit_map_load`].
+#[cfg(feature = "std")]
+fn dispatch_profile_jit_map_load(
+    profile_session: &mut Option<crate::profile::ProfileSession>,
+    cycle_count: u64,
+    memory: &Memory,
+    base: u32,
+    len: u32,
+    count: u32,
+    entries_ptr: u32,
+) {
+    let Some(session) = profile_session.as_mut() else {
+        return;
+    };
+
+    let _ = len; // future: validate base..base+len contains all entries
+
+    const MAX_ENTRIES: u32 = 4096;
+    if count > MAX_ENTRIES {
+        log::warn!("SYSCALL_JIT_MAP_LOAD: count={count} exceeds MAX_ENTRIES; truncating");
+    }
+    let count = count.min(MAX_ENTRIES);
+
+    let mut decoded: Vec<(u32, u32, String)> = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let entry_addr = entries_ptr.wrapping_add(i.wrapping_mul(16));
+        let Ok(offset) = memory.read_word(entry_addr) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].offset failed");
+            return;
+        };
+        let Ok(size) = memory.read_word(entry_addr.wrapping_add(4)) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].size failed");
+            return;
+        };
+        let Ok(name_ptr) = memory.read_word(entry_addr.wrapping_add(8)) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].name_ptr failed");
+            return;
+        };
+        let Ok(name_len) = memory.read_word(entry_addr.wrapping_add(12)) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].name_len failed");
+            return;
+        };
+
+        let name = match read_jit_name(memory, name_ptr as u32, name_len as u32) {
+            Some(s) => s,
+            None => {
+                log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}] name failed");
+                continue;
+            }
+        };
+
+        decoded.push((offset as u32, size as u32, name));
+    }
+
+    session.on_jit_map_load(base, &decoded, cycle_count);
+}
+
+#[cfg(feature = "std")]
+impl Riscv32Emulator {
+    /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`crate::profile::ProfileSession::on_perf_event`].
+    pub(super) fn handle_perf_event_syscall(
+        &mut self,
+        syscall_info: &SyscallInfo,
+    ) -> Result<StepResult, EmulatorError> {
+        use crate::profile::perf_event::{MAX_EVENT_NAME_LEN, intern_known_name};
+        use crate::profile::{PerfEvent, PerfEventKind};
+        use lp_riscv_inst::Gpr;
+
+        let name_ptr = syscall_info.args[0] as u32;
+        let name_len_u = syscall_info.args[1] as u32;
+        let kind_raw = syscall_info.args[2] as u32;
+
+        let kind = match PerfEventKind::from_u32(kind_raw) {
+            Some(k) => k,
+            None => {
+                log::warn!("SYSCALL_PERF_EVENT: invalid kind {kind_raw}");
+                self.regs[Gpr::A0.num() as usize] = 0;
+                return Ok(StepResult::Continue);
+            }
+        };
+        if name_len_u == 0 || (name_len_u as usize) > MAX_EVENT_NAME_LEN {
+            log::warn!("SYSCALL_PERF_EVENT: bad name_len {name_len_u}");
+            self.regs[Gpr::A0.num() as usize] = 0;
+            return Ok(StepResult::Continue);
+        }
+        let name_len = name_len_u as usize;
+        let mut bytes = Vec::with_capacity(name_len);
+        for i in 0..name_len {
+            match self.memory.read_u8(name_ptr.wrapping_add(i as u32)) {
+                Ok(byte) => bytes.push(byte),
+                Err(e) => {
+                    log::warn!("SYSCALL_PERF_EVENT: memory read failed: {e}");
+                    self.regs[Gpr::A0.num() as usize] = 0;
+                    return Ok(StepResult::Continue);
+                }
+            }
+        }
+        let name_str = match core::str::from_utf8(&bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                log::warn!("SYSCALL_PERF_EVENT: name not utf8");
+                self.regs[Gpr::A0.num() as usize] = 0;
+                return Ok(StepResult::Continue);
+            }
+        };
+        let interned = match intern_known_name(name_str) {
+            Some(s) => s,
+            None => {
+                log::warn!("SYSCALL_PERF_EVENT: unknown name {name_str:?}");
+                self.regs[Gpr::A0.num() as usize] = 0;
+                return Ok(StepResult::Continue);
+            }
+        };
+
+        let evt = PerfEvent {
+            cycle: self.cycle_count,
+            name: interned,
+            kind,
+        };
+        if let Some(session) = self.profile_session.as_mut() {
+            session.on_perf_event(&evt);
+            if session.pending_halt_reason().is_some() {
+                self.profile_stop_pending = true;
+            }
+        }
+        self.regs[Gpr::A0.num() as usize] = 0;
+        Ok(StepResult::Continue)
+    }
+}
 
 impl Riscv32Emulator {
     /// Internal run loop with tight loop and inline fuel checking.
@@ -79,23 +237,16 @@ impl Riscv32Emulator {
                 e
             })?;
 
-            // Check if compressed instruction (bits [1:0] != 0b11)
-            let is_compressed = (inst_word & 0x3) != 0x3;
-
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
 
+            let pc = self.pc;
             // Execute using fast path (no logging)
-            let exec_result = decode_execute::<LoggingDisabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?;
-            self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
+            let exec_result =
+                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            self.after_execute(pc, &exec_result);
 
-            // Update PC (2 bytes for compressed, 4 for standard)
-            let pc_increment = if is_compressed { 2 } else { 4 };
+            let pc_increment = u32::from(exec_result.inst_size);
             self.pc = exec_result
                 .new_pc
                 .unwrap_or(self.pc.wrapping_add(pc_increment));
@@ -137,7 +288,13 @@ impl Riscv32Emulator {
 
                 // Handle syscall
                 match self.handle_syscall(syscall_info)? {
-                    StepResult::Continue => continue,
+                    StepResult::Continue => {
+                        if self.profile_stop_pending {
+                            self.profile_stop_pending = false;
+                            return Ok(StepResult::ProfileStop);
+                        }
+                        continue;
+                    }
                     result => return Ok(result),
                 }
             } else {
@@ -183,23 +340,16 @@ impl Riscv32Emulator {
                 e
             })?;
 
-            // Check if compressed instruction (bits [1:0] != 0b11)
-            let is_compressed = (inst_word & 0x3) != 0x3;
-
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
 
+            let pc = self.pc;
             // Execute using logging path
-            let exec_result = decode_execute::<LoggingEnabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?;
-            self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
+            let exec_result =
+                decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            self.after_execute(pc, &exec_result);
 
-            // Update PC (2 bytes for compressed, 4 for standard)
-            let pc_increment = if is_compressed { 2 } else { 4 };
+            let pc_increment = u32::from(exec_result.inst_size);
             self.pc = exec_result
                 .new_pc
                 .unwrap_or(self.pc.wrapping_add(pc_increment));
@@ -244,7 +394,13 @@ impl Riscv32Emulator {
 
                 // Handle syscall
                 match self.handle_syscall(syscall_info)? {
-                    StepResult::Continue => continue,
+                    StepResult::Continue => {
+                        if self.profile_stop_pending {
+                            self.profile_stop_pending = false;
+                            return Ok(StepResult::ProfileStop);
+                        }
+                        continue;
+                    }
                     result => return Ok(result),
                 }
             } else {
@@ -402,81 +558,85 @@ impl Riscv32Emulator {
                 self.regs[Gpr::A0.num() as usize] = 0;
             }
             Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_PERF_EVENT {
+            #[cfg(feature = "std")]
+            {
+                return self.handle_perf_event_syscall(&syscall_info);
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                Ok(StepResult::Syscall(syscall_info))
+            }
         } else if syscall_info.number == SYSCALL_ALLOC_TRACE {
             #[cfg(feature = "std")]
             {
-                if self.alloc_tracer.is_some() {
-                    let event_type = syscall_info.args[0];
-                    let frames = self.unwind_backtrace(self.pc, &self.regs);
-                    let ic = self.instruction_count;
+                use crate::profile::{HaltReason, SyscallAction};
 
-                    let event = match event_type {
-                        lp_riscv_emu_shared::ALLOC_TRACE_ALLOC => crate::alloc_trace::AllocEvent {
-                            t: "A",
-                            ptr: syscall_info.args[1] as u32,
-                            sz: syscall_info.args[2] as u32,
-                            ic,
-                            frames,
-                            free: syscall_info.args[3] as u32,
-                            old_ptr: None,
-                            old_sz: None,
-                        },
-                        lp_riscv_emu_shared::ALLOC_TRACE_DEALLOC => {
-                            crate::alloc_trace::AllocEvent {
-                                t: "D",
-                                ptr: syscall_info.args[1] as u32,
-                                sz: syscall_info.args[2] as u32,
-                                ic,
-                                frames,
-                                free: syscall_info.args[3] as u32,
-                                old_ptr: None,
-                                old_sz: None,
-                            }
-                        }
-                        lp_riscv_emu_shared::ALLOC_TRACE_REALLOC => {
-                            crate::alloc_trace::AllocEvent {
-                                t: "R",
-                                ptr: syscall_info.args[2] as u32,
-                                sz: syscall_info.args[4] as u32,
-                                ic,
-                                frames,
-                                free: syscall_info.args[5] as u32,
-                                old_ptr: Some(syscall_info.args[1] as u32),
-                                old_sz: Some(syscall_info.args[3] as u32),
-                            }
-                        }
-                        lp_riscv_emu_shared::ALLOC_TRACE_OOM => {
-                            let sz = syscall_info.args[2] as u32;
-                            let event = crate::alloc_trace::AllocEvent {
-                                t: "O",
-                                ptr: 0,
-                                sz,
-                                ic,
-                                frames,
-                                free: 0,
-                                old_ptr: None,
-                                old_sz: None,
-                            };
-                            self.alloc_tracer.as_mut().unwrap().record_event(&event);
-                            return Ok(StepResult::Oom(super::types::OomInfo {
-                                size: sz,
-                                pc: self.pc,
-                            }));
-                        }
-                        _ => {
-                            self.regs[Gpr::A0.num() as usize] = 0;
-                            return Ok(StepResult::Continue);
-                        }
-                    };
-                    self.alloc_tracer.as_mut().unwrap().record_event(&event);
+                let args_u32 = syscall_info.args.map(|a| a as u32);
+                match dispatch_profile_alloc_syscall(
+                    &mut self.profile_session,
+                    self.pc,
+                    &self.regs,
+                    self.cycle_count,
+                    self.instruction_count,
+                    &self.memory,
+                    SYSCALL_ALLOC_TRACE as u32,
+                    &args_u32,
+                ) {
+                    SyscallAction::Pass => {}
+                    SyscallAction::Handled => {
+                        self.regs[Gpr::A0.num() as usize] = 0;
+                        return Ok(StepResult::Continue);
+                    }
+                    SyscallAction::Halt(HaltReason::Oom { size }) => {
+                        return Ok(StepResult::Oom(super::types::OomInfo { size, pc: self.pc }));
+                    }
+                    SyscallAction::Halt(HaltReason::ProfileStop) => {
+                        // Alloc trace syscall does not produce this; perf syscall (phase 5) will.
+                        unreachable!("alloc syscall cannot halt with ProfileStop");
+                    }
                 }
             }
+            self.regs[Gpr::A0.num() as usize] = 0;
+            Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_JIT_MAP_LOAD {
+            #[cfg(feature = "std")]
+            {
+                let base = syscall_info.args[0] as u32;
+                let len = syscall_info.args[1] as u32;
+                let count = syscall_info.args[2] as u32;
+                let entries_ptr = syscall_info.args[3] as u32;
+                dispatch_profile_jit_map_load(
+                    &mut self.profile_session,
+                    self.cycle_count,
+                    &self.memory,
+                    base,
+                    len,
+                    count,
+                    entries_ptr,
+                );
+            }
+            self.regs[Gpr::A0.num() as usize] = 0;
+            Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_JIT_MAP_UNLOAD {
+            log::error!("SYSCALL_JIT_MAP_UNLOAD not yet implemented; symbols may be stale");
             self.regs[Gpr::A0.num() as usize] = 0;
             Ok(StepResult::Continue)
         } else {
             Ok(StepResult::Syscall(syscall_info))
         }
     }
+}
+
+#[cfg(feature = "std")]
+fn read_jit_name(memory: &Memory, ptr: u32, len: u32) -> Option<String> {
+    const MAX_NAME_LEN: u32 = 256;
+    let len = len.min(MAX_NAME_LEN);
+    let mut bytes = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        bytes.push(memory.read_u8(ptr.wrapping_add(i)).ok()?);
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// Read a string from emulator memory.
@@ -549,6 +709,12 @@ impl Riscv32Emulator {
     /// * `Ok(StepResult::FuelExhausted(count))` - Fuel exhausted (instructions executed)
     /// * `Err(EmulatorError)` - Error occurred (memory access violation, etc.)
     pub fn run_fuel(&mut self, fuel: u64) -> Result<StepResult, EmulatorError> {
+        #[cfg(feature = "std")]
+        {
+            if let Some(session) = self.profile_session.as_mut() {
+                session.start();
+            }
+        }
         self.run_inner(fuel)
     }
 
@@ -592,6 +758,12 @@ impl Riscv32Emulator {
                 }
                 StepResult::Continue => {
                     unreachable!("run() should not return Continue");
+                }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::ProfileStopped {
+                        pc: self.pc,
+                        regs: self.regs,
+                    });
                 }
             }
         }
@@ -638,6 +810,12 @@ impl Riscv32Emulator {
                 }
                 StepResult::Continue => {
                     unreachable!("run() should not return Continue");
+                }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::ProfileStopped {
+                        pc: self.pc,
+                        regs: self.regs,
+                    });
                 }
             }
         }
@@ -704,7 +882,115 @@ impl Riscv32Emulator {
                 StepResult::Continue => {
                     unreachable!("run() should not return Continue");
                 }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::ProfileStopped {
+                        pc: self.pc,
+                        regs: self.regs,
+                    });
+                }
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod jit_map_syscall_tests {
+    use super::*;
+    use crate::profile::{Collector, FinishCtx, SessionMetadata};
+    use crate::{DEFAULT_RAM_START, Riscv32Emulator, SyscallInfo};
+    use alloc::boxed::Box;
+    use std::any::Any;
+
+    struct NoopCollector;
+
+    impl Collector for NoopCollector {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn name(&self) -> &'static str {
+            "noop"
+        }
+
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+            writeln!(w, "noop")
+        }
+    }
+
+    fn poke_u32(ram: &mut [u8], guest_addr: u32, v: u32) {
+        let off = guest_addr.wrapping_sub(DEFAULT_RAM_START) as usize;
+        ram[off..off + 4].copy_from_slice(&v.to_le_bytes());
+    }
+
+    fn poke_bytes(ram: &mut [u8], guest_addr: u32, data: &[u8]) {
+        let off = guest_addr.wrapping_sub(DEFAULT_RAM_START) as usize;
+        ram[off..off + data.len()].copy_from_slice(data);
+    }
+
+    /// Exercises `handle_syscall` → guest memory decode → `ProfileSession::jit_symbols`.
+    /// End-to-end coverage of the syscall path lives in phase 7 integration tests.
+    #[test]
+    fn handle_syscall_jit_map_load_updates_profile_session() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let metadata = SessionMetadata {
+            schema_version: 1,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            project: "test".into(),
+            workload: "test".into(),
+            note: None,
+            clock_source: "emu_estimated",
+            mode: "steady-render".into(),
+            cycle_model: "esp32c6".into(),
+            max_cycles: 0,
+            cycles_used: 0,
+            terminated_by: "running".into(),
+            symbols: Vec::new(),
+        };
+        let collectors: Vec<Box<dyn Collector>> =
+            alloc::vec![Box::new(NoopCollector) as Box<dyn Collector>];
+
+        let mut ram = vec![0u8; 64 * 1024];
+        let base = 0x8000_0000u32;
+        let entries_ptr = 0x8000_0200u32;
+        let name_ptr = 0x8000_0300u32;
+        let name = b"palette_warm";
+        poke_bytes(&mut ram, name_ptr, name);
+        poke_u32(&mut ram, entries_ptr, 0);
+        poke_u32(&mut ram, entries_ptr + 4, 0x40);
+        poke_u32(&mut ram, entries_ptr + 8, name_ptr);
+        poke_u32(&mut ram, entries_ptr + 12, name.len() as u32);
+
+        let code = vec![0x13, 0x00, 0x00, 0x00]; // addi x0, x0, 0
+        let mut emu = Riscv32Emulator::new(code, ram)
+            .with_profile_session(tmp.path().to_path_buf(), &metadata, collectors)
+            .expect("profile session");
+
+        let syscall_info = SyscallInfo {
+            number: SYSCALL_JIT_MAP_LOAD,
+            args: [base as i32, 0x1000, 1, entries_ptr as i32, 0, 0, 0],
+        };
+
+        let res = emu.handle_syscall(syscall_info).expect("handle_syscall");
+        assert!(matches!(res, StepResult::Continue));
+
+        let mut session = emu.take_profile_session().expect("session");
+        assert_eq!(
+            session.jit_symbols().lookup(0x8000_0000),
+            Some("palette_warm")
+        );
+        assert_eq!(
+            session.jit_symbols().lookup(0x8000_003f),
+            Some("palette_warm")
+        );
+        assert_eq!(session.jit_symbols().lookup(0x8000_0040), None);
+        session.finish().expect("finish");
     }
 }

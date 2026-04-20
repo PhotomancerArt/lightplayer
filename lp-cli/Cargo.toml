@@ -27,12 +27,12 @@ lp-shared = { path = "../lp-core/lp-shared" }
 lp-engine-client = { path = "../lp-core/lp-engine-client" }
 lp-client = { path = "../lp-core/lp-client", features = ["ws", "serial", "emu"] }
 lp-riscv-emu = { path = "../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 serialport = "4.8"
 dialoguer = "0.11"
 chrono = "0.4"
-rustc-demangle = "0.1"
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
 lps-shared = { path = "../lp-shader/lps-shared" }

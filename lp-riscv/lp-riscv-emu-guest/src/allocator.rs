@@ -1,16 +1,16 @@
 //! Global allocator setup for emulator guest code
 //!
-//! When the `alloc-trace` feature is enabled, wraps the allocator with a
+//! When the `profile` feature is enabled, wraps the allocator with a
 //! `TrackingAllocator` that emits a syscall on every alloc/dealloc/realloc.
 //! The host emulator captures these events for offline analysis.
 
 use linked_list_allocator::LockedHeap;
 
-#[cfg(not(feature = "alloc-trace"))]
+#[cfg(not(feature = "profile"))]
 #[global_allocator]
 static HEAP_ALLOCATOR: LockedHeap = LockedHeap::empty();
 
-#[cfg(feature = "alloc-trace")]
+#[cfg(feature = "profile")]
 #[global_allocator]
 static HEAP_ALLOCATOR: TrackingAllocator = TrackingAllocator::new();
 
@@ -36,22 +36,22 @@ pub unsafe fn init_heap() {
     let heap_start = heap_start_addr as *mut u8;
 
     unsafe {
-        #[cfg(not(feature = "alloc-trace"))]
+        #[cfg(not(feature = "profile"))]
         HEAP_ALLOCATOR.lock().init(heap_start, heap_size);
 
-        #[cfg(feature = "alloc-trace")]
+        #[cfg(feature = "profile")]
         HEAP_ALLOCATOR.inner.lock().init(heap_start, heap_size);
     }
 }
 
-// --- TrackingAllocator (only when alloc-trace feature is enabled) ---
+// --- TrackingAllocator (only when profile feature is enabled) ---
 
-#[cfg(feature = "alloc-trace")]
+#[cfg(feature = "profile")]
 pub struct TrackingAllocator {
     inner: LockedHeap,
 }
 
-#[cfg(feature = "alloc-trace")]
+#[cfg(feature = "profile")]
 impl TrackingAllocator {
     const fn new() -> Self {
         Self {
@@ -91,7 +91,7 @@ impl TrackingAllocator {
     }
 }
 
-#[cfg(feature = "alloc-trace")]
+#[cfg(feature = "profile")]
 unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         let ptr = {
@@ -166,5 +166,5 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
     }
 }
 
-#[cfg(feature = "alloc-trace")]
+#[cfg(feature = "profile")]
 unsafe impl Sync for TrackingAllocator {}

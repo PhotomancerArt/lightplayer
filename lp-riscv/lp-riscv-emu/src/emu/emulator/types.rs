@@ -23,6 +23,9 @@ pub enum StepResult {
     /// Fuel exhausted during run (instructions executed in this run)
     /// Only returned by run() functions, never by step()
     FuelExhausted(u64),
+    /// The active profile session's gate requested termination.
+    /// The CLI should drain remaining buffers and finish the session.
+    ProfileStop,
 }
 
 /// Information about an out-of-memory condition.

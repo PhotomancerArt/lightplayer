@@ -120,6 +120,7 @@ fn execute_lb<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 4,
         log,
     })
 }
@@ -187,6 +188,7 @@ fn execute_lh<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 4,
         log,
     })
 }
@@ -253,6 +255,7 @@ fn execute_lw<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 4,
         log,
     })
 }
@@ -312,6 +315,7 @@ fn execute_lbu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 4,
         log,
     })
 }
@@ -379,6 +383,7 @@ fn execute_lhu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Load,
+        inst_size: 4,
         log,
     })
 }
@@ -439,6 +444,7 @@ fn execute_sb<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Store,
+        inst_size: 4,
         log,
     })
 }
@@ -509,6 +515,7 @@ fn execute_sh<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Store,
+        inst_size: 4,
         log,
     })
 }
@@ -576,6 +583,7 @@ fn execute_sw<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Store,
+        inst_size: 4,
         log,
     })
 }

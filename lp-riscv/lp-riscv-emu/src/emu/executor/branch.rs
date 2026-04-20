@@ -77,6 +77,7 @@ fn execute_beq<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 4,
         log,
     })
 }
@@ -123,6 +124,7 @@ fn execute_bne<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 4,
         log,
     })
 }
@@ -169,6 +171,7 @@ fn execute_blt<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 4,
         log,
     })
 }
@@ -215,6 +218,7 @@ fn execute_bge<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 4,
         log,
     })
 }
@@ -261,6 +265,7 @@ fn execute_bltu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 4,
         log,
     })
 }
@@ -307,6 +312,7 @@ fn execute_bgeu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: branch_class,
+        inst_size: 4,
         log,
     })
 }

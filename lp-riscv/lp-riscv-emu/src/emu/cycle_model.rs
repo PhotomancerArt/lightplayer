@@ -31,8 +31,11 @@ pub enum InstClass {
     Store,
     BranchTaken,
     BranchNotTaken,
-    Jal,
-    Jalr,
+    JalCall,
+    JalTail,
+    JalrCall,
+    JalrReturn,
+    JalrIndirect,
     Lui,
     Auipc,
     System,
@@ -51,8 +54,8 @@ impl CycleModel {
                 InstClass::Store => 1,
                 InstClass::BranchNotTaken => 1,
                 InstClass::BranchTaken => 2,
-                InstClass::Jal => 2,
-                InstClass::Jalr => 3,
+                InstClass::JalCall | InstClass::JalTail => 2,
+                InstClass::JalrCall | InstClass::JalrReturn | InstClass::JalrIndirect => 3,
                 InstClass::System => 4,
                 InstClass::Fence => 4,
                 InstClass::Atomic => 4,
@@ -70,7 +73,7 @@ mod tests {
 
     use crate::Riscv32Emulator;
 
-    use super::CycleModel;
+    use super::{CycleModel, InstClass};
 
     fn push_u32(code: &mut Vec<u8>, word: u32) {
         code.extend_from_slice(&word.to_le_bytes());
@@ -94,6 +97,16 @@ mod tests {
         emu.run_until_ebreak().expect("ebreak");
         let n = emu.get_instruction_count();
         assert_eq!(emu.get_cycle_count(), n);
+    }
+
+    #[test]
+    fn esp32c6_jump_class_costs_match_legacy_jal_jalr() {
+        let m = CycleModel::Esp32C6;
+        assert_eq!(m.cycles_for(InstClass::JalCall), 2);
+        assert_eq!(m.cycles_for(InstClass::JalTail), 2);
+        assert_eq!(m.cycles_for(InstClass::JalrCall), 3);
+        assert_eq!(m.cycles_for(InstClass::JalrReturn), 3);
+        assert_eq!(m.cycles_for(InstClass::JalrIndirect), 3);
     }
 
     #[test]

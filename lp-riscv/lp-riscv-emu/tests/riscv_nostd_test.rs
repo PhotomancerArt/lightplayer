@@ -206,6 +206,9 @@ fn run_nostd_test() -> Result<(), String> {
                     info.size, info.pc
                 ));
             }
+            Ok(StepResult::ProfileStop) => {
+                return Err("Guest profile stop".to_string());
+            }
             Err(e) => {
                 return Err(format!("Emulator error: {e:?}"));
             }

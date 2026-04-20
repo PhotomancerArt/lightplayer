@@ -15,6 +15,6 @@ log = { workspace = true, default-features = false }
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 
 [features]
-alloc-trace = []
+profile = []
 
 [build-dependencies]

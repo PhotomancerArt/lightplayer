@@ -19,6 +19,7 @@ use lp_model::{
         ProjectResponse,
     },
 };
+use lp_perf::{EVENT_FRAME, EVENT_PROJECT_LOAD};
 use lp_shared::fs::{LpFs, fs_event::FsChange};
 use lp_shared::time::TimeProvider;
 
@@ -98,19 +99,24 @@ impl ProjectRuntime {
         time_provider: Option<Rc<dyn TimeProvider>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, Error> {
-        let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
+        lp_perf::emit_begin!(EVENT_PROJECT_LOAD);
+        let result = (|| -> Result<Self, Error> {
+            let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
 
-        Ok(Self {
-            frame_id: FrameId::default(),
-            frame_time: FrameTime::zero(),
-            fs,
-            output_provider,
-            nodes: BTreeMap::new(),
-            next_handle: 1,
-            memory_stats,
-            time_provider,
-            graphics,
-        })
+            Ok(Self {
+                frame_id: FrameId::default(),
+                frame_time: FrameTime::zero(),
+                fs,
+                output_provider,
+                nodes: BTreeMap::new(),
+                next_handle: 1,
+                memory_stats,
+                time_provider,
+                graphics,
+            })
+        })();
+        lp_perf::emit_end!(EVENT_PROJECT_LOAD);
+        result
     }
 
     /// Destroy all node runtimes, releasing resources (e.g. output channels).
@@ -472,6 +478,7 @@ impl ProjectRuntime {
     /// Updates frame ID and frame time, then renders the frame.
     /// `delta_ms` is the time elapsed since the last frame in milliseconds.
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), Error> {
+        lp_perf::emit_begin!(EVENT_FRAME);
         // Update frame ID and time
         let old_frame_id = self.frame_id;
         self.frame_id = self.frame_id.next();
@@ -590,6 +597,7 @@ impl ProjectRuntime {
             }
         }
 
+        lp_perf::emit_end!(EVENT_FRAME);
         Ok(())
     }
 

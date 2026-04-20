@@ -178,6 +178,12 @@ impl Riscv32Emulator {
                 StepResult::FuelExhausted(_) => {
                     unreachable!("step() should never return FuelExhausted");
                 }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::ProfileStopped {
+                        pc: self.pc,
+                        regs: self.regs,
+                    });
+                }
             }
         }
 
@@ -349,6 +355,12 @@ impl Riscv32Emulator {
                 }
                 StepResult::FuelExhausted(_) => {
                     unreachable!("step() should never return FuelExhausted");
+                }
+                StepResult::ProfileStop => {
+                    return Err(EmulatorError::ProfileStopped {
+                        pc: self.pc,
+                        regs: self.regs,
+                    });
                 }
             }
         }

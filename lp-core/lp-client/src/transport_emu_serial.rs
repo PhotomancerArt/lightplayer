@@ -134,6 +134,15 @@ impl SerialEmuClientTransport {
                 log::trace!("SerialEmuClientTransport: Emulator yielded");
                 Ok(())
             }
+            Err(e) if e.is_profile_stop() => {
+                // Profile gate fired Stop while we were driving the emulator
+                // toward a yield (typically during teardown RPCs like
+                // stopAllProjects). This is a clean, expected condition —
+                // the emulator deliberately stopped and will not produce a
+                // response. Log quietly without the full state dump.
+                log::debug!("SerialEmuClientTransport: {e}");
+                Err(TransportError::Other(format!("{e}")))
+            }
             Err(e) => {
                 // Print emulator state on error for debugging
                 if let Ok(emu) = self.emulator.lock() {

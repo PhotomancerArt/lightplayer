@@ -137,6 +137,7 @@ fn execute_addi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -176,6 +177,7 @@ fn execute_slli<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -215,6 +217,7 @@ fn execute_srli<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -259,6 +262,7 @@ fn execute_srai<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -297,6 +301,7 @@ fn execute_andi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -335,6 +340,7 @@ fn execute_ori<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -373,6 +379,7 @@ fn execute_xori<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -411,6 +418,7 @@ fn execute_slti<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -450,6 +458,7 @@ fn execute_sltiu<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -492,6 +501,7 @@ fn execute_bclri<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -532,6 +542,7 @@ fn execute_bseti<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -572,6 +583,7 @@ fn execute_binvi<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -611,6 +623,7 @@ fn execute_bexti<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -651,6 +664,7 @@ fn execute_rori<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -692,6 +706,7 @@ fn execute_rev8<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -736,6 +751,7 @@ fn execute_brev8<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -781,6 +797,7 @@ fn execute_orcb<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -823,6 +840,7 @@ fn execute_clz<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -865,6 +883,7 @@ fn execute_ctz<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -903,6 +922,7 @@ fn execute_cpop<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -940,6 +960,7 @@ fn execute_sextb<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -977,6 +998,7 @@ fn execute_sexth<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1014,6 +1036,7 @@ fn execute_zexth<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }
@@ -1054,6 +1077,7 @@ fn execute_slliuw<M: LoggingMode>(
         should_halt: false,
         syscall: false,
         class: InstClass::Alu,
+        inst_size: 4,
         log,
     })
 }

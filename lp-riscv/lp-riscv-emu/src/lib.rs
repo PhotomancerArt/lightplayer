@@ -25,11 +25,15 @@ pub mod serial;
 pub mod time;
 
 #[cfg(feature = "std")]
-pub mod alloc_trace;
+pub mod profile;
+#[cfg(feature = "std")]
+pub use profile::{CpuCollector, PcSymbolizer};
 #[cfg(feature = "std")]
 pub mod test_util;
 
 // Re-exports for convenience
+#[cfg(feature = "std")]
+pub use emu::FrameOutcome;
 pub use emu::memory::{DEFAULT_RAM_START, Memory};
 pub use emu::{
     CycleModel, DEFAULT_SHARED_START, EmulatorError, InstClass, InstLog, LogLevel,

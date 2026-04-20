@@ -8,6 +8,8 @@ pub mod logging;
 pub mod memory;
 
 pub use cycle_model::{CycleModel, InstClass};
+#[cfg(feature = "std")]
+pub use emulator::FrameOutcome;
 pub use emulator::{
     DEFAULT_RAM_START, DEFAULT_SHARED_START, OomInfo, PanicInfo, Riscv32Emulator, StepResult,
     SyscallInfo,

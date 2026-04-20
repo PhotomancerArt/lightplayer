@@ -73,6 +73,15 @@ pub enum EmulatorError {
         info: super::OomInfo,
         regs: [i32; 32],
     },
+    /// Profile gate requested stop while the emulator was inside a
+    /// `run_until_*` helper that expected to reach a syscall first.
+    ///
+    /// This is a clean, expected condition during profile teardown — the
+    /// host should treat it as "the emulator deliberately stopped, no
+    /// further responses will arrive", not as a guest crash. Distinct
+    /// from `InvalidInstruction` so callers can suppress noisy state
+    /// dumps and avoid logging it as an error.
+    ProfileStopped { pc: u32, regs: [i32; 32] },
 }
 
 /// Convert a TrapCode to a human-readable string.
@@ -108,6 +117,7 @@ impl EmulatorError {
             EmulatorError::Trap { pc, .. } => *pc,
             EmulatorError::Panic { pc, .. } => *pc,
             EmulatorError::Oom { info, .. } => info.pc,
+            EmulatorError::ProfileStopped { pc, .. } => *pc,
         }
     }
 
@@ -123,7 +133,18 @@ impl EmulatorError {
             EmulatorError::Trap { regs, .. } => Some(regs),
             EmulatorError::Panic { regs, .. } => Some(regs),
             EmulatorError::Oom { regs, .. } => Some(regs),
+            EmulatorError::ProfileStopped { regs, .. } => Some(regs),
         }
+    }
+
+    /// True if this error indicates an expected, clean termination caused by
+    /// the profile gate firing `Stop` rather than a guest fault.
+    ///
+    /// Hosts should use this to decide whether to log full state dumps
+    /// (don't, when this is true) and whether to bother with cleanup RPCs
+    /// (don't — the emulator will not process further messages).
+    pub fn is_profile_stop(&self) -> bool {
+        matches!(self, EmulatorError::ProfileStopped { .. })
     }
 }
 
@@ -211,6 +232,10 @@ impl core::fmt::Display for EmulatorError {
                     info.pc, info.size
                 )
             }
+            EmulatorError::ProfileStopped { pc, .. } => write!(
+                f,
+                "Emulator stopped by profile gate at PC 0x{pc:08x} (no further responses)"
+            ),
         }
     }
 }

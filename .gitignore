@@ -16,7 +16,7 @@ tags
 target
 .z3-trace
 foo
-.cargo
+/.cargo
 publish
 vendor
 *.coredump
@@ -33,3 +33,4 @@ perf.data*
 .DS_Store
 .builtins-source-hash
 traces/
+profiles/

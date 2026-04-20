@@ -12,7 +12,7 @@ use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use log;
-use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
+use lp_riscv_emu_shared::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_PERF_EVENT};
 use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {
@@ -82,24 +82,17 @@ impl Riscv32Emulator {
         };
 
         // Execute instruction using new executor
+        let pc = self.pc;
         let exec_result = match self.log_level {
-            LogLevel::None => decode_execute::<LoggingDisabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?,
-            _ => decode_execute::<LoggingEnabled>(
-                inst_word,
-                self.pc,
-                &mut self.regs,
-                &mut self.memory,
-            )?,
+            LogLevel::None => {
+                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?
+            }
+            _ => decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?,
         };
-        self.cycle_count += self.cycle_model.cycles_for(exec_result.class) as u64;
+        self.after_execute(pc, &exec_result);
 
-        // Update PC (2 bytes for compressed, 4 for standard)
-        let pc_increment = if is_compressed { 2 } else { 4 };
+        // Fall-through PC step matches the decoded instruction width (2 or 4 bytes).
+        let pc_increment = u32::from(exec_result.inst_size);
         self.pc = exec_result
             .new_pc
             .unwrap_or(self.pc.wrapping_add(pc_increment));
@@ -381,6 +374,15 @@ impl Riscv32Emulator {
                 }
 
                 Ok(StepResult::Continue)
+            } else if syscall_info.number == SYSCALL_PERF_EVENT {
+                #[cfg(feature = "std")]
+                {
+                    return self.handle_perf_event_syscall(&syscall_info);
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    Ok(StepResult::Syscall(syscall_info))
+                }
             } else {
                 Ok(StepResult::Syscall(syscall_info))
             }
@@ -394,8 +396,12 @@ impl Riscv32Emulator {
     /// This is the public API for single-step debugging.
     /// For running multiple instructions efficiently, use `run()` or `run_fuel()`.
     pub fn step(&mut self) -> Result<StepResult, EmulatorError> {
-        // No fuel check - fuel is per-run, not global
-        self.step_inner()
+        let result = self.step_inner()?;
+        if self.profile_stop_pending {
+            self.profile_stop_pending = false;
+            return Ok(StepResult::ProfileStop);
+        }
+        Ok(result)
     }
 }
 
