@@ -1,4 +1,3 @@
-pub mod channel_lut;
 pub mod gamma;
 pub mod mapping;
 pub mod runtime;
