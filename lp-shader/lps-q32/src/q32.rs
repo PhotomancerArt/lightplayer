@@ -97,6 +97,12 @@ impl Q32 {
         self.0
     }
 
+    /// `self * 0.5` using a single raw shift (exact in Q16.16).
+    #[inline(always)]
+    pub const fn half(self) -> Q32 {
+        Q32(self.0 >> 1)
+    }
+
     /// Clamp value between min and max
     #[inline(always)]
     pub fn clamp(self, min: Q32, max: Q32) -> Q32 {
