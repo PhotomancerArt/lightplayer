@@ -175,10 +175,7 @@ mod tests {
             for &frac in &[1i32, 2, 100, 1000, 0x4000, 0x8000, 0xC000, 0xFFFF] {
                 let new = ((norm as u32 * frac as u32) >> 16) as i32;
                 let old = i64_ref(norm, frac);
-                assert_eq!(
-                    new, old,
-                    "mismatch at norm={norm} (v={v}), frac={frac}"
-                );
+                assert_eq!(new, old, "mismatch at norm={norm} (v={v}), frac={frac}");
             }
         }
     }
