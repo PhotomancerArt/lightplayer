@@ -103,6 +103,24 @@ impl Q32 {
         Q32(self.0 >> 1)
     }
 
+    /// Fixed-point multiply with **wrapping** `i32` raw result (no saturation).
+    #[inline(always)]
+    pub const fn mul_wrapping(self, rhs: Q32) -> Q32 {
+        Q32(((self.0 as i64 * rhs.0 as i64) >> SHIFT) as i32)
+    }
+
+    /// Raw fixed-point add with wrapping `i32` semantics (no saturation).
+    #[inline(always)]
+    pub const fn add_wrapping(self, rhs: Q32) -> Q32 {
+        Q32(self.0.wrapping_add(rhs.0))
+    }
+
+    /// Raw fixed-point subtract with wrapping `i32` semantics (no saturation).
+    #[inline(always)]
+    pub const fn sub_wrapping(self, rhs: Q32) -> Q32 {
+        Q32(self.0.wrapping_sub(rhs.0))
+    }
+
     /// Clamp value between min and max
     #[inline(always)]
     pub fn clamp(self, min: Q32, max: Q32) -> Q32 {

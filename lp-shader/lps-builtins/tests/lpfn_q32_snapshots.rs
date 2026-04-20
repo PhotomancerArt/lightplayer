@@ -37,7 +37,16 @@ fn render_psrdnoise2_q32() -> String {
     let mut lines = Vec::new();
     let alphas = [float_to_fixed(0.0), float_to_fixed(0.5)];
     let seeds = [0u32, 42];
-    let coords: &[(f32, f32)] = &[(1.5, 2.3), (-1.25, 3.75), (0.0, 0.0), (10.125, -0.5)];
+    let coords: &[(f32, f32)] = &[
+        (1.5, 2.3),
+        (-1.25, 3.75),
+        (0.0, 0.0),
+        (10.125, -0.5),
+        // Large-magnitude probes (wrapping vs saturating mul in hot path)
+        (1200.5, 900.25),
+        (-900.0, 750.0),
+        (512.0, -384.0),
+    ];
     let periods: &[(f32, f32)] = &[(0.0, 0.0), (10.0, 10.0)];
     for &(x, y) in coords {
         for &(px, py) in periods {

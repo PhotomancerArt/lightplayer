@@ -182,9 +182,15 @@ fn psrdnoise2_tail(
     let g2_x = gx_z;
     let g2_y = gy_z;
 
-    let dot0 = x0.length_squared();
-    let dot1 = x1.length_squared();
-    let dot2 = x2.length_squared();
+    let dot0 =
+        x0.x.mul_wrapping(x0.x)
+            .add_wrapping(x0.y.mul_wrapping(x0.y));
+    let dot1 =
+        x1.x.mul_wrapping(x1.x)
+            .add_wrapping(x1.y.mul_wrapping(x1.y));
+    let dot2 =
+        x2.x.mul_wrapping(x2.x)
+            .add_wrapping(x2.y.mul_wrapping(x2.y));
     let mut w_x = RADIAL_DECAY_0_8 - dot0;
     let mut w_y = RADIAL_DECAY_0_8 - dot1;
     let mut w_z = RADIAL_DECAY_0_8 - dot2;
@@ -193,36 +199,66 @@ fn psrdnoise2_tail(
     w_y = w_y.max(Q32::ZERO);
     w_z = w_z.max(Q32::ZERO);
 
-    let w2_x = w_x * w_x;
-    let w2_y = w_y * w_y;
-    let w2_z = w_z * w_z;
-    let w4_x = w2_x * w2_x;
-    let w4_y = w2_y * w2_y;
-    let w4_z = w2_z * w2_z;
+    let w2_x = w_x.mul_wrapping(w_x);
+    let w2_y = w_y.mul_wrapping(w_y);
+    let w2_z = w_z.mul_wrapping(w_z);
+    let w4_x = w2_x.mul_wrapping(w2_x);
+    let w4_y = w2_y.mul_wrapping(w2_y);
+    let w4_z = w2_z.mul_wrapping(w2_z);
 
-    let g0 = Vec2Q32::new(g0_x, g0_y);
-    let g1 = Vec2Q32::new(g1_x, g1_y);
-    let g2 = Vec2Q32::new(g2_x, g2_y);
-    let gdotx_x = g0.dot(x0);
-    let gdotx_y = g1.dot(x1);
-    let gdotx_z = g2.dot(x2);
+    let gdotx_x = g0_x
+        .mul_wrapping(x0.x)
+        .add_wrapping(g0_y.mul_wrapping(x0.y));
+    let gdotx_y = g1_x
+        .mul_wrapping(x1.x)
+        .add_wrapping(g1_y.mul_wrapping(x1.y));
+    let gdotx_z = g2_x
+        .mul_wrapping(x2.x)
+        .add_wrapping(g2_y.mul_wrapping(x2.y));
 
-    let n = w4_x * gdotx_x + w4_y * gdotx_y + w4_z * gdotx_z;
+    let n = w4_x
+        .mul_wrapping(gdotx_x)
+        .add_wrapping(w4_y.mul_wrapping(gdotx_y))
+        .add_wrapping(w4_z.mul_wrapping(gdotx_z));
 
-    let w3_x = w2_x * w_x;
-    let w3_y = w2_y * w_y;
-    let w3_z = w2_z * w_z;
-    let dw_x = -EIGHT * w3_x * gdotx_x;
-    let dw_y = -EIGHT * w3_y * gdotx_y;
-    let dw_z = -EIGHT * w3_z * gdotx_z;
-    let dn0 = g0 * w4_x + x0 * dw_x;
-    let dn1 = g1 * w4_y + x1 * dw_y;
-    let dn2 = g2 * w4_z + x2 * dw_z;
-    let gradient = (dn0 + dn1 + dn2) * SCALE_10_9;
+    let w3_x = w2_x.mul_wrapping(w_x);
+    let w3_y = w2_y.mul_wrapping(w_y);
+    let w3_z = w2_z.mul_wrapping(w_z);
+    let dw_x = (-EIGHT).mul_wrapping(w3_x).mul_wrapping(gdotx_x);
+    let dw_y = (-EIGHT).mul_wrapping(w3_y).mul_wrapping(gdotx_y);
+    let dw_z = (-EIGHT).mul_wrapping(w3_z).mul_wrapping(gdotx_z);
+    let dn0 = Vec2Q32::new(
+        g0_x.mul_wrapping(w4_x)
+            .add_wrapping(x0.x.mul_wrapping(dw_x)),
+        g0_y.mul_wrapping(w4_x)
+            .add_wrapping(x0.y.mul_wrapping(dw_x)),
+    );
+    let dn1 = Vec2Q32::new(
+        g1_x.mul_wrapping(w4_y)
+            .add_wrapping(x1.x.mul_wrapping(dw_y)),
+        g1_y.mul_wrapping(w4_y)
+            .add_wrapping(x1.y.mul_wrapping(dw_y)),
+    );
+    let dn2 = Vec2Q32::new(
+        g2_x.mul_wrapping(w4_z)
+            .add_wrapping(x2.x.mul_wrapping(dw_z)),
+        g2_y.mul_wrapping(w4_z)
+            .add_wrapping(x2.y.mul_wrapping(dw_z)),
+    );
+    let gradient = Vec2Q32::new(
+        dn0.x
+            .add_wrapping(dn1.x)
+            .add_wrapping(dn2.x)
+            .mul_wrapping(SCALE_10_9),
+        dn0.y
+            .add_wrapping(dn1.y)
+            .add_wrapping(dn2.y)
+            .mul_wrapping(SCALE_10_9),
+    );
     let gradient_x = gradient.x;
     let gradient_y = gradient.y;
 
-    let noise_value = SCALE_10_9 * n;
+    let noise_value = SCALE_10_9.mul_wrapping(n);
 
     (noise_value, gradient_x, gradient_y)
 }
