@@ -20,6 +20,7 @@ pub mod debug;
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
+pub mod imm;
 pub mod link;
 pub mod lower;
 pub mod lower_opts;

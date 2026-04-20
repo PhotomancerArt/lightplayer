@@ -65,6 +65,7 @@ use lps_builtin_ids::{
 use crate::LowerOpts;
 use crate::abi::ModuleAbi;
 use crate::error::LowerError;
+use crate::imm::fits_imm12;
 use crate::region::{REGION_ID_NONE, RegionId, RegionTree};
 use crate::vinst::{
     AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, TempVRegs, VInst, VReg,
@@ -93,6 +94,48 @@ fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice
         start,
         count: ir.len() as u8,
     })
+}
+
+/// Emit `dst = src OP imm` for an op that has both an `addi`-class immediate
+/// form and an R-form. If `imm` fits a signed 12-bit immediate (the only
+/// thing the RV32 `OP-IMM` encoding can hold) emit the I-form; otherwise
+/// materialize `imm` into a fresh temp via [`VInst::IConst32`] and emit the
+/// R-form. This is the fix for the silent low-12-bit truncation that used
+/// to happen when LPIR emitted `IaddImm { imm: 65536 }` (the texture
+/// render synth's per-pixel `pos_x += Q_ONE` step).
+fn lower_alu_imm12(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    dst: VReg,
+    src: VReg,
+    imm: i32,
+    imm_op: AluImmOp,
+    rrr_op: AluOp,
+    src_op: u16,
+) {
+    if fits_imm12(imm) {
+        out.push(VInst::AluRRI {
+            op: imm_op,
+            dst,
+            src,
+            imm,
+            src_op,
+        });
+    } else {
+        let scratch = temps.mint();
+        out.push(VInst::IConst32 {
+            dst: scratch,
+            val: imm,
+            src_op,
+        });
+        out.push(VInst::AluRRR {
+            op: rrr_op,
+            dst,
+            src1: src,
+            src2: scratch,
+            src_op,
+        });
+    }
 }
 
 fn sym_call(
@@ -318,21 +361,63 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::IaddImm { dst, src, imm } => {
-            out.push(VInst::AluRRI {
-                op: AluImmOp::Addi,
-                dst: fa_vreg(*dst),
-                src: fa_vreg(*src),
-                imm: *imm,
-                src_op: po,
-            });
+            lower_alu_imm12(
+                out,
+                temps,
+                fa_vreg(*dst),
+                fa_vreg(*src),
+                *imm,
+                AluImmOp::Addi,
+                AluOp::Add,
+                po,
+            );
             Ok(())
         }
         LpirOp::IsubImm { dst, src, imm } => {
-            out.push(VInst::AluRRI {
-                op: AluImmOp::Addi,
+            // Try to fold into `addi rd, rs, -imm` (matches the wider RV32
+            // immediate range; e.g. `imm == 2048` does not fit imm12 but
+            // `-imm == -2048` does). Fall back to materializing `imm` and
+            // emitting an R-form `sub` when neither form fits, including the
+            // `imm == i32::MIN` case where `-imm` overflows.
+            let neg = imm.checked_neg().filter(|n| fits_imm12(*n));
+            if let Some(neg) = neg {
+                out.push(VInst::AluRRI {
+                    op: AluImmOp::Addi,
+                    dst: fa_vreg(*dst),
+                    src: fa_vreg(*src),
+                    imm: neg,
+                    src_op: po,
+                });
+            } else {
+                let scratch = temps.mint();
+                out.push(VInst::IConst32 {
+                    dst: scratch,
+                    val: *imm,
+                    src_op: po,
+                });
+                out.push(VInst::AluRRR {
+                    op: AluOp::Sub,
+                    dst: fa_vreg(*dst),
+                    src1: fa_vreg(*src),
+                    src2: scratch,
+                    src_op: po,
+                });
+            }
+            Ok(())
+        }
+        LpirOp::ImulImm { dst, src, imm } => {
+            // RV32M has no `muli`; always materialize then `mul`.
+            let scratch = temps.mint();
+            out.push(VInst::IConst32 {
+                dst: scratch,
+                val: *imm,
+                src_op: po,
+            });
+            out.push(VInst::AluRRR {
+                op: AluOp::Mul,
                 dst: fa_vreg(*dst),
-                src: fa_vreg(*src),
-                imm: -(*imm),
+                src1: fa_vreg(*src),
+                src2: scratch,
                 src_op: po,
             });
             Ok(())

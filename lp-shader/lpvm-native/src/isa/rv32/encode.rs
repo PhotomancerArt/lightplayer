@@ -14,15 +14,32 @@ pub fn encode_r_type(opcode: u32, rd: u32, funct3: u32, rs1: u32, rs2: u32, func
 }
 
 /// I-type: imm[11:0] | rs1 | funct3 | rd | opcode
+///
+/// `imm` must be a signed 12-bit value (`-2048..=2047`); callers that pack
+/// extra bits in the upper portion (e.g. `srai`'s funct7 in bits 25:20)
+/// stay within this range too. The low 12 bits are masked, so out-of-range
+/// values silently truncate; the `debug_assert!` makes that loud in dev
+/// builds. See [`crate::imm`] for the predicate.
 #[inline]
 pub fn encode_i_type(opcode: u32, rd: u32, funct3: u32, rs1: u32, imm: i32) -> u32 {
+    debug_assert!(
+        crate::imm::fits_imm12(imm),
+        "encode_i_type: imm {imm} out of signed 12-bit range",
+    );
     let imm = imm as u32 & 0xfff;
     imm << 20 | ((rs1 & 0x1f) << 15) | ((funct3 & 7) << 12) | ((rd & 0x1f) << 7) | (opcode & 0x7f)
 }
 
 /// S-type: imm[11:5] | rs2 | rs1 | funct3 | imm[4:0] | opcode
+///
+/// `imm` must be a signed 12-bit value (`-2048..=2047`); see
+/// [`encode_i_type`] for rationale.
 #[inline]
 pub fn encode_s_type(opcode: u32, funct3: u32, rs1: u32, rs2: u32, imm: i32) -> u32 {
+    debug_assert!(
+        crate::imm::fits_imm12(imm),
+        "encode_s_type: imm {imm} out of signed 12-bit range",
+    );
     let imm = imm as u32;
     let imm_lo = imm & 0x1f;
     let imm_hi = (imm >> 5) & 0x7f;

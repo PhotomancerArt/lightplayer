@@ -1,7 +1,10 @@
 //! Handler for `shader-debug`.
 
 use anyhow::{Context, Result};
-use lpir::{CompilerConfig, FloatMode, validate_module};
+use lp_shader::synth::{SynthError, synthesise_render_texture};
+use lpir::{CompilerConfig, FloatMode, LpirModule, validate_module};
+use lps_frontend::LpsModuleSig;
+use lps_shared::TextureStorageFormat;
 
 use super::args::Args;
 use super::collect::{collect_cranelift_data, collect_fa_data};
@@ -43,7 +46,12 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
         .with_context(|| format!("read {}", args.input.display()))?;
 
     let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
-    let (ir, sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+    let (mut ir, mut sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+
+    let synth_formats = args
+        .render_texture_formats()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    apply_render_texture_synth(&mut ir, &mut sig, &synth_formats);
 
     if let Err(errs) = validate_module(&ir) {
         anyhow::bail!(
@@ -116,4 +124,38 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     print_comparison_table(&report);
 
     Ok(())
+}
+
+/// Append `__render_texture_<format>` for each requested format. Best-effort:
+/// missing or wrong-arity `render` is a non-fatal info message so the tool
+/// stays useful for inputs that aren't full pixel shaders (e.g. LPIR
+/// snippets, helper-only files).
+fn apply_render_texture_synth(
+    ir: &mut LpirModule,
+    sig: &mut LpsModuleSig,
+    formats: &[TextureStorageFormat],
+) {
+    if formats.is_empty() {
+        return;
+    }
+
+    let Some(render_idx) = sig.functions.iter().position(|f| f.name == "render") else {
+        eprintln!(
+            "info: --render-texture skipped (no `render` function in this input; \
+             pass --render-texture none to silence)"
+        );
+        return;
+    };
+
+    for &format in formats {
+        match synthesise_render_texture(ir, sig, render_idx, format) {
+            Ok(name) => eprintln!("info: synthesised {name}"),
+            Err(SynthError::RenderFunctionMissing) => eprintln!(
+                "info: --render-texture {format:?} skipped (render arity does not match channel count)",
+            ),
+            Err(SynthError::InvalidRenderFnIndex) => eprintln!(
+                "info: --render-texture {format:?} skipped (internal: render index invalidated)",
+            ),
+        }
+    }
 }

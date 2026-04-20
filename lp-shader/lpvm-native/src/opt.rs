@@ -7,16 +7,9 @@
 
 use alloc::vec::Vec;
 
+use crate::imm::fits_imm12;
 use crate::lower::LoweredFunction;
 use crate::vinst::{AluImmOp, AluOp, VInst, VReg};
-
-const IMM12_MIN: i32 = -2048;
-const IMM12_MAX: i32 = 2047;
-
-#[inline]
-fn fits_imm12(val: i32) -> bool {
-    val >= IMM12_MIN && val <= IMM12_MAX
-}
 
 fn alu_to_imm_op(op: AluOp) -> Option<AluImmOp> {
     match op {
