@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use lp_riscv_emu::profile::{PcSymbolizer, TraceSymbol};
+use rustc_demangle::demangle;
 use serde::Deserialize;
 
 /// One dynamic (JIT) symbol record from `meta.json` (`dynamic_symbols` array).
@@ -124,7 +125,7 @@ fn build_static_intervals(symbols: &[TraceSymbol]) -> Vec<(u32, u32, String)> {
         .map(|s| {
             let lo = s.addr;
             let hi = s.addr.saturating_add(s.size);
-            (lo, hi, s.name.clone())
+            (lo, hi, pretty_static_name(&s.name))
         })
         .collect();
     v.sort_unstable_by_key(|(lo, _, _)| *lo);
@@ -178,6 +179,124 @@ fn entry_lo_in_intervals<S: AsRef<str>>(intervals: &[(u32, u32, S)], pc: u32) ->
     None
 }
 
+fn pretty_static_name(raw: &str) -> String {
+    let demangled = demangle(raw).to_string();
+    shorten_demangled(&demangled)
+}
+
+fn shorten_demangled(demangled: &str) -> String {
+    if demangled.starts_with('<') {
+        if let Some(short) = shorten_trait_impl(demangled) {
+            return short;
+        }
+    }
+    shorten_path(demangled)
+}
+
+fn shorten_trait_impl(s: &str) -> Option<String> {
+    let close = find_matching_close(s, 0)?;
+    let inner = &s[1..close];
+    let rest = s[close + 1..].strip_prefix("::")?;
+
+    let as_pos = find_as_at_depth0(inner)?;
+    let self_type = inner[..as_pos].trim();
+
+    let short_self = last_path_component(self_type);
+    Some(format!("{short_self}::{rest}"))
+}
+
+fn shorten_path(s: &str) -> String {
+    let components = split_path(s);
+    if components.len() <= 3 {
+        return s.to_string();
+    }
+    components[components.len() - 3..].join("::")
+}
+
+fn find_matching_close(s: &str, start: usize) -> Option<usize> {
+    let mut depth = 0;
+    for (i, c) in s[start..].char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn find_as_at_depth0(s: &str) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let bytes = s.as_bytes();
+    for i in 0..s.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b' ' if depth == 0 => {
+                if s[i..].starts_with(" as ") {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn last_path_component(path: &str) -> &str {
+    let mut depth: i32 = 0;
+    let bytes = path.as_bytes();
+    let mut last_sep = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b':' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b':' => {
+                last_sep = Some(i);
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    match last_sep {
+        Some(pos) => &path[pos + 2..],
+        None => path,
+    }
+}
+
+fn split_path(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth: i32 = 0;
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b':' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b':' => {
+                parts.push(&s[start..i]);
+                i += 2;
+                start = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if start < s.len() {
+        parts.push(&s[start..]);
+    }
+    parts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +321,14 @@ mod tests {
 
     fn for_test(static_syms: Vec<TraceSymbol>, dynamic: Vec<DynamicSymbol>) -> Symbolizer {
         Symbolizer::new(&static_syms, &dynamic)
+    }
+
+    #[test]
+    fn lookup_static_symbol_is_demangled_and_shortened() {
+        // v0-mangled `<lp_engine::...::FixtureRuntime as lp_engine::...::NodeRuntime>::render`
+        let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
+        let s = for_test(vec![sym(0x1000, 0x10, mangled)], vec![]);
+        assert_eq!(s.lookup(0x1000).as_ref(), "FixtureRuntime::render");
     }
 
     #[test]

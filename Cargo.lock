@@ -3703,6 +3703,7 @@ dependencies = [
  "lpvm-cranelift",
  "lpvm-native",
  "notify",
+ "rustc-demangle",
  "serde",
  "serde_json",
  "serialport",

@@ -41,6 +41,7 @@ lp-shader = { path = "../lp-shader/lp-shader" }
 lpvm-native = { path = "../lp-shader/lpvm-native", features = ["debug"] }
 lpvm-cranelift = { path = "../lp-shader/lpvm-cranelift", features = ["riscv32-object"] }
 unicode-width = "0.2"
+rustc-demangle = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

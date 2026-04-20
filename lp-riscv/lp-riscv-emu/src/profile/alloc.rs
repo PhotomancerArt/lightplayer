@@ -106,6 +106,19 @@ mod tests {
         assert_eq!(resolver.resolve(0x1000), "static_fn");
         assert_eq!(resolver.resolve(0x8000_0000), "???");
     }
+
+    #[test]
+    fn resolve_static_symbol_is_demangled_and_shortened() {
+        // v0-mangled `<lp_engine::...::FixtureRuntime as lp_engine::...::NodeRuntime>::render`
+        let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
+        let resolver = resolver_from_meta_json(&format!(
+            r#"{{
+            "symbols": [{{ "addr": 4096, "size": 16, "name": "{mangled}" }}]
+        }}"#
+        ))
+        .expect("parse");
+        assert_eq!(resolver.resolve(0x1000), "FixtureRuntime::render");
+    }
 }
 
 /// A single allocation event, serialized as one JSON line in `heap-trace.jsonl`.
@@ -976,11 +989,7 @@ impl SymbolResolver {
     }
 
     fn demangle_name(raw: &str) -> String {
-        if raw.starts_with("_Z") {
-            format!("{}", demangle(raw))
-        } else {
-            raw.to_string()
-        }
+        format!("{}", demangle(raw))
     }
 
     fn shorten_demangled(demangled: &str) -> String {
