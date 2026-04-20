@@ -5,30 +5,9 @@ use super::sampling::create_sampler;
 use alloc::vec::Vec;
 use lps_q32::q32::Q32;
 
-/// Lookup table for u8 → Q32 normalization, populated from the exact
-/// formula `Q32((v * 65536) / 255)` for v ∈ 0..=255.
-///
-/// This kills the `__divdi3` / `u64_div_rem` calls that the divide
-/// generated on RV32. Bit-exact with the old `u8_to_q32_normalized`
-/// formula by construction.
-static U8_TO_Q32: [Q32; 256] = {
-    let mut table = [Q32::ZERO; 256];
-    let mut v = 0usize;
-    while v < 256 {
-        // Same formula as the old function. Cast chain matches exactly.
-        table[v] = Q32(((v as i64) * 65536 / 255) as i32);
-        v += 1;
-    }
-    table
-};
-
-/// Convert u8 (0–255) from sampler to Q32 (0–1).
-///
-/// Bit-exact with `Q32(((v as i64) * 65536 / 255) as i32)`; backed by a
-/// const-evaluated 256-entry LUT (see `U8_TO_Q32`).
-#[inline]
+/// Convert u8 (0-255) from sampler to Q32 (0-1)
 fn u8_to_q32_normalized(v: u8) -> Q32 {
-    U8_TO_Q32[v as usize]
+    Q32(((v as i64) * 65536 / 255) as i32)
 }
 
 /// Channel accumulator result
@@ -165,22 +144,6 @@ pub fn accumulate_from_mapping(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn u8_to_q32_lut_matches_division_formula() {
-        for v in 0u8..=255 {
-            let lut = U8_TO_Q32[v as usize].0;
-            let formula = ((v as i64) * 65536 / 255) as i32;
-            assert_eq!(lut, formula, "LUT mismatch at v={v}");
-        }
-    }
-
-    #[test]
-    fn u8_to_q32_normalized_uses_lut() {
-        for v in 0u8..=255 {
-            assert_eq!(u8_to_q32_normalized(v), U8_TO_Q32[v as usize]);
-        }
-    }
 
     #[test]
     fn u32_mul_matches_i64_reference() {
