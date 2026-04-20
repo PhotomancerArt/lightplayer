@@ -174,17 +174,63 @@ Sibling files in this directory (`gamma.rs`, `entry.rs`, `accumulation.rs`,
 
 ## Phase outline
 
-| # | Title | Sub-agent | Profile after? |
-| --- | --- | --- | --- |
-| 00 | Configure fastmath example + capture baseline profile | main | yes (`p0-baseline`) |
-| 01 | Accumulation: u32 multiply | yes | yes (`p1-u32mul`) |
-| 02 | Accumulation: u8→Q32 LUT | yes | yes (`p2-u8lut`) |
-| 03 | ChannelLut module (new file, no integration) | yes | no (no behaviour change) |
-| 04 | Wire ChannelLut into FixtureRuntime | yes | yes (`p4-channel-lut`) |
-| 05 | Cleanup, validation, summary profile | supervised | yes (`p5-final`) |
+| # | Title | Sub-agent | Profile after? | Status |
+| --- | --- | --- | --- | --- |
+| 00 | Configure fastmath example + capture baseline profile | main | yes (`p0-baseline`) | done (`512455f6`) |
+| 01 | Accumulation: u32 multiply | yes | yes (`p1-u32mul`) | done (`3c6bc02c`) — saved 43k cycles |
+| 02 | Accumulation: u8→Q32 LUT | yes | yes (`p2-u8lut`) | **reverted** — see "Phase 02 retrospective" below |
+| 03 | ChannelLut module (new file, no integration) | yes | no (no behaviour change) | pending |
+| 04 | Wire ChannelLut into FixtureRuntime | yes | yes (`p4-channel-lut`) | pending |
+| 05 | Cleanup, validation, summary profile | supervised | yes (`p5-final`) | pending |
 
 All phases run sequentially. No parallel groups (each phase depends on
 the previous one being merged for accurate per-phase profile attribution).
+
+## Phase 02 retrospective
+
+**Commit:** `029f558e` (reverted by `66cf034a`).
+
+**What we predicted:** `__divdi3` (~2.1% self) and `u64_div_rem` (~2.7%
+self) were called from `u8_to_q32_normalized`'s `(v * 65536) / 255`
+divide. Replacing the divide with a 256-entry LUT should kill those
+helpers.
+
+**What actually happened:** post-LUT profile showed `__divdi3` and
+`u64_div_rem` self-cycles **byte-identical** to the pre-LUT profile
+(163,500 / 217,686 cycles, unchanged). Meanwhile
+`FixtureRuntime::render` self regressed by +43k cycles (back to p0
+baseline). Net: −0.5pp regression.
+
+**Root cause:** the `__divdi3` / `u64_div_rem` helpers in this binary
+are called from JIT shader math builtins (`__lps_cosh_q32`,
+`__lps_acos_q32`, `__lp_lpfn_psrdnoise2_q32`, ...) and from naga's
+compile-time constant evaluator + `pp_rs` preprocessor. None of those
+callers are reached from the engine-side `accumulate_from_mapping` path.
+
+The original `(v * 65536) / 255` divide was almost certainly being
+constant-folded by LLVM into a magic-multiply sequence at compile time
+(255 is a constant divisor, the input is a `u8`, so the divide reduces
+to `(v * magic) >> shift` — a few in-register instructions). The LUT
+replaced that fast inline arithmetic with a memory load + (probable)
+bounds check, which costs more on RV32 than the magic multiply.
+
+**Lessons for future plans:**
+
+1. **Symbol-level profile attribution can lie.** A `__divdi3` line in
+   the top-N tells you a divide helper is hot, but does NOT tell you
+   *which* divide. Always trace callers (e.g. `riscv32-elf-objdump -d`
+   + grep for callsites of the helper) before assuming a specific
+   source-level expression is responsible.
+2. **Constant-foldable arithmetic may already be cheaper than a LUT.**
+   When a divide has a compile-time constant divisor, LLVM lowers it
+   to `mul + shift` already — replacing it with a memory load can be
+   a regression on cache-warm short tables.
+3. **Per-phase profiling caught this in one commit.** That's the whole
+   point of the commit-per-phase strategy.
+
+Phase 03 and Phase 04 are independent of Phase 02 and proceed unchanged.
+
+## Per-phase commit/profile flow
 
 ## Per-phase commit/profile flow
 
