@@ -12,9 +12,10 @@ use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use lp_riscv_emu_shared::{
-    SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_LOG, SYSCALL_PANIC,
-    SYSCALL_PERF_EVENT, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE,
-    SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
+    SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_JIT_MAP_LOAD,
+    SYSCALL_JIT_MAP_UNLOAD, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_PERF_EVENT,
+    SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS,
+    SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
 };
 use lp_riscv_inst::Gpr;
 
@@ -45,6 +46,64 @@ fn dispatch_profile_alloc_syscall(
         memory,
     };
     session.dispatch_syscall(&mut ctx, syscall_id, args)
+}
+
+/// Reads a `JitSymbolEntry` array from guest memory and forwards to
+/// [`crate::profile::ProfileSession::on_jit_map_load`].
+#[cfg(feature = "std")]
+fn dispatch_profile_jit_map_load(
+    profile_session: &mut Option<crate::profile::ProfileSession>,
+    cycle_count: u64,
+    memory: &Memory,
+    base: u32,
+    len: u32,
+    count: u32,
+    entries_ptr: u32,
+) {
+    let Some(session) = profile_session.as_mut() else {
+        return;
+    };
+
+    let _ = len; // future: validate base..base+len contains all entries
+
+    const MAX_ENTRIES: u32 = 4096;
+    if count > MAX_ENTRIES {
+        log::warn!("SYSCALL_JIT_MAP_LOAD: count={count} exceeds MAX_ENTRIES; truncating");
+    }
+    let count = count.min(MAX_ENTRIES);
+
+    let mut decoded: Vec<(u32, u32, String)> = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let entry_addr = entries_ptr.wrapping_add(i.wrapping_mul(16));
+        let Ok(offset) = memory.read_word(entry_addr) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].offset failed");
+            return;
+        };
+        let Ok(size) = memory.read_word(entry_addr.wrapping_add(4)) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].size failed");
+            return;
+        };
+        let Ok(name_ptr) = memory.read_word(entry_addr.wrapping_add(8)) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].name_ptr failed");
+            return;
+        };
+        let Ok(name_len) = memory.read_word(entry_addr.wrapping_add(12)) else {
+            log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].name_len failed");
+            return;
+        };
+
+        let name = match read_jit_name(memory, name_ptr as u32, name_len as u32) {
+            Some(s) => s,
+            None => {
+                log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}] name failed");
+                continue;
+            }
+        };
+
+        decoded.push((offset as u32, size as u32, name));
+    }
+
+    session.on_jit_map_load(base, &decoded, cycle_count);
 }
 
 #[cfg(feature = "std")]
@@ -540,10 +599,44 @@ impl Riscv32Emulator {
             }
             self.regs[Gpr::A0.num() as usize] = 0;
             Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_JIT_MAP_LOAD {
+            #[cfg(feature = "std")]
+            {
+                let base = syscall_info.args[0] as u32;
+                let len = syscall_info.args[1] as u32;
+                let count = syscall_info.args[2] as u32;
+                let entries_ptr = syscall_info.args[3] as u32;
+                dispatch_profile_jit_map_load(
+                    &mut self.profile_session,
+                    self.cycle_count,
+                    &self.memory,
+                    base,
+                    len,
+                    count,
+                    entries_ptr,
+                );
+            }
+            self.regs[Gpr::A0.num() as usize] = 0;
+            Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_JIT_MAP_UNLOAD {
+            log::error!("SYSCALL_JIT_MAP_UNLOAD not yet implemented; symbols may be stale");
+            self.regs[Gpr::A0.num() as usize] = 0;
+            Ok(StepResult::Continue)
         } else {
             Ok(StepResult::Syscall(syscall_info))
         }
     }
+}
+
+#[cfg(feature = "std")]
+fn read_jit_name(memory: &Memory, ptr: u32, len: u32) -> Option<String> {
+    const MAX_NAME_LEN: u32 = 256;
+    let len = len.min(MAX_NAME_LEN);
+    let mut bytes = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        bytes.push(memory.read_u8(ptr.wrapping_add(i)).ok()?);
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// Read a string from emulator memory.
@@ -797,5 +890,107 @@ impl Riscv32Emulator {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod jit_map_syscall_tests {
+    use super::*;
+    use crate::profile::{Collector, FinishCtx, SessionMetadata};
+    use crate::{DEFAULT_RAM_START, Riscv32Emulator, SyscallInfo};
+    use alloc::boxed::Box;
+    use std::any::Any;
+
+    struct NoopCollector;
+
+    impl Collector for NoopCollector {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn name(&self) -> &'static str {
+            "noop"
+        }
+
+        fn finish(&mut self, _: &FinishCtx<'_>) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+            writeln!(w, "noop")
+        }
+    }
+
+    fn poke_u32(ram: &mut [u8], guest_addr: u32, v: u32) {
+        let off = guest_addr.wrapping_sub(DEFAULT_RAM_START) as usize;
+        ram[off..off + 4].copy_from_slice(&v.to_le_bytes());
+    }
+
+    fn poke_bytes(ram: &mut [u8], guest_addr: u32, data: &[u8]) {
+        let off = guest_addr.wrapping_sub(DEFAULT_RAM_START) as usize;
+        ram[off..off + data.len()].copy_from_slice(data);
+    }
+
+    /// Exercises `handle_syscall` → guest memory decode → `ProfileSession::jit_symbols`.
+    /// End-to-end coverage of the syscall path lives in phase 7 integration tests.
+    #[test]
+    fn handle_syscall_jit_map_load_updates_profile_session() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let metadata = SessionMetadata {
+            schema_version: 1,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            project: "test".into(),
+            workload: "test".into(),
+            note: None,
+            clock_source: "emu_estimated",
+            mode: "steady-render".into(),
+            cycle_model: "esp32c6".into(),
+            max_cycles: 0,
+            cycles_used: 0,
+            terminated_by: "running".into(),
+            symbols: Vec::new(),
+        };
+        let collectors: Vec<Box<dyn Collector>> =
+            alloc::vec![Box::new(NoopCollector) as Box<dyn Collector>];
+
+        let mut ram = vec![0u8; 64 * 1024];
+        let base = 0x8000_0000u32;
+        let entries_ptr = 0x8000_0200u32;
+        let name_ptr = 0x8000_0300u32;
+        let name = b"palette_warm";
+        poke_bytes(&mut ram, name_ptr, name);
+        poke_u32(&mut ram, entries_ptr, 0);
+        poke_u32(&mut ram, entries_ptr + 4, 0x40);
+        poke_u32(&mut ram, entries_ptr + 8, name_ptr);
+        poke_u32(&mut ram, entries_ptr + 12, name.len() as u32);
+
+        let code = vec![0x13, 0x00, 0x00, 0x00]; // addi x0, x0, 0
+        let mut emu = Riscv32Emulator::new(code, ram)
+            .with_profile_session(tmp.path().to_path_buf(), &metadata, collectors)
+            .expect("profile session");
+
+        let syscall_info = SyscallInfo {
+            number: SYSCALL_JIT_MAP_LOAD,
+            args: [base as i32, 0x1000, 1, entries_ptr as i32, 0, 0, 0],
+        };
+
+        let res = emu.handle_syscall(syscall_info).expect("handle_syscall");
+        assert!(matches!(res, StepResult::Continue));
+
+        let mut session = emu.take_profile_session().expect("session");
+        assert_eq!(
+            session.jit_symbols().lookup(0x8000_0000),
+            Some("palette_warm")
+        );
+        assert_eq!(
+            session.jit_symbols().lookup(0x8000_003f),
+            Some("palette_warm")
+        );
+        assert_eq!(session.jit_symbols().lookup(0x8000_0040), None);
+        session.finish().expect("finish");
     }
 }

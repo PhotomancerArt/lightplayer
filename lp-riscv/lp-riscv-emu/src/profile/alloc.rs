@@ -18,6 +18,96 @@ use std::path::{Path, PathBuf};
 use super::{Collector, EmuCtx, FinishCtx, HaltReason, SyscallAction};
 use std::any::Any;
 
+#[cfg(test)]
+mod tests {
+    use super::SymbolResolver;
+    use ::alloc::format;
+    use std::io;
+
+    fn resolver_from_meta_json(s: &str) -> io::Result<SymbolResolver> {
+        let meta: super::TraceMetaSymbols = serde_json::from_str(s).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("meta.json symbols: {e}"),
+            )
+        })?;
+        SymbolResolver::from_parsed_meta(meta)
+    }
+
+    #[test]
+    fn static_only_symbol_lookup_regression() {
+        let resolver = resolver_from_meta_json(
+            r#"{
+            "symbols": [{ "addr": 4096, "size": 16, "name": "static_fn" }]
+        }"#,
+        )
+        .expect("parse");
+        assert_eq!(resolver.resolve(0x1000), "static_fn");
+        assert_eq!(resolver.resolve(0x1004), "static_fn");
+        assert_eq!(resolver.resolve(0x100F), "static_fn");
+        assert_eq!(resolver.resolve(0x1010), "???");
+    }
+
+    #[test]
+    fn dynamic_symbol_resolves() {
+        let resolver = resolver_from_meta_json(
+            r#"{
+        "symbols": [],
+        "dynamic_symbols": [
+            { "addr": 2147483648, "size": 64, "name": "palette_warm",
+              "loaded_at_cycle": 0, "unloaded_at_cycle": null }
+        ]
+    }"#,
+        )
+        .expect("parse");
+        assert_eq!(resolver.resolve(0x8000_0010), "palette_warm");
+    }
+
+    #[test]
+    fn static_wins_on_overlap() {
+        let resolver = resolver_from_meta_json(
+            r#"{
+        "symbols": [{ "addr": 4096, "size": 16, "name": "static_fn" }],
+        "dynamic_symbols": [
+            { "addr": 4096, "size": 16, "name": "dyn_fn",
+              "loaded_at_cycle": 0, "unloaded_at_cycle": null }
+        ]
+    }"#,
+        )
+        .expect("parse");
+        assert_eq!(resolver.resolve(0x1000), "static_fn");
+    }
+
+    /// Static interval starts lower and overlaps a later dynamic interval; static must win.
+    #[test]
+    fn static_wins_on_partial_overlap() {
+        let resolver = resolver_from_meta_json(
+            r#"{
+        "symbols": [{ "addr": 4096, "size": 32, "name": "static_fn" }],
+        "dynamic_symbols": [
+            { "addr": 4112, "size": 32, "name": "dyn_fn",
+              "loaded_at_cycle": 0, "unloaded_at_cycle": null }
+        ]
+    }"#,
+        )
+        .expect("parse");
+        // 4120 = 0x1018: inside [4096,4128) static and [4112,4144) dynamic
+        assert_eq!(resolver.resolve(4120), "static_fn");
+    }
+
+    #[test]
+    fn missing_dynamic_symbols_field_is_back_compat() {
+        let resolver = resolver_from_meta_json(
+            r#"{
+        "symbols": [{ "addr": 4096, "size": 16, "name": "static_fn" }]
+    }"#,
+        )
+        .expect("parse");
+        assert_eq!(resolver.resolve(0x1000), "static_fn");
+        assert_eq!(resolver.resolve(0x8000_0000), "???");
+    }
+}
+
 /// A single allocation event, serialized as one JSON line in `heap-trace.jsonl`.
 #[derive(Debug, Serialize)]
 pub struct AllocEvent {
@@ -719,6 +809,19 @@ fn fmt_num(n: u64) -> String {
 #[derive(Debug, Deserialize)]
 struct TraceMetaSymbols {
     symbols: Vec<SymbolEntry>,
+    #[serde(default)]
+    dynamic_symbols: Vec<DynamicSymbolJson>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DynamicSymbolJson {
+    addr: u64,
+    size: u64,
+    name: String,
+    #[serde(default, rename = "loaded_at_cycle")]
+    _loaded_at_cycle: Option<u64>,
+    #[serde(default, rename = "unloaded_at_cycle")]
+    _unloaded_at_cycle: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -741,20 +844,40 @@ impl SymbolResolver {
                 format!("meta.json symbols: {e}"),
             )
         })?;
+        Self::from_parsed_meta(meta)
+    }
 
-        let mut symbols: Vec<(u32, u32, String, String)> = meta
-            .symbols
-            .into_iter()
-            .filter(|s| s.size > 0)
-            .map(|s| {
-                let end = s.addr.saturating_add(s.size);
-                let full = Self::demangle_name(&s.name);
-                let display = Self::shorten_demangled(&full);
-                (s.addr, end, full, display)
-            })
-            .collect();
+    fn from_parsed_meta(meta: TraceMetaSymbols) -> io::Result<Self> {
+        let mut symbols: Vec<(u32, u32, String, String)> =
+            Vec::with_capacity(meta.symbols.len() + meta.dynamic_symbols.len());
 
-        symbols.sort_by_key(|(addr, _, _, _)| *addr);
+        for s in meta.symbols {
+            if s.size == 0 {
+                continue;
+            }
+            let end = s.addr.saturating_add(s.size);
+            let full = Self::demangle_name(&s.name);
+            let display = Self::shorten_demangled(&full);
+            symbols.push((s.addr, end, full, display));
+        }
+
+        for d in meta.dynamic_symbols {
+            let Ok(addr) = u32::try_from(d.addr) else {
+                continue;
+            };
+            let Ok(size) = u32::try_from(d.size) else {
+                continue;
+            };
+            if size == 0 {
+                continue;
+            }
+            let end = addr.saturating_add(size);
+            let full = Self::demangle_name(&d.name);
+            let display = Self::shorten_demangled(&full);
+            symbols.push((addr, end, full, display));
+        }
+
+        symbols.sort_by_key(|(lo, _, _, _)| *lo);
 
         Ok(Self { symbols })
     }
@@ -775,17 +898,13 @@ impl SymbolResolver {
         if self.symbols.is_empty() {
             return None;
         }
-        let idx = match self.symbols.binary_search_by_key(&addr, |(a, _, _, _)| *a) {
-            Ok(i) => i,
-            Err(0) => return None,
-            Err(i) => i - 1,
-        };
-        let (_start, end, full, display) = &self.symbols[idx];
-        if addr < *end {
-            Some((full, display))
-        } else {
-            None
+        let i = self.symbols.partition_point(|(lo, _, _, _)| *lo <= addr);
+        for (_, end, full, display) in &self.symbols[..i] {
+            if addr < *end {
+                return Some((full, display));
+            }
         }
+        None
     }
 
     fn format_callstack(&self, frames: &[u32], max_frames: usize) -> String {

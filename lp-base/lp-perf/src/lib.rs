@@ -41,3 +41,29 @@ macro_rules! emit_instant {
 pub fn __emit(name: &'static str, kind: PerfEventKind) {
     sinks::emit(name, kind);
 }
+
+#[cfg(feature = "syscall")]
+pub use lp_riscv_emu_shared::JitSymbolEntry;
+
+/// When neither sink pulls in `lp_riscv_emu_shared`, we still need a
+/// `JitSymbolEntry` symbol so the public signature compiles. Define a
+/// local mirror behind the noop/log paths.
+#[cfg(not(feature = "syscall"))]
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct JitSymbolEntry {
+    pub offset: u32,
+    pub size: u32,
+    pub name_ptr: u32,
+    pub name_len: u32,
+}
+
+/// JIT symbol-map load notification.
+///
+/// On RV32 firmware with `feature = "syscall"` this triggers
+/// `SYSCALL_JIT_MAP_LOAD`. On host builds (`feature = "log"` or default
+/// noop), it logs or no-ops.
+#[inline(always)]
+pub fn emit_jit_map_load(base: u32, len: u32, entries: &[JitSymbolEntry]) {
+    sinks::emit_jit_map_load(base, len, entries);
+}

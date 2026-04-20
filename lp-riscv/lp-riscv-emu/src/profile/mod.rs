@@ -14,8 +14,10 @@ use std::path::{Path, PathBuf};
 pub mod alloc;
 pub mod cpu;
 pub mod events;
+pub mod jit_symbols;
 pub mod perf_event;
 
+pub use jit_symbols::{JitSymbolRecord, JitSymbols};
 pub use perf_event::{EVENT_PROFILE_END, EVENT_PROFILE_START, PerfEvent, PerfEventKind};
 
 pub use crate::emu::cycle_model::InstClass;
@@ -255,6 +257,7 @@ pub struct ProfileSession {
     halt_reason: Option<HaltReason>,
     /// Idempotent guard for [`ProfileSession::start`].
     started: bool,
+    jit_symbols: JitSymbols,
 }
 
 impl ProfileSession {
@@ -301,7 +304,18 @@ impl ProfileSession {
             gate: None,
             halt_reason: None,
             started: false,
+            jit_symbols: JitSymbols::new(),
         })
+    }
+
+    pub fn jit_symbols(&self) -> &JitSymbols {
+        &self.jit_symbols
+    }
+
+    /// Called by the host syscall handler for `SYSCALL_JIT_MAP_LOAD`.
+    /// `entries` is `(offset_within_module, size_bytes, name)`.
+    pub fn on_jit_map_load(&mut self, base: u32, entries: &[(u32, u32, String)], cycle: u64) {
+        self.jit_symbols.add_module(base, entries, cycle);
     }
 
     pub fn set_gate(&mut self, gate: Box<dyn Gate>) {
@@ -421,6 +435,8 @@ impl ProfileSession {
         &mut self,
         sym: Option<&dyn PcSymbolizer>,
     ) -> std::io::Result<Vec<(String, u64)>> {
+        self.write_dynamic_symbols_to_meta()?;
+
         for c in &mut self.collectors {
             let ctx = FinishCtx {
                 trace_dir: &self.trace_dir,
@@ -452,6 +468,23 @@ impl ProfileSession {
         std::fs::write(&report_path, buf.as_bytes())?;
 
         Ok(counts)
+    }
+
+    fn write_dynamic_symbols_to_meta(&self) -> std::io::Result<()> {
+        let meta_path = self.trace_dir.join("meta.json");
+        let bytes = std::fs::read(&meta_path)?;
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                ::alloc::format!("meta.json parse: {e}"),
+            )
+        })?;
+        if let serde_json::Value::Object(map) = &mut value {
+            map.insert("dynamic_symbols".to_string(), self.jit_symbols.to_json());
+        }
+        let file = std::fs::File::create(&meta_path)?;
+        serde_json::to_writer_pretty(std::io::BufWriter::new(file), &value)?;
+        Ok(())
     }
 }
 
@@ -784,5 +817,35 @@ mod tests {
 
         let g = shared.lock().expect("test mutex");
         assert_eq!(&g[..], &[GateAction::Enable]);
+    }
+
+    #[test]
+    fn finish_splices_dynamic_symbols_into_meta_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let collectors: Vec<Box<dyn Collector>> =
+            Vec::from([Box::new(NoopCollector) as Box<dyn Collector>]);
+        let mut session =
+            ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
+
+        session.on_jit_map_load(0x8000_0000, &[(0, 16, "a".into()), (16, 8, "b".into())], 99);
+
+        session.finish_with_symbolizer(None).unwrap();
+
+        let bytes = std::fs::read(tmp.path().join("meta.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["schema_version"], 1);
+        assert!(v["symbols"].is_array());
+        let dyn_sym = v["dynamic_symbols"]
+            .as_array()
+            .expect("dynamic_symbols array");
+        assert_eq!(dyn_sym.len(), 2);
+        assert_eq!(dyn_sym[0]["addr"].as_u64(), Some(0x8000_0000));
+        assert_eq!(dyn_sym[0]["size"].as_u64(), Some(16));
+        assert_eq!(dyn_sym[0]["name"].as_str(), Some("a"));
+        assert_eq!(dyn_sym[0]["loaded_at_cycle"].as_u64(), Some(99));
+        assert!(dyn_sym[0]["unloaded_at_cycle"].is_null());
+        assert_eq!(dyn_sym[1]["addr"].as_u64(), Some(0x8000_0010));
+        assert_eq!(dyn_sym[1]["size"].as_u64(), Some(8));
+        assert_eq!(dyn_sym[1]["name"].as_str(), Some("b"));
     }
 }

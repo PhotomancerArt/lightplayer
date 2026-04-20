@@ -304,3 +304,23 @@ Suggested order:
 If hardware unavailable, m6 ships without
 `correlation-baseline.md` populated — captured as a follow-up to
 do on next available hardware session.
+
+### Known limitation from m5
+
+`SYSCALL_JIT_MAP_UNLOAD` is reserved but not implemented in m5. If
+the JIT relinks during a profile run and a new module reuses address
+ranges from a freed module, the old symbols stay in the overlay
+(latest-inserted wins on overlap for the same base, but freed-and-reused
+ranges can still appear under the old name). m6 documentation
+and follow-up work should either implement UNLOAD or record this as
+accepted behaviour when hot-reload is in play.
+
+**Separate gap (not UNLOAD):** as shipped, `fw-esp32` depends on
+`lp-perf` with `default-features = false` and does **not** enable the
+`syscall` feature (unlike `fw-emu`, which sets `features = ["syscall"]`).
+Without that sink, `emit_jit_map_load` is a no-op on device, so JIT
+shader names will not reach the host overlay for ESP32-captured
+profiles until the firmware manifest wires `lp-perf/syscall` the same
+way as the emulator firmware. Plan and design notes:
+`docs/plans/2026-04-20-cpu-profile-m5-jit-symbols/`,
+`docs/roadmaps/2026-04-19-cpu-profile/m5-jit-symbols.md`.

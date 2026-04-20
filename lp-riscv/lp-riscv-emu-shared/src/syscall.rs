@@ -37,12 +37,15 @@ pub const SYSCALL_ALLOC_TRACE: i32 = 9;
 /// a3 reserved for a future `arg: u32` payload.
 pub const SYSCALL_PERF_EVENT: i32 = 10;
 
-/// Reserved for m5 JIT-symbol overlay (load).
-/// Not yet implemented; reserving the number to avoid collision in m2-m4.
+/// JIT-symbol overlay: notify host that a JIT module has been linked.
+///
+/// ABI: `a0 = base_addr (u32)`, `a1 = len (u32)`, `a2 = count (u32)`,
+/// `a3 = entries_ptr (u32)`. The entries array is `count` records of
+/// `JitSymbolEntry` (see [`crate::JitSymbolEntry`]).
 pub const SYSCALL_JIT_MAP_LOAD: i32 = 11;
 
 /// Reserved for m5 JIT-symbol overlay (unload).
-/// Not yet implemented; reserving the number to avoid collision in m2-m4.
+/// Not yet implemented; reserving the number to avoid collision — deferred, see m5 plan / future-work doc.
 pub const SYSCALL_JIT_MAP_UNLOAD: i32 = 12;
 
 /// Allocation event type constants

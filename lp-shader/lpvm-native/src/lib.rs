@@ -21,6 +21,8 @@ pub mod debug_asm;
 pub mod emit;
 pub mod error;
 pub mod imm;
+#[cfg(any(test, target_arch = "riscv32"))]
+mod jit_symbol_sizes;
 pub mod link;
 pub mod lower;
 pub mod lower_opts;

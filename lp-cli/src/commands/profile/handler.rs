@@ -22,7 +22,7 @@ use super::args::ProfileArgs;
 use super::output;
 use super::output_cpu_json;
 use super::output_speedscope;
-use super::symbolize::Symbolizer;
+use super::symbolize::{DynamicSymbol, Symbolizer, symbolizer_from_meta_json_str};
 use super::workload;
 
 pub fn handle_profile(args: ProfileArgs) -> Result<()> {
@@ -161,7 +161,33 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
             .context("profile session missing at finish")?
     };
 
-    let symbolizer = Symbolizer::new(&trace_symbols);
+    let dynamic_symbols: Vec<DynamicSymbol> = session
+        .jit_symbols()
+        .records()
+        .iter()
+        .map(|r| DynamicSymbol {
+            addr: u64::from(r.base_addr.wrapping_add(r.offset)),
+            size: u64::from(r.size),
+            name: r.name.clone(),
+            loaded_at_cycle: Some(r.loaded_at_cycle),
+            unloaded_at_cycle: r.unloaded_at_cycle,
+        })
+        .collect();
+    let symbolizer_elf = Symbolizer::new(&trace_symbols, &dynamic_symbols);
+
+    let counts = session
+        .finish_with_symbolizer(Some(&symbolizer_elf as &dyn PcSymbolizer))
+        .context("Failed to flush profile session")?;
+
+    let meta_path = trace_dir.join("meta.json");
+    let meta_json = std::fs::read_to_string(&meta_path).with_context(|| {
+        format!(
+            "failed to read {} for symbolizer (dynamic_symbols)",
+            meta_path.display()
+        )
+    })?;
+    let symbolizer =
+        symbolizer_from_meta_json_str(&meta_json).with_context(|| "parse meta.json symbolizer")?;
 
     if let Some(cpu) = session
         .collectors()
@@ -181,10 +207,6 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
             &trace_dir.join("cpu-profile.json"),
         )?;
     }
-
-    let counts = session
-        .finish_with_symbolizer(Some(&symbolizer as &dyn PcSymbolizer))
-        .context("Failed to flush profile session")?;
 
     if let Ok(outcome) = &workload_result {
         if let workload::WorkloadOutcome::GuestHalted(reason) = outcome {
@@ -392,10 +414,7 @@ mod tests {
     #[test]
     fn weird_chars_kebab_per_component() {
         assert_eq!(
-            derive_dir_label(
-                Path::new("examples/foo bar.shader"),
-                Path::new("/cwd"),
-            ),
+            derive_dir_label(Path::new("examples/foo bar.shader"), Path::new("/cwd"),),
             "examples-foo-bar-shader"
         );
     }

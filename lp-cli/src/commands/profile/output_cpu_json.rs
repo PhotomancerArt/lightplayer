@@ -75,7 +75,7 @@ mod tests {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
-        let sym = Symbolizer::new(&[]);
+        let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
         assert_eq!(v["schema_version"], 1);
     }
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn cycle_model_label_round_trips() {
         let cpu = CpuCollector::new("uniform");
-        let sym = Symbolizer::new(&[]);
+        let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
         assert_eq!(v["cycle_model"], "uniform");
     }
@@ -94,7 +94,7 @@ mod tests {
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x2000, InstClass::JalCall, 2);
         cpu.on_instruction(0x2000, 0x2004, InstClass::Alu, 1);
-        let sym = Symbolizer::new(&[]);
+        let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
         let fs = v["func_stats"].as_object().unwrap();
         for k in fs.keys() {
@@ -120,7 +120,7 @@ mod tests {
             size: 0x100,
             name: "f".into(),
         }];
-        let sym = Symbolizer::new(&syms);
+        let sym = Symbolizer::new(&syms, &[]);
         let v = build(&cpu, &sym);
         let e0 = v["call_edges"].as_array().unwrap()[0].as_object().unwrap();
         assert!(e0.contains_key("caller"));
@@ -134,7 +134,7 @@ mod tests {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
-        let sym = Symbolizer::new(&[]);
+        let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
         let s = serde_json::to_string(&v).unwrap();
         let v2: Value = serde_json::from_str(&s).unwrap();

@@ -29,6 +29,7 @@ test-log = { workspace = true }
 env_logger = { workspace = true }
 serial_test = "3.0"
 tempfile = "3"
+lp-cli = { path = "../../lp-cli" }
 
 [lints]
 workspace = true

@@ -236,7 +236,7 @@ mod tests {
     fn smoke_empty_cpu_produces_valid_envelope() {
         let cpu = CpuCollector::new("esp32c6");
         let syms: [TraceSymbol; 0] = [];
-        let sym = Symbolizer::new(&syms);
+        let sym = Symbolizer::new(&syms, &[]);
         let v = build(&cpu, &sym, "w", "m");
         assert_eq!(
             v["$schema"],
@@ -289,7 +289,7 @@ mod tests {
                 name: "c".into(),
             },
         ];
-        let sym = Symbolizer::new(&symbols);
+        let sym = Symbolizer::new(&symbols, &[]);
         let v = build(&cpu, &sym, "w", "m");
         let n = v["profiles"][0]["events"].as_array().unwrap().len();
         assert_eq!(n, 6, "expected 3 open + 3 close events");
@@ -300,7 +300,7 @@ mod tests {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
-        let sym = Symbolizer::new(&[]);
+        let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym, "w", "m");
         assert_eq!(
             v["$schema"],
@@ -316,7 +316,7 @@ mod tests {
         for _ in 0..7 {
             cpu.on_instruction(0x500, 0x504, InstClass::Alu, 1);
         }
-        let sym = Symbolizer::new(&[]);
+        let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym, "w", "m");
         assert_eq!(v["profiles"][0]["endValue"], cpu.total_cycles_attributed);
     }
@@ -329,7 +329,7 @@ mod tests {
             size: 0x1000,
             name: "selfy".into(),
         }];
-        let sym = Symbolizer::new(&symbols);
+        let sym = Symbolizer::new(&symbols, &[]);
 
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
