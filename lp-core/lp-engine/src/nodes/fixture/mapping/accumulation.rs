@@ -5,7 +5,23 @@ use super::sampling::create_sampler;
 use alloc::vec::Vec;
 use lps_q32::q32::Q32;
 
-/// Convert u8 (0-255) from sampler to Q32 (0-1)
+/// Convert u8 (0-255) from sampler to Q32 (0-1).
+///
+/// CAREFUL — do not "optimize" this with a 256-entry LUT.
+///
+/// 255 is a compile-time constant divisor, so LLVM lowers `(v * 65536)
+/// / 255` to a magic-multiply sequence (`(v * magic) >> shift`) at
+/// compile time. That's a few in-register instructions on RV32 and is
+/// faster than a static LUT load + bounds check.
+///
+/// A LUT was tried in commit 029f558e and reverted in 66cf034a after
+/// per-phase profiling caught a +43k cycle regression in
+/// `FixtureRuntime::render`. The `__divdi3` and `u64_div_rem` lines
+/// that show up in profiles are called by JIT shader math builtins
+/// (`__lps_*`, `__lp_lpfn_*`) and naga's compile-time evaluator, NOT
+/// from this function. See
+/// `docs/plans-old/2026-04-19-fixture-render-perf/00-notes.md`
+/// "Phase 02 retrospective" for the full investigation.
 fn u8_to_q32_normalized(v: u8) -> Q32 {
     Q32(((v as i64) * 65536 / 255) as i32)
 }
