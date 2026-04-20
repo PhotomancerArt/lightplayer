@@ -146,6 +146,28 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslSincosQ32 => {
+            let mem = linked_env_memory;
+            let off_1 = params[1].unwrap_i32() as u32 as usize;
+            let mut buf_1 = [0i32; 1];
+            let off_2 = params[2].unwrap_i32() as u32 as usize;
+            let mut buf_2 = [0i32; 1];
+            let p0 = params[0].unwrap_i32();
+            lps_builtins::builtins::glsl::sincos_q32::__lps_sincos_q32(
+                p0,
+                buf_1.as_mut_ptr(),
+                buf_2.as_mut_ptr(),
+            );
+            for (i, v) in buf_1.iter().enumerate() {
+                mem.write(&mut caller, off_1 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            for (i, v) in buf_2.iter().enumerate() {
+                mem.write(&mut caller, off_2 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
         BuiltinId::LpGlslSinhQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::sinh_q32::__lps_sinh_q32(p0);

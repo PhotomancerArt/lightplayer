@@ -12,7 +12,7 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         glsl::{
             acos_q32, acosh_q32, asin_q32, asinh_q32, atan_q32, atan2_q32, atanh_q32, cos_q32,
             cosh_q32, exp_q32, exp2_q32, fma_q32, inversesqrt_q32, ldexp_q32, log_q32, log2_q32,
-            mod_q32, pow_q32, round_q32, sin_q32, sinh_q32, tan_q32, tanh_q32,
+            mod_q32, pow_q32, round_q32, sin_q32, sincos_q32, sinh_q32, tan_q32, tanh_q32,
         },
         lpfn::{color, generative, hash, math},
         lpir::{
@@ -42,6 +42,7 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpGlslPowQ32 => pow_q32::__lps_pow_q32 as *const u8,
         BuiltinId::LpGlslRoundQ32 => round_q32::__lps_round_q32 as *const u8,
         BuiltinId::LpGlslSinQ32 => sin_q32::__lps_sin_q32 as *const u8,
+        BuiltinId::LpGlslSincosQ32 => sincos_q32::__lps_sincos_q32 as *const u8,
         BuiltinId::LpGlslSinhQ32 => sinh_q32::__lps_sinh_q32 as *const u8,
         BuiltinId::LpGlslTanQ32 => tan_q32::__lps_tan_q32 as *const u8,
         BuiltinId::LpGlslTanhQ32 => tanh_q32::__lps_tanh_q32 as *const u8,

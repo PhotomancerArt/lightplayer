@@ -56,6 +56,7 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         ("pow", 2) => Some(BuiltinId::LpGlslPowQ32),
         ("round", 1) => Some(BuiltinId::LpGlslRoundQ32),
         ("sin", 1) => Some(BuiltinId::LpGlslSinQ32),
+        ("sincos", 3) => Some(BuiltinId::LpGlslSincosQ32),
         ("sinh", 1) => Some(BuiltinId::LpGlslSinhQ32),
         ("tan", 1) => Some(BuiltinId::LpGlslTanQ32),
         ("tanh", 1) => Some(BuiltinId::LpGlslTanhQ32),

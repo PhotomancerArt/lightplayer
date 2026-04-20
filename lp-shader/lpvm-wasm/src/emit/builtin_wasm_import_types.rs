@@ -37,6 +37,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
         BuiltinId::LpGlslPowQ32 => (vec![ValType::I32, ValType::I32], vec![ValType::I32]),
         BuiltinId::LpGlslRoundQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpGlslSinQ32 => (vec![ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpGlslSincosQ32 => (vec![ValType::I32, ValType::I32, ValType::I32], Vec::new()),
         BuiltinId::LpGlslSinhQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpGlslTanQ32 => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpGlslTanhQ32 => (vec![ValType::I32], vec![ValType::I32]),

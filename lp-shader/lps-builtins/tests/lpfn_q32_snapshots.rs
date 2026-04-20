@@ -2,6 +2,7 @@
 
 mod util;
 
+use lps_builtins::builtins::glsl::sincos_q32::lps_sincos_q32_pair;
 use lps_builtins::builtins::lpfn::color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_q32;
 use lps_builtins::builtins::lpfn::color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_q32;
 use lps_builtins::builtins::lpfn::generative::fbm::fbm2_q32::__lp_lpfn_fbm2_q32;
@@ -396,6 +397,20 @@ fn render_hsv2rgb_q32() -> String {
     sort_join(lines)
 }
 
+fn render_sincos_q32() -> String {
+    let mut lines = Vec::new();
+    let angles: &[f32] = &[
+        -6.2831855, -3.1415927, -1.5707963, -0.7853982, -0.1, 0.0, 0.1, 0.25, 0.5, 0.7853982, 1.0,
+        1.5707963, 2.0, 2.5, 3.1415927, 3.5, 4.0, 4.712389, 5.0, 5.5, 6.0, 6.2831855, 7.0, 10.0,
+    ];
+    for &a in angles {
+        let x = float_to_fixed(a);
+        let (s, c) = lps_sincos_q32_pair(x);
+        lines.push(format!("sincos_q32(x={x}) = sin={s} cos={c}"));
+    }
+    sort_join(lines)
+}
+
 fn render_rgb2hsv_q32() -> String {
     let mut lines = Vec::new();
     let triples: &[(f32, f32, f32)] = &[
@@ -441,5 +456,6 @@ fn lpfn_q32_snapshots() {
     assert_snapshot("fbm3_q32", &render_fbm3_q32());
     assert_snapshot("hsv2rgb_q32", &render_hsv2rgb_q32());
     assert_snapshot("rgb2hsv_q32", &render_rgb2hsv_q32());
+    assert_snapshot("sincos_q32", &render_sincos_q32());
     finish_snapshot_update_if_requested();
 }

@@ -26,6 +26,7 @@ use crate::builtins::glsl::mod_q32::__lps_mod_q32;
 use crate::builtins::glsl::pow_q32::__lps_pow_q32;
 use crate::builtins::glsl::round_q32::__lps_round_q32;
 use crate::builtins::glsl::sin_q32::__lps_sin_q32;
+use crate::builtins::glsl::sincos_q32::__lps_sincos_q32;
 use crate::builtins::glsl::sinh_q32::__lps_sinh_q32;
 use crate::builtins::glsl::tan_q32::__lps_tan_q32;
 use crate::builtins::glsl::tanh_q32::__lps_tanh_q32;
@@ -148,6 +149,7 @@ pub fn ensure_builtins_referenced() {
         let __lps_pow_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_pow_q32;
         let __lps_round_q32_fn: extern "C" fn(i32) -> i32 = __lps_round_q32;
         let __lps_sin_q32_fn: extern "C" fn(i32) -> i32 = __lps_sin_q32;
+        let __lps_sincos_q32_fn: extern "C" fn(i32, *mut i32, *mut i32) -> () = __lps_sincos_q32;
         let __lps_sinh_q32_fn: extern "C" fn(i32) -> i32 = __lps_sinh_q32;
         let __lps_tan_q32_fn: extern "C" fn(i32) -> i32 = __lps_tan_q32;
         let __lps_tanh_q32_fn: extern "C" fn(i32) -> i32 = __lps_tanh_q32;
@@ -311,6 +313,7 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&__lps_pow_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_round_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_sin_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_sincos_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_sinh_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_tan_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_tanh_q32_fn as *const _);

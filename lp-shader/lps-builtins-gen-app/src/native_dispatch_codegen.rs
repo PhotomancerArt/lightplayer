@@ -30,6 +30,7 @@ fn guest_pointer_out_plan(fn_name: &str) -> Option<Vec<(usize, usize, &'static s
         "__lp_lpfn_psrdnoise2_q32" => Some(vec![(5, 2, "i32")]),
         "__lp_lpfn_psrdnoise3_f32" => Some(vec![(7, 3, "f32")]),
         "__lp_lpfn_psrdnoise3_q32" => Some(vec![(7, 3, "i32")]),
+        "__lps_sincos_q32" => Some(vec![(1, 1, "i32"), (2, 1, "i32")]),
         _ => None,
     }
 }

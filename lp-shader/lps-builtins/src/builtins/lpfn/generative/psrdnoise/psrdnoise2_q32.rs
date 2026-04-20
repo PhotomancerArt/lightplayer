@@ -42,9 +42,8 @@
 //!
 //! Noise value approximately in range [-1, 1] (float)
 
-use crate::builtins::glsl::cos_q32::__lps_cos_q32;
 use crate::builtins::glsl::mod_q32::__lps_mod_q32;
-use crate::builtins::glsl::sin_q32::__lps_sin_q32;
+use crate::builtins::glsl::sincos_q32::lps_sincos_q32_pair;
 use lps_q32::q32::Q32;
 use lps_q32::vec2_q32::Vec2Q32;
 
@@ -174,12 +173,15 @@ fn psrdnoise2_tail(
             .wrapping_add(alpha.0),
     );
 
-    let gx_x = Q32::from_fixed(__lps_cos_q32(psi_x.to_fixed()));
-    let gx_y = Q32::from_fixed(__lps_cos_q32(psi_y.to_fixed()));
-    let gx_z = Q32::from_fixed(__lps_cos_q32(psi_z.to_fixed()));
-    let gy_x = Q32::from_fixed(__lps_sin_q32(psi_x.to_fixed()));
-    let gy_y = Q32::from_fixed(__lps_sin_q32(psi_y.to_fixed()));
-    let gy_z = Q32::from_fixed(__lps_sin_q32(psi_z.to_fixed()));
+    let (sin_x, cos_x) = lps_sincos_q32_pair(psi_x.to_fixed());
+    let (sin_y, cos_y) = lps_sincos_q32_pair(psi_y.to_fixed());
+    let (sin_z, cos_z) = lps_sincos_q32_pair(psi_z.to_fixed());
+    let gx_x = Q32::from_fixed(cos_x);
+    let gx_y = Q32::from_fixed(cos_y);
+    let gx_z = Q32::from_fixed(cos_z);
+    let gy_x = Q32::from_fixed(sin_x);
+    let gy_y = Q32::from_fixed(sin_y);
+    let gy_z = Q32::from_fixed(sin_z);
 
     let g0_x = gx_x;
     let g0_y = gy_x;
