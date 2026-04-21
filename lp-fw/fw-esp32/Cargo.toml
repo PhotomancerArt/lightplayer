@@ -28,6 +28,8 @@ test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
 test_oom = []   # Allocate until OOM, verify catch_unwind recovers (for panic recovery validation)
+test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
+test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
@@ -42,6 +44,8 @@ esp-println = { version = "0.16.1", default-features = false, features = ["esp32
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
+lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
+libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
 lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"], optional = true }

@@ -5,4 +5,15 @@
 //! and add feature gates in board/mod.rs.
 
 pub mod init;
+#[cfg(any(
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+    )),
+    feature = "test_json",
+))]
 pub mod usb_connection;

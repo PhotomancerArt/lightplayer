@@ -388,6 +388,14 @@ fwtest-json-esp32c6: install-rv32-target
 fwtest-oom-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
+# Run firmware with test_msafluid: MSAFluid solver perf experiment, prints mcycle per step
+fwtest-msafluid-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_msafluid,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
+# Run firmware with test_fluid_demo: live RGB MSAFluid demo on examples/basic ring fixture (GPIO4)
+fwtest-fluid-demo-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
 cargo-update:
     cargo update -p regalloc2 \
                  -p cranelift-codegen \

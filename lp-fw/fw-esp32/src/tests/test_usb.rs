@@ -25,19 +25,6 @@ static FRAME_COUNT: AtomicU32 = AtomicU32::new(0);
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 
-/// Serial connection state
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SerialState {
-    /// Serial not yet initialized
-    Uninitialized,
-    /// Serial ready and working
-    Ready,
-    /// Serial disconnected (will retry)
-    Disconnected,
-    /// Serial error (will retry)
-    Error,
-}
-
 /// Heartbeat task - sends status message every second
 ///
 /// Sends a simple heartbeat message so it's easy to see the firmware is running
@@ -54,7 +41,7 @@ async fn heartbeat_task() {
         let frame_count = FRAME_COUNT.load(Ordering::Relaxed);
 
         // Format heartbeat message (no M! prefix so tests ignore it)
-        let heartbeat_msg = format!("heartbeat: frame_count={}\n", frame_count);
+        let heartbeat_msg = format!("heartbeat: frame_count={frame_count}\n");
 
         // Send via router (non-blocking, drop if queue full)
         let _ = router.send(heartbeat_msg);
@@ -66,7 +53,7 @@ async fn heartbeat_task() {
 /// Responsibilities:
 /// - Drain outgoing queue and send via serial
 /// - Read from serial and push to incoming queue (filter M! prefix)
-/// - Handle serial state (Ready/Disconnected/Error)
+/// - Tolerate disconnects (read/write errors break inner loops until next iteration)
 /// - Retry serial initialization if disconnected
 #[embassy_executor::task]
 async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
@@ -172,7 +159,7 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 /// - I/O task (handles serial communication)
 pub async fn run_usb_test(spawner: embassy_executor::Spawner) -> ! {
     // Initialize board (clock, heap, runtime) and get hardware peripherals
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18) = init_board();
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4) = init_board();
     start_runtime(timg0, sw_int);
 
     // Initialize RMT driver for LED blinking
@@ -242,7 +229,7 @@ fn handle_messages(router: &MessageRouter) {
             Err(e) => {
                 // Parse error - ignore
                 #[cfg(feature = "esp32c6")]
-                log::warn!("Failed to parse command: {:?}", e);
+                log::warn!("Failed to parse command: {e:?}");
                 continue;
             }
         };
