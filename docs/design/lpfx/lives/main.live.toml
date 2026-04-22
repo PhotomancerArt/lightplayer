@@ -1,0 +1,34 @@
+# Composed Visual: N candidates loaded simultaneously, one selected per frame
+# by max priority. Transition fades between selections.
+
+title       = "Main"
+description = "Fluid when audio active, FBM noise as fallback, rainbow when idle"
+
+[[candidates]]
+visual   = "../patterns/fluid.pattern.toml"
+priority = 0.0  # bound externally to audio level
+
+[[candidates]]
+visual   = "../stacks/psychedelic.stack.toml"
+priority = 0.3  # static fallback
+
+[[candidates]]
+visual   = "../patterns/rainbow.pattern.toml"
+priority = 0.1  # deeper fallback
+
+[transition]
+visual   = "../transitions/crossfade.transition.toml"
+duration = 2.0   # seconds
+
+[selection]
+min_hold = 4.0   # don't switch more often than this (seconds)
+debounce = 0.5   # priority must lead for this long before switching
+
+# Bindings for descendants. Keys are NodePropSpecs relative to this Live.
+# Ancestors (Show, Project) can override.
+# Note: `transition#progress` is driven internally by the Live; not bound here.
+[bindings]
+"candidates/0#priority"  = { bus = "audio/level" }   # fluid follows audio
+"candidates/0#emitter_x" = { bus = "touch/in.x" }
+"candidates/0#emitter_y" = { bus = "touch/in.y" }
+"candidates/0#intensity" = { bus = "audio/level" }   # transforms (scale, etc.) TBD

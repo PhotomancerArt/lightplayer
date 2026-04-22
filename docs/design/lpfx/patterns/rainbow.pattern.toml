@@ -1,0 +1,39 @@
+# Trivial ShaderPattern. Single-file form, all inline.
+# Cycling rainbow gradient driven by time.
+
+title       = "Rainbow"
+description = "Cycling rainbow gradient"
+author      = "yona"
+
+[shader]
+glsl = """
+uniform vec2  outputSize;
+uniform float param_time;
+uniform float param_speed;
+uniform float param_saturation;
+
+vec4 render(vec2 pos) {
+  vec2 uv = pos / outputSize;
+  float h = fract(uv.x + param_time * param_speed);
+  return vec4(lpfn_hsv2rgb(vec3(h, param_saturation, 1.0)), 1.0);
+}
+"""
+
+[params.time]
+type = "f32"
+bind = { bus = "time" }   # default; any enclosing node can override
+
+[params.speed]
+type    = "f32"
+default = 1.0
+min     = 0.0
+max     = 5.0
+label   = "Speed"
+unit    = "Hz"
+ui.fader = { step = 0.1 }
+
+[params.saturation]
+type    = "f32"
+default = 1.0
+min     = 0.0
+max     = 1.0

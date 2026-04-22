@@ -40,9 +40,9 @@ Questions:
 | ----------- | ------------------------------------------------------------------- | ------------------------------------------------- |
 | **Signal**  | Typed data flowing on the bus (Audio, Video, Texture, Float, etc.). | a frame of camera video; an audio sample buffer   |
 | **Bus**     | Implicit typed channel space. Derived from modules connected to it. | the project's runtime channel set                 |
-| **Channel** | Typed named address on the bus: `<type>/<dir>/<idx>`.               | `audio/in/0`, `video/out/0`, `touch/in/1`         |
+| **Channel** | Typed named address on the bus: `<type>/<dir>[/<n>]`.               | `audio/in`, `video/out`, `touch/in/1`             |
 | **Module**  | Self-contained bus participant. Either a Show or a Rig.             | `main.show`, `dome.rig`                           |
-| **Binding** | Connection from a Signal to a Parameter (modulation).               | `audio/in/0 → main.show/fluid.vis#speed`          |
+| **Binding** | Connection from a Signal to a Parameter (modulation).               | `audio/in → main.show/fluid.vis#speed`            |
 | **Source**  | Anything that produces a Signal.                                    | a microphone, an LFO, a touch surface             |
 | **Sink**    | Anything that consumes a Signal.                                    | a speaker, an Art-Net DMX output, the debug scope |
 
@@ -52,7 +52,7 @@ Questions:
 2. Strict `<type>/<dir>/<idx>` channel names, or allow user-named (`drawpad/0`)? Force `<type>/<name>[/idx]` style, but `<name>` and `<idx>` are configurable. Numbers are default, but we allow user-named indices like `video/in/webcam` or `video/app`.
 3. One bus per project, or one per Module pair? One per project.
 4. Binding transforms (scale, smoothing, curve) — inline on Binding, or via a separate Modulator Node?
-5. Naming: `audio_in/0`, `audio/in/0`, or `audio/in` & `audio/in/1`? I think `audio/in` & `audio/in/1`
+5. Naming: `audio_in/0`, `audio/in/0`, or `audio/in` & `audio/in/1`? **Decided**: `<kind>/<dir>/<channel>[/<sub>...]` — always include the channel index, even for the default. `audio/in/0`, `audio/in/1`, `audio/in/0/bands`. Positional clarity (kind, direction, channel, sub-channel) and easy sub-channel addressing without retroactively shifting names. Convention only for now; may be codified later.
 
 ## Signal types
 
@@ -72,6 +72,7 @@ Questions:
 2. Audio sample format (f32 / i16 / Q-fixed)? Good question. TBD later.
 3. Touch: XY only, or include pressure / id / continuity? Yes all those things. Touch struct.
 4. Is the FFT step a Transformer Node, or is `AudioFFT` materialized by some other mechanism? Figure out later.
+5. Event type for button presses, etc.? TBD.
 
 # Domain
 
@@ -146,8 +147,8 @@ Questions:
 | Term           | One-line                                                        | Example                                           |
 | -------------- | --------------------------------------------------------------- | ------------------------------------------------- |
 | **Arity**      | Number of primary texture inputs a Visual takes (0 / 1 / N).    | Pattern=0, Effect=1, Transition=2, Mixer=N        |
-| **Convention** | Default channel-binding rules. Most projects need no overrides. | `audio_in/0` auto-binds to the only mic source    |
-| **Override**   | Per-device deviation from convention. Lives on the device.      | "this rig: audio_out → audio_in" loopback         |
+| **Convention** | Default channel-binding rules. Most projects need no overrides. | `audio/in` auto-binds to the only mic source      |
+| **Override**   | Per-device deviation from convention. Lives on the device.      | "this rig: audio/out → audio/in" loopback         |
 | **Wiring**     | The concrete publisher↔consumer connection record.              | resolved binding `mic-1 → fluid.vis#speed`        |
 | **Manifest**   | The `*.toml` file for any Node. Suffix indicates type.          | `fluid.vis/Node.toml`, `dome.rig/Node.toml`       |
 | **Scope**      | Where a software source is declared (rig / show / visual).      | LFO declared in a Visual is local to that Visual  |

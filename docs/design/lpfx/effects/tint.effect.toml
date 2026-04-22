@@ -1,0 +1,35 @@
+# Trivial 1-arity ShaderEffect. Multiplies input by a color.
+
+title       = "Tint"
+description = "Multiply input by a color"
+
+[shader]
+glsl = """
+uniform sampler2D input;
+uniform vec2      outputSize;
+uniform float     param_time;
+uniform vec3      param_color;
+uniform float     param_amount;
+
+vec4 render(vec2 pos) {
+  vec2 uv = pos / outputSize;
+  vec4 src = texture(input, uv);
+  vec3 tinted = src.rgb * param_color;
+  return vec4(mix(src.rgb, tinted, param_amount), src.a);
+}
+"""
+
+[params.time]
+type = "f32"
+bind = { bus = "time" }
+
+[params.color]
+type    = "vec3"
+default = [1.0, 0.6, 0.4]
+ui.color = {}
+
+[params.amount]
+type    = "f32"
+default = 1.0
+min     = 0.0
+max     = 1.0

@@ -1,0 +1,49 @@
+# 1-arity ShaderEffect. Mirrors input around a center into N angular slices.
+# Demonstrates spatial transformation: re-samples input at a different position.
+
+title       = "Kaleidoscope"
+description = "Radial mirror with N slices"
+
+[shader]
+glsl = """
+uniform sampler2D input;
+uniform vec2      outputSize;
+uniform float     param_time;
+uniform int       param_slices;
+uniform float     param_rotation;
+
+const float PI = 3.14159265;
+
+vec4 render(vec2 pos) {
+  vec2 uv = pos / outputSize;
+  vec2 c = uv - 0.5;
+
+  float r = length(c);
+  float a = atan(c.y, c.x) + param_rotation;
+
+  float seg = 2.0 * PI / float(param_slices);
+  a = mod(a, seg);
+  a = abs(a - seg * 0.5);
+
+  vec2 sampleUv = vec2(cos(a), sin(a)) * r + 0.5;
+  return texture(input, sampleUv);
+}
+"""
+
+[params.time]
+type = "f32"
+bind = { bus = "time" }
+
+[params.slices]
+type    = "i32"
+default = 6
+min     = 2
+max     = 16
+ui.stepper = { step = 1 }
+
+[params.rotation]
+type    = "f32"
+default = 0.0
+min     = 0.0
+max     = 6.283
+unit    = "rad"

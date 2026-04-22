@@ -1,0 +1,34 @@
+# Composed Visual: input texture + N Effects, applied in order each frame.
+# Flat in structure (no nested [[effects]] within an effect entry), but the
+# [input] slot may reference any Visual — including another Stack. Children
+# are referenced by ArtifactSpec; their params can be overridden inline.
+# The [input] slot accepts a Visual or a bus channel.
+
+title       = "Psychedelic"
+description = "FBM noise through a kaleidoscope, tinted pink"
+
+[input]
+visual = "../patterns/fbm.pattern.toml"
+
+[input.params]
+scale    = 6.0
+octaves  = 4
+hueShift = 0.2
+
+# Alternative form: bus channel as input
+# [input]
+# channel = "video/in"
+
+[[effects]]
+visual = "../effects/kaleidoscope.effect.toml"
+
+[effects.params]
+slices   = 8
+rotation = 0.0
+
+[[effects]]
+visual = "../effects/tint.effect.toml"
+
+[effects.params]
+color  = [1.0, 0.5, 0.8]
+amount = 0.7
