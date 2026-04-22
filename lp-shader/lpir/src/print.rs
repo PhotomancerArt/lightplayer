@@ -36,6 +36,7 @@ enum Block {
     If,
     Else,
     Loop {
+        #[allow(dead_code)]
         start_pc: usize,
     },
     Switch,

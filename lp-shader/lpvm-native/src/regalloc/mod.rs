@@ -10,8 +10,8 @@ use alloc::vec::Vec;
 pub mod debug_facade;
 
 pub use debug_facade::{
-    append_entry_trace_metadata_lines, trace_by_vinst_or_empty, trace_sink_new, TraceEntry, TracePush,
-    TraceSink,
+    TraceEntry, TracePush, TraceSink, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
+    trace_sink_new,
 };
 
 pub mod liveness;
@@ -239,7 +239,7 @@ fn used_callee_saved_from_output(output: &AllocOutput, func_abi: &FuncAbi) -> cr
 /// Allocate registers for a lowered function (full region tree).
 pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
     use crate::regalloc::pool::RegPool;
-    use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
+    use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 
     log::debug!(
         "[native-fa] allocate: starting for {} vinsts, region_tree.root={}",

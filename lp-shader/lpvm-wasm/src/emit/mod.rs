@@ -8,11 +8,12 @@ mod memory;
 mod ops;
 mod q32;
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::LpirModule;
+use lpir::{FuncId, LpirModule};
 use lps_q32::q32_options::Q32Options;
 
 use crate::module::EnvMemorySpec;
@@ -38,7 +39,9 @@ pub(crate) struct FdivRecipLocals {
 pub(crate) struct EmitCtx<'a> {
     pub options: &'a crate::options::WasmOptions,
     pub import_remap: &'a [Option<u32>],
-    pub filtered_import_count: u32,
+    /// Maps `FuncId` → WASM function index. Required because DFE may leave
+    /// gaps in the `FuncId` space, but WASM function indices are dense.
+    pub local_func_index: &'a BTreeMap<FuncId, u32>,
     /// Copied from [`lpir::CompilerConfig::q32`] for Q32 opcode lowering.
     pub q32: Q32Options,
 }
@@ -157,10 +160,15 @@ pub(crate) fn emit_module(
         exports.export("render_frame", ExportKind::Func, render_fn_index);
     }
 
+    let mut local_func_index: BTreeMap<FuncId, u32> = BTreeMap::new();
+    for (i, &fid) in ir.functions.keys().enumerate() {
+        local_func_index.insert(fid, filtered_fn_count + i as u32);
+    }
+
     let ctx = EmitCtx {
         options,
         import_remap: &filtered.remap,
-        filtered_import_count: filtered_fn_count,
+        local_func_index: &local_func_index,
         q32: options.config.q32,
     };
 

@@ -1,6 +1,8 @@
 //! Candidate inline weight metrics (M3.1).
 
-use crate::inline_weights::{weight, weight_body_len, weight_heavy_bias, weight_markers_zero, WeightKind};
+use crate::inline_weights::{
+    WeightKind, weight, weight_body_len, weight_heavy_bias, weight_markers_zero,
+};
 use crate::parse::parse_module;
 use crate::validate::validate_module;
 
@@ -27,7 +29,11 @@ func @handcrafted(v1:f32) -> f32 {
 fn handcrafted_three_weights_and_dispatcher() {
     let m = parse_module(HANDCRAFTED).expect("parse");
     validate_module(&m).expect("validate");
-    let f = m.functions.values().find(|g| g.name == "handcrafted").expect("func");
+    let f = m
+        .functions
+        .values()
+        .find(|g| g.name == "handcrafted")
+        .expect("func");
 
     let bl = weight_body_len(f);
     let mz = weight_markers_zero(f);

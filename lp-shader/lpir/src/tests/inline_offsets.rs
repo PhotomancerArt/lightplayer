@@ -146,7 +146,10 @@ fn switch_multi_arm() {
     b.end_switch_arm();
     b.push_default();
     let d = b.alloc_vreg(IrType::F32);
-    b.push(LpirOp::FconstF32 { dst: d, value: -1.0 });
+    b.push(LpirOp::FconstF32 {
+        dst: d,
+        value: -1.0,
+    });
     b.end_switch_arm();
     b.end_switch();
     let f = b.finish();
@@ -190,7 +193,10 @@ fn mutated_body_grows() {
     let a = b_ref.alloc_vreg(IrType::I32);
     b_ref.push(LpirOp::IconstI32 { dst: a, value: 1 });
     let b_reg = b_ref.alloc_vreg(IrType::I32);
-    b_ref.push(LpirOp::IconstI32 { dst: b_reg, value: 2 });
+    b_ref.push(LpirOp::IconstI32 {
+        dst: b_reg,
+        value: 2,
+    });
     b_ref.end_if();
     let reference = b_ref.finish();
     let expected_words = flatten_control_offset_words(&reference.body);

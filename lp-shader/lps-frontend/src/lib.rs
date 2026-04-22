@@ -146,6 +146,59 @@ mod tests {
             .find(|f| f.name == "add")
             .expect("add fn");
         assert_eq!(add.param_count, 2);
+        assert!(!add.is_entry);
+    }
+
+    #[test]
+    fn lower_marks_only_render_as_entry_among_user_functions() {
+        let src = r#"
+float helper(float x) { return x + 1.0; }
+vec4 render(vec2 pos) { return vec4(helper(pos.x)); }
+"#;
+        let naga = compile(src).unwrap();
+        let (ir, _) = super::lower(&naga).expect("lower");
+        let render = ir
+            .functions
+            .values()
+            .find(|f| f.name == "render")
+            .expect("render");
+        let helper = ir
+            .functions
+            .values()
+            .find(|f| f.name == "helper")
+            .expect("helper");
+        assert!(render.is_entry);
+        assert!(!helper.is_entry);
+    }
+
+    #[test]
+    fn lower_shader_init_ir_is_entry() {
+        let src = "float my_global = 42.0; float test() { return my_global; }";
+        let naga = compile(src).unwrap();
+        let (ir, _) = super::lower(&naga).expect("lower");
+        let init = ir
+            .functions
+            .values()
+            .find(|f| f.name == "__shader_init")
+            .expect("__shader_init");
+        assert!(init.is_entry);
+        let test_fn = ir
+            .functions
+            .values()
+            .find(|f| f.name == "test")
+            .expect("test");
+        assert!(!test_fn.is_entry);
+    }
+
+    #[test]
+    fn lower_helper_only_module_has_no_entry_functions() {
+        let src = "float foo(float x) { return x; }";
+        let naga = compile(src).unwrap();
+        let (ir, _) = super::lower(&naga).expect("lower");
+        assert!(
+            ir.functions.values().all(|f| !f.is_entry),
+            "no production roots without render or __shader_init"
+        );
     }
 
     #[test]

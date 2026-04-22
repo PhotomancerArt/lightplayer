@@ -18,13 +18,7 @@ fn alias_for_readonly_param() {
     let pw = scan_param_writes(&callee);
     let mut caller = FunctionBuilder::new("caller", &[IrType::I32]).finish();
     let arg = VReg(5);
-    let r = build_remap(
-        &mut caller,
-        &callee,
-        &[VMCTX_VREG, arg],
-        &[],
-        &pw,
-    );
+    let r = build_remap(&mut caller, &callee, &[VMCTX_VREG, arg], &[], &pw);
     assert!(r.param_copies.is_empty());
     assert_eq!(r.vreg_table[1], arg);
 }
@@ -45,13 +39,7 @@ fn copy_for_mutated_param() {
     let pw = scan_param_writes(&callee);
     let mut caller = FunctionBuilder::new("caller", &[IrType::I32]).finish();
     let arg = VReg(9);
-    let r = build_remap(
-        &mut caller,
-        &callee,
-        &[VMCTX_VREG, arg],
-        &[],
-        &pw,
-    );
+    let r = build_remap(&mut caller, &callee, &[VMCTX_VREG, arg], &[], &pw);
     assert_eq!(r.param_copies.len(), 1);
     match &r.param_copies[0] {
         LpirOp::Copy { dst, src } => {
@@ -70,22 +58,10 @@ fn vmctx_aliases() {
     let callee = b.finish();
     let pw = scan_param_writes(&callee);
     let mut caller1 = FunctionBuilder::new("caller1", &[IrType::I32]).finish();
-    let r = build_remap(
-        &mut caller1,
-        &callee,
-        &[VMCTX_VREG, VReg(3)],
-        &[],
-        &pw,
-    );
+    let r = build_remap(&mut caller1, &callee, &[VMCTX_VREG, VReg(3)], &[], &pw);
     assert_eq!(r.vreg_table[0], VMCTX_VREG);
     let mut caller2 = FunctionBuilder::new("caller2", &[IrType::I32]).finish();
-    let r2 = build_remap(
-        &mut caller2,
-        &callee,
-        &[VMCTX_VREG, VReg(3)],
-        &[],
-        &pw,
-    );
+    let r2 = build_remap(&mut caller2, &callee, &[VMCTX_VREG, VReg(3)], &[], &pw);
     assert_eq!(r2.vreg_table[0], VMCTX_VREG);
 }
 
@@ -98,10 +74,7 @@ fn slot_offset_applied() {
         param_count: 0,
         return_types: vec![],
         vreg_types: vec![IrType::Pointer],
-        slots: vec![
-            SlotDecl { size: 4 },
-            SlotDecl { size: 8 },
-        ],
+        slots: vec![SlotDecl { size: 4 }, SlotDecl { size: 8 }],
         body: vec![],
         vreg_pool: vec![],
     };
@@ -158,13 +131,7 @@ fn vreg_pool_splice() {
     let pw = scan_param_writes(&callee);
     let mut caller = FunctionBuilder::new("caller", &[IrType::F32]).finish();
     let arg = VReg(100);
-    let remap = build_remap(
-        &mut caller,
-        &callee,
-        &[VMCTX_VREG, arg],
-        &[],
-        &pw,
-    );
+    let remap = build_remap(&mut caller, &callee, &[VMCTX_VREG, arg], &[], &pw);
     let call_op = callee
         .body
         .iter()

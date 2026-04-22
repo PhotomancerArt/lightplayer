@@ -19,10 +19,7 @@ fn leaf() {
     let mut f = FunctionBuilder::new("leaf", &[IrType::I32]);
     let p = f.add_param(IrType::I32);
     let tmp = f.alloc_vreg(IrType::I32);
-    f.push(LpirOp::IconstI32 {
-        dst: tmp,
-        value: 0,
-    });
+    f.push(LpirOp::IconstI32 { dst: tmp, value: 0 });
     f.push_return(&[p]);
     mb.add_function(f.finish());
 
@@ -31,7 +28,12 @@ fn leaf() {
     let (topo, cyclic) = callgraph::topo_order(&g, &module);
     assert!(cyclic.is_empty());
     assert_eq!(topo, vec![FuncId(0)]);
-    assert!(g.callees_of.get(&FuncId(0)).map(|v| v.is_empty()).unwrap_or(true));
+    assert!(
+        g.callees_of
+            .get(&FuncId(0))
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+    );
 }
 
 #[test]
@@ -275,7 +277,12 @@ fn import_only_callee() {
     let (topo, cyclic) = callgraph::topo_order(&g, &module);
     assert!(cyclic.is_empty());
     assert_eq!(topo, vec![FuncId(0)]);
-    assert!(g.callees_of.get(&FuncId(0)).map(|v| v.is_empty()).unwrap_or(true));
+    assert!(
+        g.callees_of
+            .get(&FuncId(0))
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+    );
 }
 
 #[test]

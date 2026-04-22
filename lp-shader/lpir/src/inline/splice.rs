@@ -34,11 +34,7 @@ fn classify_return_shape(body: &[LpirOp]) -> ReturnShape {
     }
 }
 
-pub(crate) fn inline_call_site(
-    caller: &mut IrFunction,
-    callee: &IrFunction,
-    call_op_idx: usize,
-) {
+pub(crate) fn inline_call_site(caller: &mut IrFunction, callee: &IrFunction, call_op_idx: usize) {
     let (args_range, results_range) = match &caller.body.get(call_op_idx) {
         Some(LpirOp::Call { args, results, .. }) => (*args, *results),
         _ => return,
@@ -64,13 +60,7 @@ pub(crate) fn inline_call_site(
     }
 
     let pw = scan_param_writes(callee);
-    let rmap = build_remap(
-        caller,
-        callee,
-        &call_args,
-        &call_results,
-        &pw,
-    );
+    let rmap = build_remap(caller, callee, &call_args, &call_results, &pw);
 
     let shape = classify_return_shape(&callee.body);
     let needs_block = matches!(shape, ReturnShape::Multi);

@@ -12,11 +12,11 @@ pub(crate) use offsets::recompute_offsets;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
+use crate::InlineConfig;
 use crate::inline::callgraph::CallGraph;
 use crate::inline::heuristic::{BudgetReason, Decision};
 use crate::lpir_module::LpirModule;
 use crate::types::FuncId;
-use crate::InlineConfig;
 
 /// Counters and flags returned by [`inline_module`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -32,11 +32,7 @@ pub struct InlineResult {
 }
 
 fn total_op_count(module: &LpirModule) -> usize {
-    module
-        .functions
-        .values()
-        .map(|f| f.body.len())
-        .sum()
+    module.functions.values().map(|f| f.body.len()).sum()
 }
 
 fn call_sites_for_callee(graph: &CallGraph, callee_id: FuncId) -> Vec<(FuncId, usize)> {
@@ -103,10 +99,7 @@ pub fn inline_module(module: &mut LpirModule, config: &InlineConfig) -> InlineRe
                     current_op_count
                 );
                 let by_caller = group_by_caller_desc(&sites);
-                let callee = module
-                    .functions
-                    .remove(&callee_id)
-                    .expect("topo callee");
+                let callee = module.functions.remove(&callee_id).expect("topo callee");
                 for (caller_id, indices) in by_caller {
                     let caller = module.functions.get_mut(&caller_id).expect("caller");
                     for op_idx in indices {
@@ -144,7 +137,10 @@ pub fn inline_module(module: &mut LpirModule, config: &InlineConfig) -> InlineRe
     }
 
     for caller_id in mutated_callers {
-        let f = module.functions.get_mut(&caller_id).expect("mutated caller");
+        let f = module
+            .functions
+            .get_mut(&caller_id)
+            .expect("mutated caller");
         recompute_offsets(&mut f.body);
         f.body.shrink_to_fit();
     }

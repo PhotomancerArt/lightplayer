@@ -322,6 +322,9 @@ mod tests {
         assert!(s.contains("hb"));
         assert!(s.contains("foo"));
         assert!(s.contains("TOTAL"));
-        assert!(s.lines().any(|line| line.contains("foo") && line.contains("10") && line.contains("6") && line.contains("8")));
+        assert!(s.lines().any(|line| line.contains("foo")
+            && line.contains("10")
+            && line.contains("6")
+            && line.contains("8")));
     }
 }

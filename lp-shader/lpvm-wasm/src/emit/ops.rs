@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{CalleeRef, FuncId, ImportId, IrFunction, IrType, LpirModule, LpirOp};
+use lpir::{CalleeRef, ImportId, IrFunction, IrType, LpirModule, LpirOp};
 use lps_q32::q32_options::{AddSubMode, DivMode, MulMode};
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
@@ -26,7 +26,11 @@ fn wasm_func_index(ctx: &FuncEmitCtx<'_>, callee: CalleeRef) -> Result<u32, Stri
             let k = i as usize;
             m.import_remap[k].ok_or_else(|| format!("call to pruned import {k}"))
         }
-        CalleeRef::Local(FuncId(id)) => Ok(m.filtered_import_count + id as u32),
+        CalleeRef::Local(fid) => m
+            .local_func_index
+            .get(&fid)
+            .copied()
+            .ok_or_else(|| format!("call to unknown local function {fid:?}")),
     }
 }
 

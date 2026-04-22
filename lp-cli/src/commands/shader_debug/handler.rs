@@ -13,14 +13,18 @@ use super::display::{print_comparison_table, print_detailed_view, print_help_tex
 use super::types::{BackendTarget, DebugReport};
 
 pub fn handle_shader_debug(args: Args) -> Result<()> {
-    let has_empty_opt = args.opt.iter().any(String::is_empty);
+    let compiler_opt_sources: Vec<&String> =
+        args.opt.iter().chain(args.compiler_opt.iter()).collect();
+    let has_empty_opt = compiler_opt_sources.iter().any(|s| s.is_empty());
     if has_empty_opt {
-        if args.opt.iter().any(|s| !s.is_empty()) {
+        if compiler_opt_sources.iter().any(|s| !s.is_empty()) {
             anyhow::bail!(
-                "`--opt` without KEY=value prints valid keys and values; do not mix with other `--opt` flags on the same command"
+                "`--opt` / `--compiler-opt` without KEY=value prints valid keys and values; do not mix empty and non-empty entries on the same command"
             );
         }
-        eprintln!("Valid keys for `-o KEY=VALUE` / `--opt KEY=VALUE`:");
+        eprintln!(
+            "Valid keys for `-o KEY=VALUE` / `--opt KEY=VALUE` / `--compiler-opt KEY=VALUE`:"
+        );
         eprintln!();
         eprintln!("  inline.mode                          auto | always | never  (default auto)");
         eprintln!("  inline.always_inline_single_site     true | false           (default true)");
@@ -31,6 +35,7 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
         eprintln!(
             "  inline.module_op_budget              <usize>                (default unlimited)"
         );
+        eprintln!("  dead_func_elim.mode                  auto | never           (default never)");
         eprintln!(
             "  q32.add_sub                          saturating | wrapping  (default saturating)"
         );
@@ -71,15 +76,15 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     };
 
     let mut compiler_config = CompilerConfig::default();
-    for opt in &args.opt {
+    for opt in compiler_opt_sources {
         let (key, value) = opt.split_once('=').ok_or_else(|| {
             anyhow::anyhow!(
-                "--opt expects KEY=VALUE, got: {opt:?} (use `--opt` alone to list valid keys and values)"
+                "--opt / --compiler-opt expects KEY=VALUE, got: {opt:?} (use `--opt` or `--compiler-opt` alone to list valid keys and values)"
             )
         })?;
         compiler_config
             .apply(key, value)
-            .map_err(|e| anyhow::anyhow!("invalid --opt: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("invalid compiler option: {e}"))?;
     }
 
     // Parse targets

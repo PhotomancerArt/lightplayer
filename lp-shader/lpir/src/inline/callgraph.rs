@@ -28,14 +28,8 @@ pub(crate) fn build(module: &LpirModule) -> CallGraph {
                 ..
             } = op
             {
-                callees_raw
-                    .entry(caller_id)
-                    .or_default()
-                    .insert(*callee_id);
-                callers_raw
-                    .entry(*callee_id)
-                    .or_default()
-                    .insert(caller_id);
+                callees_raw.entry(caller_id).or_default().insert(*callee_id);
+                callers_raw.entry(*callee_id).or_default().insert(caller_id);
                 call_sites_of
                     .entry(caller_id)
                     .or_default()

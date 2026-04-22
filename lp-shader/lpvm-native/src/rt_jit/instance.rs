@@ -5,7 +5,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lps_shared::{lps_value_f32::LpsValueF32, LpsType, LpsValueQ32, ParamQualifier};
+use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
     encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,

@@ -1,9 +1,9 @@
 //! Compile LPIR (+ module metadata) to WASM.
 
-use alloc::{format, vec::Vec};
+use alloc::{collections::BTreeMap, format, vec::Vec};
 
 use lpir::LpirModule;
-use lps_shared::LpsModuleSig;
+use lps_shared::{LpsFnSig, LpsModuleSig};
 
 use crate::emit;
 use crate::error::WasmError;
@@ -49,6 +49,21 @@ pub fn compile_lpir(
             inline_result.call_sites_replaced
         );
     }
+    if !matches!(
+        options.config.dead_func_elim.mode,
+        lpir::DeadFuncElimMode::Never
+    ) {
+        let roots = lpir::roots_from_is_entry(&ir_opt);
+        if !roots.is_empty() {
+            let dfe = lpir::dead_func_elim(&mut ir_opt, &roots);
+            if dfe.functions_removed > 0 {
+                log::info!(
+                    "[wasm] dead_func_elim: removed {} functions",
+                    dfe.functions_removed
+                );
+            }
+        }
+    }
 
     validate_metadata(&ir_opt, meta)?;
     let (wasm_bytes, shadow_stack_base, env_memory) =
@@ -66,18 +81,16 @@ pub fn compile_lpir(
 }
 
 fn validate_metadata(ir: &LpirModule, meta: &LpsModuleSig) -> Result<(), WasmError> {
-    if ir.functions.len() != meta.functions.len() {
-        return Err(WasmError::metadata_mismatch(format!(
-            "IR has {} functions but metadata has {}",
-            ir.functions.len(),
-            meta.functions.len()
-        )));
-    }
-    for (ir_f, sig) in ir.functions.values().zip(meta.functions.iter()) {
-        if ir_f.name != sig.name {
+    let sig_map: BTreeMap<&str, &LpsFnSig> = meta
+        .functions
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
+    for ir_f in ir.functions.values() {
+        if !sig_map.contains_key(ir_f.name.as_str()) {
             return Err(WasmError::metadata_mismatch(format!(
-                "function name mismatch: IR {:?} vs metadata {:?}",
-                ir_f.name, sig.name
+                "IR function {:?} has no metadata entry",
+                ir_f.name
             )));
         }
     }
@@ -85,10 +98,24 @@ fn validate_metadata(ir: &LpirModule, meta: &LpsModuleSig) -> Result<(), WasmErr
 }
 
 fn collect_exports(ir: &LpirModule, meta: &LpsModuleSig, options: &WasmOptions) -> Vec<WasmExport> {
+    let sig_map: BTreeMap<&str, &LpsFnSig> = meta
+        .functions
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
     ir.functions
         .values()
-        .zip(meta.functions.iter())
-        .map(|(ir_f, sig)| {
+        .map(|ir_f| {
+            let default_sig = LpsFnSig {
+                name: ir_f.name.clone(),
+                return_type: lps_shared::LpsType::Void,
+                parameters: Vec::new(),
+                kind: lps_shared::LpsFnKind::UserDefined,
+            };
+            let sig = sig_map
+                .get(ir_f.name.as_str())
+                .copied()
+                .unwrap_or_else(|| &default_sig);
             let mut params: Vec<_> = alloc::vec![WasmValType::I32];
             params.extend(sig.parameters.iter().flat_map(|p| {
                 crate::module::glsl_type_to_wasm_components(&p.ty, options.float_mode)

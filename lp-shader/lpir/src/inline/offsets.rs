@@ -46,9 +46,7 @@ pub(crate) fn recompute_offsets(body: &mut [LpirOp]) {
                 stack.push(Frame::If { start: idx });
             }
             LpirOp::Else => {
-                let top = stack
-                    .pop()
-                    .expect("Else without matching IfStart");
+                let top = stack.pop().expect("Else without matching IfStart");
                 match top {
                     Frame::If { start } => {
                         if let LpirOp::IfStart {
@@ -73,10 +71,7 @@ pub(crate) fn recompute_offsets(body: &mut [LpirOp]) {
                         start,
                         had_continuing,
                     } => {
-                        assert!(
-                            !*had_continuing,
-                            "duplicate Continuing in same loop"
-                        );
+                        assert!(!*had_continuing, "duplicate Continuing in same loop");
                         *had_continuing = true;
                         if let LpirOp::LoopStart {
                             continuing_offset, ..
@@ -110,10 +105,7 @@ pub(crate) fn recompute_offsets(body: &mut [LpirOp]) {
             }
             LpirOp::CaseStart { end_offset, .. } | LpirOp::DefaultStart { end_offset } => {
                 *end_offset = 0;
-                let pending = if let Some(Frame::Switch {
-                    pending_case, ..
-                }) = stack.last_mut()
-                {
+                let pending = if let Some(Frame::Switch { pending_case, .. }) = stack.last_mut() {
                     pending_case.take()
                 } else {
                     panic!("Case/Default outside Switch");
@@ -127,10 +119,7 @@ pub(crate) fn recompute_offsets(body: &mut [LpirOp]) {
                         _ => {}
                     }
                 }
-                if let Some(Frame::Switch {
-                    pending_case, ..
-                }) = stack.last_mut()
-                {
+                if let Some(Frame::Switch { pending_case, .. }) = stack.last_mut() {
                     *pending_case = Some(idx);
                 }
                 stack.push(Frame::Arm);

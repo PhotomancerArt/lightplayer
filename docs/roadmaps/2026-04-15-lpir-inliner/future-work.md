@@ -174,6 +174,50 @@ heavy palette/lookup, math-heavy fragment work, control-flow-heavy
 animation, etc. Bonus: include a shader that mirrors a real artist's
 output.
 
+### Inliner: refresh stale call-graph indices between callees
+
+Surfaced during M5 filetest design. `inline_module` builds the call
+graph once at the start of the pass and uses the cached
+`(caller, op_idx)` pairs unchanged for every callee. Splicing a call
+site mutates the caller body and shifts every subsequent op's index, so
+when a single caller has Calls to **two distinct local callees** the
+second callee's recorded `op_idx` is stale by the time we get there.
+`splice::inline_call_site` then sees a non-`Call` op at that index and
+silently returns; the inliner reports `inlined=N` but the second callee
+isn't actually spliced.
+
+Workarounds today: filetests avoid the pattern (see
+`optimizer/dead_func_elim/dfe-removes-unreachable.glsl`, where `render`
+calls only one local function under `inline.mode=always`).
+
+Fix options:
+1. Rebuild the call graph after each callee is processed (simplest,
+   O(n) per callee).
+2. Maintain a small per-caller index-shift vector during splicing and
+   apply it when looking up subsequent sites.
+3. Refresh sites for a caller lazily right before splicing, by
+   re-walking that caller's body once per (caller, callee) pair.
+
+Acceptance: a filetest like `dfe-after-inline.glsl` (small `helper`,
+small `test_dfe_*`, `render` calls both `pipeline(...)` *and*
+`test_dfe_*` directly) compiles and `// run:` lines pass on every
+backend with `inline.mode=always`.
+
+### Mark `test_*` functions as `is_entry` in the filetest path
+
+Surfaced during M5. The harness invokes user functions by name (e.g.
+`test_dfe_after_inline`). With `inline.mode=always` the inliner copies
+small `test_*` bodies into `render` and removes the original call site;
+DFE then drops the now-orphan `test_*`, and the harness fails with
+"symbol not found".
+
+Cheapest fix: have either the filetest harness or the GLSL frontend
+mark every function named `test_*` as `is_entry`, so it survives DFE
+even after being inlined. Alternative: extend
+`CompilerConfig`/`DeadFuncElimConfig` with an explicit `entry_names:
+Vec<String>` knob that the harness populates from the parsed `// run:`
+directives.
+
 ### Triage `function/call-order.glsl` under `--force-opt inline.mode=always`
 
 Surfaced during M4 Phase 4 acceptance: this test is annotated

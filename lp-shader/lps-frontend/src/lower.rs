@@ -49,7 +49,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
     // Lower user functions.
     for (handle, info) in &naga_module.functions {
         let func = &naga_module.module.functions[*handle];
-        let ir = lower_function(
+        let mut ir = lower_function(
             &naga_module.module,
             func,
             info.name.as_str(),
@@ -62,6 +62,9 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             name: info.name.clone(),
             inner: Box::new(e),
         })?;
+        if info.name == "render" {
+            ir.is_entry = true;
+        }
         glsl_meta.functions.push(LpsFnSig {
             name: info.name.clone(),
             parameters: info.params.clone(),
@@ -252,6 +255,7 @@ fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<
     }
 
     let mut fb = FunctionBuilder::new("__shader_init", &[]);
+    fb.set_entry();
     let mut emitted_any = false;
 
     // For each global with an initializer, evaluate it and store to VMContext.

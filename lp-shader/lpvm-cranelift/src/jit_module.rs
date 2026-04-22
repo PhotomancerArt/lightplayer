@@ -123,6 +123,21 @@ pub(crate) fn build_jit_module(
             inline_result.call_sites_replaced
         );
     }
+    if !matches!(
+        options.config.dead_func_elim.mode,
+        lpir::DeadFuncElimMode::Never
+    ) {
+        let roots = lpir::roots_from_is_entry(&ir_opt);
+        if !roots.is_empty() {
+            let dfe = lpir::dead_func_elim(&mut ir_opt, &roots);
+            if dfe.functions_removed > 0 {
+                log::info!(
+                    "[cranelift] dead_func_elim: removed {} functions",
+                    dfe.functions_removed
+                );
+            }
+        }
+    }
 
     let _codegen_guard = process_sync::codegen_guard();
 

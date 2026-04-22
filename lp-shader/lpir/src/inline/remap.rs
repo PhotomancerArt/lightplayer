@@ -445,17 +445,29 @@ pub(crate) fn remap_op(
             base: m(*base),
             offset: *offset,
         },
-        LpirOp::Store { base, offset, value } => LpirOp::Store {
+        LpirOp::Store {
+            base,
+            offset,
+            value,
+        } => LpirOp::Store {
             base: m(*base),
             offset: *offset,
             value: m(*value),
         },
-        LpirOp::Store8 { base, offset, value } => LpirOp::Store8 {
+        LpirOp::Store8 {
+            base,
+            offset,
+            value,
+        } => LpirOp::Store8 {
             base: m(*base),
             offset: *offset,
             value: m(*value),
         },
-        LpirOp::Store16 { base, offset, value } => LpirOp::Store16 {
+        LpirOp::Store16 {
+            base,
+            offset,
+            value,
+        } => LpirOp::Store16 {
             base: m(*base),
             offset: *offset,
             value: m(*value),
@@ -514,7 +526,10 @@ pub(crate) fn remap_op(
             selector: m(*selector),
             end_offset: 0,
         },
-        LpirOp::CaseStart { value, end_offset: _ } => LpirOp::CaseStart {
+        LpirOp::CaseStart {
+            value,
+            end_offset: _,
+        } => LpirOp::CaseStart {
             value: *value,
             end_offset: 0,
         },

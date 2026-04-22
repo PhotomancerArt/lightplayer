@@ -5,14 +5,14 @@ use crate::abi::classify::{ArgLoc, ReturnMethod};
 use crate::isa::IsaTarget;
 use crate::regalloc::trace::TraceEntry;
 use crate::regalloc::{
-    append_entry_trace_metadata_lines, trace_by_vinst_or_empty, Alloc, AllocOutput, Edit, EditPoint,
+    Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
 };
 use crate::vinst::{IcmpCond, ModuleSymbols, VInst, VReg};
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lpir::{print_module, FuncId, IrFunction, LpirModule, LpirOp};
+use lpir::{FuncId, IrFunction, LpirModule, LpirOp, print_module};
 
 /// Indentation for LPIR body lines (after `; ` in the file).
 const IND_LP: &str = "    ";

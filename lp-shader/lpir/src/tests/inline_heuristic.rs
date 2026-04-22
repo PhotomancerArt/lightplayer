@@ -1,20 +1,17 @@
 //! Tests for [`crate::inline::heuristic::should_inline`] and budget behavior via [`crate::inline_module`].
 
 use crate::builder::{FunctionBuilder, ModuleBuilder};
-use crate::inline::heuristic::{should_inline, BudgetReason, Decision};
+use crate::inline::heuristic::{BudgetReason, Decision, should_inline};
 use crate::lpir_module::VMCTX_VREG;
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType};
-use crate::{inline_module, InlineConfig, InlineMode};
+use crate::{InlineConfig, InlineMode, inline_module};
 
 #[test]
 fn mode_never_is_skip_mode() {
     let mut c = InlineConfig::default();
     c.mode = InlineMode::Never;
-    assert_eq!(
-        should_inline(1, 99, 0, &c),
-        Decision::SkipMode
-    );
+    assert_eq!(should_inline(1, 99, 0, &c), Decision::SkipMode);
 }
 
 #[test]
@@ -171,11 +168,10 @@ fn max_growth_still_allows_other_callees_orchestration() {
     cfg.max_growth_budget = Some(30);
     let r = inline_module(&mut module, &cfg);
     assert_eq!(r.functions_inlined, 1);
-    let still_calls_huge = module
-        .functions
-        .values()
-        .any(|f| f.body.iter().any(|op| {
-            matches!(op, LpirOp::Call { callee: CalleeRef::Local(id), .. } if *id == id_huge)
-        }));
+    let still_calls_huge = module.functions.values().any(|f| {
+        f.body.iter().any(
+            |op| matches!(op, LpirOp::Call { callee: CalleeRef::Local(id), .. } if *id == id_huge),
+        )
+    });
     assert!(still_calls_huge);
 }

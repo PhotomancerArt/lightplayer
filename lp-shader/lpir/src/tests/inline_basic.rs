@@ -8,11 +8,11 @@ use crate::builder::{FunctionBuilder, ModuleBuilder};
 use crate::inline::recompute_offsets;
 use crate::inline::splice::inline_call_site;
 use crate::interp::{ImportHandler, InterpError, Value, interpret};
-use crate::{inline_module, InlineConfig};
 use crate::lpir_module::{ImportDecl, LpirModule, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType};
 use crate::validate::validate_module;
+use crate::{InlineConfig, inline_module};
 
 struct NoImports;
 
@@ -41,10 +41,13 @@ impl ImportHandler for SinImport {
 
 fn find_local_call(f: &crate::lpir_module::IrFunction) -> Option<usize> {
     f.body.iter().enumerate().find_map(|(i, o)| {
-        matches!(o, LpirOp::Call {
-            callee: CalleeRef::Local(_),
-            ..
-        })
+        matches!(
+            o,
+            LpirOp::Call {
+                callee: CalleeRef::Local(_),
+                ..
+            }
+        )
         .then_some(i)
     })
 }
@@ -342,7 +345,10 @@ fn readonly_param() {
         .iter()
         .filter(|o| matches!(o, LpirOp::Copy { .. }))
         .count();
-    assert_eq!(copy_count, 1, "only return lowering Copy, no param preamble");
+    assert_eq!(
+        copy_count, 1,
+        "only return lowering Copy, no param preamble"
+    );
 }
 
 #[test]
@@ -379,12 +385,13 @@ fn vmctx_propagation() {
         recompute_offsets(&mut caller.body);
     }
     validate_module(&module).unwrap();
-    assert!(
-        module.functions[&caller_id]
-            .body
-            .iter()
-            .any(|o| matches!(o, LpirOp::Load { base: VMCTX_VREG, .. }))
-    );
+    assert!(module.functions[&caller_id].body.iter().any(|o| matches!(
+        o,
+        LpirOp::Load {
+            base: VMCTX_VREG,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -549,4 +556,3 @@ fn recursive_skipped() {
         "self-call still present"
     );
 }
-

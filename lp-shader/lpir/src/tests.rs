@@ -30,6 +30,9 @@ mod inline_heuristic;
 #[path = "tests/inline_weights.rs"]
 mod inline_weights;
 
+#[path = "tests/dead_func_elim.rs"]
+mod dead_func_elim;
+
 #[path = "tests/validate.rs"]
 mod validate;
 

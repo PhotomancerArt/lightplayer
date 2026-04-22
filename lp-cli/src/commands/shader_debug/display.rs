@@ -9,8 +9,7 @@ fn should_color() -> bool {
 
 /// Print comparison table across all backends.
 pub fn print_comparison_table(report: &DebugReport, show_weights: bool) {
-    if let Some(text) =
-        comparison_table::render_summary_table(report, should_color(), show_weights)
+    if let Some(text) = comparison_table::render_summary_table(report, should_color(), show_weights)
     {
         print!("{text}");
     }
