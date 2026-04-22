@@ -24,8 +24,8 @@ use fw_core::transport::SerialTransport;
 use lp_model::AsLpPath;
 use lp_riscv_emu_guest::allocator;
 use lp_server::{Graphics, LpGraphics, LpServer};
-use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
+use lpfs::LpFsMemory;
 use lps_builtins::host_debug;
 
 use output::SyscallOutputProvider;

@@ -1,7 +1,7 @@
 //! In-memory filesystem implementation for testing
 
 use crate::error::FsError;
-use crate::fs::{
+use crate::{
     LpFs,
     fs_event::ChangeType,
     fs_event::{FsChange, FsVersion},

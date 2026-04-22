@@ -1,7 +1,7 @@
 //! Host filesystem implementation using std::fs
 
 use crate::error::FsError;
-use crate::fs::{
+use crate::{
     LpFs,
     fs_event::{ChangeType, FsChange, FsVersion},
     lp_fs_view::LpFsView,
@@ -12,7 +12,6 @@ use hashbrown::HashMap;
 use lp_model::path::{LpPath, LpPathBuf};
 use std::fs;
 use std::path::PathBuf;
-#[cfg(feature = "std")]
 use std::sync::Mutex;
 
 /// LP filesystem implementation using std::fs
@@ -475,7 +474,7 @@ impl LpFs for LpFsStd {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use lp_model::AsLpPath;

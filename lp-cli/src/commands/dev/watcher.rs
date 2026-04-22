@@ -4,7 +4,7 @@
 //! Converts OS-level file events into `FsChange` events compatible with the sync system.
 
 use anyhow::{Context, Result};
-use lp_shared::fs::fs_event::{ChangeType, FsChange};
+use lpfs::{ChangeType, FsChange};
 use notify::Watcher;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;

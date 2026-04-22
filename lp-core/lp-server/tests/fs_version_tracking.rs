@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_model::{AsLpPath, AsLpPathBuf};
 use lp_server::{Graphics, LpGraphics, LpServer};
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 #[test]
 fn test_fs_changes_not_repeated() {

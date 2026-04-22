@@ -12,7 +12,7 @@ use lp_model::nodes::{
 };
 use lp_model::project::config::ProjectConfig;
 use lp_model::{AsLpPath, AsLpPathBuf};
-use lp_shared::fs::LpFs;
+use lpfs::LpFs;
 
 use crate::messages;
 
@@ -116,7 +116,7 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>, uid: Option<&str
         .with_context(|| format!("Failed to create src directory: {}", src_dir.display()))?;
 
     // Create filesystem view for project directory
-    let fs = lp_shared::fs::LpFsStd::new(dir.to_path_buf());
+    let fs = lpfs::LpFsStd::new(dir.to_path_buf());
 
     // Write project.json
     let config = ProjectConfig {
@@ -301,7 +301,7 @@ pub fn print_success_message(dir: &Path, name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_shared::fs::LpFsMemory;
+    use lpfs::LpFsMemory;
     use tempfile::TempDir;
 
     #[test]

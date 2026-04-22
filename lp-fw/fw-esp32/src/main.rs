@@ -186,8 +186,8 @@ use {
     core::cell::RefCell,
     lp_model::path::AsLpPath,
     lp_server::{Graphics, LpGraphics, LpServer},
-    lp_shared::fs::LpFsMemory,
     lp_shared::output::OutputProvider,
+    lpfs::LpFsMemory,
     output::Esp32OutputProvider,
     serial::io_task,
     server_loop::run_server_loop,
@@ -389,7 +389,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         esp_println::println!("[INIT] Output provider created");
 
         // Create filesystem: in-memory when memory_fs enabled, else flash-backed
-        let base_fs: Box<dyn lp_shared::fs::LpFs> = {
+        let base_fs: Box<dyn lpfs::LpFs> = {
             #[cfg(not(feature = "memory_fs"))]
             {
                 let flash_storage = esp_storage::FlashStorage::new(flash);

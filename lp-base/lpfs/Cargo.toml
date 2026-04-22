@@ -1,5 +1,5 @@
 [package]
-name = "lp-shared"
+name = "lpfs"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -7,16 +7,17 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["std"]
-std = ["lpfs/std"]
+default = []
+std = []
 
 [dependencies]
-libm = "0.2"
+hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
-lp-model = { path = "../lp-model", default-features = false }
-lpfs = { path = "../../lp-base/lpfs", default-features = false }
-lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
+lp-model = { path = "../../lp-core/lp-model", default-features = false }
 serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

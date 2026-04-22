@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::config::ServerConfig;
 use crate::config::server::{load_server_config, save_server_config, server_config_exists};
 use crate::messages::{format_command, print_error_and_return};
-use lp_shared::fs::{LpFs, LpFsMemory, LpFsStd};
+use lpfs::{LpFs, LpFsMemory, LpFsStd};
 
 /// Initialize server directory
 ///

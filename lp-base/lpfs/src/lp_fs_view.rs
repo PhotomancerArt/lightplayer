@@ -3,9 +3,9 @@
 //! `LpFsView` wraps any `LpFs` implementation with a prefix path, translating
 //! all operations between chrooted-relative paths and parent-absolute paths.
 
+use crate::LpFs;
 use crate::error::FsError;
-use crate::fs::LpFs;
-use crate::fs::fs_event::{FsChange, FsVersion};
+use crate::fs_event::{FsChange, FsVersion};
 use alloc::{
     format,
     rc::Rc,
@@ -271,7 +271,7 @@ impl LpFs for LpFsView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::LpFsMemory;
+    use crate::LpFsMemory;
     use lp_model::AsLpPath;
 
     #[test]

@@ -19,7 +19,7 @@ use lp_model::{
     project::FrameId,
 };
 use lp_perf::EVENT_SHADER_COMPILE;
-use lp_shared::fs::fs_event::FsChange;
+use lpfs::{ChangeType, FsChange};
 use lps_shared::TextureBuffer;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
@@ -239,15 +239,14 @@ impl NodeRuntime for ShaderRuntime {
 
         if change.path.as_str() == glsl_path.as_str() {
             match change.change_type {
-                lp_shared::fs::fs_event::ChangeType::Create
-                | lp_shared::fs::fs_event::ChangeType::Modify => {
+                ChangeType::Create | ChangeType::Modify => {
                     let config = self.config.clone().ok_or_else(|| Error::InvalidConfig {
                         node_path: format!("shader-{}", self.node_handle.as_i32()),
                         reason: "Config not set".to_string(),
                     })?;
                     let _ = self.load_and_compile_shader(&config, ctx);
                 }
-                lp_shared::fs::fs_event::ChangeType::Delete => {
+                ChangeType::Delete => {
                     self.shader = None;
                     let error_msg = "GLSL file deleted".to_string();
                     self.compilation_error = Some(error_msg.clone());

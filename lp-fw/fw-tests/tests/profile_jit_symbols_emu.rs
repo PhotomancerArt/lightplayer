@@ -24,7 +24,7 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 /// `ProjectBuilder::shader_basic` uses GLSL with entry point `render` (see `lp-shader`).
 const EXPECTED_JIT_FN: &str = "render";
@@ -186,7 +186,7 @@ async fn jit_symbols_round_trip_to_meta_and_symbolizer() {
 }
 
 fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
-    use lp_shared::fs::LpFs;
+    use lpfs::LpFs;
 
     let entries = fs
         .list_dir("/".as_path(), true)

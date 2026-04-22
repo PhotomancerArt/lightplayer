@@ -8,10 +8,7 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 
 use lp_model::path::{LpPath, LpPathBuf};
-use lp_shared::fs::{
-    LpFs, LpFsMemory, LpFsView,
-    fs_event::{ChangeType, FsChange, FsVersion},
-};
+use lpfs::{ChangeType, FsChange, FsError, FsVersion, LpFs, LpFsMemory, LpFsView};
 
 use crate::flash_storage::{LpFlashStorage, lpfs_config};
 use littlefs_rust::{Error as LfsError, FileType as LfsFileType, Filesystem};
@@ -92,7 +89,7 @@ impl LpFsFlash {
     }
 
     /// Ensure parent directories exist for a path (for write_file)
-    fn ensure_parent_dirs(&self, path: &str) -> Result<(), lp_shared::error::FsError> {
+    fn ensure_parent_dirs(&self, path: &str) -> Result<(), FsError> {
         if path.is_empty() {
             return Ok(());
         }
@@ -113,9 +110,7 @@ impl LpFsFlash {
                     Ok(()) => {}
                     Err(LfsError::Exists) => {}
                     Err(e) => {
-                        return Err(lp_shared::error::FsError::Filesystem(format!(
-                            "mkdir {current}: {e}"
-                        )));
+                        return Err(FsError::Filesystem(format!("mkdir {current}: {e}")));
                     }
                 }
             }
@@ -124,12 +119,13 @@ impl LpFsFlash {
     }
 
     /// Recursively delete a directory (littlefs remove only works on empty dirs)
-    fn delete_dir_recursive(&self, path: &str) -> Result<(), lp_shared::error::FsError> {
+    fn delete_dir_recursive(&self, path: &str) -> Result<(), FsError> {
         let entries = {
             let inner = self.inner.borrow();
-            inner.fs.list_dir(path).map_err(|e| {
-                lp_shared::error::FsError::Filesystem(format!("list_dir {path}: {e}"))
-            })?
+            inner
+                .fs
+                .list_dir(path)
+                .map_err(|e| FsError::Filesystem(format!("list_dir {path}: {e}")))?
         };
         for entry in entries {
             let child_path = if path.is_empty() {
@@ -142,25 +138,24 @@ impl LpFsFlash {
                 LfsFileType::File => {
                     let inner = self.inner.borrow_mut();
                     inner.fs.remove(&child_path).map_err(|e| {
-                        lp_shared::error::FsError::Filesystem(format!(
-                            "remove file {child_path}: {e}"
-                        ))
+                        FsError::Filesystem(format!("remove file {child_path}: {e}"))
                     })?;
                 }
             }
         }
         let inner = self.inner.borrow_mut();
-        inner.fs.remove(path).map_err(|e| {
-            lp_shared::error::FsError::Filesystem(format!("remove dir {path}: {e}"))
-        })?;
+        inner
+            .fs
+            .remove(path)
+            .map_err(|e| FsError::Filesystem(format!("remove dir {path}: {e}")))?;
         Ok(())
     }
 }
 
 impl LpFs for LpFsFlash {
-    fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, lp_shared::error::FsError> {
+    fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
@@ -170,21 +165,19 @@ impl LpFs for LpFsFlash {
         inner
             .fs
             .read_to_vec(lfs_path)
-            .map_err(|e| lp_shared::error::FsError::NotFound(format!("{}: {}", path.as_str(), e)))
+            .map_err(|e| FsError::NotFound(format!("{}: {}", path.as_str(), e)))
     }
 
-    fn write_file(&self, path: &LpPath, data: &[u8]) -> Result<(), lp_shared::error::FsError> {
+    fn write_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
         }
         let lfs_path = Self::to_lfs_path(path);
         if lfs_path.is_empty() {
-            return Err(lp_shared::error::FsError::InvalidPath(
-                "Cannot write to root".to_string(),
-            ));
+            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
         }
         self.ensure_parent_dirs(lfs_path)?;
         let existed = {
@@ -192,9 +185,10 @@ impl LpFs for LpFsFlash {
             inner.fs.exists(lfs_path)
         };
         let inner = self.inner.borrow_mut();
-        inner.fs.write_file(lfs_path, data).map_err(|e| {
-            lp_shared::error::FsError::Filesystem(format!("write {}: {e}", path.as_str()))
-        })?;
+        inner
+            .fs
+            .write_file(lfs_path, data)
+            .map_err(|e| FsError::Filesystem(format!("write {}: {e}", path.as_str())))?;
         drop(inner);
         let change_type = if existed {
             ChangeType::Modify
@@ -205,9 +199,9 @@ impl LpFs for LpFsFlash {
         Ok(())
     }
 
-    fn file_exists(&self, path: &LpPath) -> Result<bool, lp_shared::error::FsError> {
+    fn file_exists(&self, path: &LpPath) -> Result<bool, FsError> {
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
@@ -217,9 +211,9 @@ impl LpFs for LpFsFlash {
         Ok(inner.fs.exists(lfs_path))
     }
 
-    fn is_dir(&self, path: &LpPath) -> Result<bool, lp_shared::error::FsError> {
+    fn is_dir(&self, path: &LpPath) -> Result<bool, FsError> {
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
@@ -228,23 +222,14 @@ impl LpFs for LpFsFlash {
         let inner = self.inner.borrow();
         match inner.fs.stat(lfs_path) {
             Ok(meta) => Ok(meta.file_type == LfsFileType::Dir),
-            Err(LfsError::NoEntry) => Err(lp_shared::error::FsError::NotFound(
-                path.as_str().to_string(),
-            )),
-            Err(e) => Err(lp_shared::error::FsError::Filesystem(format!(
-                "stat {}: {e}",
-                path.as_str()
-            ))),
+            Err(LfsError::NoEntry) => Err(FsError::NotFound(path.as_str().to_string())),
+            Err(e) => Err(FsError::Filesystem(format!("stat {}: {e}", path.as_str()))),
         }
     }
 
-    fn list_dir(
-        &self,
-        path: &LpPath,
-        recursive: bool,
-    ) -> Result<Vec<LpPathBuf>, lp_shared::error::FsError> {
+    fn list_dir(&self, path: &LpPath, recursive: bool) -> Result<Vec<LpPathBuf>, FsError> {
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
@@ -267,10 +252,10 @@ impl LpFs for LpFsFlash {
                 path: &str,
                 prefix: &str,
                 entries: &mut Vec<LpPathBuf>,
-            ) -> Result<(), lp_shared::error::FsError> {
-                let items = fs.list_dir(path).map_err(|e| {
-                    lp_shared::error::FsError::Filesystem(format!("list_dir {path}: {e}"))
-                })?;
+            ) -> Result<(), FsError> {
+                let items = fs
+                    .list_dir(path)
+                    .map_err(|e| FsError::Filesystem(format!("list_dir {path}: {e}")))?;
                 for item in items {
                     let full_lfs = if path.is_empty() {
                         item.name.clone()
@@ -296,9 +281,10 @@ impl LpFs for LpFsFlash {
             }
             list_recursive(&inner.fs, lfs_path, prefix, &mut entries)?;
         } else {
-            let items = inner.fs.list_dir(lfs_path).map_err(|e| {
-                lp_shared::error::FsError::Filesystem(format!("list_dir {}: {e}", path.as_str()))
-            })?;
+            let items = inner
+                .fs
+                .list_dir(lfs_path)
+                .map_err(|e| FsError::Filesystem(format!("list_dir {}: {e}", path.as_str())))?;
             for item in items {
                 let full_lp = if prefix == "/" {
                     format!("/{}", item.name)
@@ -319,10 +305,10 @@ impl LpFs for LpFsFlash {
         Ok(entries)
     }
 
-    fn delete_file(&self, path: &LpPath) -> Result<(), lp_shared::error::FsError> {
+    fn delete_file(&self, path: &LpPath) -> Result<(), FsError> {
         LpFsMemory::validate_path_for_deletion(path)?;
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
@@ -331,14 +317,14 @@ impl LpFs for LpFsFlash {
         let inner = self.inner.borrow_mut();
         inner.fs.remove(lfs_path).map_err(|e| {
             if e == LfsError::IsDir {
-                lp_shared::error::FsError::Filesystem(format!(
+                FsError::Filesystem(format!(
                     "Path {} is a directory, use delete_dir() instead",
                     path.as_str()
                 ))
             } else if e == LfsError::NoEntry {
-                lp_shared::error::FsError::NotFound(path.as_str().to_string())
+                FsError::NotFound(path.as_str().to_string())
             } else {
-                lp_shared::error::FsError::Filesystem(format!("remove {}: {e}", path.as_str()))
+                FsError::Filesystem(format!("remove {}: {e}", path.as_str()))
             }
         })?;
         drop(inner);
@@ -346,10 +332,10 @@ impl LpFs for LpFsFlash {
         Ok(())
     }
 
-    fn delete_dir(&self, path: &LpPath) -> Result<(), lp_shared::error::FsError> {
+    fn delete_dir(&self, path: &LpPath) -> Result<(), FsError> {
         LpFsMemory::validate_path_for_deletion(path)?;
         if !path.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 path.as_str()
             )));
@@ -360,9 +346,9 @@ impl LpFs for LpFsFlash {
         Ok(())
     }
 
-    fn chroot(&self, subdir: &LpPath) -> Result<Rc<RefCell<dyn LpFs>>, lp_shared::error::FsError> {
+    fn chroot(&self, subdir: &LpPath) -> Result<Rc<RefCell<dyn LpFs>>, FsError> {
         if !subdir.is_absolute() {
-            return Err(lp_shared::error::FsError::InvalidPath(format!(
+            return Err(FsError::InvalidPath(format!(
                 "Path must be absolute: {}",
                 subdir.as_str()
             )));

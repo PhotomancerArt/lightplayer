@@ -6,10 +6,7 @@
 //! - Path formatting in sync_file_change
 
 use lp_model::AsLpPath;
-use lp_shared::fs::{
-    LpFs, LpFsMemory,
-    fs_event::{ChangeType, FsChange},
-};
+use lpfs::{ChangeType, FsChange, LpFs, LpFsMemory};
 use std::collections::HashMap;
 use std::time::Instant;
 

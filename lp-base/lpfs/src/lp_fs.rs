@@ -8,7 +8,7 @@
 //! provide security by preventing access outside the project directory.
 
 use crate::error::FsError;
-use crate::fs::fs_event::{FsChange, FsVersion};
+use crate::fs_event::{FsChange, FsVersion};
 use lp_model::path::{LpPath, LpPathBuf};
 
 /// Platform-agnostic filesystem trait

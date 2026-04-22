@@ -8,7 +8,7 @@ use lp_model::{
     nodes::texture::{TextureConfig, TextureFormat, TextureState},
     project::FrameId,
 };
-use lp_shared::fs::fs_event::FsChange;
+use lpfs::FsChange;
 
 /// Texture node runtime
 pub struct TextureRuntime {

@@ -8,7 +8,7 @@ use lp_model::AsLpPath;
 use lp_model::nodes::NodeSpecifier;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 /// Integration test for partial state updates
 ///

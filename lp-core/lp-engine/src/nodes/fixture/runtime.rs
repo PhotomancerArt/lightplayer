@@ -10,7 +10,7 @@ use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, Tex
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
-use lp_shared::fs::fs_event::FsChange;
+use lpfs::FsChange;
 use lps_q32::q32::ToQ32;
 use lps_shared::TextureStorageFormat;
 
