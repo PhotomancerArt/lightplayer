@@ -26,9 +26,13 @@ Modules, Bus).
    - **`Slot`** — recursive declaration: a `Shape` (Scalar /
      Array / Struct) plus per-use metadata (default, label, bind,
      presentation).
-2. **Every Slot has a `default: ValueSpec`.** For value-Kinds it's
-   `Literal(LpsValue)`; for opaque-handle Kinds (Texture, future
-   Audio/Video) it's a recipe the loader materializes.
+2. **Every Slot can produce a default value.** Scalar Shapes
+   carry a mandatory `default: ValueSpec`; composed Shapes
+   (`Array`, `Struct`) carry an `Option<ValueSpec>` override and
+   derive a default from their children when absent. For
+   value-Kinds the spec is `Literal(LpsValue)`; for opaque-handle
+   Kinds (Texture, future Audio/Video) it's a recipe the loader
+   materializes.
 3. **The bus is implicit.** Channels are Kind-typed, derived from
    the first binding; subsequent bindings to the same channel must
    declare the same Kind or compose-time error.
@@ -284,14 +288,24 @@ that wants to enforce in-gamut authoring overrides with `Range`.
 
 ```rust
 pub enum Shape {
-    Scalar { kind: Kind, constraint: Constraint },
-    Array  { element: Box<Slot>, length: u32 },
-    Struct { fields:  Vec<(String, Slot)> },   // ordered
+    Scalar {
+        kind: Kind,
+        constraint: Constraint,
+        default: ValueSpec,                    // mandatory on Scalar
+    },
+    Array {
+        element: Box<Slot>,
+        length: u32,
+        default: Option<ValueSpec>,            // None ⇒ derive from element
+    },
+    Struct {
+        fields: Vec<(String, Slot)>,           // ordered
+        default: Option<ValueSpec>,            // None ⇒ derive from fields
+    },
 }
 
 pub struct Slot {
     pub shape:       Shape,
-    pub default:     ValueSpec,            // mandatory; see §7
     pub label:       Option<String>,
     pub description: Option<String>,
     pub bind:        Option<Binding>,      // §8
@@ -304,6 +318,11 @@ impl Slot {
 
     /// Single load+bind-time check.
     pub fn validate(&self, v: &LpsValue) -> Result<(), DomainError>;
+
+    /// Materialize the default value. Scalar reads `default` directly;
+    /// composed Shapes use the override if present, otherwise derive
+    /// from children.
+    pub fn default_value(&self, ctx: &mut LoadCtx) -> LpsValue;
 }
 ```
 
@@ -324,9 +343,22 @@ maps cleanly to a shader uniform / storage buffer.
 
 ### Defaults for compositions
 
-A composition's `default` (`ValueSpec::Literal(LpsValue::Struct{...})`
-or `Array`) may be omitted in TOML and *computed* from children's
-defaults at load time. The in-memory `Slot` always carries one.
+A composition's `default` is **literally optional** —
+`Shape::Array` and `Shape::Struct` carry
+`default: Option<ValueSpec>`. `Scalar` carries a mandatory
+`ValueSpec`.
+
+- `default = Some(spec)` ⇒ materialize from `spec` (the only
+  way to express aggregate-level overrides like the array
+  preset in §10).
+- `default = None`        ⇒ derive at load time:
+  - `Array`  ⇒ `LpsValue::Array(N copies of element.default_value())`.
+  - `Struct` ⇒ `LpsValue::Struct(field_name → field.default_value())`.
+
+Round-trip parity is automatic via
+`#[serde(skip_serializing_if = "Option::is_none")]` on the
+composed-default fields: a TOML file that omitted `default` on a
+struct gets re-saved without one.
 
 ## 7. `ValueSpec` — author-time defaults
 
@@ -362,9 +394,12 @@ impl ValueSpec {
 
 ### Conventions
 
-- **Every Slot has a `default: ValueSpec`** — mandatory, not
-  optional. Init-order ambiguity is exactly the can of worms we're
-  closing.
+- **Every Slot can produce a default value at materialize time.**
+  `Scalar` Shapes hold a mandatory `default: ValueSpec`. Composed
+  Shapes (`Array`, `Struct`) hold `default: Option<ValueSpec>`
+  and derive from their children when `None`. See §6 for the
+  mechanics. Init-order ambiguity is still closed:
+  `Slot::default_value(ctx)` always returns an `LpsValue`.
 - **Authored source forms round-trip on save.** We serialize
   `ValueSpec`, not the materialized `LpsValue`. What the user
   wrote is what they get back.
@@ -624,8 +659,14 @@ later if naming chaos becomes a problem; for now it's documentation.
 
 The hard rules. Implementations that violate these are wrong.
 
-1. **Every Slot has a `default: ValueSpec`.** No `Option<>`. Init-
-   order ambiguity is the can of worms we're closing.
+1. **Every Slot can produce a default value at materialize
+   time.** `Scalar` Shapes carry a mandatory `ValueSpec`.
+   Composed Shapes (`Array`, `Struct`) carry an
+   `Option<ValueSpec>` override and derive a default from their
+   children when `None`. Round-trip preserves whether the
+   composed default was explicit. Init-order ambiguity is still
+   closed: `Slot::default_value(ctx)` always returns an
+   `LpsValue`.
 2. **Composition Shapes are `Scalar | Array | Struct`.** No
    tuples, no sum types — anything we model must project to GPU
    storage.

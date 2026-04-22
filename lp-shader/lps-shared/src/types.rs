@@ -1,8 +1,67 @@
 use alloc::string::String;
 use alloc::{boxed::Box, vec::Vec};
 
+#[cfg(test)]
+mod serde_tests {
+    use super::*;
+    use alloc::boxed::Box;
+    use alloc::string::String;
+    use alloc::vec;
+
+    #[test]
+    fn lps_type_scalar_roundtrip() {
+        let cases = [LpsType::Float, LpsType::Vec3, LpsType::Int];
+        for original in cases {
+            let json = serde_json::to_string(&original).unwrap();
+            let decoded: LpsType = serde_json::from_str(&json).unwrap();
+            assert_eq!(original, decoded);
+        }
+    }
+
+    #[test]
+    fn lps_type_array_roundtrip() {
+        let original = LpsType::Array {
+            element: Box::new(LpsType::Float),
+            len: 4,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: LpsType = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn lps_type_struct_roundtrip() {
+        let original = LpsType::Struct {
+            name: Some(String::from("Color")),
+            members: vec![
+                StructMember {
+                    name: Some(String::from("space")),
+                    ty: LpsType::Int,
+                },
+                StructMember {
+                    name: Some(String::from("coords")),
+                    ty: LpsType::Vec3,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: LpsType = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[cfg(feature = "schemars")]
+    #[test]
+    fn lps_type_schema_for_succeeds() {
+        let schema = schemars::schema_for!(LpsType);
+        let json = serde_json::to_string(&schema).unwrap();
+        assert!(!json.is_empty());
+        assert!(json.contains("LpsType"));
+    }
+}
+
 /// Logical shader type (scalar, vector, square matrix, array, struct) for parameters, returns, and layouts.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum LpsType {
     Void,
     Float,
@@ -37,7 +96,8 @@ pub enum LpsType {
 }
 
 /// One field in a [`LpsType::Struct`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct StructMember {
     pub name: Option<String>,
     pub ty: LpsType,

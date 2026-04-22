@@ -11,6 +11,12 @@ workspace = true
 [features]
 default = []
 std = []
+schemars = ["dep:schemars"]
 
 [dependencies]
 lps-q32 = { path = "../lps-q32" }
+serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

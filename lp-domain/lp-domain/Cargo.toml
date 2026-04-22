@@ -1,0 +1,26 @@
+[package]
+name = "lp-domain"
+description = "LightPlayer domain model: identity, addressing, and the Quantity model"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+std = ["dep:lpfs", "lpfs/std", "toml/std"]
+schema-gen = ["std", "lps-shared/schemars", "dep:schemars"]
+
+[dependencies]
+lps-shared = { path = "../../lp-shader/lps-shared" }
+lpfs = { path = "../../lp-base/lpfs", optional = true }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
