@@ -360,6 +360,7 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
                 return_types: rets.to_vec(),
                 lpfn_glsl_params: None,
                 needs_vmctx,
+                sret: false,
             });
             m.insert(format!("{module}::{name}"), r);
         };

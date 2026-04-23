@@ -8,6 +8,7 @@ extern crate alloc;
 
 mod emu_run;
 mod engine;
+mod host_marshal;
 mod instance;
 mod memory;
 mod module;

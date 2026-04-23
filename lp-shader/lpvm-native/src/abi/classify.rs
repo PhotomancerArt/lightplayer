@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use lpir::IrType;
 use lps_shared::{LpsFnSig, LpsType};
 
 use crate::abi::PReg;
@@ -73,6 +74,13 @@ pub fn entry_param_scalar_count(sig: &LpsFnSig) -> usize {
         n = n.saturating_add(scalar_count_of_type(&p.ty));
     }
     n
+}
+
+/// Scalar argument words for one LPIR parameter type (M1 aggregate `in` is one [`IrType::Pointer`]).
+pub fn ir_type_scalar_words(ty: IrType) -> usize {
+    match ty {
+        IrType::I32 | IrType::F32 | IrType::Pointer => 1,
+    }
 }
 
 #[cfg(test)]

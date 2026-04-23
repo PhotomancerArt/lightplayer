@@ -271,7 +271,7 @@ pub(crate) fn lower_access_expr_vec(
     if let Some((root, ops)) =
         crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
+        if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
             if ops.len() == info.dimensions.len() {
                 let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
                     ctx,
@@ -286,7 +286,7 @@ pub(crate) fn lower_access_expr_vec(
     if let Some((lv, idx_handles)) =
         crate::lower_array_multidim::peel_access_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+        if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
             if idx_handles.len() == info.dimensions.len() {
                 let mut vregs = alloc::vec::Vec::new();
                 for &h in &idx_handles {
@@ -309,7 +309,7 @@ pub(crate) fn lower_access_expr_vec(
     let index_v = ctx.ensure_expr(*index)?;
     match &ctx.func.expressions[*base] {
         Expression::LocalVariable(lv) => {
-            if let Some(info) = ctx.array_map.get(lv).cloned() {
+            if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
                 return crate::lower_array::load_array_element_dynamic(ctx, &info, index_v);
             }
             let inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
@@ -364,12 +364,17 @@ pub(crate) fn lower_access_expr_vec(
                                 "Access load: array element count overflow",
                             ))
                         })?;
-                    let info = crate::lower_ctx::ArrayInfo {
-                        slot: crate::lower_ctx::ArraySlot::Param(*arg_i),
+                    let (total_size, _align) =
+                        crate::lower_aggregate_layout::aggregate_size_and_align(
+                            ctx.module, pointee,
+                        )?;
+                    let info = crate::lower_ctx::AggregateInfo {
+                        slot: crate::lower_ctx::AggregateSlot::Param(*arg_i),
                         dimensions,
                         leaf_element_ty: leaf_ty,
                         leaf_stride,
                         element_count,
+                        total_size,
                     };
                     crate::lower_array::load_array_element_dynamic(ctx, &info, index_v)
                 }
@@ -394,7 +399,7 @@ pub(crate) fn store_through_access(
     if let Some((root, ops)) =
         crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
+        if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
             if ops.len() == info.dimensions.len() {
                 let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
                     ctx,
@@ -409,7 +414,7 @@ pub(crate) fn store_through_access(
     if let Some((lv, idx_handles)) =
         crate::lower_array_multidim::peel_access_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+        if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
             if idx_handles.len() == info.dimensions.len() {
                 let mut vregs = alloc::vec::Vec::new();
                 for &h in &idx_handles {
@@ -432,7 +437,7 @@ pub(crate) fn store_through_access(
     let index_v = ctx.ensure_expr(*index)?;
     match &ctx.func.expressions[*base] {
         Expression::LocalVariable(lv) => {
-            if let Some(info) = ctx.array_map.get(lv).cloned() {
+            if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
                 return crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value);
             }
             let inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
@@ -534,12 +539,17 @@ pub(crate) fn store_through_access(
                                 "Access store: array element count overflow",
                             ))
                         })?;
-                    let info = crate::lower_ctx::ArrayInfo {
-                        slot: crate::lower_ctx::ArraySlot::Param(*arg_i),
+                    let (total_size, _align) =
+                        crate::lower_aggregate_layout::aggregate_size_and_align(
+                            ctx.module, pointee,
+                        )?;
+                    let info = crate::lower_ctx::AggregateInfo {
+                        slot: crate::lower_ctx::AggregateSlot::Param(*arg_i),
                         dimensions,
                         leaf_element_ty: leaf_ty,
                         leaf_stride,
                         element_count,
+                        total_size,
                     };
                     crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value)
                 }

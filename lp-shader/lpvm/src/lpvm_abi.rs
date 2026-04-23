@@ -1,7 +1,14 @@
-//! Flattened word ABI for Q32 LPVM calls (`Vec<i32>` user arguments / returns).
+//! Flattened **dense Q32 lane** words for Level-1 LPVM helpers (`Vec<i32>` scalars / small
+//! composites passed to [`crate::LpvmInstance::call_q32`] and friends).
 //!
-//! Pairs with [`lps_shared::LpsValueQ32`] on the host; float components use raw
-//! [`Q32::to_fixed`] / [`Q32::from_fixed`] (`i32` lane words).
+//! Scalar, vector, and matrix types map one-to-one to consecutive `i32` lanes (float lanes use
+//! [`Q32::to_fixed`] / [`Q32::from_fixed`]). Arrays use the same **dense** lane order (all lanes of
+//! element `0`, then element `1`, …) so the emulator host can pack them into a guest buffer before
+//! passing a pointer — see `lp-shader/lpvm-emu/src/host_marshal.rs`.
+//!
+//! **Aggregate memory layout elsewhere** (slots, uniforms, sret buffers, wasm shadow stack) is
+//! [`crate::LpvmDataQ32`] over `lps_shared::layout` std430; per-backend pointer/sret marshalling
+//! lives in `lpvm-cranelift`, `lpvm-native`, `lpvm-emu`, and `lpvm-wasm` (M1 pointer ABI).
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -211,25 +218,7 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
             Ok(w)
         }
 
-        (LpsType::Array { element, len }, LpsValueQ32::Array(items)) => {
-            if items.len() != *len as usize {
-                return Err(CallError::TypeMismatch(format!(
-                    "array argument length mismatch: expected {}, got {}",
-                    len,
-                    items.len()
-                )));
-            }
-            let sub = FnParam {
-                name: String::new(),
-                ty: element.as_ref().clone(),
-                qualifier: param.qualifier,
-            };
-            let mut out = Vec::new();
-            for it in items.iter() {
-                out.extend(flatten_q32_arg(&sub, it)?);
-            }
-            Ok(out)
-        }
+        (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
 
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
             Err(CallError::Unsupported(String::from(
@@ -370,15 +359,50 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, Cal
                 Q32::from_fixed(words[15]),
             ],
         ]),
-        LpsType::Array { element, len } => {
-            let per = glsl_component_count(element);
-            let mut elems = Vec::with_capacity(*len as usize);
-            for i in 0..(*len as usize) {
-                let start = i * per;
-                let end = start + per;
-                elems.push(decode_q32_return(element, &words[start..end])?);
-            }
-            LpsValueQ32::Array(elems.into_boxed_slice())
-        }
+        LpsType::Array { .. } => dense_q32_decode_array(ty, words)?,
     })
+}
+
+/// Dense packed lanes for array-typed parameters (see module docs — not padded std430 traversal).
+fn dense_q32_flatten_array(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, CallError> {
+    let (LpsType::Array { element, len }, LpsValueQ32::Array(items)) = (&param.ty, arg) else {
+        return Err(CallError::TypeMismatch(format!(
+            "argument type mismatch: expected {:?}, got {:?}",
+            &param.ty,
+            got_ty_name(arg)
+        )));
+    };
+    if items.len() != *len as usize {
+        return Err(CallError::TypeMismatch(format!(
+            "array argument length mismatch: expected {}, got {}",
+            len,
+            items.len()
+        )));
+    }
+    let sub = FnParam {
+        name: String::new(),
+        ty: element.as_ref().clone(),
+        qualifier: param.qualifier,
+    };
+    let mut out = Vec::new();
+    for it in items.iter() {
+        out.extend(flatten_q32_arg(&sub, it)?);
+    }
+    Ok(out)
+}
+
+fn dense_q32_decode_array(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, CallError> {
+    let LpsType::Array { element, len } = ty else {
+        return Err(CallError::Unsupported(String::from(
+            "dense_q32_decode_array: not an array type",
+        )));
+    };
+    let per = glsl_component_count(element);
+    let mut elems = Vec::with_capacity(*len as usize);
+    for i in 0..(*len as usize) {
+        let start = i * per;
+        let end = start + per;
+        elems.push(decode_q32_return(element, &words[start..end])?);
+    }
+    Ok(LpsValueQ32::Array(elems.into_boxed_slice()))
 }

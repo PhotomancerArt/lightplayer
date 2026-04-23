@@ -6,7 +6,6 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use cranelift_codegen::data_value::DataValue;
-use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
 use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
@@ -20,6 +19,7 @@ use lpvm::{
 use lpvm_cranelift::signature_for_ir_func;
 
 use crate::emu_run::{self, GUEST_VMCTX_BYTES};
+use crate::host_marshal::{ir_user_args_from_q32_words, sret_buffer_byte_size};
 use crate::module::EmuModule;
 
 /// Execution error for [`EmuInstance`].
@@ -264,17 +264,11 @@ impl LpvmInstance for EmuInstance {
             .values()
             .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let param_count = ir_func.param_count as usize;
-        if flat.len() != param_count {
-            return Err(CallError::Unsupported(format!(
-                "flattened argument count {} does not match IR param_count {}",
-                flat.len(),
-                param_count
-            ))
-            .into());
-        }
+        let ir_words =
+            ir_user_args_from_q32_words(ir_func, &gfn.parameters, &flat, &self.module.arena)
+                .map_err(InstanceError::Call)?;
 
-        let words = self.invoke_flat(name, &flat, CycleModel::default())?;
+        let words = self.invoke_flat(name, &ir_words, CycleModel::default())?;
         let gq = decode_q32_return(&gfn.return_type, &words)?;
         q32_to_lps_value_f32(&gfn.return_type, gq)
             .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
@@ -321,7 +315,7 @@ impl LpvmInstance for EmuInstance {
         })?;
         let vmctx = self.vmctx_guest as i32;
         let full = [vmctx, tex_offset, width as i32, height as i32];
-        self.run_emulator_call(&ir_func, entry, &full, CycleModel::default())?;
+        self.run_emulator_call(&ir_func, entry, &full, CycleModel::default(), None)?;
         Ok(())
     }
 
@@ -402,8 +396,6 @@ impl EmuInstance {
             .values()
             .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let param_count = ir_func.param_count as usize;
-
         let expected_words: usize = gfn
             .parameters
             .iter()
@@ -416,16 +408,12 @@ impl EmuInstance {
             }
             .into());
         }
-        if args.len() != param_count {
-            return Err(CallError::Unsupported(format!(
-                "flattened argument count {} does not match IR param_count {}",
-                args.len(),
-                param_count
-            ))
-            .into());
-        }
 
-        let words = self.invoke_flat(name, args, cycle_model)?;
+        let ir_words =
+            ir_user_args_from_q32_words(ir_func, &gfn.parameters, args, &self.module.arena)
+                .map_err(InstanceError::Call)?;
+
+        let words = self.invoke_flat(name, &ir_words, cycle_model)?;
         if gfn.return_type == LpsType::Void {
             return Ok(Vec::new());
         }
@@ -469,6 +457,7 @@ impl EmuInstance {
         entry: u32,
         full: &[i32],
         cycle_model: CycleModel,
+        return_ty_sret: Option<&LpsType>,
     ) -> Result<Vec<i32>, InstanceError> {
         let isa = emu_run::riscv32_reference_isa()
             .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("{e}"))))?;
@@ -480,6 +469,17 @@ impl EmuInstance {
             &*isa,
         );
         let n_ret = ir_func.return_types.len();
+        let uses_sret = ir_func.sret_arg.is_some();
+        let struct_size = if uses_sret {
+            let rt = return_ty_sret.ok_or_else(|| {
+                InstanceError::Call(CallError::Unsupported(String::from(
+                    "internal: LPIR sret without host return type for sizing",
+                )))
+            })?;
+            sret_buffer_byte_size(rt).map_err(InstanceError::Call)?
+        } else {
+            0usize
+        };
 
         let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
         let shared = self.module.arena.storage_arc();
@@ -499,12 +499,8 @@ impl EmuInstance {
         let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
         emu.set_cycle_model(cycle_model);
 
-        let has_sr = sig
-            .params
-            .iter()
-            .any(|p| p.purpose == ArgumentPurpose::StructReturn);
-        let ret_result = if has_sr {
-            emu.call_function_with_struct_return(entry, &data_args, &sig, n_ret * 4)
+        let ret_result = if uses_sret {
+            emu.call_function_with_struct_return(entry, &data_args, &sig, struct_size)
         } else {
             emu.call_function(entry, &data_args, &sig)
         };
@@ -536,14 +532,27 @@ impl EmuInstance {
                         }
                     }
                 }
-                if words.len() < n_ret {
-                    return Err(InstanceError::Call(CallError::Unsupported(format!(
-                        "emulator returned {} words, signature expects {}",
-                        words.len(),
-                        n_ret
-                    ))));
+                if uses_sret {
+                    let need_words = (struct_size + 3) / 4;
+                    if words.len() < need_words {
+                        return Err(InstanceError::Call(CallError::Unsupported(format!(
+                            "emulator returned {} words, sret needs {} words for {} bytes",
+                            words.len(),
+                            need_words,
+                            struct_size
+                        ))));
+                    }
+                    words.truncate(need_words);
+                } else {
+                    if words.len() < n_ret {
+                        return Err(InstanceError::Call(CallError::Unsupported(format!(
+                            "emulator returned {} words, signature expects {}",
+                            words.len(),
+                            n_ret
+                        ))));
+                    }
+                    words.truncate(n_ret);
                 }
-                words.truncate(n_ret);
                 self.last_guest_instruction_count = Some(n_inst);
                 self.last_guest_cycle_count = Some(emu.get_cycle_count());
                 Ok(words)
@@ -570,7 +579,7 @@ impl EmuInstance {
     fn invoke_flat(
         &mut self,
         name: &str,
-        flat: &[i32],
+        ir_user_args: &[i32],
         cycle_model: CycleModel,
     ) -> Result<Vec<i32>, InstanceError> {
         self.last_guest_instruction_count = None;
@@ -586,14 +595,23 @@ impl EmuInstance {
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?
             .clone();
 
-        let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
+        let gfn = self
+            .module
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+
+        let mut full: Vec<i32> = Vec::with_capacity(1 + ir_user_args.len());
         full.push(self.vmctx_guest as i32);
-        full.extend_from_slice(flat);
+        full.extend_from_slice(ir_user_args);
 
         let entry = *self.module.load.symbol_map.get(name).ok_or_else(|| {
             CallError::Unsupported(format!("symbol `{name}` not in linked RV32 image"))
         })?;
 
-        self.run_emulator_call(&ir_func, entry, &full, cycle_model)
+        let return_ty_sret = ir_func.sret_arg.is_some().then(|| gfn.return_type.clone());
+        self.run_emulator_call(&ir_func, entry, &full, cycle_model, return_ty_sret.as_ref())
     }
 }

@@ -90,7 +90,6 @@ impl AllocTestBuilder {
                     qualifier: ParamQualifier::In,
                 })
                 .collect();
-            let total_param_slots = 1 + self.abi_params;
             abi::func_abi_rv32(
                 &LpsFnSig {
                     name: String::from("test"),
@@ -98,7 +97,7 @@ impl AllocTestBuilder {
                     parameters: params,
                     kind: LpsFnKind::UserDefined,
                 },
-                total_param_slots,
+                None,
             )
         } else {
             abi::func_abi_rv32(
@@ -108,7 +107,7 @@ impl AllocTestBuilder {
                     parameters: Vec::new(),
                     kind: LpsFnKind::UserDefined,
                 },
-                0,
+                None,
             )
         }
     }
@@ -158,6 +157,7 @@ impl AllocTestBuilder {
         arg_iregs: &[u16],
         ret_iregs: &[u16],
         callee_uses_sret: bool,
+        caller_passes_sret_ptr: bool,
     ) -> AllocTestResult {
         let args_s = arg_iregs
             .iter()
@@ -181,11 +181,13 @@ impl AllocTestBuilder {
             vinst::parse(&line).unwrap_or_else(|e| panic!("run_call parse: {e:?}"));
         for inst in &mut vinsts {
             if let VInst::Call {
-                callee_uses_sret: flag,
+                callee_uses_sret: cu,
+                caller_passes_sret_ptr: cp,
                 ..
             } = inst
             {
-                *flag = callee_uses_sret;
+                *cu = callee_uses_sret;
+                *cp = caller_passes_sret_ptr;
             }
         }
         self.run_vinst_inner(vinsts, vreg_pool, symbols)
@@ -329,7 +331,7 @@ mod tests {
 
     #[test]
     fn smoke_run_call_allocates() {
-        let r = alloc_test().run_call("callee", &[0, 1], &[2], false);
+        let r = alloc_test().run_call("callee", &[0, 1], &[2], false, false);
         assert!(
             r.rendered.contains("Call callee"),
             "expected Call in render: {}",
@@ -339,7 +341,7 @@ mod tests {
 
     #[test]
     fn smoke_run_call_sret_flag_in_render() {
-        let r = alloc_test().run_call("big", &[0], &[1, 2, 3, 4], true);
+        let r = alloc_test().run_call("big", &[0], &[1, 2, 3, 4], true, false);
         r.expect_spill_slots(0);
         assert!(r.rendered.contains("Call big sret"));
     }

@@ -64,6 +64,7 @@ fn validate_err_break_outside_loop() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
+        sret_arg: None,
         vreg_types: Vec::new(),
         slots: Vec::new(),
         body: vec![LpirOp::Break],
@@ -113,6 +114,7 @@ fn validate_err_undefined_vreg() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: vec![IrType::F32],
+        sret_arg: None,
         vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32],
         slots: Vec::new(),
         body: vec![LpirOp::Fadd {
@@ -139,6 +141,7 @@ fn validate_err_copy_type_mismatch() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 2,
         return_types: Vec::new(),
+        sret_arg: None,
         vreg_types: vec![IrType::Pointer, IrType::F32, IrType::I32],
         slots: Vec::new(),
         body: vec![LpirOp::Copy {
@@ -173,6 +176,7 @@ fn validate_err_call_arity() {
             return_types: Vec::new(),
             lpfn_glsl_params: None,
             needs_vmctx: false,
+            sret: false,
         }],
         functions: BTreeMap::from([(FuncId(0), func)]),
     };
@@ -188,6 +192,7 @@ fn validate_err_callee_oob() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
+        sret_arg: None,
         vreg_types: Vec::new(),
         slots: Vec::new(),
         body: vec![LpirOp::Call {
@@ -213,6 +218,7 @@ fn validate_err_continue_outside_loop() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
+        sret_arg: None,
         vreg_types: Vec::new(),
         slots: Vec::new(),
         body: vec![LpirOp::Continue],
@@ -276,6 +282,7 @@ fn validate_err_return_value_type() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: vec![IrType::F32],
+        sret_arg: None,
         vreg_types: vec![IrType::Pointer, IrType::I32],
         slots: Vec::new(),
         body: vec![
@@ -305,6 +312,7 @@ fn validate_err_vreg_pool_oob() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
+        sret_arg: None,
         vreg_types: Vec::new(),
         slots: Vec::new(),
         body: vec![LpirOp::Return {
@@ -404,6 +412,7 @@ fn validate_err_slot_addr_oob() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
+        sret_arg: None,
         vreg_types: vec![IrType::Pointer, IrType::I32],
         slots: Vec::new(),
         body: vec![LpirOp::SlotAddr {
@@ -418,4 +427,127 @@ fn validate_err_slot_addr_oob() {
     };
     let errs = validate_function(m.functions.values().next().unwrap(), &m).expect_err("bad slot");
     assert!(errs.iter().any(|e| e.message.contains("slot")));
+}
+
+#[test]
+fn validate_err_sret_with_return_types() {
+    let f = IrFunction {
+        name: String::from("bad"),
+        is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
+        param_count: 0,
+        return_types: vec![IrType::I32],
+        sret_arg: Some(VReg(1)),
+        vreg_types: vec![IrType::Pointer, IrType::Pointer],
+        slots: Vec::new(),
+        body: vec![LpirOp::Return {
+            values: VRegRange { start: 0, count: 0 },
+        }],
+        vreg_pool: Vec::new(),
+    };
+    let m = LpirModule {
+        imports: Vec::new(),
+        functions: BTreeMap::from([(FuncId(0), f)]),
+    };
+    let errs = validate_module(&m).expect_err("sret return_types");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("sret") && e.message.contains("return_types"))
+    );
+}
+
+#[test]
+fn validate_err_sret_wrong_vreg_index() {
+    let f = IrFunction {
+        name: String::from("bad"),
+        is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
+        param_count: 0,
+        return_types: Vec::new(),
+        sret_arg: Some(VReg(2)),
+        vreg_types: vec![IrType::Pointer, IrType::I32, IrType::Pointer],
+        slots: Vec::new(),
+        body: vec![LpirOp::Return {
+            values: VRegRange { start: 0, count: 0 },
+        }],
+        vreg_pool: Vec::new(),
+    };
+    let m = LpirModule {
+        imports: Vec::new(),
+        functions: BTreeMap::from([(FuncId(0), f)]),
+    };
+    let errs = validate_module(&m).expect_err("sret index");
+    assert!(errs.iter().any(|e| e.message.contains("vmctx+1")));
+}
+
+#[test]
+fn validate_err_sret_return_values() {
+    let f = IrFunction {
+        name: String::from("bad"),
+        is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
+        param_count: 0,
+        return_types: Vec::new(),
+        sret_arg: Some(VReg(1)),
+        vreg_types: vec![IrType::Pointer, IrType::Pointer, IrType::I32],
+        slots: Vec::new(),
+        body: vec![
+            LpirOp::IconstI32 {
+                dst: VReg(2),
+                value: 0,
+            },
+            LpirOp::Return {
+                values: VRegRange { start: 0, count: 1 },
+            },
+        ],
+        vreg_pool: vec![VReg(2)],
+    };
+    let m = LpirModule {
+        imports: Vec::new(),
+        functions: BTreeMap::from([(FuncId(0), f)]),
+    };
+    let errs = validate_module(&m).expect_err("sret return values");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("sret function") && e.message.contains("return"))
+    );
+}
+
+#[test]
+fn validate_err_import_sret_nonempty_returns() {
+    let m = LpirModule {
+        imports: vec![ImportDecl {
+            module_name: String::from("a"),
+            func_name: String::from("b"),
+            param_types: vec![IrType::Pointer],
+            return_types: vec![IrType::F32],
+            lpfn_glsl_params: None,
+            needs_vmctx: false,
+            sret: true,
+        }],
+        functions: BTreeMap::new(),
+    };
+    let errs = validate_module(&m).expect_err("import sret rets");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("import with sret") && e.message.contains("return_types"))
+    );
+}
+
+#[test]
+fn validate_err_import_sret_first_not_ptr() {
+    let m = LpirModule {
+        imports: vec![ImportDecl {
+            module_name: String::from("a"),
+            func_name: String::from("b"),
+            param_types: vec![IrType::I32],
+            return_types: Vec::new(),
+            lpfn_glsl_params: None,
+            needs_vmctx: false,
+            sret: true,
+        }],
+        functions: BTreeMap::new(),
+    };
+    let errs = validate_module(&m).expect_err("import sret ptr");
+    assert!(errs.iter().any(|e| e.message.contains("first param_types")));
 }

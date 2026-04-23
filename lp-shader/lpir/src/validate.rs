@@ -7,7 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::lpir_module::{IrFunction, LpirModule};
+use crate::lpir_module::{ImportDecl, IrFunction, LpirModule};
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, ImportId, IrType, VReg, VRegRange};
 
@@ -99,6 +99,21 @@ fn validate_imports(module: &LpirModule, errs: &mut Vec<ValidationError>) {
                 imp.module_name, imp.func_name
             )));
         }
+        validate_import_sret(imp, errs);
+    }
+}
+
+fn validate_import_sret(imp: &ImportDecl, errs: &mut Vec<ValidationError>) {
+    if !imp.sret {
+        return;
+    }
+    if !imp.return_types.is_empty() {
+        errs.push(err_module("import with sret must have empty return_types"));
+    }
+    if imp.param_types.first() != Some(&IrType::Pointer) {
+        errs.push(err_module(
+            "import with sret must have ptr as first param_types entry",
+        ));
     }
 }
 
@@ -120,6 +135,53 @@ enum StackEntry {
 
 fn has_enclosing_block(stack: &[StackEntry]) -> bool {
     stack.iter().rev().any(|e| matches!(e, StackEntry::Block))
+}
+
+fn validate_sret_function_invariants(
+    func: &IrFunction,
+    fname: &str,
+    errs: &mut Vec<ValidationError>,
+) {
+    let Some(sv) = func.sret_arg else {
+        return;
+    };
+    if !func.return_types.is_empty() {
+        errs.push(err_in_func(
+            fname,
+            None,
+            "function with sret_arg must have empty return_types",
+        ));
+    }
+    let i = sv.0 as usize;
+    if sv.0 != func.vmctx_vreg.0 + 1 {
+        errs.push(err_in_func(
+            fname,
+            None,
+            alloc::format!(
+                "sret vreg must be v{} (vmctx+1), got v{}",
+                func.vmctx_vreg.0 + 1,
+                sv.0
+            ),
+        ));
+    }
+    if i < func.vreg_types.len() && func.vreg_types[i] != IrType::Pointer {
+        errs.push(err_in_func(
+            fname,
+            None,
+            alloc::format!("sret vreg must have type ptr, got {:?}", func.vreg_types[i]),
+        ));
+    }
+    for (oi, op) in func.body.iter().enumerate() {
+        if let LpirOp::Return { values } = op {
+            if values.count != 0 {
+                errs.push(err_in_func(
+                    fname,
+                    Some(oi),
+                    "sret function must not return values (use empty return)",
+                ));
+            }
+        }
+    }
 }
 
 fn validate_function_inner(
@@ -148,12 +210,20 @@ fn validate_function_inner(
     if vm < n {
         defined[vm] = true;
     }
+    let h = func.hidden_param_slots() as usize;
+    if let Some(sv) = func.sret_arg {
+        let si = sv.0 as usize;
+        if si < n {
+            defined[si] = true;
+        }
+    }
     for i in 0..func.param_count as usize {
-        let j = vm + 1 + i;
+        let j = vm + h + i;
         if j < n {
             defined[j] = true;
         }
     }
+    validate_sret_function_invariants(func, fname, errs);
 
     let mut stack: Vec<StackEntry> = Vec::new();
 
@@ -414,7 +484,8 @@ fn validate_call(
                 return;
             };
             let vm = fdef.vmctx_vreg.0 as usize;
-            let end = vm + 1 + fdef.param_count as usize;
+            let h = fdef.hidden_param_slots() as usize;
+            let end = vm + h + fdef.param_count as usize;
             if end > fdef.vreg_types.len() {
                 errs.push(err_in_func(
                     fname,

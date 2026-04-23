@@ -212,6 +212,7 @@ fn build_lpfn_import_decl(
         return_types,
         lpfn_glsl_params,
         needs_vmctx: false,
+        sret: false,
     })
 }
 

@@ -176,7 +176,6 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::abi::classify::entry_param_scalar_count;
     use crate::isa::rv32::abi as rv32;
     use lps_shared::{LpsFnKind, LpsFnSig, LpsType};
 
@@ -187,7 +186,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        rv32::func_abi_rv32(&sig, entry_param_scalar_count(&sig))
+        rv32::func_abi_rv32(&sig, None)
     }
 
     #[test]

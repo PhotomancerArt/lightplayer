@@ -46,16 +46,15 @@ fn func_needs_i64_scratch(f: &IrFunction, mode: FloatMode) -> bool {
 
 /// WASM `(params) -> (results)` for `f`'s type section entry.
 ///
-/// Note: VMContext (vreg 0, an i32 pointer) is included as the first param to maintain
-/// ABI consistency with Cranelift. The signature is:
-/// - param 0: VMContext (i32 pointer)
-/// - param 1..: user params (vregs 1..param_count+1)
+/// Params match [`IrFunction::vreg_types`] for all parameter vregs:
+/// vmctx (`%0`), optional sret pointer (`%1`), then user params — see
+/// [`IrFunction::total_param_slots`].
 pub(crate) fn wasm_function_signature(
     f: &IrFunction,
     mode: FloatMode,
 ) -> (Vec<ValType>, Vec<ValType>) {
-    // Include VMContext (vreg 0) + user params (vregs 1..param_count+1)
-    let params: Vec<ValType> = (0..=f.param_count as usize)
+    let n = f.total_param_slots() as usize;
+    let params: Vec<ValType> = (0..n)
         .map(|i| ir_type_to_val(f.vreg_types[i], mode))
         .collect();
     let results: Vec<ValType> = f
@@ -76,30 +75,23 @@ pub(crate) fn encode_ir_function(
 ) -> Result<Function, String> {
     let mode = ctx.options.float_mode;
 
-    // Local index mapping:
-    // WASM locals are: [params (from signature)] + [declared locals]
-    // With VMContext as first param, the mapping is:
-    // - WASM local 0: VMContext (first param, vreg 0)
-    // - WASM local 1..param_count+1: user params (vregs 1..param_count+1)
-    // - WASM local param_count+1..: declared locals (vregs param_count+1..)
-    //
-    // So WASM local index = vreg index (since they align)
-    // vreg 0 -> local 0 (VMContext param)
-    // vreg 1 -> local 1 (user param 0)
-    // etc.
+    // Local index mapping: WASM local index == vreg index. Parameter locals are
+    // vregs `0..total_param_slots`; declared locals follow.
 
     // VMContext local is at index 0 (verified present)
     let _vmctx_local = func_ctx.vmctx_local.expect("vmctx_local must be set");
     let sp_global = func_ctx.sp_global;
 
-    // Declared locals: vregs that are not params (vreg index > param_count)
+    let param_slots = f.total_param_slots() as usize;
+
+    // Declared locals: vregs that are not parameters
     let mut local_types: Vec<ValType> = Vec::new();
-    for i in (f.param_count as usize + 1)..f.vreg_types.len() {
+    for i in param_slots..f.vreg_types.len() {
         local_types.push(ir_type_to_val(f.vreg_types[i], mode));
     }
 
     let i64_scratch = if func_needs_i64_scratch(f, mode) {
-        let idx = (f.param_count as usize + 1 + local_types.len()) as u32;
+        let idx = (param_slots + local_types.len()) as u32;
         local_types.push(ValType::I64);
         Some(idx)
     } else {
@@ -108,7 +100,7 @@ pub(crate) fn encode_ir_function(
     func_ctx.i64_scratch = i64_scratch;
 
     let fdiv_recip_scratch = if func_needs_fdiv_recip_scratch(f, mode, ctx) {
-        let base = (f.param_count as usize + 1 + local_types.len()) as u32;
+        let base = (param_slots + local_types.len()) as u32;
         for _ in 0..7 {
             local_types.push(ValType::I32);
         }

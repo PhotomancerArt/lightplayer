@@ -2,9 +2,10 @@
 
 use alloc::vec::Vec;
 
+use lpir::IrFunction;
 use lps_shared::LpsFnSig;
 
-use crate::abi::classify::{ArgLoc, ReturnMethod, scalar_count_of_type};
+use crate::abi::classify::{ArgLoc, ReturnMethod, ir_type_scalar_words, scalar_count_of_type};
 use crate::abi::{PReg, PregSet, RegClass};
 
 // --- Named integer registers (x0–x31) ---
@@ -222,7 +223,9 @@ fn push_scalar_words(
     }
 }
 
-/// Classify return value. RV32: more than two scalars ⇒ full value in sret buffer (no split).
+/// Classify return value from the surface signature. RV32: more than two scalars ⇒ sret buffer.
+///
+/// M1 aggregate returns use [`IrFunction::sret_arg`] instead; see [`func_abi_rv32`].
 pub fn classify_return(sig: &LpsFnSig) -> ReturnMethod {
     let n = scalar_count_of_type(&sig.return_type);
     match n {
@@ -242,21 +245,81 @@ pub fn classify_return(sig: &LpsFnSig) -> ReturnMethod {
     }
 }
 
-/// Build a `FuncAbi` using RV32 calling convention.
-/// `total_param_slots` must be the number of incoming parameter **vregs**
-/// (vmctx + flattened scalars / pointer words), usually [`crate::abi::classify::entry_param_scalar_count`].
-pub fn func_abi_rv32(sig: &LpsFnSig, total_param_slots: usize) -> crate::abi::FuncAbi {
-    use crate::abi::FuncAbi;
+// `classify_params(sig, …)` is for [`func_abi_rv32`] without an [`IrFunction`] (tests / metadata).
+// Normal compilation uses [`classify_params_for_compile`].
 
-    let return_method = classify_return(sig);
+/// Parameter locations matching LPIR vreg order for a concrete [`IrFunction`].
+///
+/// When `func.sret_arg` is set (M1 aggregate return), incoming layout is
+/// `a1=vmctx`, `a0=sret`, then user args from `a2` (see emitter prologue).
+pub fn classify_params_for_compile(sig: &LpsFnSig, func: &IrFunction) -> Vec<ArgLoc> {
+    if func.sret_arg.is_some() {
+        let mut out = Vec::new();
+        let mut reg_idx = 2usize;
+        let mut stack_off = 0i32;
+        out.push(ArgLoc::Reg(A1));
+        out.push(ArgLoc::Reg(A0));
+        for i in 0..func.param_count {
+            let v = func.user_param_vreg(i);
+            let ty = func.vreg_types[v.0 as usize];
+            let n = ir_type_scalar_words(ty);
+            push_scalar_words(&mut out, &mut reg_idx, &mut stack_off, n);
+        }
+        return out;
+    }
+
+    let legacy_sret_return = classify_return(sig).is_sret();
+    let mut out = Vec::new();
+    let mut reg_idx = if legacy_sret_return { 1usize } else { 0usize };
+    let mut stack_off = 0i32;
+    push_scalar_words(&mut out, &mut reg_idx, &mut stack_off, 1);
+    for i in 0..func.param_count {
+        let v = func.user_param_vreg(i);
+        let ty = func.vreg_types[v.0 as usize];
+        let n = ir_type_scalar_words(ty);
+        push_scalar_words(&mut out, &mut reg_idx, &mut stack_off, n);
+    }
+    out
+}
+
+/// Build a `FuncAbi` using RV32 calling convention.
+///
+/// When `func` is `Some`, parameter layout follows that [`IrFunction`]'s vregs
+/// (including M1 `sret_arg` hidden slot). Return classification uses
+/// `func.sret_arg` when set, otherwise [`classify_return`] (scalar / mat / vec3+ heuristic).
+///
+/// When `func` is `None`, falls back to [`entry_param_scalar_count`] and flattened
+/// [`LpsFnSig`] parameters (tests and signature-only metadata).
+pub fn func_abi_rv32(sig: &LpsFnSig, func: Option<&IrFunction>) -> crate::abi::FuncAbi {
+    use crate::abi::FuncAbi;
+    use crate::abi::classify::entry_param_scalar_count;
+
+    let return_method = match func {
+        Some(f) if f.sret_arg.is_some() => {
+            let n = scalar_count_of_type(&sig.return_type) as u32;
+            ReturnMethod::Sret {
+                ptr_reg: A0,
+                preserved_reg: S1,
+                word_count: n,
+            }
+        }
+        _ => classify_return(sig),
+    };
     let is_sret = return_method.is_sret();
-    let param_locs = classify_params(sig, is_sret);
+    let param_locs = match func {
+        Some(f) => classify_params_for_compile(sig, f),
+        None => classify_params(sig, is_sret),
+    };
 
     let mut allocatable = alloca_base_int();
     if is_sret {
         allocatable.remove(S1);
     }
 
+    let total_param_slots = match func {
+        Some(f) => f.total_param_slots() as usize,
+        None => entry_param_scalar_count(sig),
+    };
     let precolors = build_precolors(&param_locs, total_param_slots);
 
     FuncAbi::new_raw(

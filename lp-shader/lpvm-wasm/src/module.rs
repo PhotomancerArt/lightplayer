@@ -117,6 +117,8 @@ pub struct WasmExport {
     pub results: Vec<WasmValType>,
     pub return_type: LpsType,
     pub param_types: Vec<LpsType>,
+    /// `IrFunction::sret_arg` — aggregate (etc.) return via hidden pointer param; wasm has no results.
+    pub uses_sret: bool,
 }
 
 impl WasmModule {

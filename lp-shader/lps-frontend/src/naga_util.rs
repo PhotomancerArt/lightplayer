@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpir::IrType;
 use naga::{
     ArraySize, BinaryOperator, Expression, Function, Handle, Literal, MathFunction, Module,
-    RelationalFunction, Scalar, ScalarKind, TypeInner, VectorSize,
+    RelationalFunction, Scalar, ScalarKind, Type, TypeInner, VectorSize,
 };
 use smallvec::SmallVec;
 
@@ -91,24 +91,12 @@ pub(crate) fn naga_type_width(inner: &TypeInner) -> usize {
     }
 }
 
-/// Flatten a fixed-size Naga array type (including multidimensional) to one LPIR register type per
-/// scalar component, row-major — same layout as [`crate::lower_ctx`] uses for array `in` parameters.
-/// Scalar/vector/matrix via [`naga_type_to_ir_types`]; fixed-size arrays flattened like parameters.
-pub(crate) fn ir_types_for_naga_type(
+/// Flatten a fixed-size Naga array to one LPIR type per scalar element (row-major) — only for
+/// [`coerce_assignment_vregs`] and other value-shape coercions. Parameter and return ABIs use
+/// [`array_ty_pointer_arg_ir_type`] / [`func_return_ir_types_with_sret`] instead.
+fn array_type_flat_components_for_value_coercions(
     module: &Module,
-    ty: Handle<naga::Type>,
-) -> Result<Vec<IrType>, LowerError> {
-    let inner = &module.types[ty].inner;
-    if matches!(inner, TypeInner::Array { .. }) {
-        array_type_flat_ir_types(module, ty)
-    } else {
-        Ok(naga_type_to_ir_types(inner)?.to_vec())
-    }
-}
-
-pub(crate) fn array_type_flat_ir_types(
-    module: &Module,
-    array_ty: Handle<naga::Type>,
+    array_ty: Handle<Type>,
 ) -> Result<Vec<IrType>, LowerError> {
     let (dimensions, leaf_ty, _) =
         crate::lower_array_multidim::flatten_array_type_shape(module, array_ty)?;
@@ -116,7 +104,9 @@ pub(crate) fn array_type_flat_ir_types(
         .iter()
         .try_fold(1u32, |acc, &d| acc.checked_mul(d))
         .ok_or_else(|| {
-            LowerError::Internal(String::from("array_type_flat_ir_types: count overflow"))
+            LowerError::Internal(String::from(
+                "array_type_flat_components_for_value_coercions: count overflow",
+            ))
         })?;
     let leaf_inner = &module.types[leaf_ty].inner;
     let leaf_tys = naga_type_to_ir_types(leaf_inner)?;
@@ -129,19 +119,63 @@ pub(crate) fn array_type_flat_ir_types(
     Ok(out)
 }
 
-pub(crate) fn func_return_ir_types(
+/// Scalar/vector/matrix via [`naga_type_to_ir_types`]; fixed-size arrays flattened for coercion.
+pub(crate) fn ir_types_for_naga_type(
     module: &Module,
-    func: &Function,
+    ty: Handle<Type>,
 ) -> Result<Vec<IrType>, LowerError> {
-    let Some(res) = &func.result else {
-        return Ok(Vec::new());
-    };
-    let inner = &module.types[res.ty].inner;
+    let inner = &module.types[ty].inner;
     if matches!(inner, TypeInner::Array { .. }) {
-        return array_type_flat_ir_types(module, res.ty);
+        array_type_flat_components_for_value_coercions(module, ty)
+    } else {
+        Ok(naga_type_to_ir_types(inner)?.to_vec())
+    }
+}
+
+/// LPIR formal type for a by-value Naga array parameter (M1+): one pointer, caller slot address.
+pub(crate) fn array_ty_pointer_arg_ir_type(
+    _module: &Module,
+    _ty: Handle<Type>,
+) -> Result<IrType, LowerError> {
+    Ok(IrType::Pointer)
+}
+
+/// Return ABI for a function, including an optional sret buffer for aggregate (array) returns.
+pub(crate) struct FuncReturnAbi {
+    /// LPIR `return_types` for the [`lpir::FunctionBuilder`]. Empty when sret is set.
+    pub returns: Vec<IrType>,
+    /// `Some` when the return is lowered via a hidden sret pointer parameter.
+    pub sret: Option<IrType>,
+    /// Byte size of the sret buffer (the aggregate’s std430 size). Zero when not used.
+    pub sret_size: u32,
+}
+
+pub(crate) fn func_return_ir_types_with_sret(
+    module: &Module,
+    ret_ty: Option<Handle<Type>>,
+) -> Result<FuncReturnAbi, LowerError> {
+    let Some(h) = ret_ty else {
+        return Ok(FuncReturnAbi {
+            returns: Vec::new(),
+            sret: None,
+            sret_size: 0,
+        });
+    };
+    let inner = &module.types[h].inner;
+    if matches!(inner, TypeInner::Array { .. }) {
+        let (size, _align) = crate::lower_aggregate_layout::aggregate_size_and_align(module, h)?;
+        return Ok(FuncReturnAbi {
+            returns: Vec::new(),
+            sret: Some(IrType::Pointer),
+            sret_size: size,
+        });
     }
     let tys = naga_type_to_ir_types(inner)?;
-    Ok(tys.to_vec())
+    Ok(FuncReturnAbi {
+        returns: tys.to_vec(),
+        sret: None,
+        sret_size: 0,
+    })
 }
 
 pub(crate) fn type_handle_scalar_kind(

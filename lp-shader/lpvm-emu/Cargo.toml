@@ -25,3 +25,6 @@ lpir = { path = "../lpir" }
 lps-shared = { path = "../lps-shared" }
 cranelift-codegen = { workspace = true, default-features = false, features = ["riscv32"] }
 target-lexicon = { workspace = true }
+
+[dev-dependencies]
+lps-frontend = { path = "../lps-frontend" }

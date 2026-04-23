@@ -38,10 +38,8 @@ fn riscv32_flags() -> Result<cranelift_codegen::settings::Flags, CompilerError> 
                 "use_colocated_libcalls: {e}"
             )))
         })?;
-    // NOTE: We use EXPLICIT StructReturn (added by signature_for_ir_func), so we must NOT
-    // enable implicit sret. With explicit sret, the backend expects the sret param to be passed
-    // explicitly by the caller. The implicit_sret feature would hide the first pointer param
-    // from num_args(), causing an ABI mismatch.
+    // NOTE: We use EXPLICIT StructReturn (second param after vmctx in `signature_for_ir_func`)
+    // so we must NOT enable implicit sret. The implicit_sret feature would mis-handle args.
     flag_builder
         .set("enable_multi_ret_implicit_sret", "false")
         .map_err(|e| {

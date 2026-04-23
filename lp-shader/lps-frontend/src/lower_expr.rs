@@ -56,7 +56,7 @@ fn lower_expr_vec_uncached(
         Expression::FunctionArgument(i) => ctx.arg_vregs_for(*i),
         Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
             Expression::LocalVariable(lv) => {
-                if ctx.array_map.contains_key(lv) {
+                if ctx.aggregate_map.contains_key(lv) {
                     return Err(LowerError::UnsupportedExpression(String::from(
                         "Load of whole array local is not supported",
                     )));
@@ -127,6 +127,10 @@ fn lower_expr_vec_uncached(
             ))),
         },
         Expression::CallResult(_) => {
+            if let Some(info) = ctx.call_result_aggregates.get(&expr).cloned() {
+                let addr = crate::lower_array::aggregate_storage_base_vreg(ctx, &info.slot)?;
+                return Ok(smallvec::smallvec![addr]);
+            }
             let i = expr.index();
             ctx.expr_cache
                 .get(i)
@@ -173,7 +177,7 @@ fn lower_expr_vec_uncached(
             if let Some((root, ops)) =
                 crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
             {
-                if let Some(info) = ctx.array_info_for_subscript_root(root)? {
+                if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
                     if ops.len() == info.dimensions.len() {
                         if ops.iter().all(|o| {
                             matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
@@ -366,7 +370,7 @@ fn lower_expr_vec_uncached(
                 if let Some((root, _)) =
                     crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
                 {
-                    if ctx.array_info_for_subscript_root(root)?.is_some() {
+                    if ctx.aggregate_info_for_subscript_root(root)?.is_some() {
                         return crate::lower_access::lower_access_expr_vec(ctx, expr);
                     }
                 }
@@ -375,7 +379,7 @@ fn lower_expr_vec_uncached(
                     if let Some((lv, _)) =
                         crate::lower_array_multidim::peel_access_chain(ctx.func, expr)
                     {
-                        if ctx.array_map.contains_key(&lv) {
+                        if ctx.aggregate_map.contains_key(&lv) {
                             return crate::lower_access::lower_access_expr_vec(ctx, expr);
                         }
                     }

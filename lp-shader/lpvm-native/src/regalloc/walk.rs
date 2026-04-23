@@ -87,19 +87,24 @@ fn build_passthrough_set(
             VInst::Call {
                 args,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 ..
             } => {
-                let arg_base = if *callee_uses_sret { 1 } else { 0 };
                 let call_args = args.vregs(vreg_pool);
-                let arg_regs = func_abi.arg_regs();
+                let isa = func_abi.isa();
                 for (i, &arg_vreg) in call_args.iter().enumerate() {
                     let idx = arg_vreg.0 as usize;
                     if idx >= passthrough.len() || disqualified[idx] || passthrough[idx].is_none() {
                         continue;
                     }
                     let entry_reg = passthrough[idx].unwrap();
-                    let is_reg_pass = arg_base + i < arg_regs.len();
-                    if !is_reg_pass || arg_regs[arg_base + i].hw != entry_reg {
+                    let Some(target) =
+                        isa.lpir_call_arg_target_hw(*callee_uses_sret, *caller_passes_sret_ptr, i)
+                    else {
+                        disqualified[idx] = true;
+                        continue;
+                    };
+                    if entry_reg != target {
                         disqualified[idx] = true;
                     }
                 }
@@ -831,13 +836,14 @@ fn process_call(
     passthrough: &[Option<u8>],
 ) {
     let isa = func_abi.isa();
-    let (args_slice, rets_slice, callee_uses_sret) = match inst {
+    let (args_slice, rets_slice, callee_uses_sret, caller_passes_sret_ptr) = match inst {
         VInst::Call {
             args,
             rets,
             callee_uses_sret,
+            caller_passes_sret_ptr,
             ..
-        } => (*args, *rets, *callee_uses_sret),
+        } => (*args, *rets, *callee_uses_sret, *caller_passes_sret_ptr),
         _ => unreachable!(),
     };
 
@@ -983,8 +989,6 @@ fn process_call(
     // vector) so they can be filtered against ret_move_pool_regs and
     // sequenced correctly relative to ret_moves.
 
-    let arg_base = if callee_uses_sret { 1 } else { 0 };
-
     // (vreg, target_arg_reg) for register-pass args — Before moves deferred.
     let mut reg_pass_args: Vec<(VReg, u8)> = Vec::new();
 
@@ -993,12 +997,10 @@ fn process_call(
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        let is_reg_pass = arg_base + i < isa.call_arg_reg_count();
-        if is_reg_pass {
-            let target = isa
-                .call_arg_reg_hw(arg_base + i)
-                .expect("arg slot within call_arg_reg_count");
-
+        let target_opt = isa.lpir_call_arg_target_hw(callee_uses_sret, caller_passes_sret_ptr, i);
+        let is_reg_pass = target_opt.is_some();
+        let trace_target = target_opt.unwrap_or(0);
+        if let Some(target) = target_opt {
             // Pass-through shortcut: vreg stays in its ABI register, no pool needed.
             let is_passthrough = passthrough
                 .get(arg_vreg.0 as usize)
@@ -1105,11 +1107,7 @@ fn process_call(
                 vinst_idx: inst_idx,
                 vinst_mnemonic: String::from("call_arg"),
                 decision: if is_reg_pass {
-                    alloc::format!(
-                        "v{}: pool -> x{} (deferred)",
-                        arg_vreg.0,
-                        isa.call_arg_reg_hw(arg_base + i).unwrap_or(0)
-                    )
+                    alloc::format!("v{}: pool -> x{} (deferred)", arg_vreg.0, trace_target)
                 } else {
                     alloc::format!(
                         "v{}: x{} (stack-pass)",

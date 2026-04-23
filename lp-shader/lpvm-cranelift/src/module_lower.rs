@@ -107,12 +107,6 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     let mut func_names = Vec::with_capacity(indices.len());
     let mut ir_param_counts = Vec::with_capacity(indices.len());
 
-    let callee_struct_return: alloc::vec::Vec<bool> = ir
-        .functions
-        .values()
-        .map(|f| emit::signature_uses_struct_return(module.isa(), f))
-        .collect();
-
     for &fid in &indices {
         let f = &ir.functions[&fid];
         logical_return_words.insert(f.name.clone(), f.return_types.len());
@@ -149,7 +143,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         let f = &ir.functions[&fid];
         let fid = func_ids[emit_pos];
         ctx.clear();
-        let uses_struct_return = emit::signature_uses_struct_return(module.isa(), f);
+        let uses_struct_return = emit::signature_uses_struct_return(f);
         ctx.func.signature =
             emit::signature_for_ir_func(f, call_conv, mode, pointer_type, module.isa());
         let mut func_ctx = FunctionBuilderContext::new();
@@ -204,7 +198,6 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 float_mode: mode,
                 lpir_builtins,
                 uses_struct_return,
-                callee_struct_return: &callee_struct_return,
             };
 
             translate_function(f, &mut builder, &emit_ctx).map_err(|e| {

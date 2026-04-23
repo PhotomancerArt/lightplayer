@@ -4112,6 +4112,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
+ "lps-frontend",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",

@@ -17,7 +17,7 @@ use crate::lower_error::LowerError;
 use crate::lower_expr;
 
 pub(crate) use crate::naga_util::{
-    func_return_ir_types, naga_scalar_to_ir_type, naga_type_to_ir_types, naga_type_width,
+    array_ty_pointer_arg_ir_type, naga_scalar_to_ir_type, naga_type_to_ir_types, naga_type_width,
     vector_size_usize,
 };
 
@@ -39,24 +39,35 @@ pub(crate) type GlobalVarMap = BTreeMap<Handle<GlobalVariable>, GlobalVarInfo>;
 
 pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 
-/// Where array element data lives: owned stack slot vs. `inout`/`out` parameter buffer (`arg_vregs` base).
+/// Where aggregate (array) element data lives: stack slot or `inout`/`out` parameter buffer
+/// ([`LowerCtx::arg_vregs`]\[0\] = pointer).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ArraySlot {
+pub(crate) enum AggregateSlot {
     Local(SlotId),
     /// Pointer-to-array formal (`out` / `inout`); base address is [`LowerCtx::arg_vregs`]\[0\].
     Param(u32),
 }
 
-/// Stack [`SlotId`] metadata for one array-typed [`LocalVariable`].
+/// Stack [`SlotId`] and layout metadata for one aggregate-typed value (M1: arrays only).
 #[derive(Clone, Debug)]
-pub(crate) struct ArrayInfo {
-    pub slot: ArraySlot,
+pub(crate) struct AggregateInfo {
+    pub slot: AggregateSlot,
     /// Outer dimension first, e.g. `[2, 3]` for `int[2][3]`.
     pub dimensions: SmallVec<[u32; 4]>,
     pub leaf_element_ty: Handle<Type>,
     pub leaf_stride: u32,
     /// Product of [`Self::dimensions`]; leaf slots in row-major order.
     pub element_count: u32,
+    /// Total std430 size in bytes (from [`crate::lower_aggregate_layout::aggregate_size_and_align`]).
+    pub total_size: u32,
+}
+
+/// sret return buffer: hidden pointer at [`IrFunction::sret_arg`], `memcpy` the aggregate here, then
+/// return no values in LPIR.
+#[derive(Clone, Debug)]
+pub(crate) struct SretCtx {
+    pub addr: VReg,
+    pub size: u32,
 }
 
 #[allow(
@@ -70,12 +81,16 @@ pub(crate) struct LowerCtx<'a> {
     pub ir_module: Option<&'a LpirModule>,
     pub expr_cache: Vec<Option<VRegVec>>,
     pub local_map: BTreeMap<Handle<LocalVariable>, VRegVec>,
-    pub array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>,
+    /// Stack (and `in` by-value) aggregates keyed by [`LocalVariable`].
+    pub aggregate_map: BTreeMap<Handle<LocalVariable>, AggregateInfo>,
+    /// Call results for functions returning an aggregate: [`Expression::CallResult`] → stack slot
+    /// (same layout as `aggregate_map` entries, always [`AggregateSlot::Local`]).
+    pub(crate) call_result_aggregates: BTreeMap<Handle<Expression>, AggregateInfo>,
     /// Naga emits `.length()` on multi-dim arrays as the outer type-tree size, not GLSL's leftmost `[]`.
     /// Pairs `Load(array)` + `Literal(U32)` (and chained `Literal(I32)` copies) get corrected values here.
     pub(crate) array_length_literal_fixes: BTreeMap<Handle<Expression>, i32>,
     pub param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec>,
-    /// VRegs per function argument index (flattened scalars).
+    /// VRegs per function argument: scalars/vectors (flattened), or one pointer for aggregates / `inout` bases.
     pub(crate) arg_vregs: BTreeMap<u32, VRegVec>,
     /// `in`/`out`/`inout` parameters: Naga type handle of the pointee (for Load/Store).
     pub(crate) pointer_args: BTreeMap<u32, Handle<Type>>,
@@ -83,6 +98,8 @@ pub(crate) struct LowerCtx<'a> {
     pub import_map: BTreeMap<String, CalleeRef>,
     pub lpfn_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub return_types: Vec<IrType>,
+    /// Present when the shader function returns an aggregate by sret (LPIR void return, memcpy to `addr`).
+    pub sret: Option<SretCtx>,
     /// Map from Naga GlobalVariable handle to (vmctx_byte_offset, component_count, is_uniform).
     pub(crate) global_map: GlobalVarMap,
 }
@@ -97,11 +114,27 @@ impl<'a> LowerCtx<'a> {
         lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
         global_map: GlobalVarMap,
     ) -> Result<Self, LowerError> {
-        let return_types = func_return_ir_types(module, func)?;
+        let return_abi = crate::naga_util::func_return_ir_types_with_sret(
+            module,
+            func.result.as_ref().map(|r| r.ty),
+        )?;
+        let return_types = return_abi.returns.clone();
         let mut fb = FunctionBuilder::new(name, &return_types);
+        let sret = if return_abi.sret.is_some() {
+            let addr = fb.add_sret_param();
+            Some(SretCtx {
+                addr,
+                size: return_abi.sret_size,
+            })
+        } else {
+            None
+        };
 
         let mut arg_vregs: BTreeMap<u32, VRegVec> = BTreeMap::new();
         let mut pointer_args: BTreeMap<u32, Handle<Type>> = BTreeMap::new();
+        // By-value `in` array: param loop fills this; locals pass consumes it.
+        let mut pending_in_array_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
+            BTreeMap::new();
         for (i, arg) in func.arguments.iter().enumerate() {
             let inner = &module.types[arg.ty].inner;
             match inner {
@@ -116,12 +149,43 @@ impl<'a> LowerCtx<'a> {
                     pointer_args.insert(i as u32, *base);
                 }
                 TypeInner::Array { .. } => {
-                    let tys = array_ty_flat_ir_types(module, arg.ty)?;
-                    let mut vregs = VRegVec::new();
-                    for ty in tys {
-                        vregs.push(fb.add_param(ty));
-                    }
-                    arg_vregs.insert(i as u32, vregs);
+                    // By-value `in` aggregate: one pointer, memcpy into a stack slot, local mirrors that slot.
+                    let (size, _align) =
+                        crate::lower_aggregate_layout::aggregate_size_and_align(module, arg.ty)?;
+                    let _ = array_ty_pointer_arg_ir_type(module, arg.ty)?;
+                    let param_ptr = fb.add_param(IrType::Pointer);
+                    let lv = local_for_in_array_value_param(func, module, i as u32)?;
+                    let (dimensions, leaf_ty, leaf_stride) =
+                        crate::lower_array_multidim::flatten_array_type_shape(module, arg.ty)?;
+                    let element_count = dimensions
+                        .iter()
+                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                        .ok_or_else(|| {
+                            LowerError::Internal(String::from(
+                                "array `in` param: element count overflow",
+                            ))
+                        })?;
+                    let local_slot = fb.alloc_slot(size);
+                    let local_addr = fb.alloc_vreg(IrType::Pointer);
+                    fb.push(LpirOp::SlotAddr {
+                        dst: local_addr,
+                        slot: local_slot,
+                    });
+                    fb.push(LpirOp::Memcpy {
+                        dst_addr: local_addr,
+                        src_addr: param_ptr,
+                        size,
+                    });
+                    let info = AggregateInfo {
+                        slot: AggregateSlot::Local(local_slot),
+                        dimensions,
+                        leaf_element_ty: leaf_ty,
+                        leaf_stride,
+                        element_count,
+                        total_size: size,
+                    };
+                    pending_in_array_value_param.insert(lv, info);
+                    arg_vregs.insert(i as u32, smallvec::smallvec![param_ptr]);
                 }
                 _ => {
                     let tys = naga_type_to_ir_types(inner)?;
@@ -144,9 +208,13 @@ impl<'a> LowerCtx<'a> {
         }
 
         let mut local_map: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
-        let mut array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo> = BTreeMap::new();
+        let mut aggregate_map: BTreeMap<Handle<LocalVariable>, AggregateInfo> = BTreeMap::new();
         for (lv_handle, var) in func.local_variables.iter() {
             if param_aliases.contains_key(&lv_handle) {
+                continue;
+            }
+            if let Some(info) = pending_in_array_value_param.remove(&lv_handle) {
+                aggregate_map.insert(lv_handle, info);
                 continue;
             }
             match &module.types[var.ty].inner {
@@ -162,15 +230,22 @@ impl<'a> LowerCtx<'a> {
                     let total = element_count.checked_mul(leaf_stride).ok_or_else(|| {
                         LowerError::Internal(String::from("array slot size overflow"))
                     })?;
-                    let slot = fb.alloc_slot(total);
-                    array_map.insert(
+                    let (std430_total, _align) =
+                        crate::lower_aggregate_layout::aggregate_size_and_align(module, var.ty)?;
+                    debug_assert_eq!(
+                        std430_total, total,
+                        "when Naga array type maps to LpsType, slot bytes must match std430"
+                    );
+                    let slot = fb.alloc_slot(std430_total);
+                    aggregate_map.insert(
                         lv_handle,
-                        ArrayInfo {
-                            slot: ArraySlot::Local(slot),
+                        AggregateInfo {
+                            slot: AggregateSlot::Local(slot),
                             dimensions,
                             leaf_element_ty: leaf_ty,
                             leaf_stride,
                             element_count,
+                            total_size: std430_total,
                         },
                     );
                 }
@@ -185,14 +260,19 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
+        if !pending_in_array_value_param.is_empty() {
+            return Err(LowerError::Internal(String::from(
+                "in array value param: pending locals did not match any local variable",
+            )));
+        }
 
         for (lv_handle, var) in func.local_variables.iter() {
             if param_aliases.contains_key(&lv_handle) {
                 continue;
             }
-            if let Some(info) = array_map.get(&lv_handle) {
+            if let Some(info) = aggregate_map.get(&lv_handle) {
                 if var.init.is_none() {
-                    if matches!(info.slot, ArraySlot::Local(_)) {
+                    if matches!(info.slot, AggregateSlot::Local(_)) {
                         crate::lower_array::zero_fill_array_slot(&mut fb, module, info)?;
                     }
                 }
@@ -201,7 +281,7 @@ impl<'a> LowerCtx<'a> {
 
         let expr_cache = vec![None; func.expressions.len()];
         let array_length_literal_fixes =
-            crate::lower_array::scan_naga_multidim_array_length_literals(func, &array_map);
+            crate::lower_array::scan_naga_multidim_array_length_literals(func, &aggregate_map);
 
         let mut ctx = Self {
             fb,
@@ -210,7 +290,8 @@ impl<'a> LowerCtx<'a> {
             ir_module: None,
             expr_cache,
             local_map,
-            array_map,
+            aggregate_map,
+            call_result_aggregates: BTreeMap::new(),
             array_length_literal_fixes,
             param_aliases,
             arg_vregs,
@@ -219,6 +300,7 @@ impl<'a> LowerCtx<'a> {
             import_map: import_map.clone(),
             lpfn_map: lpfn_map.clone(),
             return_types,
+            sret,
             global_map,
         };
 
@@ -229,7 +311,7 @@ impl<'a> LowerCtx<'a> {
             let Some(init_h) = var.init else {
                 continue;
             };
-            if let Some(info) = ctx.array_map.get(&lv_handle).cloned() {
+            if let Some(info) = ctx.aggregate_map.get(&lv_handle).cloned() {
                 crate::lower_array::lower_array_initializer(&mut ctx, &info, init_h)?;
                 continue;
             }
@@ -264,7 +346,7 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(crate) fn resolve_local(&self, lv: Handle<LocalVariable>) -> Result<VRegVec, LowerError> {
-        if self.array_map.contains_key(&lv) {
+        if self.aggregate_map.contains_key(&lv) {
             return Err(LowerError::Internal(format!(
                 "local {lv:?} is an array (use slot lowering)"
             )));
@@ -279,23 +361,23 @@ impl<'a> LowerCtx<'a> {
     }
 
     #[allow(dead_code, reason = "call lowering and tooling")]
-    pub(crate) fn resolve_array(
+    pub(crate) fn resolve_aggregate(
         &self,
         lv: Handle<LocalVariable>,
-    ) -> Result<&ArrayInfo, LowerError> {
-        self.array_map
+    ) -> Result<&AggregateInfo, LowerError> {
+        self.aggregate_map
             .get(&lv)
-            .ok_or_else(|| LowerError::Internal(format!("local {lv:?} is not an array")))
+            .ok_or_else(|| LowerError::Internal(format!("local {lv:?} is not an aggregate array")))
     }
 
-    /// [`ArrayInfo`] for a peeled subscript chain root (stack array or pointer-to-array param).
-    pub(crate) fn array_info_for_subscript_root(
+    /// [`AggregateInfo`] for a peeled subscript chain root (local, pointer param, or call result).
+    pub(crate) fn aggregate_info_for_subscript_root(
         &self,
         root: crate::lower_array_multidim::ArraySubscriptRoot,
-    ) -> Result<Option<ArrayInfo>, LowerError> {
+    ) -> Result<Option<AggregateInfo>, LowerError> {
         use crate::lower_array_multidim::ArraySubscriptRoot;
         match root {
-            ArraySubscriptRoot::Local(lv) => Ok(self.array_map.get(&lv).cloned()),
+            ArraySubscriptRoot::Local(lv) => Ok(self.aggregate_map.get(&lv).cloned()),
             ArraySubscriptRoot::Param(arg_i) => {
                 let Some(&pointee) = self.pointer_args.get(&arg_i) else {
                     return Ok(None);
@@ -310,16 +392,22 @@ impl<'a> LowerCtx<'a> {
                     .try_fold(1u32, |acc, &d| acc.checked_mul(d))
                     .ok_or_else(|| {
                         LowerError::Internal(String::from(
-                            "array_info_for_subscript_root: element count overflow",
+                            "aggregate_info_for_subscript_root: element count overflow",
                         ))
                     })?;
-                Ok(Some(ArrayInfo {
-                    slot: ArraySlot::Param(arg_i),
+                let (total_size, _align) =
+                    crate::lower_aggregate_layout::aggregate_size_and_align(self.module, pointee)?;
+                Ok(Some(AggregateInfo {
+                    slot: AggregateSlot::Param(arg_i),
                     dimensions,
                     leaf_element_ty: leaf_ty,
                     leaf_stride,
                     element_count,
+                    total_size,
                 }))
+            }
+            ArraySubscriptRoot::CallResult(expr) => {
+                Ok(self.call_result_aggregates.get(&expr).cloned())
             }
         }
     }
@@ -346,12 +434,46 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
-/// One LPIR parameter per scalar component, row-major, for a value `in` array argument.
-fn array_ty_flat_ir_types(
+/// Naga GLSL: the [`LocalVariable`] for a by-value `in` array param (`float a[4]`) is matched by
+/// parameter name and type to `func.arguments[i]`.
+fn local_for_in_array_value_param(
+    func: &Function,
     module: &Module,
-    array_ty: Handle<Type>,
-) -> Result<Vec<IrType>, LowerError> {
-    crate::naga_util::array_type_flat_ir_types(module, array_ty)
+    param_index: u32,
+) -> Result<Handle<LocalVariable>, LowerError> {
+    let i = param_index as usize;
+    let arg = func
+        .arguments
+        .get(i)
+        .ok_or_else(|| LowerError::Internal(String::from("in_array: bad argument index")))?;
+    if !matches!(&module.types[arg.ty].inner, TypeInner::Array { .. }) {
+        return Err(LowerError::Internal(String::from(
+            "in_array: not an array type",
+        )));
+    }
+    if let Some(name) = &arg.name {
+        for (lv, v) in func.local_variables.iter() {
+            if v.ty == arg.ty && v.name.as_deref() == Some(name.as_str()) {
+                return Ok(lv);
+            }
+        }
+    }
+    let mut found = None;
+    for (lv, v) in func.local_variables.iter() {
+        if v.ty == arg.ty {
+            if found.is_some() {
+                return Err(LowerError::Internal(String::from(
+                    "in_array: ambiguous local (use matching parameter name)",
+                )));
+            }
+            found = Some(lv);
+        }
+    }
+    found.ok_or_else(|| {
+        LowerError::Internal(String::from(
+            "in_array: no local variable for by-value array parameter",
+        ))
+    })
 }
 
 fn scan_param_argument_indices(
@@ -384,7 +506,7 @@ fn scan_param_argument_indices(
                         let is_array_val = arg_ty.is_some_and(|h| {
                             matches!(&module.types[h].inner, TypeInner::Array { .. })
                         });
-                        // `in T[]` uses a real stack array in `array_map`; do not alias as flat vregs.
+                        // `in T[]` uses a real stack array in `aggregate_map`; do not alias as flat vregs.
                         if !is_ptr && !is_array_val {
                             m.insert(*lv, *idx);
                         }

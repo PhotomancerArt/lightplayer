@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use cranelift_codegen::ir::{ArgumentPurpose, InstBuilder, MemFlags, StackSlotData, StackSlotKind};
+use cranelift_codegen::ir::{InstBuilder, MemFlags, StackSlotData, StackSlotKind};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::lpir_module::IrFunction;
 use lpir::lpir_op::LpirOp;
@@ -38,52 +38,25 @@ pub(crate) fn emit_call(
                 }
             };
             if let CalleeRef::Local(id) = *callee {
-                let rank = ctx.func_id_to_ir_rank[&id];
-                if ctx.callee_struct_return.get(rank).copied().unwrap_or(false) {
-                    let callee_ir = ctx.ir.functions.get(&id).ok_or_else(|| {
-                        CompileError::unsupported("missing local callee IR for struct return")
-                    })?;
-                    let ret_n = callee_ir.return_types.len();
-                    let size_bytes = ret_n.checked_mul(4).ok_or_else(|| {
-                        CompileError::unsupported("callee return buffer size overflow")
-                    })?;
-                    let slot = builder.func.create_sized_stack_slot(StackSlotData::new(
-                        StackSlotKind::ExplicitSlot,
-                        size_bytes as u32,
-                        4,
-                    ));
-                    let base = builder.ins().stack_addr(ctx.pointer_type, slot, 0);
-                    let mut arg_vals: Vec<_> = Vec::with_capacity(1 + func.pool_slice(*args).len());
-                    // NOTE: Order must match signature: sret first, then args (vmctx is in Call args)
-                    arg_vals.push(base);
-                    for v in func.pool_slice(*args) {
-                        arg_vals.push(use_v(builder, vars, *v));
-                    }
+                let callee_ir = ctx.ir.functions.get(&id).ok_or_else(|| {
+                    CompileError::unsupported("call to missing local function IR")
+                })?;
+                if callee_ir.sret_arg.is_some() {
+                    // P3+ LPIR: args are [vmctx, sret, …]; no synthetic stack slot or load-back.
+                    let arg_vals: Vec<_> = func
+                        .pool_slice(*args)
+                        .iter()
+                        .map(|v| use_v(builder, vars, *v))
+                        .collect();
                     let call = builder.ins().call(func_ref, &arg_vals);
                     let result_regs = func.pool_slice(*results);
                     let result_vals: Vec<_> = builder.inst_results(call).to_vec();
-                    if !result_vals.is_empty() {
+                    if !result_regs.is_empty() || !result_vals.is_empty() {
                         return Err(CompileError::cranelift(alloc::format!(
-                            "struct-return call should not produce SSA results, got {}",
-                            result_vals.len()
-                        )));
-                    }
-                    if result_regs.len() != ret_n {
-                        return Err(CompileError::cranelift(alloc::format!(
-                            "struct-return result arity mismatch: expected {}, got {}",
-                            ret_n,
+                            "LPIR sret call: expected no call results, got {} SSA / {} LPIR",
+                            result_vals.len(),
                             result_regs.len()
                         )));
-                    }
-                    for (idx, vreg) in result_regs.iter().enumerate() {
-                        let offset = (idx * 4) as i32;
-                        let ty = ir_type_for_mode(
-                            callee_ir.return_types[idx],
-                            ctx.float_mode,
-                            ctx.pointer_type,
-                        );
-                        let v = builder.ins().load(ty, MemFlags::trusted(), base, offset);
-                        def_v(builder, vars, *vreg, v);
                     }
                     return Ok(true);
                 }
@@ -141,6 +114,27 @@ pub(crate) fn emit_call(
                 }
             }
 
+            if let CalleeRef::Import(ImportId(i)) = *callee {
+                if ctx.ir.imports[i as usize].sret {
+                    let arg_vals: Vec<_> = func
+                        .pool_slice(*args)
+                        .iter()
+                        .map(|v| use_v(builder, vars, *v))
+                        .collect();
+                    let call = builder.ins().call(func_ref, &arg_vals);
+                    let result_regs = func.pool_slice(*results);
+                    let result_vals: Vec<_> = builder.inst_results(call).to_vec();
+                    if !result_regs.is_empty() || !result_vals.is_empty() {
+                        return Err(CompileError::cranelift(alloc::format!(
+                            "LPIR import sret call: expected no call results, got {} SSA / {} LPIR",
+                            result_vals.len(),
+                            result_regs.len()
+                        )));
+                    }
+                    return Ok(true);
+                }
+            }
+
             // VMContext is already in the Call args from lowering when the callee expects it
             // (shader functions and `ImportDecl::needs_vmctx` builtins).
             let arg_vals: Vec<_> = func
@@ -166,16 +160,10 @@ pub(crate) fn emit_call(
         LpirOp::Return { values } => {
             let slice = func.pool_slice(*values);
             if ctx.uses_struct_return {
-                let base = builder
-                    .func
-                    .special_param(ArgumentPurpose::StructReturn)
-                    .ok_or_else(|| {
-                        CompileError::unsupported("struct-return: missing special param")
-                    })?;
-                for (idx, v) in slice.iter().enumerate() {
-                    let val = use_v(builder, vars, *v);
-                    let offset = (idx * 4) as i32;
-                    builder.ins().store(MemFlags::trusted(), val, base, offset);
+                if !slice.is_empty() {
+                    return Err(CompileError::unsupported(
+                        "LPIR sret function: return has values; use Memcpy to sret + empty Return",
+                    ));
                 }
                 builder.ins().return_(&[]);
             } else {

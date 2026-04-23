@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 use naga::{ArraySize, Expression, Function, Handle, LocalVariable, Module, Type, TypeInner};
 use smallvec::SmallVec;
 
+use crate::lower_aggregate_layout::array_element_stride;
 use crate::lower_error::LowerError;
-use crate::naga_util::naga_type_to_ir_types;
 
 /// Row-major flat index with per-axis clamping (matches v1 clamp semantics).
 pub(crate) fn flat_index_const_clamped(
@@ -67,12 +67,14 @@ pub(crate) enum SubscriptOperand {
     Dynamic(Handle<Expression>),
 }
 
-/// Root of a peeled `Access` / `AccessIndex` array chain: stack local or `out` / `inout` array param.
+/// Root of a peeled `Access` / `AccessIndex` array chain: stack local, `out` / `inout` param, or call result.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ArraySubscriptRoot {
     Local(Handle<LocalVariable>),
     /// Function argument index; must be in [`crate::lower_ctx::LowerCtx::pointer_args`] with array pointee.
     Param(u32),
+    /// [`Expression::CallResult`] from a callee with aggregate return (slot in [`LowerCtx::call_result_aggregates`](crate::lower_ctx::LowerCtx::call_result_aggregates)).
+    CallResult(Handle<Expression>),
 }
 
 /// Mixed `Access` / `AccessIndex` chain ending at [`LocalVariable`] or array pointer [`Expression::FunctionArgument`] (outer index first in vector).
@@ -106,6 +108,10 @@ pub(crate) fn peel_array_subscript_chain(
                 ops.reverse();
                 return Some((ArraySubscriptRoot::Param(*arg_i), ops));
             }
+            Expression::CallResult(_) => {
+                ops.reverse();
+                return Some((ArraySubscriptRoot::CallResult(expr), ops));
+            }
             _ => return None,
         }
     }
@@ -130,10 +136,8 @@ pub(crate) fn peel_access_index_chain(
     Some((lv, indices))
 }
 
-/// Walk nested `TypeInner::Array`, outermost dimension first; returns leaf type and byte stride per leaf.
-///
-/// NOTE: The leaf stride is rounded up to 4 bytes to ensure 4-byte alignment for RV32 loads/stores.
-/// This means bool arrays use 4 bytes per element instead of 1, but maintains alignment.
+/// Walk nested `TypeInner::Array`, outermost dimension first; returns leaf type and byte stride
+/// per leaf (std430 element stride from [`crate::lower_aggregate_layout::array_element_stride`]).
 pub(crate) fn flatten_local_array_shape(
     module: &Module,
     func: &Function,
@@ -142,9 +146,9 @@ pub(crate) fn flatten_local_array_shape(
     let mut dimensions = SmallVec::<[u32; 4]>::new();
     let mut cur_ty = var.ty;
 
-    let (leaf_ty, leaf_stride) = loop {
+    let leaf_ty = loop {
         match &module.types[cur_ty].inner {
-            TypeInner::Array { base, size, stride } => {
+            TypeInner::Array { base, size, .. } => {
                 let n = match size {
                     ArraySize::Constant(nz) => nz.get(),
                     ArraySize::Pending(_) | ArraySize::Dynamic => {
@@ -175,15 +179,12 @@ pub(crate) fn flatten_local_array_shape(
                     }
                 };
                 dimensions.push(n);
-                let stride_v = *stride;
                 match &module.types[*base].inner {
                     TypeInner::Array { .. } => {
                         cur_ty = *base;
                     }
                     _ => {
-                        // Round up stride to 4 bytes for alignment (RV32 requires 4-byte aligned loads)
-                        let aligned_stride = stride_v.max(4);
-                        break (*base, aligned_stride);
+                        break *base;
                     }
                 }
             }
@@ -195,17 +196,7 @@ pub(crate) fn flatten_local_array_shape(
         }
     };
 
-    // Naga's array stride can be smaller than our stack layout: we place each scalar component at
-    // `byte_off + j * 4` (see `store_array_element_const`). Ensure consecutive elements do not overlap
-    // (e.g. `bvec4[2]` must stride by 16 bytes, not 4).
-    let leaf_inner = &module.types[leaf_ty].inner;
-    let ir_components = u32::try_from(naga_type_to_ir_types(leaf_inner)?.len()).map_err(|_| {
-        LowerError::Internal(String::from(
-            "flatten_local_array_shape: IR component count overflows u32",
-        ))
-    })?;
-    let min_layout_stride = ir_components.saturating_mul(4);
-    let leaf_stride = leaf_stride.max(min_layout_stride);
+    let leaf_stride = array_element_stride(module, leaf_ty)?;
 
     // Naga nests `T[a][b]` so the type walk collects sizes inner-to-outer (`[b, a]`).
     // GLSL / stack layout use outermost (`a`) first in `dimensions` and in `arr[i][j]`.
@@ -222,9 +213,9 @@ pub(crate) fn flatten_array_type_shape(
 ) -> Result<(SmallVec<[u32; 4]>, Handle<Type>, u32), LowerError> {
     let mut dimensions = SmallVec::<[u32; 4]>::new();
 
-    let (leaf_ty, leaf_stride) = loop {
+    let leaf_ty = loop {
         match &module.types[cur_ty].inner {
-            TypeInner::Array { base, size, stride } => {
+            TypeInner::Array { base, size, .. } => {
                 let n = match size {
                     ArraySize::Constant(nz) => nz.get(),
                     ArraySize::Pending(_) | ArraySize::Dynamic => {
@@ -234,14 +225,12 @@ pub(crate) fn flatten_array_type_shape(
                     }
                 };
                 dimensions.push(n);
-                let stride_v = *stride;
                 match &module.types[*base].inner {
                     TypeInner::Array { .. } => {
                         cur_ty = *base;
                     }
                     _ => {
-                        let aligned_stride = stride_v.max(4);
-                        break (*base, aligned_stride);
+                        break *base;
                     }
                 }
             }
@@ -253,14 +242,7 @@ pub(crate) fn flatten_array_type_shape(
         }
     };
 
-    let leaf_inner = &module.types[leaf_ty].inner;
-    let ir_components = u32::try_from(naga_type_to_ir_types(leaf_inner)?.len()).map_err(|_| {
-        LowerError::Internal(String::from(
-            "flatten_array_type_shape: IR component count overflows u32",
-        ))
-    })?;
-    let min_layout_stride = ir_components.saturating_mul(4);
-    let leaf_stride = leaf_stride.max(min_layout_stride);
+    let leaf_stride = array_element_stride(module, leaf_ty)?;
 
     dimensions.reverse();
 

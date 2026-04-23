@@ -95,9 +95,7 @@ pub fn compile_function(
 
     // Build function ABI (needed for both debug and non-debug paths)
     let func_abi = match session.isa {
-        IsaTarget::Rv32imac => {
-            crate::isa::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize)
-        }
+        IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(fn_sig, Some(func)),
     };
 
     // 1-4. Const-fold, lower, optimize, allocate, emit
@@ -273,6 +271,7 @@ mod tests {
                     vmctx_vreg: VReg(0),
                     param_count: 0,
                     return_types: vec![IrType::I32],
+                    sret_arg: None,
                     vreg_types: vec![IrType::I32],
                     slots: vec![],
                     body: vec![
@@ -326,6 +325,7 @@ mod tests {
             vmctx_vreg: VReg(0),
             param_count: 2,
             return_types: vec![IrType::F32],
+            sret_arg: None,
             vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32, IrType::F32],
             slots: vec![],
             body: vec![

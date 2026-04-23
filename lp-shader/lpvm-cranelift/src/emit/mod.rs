@@ -44,10 +44,8 @@ pub(crate) struct EmitCtx<'a> {
     pub vreg_wide_addr: Vec<bool>,
     pub float_mode: FloatMode,
     pub lpir_builtins: Option<LpirBuiltinRefs>,
-    /// This function uses Cranelift `StructReturn` (RISC-V32: >2 scalar returns).
+    /// `IrFunction::sret_arg` is set (Cranelift `StructReturn` on the sret pointer param).
     pub uses_struct_return: bool,
-    /// Per user function: same as [`signature_uses_struct_return`].
-    pub callee_struct_return: &'a [bool],
 }
 
 pub(crate) enum CtrlFrame {
@@ -81,20 +79,9 @@ pub(crate) enum CtrlFrame {
     },
 }
 
-/// RISC-V32 cannot return >2 scalars in registers; use a hidden StructReturn pointer (Cranelift #9510).
-///
-/// On host ISAs, the Level-3 invoke shim only models up to four GPR returns, so larger multi-return
-/// (e.g. `mat3`/`mat4`) also uses `StructReturn` with a caller-allocated buffer.
-pub(crate) fn signature_uses_struct_return(isa: &dyn TargetIsa, func: &IrFunction) -> bool {
-    use target_lexicon::Architecture;
-    let n = func.return_types.len();
-    if n == 0 {
-        return false;
-    }
-    match isa.triple().architecture {
-        Architecture::Riscv32(_) => n > 2,
-        _ => n > 4,
-    }
+/// True when the frontend marked aggregate return via a hidden sret pointer ([`IrFunction::sret_arg`]).
+pub(crate) fn signature_uses_struct_return(func: &IrFunction) -> bool {
+    func.sret_arg.is_some()
 }
 
 /// Build the Cranelift [`Signature`] for `func`, including RISC-V32 StructReturn when required.
@@ -103,24 +90,22 @@ pub fn signature_for_ir_func(
     call_conv: CallConv,
     mode: FloatMode,
     pointer_type: types::Type,
-    isa: &dyn TargetIsa,
+    _isa: &dyn TargetIsa,
 ) -> Signature {
     let mut sig = Signature::new(call_conv);
-    let sr = signature_uses_struct_return(isa, func);
-    // NOTE: When enable_multi_ret_implicit_sret is enabled, the backend treats the first
-    // pointer arg as the implicit sret pointer. So we MUST put sret before vmctx.
-    if sr {
-        sig.params.push(AbiParam::special(
-            pointer_type,
-            ArgumentPurpose::StructReturn,
-        ));
-    }
-    // vmctx uses the ISA pointer type (I32 on RV32, I64 on x86-64). StructReturn (when present)
-    // is a separate special parameter; vmctx is a normal pointer argument.
+    let sr = signature_uses_struct_return(func);
+    // 1) vmctx — matches LPIR vreg0.
     sig.params.push(AbiParam::new(pointer_type));
+    if sr {
+        let mut sret = AbiParam::new(pointer_type);
+        sret.purpose = ArgumentPurpose::StructReturn;
+        sig.params.push(sret);
+    }
+    // User params: vregs start at vmctx + hidden_param_slots (vmctx + optional sret).
     let vm = func.vmctx_vreg.0 as usize;
+    let h = func.hidden_param_slots() as usize;
     for i in 0..func.param_count as usize {
-        let ty = func.vreg_types[vm + 1 + i];
+        let ty = func.vreg_types[vm + h + i];
         let ct = ir_type_for_mode(ty, mode, pointer_type);
         sig.params.push(AbiParam::new(ct));
     }
@@ -224,14 +209,16 @@ pub fn translate_function(
     let entry = builder.current_block().expect("entry block");
     let params: Vec<Value> = builder.block_params(entry).to_vec();
     let mut pi = 0usize;
-    // NOTE: Signature order is: [sret (if present), vmctx, user1, user2, ...]
-    if ctx.uses_struct_return {
-        // Skip sret pointer (first param when struct return is used)
-        pi += 1;
-    }
+    // Block params: [vmctx, sret? (StructReturn), user1, …] — same order as LPIR vregs.
     if pi < params.len() {
         def_v(builder, &vars, func.vmctx_vreg, params[pi]);
         pi += 1;
+    }
+    if let Some(sv) = func.sret_arg {
+        if pi < params.len() {
+            def_v(builder, &vars, sv, params[pi]);
+            pi += 1;
+        }
     }
     for user_i in 0..func.param_count as usize {
         if pi < params.len() {
@@ -285,6 +272,7 @@ mod struct_return_signature_tests {
     use cranelift_codegen::isa::CallConv;
     use cranelift_codegen::settings;
     use cranelift_codegen::settings::Configurable;
+    use lpir::types::VReg;
     use lpir::{FloatMode, IrFunction, IrType, VMCTX_VREG};
     use target_lexicon::Triple;
 
@@ -302,19 +290,19 @@ mod struct_return_signature_tests {
             .unwrap()
     }
 
-    /// `invoke_sysv_struct_return_buf` must pass arguments in the same order as here: sret, vmctx,
-    /// then user scalars (see `signature_for_ir_func` when `enable_multi_ret_implicit_sret` applies).
+    /// `invoke_sysv_struct_return_buf` must match: vmctx, sret buffer pointer, then user scalars.
     #[test]
-    fn riscv32_vec4_return_struct_return_param_before_vmctx() {
+    fn riscv32_sret_marker_places_struct_return_after_vmctx() {
         let isa = riscv32_isa();
         let ptr_ty = isa.pointer_type();
         let func = IrFunction {
-            name: String::from("render"),
+            name: String::from("ret_arr"),
             is_entry: true,
             vmctx_vreg: VMCTX_VREG,
             param_count: 1,
-            return_types: vec![IrType::I32, IrType::I32, IrType::I32, IrType::I32],
-            vreg_types: vec![IrType::Pointer, IrType::I32],
+            return_types: vec![],
+            sret_arg: Some(VReg(1)),
+            vreg_types: vec![IrType::Pointer, IrType::Pointer, IrType::I32],
             slots: Vec::new(),
             body: Vec::new(),
             vreg_pool: Vec::new(),
@@ -326,10 +314,10 @@ mod struct_return_signature_tests {
             ptr_ty,
             isa.as_ref(),
         );
-        assert_eq!(sig.params.len(), 3, "sret + vmctx + one user i32");
-        assert_eq!(sig.params[0].purpose, ArgumentPurpose::StructReturn);
-        assert_eq!(sig.params[1].purpose, ArgumentPurpose::Normal);
-        assert_eq!(sig.params[2].purpose, ArgumentPurpose::Normal);
+        assert_eq!(sig.params.len(), 3, "vmctx + sret + one user i32");
+        assert_eq!(sig.params[0].purpose, ArgumentPurpose::Normal, "vmctx");
+        assert_eq!(sig.params[1].purpose, ArgumentPurpose::StructReturn, "sret");
+        assert_eq!(sig.params[2].purpose, ArgumentPurpose::Normal, "user");
         assert!(
             sig.returns.is_empty(),
             "StructReturn ABI: returns live in the buffer, not in Signature::returns"

@@ -13,6 +13,7 @@ pub struct FunctionBuilder {
     name: String,
     is_entry: bool,
     return_types: Vec<IrType>,
+    sret_arg: Option<VReg>,
     param_count: u16,
     vreg_types: Vec<IrType>,
     slots: Vec<SlotDecl>,
@@ -51,6 +52,7 @@ impl FunctionBuilder {
             name: String::from(name),
             is_entry: false,
             return_types: return_types.to_vec(),
+            sret_arg: None,
             param_count: 0,
             vreg_types: alloc::vec![IrType::Pointer], // VMContext (pointer width at codegen)
             slots: Vec::new(),
@@ -64,6 +66,23 @@ impl FunctionBuilder {
 
     pub fn set_entry(&mut self) {
         self.is_entry = true;
+    }
+
+    /// Allocate the hidden sret pointer parameter. **Must be called
+    /// before any [`Self::add_param`].** Sets `IrFunction::sret_arg`
+    /// and reserves `VReg(vmctx + 1)` for the returned pointer.
+    pub fn add_sret_param(&mut self) -> VReg {
+        assert!(self.sret_arg.is_none(), "add_sret_param called twice");
+        assert_eq!(
+            self.param_count, 0,
+            "add_sret_param must be called before any user params (next_vreg={})",
+            self.next_vreg
+        );
+        let v = VReg(self.next_vreg);
+        self.next_vreg += 1;
+        self.vreg_types.push(IrType::Pointer);
+        self.sret_arg = Some(v);
+        v
     }
 
     pub fn add_param(&mut self, ty: IrType) -> VReg {
@@ -426,12 +445,19 @@ impl FunctionBuilder {
             self.block_stack.is_empty(),
             "FunctionBuilder::finish with unclosed blocks"
         );
+        if self.sret_arg.is_some() {
+            assert!(
+                self.return_types.is_empty(),
+                "FunctionBuilder::finish: sret functions must have empty return_types"
+            );
+        }
         IrFunction {
             name: core::mem::take(&mut self.name),
             is_entry: self.is_entry,
             vmctx_vreg: VMCTX_VREG,
             param_count: self.param_count,
             return_types: self.return_types,
+            sret_arg: self.sret_arg,
             vreg_types: self.vreg_types,
             slots: self.slots,
             body: self.body,

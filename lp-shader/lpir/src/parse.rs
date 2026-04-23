@@ -135,7 +135,7 @@ fn parse_import(s: &mut &str) -> Result<(ImportDecl, String), ParseError> {
     let (inside, rest) = rest
         .split_once(')')
         .ok_or_else(|| err(1, 1, "expected ) after import params"))?;
-    let params = parse_type_list_csv(inside)?;
+    let (sret_flag, params) = parse_import_param_list_types(inside)?;
     let rest = rest.trim_start();
     let rets = if let Some(r) = rest.strip_prefix("->") {
         parse_return_types_after_arrow(r.trim_start())?
@@ -151,8 +151,50 @@ fn parse_import(s: &mut &str) -> Result<(ImportDecl, String), ParseError> {
         return_types: rets,
         lpfn_glsl_params: None,
         needs_vmctx: false,
+        sret: sret_flag,
     };
     Ok((decl, key))
+}
+
+fn ir_type_from_str(s: &str) -> Result<IrType, ParseError> {
+    match s.trim() {
+        "f32" => Ok(IrType::F32),
+        "i32" => Ok(IrType::I32),
+        "ptr" => Ok(IrType::Pointer),
+        _ => Err(err(1, 1, "type")),
+    }
+}
+
+/// `(sret_flag, param_types)`: when `sret_flag`, first type in the list is the hidden sret pointer
+/// and is stored in `param_types[0]`.
+fn parse_import_param_list_types(inside: &str) -> Result<(bool, Vec<IrType>), ParseError> {
+    let inside = inside.trim();
+    if inside.is_empty() {
+        return Ok((false, Vec::new()));
+    }
+    let parts: Vec<&str> = inside
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    if let Some(p0) = parts.first() {
+        if let Some(tail) = p0.strip_prefix("sret") {
+            let ty_s = tail.trim();
+            if ty_s.is_empty() {
+                return Err(err(1, 1, "sret needs a type (expected ptr)"));
+            }
+            let t0 = ir_type_from_str(ty_s)?;
+            if t0 != IrType::Pointer {
+                return Err(err(1, 1, "sret import param must be ptr"));
+            }
+            let mut v = alloc::vec![IrType::Pointer];
+            for p in &parts[1..] {
+                v.push(ir_type_from_str(p)?);
+            }
+            return Ok((true, v));
+        }
+    }
+    Ok((false, parse_type_list_csv(inside)?))
 }
 
 fn parse_type_list_csv(s: &str) -> Result<Vec<IrType>, ParseError> {
@@ -160,14 +202,7 @@ fn parse_type_list_csv(s: &str) -> Result<Vec<IrType>, ParseError> {
     if s.is_empty() {
         return Ok(Vec::new());
     }
-    s.split(',')
-        .map(|t| match t.trim() {
-            "f32" => Ok(IrType::F32),
-            "i32" => Ok(IrType::I32),
-            "ptr" => Ok(IrType::Pointer),
-            _ => Err(err(1, 1, "type")),
-        })
-        .collect()
+    s.split(',').map(|t| ir_type_from_str(t)).collect()
 }
 
 /// Parse return type(s) after `->` (single type or `(t, u, ...)`). Returns types only.
@@ -252,7 +287,7 @@ fn parse_func_decl(
         .ok_or_else(|| err(1, 1, "expected ( after func name"))?;
     let fname = t[..paren].to_string();
     t = &t[paren..];
-    let (params, t) = parse_param_list_str(t)?;
+    let ((sret, params), t) = parse_param_list_str(t)?;
     let t = t.trim_start();
     let (rets, t) = if let Some(after_arrow) = t.strip_prefix("->") {
         let tail = after_arrow.trim_start();
@@ -271,6 +306,7 @@ fn parse_func_decl(
     parse_function_body(
         fname.as_str(),
         is_entry,
+        sret,
         &params,
         &rets,
         body,
@@ -300,7 +336,9 @@ fn call_operands_with_vmctx(
     }
 }
 
-fn parse_param_list_str(s: &str) -> Result<(Vec<(VReg, IrType)>, &str), ParseError> {
+fn parse_param_list_str(
+    s: &str,
+) -> Result<((Option<VReg>, Vec<(VReg, IrType)>), &str), ParseError> {
     let s = s.trim_start();
     let s = s
         .strip_prefix('(')
@@ -316,14 +354,7 @@ fn parse_param_list_str(s: &str) -> Result<(Vec<(VReg, IrType)>, &str), ParseErr
                 if depth == 0 {
                     let inside = s[..i].trim();
                     let rest = &s[i + 1..];
-                    let params = if inside.is_empty() {
-                        Vec::new()
-                    } else {
-                        inside
-                            .split(',')
-                            .map(|p| parse_one_param(p.trim()))
-                            .collect::<Result<_, _>>()?
-                    };
+                    let params = parse_param_list_inner(inside)?;
                     return Ok((params, rest));
                 }
             }
@@ -334,17 +365,45 @@ fn parse_param_list_str(s: &str) -> Result<(Vec<(VReg, IrType)>, &str), ParseErr
     Err(err(1, 1, "unclosed ( in param list"))
 }
 
+fn parse_param_list_inner(inside: &str) -> Result<(Option<VReg>, Vec<(VReg, IrType)>), ParseError> {
+    let inside = inside.trim();
+    if inside.is_empty() {
+        return Ok((None, Vec::new()));
+    }
+    let parts: Vec<&str> = inside
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut sret: Option<VReg> = None;
+    let start_user: usize;
+    if let Some(p0) = parts.first() {
+        if let Some(after) = p0.strip_prefix("sret") {
+            let vrest = after.trim();
+            if vrest.is_empty() {
+                return Err(err(1, 1, "sret needs a vreg (e.g. sret v1)"));
+            }
+            sret = Some(parse_vreg_token(vrest)?);
+            start_user = 1;
+        } else {
+            start_user = 0;
+        }
+    } else {
+        return Ok((None, Vec::new()));
+    }
+    let mut user = Vec::new();
+    for p in &parts[start_user..] {
+        user.push(parse_one_param(p)?);
+    }
+    Ok((sret, user))
+}
+
 fn parse_one_param(s: &str) -> Result<(VReg, IrType), ParseError> {
     let (v, ty) = s
         .split_once(':')
         .ok_or_else(|| err(1, 1, "param must be vN:ty"))?;
     let vreg = parse_vreg_token(v.trim())?;
-    let ty = match ty.trim() {
-        "f32" => IrType::F32,
-        "i32" => IrType::I32,
-        "ptr" => IrType::Pointer,
-        _ => return Err(err(1, 1, "param type")),
-    };
+    let ty = ir_type_from_str(ty)?;
     Ok((vreg, ty))
 }
 
@@ -382,6 +441,7 @@ fn next_nonempty_trimmed<'a>(lines: &'a [&'a str], mut j: usize) -> Option<&'a s
 fn parse_function_body(
     fname: &str,
     is_entry: bool,
+    sret: Option<VReg>,
     params: &[(VReg, IrType)],
     returns: &[IrType],
     body: &str,
@@ -394,6 +454,21 @@ fn parse_function_body(
         fb.set_entry();
     }
     let mut expect_v = VMCTX_VREG.0 + 1;
+    if let Some(sv) = sret {
+        if sv.0 != expect_v {
+            return Err(err(
+                1,
+                1,
+                alloc::format!(
+                    "sret vreg must be v{expect_v} (v0 is VMContext); got v{}",
+                    sv.0
+                ),
+            ));
+        }
+        let got = fb.add_sret_param();
+        debug_assert_eq!(got, sv);
+        expect_v += 1;
+    }
     for (v, t) in params {
         if v.0 != expect_v {
             return Err(err(
@@ -577,7 +652,8 @@ fn parse_vreg_token(s: &str) -> Result<VReg, ParseError> {
     let s = s.trim();
     let n = s
         .strip_prefix('v')
-        .ok_or_else(|| err(1, 1, "expected vN"))?;
+        .or_else(|| s.strip_prefix('%'))
+        .ok_or_else(|| err(1, 1, "expected vN or %N"))?;
     n.parse::<u32>()
         .map(VReg)
         .map_err(|_| err(1, 1, "invalid vreg"))
