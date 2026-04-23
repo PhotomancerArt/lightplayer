@@ -21,6 +21,32 @@ pub(crate) use crate::naga_util::{
     vector_size_usize,
 };
 
+use naga::ArraySize;
+
+/// True if `ty` is a (possibly nested) array type that still uses [`ArraySize::Pending`] or
+/// [`ArraySize::Dynamic`] on any dimension (GLSL `T[]` with size inferred from the initializer).
+/// [`crate::lower_aggregate_layout::aggregate_size_and_align`] cannot lower those Naga handles; byte
+/// size must come from [`crate::lower_array_multidim::flatten_local_array_shape`] instead.
+fn array_type_has_inferred_dimension(module: &Module, mut ty: Handle<Type>) -> bool {
+    loop {
+        match &module.types[ty].inner {
+            TypeInner::Array { base, size, .. } => {
+                if matches!(
+                    size,
+                    ArraySize::Pending(_) | ArraySize::Dynamic
+                ) {
+                    return true;
+                }
+                match &module.types[*base].inner {
+                    TypeInner::Array { .. } => ty = *base,
+                    _ => return false,
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
 /// Information about a global variable (uniform or private global) for lowering.
 #[derive(Clone, Debug)]
 pub(crate) struct GlobalVarInfo {
@@ -68,6 +94,19 @@ pub(crate) struct AggregateInfo {
 pub(crate) struct SretCtx {
     pub addr: VReg,
     pub size: u32,
+}
+
+/// By-value `in` array: metadata collected while allocating contiguous user param vregs; entry
+/// [`LpirOp::Memcpy`] runs after all [`FunctionBuilder::add_param`] calls so scratch vregs never sit
+/// between callee parameters (matches [`lpir::IrFunction::user_param_vreg`] layout).
+struct PendingInArrayValueArg {
+    arg_i: u32,
+    lv: Handle<LocalVariable>,
+    size: u32,
+    dimensions: SmallVec<[u32; 4]>,
+    leaf_ty: Handle<Type>,
+    leaf_stride: u32,
+    element_count: u32,
 }
 
 #[allow(
@@ -132,9 +171,7 @@ impl<'a> LowerCtx<'a> {
 
         let mut arg_vregs: BTreeMap<u32, VRegVec> = BTreeMap::new();
         let mut pointer_args: BTreeMap<u32, Handle<Type>> = BTreeMap::new();
-        // By-value `in` array: param loop fills this; locals pass consumes it.
-        let mut pending_in_array_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
-            BTreeMap::new();
+        let mut pending_in_array_specs: Vec<PendingInArrayValueArg> = Vec::new();
         for (i, arg) in func.arguments.iter().enumerate() {
             let inner = &module.types[arg.ty].inner;
             match inner {
@@ -149,7 +186,7 @@ impl<'a> LowerCtx<'a> {
                     pointer_args.insert(i as u32, *base);
                 }
                 TypeInner::Array { .. } => {
-                    // By-value `in` aggregate: one pointer, memcpy into a stack slot, local mirrors that slot.
+                    // By-value `in` aggregate: one pointer param; memcpy from prologue after all params.
                     let (size, _align) =
                         crate::lower_aggregate_layout::aggregate_size_and_align(module, arg.ty)?;
                     let _ = array_ty_pointer_arg_ir_type(module, arg.ty)?;
@@ -165,26 +202,15 @@ impl<'a> LowerCtx<'a> {
                                 "array `in` param: element count overflow",
                             ))
                         })?;
-                    let local_slot = fb.alloc_slot(size);
-                    let local_addr = fb.alloc_vreg(IrType::Pointer);
-                    fb.push(LpirOp::SlotAddr {
-                        dst: local_addr,
-                        slot: local_slot,
-                    });
-                    fb.push(LpirOp::Memcpy {
-                        dst_addr: local_addr,
-                        src_addr: param_ptr,
+                    pending_in_array_specs.push(PendingInArrayValueArg {
+                        arg_i: i as u32,
+                        lv,
                         size,
-                    });
-                    let info = AggregateInfo {
-                        slot: AggregateSlot::Local(local_slot),
                         dimensions,
-                        leaf_element_ty: leaf_ty,
+                        leaf_ty,
                         leaf_stride,
                         element_count,
-                        total_size: size,
-                    };
-                    pending_in_array_value_param.insert(lv, info);
+                    });
                     arg_vregs.insert(i as u32, smallvec::smallvec![param_ptr]);
                 }
                 _ => {
@@ -197,6 +223,42 @@ impl<'a> LowerCtx<'a> {
                     arg_vregs.insert(i as u32, vregs);
                 }
             }
+        }
+
+        let mut pending_in_array_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
+            BTreeMap::new();
+        for spec in pending_in_array_specs {
+            let param_ptr = arg_vregs
+                .get(&spec.arg_i)
+                .and_then(|v| v.first())
+                .copied()
+                .ok_or_else(|| {
+                    LowerError::Internal(String::from(
+                        "in array value param: missing pointer vreg after param pass",
+                    ))
+                })?;
+            let local_slot = fb.alloc_slot(spec.size);
+            let local_addr = fb.alloc_vreg(IrType::Pointer);
+            fb.push(LpirOp::SlotAddr {
+                dst: local_addr,
+                slot: local_slot,
+            });
+            fb.push(LpirOp::Memcpy {
+                dst_addr: local_addr,
+                src_addr: param_ptr,
+                size: spec.size,
+            });
+            pending_in_array_value_param.insert(
+                spec.lv,
+                AggregateInfo {
+                    slot: AggregateSlot::Local(local_slot),
+                    dimensions: spec.dimensions,
+                    leaf_element_ty: spec.leaf_ty,
+                    leaf_stride: spec.leaf_stride,
+                    element_count: spec.element_count,
+                    total_size: spec.size,
+                },
+            );
         }
 
         let param_idx = scan_param_argument_indices(module, func);
@@ -230,12 +292,17 @@ impl<'a> LowerCtx<'a> {
                     let total = element_count.checked_mul(leaf_stride).ok_or_else(|| {
                         LowerError::Internal(String::from("array slot size overflow"))
                     })?;
-                    let (std430_total, _align) =
-                        crate::lower_aggregate_layout::aggregate_size_and_align(module, var.ty)?;
-                    debug_assert_eq!(
-                        std430_total, total,
-                        "when Naga array type maps to LpsType, slot bytes must match std430"
-                    );
+                    let std430_total = if array_type_has_inferred_dimension(module, var.ty) {
+                        total
+                    } else {
+                        let (s, _) =
+                            crate::lower_aggregate_layout::aggregate_size_and_align(module, var.ty)?;
+                        debug_assert_eq!(
+                            s, total,
+                            "when Naga array type maps to LpsType, slot bytes must match std430"
+                        );
+                        s
+                    };
                     let slot = fb.alloc_slot(std430_total);
                     aggregate_map.insert(
                         lv_handle,

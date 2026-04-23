@@ -849,7 +849,22 @@ fn check_opcode_dst_types(
                 ));
             }
         }
-        LpirOp::SlotAddr { dst, .. } => expect(*dst, IrType::I32, "slot_addr"),
+        LpirOp::SlotAddr { dst, .. } => {
+            let j = dst.0 as usize;
+            if j < func.vreg_types.len() {
+                let ty = func.vreg_types[j];
+                if ty != IrType::I32 && ty != IrType::Pointer {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        format!(
+                            "slot_addr: v{} has type {:?}, expected I32 or Pointer",
+                            dst.0, ty
+                        ),
+                    ));
+                }
+            }
+        }
         LpirOp::Load8U { dst, .. }
         | LpirOp::Load8S { dst, .. }
         | LpirOp::Load16U { dst, .. }

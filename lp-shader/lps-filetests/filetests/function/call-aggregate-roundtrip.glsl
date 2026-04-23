@@ -15,5 +15,4 @@ float[4] test_call_aggregate_round_trip() {
     return step();
 }
 
-// @unimplemented(rv32n.q32)
 // run: test_call_aggregate_round_trip() ~= float[4](1.0, 2.0, 3.0, 4.0)

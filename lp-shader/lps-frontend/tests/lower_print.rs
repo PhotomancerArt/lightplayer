@@ -1,6 +1,6 @@
 //! GLSL → Naga → LPIR text (integration).
 
-use lpir::{print_module, validate_module};
+use lpir::{LpirOp, VReg, print_module, validate_module};
 use lps_frontend::{compile, lower};
 
 #[test]
@@ -60,4 +60,32 @@ fn print_contains_user_call() {
     validate_module(&ir).expect("validate");
     let s = print_module(&ir);
     assert!(s.contains("call @g("), "{s}");
+}
+
+#[test]
+fn sum_arrays_sret_slot_addr_never_overwrites_param_vregs() {
+    let glsl = r#"
+        float[2] sum_arrays(float[2] a, float[2] b) {
+            return float[2](a[0] + b[0], a[1] + b[1]);
+        }
+    "#;
+    let naga = compile(glsl).expect("compile");
+    let (ir, _) = lower(&naga).expect("lower");
+    validate_module(&ir).expect("validate");
+    let f = ir
+        .functions
+        .values()
+        .find(|x| x.name == "sum_arrays")
+        .expect("sum_arrays");
+    let u0 = f.user_param_vreg(0);
+    let u1 = f.user_param_vreg(1);
+    let sr = f.sret_arg.expect("sret");
+    for op in &f.body {
+        if let LpirOp::SlotAddr { dst, .. } = op {
+            assert_ne!(*dst, VReg(0), "slot_addr dst must not be vmctx");
+            assert_ne!(*dst, sr, "slot_addr dst must not be sret");
+            assert_ne!(*dst, u0, "slot_addr dst must not alias param a");
+            assert_ne!(*dst, u1, "slot_addr dst must not alias param b");
+        }
+    }
 }
