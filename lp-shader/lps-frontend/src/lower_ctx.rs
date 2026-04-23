@@ -31,10 +31,7 @@ fn array_type_has_inferred_dimension(module: &Module, mut ty: Handle<Type>) -> b
     loop {
         match &module.types[ty].inner {
             TypeInner::Array { base, size, .. } => {
-                if matches!(
-                    size,
-                    ArraySize::Pending(_) | ArraySize::Dynamic
-                ) {
+                if matches!(size, ArraySize::Pending(_) | ArraySize::Dynamic) {
                     return true;
                 }
                 match &module.types[*base].inner {
@@ -78,14 +75,58 @@ pub(crate) enum AggregateSlot {
 #[derive(Clone, Debug)]
 pub(crate) struct AggregateInfo {
     pub slot: AggregateSlot,
-    /// Outer dimension first, e.g. `[2, 3]` for `int[2][3]`.
-    pub dimensions: SmallVec<[u32; 4]>,
-    pub leaf_element_ty: Handle<Type>,
-    pub leaf_stride: u32,
-    /// Product of [`Self::dimensions`]; leaf slots in row-major order.
-    pub element_count: u32,
-    /// Total std430 size in bytes (from [`crate::lower_aggregate_layout::aggregate_size_and_align`]).
-    pub total_size: u32,
+    pub layout: crate::naga_util::AggregateLayout,
+    /// Naga value type of this aggregate (unwrapped array / future struct) for LpsType and layout.
+    pub naga_ty: Handle<Type>,
+}
+
+impl AggregateInfo {
+    /// Array-only — panics on Struct (phase 03 introduces struct accessors).
+    pub(crate) fn dimensions(&self) -> &[u32] {
+        match &self.layout.kind {
+            crate::naga_util::AggregateKind::Array { dimensions, .. } => dimensions,
+            crate::naga_util::AggregateKind::Struct { .. } => {
+                unreachable!("AggregateInfo::dimensions on struct")
+            }
+        }
+    }
+
+    pub(crate) fn leaf_element_ty(&self) -> Handle<Type> {
+        match &self.layout.kind {
+            crate::naga_util::AggregateKind::Array {
+                leaf_element_ty, ..
+            } => *leaf_element_ty,
+            crate::naga_util::AggregateKind::Struct { .. } => {
+                unreachable!("AggregateInfo::leaf_element_ty on struct")
+            }
+        }
+    }
+
+    pub(crate) fn leaf_stride(&self) -> u32 {
+        match &self.layout.kind {
+            crate::naga_util::AggregateKind::Array { leaf_stride, .. } => *leaf_stride,
+            crate::naga_util::AggregateKind::Struct { .. } => {
+                unreachable!("AggregateInfo::leaf_stride on struct")
+            }
+        }
+    }
+
+    pub(crate) fn element_count(&self) -> u32 {
+        match &self.layout.kind {
+            crate::naga_util::AggregateKind::Array { element_count, .. } => *element_count,
+            crate::naga_util::AggregateKind::Struct { .. } => {
+                unreachable!("AggregateInfo::element_count on struct")
+            }
+        }
+    }
+
+    pub(crate) fn total_size(&self) -> u32 {
+        self.layout.total_size
+    }
+
+    pub(crate) fn align(&self) -> u32 {
+        self.layout.align
+    }
 }
 
 /// sret return buffer: hidden pointer at [`IrFunction::sret_arg`], `memcpy` the aggregate here, then
@@ -96,17 +137,13 @@ pub(crate) struct SretCtx {
     pub size: u32,
 }
 
-/// By-value `in` array: metadata collected while allocating contiguous user param vregs; entry
-/// [`LpirOp::Memcpy`] runs after all [`FunctionBuilder::add_param`] calls so scratch vregs never sit
-/// between callee parameters (matches [`lpir::IrFunction::user_param_vreg`] layout).
-struct PendingInArrayValueArg {
+/// By-value `in` array or struct: metadata for prologue [`LpirOp::Memcpy`] (after all
+/// [`FunctionBuilder::add_param`] calls).
+struct PendingInAggregateValueArg {
     arg_i: u32,
     lv: Handle<LocalVariable>,
-    size: u32,
-    dimensions: SmallVec<[u32; 4]>,
-    leaf_ty: Handle<Type>,
-    leaf_stride: u32,
-    element_count: u32,
+    naga_ty: Handle<Type>,
+    layout: crate::naga_util::AggregateLayout,
 }
 
 #[allow(
@@ -171,7 +208,7 @@ impl<'a> LowerCtx<'a> {
 
         let mut arg_vregs: BTreeMap<u32, VRegVec> = BTreeMap::new();
         let mut pointer_args: BTreeMap<u32, Handle<Type>> = BTreeMap::new();
-        let mut pending_in_array_specs: Vec<PendingInArrayValueArg> = Vec::new();
+        let mut pending_in_aggregate_specs: Vec<PendingInAggregateValueArg> = Vec::new();
         for (i, arg) in func.arguments.iter().enumerate() {
             let inner = &module.types[arg.ty].inner;
             match inner {
@@ -185,36 +222,30 @@ impl<'a> LowerCtx<'a> {
                     arg_vregs.insert(i as u32, smallvec::smallvec![addr]);
                     pointer_args.insert(i as u32, *base);
                 }
-                TypeInner::Array { .. } => {
+                TypeInner::Array { .. } | TypeInner::Struct { .. } => {
                     // By-value `in` aggregate: one pointer param; memcpy from prologue after all params.
-                    let (size, _align) =
-                        crate::lower_aggregate_layout::aggregate_size_and_align(module, arg.ty)?;
-                    let _ = array_ty_pointer_arg_ir_type(module, arg.ty)?;
-                    let param_ptr = fb.add_param(IrType::Pointer);
-                    let lv = local_for_in_array_value_param(func, module, i as u32)?;
-                    let (dimensions, leaf_ty, leaf_stride) =
-                        crate::lower_array_multidim::flatten_array_type_shape(module, arg.ty)?;
-                    let element_count = dimensions
-                        .iter()
-                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
-                        .ok_or_else(|| {
+                    let layout =
+                        crate::naga_util::aggregate_layout(module, arg.ty)?.ok_or_else(|| {
                             LowerError::Internal(String::from(
-                                "array `in` param: element count overflow",
+                                "by-value `in` param: expected aggregate layout",
                             ))
                         })?;
-                    pending_in_array_specs.push(PendingInArrayValueArg {
-                        arg_i: i as u32,
-                        lv,
-                        size,
-                        dimensions,
-                        leaf_ty,
-                        leaf_stride,
-                        element_count,
-                    });
+                    let _ = array_ty_pointer_arg_ir_type(module, arg.ty)?;
+                    let param_ptr = fb.add_param(IrType::Pointer);
+                    if let Some(lv) =
+                        local_for_in_aggregate_value_param_optional(func, module, i as u32)?
+                    {
+                        pending_in_aggregate_specs.push(PendingInAggregateValueArg {
+                            arg_i: i as u32,
+                            lv,
+                            naga_ty: arg.ty,
+                            layout: layout.clone(),
+                        });
+                    }
                     arg_vregs.insert(i as u32, smallvec::smallvec![param_ptr]);
                 }
                 _ => {
-                    let tys = naga_type_to_ir_types(inner)?;
+                    let tys = naga_type_to_ir_types(module, inner)?;
                     let mut vregs = VRegVec::new();
                     for ty in &tys {
                         let v = fb.add_param(*ty);
@@ -225,9 +256,9 @@ impl<'a> LowerCtx<'a> {
             }
         }
 
-        let mut pending_in_array_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
+        let mut pending_in_aggregate_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
             BTreeMap::new();
-        for spec in pending_in_array_specs {
+        for spec in pending_in_aggregate_specs {
             let param_ptr = arg_vregs
                 .get(&spec.arg_i)
                 .and_then(|v| v.first())
@@ -237,7 +268,7 @@ impl<'a> LowerCtx<'a> {
                         "in array value param: missing pointer vreg after param pass",
                     ))
                 })?;
-            let local_slot = fb.alloc_slot(spec.size);
+            let local_slot = fb.alloc_slot(spec.layout.total_size);
             let local_addr = fb.alloc_vreg(IrType::Pointer);
             fb.push(LpirOp::SlotAddr {
                 dst: local_addr,
@@ -246,17 +277,14 @@ impl<'a> LowerCtx<'a> {
             fb.push(LpirOp::Memcpy {
                 dst_addr: local_addr,
                 src_addr: param_ptr,
-                size: spec.size,
+                size: spec.layout.total_size,
             });
-            pending_in_array_value_param.insert(
+            pending_in_aggregate_value_param.insert(
                 spec.lv,
                 AggregateInfo {
                     slot: AggregateSlot::Local(local_slot),
-                    dimensions: spec.dimensions,
-                    leaf_element_ty: spec.leaf_ty,
-                    leaf_stride: spec.leaf_stride,
-                    element_count: spec.element_count,
-                    total_size: spec.size,
+                    layout: spec.layout,
+                    naga_ty: spec.naga_ty,
                 },
             );
         }
@@ -275,50 +303,86 @@ impl<'a> LowerCtx<'a> {
             if param_aliases.contains_key(&lv_handle) {
                 continue;
             }
-            if let Some(info) = pending_in_array_value_param.remove(&lv_handle) {
+            if let Some(info) = pending_in_aggregate_value_param.remove(&lv_handle) {
                 aggregate_map.insert(lv_handle, info);
                 continue;
             }
             match &module.types[var.ty].inner {
                 TypeInner::Array { .. } => {
-                    let (dimensions, leaf_ty, leaf_stride) =
-                        crate::lower_array_multidim::flatten_local_array_shape(module, func, &var)?;
-                    let element_count = dimensions
-                        .iter()
-                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
-                        .ok_or_else(|| {
-                            LowerError::Internal(String::from("array element count overflow"))
+                    if array_type_has_inferred_dimension(module, var.ty) {
+                        let (dimensions, leaf_ty, leaf_stride) =
+                            crate::lower_array_multidim::flatten_local_array_shape(
+                                module, func, &var,
+                            )?;
+                        let element_count = dimensions
+                            .iter()
+                            .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                            .ok_or_else(|| {
+                                LowerError::Internal(String::from("array element count overflow"))
+                            })?;
+                        let total = element_count.checked_mul(leaf_stride).ok_or_else(|| {
+                            LowerError::Internal(String::from("array slot size overflow"))
                         })?;
-                    let total = element_count.checked_mul(leaf_stride).ok_or_else(|| {
-                        LowerError::Internal(String::from("array slot size overflow"))
-                    })?;
-                    let std430_total = if array_type_has_inferred_dimension(module, var.ty) {
-                        total
-                    } else {
-                        let (s, _) =
-                            crate::lower_aggregate_layout::aggregate_size_and_align(module, var.ty)?;
-                        debug_assert_eq!(
-                            s, total,
-                            "when Naga array type maps to LpsType, slot bytes must match std430"
+                        let std430_total = total;
+                        let align = crate::lower_aggregate_layout::aggregate_size_and_align(
+                            module, leaf_ty,
+                        )?
+                        .1;
+                        let layout = crate::naga_util::AggregateLayout {
+                            kind: crate::naga_util::AggregateKind::Array {
+                                dimensions,
+                                leaf_element_ty: leaf_ty,
+                                leaf_stride,
+                                element_count,
+                            },
+                            total_size: std430_total,
+                            align,
+                        };
+                        let slot = fb.alloc_slot(std430_total);
+                        aggregate_map.insert(
+                            lv_handle,
+                            AggregateInfo {
+                                slot: AggregateSlot::Local(slot),
+                                layout,
+                                naga_ty: var.ty,
+                            },
                         );
-                        s
-                    };
-                    let slot = fb.alloc_slot(std430_total);
+                    } else {
+                        let layout = crate::naga_util::aggregate_layout(module, var.ty)?
+                            .ok_or_else(|| {
+                                LowerError::Internal(String::from(
+                                    "local fixed array: expected aggregate layout",
+                                ))
+                            })?;
+                        let slot = fb.alloc_slot(layout.total_size);
+                        aggregate_map.insert(
+                            lv_handle,
+                            AggregateInfo {
+                                slot: AggregateSlot::Local(slot),
+                                layout,
+                                naga_ty: var.ty,
+                            },
+                        );
+                    }
+                }
+                TypeInner::Struct { .. } => {
+                    let layout =
+                        crate::naga_util::aggregate_layout(module, var.ty)?.ok_or_else(|| {
+                            LowerError::Internal(String::from("struct local: expected layout"))
+                        })?;
+                    let slot = fb.alloc_slot(layout.total_size);
                     aggregate_map.insert(
                         lv_handle,
                         AggregateInfo {
                             slot: AggregateSlot::Local(slot),
-                            dimensions,
-                            leaf_element_ty: leaf_ty,
-                            leaf_stride,
-                            element_count,
-                            total_size: std430_total,
+                            layout,
+                            naga_ty: var.ty,
                         },
                     );
                 }
                 _ => {
                     let inner = &module.types[var.ty].inner;
-                    let tys = naga_type_to_ir_types(inner)?;
+                    let tys = naga_type_to_ir_types(module, inner)?;
                     let mut vregs = VRegVec::new();
                     for ty in &tys {
                         vregs.push(fb.alloc_vreg(*ty));
@@ -327,9 +391,9 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
-        if !pending_in_array_value_param.is_empty() {
+        if !pending_in_aggregate_value_param.is_empty() {
             return Err(LowerError::Internal(String::from(
-                "in array value param: pending locals did not match any local variable",
+                "in aggregate value param: pending locals did not match any local variable",
             )));
         }
 
@@ -340,7 +404,14 @@ impl<'a> LowerCtx<'a> {
             if let Some(info) = aggregate_map.get(&lv_handle) {
                 if var.init.is_none() {
                     if matches!(info.slot, AggregateSlot::Local(_)) {
-                        crate::lower_array::zero_fill_array_slot(&mut fb, module, info)?;
+                        match &info.layout.kind {
+                            crate::naga_util::AggregateKind::Array { .. } => {
+                                crate::lower_array::zero_fill_array_slot(&mut fb, module, info)?;
+                            }
+                            crate::naga_util::AggregateKind::Struct { .. } => {
+                                crate::lower_struct::zero_fill_struct_slot(&mut fb, module, info)?;
+                            }
+                        }
                     }
                 }
             }
@@ -379,7 +450,26 @@ impl<'a> LowerCtx<'a> {
                 continue;
             };
             if let Some(info) = ctx.aggregate_map.get(&lv_handle).cloned() {
-                crate::lower_array::lower_array_initializer(&mut ctx, &info, init_h)?;
+                if matches!(
+                    &info.layout.kind,
+                    crate::naga_util::AggregateKind::Array { .. }
+                ) {
+                    crate::lower_array::lower_array_initializer(&mut ctx, &info, init_h)?;
+                } else {
+                    let lps_ty =
+                        crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, info.naga_ty)?;
+                    let base =
+                        crate::lower_array::aggregate_storage_base_vreg(&mut ctx, &info.slot)?;
+                    crate::lower_aggregate_write::store_lps_value_into_slot(
+                        &mut ctx,
+                        base,
+                        0,
+                        info.naga_ty,
+                        &lps_ty,
+                        init_h,
+                        Some(&info.layout),
+                    )?;
+                }
                 continue;
             }
             let dsts = ctx.local_map.get(&lv_handle).cloned().ok_or_else(|| {
@@ -449,29 +539,14 @@ impl<'a> LowerCtx<'a> {
                 let Some(&pointee) = self.pointer_args.get(&arg_i) else {
                     return Ok(None);
                 };
-                if !matches!(self.module.types[pointee].inner, TypeInner::Array { .. }) {
-                    return Ok(None);
+                if let Some(layout) = crate::naga_util::aggregate_layout(self.module, pointee)? {
+                    return Ok(Some(AggregateInfo {
+                        slot: AggregateSlot::Param(arg_i),
+                        layout,
+                        naga_ty: pointee,
+                    }));
                 }
-                let (dimensions, leaf_ty, leaf_stride) =
-                    crate::lower_array_multidim::flatten_array_type_shape(self.module, pointee)?;
-                let element_count = dimensions
-                    .iter()
-                    .try_fold(1u32, |acc, &d| acc.checked_mul(d))
-                    .ok_or_else(|| {
-                        LowerError::Internal(String::from(
-                            "aggregate_info_for_subscript_root: element count overflow",
-                        ))
-                    })?;
-                let (total_size, _align) =
-                    crate::lower_aggregate_layout::aggregate_size_and_align(self.module, pointee)?;
-                Ok(Some(AggregateInfo {
-                    slot: AggregateSlot::Param(arg_i),
-                    dimensions,
-                    leaf_element_ty: leaf_ty,
-                    leaf_stride,
-                    element_count,
-                    total_size,
-                }))
+                Ok(None)
             }
             ArraySubscriptRoot::CallResult(expr) => {
                 Ok(self.call_result_aggregates.get(&expr).cloned())
@@ -501,27 +576,32 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
-/// Naga GLSL: the [`LocalVariable`] for a by-value `in` array param (`float a[4]`) is matched by
+/// Naga GLSL: the [`LocalVariable`] for a by-value `in` array or struct param is matched by
 /// parameter name and type to `func.arguments[i]`.
-fn local_for_in_array_value_param(
+/// Shadow [`LocalVariable`] for a by-value aggregate parameter, if Naga emitted one (`const` params
+/// may omit it).
+fn local_for_in_aggregate_value_param_optional(
     func: &Function,
     module: &Module,
     param_index: u32,
-) -> Result<Handle<LocalVariable>, LowerError> {
+) -> Result<Option<Handle<LocalVariable>>, LowerError> {
     let i = param_index as usize;
     let arg = func
         .arguments
         .get(i)
-        .ok_or_else(|| LowerError::Internal(String::from("in_array: bad argument index")))?;
-    if !matches!(&module.types[arg.ty].inner, TypeInner::Array { .. }) {
+        .ok_or_else(|| LowerError::Internal(String::from("in aggregate: bad argument index")))?;
+    if !matches!(
+        &module.types[arg.ty].inner,
+        TypeInner::Array { .. } | TypeInner::Struct { .. }
+    ) {
         return Err(LowerError::Internal(String::from(
-            "in_array: not an array type",
+            "in aggregate: not an array or struct type",
         )));
     }
     if let Some(name) = &arg.name {
         for (lv, v) in func.local_variables.iter() {
             if v.ty == arg.ty && v.name.as_deref() == Some(name.as_str()) {
-                return Ok(lv);
+                return Ok(Some(lv));
             }
         }
     }
@@ -530,17 +610,13 @@ fn local_for_in_array_value_param(
         if v.ty == arg.ty {
             if found.is_some() {
                 return Err(LowerError::Internal(String::from(
-                    "in_array: ambiguous local (use matching parameter name)",
+                    "in aggregate: ambiguous local (use matching parameter name)",
                 )));
             }
             found = Some(lv);
         }
     }
-    found.ok_or_else(|| {
-        LowerError::Internal(String::from(
-            "in_array: no local variable for by-value array parameter",
-        ))
-    })
+    Ok(found)
 }
 
 fn scan_param_argument_indices(
@@ -573,8 +649,11 @@ fn scan_param_argument_indices(
                         let is_array_val = arg_ty.is_some_and(|h| {
                             matches!(&module.types[h].inner, TypeInner::Array { .. })
                         });
-                        // `in T[]` uses a real stack array in `aggregate_map`; do not alias as flat vregs.
-                        if !is_ptr && !is_array_val {
+                        let is_struct_val = arg_ty.is_some_and(|h| {
+                            matches!(&module.types[h].inner, TypeInner::Struct { .. })
+                        });
+                        // `in T[]` / `in` struct: stack slot in `aggregate_map`; do not alias as flat vregs.
+                        if !is_ptr && !is_array_val && !is_struct_val {
                             m.insert(*lv, *idx);
                         }
                     }

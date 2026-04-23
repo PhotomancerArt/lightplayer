@@ -1,5 +1,9 @@
 # Milestone 2 — Struct lowering on the unified ABI
 
+## Status
+
+**Complete** — 2026-04-23. All struct corpus filetests pass on `wasm.q32`, `rv32c.q32`, and `rv32n.q32`. Plan and phase notes live under `docs/plans/2026-04-23-lp-shader-aggregates-m2-struct-lowering/`.
+
 ## Goal
 
 Add first-class GLSL struct support — locals, member access, whole-struct

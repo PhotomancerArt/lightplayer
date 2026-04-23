@@ -15,9 +15,6 @@ vec3 test_access_vector_transform_position() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_transform_position() ~= vec3(1.0, 2.0, 3.0)
 
 vec3 test_access_vector_transform_rotation() {
@@ -26,9 +23,6 @@ vec3 test_access_vector_transform_rotation() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_transform_rotation() ~= vec3(0.1, 0.2, 0.3)
 
 float test_access_vector_transform_position_x() {
@@ -37,9 +31,6 @@ float test_access_vector_transform_position_x() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_transform_position_x() ~= 5.0
 
 struct ColorRGBA {
@@ -52,9 +43,6 @@ vec4 test_access_vector_color_rgba() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_color_rgba() ~= vec4(0.1, 0.2, 0.3, 0.4)
 
 float test_access_vector_color_rgba_alpha() {
@@ -63,9 +51,6 @@ float test_access_vector_color_rgba_alpha() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_color_rgba_alpha() ~= 0.8
 
 struct LineSegment {
@@ -79,9 +64,6 @@ vec2 test_access_vector_line_segment_start() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_line_segment_start() ~= vec2(0.0, 0.0)
 
 vec2 test_access_vector_line_segment_end() {
@@ -90,9 +72,6 @@ vec2 test_access_vector_line_segment_end() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_line_segment_end() ~= vec2(15.0, 15.0)
 
 float test_access_vector_line_segment_start_y() {
@@ -101,9 +80,6 @@ float test_access_vector_line_segment_start_y() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_line_segment_start_y() ~= 2.0
 
 struct Triangle3D {
@@ -118,9 +94,6 @@ vec3 test_access_vector_triangle3d_v2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_triangle3d_v2() ~= vec3(1.0, 0.0, 0.0)
 
 float test_access_vector_triangle3d_v3_z() {
@@ -129,9 +102,6 @@ float test_access_vector_triangle3d_v3_z() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_triangle3d_v3_z() ~= 3.0
 
 struct Particle {
@@ -147,9 +117,6 @@ vec3 test_access_vector_particle_velocity() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_particle_velocity() ~= vec3(0.1, 0.2, 0.3)
 
 vec4 test_access_vector_particle_color() {
@@ -158,7 +125,4 @@ vec4 test_access_vector_particle_color() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_access_vector_particle_color() ~= vec4(0.5, 0.5, 0.5, 0.8)

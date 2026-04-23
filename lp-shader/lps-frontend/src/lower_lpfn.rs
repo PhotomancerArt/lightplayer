@@ -199,7 +199,7 @@ fn build_lpfn_import_decl(
     }
     let return_types = if let Some(res) = &f.result {
         let inner = &module.types[res.ty].inner;
-        let tys = naga_type_to_ir_types(inner)?;
+        let tys = naga_type_to_ir_types(module, inner)?;
         tys.to_vec()
     } else {
         Vec::new()
@@ -357,7 +357,7 @@ pub(crate) fn lower_lpfn_call(
             .as_ref()
             .ok_or_else(|| LowerError::Internal(String::from("LPFX void with result expr")))?;
         let inner = &ctx.module.types[res_ty.ty].inner;
-        let ir_tys = naga_type_to_ir_types(inner)?;
+        let ir_tys = naga_type_to_ir_types(ctx.module, inner)?;
         let mut vregs = VRegVec::new();
         for ty in &ir_tys {
             let v = ctx.fb.alloc_vreg(*ty);

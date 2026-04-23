@@ -15,9 +15,6 @@ float test_define_vector_transform() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_transform() == 1.0
 
 struct ColorRGBA {
@@ -29,9 +26,6 @@ int test_define_vector_color_rgba() {
     return 1; // Should be 1
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_color_rgba() == 1
 
 struct LineSegment {
@@ -44,9 +38,6 @@ uint test_define_vector_line_segment() {
     return 1u; // Should be 1u
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_line_segment() == 1u
 
 struct Triangle3D {
@@ -60,9 +51,6 @@ bool test_define_vector_triangle3d() {
     return true; // Should be true
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_triangle3d() == true
 
 struct MatrixTransform {
@@ -77,9 +65,6 @@ vec2 test_define_vector_matrix_transform() {
     return vec2(1.0, 1.0); // Should be vec2(1.0, 1.0)
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_matrix_transform() ~= vec2(1.0, 1.0)
 
 struct Particle {
@@ -94,9 +79,6 @@ float test_define_vector_particle() {
     return 1.0; // Should be 1.0
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_particle() == 1.0
 
 struct BoundingBox {
@@ -109,9 +91,6 @@ int test_define_vector_bounding_box() {
     return 1; // Should be 1
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_bounding_box() == 1
 
 struct Light {
@@ -126,7 +105,4 @@ uint test_define_vector_light() {
     return 1u; // Should be 1u
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_vector_light() == 1u

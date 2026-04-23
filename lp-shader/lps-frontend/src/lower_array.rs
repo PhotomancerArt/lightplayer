@@ -189,12 +189,12 @@ pub(crate) fn zero_fill_array_slot(
             "zero_fill_array_slot: not a local stack array",
         )));
     };
-    let elem_inner = &module.types[info.leaf_element_ty].inner;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let elem_inner = &module.types[info.leaf_element_ty()].inner;
+    let ir_tys = naga_type_to_ir_types(module, elem_inner)?;
     let base = array_slot_base_fb(fb, slot);
 
-    for i in 0..info.element_count {
-        let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
+    for i in 0..info.element_count() {
+        let byte_off = i.checked_mul(info.leaf_stride()).ok_or_else(|| {
             LowerError::Internal(String::from("zero_fill_array_slot: stride overflow"))
         })?;
         for (j, ty) in ir_tys.iter().enumerate() {
@@ -230,18 +230,18 @@ pub(crate) fn load_array_element_const(
     info: &AggregateInfo,
     index: u32,
 ) -> Result<VRegVec, LowerError> {
-    if info.element_count == 0 {
+    if info.element_count() == 0 {
         return Err(LowerError::Internal(String::from(
             "load_array_element_const: empty array",
         )));
     }
     // Match dynamic clamp: OOB constant indices clamp to the last element (see `clamp_array_index`).
-    let index = index.min(info.element_count - 1);
-    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let index = index.min(info.element_count() - 1);
+    let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
+    let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
     let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
     let byte_off = index
-        .checked_mul(info.leaf_stride)
+        .checked_mul(info.leaf_stride())
         .ok_or_else(|| LowerError::Internal(String::from("load_array_element_const: overflow")))?;
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
@@ -261,11 +261,11 @@ pub(crate) fn load_array_element_dynamic(
     info: &AggregateInfo,
     index_v: VReg,
 ) -> Result<VRegVec, LowerError> {
-    let clamped = clamp_array_index(ctx, index_v, info.element_count)?;
+    let clamped = clamp_array_index(ctx, index_v, info.element_count())?;
     let stride_v = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(LpirOp::IconstI32 {
         dst: stride_v,
-        value: info.leaf_stride as i32,
+        value: info.leaf_stride() as i32,
     });
     let byte_off = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(LpirOp::Imul {
@@ -281,8 +281,8 @@ pub(crate) fn load_array_element_dynamic(
         rhs: byte_off,
     });
 
-    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
+    let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
         let dst = ctx.fb.alloc_vreg(*ty);
@@ -302,16 +302,16 @@ pub(crate) fn store_array_element_const(
     index: u32,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    if info.element_count == 0 {
+    if info.element_count() == 0 {
         return Err(LowerError::Internal(String::from(
             "store_array_element_const: empty array",
         )));
     }
-    let index = index.min(info.element_count - 1);
-    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
+    let index = index.min(info.element_count() - 1);
+    let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
     let srcs = coerce_assignment_vregs(ctx, None, elem_inner, value_expr, raw)?;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::UnsupportedStatement(format!(
             "array element store: {} vs {} components",
@@ -321,7 +321,7 @@ pub(crate) fn store_array_element_const(
     }
     let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
     let byte_off = index
-        .checked_mul(info.leaf_stride)
+        .checked_mul(info.leaf_stride())
         .ok_or_else(|| LowerError::Internal(String::from("store_array_element_const: overflow")))?;
     for (j, &src) in srcs.iter().enumerate() {
         ctx.fb.push(LpirOp::Store {
@@ -339,11 +339,11 @@ pub(crate) fn store_array_element_dynamic(
     index_v: VReg,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    let clamped = clamp_array_index(ctx, index_v, info.element_count)?;
+    let clamped = clamp_array_index(ctx, index_v, info.element_count())?;
     let stride_v = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(LpirOp::IconstI32 {
         dst: stride_v,
-        value: info.leaf_stride as i32,
+        value: info.leaf_stride() as i32,
     });
     let byte_off = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(LpirOp::Imul {
@@ -359,10 +359,10 @@ pub(crate) fn store_array_element_dynamic(
         rhs: byte_off,
     });
 
-    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
     let srcs = coerce_assignment_vregs(ctx, None, elem_inner, value_expr, raw)?;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::UnsupportedStatement(format!(
             "array element store: {} vs {} components",
@@ -385,30 +385,42 @@ pub(crate) fn lower_array_initializer(
     info: &AggregateInfo,
     init_h: Handle<Expression>,
 ) -> Result<(), LowerError> {
+    if matches!(&ctx.func.expressions[init_h], Expression::ZeroValue(_)) {
+        return zero_fill_array(ctx, ctx.module, info);
+    }
+    let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
+    if crate::lower_aggregate_write::try_memcpy_aggregate_expr(ctx, base, 0, info, init_h)? {
+        return Ok(());
+    }
+    let leaf_naga = info.leaf_element_ty();
+    let leaf_lps = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, leaf_naga)?;
     match &ctx.func.expressions[init_h] {
-        Expression::ZeroValue(_) => zero_fill_array(ctx, ctx.module, info),
         Expression::Compose { .. } => {
-            // For multi-dimensional arrays, flatten nested Compose expressions.
-            // Depth = dimensions.len() - 1 = number of nesting levels to flatten.
-            let depth = info.dimensions.len().saturating_sub(1);
-            let flat_components = collect_flat_compose_components(ctx.func, init_h, depth)?;
-            if flat_components.len() as u32 > info.element_count {
+            // Flatten to leaf components (row-major). Naga `LpsType` nesting for multi-dim arrays
+            // can differ from the initializer's `Compose` tree (see M2 notes); do not recurse `Array`
+            // in `store_lps_value_into_slot` for this path.
+            let depth = info.dimensions().len().saturating_sub(1);
+            let flat = collect_flat_compose_components(ctx.func, init_h, depth)?;
+            if flat.len() as u32 > info.element_count() {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "array initializer: too many elements",
                 )));
             }
-            let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
-            for (i, &comp) in flat_components.iter().enumerate() {
+            for (i, &comp) in flat.iter().enumerate() {
                 let byte_off = (i as u32)
-                    .checked_mul(info.leaf_stride)
+                    .checked_mul(info.leaf_stride())
                     .ok_or_else(|| LowerError::Internal(String::from("init: byte_off overflow")))?;
-                store_element_at_byte_offset(ctx, info, base, byte_off, comp)?;
+                crate::lower_aggregate_write::store_lps_value_into_slot(
+                    ctx, base, byte_off, leaf_naga, &leaf_lps, comp, None,
+                )?;
             }
-            for i in flat_components.len() as u32..info.element_count {
-                let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
+            for i in (flat.len() as u32)..info.element_count() {
+                let byte_off = i.checked_mul(info.leaf_stride()).ok_or_else(|| {
                     LowerError::Internal(String::from("init: tail byte_off overflow"))
                 })?;
-                zero_element_at_byte_offset(ctx, info, base, byte_off)?;
+                crate::lower_aggregate_write::zero_leaf_lps_in_slot(
+                    ctx, base, byte_off, leaf_naga, &leaf_lps,
+                )?;
             }
             Ok(())
         }
@@ -456,54 +468,6 @@ fn collect_flat_compose_components(
     }
 }
 
-fn store_element_at_byte_offset(
-    ctx: &mut LowerCtx<'_>,
-    info: &AggregateInfo,
-    base: VReg,
-    byte_off: u32,
-    expr: Handle<Expression>,
-) -> Result<(), LowerError> {
-    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
-    let raw = ctx.ensure_expr_vec(expr)?;
-    let srcs = coerce_assignment_vregs(ctx, None, elem_inner, expr, raw)?;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
-    if srcs.len() != ir_tys.len() {
-        return Err(LowerError::UnsupportedStatement(format!(
-            "array init element: {} vs {} components",
-            srcs.len(),
-            ir_tys.len()
-        )));
-    }
-    for (j, &src) in srcs.iter().enumerate() {
-        ctx.fb.push(LpirOp::Store {
-            base,
-            offset: byte_off + (j as u32) * 4,
-            value: src,
-        });
-    }
-    Ok(())
-}
-
-fn zero_element_at_byte_offset(
-    ctx: &mut LowerCtx<'_>,
-    info: &AggregateInfo,
-    base: VReg,
-    byte_off: u32,
-) -> Result<(), LowerError> {
-    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
-    let ir_tys = naga_type_to_ir_types(elem_inner)?;
-    for (j, ty) in ir_tys.iter().enumerate() {
-        let z = ctx.fb.alloc_vreg(*ty);
-        push_zero_for_ir_type(&mut ctx.fb, z, *ty);
-        ctx.fb.push(LpirOp::Store {
-            base,
-            offset: byte_off + (j as u32) * 4,
-            value: z,
-        });
-    }
-    Ok(())
-}
-
 /// Naga's GLSL front-end emits `.length()` on multi-dim arrays as `dimensions[0]` (type-tree outer);
 /// GLSL uses the leftmost `[]` size, which matches `dimensions[last]` in our shape walk.
 pub(crate) fn scan_naga_multidim_array_length_literals(
@@ -531,14 +495,20 @@ pub(crate) fn scan_naga_multidim_array_length_literals(
         let Some(info) = aggregate_map.get(lv) else {
             continue;
         };
-        if info.dimensions.len() < 2 {
+        if !matches!(
+            &info.layout.kind,
+            crate::naga_util::AggregateKind::Array { .. }
+        ) {
+            continue;
+        }
+        if info.dimensions().len() < 2 {
             continue;
         }
         // With dimensions in GLSL order (outer first):
         // - Naga emits the inner dimension (what used to be dimensions[0] in Naga's type tree)
         // - GLSL wants the outer dimension (dimensions[0] in our representation)
-        let glsl_outer = info.dimensions[0];
-        let naga_emitted = *info.dimensions.last().expect("dims");
+        let glsl_outer = info.dimensions()[0];
+        let naga_emitted = *info.dimensions().last().expect("dims");
         if glsl_outer == naga_emitted {
             continue;
         }
@@ -596,21 +566,26 @@ pub(crate) fn copy_stack_array_slots(
     dst: &AggregateInfo,
     src: &AggregateInfo,
 ) -> Result<(), LowerError> {
-    if dst.element_count != src.element_count
-        || dst.leaf_stride != src.leaf_stride
-        || dst.leaf_element_ty != src.leaf_element_ty
+    if dst.element_count() != src.element_count()
+        || dst.leaf_stride() != src.leaf_stride()
+        || dst.leaf_element_ty() != src.leaf_element_ty()
     {
         return Err(LowerError::UnsupportedStatement(String::from(
             "array copy: shape mismatch",
         )));
     }
+    debug_assert_eq!(
+        dst.align(),
+        src.align(),
+        "array copy: std430 alignment must match for identical array shapes"
+    );
     let (AggregateSlot::Local(dst_slot), AggregateSlot::Local(src_slot)) = (dst.slot, src.slot)
     else {
         return Err(LowerError::UnsupportedStatement(String::from(
             "array copy: only local stack arrays",
         )));
     };
-    let sz = dst.total_size;
+    let sz = dst.total_size();
     let dst_addr = array_slot_base(ctx, dst_slot);
     let src_addr = array_slot_base(ctx, src_slot);
     ctx.fb.push(LpirOp::Memcpy {
@@ -633,7 +608,7 @@ pub(crate) fn lower_array_length(
     let info = ctx.aggregate_map.get(&lv).ok_or_else(|| {
         LowerError::UnsupportedExpression(String::from("ArrayLength: not a stack-slot array local"))
     })?;
-    let len = *info.dimensions.first().expect("array dimensions") as i32;
+    let len = *info.dimensions().first().expect("array dimensions") as i32;
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(LpirOp::IconstI32 { dst, value: len });
     Ok(smallvec![dst])
@@ -662,13 +637,13 @@ pub(crate) fn lower_array_equality_vec(
     let ir = ctx.aggregate_map.get(&rr).cloned().ok_or_else(|| {
         LowerError::UnsupportedExpression(String::from("array ==: right not a stack array"))
     })?;
-    if il.element_count != ir.element_count || il.leaf_element_ty != ir.leaf_element_ty {
+    if il.element_count() != ir.element_count() || il.leaf_element_ty() != ir.leaf_element_ty() {
         return Err(LowerError::UnsupportedExpression(String::from(
             "array ==: shape mismatch",
         )));
     }
-    let leaf_inner = &ctx.module.types[il.leaf_element_ty].inner;
-    let n = il.element_count;
+    let leaf_inner = &ctx.module.types[il.leaf_element_ty()].inner;
+    let n = il.element_count();
     if n == 0 {
         let v = ctx.fb.alloc_vreg(IrType::I32);
         let val = match op {

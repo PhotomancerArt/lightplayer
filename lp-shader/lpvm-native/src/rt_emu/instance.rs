@@ -9,9 +9,7 @@ use cranelift_codegen::isa::CallConv;
 use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
-use lps_shared::{
-    LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32,
-};
+use lps_shared::{LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
     encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,

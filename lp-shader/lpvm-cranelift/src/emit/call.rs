@@ -38,17 +38,14 @@ pub(crate) fn emit_call(
                 }
             };
             if let CalleeRef::Local(id) = *callee {
-                let rank = *ctx.func_id_to_ir_rank.get(&id).ok_or_else(|| {
-                    CompileError::unsupported("call to unknown local func id")
-                })?;
+                let rank = *ctx
+                    .func_id_to_ir_rank
+                    .get(&id)
+                    .ok_or_else(|| CompileError::unsupported("call to unknown local func id"))?;
                 let callee_ir = ctx.ir.functions.get(&id).ok_or_else(|| {
                     CompileError::unsupported("call to missing local function IR")
                 })?;
-                let callee_uses_sr = ctx
-                    .callee_struct_return
-                    .get(rank)
-                    .copied()
-                    .unwrap_or(false);
+                let callee_uses_sr = ctx.callee_struct_return.get(rank).copied().unwrap_or(false);
                 if callee_uses_sr && callee_ir.sret_arg.is_none() {
                     // Legacy multi-scalar sret callee (e.g. RV32 `vec3 foo()`): LPIR has no
                     // sret vreg in args, but Cranelift signature is [StructReturn, vmctx, user…].

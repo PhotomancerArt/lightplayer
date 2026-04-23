@@ -117,13 +117,45 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             Expression::Access { .. } => lower_access::store_through_access(ctx, *pointer, *value),
             // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
             Expression::AccessIndex { .. } => {
+                if let Some((lv, chain)) =
+                    crate::lower_struct::peel_struct_access_index_chain_to_local(ctx.func, *pointer)
+                {
+                    if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+                        if matches!(
+                            &info.layout.kind,
+                            crate::naga_util::AggregateKind::Struct { .. }
+                        ) {
+                            return crate::lower_struct::store_struct_path_into_local(
+                                ctx, &info, &chain, *value,
+                            );
+                        }
+                    }
+                }
+                if let Some((gv, chain)) =
+                    crate::lower_struct::peel_struct_access_index_chain_to_global(
+                        ctx.func, *pointer,
+                    )
+                {
+                    let gv_ty = ctx.module.global_variables[gv].ty;
+                    if !chain.is_empty()
+                        && matches!(&ctx.module.types[gv_ty].inner, TypeInner::Struct { .. })
+                    {
+                        return crate::lower_struct::store_struct_path_into_global(
+                            ctx, gv, &chain, *value,
+                        );
+                    }
+                }
                 if let Some((lv, idxs)) =
                     crate::lower_array_multidim::peel_access_index_chain(ctx.func, *pointer)
                 {
                     if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
-                        if idxs.len() == info.dimensions.len() {
+                        if matches!(
+                            &info.layout.kind,
+                            crate::naga_util::AggregateKind::Array { .. }
+                        ) && idxs.len() == info.dimensions().len()
+                        {
                             let flat = crate::lower_array_multidim::flat_index_const_clamped(
-                                &info.dimensions,
+                                &info.dimensions(),
                                 &idxs,
                             )?;
                             return crate::lower_array::store_array_element_const(
@@ -138,21 +170,27 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                     use crate::lower_array_multidim::SubscriptOperand;
                     if ops.iter().all(|o| matches!(o, SubscriptOperand::Const(_))) {
                         if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
-                            let idxs: Vec<u32> = ops
-                                .iter()
-                                .map(|o| match o {
-                                    SubscriptOperand::Const(c) => *c,
-                                    SubscriptOperand::Dynamic(_) => 0,
-                                })
-                                .collect();
-                            if idxs.len() == info.dimensions.len() {
-                                let flat = crate::lower_array_multidim::flat_index_const_clamped(
-                                    &info.dimensions,
-                                    &idxs,
-                                )?;
-                                return crate::lower_array::store_array_element_const(
-                                    ctx, &info, flat, *value,
-                                );
+                            if matches!(
+                                &info.layout.kind,
+                                crate::naga_util::AggregateKind::Array { .. }
+                            ) {
+                                let idxs: Vec<u32> = ops
+                                    .iter()
+                                    .map(|o| match o {
+                                        SubscriptOperand::Const(c) => *c,
+                                        SubscriptOperand::Dynamic(_) => 0,
+                                    })
+                                    .collect();
+                                if idxs.len() == info.dimensions().len() {
+                                    let flat =
+                                        crate::lower_array_multidim::flat_index_const_clamped(
+                                            &info.dimensions(),
+                                            &idxs,
+                                        )?;
+                                    return crate::lower_array::store_array_element_const(
+                                        ctx, &info, flat, *value,
+                                    );
+                                }
                             }
                         }
                     }
@@ -227,6 +265,57 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                         }
                     }
                     Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
+                        let pointee = ctx.pointer_args[arg_i];
+                        if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
+                            let layout = crate::naga_util::aggregate_layout(ctx.module, pointee)?
+                                .ok_or_else(|| {
+                                LowerError::Internal(String::from("struct inout: layout"))
+                            })?;
+                            let members = layout.struct_members().ok_or_else(|| {
+                                LowerError::Internal(String::from("struct inout: members"))
+                            })?;
+                            let m = members.get(*index as usize).ok_or_else(|| {
+                                LowerError::UnsupportedStatement(String::from(
+                                    "struct member inout: index out of range",
+                                ))
+                            })?;
+                            let addr = ctx.arg_vregs_for(*arg_i)?[0];
+                            if let Some(sub_layout) =
+                                crate::naga_util::aggregate_layout(ctx.module, m.naga_ty)?
+                            {
+                                let lps_ty = crate::lower_aggregate_layout::naga_to_lps_type(
+                                    ctx.module, m.naga_ty,
+                                )?;
+                                return crate::lower_aggregate_write::store_lps_value_into_slot(
+                                    ctx,
+                                    addr,
+                                    m.byte_offset,
+                                    m.naga_ty,
+                                    &lps_ty,
+                                    *value,
+                                    Some(&sub_layout),
+                                );
+                            }
+                            let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                            let raw = ctx.ensure_expr_vec(*value)?;
+                            let srcs = coerce_assignment_vregs(ctx, None, naga_inner, *value, raw)?;
+                            let ir_tys = naga_type_to_ir_types(ctx.module, naga_inner)?;
+                            if srcs.len() != ir_tys.len() {
+                                return Err(LowerError::UnsupportedStatement(format!(
+                                    "struct inout store: {} vs {} components",
+                                    srcs.len(),
+                                    ir_tys.len()
+                                )));
+                            }
+                            for (j, &s) in srcs.iter().enumerate() {
+                                ctx.fb.push(LpirOp::Store {
+                                    base: addr,
+                                    offset: m.byte_offset + (j as u32) * 4,
+                                    value: s,
+                                });
+                            }
+                            return Ok(());
+                        }
                         let store_ty = expr_type_inner(ctx.module, ctx.func, *pointer)?;
                         let dst_inner = match store_ty {
                             TypeInner::ValuePointer {
@@ -314,6 +403,25 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             }
             Expression::LocalVariable(lv) => {
                 if let Some(dst_info) = ctx.aggregate_map.get(lv).cloned() {
+                    if matches!(
+                        &dst_info.layout.kind,
+                        crate::naga_util::AggregateKind::Struct { .. }
+                    ) {
+                        let lps_ty = crate::lower_aggregate_layout::naga_to_lps_type(
+                            ctx.module,
+                            dst_info.naga_ty,
+                        )?;
+                        let base = aggregate_storage_base_vreg(ctx, &dst_info.slot)?;
+                        return crate::lower_aggregate_write::store_lps_value_into_slot(
+                            ctx,
+                            base,
+                            0,
+                            dst_info.naga_ty,
+                            &lps_ty,
+                            *value,
+                            Some(&dst_info.layout),
+                        );
+                    }
                     match &ctx.func.expressions[*value] {
                         Expression::Compose { .. } | Expression::ZeroValue(_) => {
                             return crate::lower_array::lower_array_initializer(
@@ -326,7 +434,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                             ctx.fb.push(LpirOp::Memcpy {
                                 dst_addr: dst,
                                 src_addr: param_ptr,
-                                size: dst_info.total_size,
+                                size: dst_info.total_size(),
                             });
                             return Ok(());
                         }
@@ -372,7 +480,25 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             Expression::FunctionArgument(i) if ctx.pointer_args.contains_key(i) => {
                 let base_ty_h = ctx.pointer_args[i];
                 let base_inner = &ctx.module.types[base_ty_h].inner;
-                let ir_tys = naga_type_to_ir_types(base_inner)?;
+                if matches!(base_inner, TypeInner::Struct { .. }) {
+                    let layout = crate::naga_util::aggregate_layout(ctx.module, base_ty_h)?
+                        .ok_or_else(|| {
+                            LowerError::Internal(String::from("inout struct: layout"))
+                        })?;
+                    let lps_ty =
+                        crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, base_ty_h)?;
+                    let base = ctx.arg_vregs_for(*i)?[0];
+                    return crate::lower_aggregate_write::store_lps_value_into_slot(
+                        ctx,
+                        base,
+                        0,
+                        base_ty_h,
+                        &lps_ty,
+                        *value,
+                        Some(&layout),
+                    );
+                }
+                let ir_tys = naga_type_to_ir_types(ctx.module, base_inner)?;
                 let addr = ctx.arg_vregs_for(*i)?[0];
                 let srcs = ctx.ensure_expr_vec(*value)?;
                 if ir_tys.len() != srcs.len() {

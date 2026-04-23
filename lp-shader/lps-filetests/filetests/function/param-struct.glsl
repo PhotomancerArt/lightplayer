@@ -29,9 +29,6 @@ float test_param_struct_simple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_simple() ~= 5.0
 
 void move_point(inout Point p, float dx, float dy) {
@@ -47,9 +44,6 @@ void test_param_struct_modify() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_modify() == 0.0
 
 float circle_area(Circle c) {
@@ -63,9 +57,6 @@ float test_param_struct_nested() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_nested() ~= 12.56636
 
 Color blend_colors(Color c1, Color c2, float factor) {
@@ -80,9 +71,6 @@ Color test_param_struct_return() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_return() ~= Color(vec3(0.5, 0.0, 0.5), 0.9)
 
 void create_circle(out Circle c, Point center, float radius) {
@@ -98,9 +86,6 @@ void test_param_struct_out() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_out() == 0.0
 
 float get_alpha(const Color c) {
@@ -114,9 +99,6 @@ float test_param_struct_const() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_const() ~= 0.7
 
 void process_circle(in Circle input, out Circle output, inout Point center) {
@@ -136,9 +118,6 @@ float test_param_struct_mixed_qualifiers() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_mixed_qualifiers() ~= 28.0
 
 struct Triangle {
@@ -163,7 +142,4 @@ float test_param_struct_complex() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_param_struct_complex() ~= 12.0

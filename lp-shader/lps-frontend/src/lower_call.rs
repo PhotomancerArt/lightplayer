@@ -16,33 +16,49 @@ use crate::lower_array::aggregate_storage_base_vreg;
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_lpfn;
-use crate::naga_util::func_return_ir_types_with_sret;
+use crate::naga_util::{aggregate_layout, func_return_ir_types_with_sret};
 
-use crate::lower_array_multidim;
-
-/// R-value: local holding an array, or a [`Load`] of that local.
-fn call_arg_array_local(
+/// Peel `Load*` chains to a stack-slot aggregate [`LocalVariable`], if any.
+fn peel_aggregate_call_arg_local(
     ctx: &LowerCtx<'_>,
     mut expr: Handle<Expression>,
-) -> Result<Handle<LocalVariable>, LowerError> {
+) -> Option<crate::lower_ctx::AggregateInfo> {
     loop {
         match &ctx.func.expressions[expr] {
             Expression::Load { pointer } => expr = *pointer,
-            Expression::LocalVariable(lv) => {
-                if ctx.aggregate_map.contains_key(lv) {
-                    return Ok(*lv);
-                }
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "array call argument must be a local array",
-                )));
-            }
-            _ => {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "array call argument must be a local array",
-                )));
-            }
+            Expression::LocalVariable(lv) => return ctx.aggregate_map.get(lv).cloned(),
+            _ => return None,
         }
     }
+}
+
+/// Pointer to callee `in` aggregate argument: slot-backed local/load, [`CallResult`] slot, or temp
+/// materialisation for rvalues (`Compose`, nested calls, etc.).
+fn aggregate_arg_pointer(
+    ctx: &mut LowerCtx<'_>,
+    arg_h: Handle<Expression>,
+    callee_arg_ty: Handle<crate::naga::Type>,
+) -> Result<VReg, LowerError> {
+    if let Some(info) = peel_aggregate_call_arg_local(ctx, arg_h) {
+        return aggregate_storage_base_vreg(ctx, &info.slot);
+    }
+    if matches!(&ctx.func.expressions[arg_h], Expression::CallResult(_)) {
+        if let Some(info) = ctx.call_result_aggregates.get(&arg_h).cloned() {
+            return aggregate_storage_base_vreg(ctx, &info.slot);
+        }
+    }
+    let layout = aggregate_layout(ctx.module, callee_arg_ty)?.ok_or_else(|| {
+        LowerError::Internal(String::from(
+            "aggregate_arg_pointer: expected aggregate layout",
+        ))
+    })?;
+    let info = crate::lower_aggregate_write::materialise_aggregate_rvalue_to_temp_slot(
+        ctx,
+        arg_h,
+        layout,
+        callee_arg_ty,
+    )?;
+    aggregate_storage_base_vreg(ctx, &info.slot)
 }
 
 /// `inout` / `out` pointer formals: must be a local.
@@ -64,23 +80,15 @@ fn record_call_result_aggregate(
     naga_ret_ty: Handle<crate::naga::Type>,
     slot: lpir::SlotId,
 ) -> Result<(), LowerError> {
-    let (dimensions, leaf_ty, leaf_stride) =
-        lower_array_multidim::flatten_array_type_shape(ctx.module, naga_ret_ty)?;
-    let element_count = dimensions
-        .iter()
-        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
-        .ok_or_else(|| {
-            LowerError::Internal(String::from("record_call_result_aggregate: count overflow"))
-        })?;
-    let (total_size, _align) =
-        crate::lower_aggregate_layout::aggregate_size_and_align(ctx.module, naga_ret_ty)?;
+    let layout = aggregate_layout(ctx.module, naga_ret_ty)?.ok_or_else(|| {
+        LowerError::Internal(String::from(
+            "record_call_result_aggregate: expected aggregate layout",
+        ))
+    })?;
     let info = crate::lower_ctx::AggregateInfo {
         slot: crate::lower_ctx::AggregateSlot::Local(slot),
-        dimensions,
-        leaf_element_ty: leaf_ty,
-        leaf_stride,
-        element_count,
-        total_size,
+        layout,
+        naga_ty: naga_ret_ty,
     };
     ctx.call_result_aggregates.insert(res_h, info);
     let addr = aggregate_storage_base_vreg(ctx, &crate::lower_ctx::AggregateSlot::Local(slot))?;
@@ -140,14 +148,9 @@ pub(crate) fn write_aggregate_return_into_sret(
                 .as_ref()
                 .ok_or_else(|| LowerError::Internal(String::from("sret: missing result type")))?
                 .ty;
-            let (dimensions, leaf_ty, leaf_stride) =
-                lower_array_multidim::flatten_array_type_shape(ctx.module, res_ty)?;
-            let element_count = dimensions
-                .iter()
-                .try_fold(1u32, |acc, &d| acc.checked_mul(d))
-                .ok_or_else(|| {
-                    LowerError::Internal(String::from("sret literal: count overflow"))
-                })?;
+            let layout = aggregate_layout(ctx.module, res_ty)?.ok_or_else(|| {
+                LowerError::Internal(String::from("sret literal: expected aggregate layout"))
+            })?;
             let temp = ctx.fb.alloc_slot(sret.size);
             let taddr = ctx.fb.alloc_vreg(IrType::Pointer);
             ctx.fb.push(LpirOp::SlotAddr {
@@ -156,16 +159,30 @@ pub(crate) fn write_aggregate_return_into_sret(
             });
             let info = crate::lower_ctx::AggregateInfo {
                 slot: crate::lower_ctx::AggregateSlot::Local(temp),
-                dimensions,
-                leaf_element_ty: leaf_ty,
-                leaf_stride,
-                element_count,
-                total_size: sret.size,
+                layout,
+                naga_ty: res_ty,
             };
-            if matches!(&ctx.func.expressions[value_expr], E::ZeroValue(_)) {
-                crate::lower_array::zero_fill_array(ctx, ctx.module, &info)?;
-            } else {
-                crate::lower_array::lower_array_initializer(ctx, &info, value_expr)?;
+            match &info.layout.kind {
+                crate::naga_util::AggregateKind::Struct { .. } => {
+                    let lps_ty =
+                        crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, res_ty)?;
+                    crate::lower_aggregate_write::store_lps_value_into_slot(
+                        ctx,
+                        taddr,
+                        0,
+                        res_ty,
+                        &lps_ty,
+                        value_expr,
+                        Some(&info.layout),
+                    )?;
+                }
+                crate::naga_util::AggregateKind::Array { .. } => {
+                    if matches!(&ctx.func.expressions[value_expr], E::ZeroValue(_)) {
+                        crate::lower_array::zero_fill_array(ctx, ctx.module, &info)?;
+                    } else {
+                        crate::lower_array::lower_array_initializer(ctx, &info, value_expr)?;
+                    }
+                }
             }
             ctx.fb.push(LpirOp::Memcpy {
                 dst_addr: sret.addr,
@@ -179,11 +196,11 @@ pub(crate) fn write_aggregate_return_into_sret(
     let vs = ctx.ensure_expr_vec(value_expr)?;
     if !vs.is_empty() {
         return Err(LowerError::Internal(String::from(
-            "M1: aggregate return value is in flat vregs; expected slot-backed array (TODO M2: struct literals)",
+            "aggregate return value is in flat vregs; expected slot-backed aggregate",
         )));
     }
     Err(LowerError::Internal(String::from(
-        "M1: cannot lower aggregate return expression for sret",
+        "cannot lower aggregate return expression for sret",
     )))
 }
 
@@ -247,7 +264,7 @@ pub(crate) fn lower_user_call(
             record_call_result_aggregate(ctx, res_h, res_ty.ty, slot)?;
         } else {
             let inner = &ctx.module.types[res_ty.ty].inner;
-            let ir_tys: Vec<IrType> = naga_type_to_ir_types(inner)?.to_vec();
+            let ir_tys: Vec<IrType> = naga_type_to_ir_types(ctx.module, inner)?.to_vec();
             let mut vregs = VRegVec::new();
             for ty in &ir_tys {
                 let v = ctx.fb.alloc_vreg(*ty);
@@ -271,7 +288,7 @@ pub(crate) fn lower_user_call(
             } else {
                 let local_vregs = ctx.resolve_local(lv)?;
                 let base_inner = &ctx.module.types[*base].inner;
-                let ir_tys = naga_type_to_ir_types(base_inner)?;
+                let ir_tys = naga_type_to_ir_types(ctx.module, base_inner)?;
                 let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
                 let addr = ctx.fb.alloc_vreg(IrType::Pointer);
                 ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
@@ -285,14 +302,8 @@ pub(crate) fn lower_user_call(
                 arg_vs.push(addr);
                 inout_copybacks.push((lv, slot));
             }
-        } else if matches!(callee_inner, TypeInner::Array { .. }) {
-            let lv = call_arg_array_local(ctx, arg_h)?;
-            let info = ctx.aggregate_map.get(&lv).cloned().ok_or_else(|| {
-                LowerError::UnsupportedExpression(String::from(
-                    "aggregate call argument: not a stack-slot aggregate",
-                ))
-            })?;
-            let addr = aggregate_storage_base_vreg(ctx, &info.slot)?;
+        } else if aggregate_layout(ctx.module, callee_arg.ty)?.is_some() {
+            let addr = aggregate_arg_pointer(ctx, arg_h, callee_arg.ty)?;
             arg_vs.push(addr);
         } else {
             let vs = ctx.ensure_expr_vec(arg_h)?;

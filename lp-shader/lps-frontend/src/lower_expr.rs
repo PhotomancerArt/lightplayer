@@ -58,7 +58,7 @@ fn lower_expr_vec_uncached(
             Expression::LocalVariable(lv) => {
                 if ctx.aggregate_map.contains_key(lv) {
                     return Err(LowerError::UnsupportedExpression(String::from(
-                        "Load of whole array local is not supported",
+                        "Load of whole aggregate (array/struct) local is not supported",
                     )));
                 }
                 // Snapshot into fresh VRegs so the loaded value does not alias the local's
@@ -66,7 +66,7 @@ fn lower_expr_vec_uncached(
                 // Load expression handle).
                 let srcs = ctx.resolve_local(*lv)?;
                 let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
-                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(lv_ty)?;
+                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(ctx.module, lv_ty)?;
                 if srcs.len() != ir_tys.len() {
                     return Err(LowerError::Internal(format!(
                         "Load local: {} vregs vs {} IR types for {:?}",
@@ -96,7 +96,15 @@ fn lower_expr_vec_uncached(
                     )));
                 };
                 let base_inner = &ctx.module.types[base_ty_h].inner;
-                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(base_inner)?;
+                if matches!(base_inner, TypeInner::Struct { .. }) {
+                    return crate::lower_struct::load_struct_value_vregs_from_base(
+                        ctx,
+                        ctx.arg_vregs_for(idx)?[0],
+                        0,
+                        base_ty_h,
+                    );
+                }
+                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(ctx.module, base_inner)?;
                 let addr = ctx.arg_vregs_for(idx)?[0];
                 let mut vregs = VRegVec::new();
                 for (j, ty) in ir_tys.iter().enumerate() {
@@ -142,6 +150,13 @@ fn lower_expr_vec_uncached(
                     ))
                 })
         }
+        Expression::Compose { ty, .. }
+            if matches!(&ctx.module.types[*ty].inner, TypeInner::Struct { .. }) =>
+        {
+            Err(LowerError::UnsupportedExpression(String::from(
+                "struct Compose without destination slot — phase 05 routes call args",
+            )))
+        }
         Expression::Compose { components, .. } => {
             let mut result = VRegVec::new();
             for &comp in components {
@@ -174,39 +189,72 @@ fn lower_expr_vec_uncached(
             Ok(result)
         }
         Expression::AccessIndex { base, index } => {
+            if let Some((lv, chain)) =
+                crate::lower_struct::peel_struct_access_index_chain_to_local(ctx.func, expr)
+            {
+                if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+                    if matches!(
+                        &info.layout.kind,
+                        crate::naga_util::AggregateKind::Struct { .. }
+                    ) {
+                        return crate::lower_struct::load_struct_path_from_local(
+                            ctx, &info, &chain,
+                        );
+                    }
+                }
+            }
+            if let Some((gv, chain)) =
+                crate::lower_struct::peel_struct_access_index_chain_to_global(ctx.func, expr)
+            {
+                let gv_ty = ctx.module.global_variables[gv].ty;
+                if !chain.is_empty()
+                    && matches!(&ctx.module.types[gv_ty].inner, TypeInner::Struct { .. })
+                {
+                    return crate::lower_struct::load_struct_path_from_global(ctx, gv, &chain);
+                }
+            }
             if let Some((root, ops)) =
                 crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
             {
                 if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
-                    if ops.len() == info.dimensions.len() {
-                        if ops.iter().all(|o| {
-                            matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
-                        }) {
-                            use crate::lower_array_multidim::SubscriptOperand::Const as SConst;
-                            let idxs: alloc::vec::Vec<u32> = ops
-                                .iter()
-                                .map(|o| match o {
-                                    SConst(c) => *c,
-                                    _ => 0,
-                                })
-                                .collect();
-                            let flat = crate::lower_array_multidim::flat_index_const_clamped(
-                                &info.dimensions,
-                                &idxs,
+                    if matches!(
+                        &info.layout.kind,
+                        crate::naga_util::AggregateKind::Array { .. }
+                    ) {
+                        if ops.len() == info.dimensions().len() {
+                            if ops.iter().all(|o| {
+                                matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
+                            }) {
+                                use crate::lower_array_multidim::SubscriptOperand::Const as SConst;
+                                let idxs: alloc::vec::Vec<u32> = ops
+                                    .iter()
+                                    .map(|o| match o {
+                                        SConst(c) => *c,
+                                        _ => 0,
+                                    })
+                                    .collect();
+                                let flat = crate::lower_array_multidim::flat_index_const_clamped(
+                                    &info.dimensions(),
+                                    &idxs,
+                                )?;
+                                return crate::lower_array::load_array_element_const(
+                                    ctx, &info, flat,
+                                );
+                            }
+                            let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
+                                ctx,
+                                &info.dimensions(),
+                                &ops,
                             )?;
-                            return crate::lower_array::load_array_element_const(ctx, &info, flat);
+                            return crate::lower_array::load_array_element_dynamic(
+                                ctx, &info, flat_v,
+                            );
                         }
-                        let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
-                            ctx,
-                            &info.dimensions,
-                            &ops,
-                        )?;
-                        return crate::lower_array::load_array_element_dynamic(ctx, &info, flat_v);
-                    }
-                    if ops.len() < info.dimensions.len() {
-                        return Err(LowerError::UnsupportedExpression(String::from(
-                            "partial indexing of multi-dimensional array as rvalue is not supported",
-                        )));
+                        if ops.len() < info.dimensions().len() {
+                            return Err(LowerError::UnsupportedExpression(String::from(
+                                "partial indexing of multi-dimensional array as rvalue is not supported",
+                            )));
+                        }
                     }
                 }
             }
@@ -222,6 +270,138 @@ fn lower_expr_vec_uncached(
                     let start = (*index as usize) * n;
                     Ok(base_vs[start..start + n].into())
                 }
+                TypeInner::Struct { .. } => match &ctx.func.expressions[*base] {
+                    Expression::FunctionArgument(arg_i) => {
+                        let arg_ty = ctx
+                            .func
+                            .arguments
+                            .get(*arg_i as usize)
+                            .ok_or_else(|| {
+                                LowerError::Internal(String::from("bad argument index"))
+                            })?
+                            .ty;
+                        let layout = crate::naga_util::aggregate_layout(ctx.module, arg_ty)?
+                            .ok_or_else(|| {
+                                LowerError::Internal(String::from("struct member load: layout"))
+                            })?;
+                        let members = layout.struct_members().ok_or_else(|| {
+                            LowerError::Internal(String::from("struct member load: members"))
+                        })?;
+                        let midx = *index as usize;
+                        let m = members.get(midx).ok_or_else(|| {
+                            LowerError::UnsupportedExpression(String::from(
+                                "struct member index out of range",
+                            ))
+                        })?;
+                        let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                        let ir_tys =
+                            crate::lower_ctx::naga_type_to_ir_types(ctx.module, naga_inner)?;
+                        let base_ptr = ctx.arg_vregs_for(*arg_i)?[0];
+                        let mut out = VRegVec::new();
+                        for (j, ty) in ir_tys.iter().enumerate() {
+                            let dst = ctx.fb.alloc_vreg(*ty);
+                            ctx.fb.push(LpirOp::Load {
+                                dst,
+                                base: base_ptr,
+                                offset: m.byte_offset + (j as u32) * 4,
+                            });
+                            out.push(dst);
+                        }
+                        Ok(out)
+                    }
+                    Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
+                        Expression::LocalVariable(lv) => {
+                            if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                                if matches!(
+                                    &info.layout.kind,
+                                    crate::naga_util::AggregateKind::Struct { .. }
+                                ) {
+                                    return crate::lower_struct::load_struct_member_to_vregs(
+                                        ctx,
+                                        &info,
+                                        *index as usize,
+                                    );
+                                }
+                            }
+                            Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: struct value behind Load is not a slot-backed struct local",
+                            )))
+                        }
+                        Expression::FunctionArgument(arg_i)
+                            if ctx.pointer_args.contains_key(arg_i) =>
+                        {
+                            let pointee = ctx.pointer_args[arg_i];
+                            if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
+                                let layout =
+                                    crate::naga_util::aggregate_layout(ctx.module, pointee)?
+                                        .ok_or_else(|| {
+                                            LowerError::Internal(String::from(
+                                                "struct member load: layout",
+                                            ))
+                                        })?;
+                                let members = layout.struct_members().ok_or_else(|| {
+                                    LowerError::Internal(String::from("struct load members"))
+                                })?;
+                                let midx = *index as usize;
+                                let m = members.get(midx).ok_or_else(|| {
+                                    LowerError::UnsupportedExpression(String::from(
+                                        "struct member index out of range",
+                                    ))
+                                })?;
+                                let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
+                                    ctx.module, naga_inner,
+                                )?;
+                                let base_ptr = ctx.arg_vregs_for(*arg_i)?[0];
+                                let mut out = VRegVec::new();
+                                for (j, ty) in ir_tys.iter().enumerate() {
+                                    let dst = ctx.fb.alloc_vreg(*ty);
+                                    ctx.fb.push(LpirOp::Load {
+                                        dst,
+                                        base: base_ptr,
+                                        offset: m.byte_offset + (j as u32) * 4,
+                                    });
+                                    out.push(dst);
+                                }
+                                Ok(out)
+                            } else {
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: inout param is not pointer-to-struct",
+                                )))
+                            }
+                        }
+                        _ => Err(LowerError::UnsupportedExpression(String::from(
+                            "AccessIndex: struct value behind Load is not a slot-backed struct local",
+                        ))),
+                    },
+                    Expression::CallResult(_) => {
+                        let info =
+                            ctx.call_result_aggregates
+                                .get(base)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    LowerError::Internal(String::from(
+                                        "AccessIndex: struct CallResult without aggregate slot",
+                                    ))
+                                })?;
+                        if !matches!(
+                            &info.layout.kind,
+                            crate::naga_util::AggregateKind::Struct { .. }
+                        ) {
+                            return Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: expected struct aggregate call result",
+                            )));
+                        }
+                        crate::lower_struct::load_struct_member_to_vregs(
+                            ctx,
+                            &info,
+                            *index as usize,
+                        )
+                    }
+                    _ => Err(LowerError::UnsupportedExpression(String::from(
+                        "AccessIndex: struct rvalue base not supported",
+                    ))),
+                },
                 // Naga types locals as `Pointer` to value type; `v.x` is `AccessIndex` on that pointer.
                 TypeInner::Pointer { base: ty_h, .. } => {
                     let inner = &ctx.module.types[ty_h].inner;
@@ -295,8 +475,67 @@ fn lower_expr_vec_uncached(
                                 };
                                 load_lps_value_from_vmctx(ctx, byte_offset, &member_ty)
                             }
+                            Expression::LocalVariable(lv) => {
+                                if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                                    if matches!(
+                                        &info.layout.kind,
+                                        crate::naga_util::AggregateKind::Struct { .. }
+                                    ) {
+                                        return crate::lower_struct::load_struct_member_to_vregs(
+                                            ctx,
+                                            &info,
+                                            *index as usize,
+                                        );
+                                    }
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: pointer to struct must be a slot-backed struct local",
+                                )))
+                            }
+                            Expression::FunctionArgument(arg_i)
+                                if ctx.pointer_args.contains_key(arg_i) =>
+                            {
+                                let pointee = ctx.pointer_args[arg_i];
+                                if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
+                                    let layout =
+                                        crate::naga_util::aggregate_layout(ctx.module, pointee)?
+                                            .ok_or_else(|| {
+                                                LowerError::Internal(String::from(
+                                                    "struct member load: layout",
+                                                ))
+                                            })?;
+                                    let members = layout.struct_members().ok_or_else(|| {
+                                        LowerError::Internal(String::from("struct load members"))
+                                    })?;
+                                    let midx = *index as usize;
+                                    let m = members.get(midx).ok_or_else(|| {
+                                        LowerError::UnsupportedExpression(String::from(
+                                            "struct member index out of range",
+                                        ))
+                                    })?;
+                                    let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                                    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
+                                        ctx.module, naga_inner,
+                                    )?;
+                                    let base = ctx.arg_vregs_for(*arg_i)?[0];
+                                    let mut out = VRegVec::new();
+                                    for (j, ty) in ir_tys.iter().enumerate() {
+                                        let dst = ctx.fb.alloc_vreg(*ty);
+                                        ctx.fb.push(LpirOp::Load {
+                                            dst,
+                                            base,
+                                            offset: m.byte_offset + (j as u32) * 4,
+                                        });
+                                        out.push(dst);
+                                    }
+                                    return Ok(out);
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: pointer to struct inout",
+                                )))
+                            }
                             _ => Err(LowerError::UnsupportedExpression(String::from(
-                                "AccessIndex: pointer to struct must be a uniform GlobalVariable",
+                                "AccessIndex: pointer to struct: unsupported base",
                             ))),
                         },
                         _ => Err(LowerError::UnsupportedExpression(format!(
@@ -337,7 +576,8 @@ fn lower_expr_vec_uncached(
                         )));
                     }
                     let elem_inner = &ctx.module.types[elem_ty_h].inner;
-                    let elem_ir_count = crate::lower_ctx::naga_type_to_ir_types(elem_inner)?.len();
+                    let elem_ir_count =
+                        crate::lower_ctx::naga_type_to_ir_types(ctx.module, elem_inner)?.len();
                     let base_vs = lower_expr_vec(ctx, *base)?;
                     let total = (n as usize).checked_mul(elem_ir_count).ok_or_else(|| {
                         LowerError::Internal(String::from("AccessIndex array: vreg count overflow"))
@@ -758,7 +998,7 @@ pub(crate) fn coerce_assignment_vregs(
 ) -> Result<VRegVec, LowerError> {
     let dst_tys: Vec<IrType> = match dst_ty_handle {
         Some(h) => crate::naga_util::ir_types_for_naga_type(ctx.module, h)?,
-        None => crate::lower_ctx::naga_type_to_ir_types(dst_ty_inner)?.to_vec(),
+        None => crate::lower_ctx::naga_type_to_ir_types(ctx.module, dst_ty_inner)?.to_vec(),
     };
     let dst_scalar_kind = match dst_ty_handle {
         Some(h) => type_handle_scalar_kind(ctx.module, h)?,
@@ -860,7 +1100,7 @@ fn snapshot_load_result_vregs(
     srcs: VRegVec,
 ) -> Result<VRegVec, LowerError> {
     let value_inner = expr_type_inner(ctx.module, ctx.func, load_expr)?;
-    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(&value_inner)?;
+    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(ctx.module, &value_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::Internal(format!(
             "Load snapshot: {} vregs vs {} types for {:?}",

@@ -219,10 +219,8 @@ float f() { return 1.0; }
 
     #[test]
     fn missing_test_type_directive_errors() {
-        let p = std::env::temp_dir().join(format!(
-            "lps_ft_no_test_type_{}.glsl",
-            std::process::id()
-        ));
+        let p =
+            std::env::temp_dir().join(format!("lps_ft_no_test_type_{}.glsl", std::process::id()));
         std::fs::write(
             &p,
             r"float f() { return 1.0; }

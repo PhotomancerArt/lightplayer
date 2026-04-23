@@ -16,7 +16,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use lps_q32::Q32;
-use lps_shared::{FnParam, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier};
+use lps_shared::layout::{round_up, type_alignment, type_size};
+use lps_shared::{FnParam, LayoutRules, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier};
 
 /// Split a single slice of flattened Q32 argument words (per-parameter order) into
 /// [`LpsValueQ32`] values matching `params`.
@@ -262,7 +263,10 @@ fn got_ty_name(v: &LpsValueQ32) -> &'static str {
 
 /// Decode flattened return words into [`LpsValueQ32`].
 pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, CallError> {
-    let n = glsl_component_count(ty);
+    let n = match ty {
+        LpsType::Struct { .. } => (type_size(ty, LayoutRules::Std430) + 3) / 4,
+        _ => glsl_component_count(ty),
+    };
     if words.len() < n {
         return Err(CallError::Unsupported(traced_msg!(
             "not enough return values: need {n}, got {}",
@@ -270,10 +274,29 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, Cal
         )));
     }
     Ok(match ty {
-        LpsType::Struct { .. } => {
-            return Err(CallError::Unsupported(traced_msg!(
-                "struct returns are not supported by Level-1 call() yet"
-            )));
+        LpsType::Struct { name, members } => {
+            let mut byte_off = 0usize;
+            let mut fields = Vec::new();
+            for (i, m) in members.iter().enumerate() {
+                let align = type_alignment(&m.ty, LayoutRules::Std430);
+                byte_off = round_up(byte_off, align);
+                let m_size = type_size(&m.ty, LayoutRules::Std430);
+                let w0 = byte_off / 4;
+                let m_words = (m_size + 3) / 4;
+                if words.len() < w0 + m_words {
+                    return Err(CallError::Unsupported(traced_msg!(
+                        "struct decode: truncated member after byte offset {byte_off}"
+                    )));
+                }
+                let val = decode_q32_return(&m.ty, &words[w0..w0 + m_words])?;
+                let fname = m.name.clone().unwrap_or_else(|| alloc::format!("_{i}"));
+                fields.push((fname, val));
+                byte_off += m_size;
+            }
+            LpsValueQ32::Struct {
+                name: name.clone(),
+                fields,
+            }
         }
         LpsType::Void => {
             return Err(CallError::Unsupported(traced_msg!(

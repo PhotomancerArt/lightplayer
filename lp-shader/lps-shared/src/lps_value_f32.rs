@@ -90,12 +90,16 @@ impl LpsValueF32 {
                     fields: fb,
                 },
             ) => {
-                na == nb
-                    && fa.len() == fb.len()
-                    && fa
-                        .iter()
-                        .zip(fb.iter())
-                        .all(|((ka, va), (kb, vb))| ka == kb && va.eq(vb))
+                let name_ok = na.is_none() || nb.is_none() || na == nb;
+                if !name_ok || fa.len() != fb.len() {
+                    return false;
+                }
+                if fa.iter().all(|(k, _)| k.is_empty()) {
+                    return fa.iter().zip(fb.iter()).all(|((_, va), (_, vb))| va.eq(vb));
+                }
+                fa.iter()
+                    .zip(fb.iter())
+                    .all(|((ka, va), (kb, vb))| ka == kb && va.eq(vb))
             }
             _ => false, // Type mismatch
         }
@@ -163,12 +167,19 @@ impl LpsValueF32 {
                     fields: fb,
                 },
             ) => {
-                na == nb
-                    && fa.len() == fb.len()
-                    && fa
+                let name_ok = na.is_none() || nb.is_none() || na == nb;
+                if !name_ok || fa.len() != fb.len() {
+                    return false;
+                }
+                if fa.iter().all(|(k, _)| k.is_empty()) {
+                    return fa
                         .iter()
                         .zip(fb.iter())
-                        .all(|((ka, va), (kb, vb))| ka == kb && va.approx_eq(vb, tolerance))
+                        .all(|((_, va), (_, vb))| va.approx_eq(vb, tolerance));
+                }
+                fa.iter()
+                    .zip(fb.iter())
+                    .all(|((ka, va), (kb, vb))| ka == kb && va.approx_eq(vb, tolerance))
             }
             _ => false, // Type mismatch
         }

@@ -20,9 +20,6 @@ float test_define_nested_line() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_line() == 1.0
 
 struct Color {
@@ -43,9 +40,6 @@ int test_define_nested_material() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_material() == 1
 
 struct Vector2D {
@@ -64,9 +58,6 @@ uint test_define_nested_vector3d() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_vector3d() == 1u
 
 struct Person {
@@ -86,9 +77,6 @@ bool test_define_nested_family() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_family() == true
 
 struct BoundingBox2D {
@@ -102,26 +90,10 @@ vec2 test_define_nested_bounding_box2d() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_bounding_box2d() ~= vec2(1.0, 1.0)
 
-struct Node {
-    int value;
-    Node next; // This would be an error - can't have self-referencing struct
-};
-
-float test_define_nested_node() {
-    // Node n; // This would be a compile error
-    return 1.0; // We can't test the error, so just return success
-}
-
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_define_nested_node() == 1.0
+// Self-referencing structs (`struct Node { Node next; }`) are invalid GLSL and rejected at parse;
+// they cannot live in the same translation unit as runnable tests.
 
 struct TreeNode {
     int value;
@@ -134,9 +106,6 @@ int test_define_nested_tree_node() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_tree_node() == 1
 
 struct ComplexShape {
@@ -151,7 +120,4 @@ uint test_define_nested_complex_shape() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_define_nested_complex_shape() == 1u
