@@ -268,9 +268,9 @@ pub fn classify_params_for_compile(sig: &LpsFnSig, func: &IrFunction) -> Vec<Arg
         return out;
     }
 
-    let legacy_sret_return = classify_return(sig).is_sret();
+    let implicit_scalar_sret = classify_return(sig).is_sret();
     let mut out = Vec::new();
-    let mut reg_idx = if legacy_sret_return { 1usize } else { 0usize };
+    let mut reg_idx = if implicit_scalar_sret { 1usize } else { 0usize };
     let mut stack_off = 0i32;
     push_scalar_words(&mut out, &mut reg_idx, &mut stack_off, 1);
     for i in 0..func.param_count {

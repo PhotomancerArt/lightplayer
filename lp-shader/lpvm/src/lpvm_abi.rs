@@ -28,13 +28,13 @@ pub fn unflatten_q32_args(
     let mut off = 0;
     for p in params {
         if p.qualifier != ParamQualifier::In {
-            return Err(CallError::Unsupported(String::from(
-                "out/inout parameters are not supported by Level-1 call_q32 yet",
+            return Err(CallError::Unsupported(traced_msg!(
+                "out/inout parameters are not supported by Level-1 call_q32 yet"
             )));
         }
         let n = glsl_component_count(&p.ty);
         if off + n > words.len() {
-            return Err(CallError::Unsupported(format!(
+            return Err(CallError::Unsupported(traced_msg!(
                 "not enough Q32 argument words at parameter `{}`: need {}, have {} total",
                 p.name,
                 off + n,
@@ -46,7 +46,7 @@ pub fn unflatten_q32_args(
         out.push(v);
     }
     if off != words.len() {
-        return Err(CallError::Unsupported(format!(
+        return Err(CallError::Unsupported(traced_msg!(
             "extra Q32 argument words: used {}, got {} total",
             off,
             words.len()
@@ -139,8 +139,8 @@ pub fn glsl_component_count(ty: &LpsType) -> usize {
 /// Flatten one function parameter using Q32 lane encoding.
 pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, CallError> {
     if param.qualifier != ParamQualifier::In {
-        return Err(CallError::Unsupported(String::from(
-            "out/inout parameters are not supported by Level-1 call() yet",
+        return Err(CallError::Unsupported(traced_msg!(
+            "out/inout parameters are not supported by Level-1 call() yet"
         )));
     }
     match (&param.ty, arg) {
@@ -221,8 +221,8 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
         (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
 
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
-            Err(CallError::Unsupported(String::from(
-                "struct parameters are not supported by Level-1 call() yet",
+            Err(CallError::Unsupported(traced_msg!(
+                "struct parameters are not supported by Level-1 call() yet"
             )))
         }
 
@@ -264,20 +264,20 @@ fn got_ty_name(v: &LpsValueQ32) -> &'static str {
 pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, CallError> {
     let n = glsl_component_count(ty);
     if words.len() < n {
-        return Err(CallError::Unsupported(format!(
+        return Err(CallError::Unsupported(traced_msg!(
             "not enough return values: need {n}, got {}",
             words.len()
         )));
     }
     Ok(match ty {
         LpsType::Struct { .. } => {
-            return Err(CallError::Unsupported(String::from(
-                "struct returns are not supported by Level-1 call() yet",
+            return Err(CallError::Unsupported(traced_msg!(
+                "struct returns are not supported by Level-1 call() yet"
             )));
         }
         LpsType::Void => {
-            return Err(CallError::Unsupported(String::from(
-                "decode_q32_return called for void",
+            return Err(CallError::Unsupported(traced_msg!(
+                "decode_q32_return called for void"
             )));
         }
         LpsType::Float => LpsValueQ32::F32(Q32::from_fixed(words[0])),
@@ -393,8 +393,8 @@ fn dense_q32_flatten_array(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32
 
 fn dense_q32_decode_array(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, CallError> {
     let LpsType::Array { element, len } = ty else {
-        return Err(CallError::Unsupported(String::from(
-            "dense_q32_decode_array: not an array type",
+        return Err(CallError::Unsupported(traced_msg!(
+            "dense_q32_decode_array: not an array type"
         )));
     };
     let per = glsl_component_count(element);

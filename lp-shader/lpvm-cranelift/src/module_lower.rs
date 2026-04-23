@@ -137,13 +137,21 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         id_at_ir[r] = Some(func_ids[emit_pos]);
     }
 
+    // Per-IR-rank flag: does the callee's Cranelift signature use StructReturn?
+    // Indexed by IR rank (BTreeMap key order), matching `func_id_to_ir_rank` and `id_at_ir`.
+    let mut callee_struct_return: Vec<bool> = vec![false; ir.functions.len()];
+    for (fid, f) in ir.functions.iter() {
+        let r = func_id_to_ir_rank[fid];
+        callee_struct_return[r] = emit::signature_uses_struct_return(module.isa(), f);
+    }
+
     let mut ctx = module.make_context();
 
     for (emit_pos, &fid) in indices.iter().enumerate() {
         let f = &ir.functions[&fid];
         let fid = func_ids[emit_pos];
         ctx.clear();
-        let uses_struct_return = emit::signature_uses_struct_return(f);
+        let uses_struct_return = emit::signature_uses_struct_return(module.isa(), f);
         ctx.func.signature =
             emit::signature_for_ir_func(f, call_conv, mode, pointer_type, module.isa());
         let mut func_ctx = FunctionBuilderContext::new();
@@ -198,6 +206,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 float_mode: mode,
                 lpir_builtins,
                 uses_struct_return,
+                callee_struct_return: &callee_struct_return,
             };
 
             translate_function(f, &mut builder, &emit_ctx).map_err(|e| {

@@ -46,6 +46,11 @@ pub(crate) struct EmitCtx<'a> {
     pub lpir_builtins: Option<LpirBuiltinRefs>,
     /// `IrFunction::sret_arg` is set (Cranelift `StructReturn` on the sret pointer param).
     pub uses_struct_return: bool,
+    /// Per local function (IR rank, BTreeMap key order): does the callee's Cranelift signature
+    /// use `StructReturn`? Needed at call sites to allocate a buffer for implicit multi-scalar
+    /// sret callees (e.g. RV32 `vec3 foo()` callee with no `sret_arg` LPIR vreg) and load
+    /// results back from the buffer.
+    pub callee_struct_return: &'a [bool],
 }
 
 pub(crate) enum CtrlFrame {
@@ -79,28 +84,61 @@ pub(crate) enum CtrlFrame {
     },
 }
 
-/// True when the frontend marked aggregate return via a hidden sret pointer ([`IrFunction::sret_arg`]).
-pub(crate) fn signature_uses_struct_return(func: &IrFunction) -> bool {
-    func.sret_arg.is_some()
+/// True when [`signature_for_ir_func`] adds a `StructReturn` parameter for this `func` and ISA.
+///
+/// **Single source of truth** for “does this IR+ISA use a struct-return buffer?” — callers
+/// must not re-derive this from [`IrFunction::sret_arg`] alone (implicit scalar sret has no
+/// `sret_arg`) or by scanning `Signature::params`.
+///
+/// Two cases:
+/// 1. **Explicit LPIR sret:** [`IrFunction::sret_arg`] is set (M1 aggregate, any target).
+/// 2. **Implicit ABI sret:** the ISA cannot return `func.return_types.len()` scalars in
+///    registers (RV32: more than 2 `i32` returns; other hosts: more than 4).
+///
+/// `lpvm-native`'s RV32 backend classifies vec3+/mat scalar returns the same way (see
+/// `classify_return`); Cranelift signatures must match or the emulator and callee disagree
+/// on argument slots and where return values live.
+pub fn signature_uses_struct_return(isa: &dyn TargetIsa, func: &IrFunction) -> bool {
+    if func.sret_arg.is_some() {
+        return true;
+    }
+    let n = func.return_types.len();
+    if n == 0 {
+        return false;
+    }
+    use target_lexicon::Architecture;
+    match isa.triple().architecture {
+        Architecture::Riscv32(_) => n > 2,
+        _ => n > 4,
+    }
 }
 
-/// Build the Cranelift [`Signature`] for `func`, including RISC-V32 StructReturn when required.
+/// Build the Cranelift [`Signature`] for `func`, including StructReturn for explicit
+/// (M1 `sret_arg`) and implicit multi-scalar (RV32 vec3+/mat, host >4 scalars) returns.
+///
+/// Param order is `[sret?, vmctx, user_params…]` — sret comes first (RV32 SystemV / x86-64
+/// SysV / Apple AArch64 `x8` convention), so positional ABIs (e.g. `lp-riscv-emu`'s
+/// `compute_arg_locations_for_emulator`) place the sret pointer in `a0` / `rdi` where
+/// `lpvm-native`'s `classify_return.ptr_reg = A0` expects it. LPIR vreg ordering
+/// (`vmctx_vreg=0, sret_arg=1` then user vregs) is independent of this Cranelift block-
+/// param order; [`translate_function`] maps them by name.
+///
+/// When sret is present, returns live in the buffer and `Signature::returns` is empty.
 pub fn signature_for_ir_func(
     func: &IrFunction,
     call_conv: CallConv,
     mode: FloatMode,
     pointer_type: types::Type,
-    _isa: &dyn TargetIsa,
+    isa: &dyn TargetIsa,
 ) -> Signature {
     let mut sig = Signature::new(call_conv);
-    let sr = signature_uses_struct_return(func);
-    // 1) vmctx — matches LPIR vreg0.
-    sig.params.push(AbiParam::new(pointer_type));
+    let sr = signature_uses_struct_return(isa, func);
     if sr {
         let mut sret = AbiParam::new(pointer_type);
         sret.purpose = ArgumentPurpose::StructReturn;
         sig.params.push(sret);
     }
+    sig.params.push(AbiParam::new(pointer_type));
     // User params: vregs start at vmctx + hidden_param_slots (vmctx + optional sret).
     let vm = func.vmctx_vreg.0 as usize;
     let h = func.hidden_param_slots() as usize;
@@ -209,16 +247,25 @@ pub fn translate_function(
     let entry = builder.current_block().expect("entry block");
     let params: Vec<Value> = builder.block_params(entry).to_vec();
     let mut pi = 0usize;
-    // Block params: [vmctx, sret? (StructReturn), user1, …] — same order as LPIR vregs.
-    if pi < params.len() {
-        def_v(builder, &vars, func.vmctx_vreg, params[pi]);
-        pi += 1;
-    }
+    // Block params: [sret? (StructReturn), vmctx, user1, …]. LPIR vreg numbering is independent:
+    // vmctx_vreg = 0, sret_arg = 1 (when present), then user_param_vreg(0..).
     if let Some(sv) = func.sret_arg {
         if pi < params.len() {
             def_v(builder, &vars, sv, params[pi]);
             pi += 1;
         }
+    } else if ctx.uses_struct_return {
+        // Implicit multi-scalar sret: the signature has a StructReturn param, but LPIR has no
+        // sret vreg (returns are still scalars in `func.return_types`). Skip it; the back end
+        // writes returns through a backend-private path (e.g. `lpvm-native`'s
+        // `ReturnMethod::Sret`) rather than through an LPIR-visible pointer.
+        if pi < params.len() {
+            pi += 1;
+        }
+    }
+    if pi < params.len() {
+        def_v(builder, &vars, func.vmctx_vreg, params[pi]);
+        pi += 1;
     }
     for user_i in 0..func.param_count as usize {
         if pi < params.len() {
@@ -290,9 +337,10 @@ mod struct_return_signature_tests {
             .unwrap()
     }
 
-    /// `invoke_sysv_struct_return_buf` must match: vmctx, sret buffer pointer, then user scalars.
+    /// `invoke_sysv_struct_return_buf` and `lpvm-native`'s `ReturnMethod::Sret { ptr_reg: A0 }`
+    /// expect: sret buffer pointer FIRST (RV32 `a0`, x86-64 `rdi`), then vmctx, then user scalars.
     #[test]
-    fn riscv32_sret_marker_places_struct_return_after_vmctx() {
+    fn riscv32_sret_marker_places_struct_return_first() {
         let isa = riscv32_isa();
         let ptr_ty = isa.pointer_type();
         let func = IrFunction {
@@ -314,13 +362,47 @@ mod struct_return_signature_tests {
             ptr_ty,
             isa.as_ref(),
         );
-        assert_eq!(sig.params.len(), 3, "vmctx + sret + one user i32");
-        assert_eq!(sig.params[0].purpose, ArgumentPurpose::Normal, "vmctx");
-        assert_eq!(sig.params[1].purpose, ArgumentPurpose::StructReturn, "sret");
+        assert_eq!(sig.params.len(), 3, "sret + vmctx + one user i32");
+        assert_eq!(sig.params[0].purpose, ArgumentPurpose::StructReturn, "sret");
+        assert_eq!(sig.params[1].purpose, ArgumentPurpose::Normal, "vmctx");
         assert_eq!(sig.params[2].purpose, ArgumentPurpose::Normal, "user");
         assert!(
             sig.returns.is_empty(),
             "StructReturn ABI: returns live in the buffer, not in Signature::returns"
+        );
+    }
+
+    /// Regression: vec3+ scalar returns on RV32 must still use StructReturn so `lp-riscv-emu`
+    /// matches `lpvm-native`'s `classify_return` (implicit ABI sret when `sret_arg` is unset).
+    #[test]
+    fn riscv32_vec3_implicit_abi_uses_struct_return_without_sret_arg() {
+        let isa = riscv32_isa();
+        let ptr_ty = isa.pointer_type();
+        let func = IrFunction {
+            name: String::from("ret_vec3"),
+            is_entry: false,
+            vmctx_vreg: VMCTX_VREG,
+            param_count: 0,
+            return_types: vec![IrType::I32, IrType::I32, IrType::I32],
+            sret_arg: None,
+            vreg_types: vec![IrType::Pointer],
+            slots: Vec::new(),
+            body: Vec::new(),
+            vreg_pool: Vec::new(),
+        };
+        let sig = signature_for_ir_func(
+            &func,
+            CallConv::SystemV,
+            FloatMode::Q32,
+            ptr_ty,
+            isa.as_ref(),
+        );
+        assert_eq!(sig.params.len(), 2, "sret + vmctx");
+        assert_eq!(sig.params[0].purpose, ArgumentPurpose::StructReturn, "sret");
+        assert_eq!(sig.params[1].purpose, ArgumentPurpose::Normal, "vmctx");
+        assert!(
+            sig.returns.is_empty(),
+            "Legacy multi-scalar sret: returns live in the buffer"
         );
     }
 }

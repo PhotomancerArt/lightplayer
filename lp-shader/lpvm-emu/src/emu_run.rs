@@ -20,7 +20,7 @@ use lpvm_cranelift::error::CompileError;
 use lpvm_cranelift::{CompileOptions, CompilerError, signature_for_ir_func};
 use target_lexicon::Triple;
 
-use crate::host_marshal::{ir_user_args_from_q32_words, sret_buffer_byte_size};
+use crate::host_marshal::{emulator_struct_return_buffer, ir_user_args_from_q32_words};
 use crate::memory::{DEFAULT_SHARED_CAPACITY, EmuSharedArena};
 
 /// RV32 guest [`VmContext`](lpvm::VmContext) header: `fuel` (u64 LE) + `trap` (u32) + `metadata` (u32).
@@ -121,12 +121,8 @@ pub fn glsl_q32_call_emulated(
         &*isa,
     );
     let n_ret = ir_func.return_types.len();
-    let uses_sret = ir_func.sret_arg.is_some();
-    let struct_size = if uses_sret {
-        sret_buffer_byte_size(&gfn.return_type)?
-    } else {
-        0usize
-    };
+    let (uses_sret, struct_size) =
+        emulator_struct_return_buffer(&*isa, ir_func, Some(&gfn.return_type))?;
     let entry = *load.symbol_map.get(name).ok_or_else(|| {
         CallError::Unsupported(format!("symbol `{name}` not in linked RV32 image"))
     })?;
@@ -212,12 +208,12 @@ pub fn run_loaded_function_i32(
                 "no IR function `{func_name}`"
             )))
         })?;
-    if f.sret_arg.is_some() {
+    let isa = riscv32_reference_isa()?;
+    if lpvm_cranelift::signature_uses_struct_return(&*isa, f) {
         return Err(CompilerError::Codegen(CompileError::unsupported(
-            "run_loaded_function_i32: aggregate sret returns are not supported; use EmuInstance or glsl_q32_call_emulated",
+            "run_loaded_function_i32: struct-return calls (explicit or implicit) are not supported; use EmuInstance or glsl_q32_call_emulated",
         )));
     }
-    let isa = riscv32_reference_isa()?;
     let sig = signature_for_ir_func(
         f,
         CallConv::SystemV,

@@ -19,7 +19,7 @@ use lpvm::{
 use lpvm_cranelift::signature_for_ir_func;
 
 use crate::emu_run::{self, GUEST_VMCTX_BYTES};
-use crate::host_marshal::{ir_user_args_from_q32_words, sret_buffer_byte_size};
+use crate::host_marshal::{emulator_struct_return_buffer, ir_user_args_from_q32_words};
 use crate::module::EmuModule;
 
 /// Execution error for [`EmuInstance`].
@@ -469,17 +469,9 @@ impl EmuInstance {
             &*isa,
         );
         let n_ret = ir_func.return_types.len();
-        let uses_sret = ir_func.sret_arg.is_some();
-        let struct_size = if uses_sret {
-            let rt = return_ty_sret.ok_or_else(|| {
-                InstanceError::Call(CallError::Unsupported(String::from(
-                    "internal: LPIR sret without host return type for sizing",
-                )))
-            })?;
-            sret_buffer_byte_size(rt).map_err(InstanceError::Call)?
-        } else {
-            0usize
-        };
+        let (uses_sret, struct_size) =
+            emulator_struct_return_buffer(&*isa, ir_func, return_ty_sret)
+                .map_err(InstanceError::Call)?;
 
         let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
         let shared = self.module.arena.storage_arc();

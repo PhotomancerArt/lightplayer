@@ -5,10 +5,12 @@ extern crate alloc;
 use alloc::format;
 use alloc::vec::Vec;
 
+use cranelift_codegen::isa::TargetIsa;
 use lpir::lpir_module::IrFunction;
 use lpir::types::IrType;
 use lps_shared::{FnParam, LayoutRules, LpsType};
 use lpvm::{CallError, LpvmMemory, glsl_component_count, type_alignment, type_size};
+use lpvm_cranelift::signature_uses_struct_return;
 
 use crate::memory::EmuSharedArena;
 
@@ -121,6 +123,32 @@ pub(crate) fn ir_user_args_from_q32_words(
     }
 
     Ok(out)
+}
+
+/// Whether the emulator must use a struct-return buffer, and its size in bytes.
+///
+/// Uses [`signature_uses_struct_return`] as the single predicate matching
+/// [`lpvm_cranelift::signature_for_ir_func`]. Explicit LPIR sret (`sret_arg`) sizes from
+/// `return_ty_for_explicit` (std430); implicit ABI sret uses `return_types.len() * 4`.
+pub(crate) fn emulator_struct_return_buffer(
+    isa: &dyn TargetIsa,
+    ir_func: &IrFunction,
+    return_ty_for_explicit: Option<&LpsType>,
+) -> Result<(bool, usize), CallError> {
+    if !signature_uses_struct_return(isa, ir_func) {
+        return Ok((false, 0));
+    }
+    let bytes = if ir_func.sret_arg.is_some() {
+        let rt = return_ty_for_explicit.ok_or_else(|| {
+            CallError::Unsupported(String::from(
+                "internal: LPIR sret without host return type for sizing",
+            ))
+        })?;
+        sret_buffer_byte_size(rt)?
+    } else {
+        ir_func.return_types.len() * 4
+    };
+    Ok((true, bytes))
 }
 
 /// Byte size of the sret buffer for an aggregate return under std430.
