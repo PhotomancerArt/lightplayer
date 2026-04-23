@@ -1,17 +1,38 @@
-//! ValueSpec: author-time defaults (literal values + opaque-handle recipes).
-//! See docs/design/lightplayer/quantity.md §7.
+//! Author-time **default** description: what to put in a slot before the
+//! loader/runtime has real resources.
+//!
+//! Some [`Kind`][`crate::kind::Kind`]s need more than a plain [`crate::LpsValue`]
+//! at author time: **opaque handles** (e.g. [`Kind::Texture`][`crate::kind::Kind::Texture`])
+//! are produced from a small **recipe** (`TextureSpec`) that the loader
+//! materializes into a handle-shaped value (`docs/design/lightplayer/quantity.md`
+//! §7). Value-typed Kinds use [`ValueSpec::Literal`]. Defaults are serialized
+//! as [`ValueSpec`], not as an already-resolved GPU handle, so save/reload
+//! round-trips author intent (`quantity.md` §7 “Conventions”).
+//!
+//! ## Serde and equality
+//!
+//! `LpsValueF32` in `lps-shared` does not derive `Serialize` / `PartialEq` in
+//! M2; this module uses a **private** wire form for serde and hand-written
+//! [`ValueSpec`]:[`PartialEq`] (see
+//! `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` — “ValueSpec
+//! serde via private wire enum” and hand-written `PartialEq` for `ValueSpec`).
 
 use crate::LpsValue;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Loader-side context. Phase 5 ships a stub; M3 fills with a real
-/// texture handle allocator and asset cache.
+/// Load-time context for **materializing** author specs: allocating handles,
+/// resolving assets, and similar.
+///
+/// M2 ships a minimal stub; M3+ is expected to wire a real texture allocator
+/// and cache (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md` — `LoadCtx` stub, `summary.md`).
 #[derive(Default)]
 pub struct LoadCtx {
+    /// Monotonic counter (or future allocator state) for [`TextureSpec`] materialization in tests; not the final handle policy.
     pub next_texture_handle: i32,
 }
 
+// Private serde mirror of `LpsValue` (wire shape); see module docs.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -116,6 +137,7 @@ impl From<LpsValueWire> for LpsValue {
     }
 }
 
+// Internally-tagged `ValueSpec` for serde/JsonSchema; public API is `ValueSpec`.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -142,9 +164,14 @@ impl From<ValueSpecWire> for ValueSpec {
     }
 }
 
+/// Either a concrete [`LpsValue`] for value-typed kinds, or a handle recipe
+/// for opaque kinds (`docs/design/lightplayer/quantity.md` §7).
 #[derive(Clone, Debug)]
 pub enum ValueSpec {
+    /// Materializes to a clone of the same value (`quantity.md` §7).
     Literal(LpsValue),
+    /// [`TextureSpec`] for [`Kind::Texture`](crate::kind::Kind::Texture) defaults
+    /// (M2: v0 has [`TextureSpec::Black`] only, `quantity.md` §7 sketch).
     Texture(TextureSpec),
 }
 
@@ -170,14 +197,21 @@ impl PartialEq for ValueSpec {
     }
 }
 
+/// Recipe to build a default **texture** when author-time data is not a raw
+/// handle. M2 defines only a universal 1×1 black (`quantity.md` §7).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TextureSpec {
+    /// 1×1 fully opaque black: the universal “no texture” default
+    /// (`docs/design/lightplayer/quantity.md` §7).
     Black,
 }
 
 impl ValueSpec {
+    /// Produces a runtime [`LpsValue`]: **identity** for [`ValueSpec::Literal`];
+    /// for [`ValueSpec::Texture`], run [`TextureSpec::materialize`] and allocate/assign handles through
+    /// `ctx` (`quantity.md` §7 `ValueSpec` / “Materialization is at load time”).
     pub fn materialize(&self, ctx: &mut LoadCtx) -> LpsValue {
         match self {
             Self::Literal(v) => v.clone(),
@@ -187,6 +221,8 @@ impl ValueSpec {
 }
 
 impl TextureSpec {
+    /// Returns the handle-shaped `LpsValue` struct for [`Kind::Texture`](crate::kind::Kind::Texture)
+    /// storage (`quantity.md` §3, texture struct).
     pub fn materialize(&self, ctx: &mut LoadCtx) -> LpsValue {
         match self {
             Self::Black => texture_handle_value(ctx, 0, 1, 1),
@@ -194,6 +230,8 @@ impl TextureSpec {
     }
 }
 
+/// Delegates to the private `ValueSpecWire` type’s `JsonSchema` impl so recursive [`Shape`](crate::shape::Shape)
+/// / [`Slot`](crate::shape::Slot) can derive schemas without exposing the wire type.
 #[cfg(feature = "schema-gen")]
 impl schemars::JsonSchema for ValueSpec {
     fn schema_name() -> alloc::borrow::Cow<'static, str> {

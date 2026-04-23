@@ -1,14 +1,26 @@
-//! Node trait: the runtime interface every concrete node implements.
+//! **Runtime** graph nodes: the live counterpart to authored path and spec
+//! types in [`crate::types`].
+//!
+//! A [`Node`] is an **object-safe** interface implemented by every concrete
+//! on-graph object (see tests holding `Box<dyn Node>`). It combines a cheap
+//! [`Uid`] with a stable [`NodePath`] and [`PropPath`]-keyed property access
+//! over [`LpsValue`][`crate::LpsValue`] (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md` trait surface, `00-design` Node sketch).
 
 use crate::LpsValue;
 use crate::error::DomainError;
 use crate::types::{NodePath, PropPath, Uid};
 
+/// A **node instance** in the runtime graph: addressable, property-get/set.
 pub trait Node {
+    /// The process-local [`Uid`]; not the same as a [`NodePath`].
     fn uid(&self) -> Uid;
+    /// Slash-joined path of `name.type` segments (see [`NodePath`]). Stable across sessions for authored content.
     fn path(&self) -> &NodePath;
 
+    /// Read a property; paths use [`PropPath`] (dot fields and `[index]`).
+    /// Errors map to [`DomainError`] (e.g. unknown key or type mismatch when setting).
     fn get_property(&self, prop: &PropPath) -> Result<LpsValue, DomainError>;
+    /// Write a property, validating shape against the domain model where applicable.
     fn set_property(&mut self, prop: &PropPath, value: LpsValue) -> Result<(), DomainError>;
 }
 

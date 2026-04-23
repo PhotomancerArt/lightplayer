@@ -1,5 +1,19 @@
-//! Binding enum (bus connection) + BindingResolver trait stub.
-//! See docs/design/lightplayer/quantity.md §8.
+//! **Bindings** connect parameter slots to **runtime signals** on the implicit
+//! bus (`docs/design/lightplayer/quantity.md` §8).
+//!
+//! There is no separate “bus object” in authored files: **channels exist** when
+//! at least one binding references them; direction (read vs write) comes from
+//! the slot’s **role** in its container (e.g. under `params` vs an output
+//! declaration), not from the [`Binding`] enum (`quantity.md` §8 “Direction is
+//! contextual”). The first writer/reader to a channel establishes its
+//! [`Kind`](crate::kind::Kind); mismatches are compose-time errors (same
+//! section).
+//!
+//! # JSON / TOML shape
+//!
+//! The bus model in `quantity.md` uses `bind = { bus = "…" }` in TOML. M2’s
+//! serde shape for [`Binding::Bus`] may differ from the final on-disk sugar;
+//! see the `// TODO(M3)` note in this file.
 
 // TODO(M3): align serde JSON shape with quantity.md §8 on-disk form `bind = { bus = "…" }`
 // (inline string per channel). Current externally-tagged form is
@@ -7,19 +21,25 @@
 
 use crate::types::ChannelName;
 
+/// A **connection** from a slot to a bus channel. v0 has a single variant.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Binding {
+    /// Read or write (per container context) the named channel. Convention:
+    /// names like `time`, `video/in/0`, `audio/in/0` — see
+    /// `docs/design/lightplayer/quantity.md` §8 and §11 (channel naming).
     Bus { channel: ChannelName },
 }
 
-/// Trait stub — compose-time validation that a Slot's binding is
-/// type-compatible with its target bus channel. Real impl lands in M3+.
+/// **Compose-time** lookup for “what [`Kind`](crate::kind::Kind) does this
+/// channel carry?”, used to validate that a slot’s kind matches the bus. A real
+/// implementation lands in M3+; M2 is only a trait shape
+/// (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md`).
 pub trait BindingResolver {
-    /// The [`Kind`](crate::kind::Kind) that the channel currently carries (set by the first
-    /// binding to it). `None` means the channel doesn't exist yet and
-    /// will be declared by this binding.
+    /// The kind currently associated with `channel`, if any. `None` means the
+    /// channel will be **declared** by this binding (first use), per
+    /// `docs/design/lightplayer/quantity.md` §8 “Compose-time validation”.
     fn channel_kind(&self, channel: &ChannelName) -> Option<crate::kind::Kind>;
 }
 

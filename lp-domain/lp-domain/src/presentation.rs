@@ -1,19 +1,40 @@
-//! Presentation enum (UI widget hint).
-//! See docs/design/lightplayer/quantity.md §9.
+//! **UI widget** hints for editing a slot’s value: orthogonal to
+//! [`Constraint`](crate::constraint::Constraint), which is the **legal
+//! range**; presentation is how to *show* the control
+//! (`docs/design/lightplayer/quantity.md` §9 and the default table there).
+//! v0 is an **enum only** (no per-variant config); constraints already carry
+//! range/step/choices. Log scale, format strings, and similar are deferred
+//! until a concrete need (`quantity.md` §9 “v0 is enum-only”).
+//!
+//! When a [`Slot`](crate::shape::Slot)’s `present` is `None`, tools use
+//! [`Kind::default_presentation`](crate::kind::Kind::default_presentation)
+//! (`quantity.md` §9 table).
 
+/// A **widget kind** for inspector / panel generation. Values serialize as
+/// snake_case strings (see module tests).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Presentation {
+    /// Rotary control; default for several angular and frequency-like kinds (`quantity.md` §9 table).
     Knob,
+    /// Linear fader; default for spans and many 0–1 kinds (`quantity.md` §9).
     Fader,
+    /// On/off control; default for [`Kind::Bool`](crate::kind::Kind::Bool).
     Toggle,
+    /// Typed or stepped numeric field; used for e.g. [`Kind::Instant`](crate::kind::Kind::Instant) and [`Kind::Count`](crate::kind::Kind::Count), and for [`Kind::Position3d`](crate::kind::Kind::Position3d) in v0 (three numbers, `quantity.md` §9).
     NumberInput,
+    /// Labeled discrete options; default for [`Kind::Choice`](crate::kind::Kind::Choice).
     Dropdown,
+    /// 2D point editor; default for [`Kind::Position2d`](crate::kind::Kind::Position2d).
     XyPad,
+    /// Color space + coordinate editing for [`Kind::Color`](crate::kind::Kind::Color).
     ColorPicker,
+    /// Edits palette entries; default for [`Kind::ColorPalette`](crate::kind::Kind::ColorPalette).
     PaletteEditor,
+    /// Edits gradient stops; default for [`Kind::Gradient`](crate::kind::Kind::Gradient).
     GradientEditor,
+    /// Preview of a [`Kind::Texture`](crate::kind::Kind::Texture) slot.
     TexturePreview,
 }
 

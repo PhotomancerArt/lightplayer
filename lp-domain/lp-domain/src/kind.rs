@@ -1,4 +1,15 @@
-//! Kind: semantic identity of a value. See docs/design/lightplayer/quantity.md §3.
+//! [`Kind`]: semantic identity of a value.
+//!
+//! In the five-layer Quantity model, [`Kind`] sits *above* storage types and
+//! *below* per-slot legality: it answers “what category of thing is this value?”
+//! while [`crate::LpsType`] and [`crate::LpsValue`] (from `lps_shared`) cover raw
+//! shape. See `docs/design/lightplayer/quantity.md` §0, §1, §2, and §3.
+//!
+//! A [`Kind`] is **orthogonal to storage** in the sense that each variant maps
+//! to a **fixed** [`Kind::storage`] recipe for GPU and serialization, while
+//! still carrying a distinct *meaning* (e.g. [`Kind::Amplitude`] vs
+//! [`Kind::Ratio`] both use `LpsType::Float` in v0 but differ in default
+//! constraint, presentation, and intent — see the §3 table in `quantity.md`).
 
 use crate::LpsType;
 use crate::binding::Binding;
@@ -9,27 +20,56 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use lps_shared::StructMember;
 
+/// Maximum number of colors in a [`Kind::ColorPalette`] value’s fixed array storage.
+///
+/// v0 is deliberately small for embedded targets; the same constant sizes the
+/// `entries` field in the palette’s [`LpsType`] (see `quantity.md` §3 “Storage
+/// recipes” and the roadmap risk note on fixed-size arrays).
 pub const MAX_PALETTE_LEN: u32 = 16;
+
+/// Maximum number of stops in a [`Kind::Gradient`] value’s fixed `stops` array.
+///
+/// See [`MAX_PALETTE_LEN`] and `quantity.md` §3. Constants like this live in
+/// `lp-domain` so layout stays explicit next to the [`Kind`]s that use them.
 pub const MAX_GRADIENT_STOPS: u32 = 16;
 
+/// **Commensurability class** for a [`Kind`]: two Kinds share a [`Dimension`]
+/// iff their values are meaningfully expressed in the same *kind* of unit.
+///
+/// This is the “which quantities can be converted as same-dimension” layer;
+/// the framework does **not** do quantity algebra — math stays in user shaders
+/// (`docs/design/lightplayer/quantity.md` §4, “No quantity arithmetic in the
+/// framework”). [`Kind::Phase`] and [`Kind::Angle`] are intentionally *different*
+/// [`Kind`]s even though both are “dimensionless” in the SI sense (`quantity.md` §4).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Dimension {
+    /// Kinds with no physical dimension: [`Kind::Amplitude`], [`Kind::Ratio`], [`Kind::Phase`], [`Kind::Count`], [`Kind::Bool`], [`Kind::Choice`], color-family and spatial-struct Kinds, and [`Kind::Texture`].
     Dimensionless,
+    /// [`Kind::Instant`] and [`Kind::Duration`] (stored in seconds as F32, `quantity.md` §4).
     Time,
+    /// [`Kind::Frequency`] (stored in hertz, `quantity.md` §4).
     Frequency,
+    /// [`Kind::Angle`] (stored in radians, `quantity.md` §4).
     Angle,
 }
 
+/// **Base storage unit** implied by a [`Kind`] for display and v0 TOML (no
+/// per-value `unit` field — the [`Kind`] implies it, `quantity.md` §4).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Unit {
+    /// Used for [`Dimension::Dimensionless`] (and in v0, [`Kind::Phase`], which is *not* [`Dimension::Angle`], `quantity.md` §4).
     None,
+    /// Time base unit (seconds) for the [`Dimension::Time`] dimension.
     Seconds,
+    /// Frequency base unit (hertz) for the [`Dimension::Frequency`] dimension.
     Hertz,
+    /// Angle base unit (radians) for the [`Dimension::Angle`] dimension.
     Radians,
 }
 
+/// Authoritative color space tag used **inside** color-family `LpsValue` structs; values line up with `docs/design/color.md` and the `space: I32` field in the [`Kind::Color`]/[`Kind::ColorPalette`]/[`Kind::Gradient`] storage recipes (`quantity.md` §3).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Colorspace {
@@ -39,6 +79,7 @@ pub enum Colorspace {
     Srgb,
 }
 
+/// How to interpolate a [`Kind::Gradient`]; the numeric tag lives in the gradient struct’s `method: I32` field (`quantity.md` §3, `color.md`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum InterpMethod {
@@ -47,32 +88,65 @@ pub enum InterpMethod {
     Step,
 }
 
+/// **Semantic** identity of a value in the LightPlayer domain: what it *means*
+/// for tooling, the bus, and defaults — independent of whether it is a scalar
+/// or a structured *value-type* vs an opaque *handle-type* (`quantity.md` §3, open
+/// enumeration).
+///
+/// The set is open for new examples; M2 ships the v0 row used across documentation.
+///
+/// Grouping (per `quantity.md` §3 sketch):
+///
+/// - **Dimensionless value scalars:** `Kind::Amplitude`, `Kind::Ratio`, `Kind::Phase`, `Kind::Count`, `Kind::Bool`, `Kind::Choice`
+/// - **Scalars with a [`Dimension`]:** `Kind::Instant`, `Kind::Duration`, `Kind::Frequency`, `Kind::Angle`
+/// - **Structured *value* kinds (GPU-friendly structs):** `Kind::Color`, `Kind::ColorPalette`, `Kind::Gradient`, `Kind::Position2d`, `Kind::Position3d`
+/// - **Opaque handle (texture today):** `Kind::Texture`
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
+    /// [0, 1] strength of a signal (`quantity.md` §3 table).
     Amplitude,
+    /// [0, 1] fraction or proportion (`quantity.md` §3).
     Ratio,
+    /// [0, 1) **wrapping** cycle position; distinct from [`Kind::Angle`] and [`Kind::Ratio`] by intent (`quantity.md` §3; see also `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` Q3 for `Phase` vs `Angle`).
     Phase,
+    /// Non-negative integer count; storage `LpsType::Int` (`quantity.md` §3, storage table).
     Count,
+    /// Boolean.
     Bool,
+    /// Discrete choice; storage `LpsType::Int` in v0 (`quantity.md` §3).
     Choice,
 
+    /// Time **instant** as F32 seconds since an epoch; [`Dimension::Time`] (`quantity.md` §3). Default bus is [`Binding::Bus`] with channel `"time"` when no explicit bind (`quantity.md` §8).
     Instant,
+    /// Non-negative F32 **duration** in seconds; [`Dimension::Time`] (`quantity.md` §3).
     Duration,
+    /// F32 **frequency** in hertz; [`Dimension::Frequency`] (`quantity.md` §3).
     Frequency,
+    /// F32 **angle** in radians, may exceed 2π; [`Dimension::Angle`] (`quantity.md` §3).
     Angle,
 
+    /// Full color in an author-selected space; see `docs/design/color.md` and the struct recipe in `quantity.md` §3.
     Color,
+    /// Fixed-max palette: [`MAX_PALETTE_LEN`], `count`, and `entries` (`quantity.md` §3, `color.md`).
     ColorPalette,
+    /// Gradient with stops; [`MAX_GRADIENT_STOPS`] and [`InterpMethod`] (`quantity.md` §3).
     Gradient,
+    /// 2D position as `LpsType::Vec2` (`quantity.md` §3).
     Position2d,
+    /// 3D position as `LpsType::Vec3` (`quantity.md` §3).
     Position3d,
 
+    /// Opaque **GPU** texture: handle/width/height/format struct; pixel data in [`crate::TextureBuffer`] (`quantity.md` §3, storage table). Default bus: `"video/in/0"` when no explicit bind (`quantity.md` §8).
     Texture,
 }
 
 impl Kind {
+    /// Returns the **structural** [`LpsType`] the shader, serializer, and
+    /// runtime agree on: the “storage recipe” for this [`Kind`]
+    /// (`docs/design/lightplayer/quantity.md` §3, “Storage recipes”, and `impl`
+    /// block in §3).
     pub fn storage(self) -> LpsType {
         match self {
             Self::Amplitude
@@ -93,6 +167,10 @@ impl Kind {
         }
     }
 
+    /// Returns the **dimensional** class used for commensurability
+    /// (`docs/design/lightplayer/quantity.md` §4, [`Dimension`] / [`Unit`]). Kinds
+    /// not listed in that section map to [`Dimension::Dimensionless`], including
+    /// [`Kind::Phase`] (explicitly *not* [`Dimension::Angle`], `quantity.md` §4).
     pub fn dimension(self) -> Dimension {
         match self {
             Self::Instant | Self::Duration => Dimension::Time,
@@ -102,6 +180,15 @@ impl Kind {
         }
     }
 
+    /// A **sensible default** [`Constraint::Range`] (or [`Constraint::Free`])
+    /// for this [`Kind`] when a slot does not override legality. This is the
+    /// *natural* domain of the kind before slot-specific tuning (`quantity.md` §3
+    /// per-`Kind` contract and §5: constraints **refine** the kind, they don’t
+    /// replace it).
+    ///
+    /// v0 range fields are F32 in [`crate::constraint::Constraint`]; see
+    /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (F32
+    /// narrowing and future widening).
     pub fn default_constraint(self) -> Constraint {
         use Constraint::*;
         match self {
@@ -124,6 +211,9 @@ impl Kind {
         }
     }
 
+    /// **Default** [`Presentation`]: which widget to use when a [`crate::shape::Slot`]
+    /// omits an explicit `present` override (`docs/design/lightplayer/quantity.md` §9
+    /// and the default table there).
     pub fn default_presentation(self) -> Presentation {
         use Presentation::*;
         match self {
@@ -141,6 +231,12 @@ impl Kind {
         }
     }
 
+    /// **Conventional** input binding when a slot’s `bind` is absent: bus
+    /// resolution order is **explicit slot bind → kind default here → use the
+    /// slot’s default value** (materialized from [`ValueSpec`](crate::value_spec::ValueSpec),
+    /// `docs/design/lightplayer/quantity.md` §8). Output-side defaults are
+    /// module-level (e.g. shows writing `video/out/0`), not listed here
+    /// (`quantity.md` §8).
     pub fn default_bind(self) -> Option<Binding> {
         match self {
             Self::Instant => Some(Binding::Bus {

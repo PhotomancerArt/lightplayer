@@ -1,25 +1,38 @@
-//! LightPlayer domain model.
+//! LightPlayer **domain** crate: identity, addressing, and the **Quantity model**
+//! ([`Kind`](kind::Kind), [`Constraint`](constraint::Constraint), [`Shape`](shape::Shape)/[`Slot`](shape::Slot), [`ValueSpec`](value_spec::ValueSpec), [`Binding`](binding::Binding), [`Presentation`](presentation::Presentation)).
 //!
-//! See [`docs/design/lightplayer/quantity.md`](../../../docs/design/lightplayer/quantity.md)
-//! for the canonical Quantity-model spec this crate implements.
+//! # Layered model
 //!
-//! ## schemars fallback chain (when a derive misbehaves)
+//! The stack is intentionally layered (see `docs/design/lightplayer/quantity.md` §0, §1, and §2):
 //!
-//! Every public type in this crate derives `schemars::JsonSchema` behind
-//! the `schema-gen` feature. If a future derive fails (recursive-type
-//! cycle, generic that schemars can't introspect, lifetime issue):
+//! 1. **[`LpsValue`]** — raw structural data (bytes, no semantics). From the `lps_shared` dependency.
+//! 2. **[`LpsType`]** — the structural type of an [`LpsValue`]. From the `lps_shared` dependency.
+//! 3. **[`Kind`](kind::Kind)** — semantic identity (e.g. `Kind::Frequency`, `Kind::Color`, `Kind::Texture`). This crate. Orthogonal to storage: one [`Kind`](kind::Kind) maps to a fixed storage recipe.
+//! 4. **[`Constraint`](constraint::Constraint)** — which values are *legal* in a slot (range, choices). Domain truth, not a UI afterthought. See `quantity.md` §5.
+//! 5. **[`Shape`](shape::Shape) and [`Slot`](shape::Slot)** — recursive composition (structural shape plus labels, bus [`Binding`](binding::Binding), and [`Presentation`](presentation::Presentation)). See `quantity.md` §6. Defaults for composed shapes are carried on [`Shape`](shape::Shape), not a separate `default` field on [`Slot`](shape::Slot) (M2, “Option A”; see `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md`).
 //!
-//! 1. **Manual derive impl.** Hand-write `impl JsonSchema for T` returning
-//!    a `schemars::schema::SchemaObject` that mirrors the serde shape.
-//! 2. **Hand-written schema.** Drop the derive and ship a `pub fn
-//!    <type>_schema() -> RootSchema` constructor that the codegen tool
-//!    calls explicitly.
-//! 3. **Drop schemars for the type.** As a last resort: remove the derive
-//!    and document the type as "not part of the on-disk surface" so M4's
-//!    codegen tool can skip it. M2 should not need this fallback for any
-//!    type — if you find yourself reaching for it, stop and report.
+//! # Environment and features
 //!
-//! The smoke tests in `schema_gen_smoke.rs` catch broken derives early.
+//! - **Default build:** `no_std` with the `alloc` crate, for embedded class targets (e.g. ESP32-C6), matching the roadmap (`docs/roadmaps/2026-04-22-lp-domain/overview.md`).
+//! - **`std`:** optional `std` wiring (e.g. `lpfs` / `toml` with `std`) for host-side and tooling.
+//! - **`schema-gen`:** enables schemars `JsonSchema` on model types and pulls `schemars` through `lps-shared` for host-side JSON Schema generation. Schemars’ own **codegen** is std-only; use this feature where tooling runs (`docs/roadmaps/2026-04-22-lp-domain/overview.md` — “Risks”, `schemars`).
+//!
+//! # Design references
+//!
+//! - **`docs/design/lightplayer/quantity.md`** — primary Quantity spec.
+//! - **`docs/roadmaps/2026-04-22-lp-domain/overview.md`** — domain layer, artifacts, and migration story.
+//! - **`docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md`** — historical “why” for Quantity decisions.
+//! - **M2 milestone:** `docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md`, `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/00-design.md`, `summary.md`.
+//!
+//! # schemars fallback (when a derive misbehaves)
+//!
+//! Public types in this crate derive or implement the schemars `JsonSchema` trait behind `schema-gen` where possible. If a future derive fails (recursive type cycle, generic introspection, lifetimes), use this order:
+//!
+//! 1. **Manual `JsonSchema` impl** — return a `schemars::schema::SchemaObject` that mirrors the serde shape.
+//! 2. **Hand-written schema** — a `pub fn <type>_schema() -> RootSchema` that codegen calls explicitly.
+//! 3. **Last resort** — remove the derive and document the type as not part of the on-disk or generated schema surface.
+//!
+//! M2 is not expected to need (3) for any model type. The smoke tests in `schema_gen_smoke` catch broken `schema_for!` / derives early.
 
 #![no_std]
 extern crate alloc;
@@ -42,6 +55,13 @@ pub mod value_spec;
 #[cfg(feature = "schema-gen")]
 mod schema_gen_smoke;
 
+/// Cross-cutting error for [`Node`](node::Node) property access and related domain operations.
 pub use error::DomainError;
+/// Shader-facing structural type system (mirrors [`LpsValue`]); shared with the GLSL/compilation stack.
+pub use lps_shared::LpsType;
+/// Canonical structural **value** type for the engine and tooling: `lps_shared::LpsValueF32` re-exported for convenience.
 pub use lps_shared::LpsValueF32 as LpsValue;
-pub use lps_shared::{LpsType, TextureBuffer, TextureStorageFormat};
+/// Opaque texture pixel storage (lives beside handle values in the GPU/loader story).
+pub use lps_shared::TextureBuffer;
+/// Texture format id for [`Kind::Texture`](kind::Kind::Texture) storage; from `lps_shared`. See `docs/design/lightplayer/quantity.md` §3 (storage table).
+pub use lps_shared::TextureStorageFormat;

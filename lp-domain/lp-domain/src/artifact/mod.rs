@@ -1,6 +1,7 @@
-//! Artifact ergonomics: re-exports of the trait shapes from `crate::schema`.
-//!
-//! Concrete artifact types (`Pattern`, `Stack`, `Live`, `Playlist`, `Setlist`,
-//! `Show`) land in M3 alongside their TOML loaders.
+//! Re-exports for **artifact**-related schema traits. Concrete struct types
+//! (`Pattern`, `Effect`, `Transition`, `Stack`, `Live`, `Playlist` — the six
+//! **Visual** / playlist kinds in `docs/roadmaps/2026-04-22-lp-domain/overview.md`)
+//! and TOML loaders are **M3+**; M2 only wires [`Artifact`], [`Migration`],
+//! and [`Registry`] from [`crate::schema`].
 
 pub use crate::schema::{Artifact, Migration, Registry};

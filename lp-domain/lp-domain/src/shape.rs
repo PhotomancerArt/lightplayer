@@ -1,4 +1,24 @@
-//! Shape (Scalar / Array / Struct) and Slot. See docs/design/lightplayer/quantity.md §6.
+//! [`Shape`]: the **structural** skeleton of a value (what WGSL/GLSL can
+//! represent); [`Slot`]: a [`Shape`] plus **metadata** and wiring hints.
+//!
+//! Together they are the **composition** layer of the Quantity model
+//! (`docs/design/lightplayer/quantity.md` §1, §2, and §6). `Shape` is *only*
+//! `Scalar | Array | Struct` (no tuples or sum types) so every slot’s storage
+//! projects cleanly to a [`crate::LpsType`] and GPU layouts (`quantity.md` §6,
+//! “Why no tuples”).
+//!
+//! **Defaults (M2, “Q15 Option A”):** [`Shape::Scalar`] carries a **mandatory**
+//! [`ValueSpec`][`crate::value_spec::ValueSpec`]. [`Shape::Array`] and
+//! [`Shape::Struct`] carry `default: Option<ValueSpec>`; if `None`, the
+//! default is **derived** at materialize time from child slots (arrays:
+//! N copies; structs: one field per child). If `Some`, that aggregate spec
+//! wins. See `quantity.md` §6 “Defaults for compositions” and
+//! `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (Q15). A
+//! [`Slot`] has **no** separate top-level `default` field: defaults are entirely
+//! expressed through [`Shape`].
+//!
+//! [`Shape::Struct`]’s `fields` are a **vector** to preserve TOML order, std430
+//! layout, and panel field order (`quantity.md` §6).
 
 use crate::binding::Binding;
 use crate::constraint::Constraint;
@@ -12,21 +32,30 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use lps_shared::StructMember;
 
+/// The **recursive** shape of a slot: scalar, fixed-length array, or ordered struct.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(tag = "shape", rename_all = "snake_case")]
 pub enum Shape {
+    /// One leaf value: [`Kind`], [`Constraint`], and a **required** default
+    /// [`ValueSpec`][`crate::value_spec::ValueSpec`] (there is nothing to
+    /// derive a default from, `quantity.md` §6).
     Scalar {
         kind: Kind,
         constraint: Constraint,
         default: ValueSpec,
     },
+    /// A fixed `length` of `element` slots; optional **aggregate** default
+    /// (see module docs). `None` ⇒ N-element array from
+    /// [`Slot::default_value`].
     Array {
         element: Box<Slot>,
         length: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<ValueSpec>,
     },
+    /// Ordered struct fields. Optional aggregate default: `None` ⇒ struct
+    /// map from each field’s default (`quantity.md` §6).
     Struct {
         fields: Vec<(Name, Slot)>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,21 +63,43 @@ pub enum Shape {
     },
 }
 
+/// A **slot declaration**: a [`Shape`] plus optional human and runtime-facing
+/// metadata.
+///
+/// `label` / `description` are for author-facing UI. `bind` and `present`
+/// connect to the bus and widget hints; when `present` is `None`, tools use
+/// [`Kind::default_presentation`][`crate::kind::Kind::default_presentation`]
+/// (`docs/design/lightplayer/quantity.md` §8–9). The slot’s **value default**
+/// is fully determined by the nested [`Shape`], not a separate field (Q15, see
+/// module `//!` above).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct Slot {
+    /// The structural and default-bearing part of the slot.
     pub shape: Shape,
+    /// Short user-facing name (optional; falls back to kind defaults in UI, `quantity.md` §6 sketch).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Longer description (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// If set, **overrides** [`Kind::default_bind`][`crate::kind::Kind::default_bind`]
+    /// for input-side bus wiring (`docs/design/lightplayer/quantity.md` §8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bind: Option<Binding>,
+    /// If set, **overrides** [`Kind::default_presentation`][`crate::kind::Kind::default_presentation`]
+    /// for UI (`docs/design/lightplayer/quantity.md` §9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub present: Option<Presentation>,
 }
 
 impl Slot {
+    /// Materialize the **default** for this slot: for [`Shape::Scalar`],
+    /// [`ValueSpec::materialize`][`crate::value_spec::ValueSpec::materialize`]
+    /// on the scalar’s `default`. For array/struct, if `default` is `Some`, use
+    /// that; otherwise build `Array` of `length` / `Struct` of field name →
+    /// child default, per `docs/design/lightplayer/quantity.md` §6 “Defaults
+    /// for compositions”.
     pub fn default_value(&self, ctx: &mut LoadCtx) -> LpsValue {
         match &self.shape {
             Shape::Scalar { default, .. } => default.materialize(ctx),
@@ -82,6 +133,10 @@ impl Slot {
         }
     }
 
+    /// Structural type for GPU and serializers: for scalars,
+    /// [`Kind::storage`](crate::kind::Kind::storage) for the leaf kind; for arrays, element type
+    /// with length; for structs, ordered members (`quantity.md` §2 table and §6
+    /// `storage()` sketch).
     pub fn storage(&self) -> LpsType {
         match &self.shape {
             Shape::Scalar { kind, .. } => kind.storage(),

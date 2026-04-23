@@ -1,21 +1,43 @@
-//! Schema layer: Artifact + Migration trait shapes; empty Registry.
+//! **Schema versioning and migrations**: traits that typed **artifacts** will
+//! implement, plus a placeholder [`Registry`] for the migration framework in M5
+//! (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md` — `Artifact`,
+//! `Migration`, empty registry; M5 fills behavior per `overview.md` milestone table).
 
 use core::marker::PhantomData;
 
+/// Metadata for a **versioned, on-disk** LightPlayer artifact: pattern, effect,
+/// transition, stack, live, or playlist, each with its own `KIND` string and
+/// schema `CURRENT_VERSION` (`docs/roadmaps/2026-04-22-lp-domain/overview.md`
+/// — crate layout and `schema_version` story).
+///
+/// Typed deserialize, JSON Schema bounds, and migration wiring come in
+/// M5+ (`// TODO` on this trait).
 pub trait Artifact {
+    /// TOML/JSON `kind` discriminator and file extension family (e.g. `"pattern"`).
     const KIND: &'static str;
+    /// Breaking-schema bump only; see `single schema_version` in `overview.md` compatibility model.
     const CURRENT_VERSION: u32;
     // TODO(M5): add `: serde::de::DeserializeOwned` and `: schemars::JsonSchema` bounds
     //          when the migration framework + codegen tooling come online.
 }
 
+/// One **migrator** in a `FROM` → `FROM+1` chain on raw [`toml::Value`]
+/// (hybrid model in `docs/roadmaps/2026-04-22-lp-domain/overview.md` — data flow on load).
 pub trait Migration {
+    /// Must match the [`Artifact::KIND`] this migration applies to.
     const KIND: &'static str;
+    /// Source schema version this function can upgrade from.
     const FROM: u32;
 
+    /// Rewrite `value` in place to the next version’s shape. Chains run until
+    /// the document reaches `Artifact::CURRENT_VERSION`, then a typed
+    /// `Deserialize` runs (`overview.md`).
     fn migrate(value: &mut toml::Value);
 }
 
+/// Placeholder for the **global** migration and artifact-factory table (M5
+/// per `m2-domain-skeleton.md` and `schema/mod` `TODO` here). M2 only needs a
+/// constructible type for tests and forward references.
 #[derive(Default)]
 pub struct Registry {
     // TODO(M5): replace with the real registry shape (artifact factories + migration chains).
@@ -23,6 +45,7 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Creates an empty placeholder registry. Real registration APIs land with M5.
     pub fn new() -> Self {
         Self::default()
     }
