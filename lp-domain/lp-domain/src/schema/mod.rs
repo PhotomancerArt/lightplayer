@@ -5,6 +5,8 @@
 
 use core::marker::PhantomData;
 
+use crate::shape::Slot;
+
 /// Metadata for a **versioned, on-disk** LightPlayer artifact: pattern, effect,
 /// transition, stack, live, or playlist, each with its own `KIND` string and
 /// schema `CURRENT_VERSION` (`docs/roadmaps/2026-04-22-lp-domain/overview.md`
@@ -17,8 +19,15 @@ pub trait Artifact {
     const KIND: &'static str;
     /// Breaking-schema bump only; see `single schema_version` in `overview.md` compatibility model.
     const CURRENT_VERSION: u32;
-    // TODO(M5): add `: serde::de::DeserializeOwned` and `: schemars::JsonSchema` bounds
-    //          when the migration framework + codegen tooling come online.
+
+    /// On-disk `schema_version` field after load (validated against [`CURRENT_VERSION`](Self::CURRENT_VERSION) by the loader).
+    fn schema_version(&self) -> u32;
+
+    /// Visit every top-level [`Slot`] this artifact owns for load-time default materialization.
+    ///
+    /// Visuals with a `[params]` table walk the inner [`ParamsTable`](crate::visual::ParamsTable) root slot;
+    /// nested fields are reached via [`Slot::default_value`](crate::shape::Slot::default_value).
+    fn walk_slots<F: FnMut(&Slot)>(&self, _f: F) {}
 }
 
 /// One **migrator** in a `FROM` → `FROM+1` chain on raw [`toml::Value`]
@@ -60,6 +69,10 @@ mod tests {
     impl Artifact for DummyArtifact {
         const KIND: &'static str = "dummy";
         const CURRENT_VERSION: u32 = 1;
+
+        fn schema_version(&self) -> u32 {
+            Self::CURRENT_VERSION
+        }
     }
 
     struct DummyMigration;

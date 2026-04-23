@@ -1,0 +1,24 @@
+# Linear cross-fade between inputA and inputB. `progress` is the
+# conventional uniform driven by the parent runtime (Live / Playlist).
+
+schema_version = 1
+title          = "Crossfade"
+description    = "Linear interpolation between two inputs."
+author         = "yona"
+
+[shader]
+glsl = """
+uniform vec2  outputSize;
+uniform float progress;
+uniform sampler2D inputA;
+uniform sampler2D inputB;
+
+vec4 render(vec2 pos) {
+    vec2 uv = pos / outputSize;
+    return mix(texture(inputA, uv), texture(inputB, uv), progress);
+}
+"""
+
+[params.softness]
+kind    = "amplitude"
+default = 1.0

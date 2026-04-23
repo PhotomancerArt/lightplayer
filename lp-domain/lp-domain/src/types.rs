@@ -311,6 +311,7 @@ impl fmt::Display for ArtifactSpec {
 /// project’s bus graph.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(transparent)]
 pub struct ChannelName(pub String);
 
 impl fmt::Display for ChannelName {

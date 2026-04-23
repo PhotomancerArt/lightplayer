@@ -51,6 +51,7 @@ pub mod schema;
 pub mod shape;
 pub mod types;
 pub mod value_spec;
+pub mod visual;
 
 #[cfg(feature = "schema-gen")]
 mod schema_gen_smoke;
@@ -65,3 +66,10 @@ pub use lps_shared::LpsValueF32 as LpsValue;
 pub use lps_shared::TextureBuffer;
 /// Texture format id for [`Kind::Texture`](kind::Kind::Texture) storage; from `lps_shared`. See `docs/design/lightplayer/quantity.md` §3 (storage table).
 pub use lps_shared::TextureStorageFormat;
+pub use visual::{
+    Effect, EffectRef, Live, LiveCandidate, ParamsTable, Pattern, Playlist, PlaylistBehavior,
+    PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
+};
+
+#[cfg(feature = "std")]
+pub use artifact::{LoadError, load_artifact};

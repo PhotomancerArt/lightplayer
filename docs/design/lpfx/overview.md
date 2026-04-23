@@ -1,7 +1,19 @@
 # lpfx overview
 
-The Visual layer of Lightplayer. See `../lightplayer/domain.md` for
-the broader domain model and `concepts.md` for vocabulary.
+The Visual layer of Lightplayer. See [`../lightplayer/domain.md`](../lightplayer/domain.md) for
+the broader domain model and [`../lightplayer/quantity.md`](../lightplayer/quantity.md) for
+the Quantity vocabulary (kinds, slots, TOML grammar).
+
+## Schema baseline
+
+The canonical v1 example corpus lives at
+[`lp-domain/lp-domain/examples/v1/`](../../../lp-domain/lp-domain/examples/v1/),
+exercising all six Visual kinds (Pattern, Effect, Transition,
+Stack, Live, Playlist). The TOML grammar that drives the
+`[params]` section is locked in [`quantity.md` §10 — TOML grammar](../lightplayer/quantity.md#10-toml-grammar).
+Each example sets `schema_version = 1` as the first field; M5
+introduces the migration framework that will let v2 examples
+live alongside v1 in `examples/v1/<kind>/history/`.
 
 ## Conventions (decided so far)
 
@@ -10,27 +22,39 @@ the broader domain model and `concepts.md` for vocabulary.
   declared here. There is no separate `[config]` section — builtins put
   their compile-time knobs in `[params]` too, and may flag them internally
   as static.
+- **Shader source** is declared in a single `[shader]` table
+  with exactly one of `glsl = "..."` (inline source),
+  `file = "main.glsl"` (sibling file; language inferred from
+  extension), or `builtin = "fluid"` (built-in Rust impl). The
+  former `[builtin]` block is gone in v1.
 - **GLSL uniform naming**: structural uniforms unprefixed (`outputSize`,
   `input`, `inputA`, `inputB`); user/engine params prefixed `param_`
   (`param_time`, `param_speed`, `param_progress`).
-- **Param types**: any LpsValue / GLSL type — `f32`, `i32`, `bool`, `vec2`,
-  `vec3`, `vec4`, structs (eventually).
-- **UI hints**: per-kind sub-table on the param.
-  - `ui.fader = { step = 0.1 }` for continuous scalars
-  - `ui.stepper = { step = 1 }` for discrete scalars
-  - `ui.color = {}` for `vec3` / `vec4` color picker
-  - `ui.select = { choices = [...] }` for enumerations
-  - `ui.checkbox = {}` for `bool`
-  - `label`, `unit` are direct fields on the param, independent of `ui`.
+- **Param kinds** — every param declares
+  `kind = "<snake_case>"` from the open `Kind` enum
+  (`amplitude`, `ratio`, `phase`, `count`, `color`, `audio_level`,
+  ...). The Kind picks the storage type, default
+  presentation, default constraint, and default bind. See
+  [`quantity.md` §3 — `Kind`](../lightplayer/quantity.md#3-kind--the-semantic-identity-layer).
+- **Presentation** is derived from the param's
+  `Kind` (`Kind::default_presentation()`) and may be overridden
+  per-param with `presentation = "<variant>"`. Pre-v1 per-param
+  widget sub-tables under a `ui` key (fader, stepper, color picker,
+  select, checkbox) are not used in the v1 on-disk form.
+- **`label`**, **unit** — `label` is a direct field on each param
+  entry under `[params]`. `unit` is **gone** in v1: stored values are
+  always in the `Kind`'s base unit (radians for Angle, Hz for
+  Frequency, etc.) per [`quantity.md` §4 — Dimension and Unit](../lightplayer/quantity.md#4-dimension-and-unit).
 - **`time` / `progress`**: declared explicitly as `[params.time]` /
   `[params.progress]`. Default-bound to bus channels `time` and the
   parent Show's progress signal respectively.
 - **Bus channel names**: `<type>/<dir>` for the default/single channel,
   `<type>/<dir>/<n>` when there's more than one. Examples: `video/in`,
   `video/in/1`, `audio/in`, `time`.
-- **Transition section**: always `[transition]`. Live and Playlist both
-  use the same key. Playlist allows `[entries.transition]` for per-entry
-  override.
+- **Transition section**: always `[transition]`. Live and
+  Playlist both declare a single playlist-wide `[transition]`.
+  Per-entry transition overrides are deferred (see M3 plan
+  notes).
 
 ## Bindings
 
@@ -66,8 +90,9 @@ default with its `param` / `input` / `output` declaration:
 
 ```toml
 [params.time]
-type = "f32"
-bind = { bus = "time" }
+kind    = "instant"
+default = 0.0
+# default-binds to bus `time`; add `bind = { bus = "…" }` to override
 ```
 
 **2. `[bindings]` block on any composite node.** Any node that contains

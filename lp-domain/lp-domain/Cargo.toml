@@ -9,18 +9,30 @@ rust-version.workspace = true
 
 [features]
 default = []
-std = ["dep:lpfs", "lpfs/std", "toml/std"]
+std = ["dep:lpfs", "dep:lp-model", "lpfs/std", "toml/std"]
 schema-gen = ["std", "lps-shared/schemars", "dep:schemars"]
 
 [dependencies]
 lps-shared = { path = "../../lp-shader/lps-shared" }
+lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", optional = true }
 serde = { workspace = true, features = ["derive"] }
-toml = { workspace = true }
+toml = { workspace = true, features = ["display", "preserve_order"] }
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
+jsonschema = "0.46.2"
+lp-model = { path = "../../lp-core/lp-model", default-features = false }
+lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
+schemars = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true, features = ["display", "preserve_order"] }
+
+[[test]]
+name = "round_trip"
+path = "tests/round_trip.rs"
+required-features = ["std"]
 
 [lints]
 workspace = true

@@ -1,0 +1,33 @@
+# Reflects the input around N angular slices.
+
+schema_version = 1
+title          = "Kaleidoscope"
+description    = "Mirrors the input texture across angular slices."
+author         = "yona"
+
+[shader]
+glsl = """
+uniform vec2  outputSize;
+uniform int   param_slices;
+uniform float param_rotation;
+uniform sampler2D inputColor;
+
+vec4 render(vec2 pos) {
+    vec2  uv = pos / outputSize;
+    return texture(inputColor, lpfn_kaleidoscope(uv, param_slices, param_rotation));
+}
+"""
+
+[input]
+bus = "video/in/0"
+
+[params.slices]
+kind    = "count"
+range   = [2, 16]
+default = 6
+label   = "Slices"
+
+[params.rotation]
+kind    = "angle"
+default = 0.0
+label   = "Rotation"

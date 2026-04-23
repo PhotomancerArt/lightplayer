@@ -1,0 +1,32 @@
+# Sequenced setlist with a single default transition. `loop = true`
+# restarts from the first entry after the last.
+
+schema_version = 1
+title          = "Setlist"
+description    = "Three-track choreographed sequence."
+
+[[entries]]
+visual   = "../patterns/fluid.pattern.toml"
+duration = 60.0
+
+[[entries]]
+visual   = "../patterns/fbm.pattern.toml"
+duration = 90.0
+
+[[entries]]
+visual   = "../stacks/psychedelic.stack.toml"
+duration = 75.0
+
+[[entries]]
+visual   = "../patterns/rainbow.pattern.toml"
+# no duration → wait for cue
+
+[transition]
+visual   = "../transitions/crossfade.transition.toml"
+duration = 1.5
+
+[behavior]
+loop = true
+
+[bindings]
+"entries/1#scale" = { bus = "audio/in/0/level" }

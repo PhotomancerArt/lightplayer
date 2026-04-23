@@ -15,6 +15,10 @@ mod tests {
         ArtifactSpec, ChannelName, Name, NodePath, NodePathSegment, NodePropSpec, Uid,
     };
     use crate::value_spec::{TextureSpec, ValueSpec};
+    use crate::{
+        Effect, EffectRef, Live, LiveCandidate, ParamsTable, Pattern, Playlist, PlaylistBehavior,
+        PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
+    };
 
     macro_rules! assert_schema_compiles {
         ($t:ty) => {{
@@ -108,24 +112,93 @@ mod tests {
         assert_schema_compiles!(LpsType);
     }
 
+    // M3 — Visual kinds + key substructure (derive / hand-written JsonSchema).
+    #[test]
+    fn schema_pattern() {
+        assert_schema_compiles!(Pattern);
+    }
+    #[test]
+    fn schema_effect() {
+        assert_schema_compiles!(Effect);
+    }
+    #[test]
+    fn schema_transition() {
+        assert_schema_compiles!(Transition);
+    }
+    #[test]
+    fn schema_stack() {
+        assert_schema_compiles!(Stack);
+    }
+    #[test]
+    fn schema_live() {
+        assert_schema_compiles!(Live);
+    }
+    #[test]
+    fn schema_playlist() {
+        assert_schema_compiles!(Playlist);
+    }
+    #[test]
+    fn schema_shader_ref() {
+        assert_schema_compiles!(ShaderRef);
+    }
+    #[test]
+    fn schema_visual_input() {
+        assert_schema_compiles!(VisualInput);
+    }
+    #[test]
+    fn schema_params_table() {
+        assert_schema_compiles!(ParamsTable);
+    }
+    #[test]
+    fn schema_transition_ref() {
+        assert_schema_compiles!(TransitionRef);
+    }
+    #[test]
+    fn schema_playlist_entry() {
+        assert_schema_compiles!(PlaylistEntry);
+    }
+    #[test]
+    fn schema_playlist_behavior() {
+        assert_schema_compiles!(PlaylistBehavior);
+    }
+    #[test]
+    fn schema_live_candidate() {
+        assert_schema_compiles!(LiveCandidate);
+    }
+    #[test]
+    fn schema_effect_ref() {
+        assert_schema_compiles!(EffectRef);
+    }
+
     #[test]
     fn slot_schema_is_recursive_and_non_trivial() {
         let schema = schemars::schema_for!(Slot);
         let json = serde_json::to_string(&schema).unwrap();
-        // Slot's serialization mentions "shape", "label", "bind", "present" —
-        // pick one that's stable across schemars versions.
+        // Wire-true `JsonSchema` for `Slot` (see `impl JsonSchema for Slot`): a
+        // `oneOf` of scalar range/choice/free, array, and struct arms — no
+        // separate `subschema_for::<Shape>()` (the tagged `Shape` enum is not
+        // what `impl Serialize for Slot` emits). Recursion is the root-`#` $ref
+        // on `element` and on struct `fields` items.
         assert!(
-            json.contains("shape"),
-            "Slot schema should mention `shape`: {json}"
+            json.contains("oneOf"),
+            "Slot wire schema should be a oneOf: {json}"
         );
-        // Slot is recursive via Shape::Array { element: Box<Slot>, ... } and
-        // Shape::Struct { fields: Vec<(Name, Slot)>, ... }. The schema must
-        // therefore have at least two definitions in its definitions table
-        // (Slot itself + Shape, at minimum).
         assert!(
-            json.contains("Slot") && json.contains("Shape"),
-            "recursive schema lost Shape/Slot definitions: {json}",
+            json.contains("\"$ref\":\"#\""),
+            "Slot should recurse with root-anchored $ref: {json}"
         );
+        for needle in [r#""const":"array""#, r#""const":"struct""#] {
+            assert!(
+                json.contains(needle),
+                "Slot wire schema missing {needle}: {json}"
+            );
+        }
+        for needle in ["kind", "element", "fields"] {
+            assert!(
+                json.contains(needle),
+                "Slot wire schema missing `{needle}`: {json}"
+            );
+        }
     }
 
     #[test]

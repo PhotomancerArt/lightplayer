@@ -1,0 +1,26 @@
+# Fractal Brownian Motion noise pattern. Shader source is a sibling file
+# (`fbm/main.glsl`); this file holds the param surface.
+
+schema_version = 1
+title          = "FBM Noise"
+description    = "Multi-octave value-noise field."
+author         = "yona"
+
+[shader]
+file = "fbm/main.glsl"
+
+[params.time]
+kind    = "instant"
+default = 0.0
+
+[params.scale]
+kind    = "amplitude"
+range   = [0.5, 16.0]
+default = 4.0
+label   = "Scale"
+
+[params.octaves]
+kind    = "count"
+range   = [1, 8]
+default = 4
+label   = "Octaves"

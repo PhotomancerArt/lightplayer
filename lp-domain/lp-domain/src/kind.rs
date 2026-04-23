@@ -13,7 +13,7 @@
 
 use crate::LpsType;
 use crate::binding::Binding;
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, ConstraintFree, ConstraintRange};
 use crate::presentation::Presentation;
 use crate::types::ChannelName;
 use alloc::boxed::Box;
@@ -32,6 +32,10 @@ pub const MAX_PALETTE_LEN: u32 = 16;
 /// See [`MAX_PALETTE_LEN`] and `quantity.md` §3. Constants like this live in
 /// `lp-domain` so layout stays explicit next to the [`Kind`]s that use them.
 pub const MAX_GRADIENT_STOPS: u32 = 16;
+
+/// Number of frequency bands carried by [`Kind::AudioLevel`]: low / mid /
+/// high. See `docs/design/lightplayer/quantity.md` §3.
+pub const AUDIO_LEVEL_BANDS: usize = 3;
 
 /// **Commensurability class** for a [`Kind`]: two Kinds share a [`Dimension`]
 /// iff their values are meaningfully expressed in the same *kind* of unit.
@@ -99,7 +103,7 @@ pub enum InterpMethod {
 ///
 /// - **Dimensionless value scalars:** `Kind::Amplitude`, `Kind::Ratio`, `Kind::Phase`, `Kind::Count`, `Kind::Bool`, `Kind::Choice`
 /// - **Scalars with a [`Dimension`]:** `Kind::Instant`, `Kind::Duration`, `Kind::Frequency`, `Kind::Angle`
-/// - **Structured *value* kinds (GPU-friendly structs):** `Kind::Color`, `Kind::ColorPalette`, `Kind::Gradient`, `Kind::Position2d`, `Kind::Position3d`
+/// - **Structured *value* kinds (GPU-friendly structs):** `Kind::Color`, `Kind::ColorPalette`, `Kind::Gradient`, `Kind::Position2d`, `Kind::Position3d`, `Kind::AudioLevel`
 /// - **Opaque handle (texture today):** `Kind::Texture`
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -140,6 +144,14 @@ pub enum Kind {
 
     /// Opaque **GPU** texture: handle/width/height/format struct; pixel data in [`crate::TextureBuffer`] (`quantity.md` §3, storage table). Default bus: `"video/in/0"` when no explicit bind (`quantity.md` §8).
     Texture,
+
+    /// Audio frequency-band levels (low / mid / high) as F32 RMS values.
+    /// Default-binds to `audio/in/0/level` (`quantity.md` §8). Storage is a
+    /// fixed `{ low: f32, mid: f32, high: f32 }` struct (no project-wide
+    /// constant beyond [`AUDIO_LEVEL_BANDS`]). Default constraint is
+    /// [`Constraint::Free`] — RMS may exceed 1.0 with boost; clamping is
+    /// downstream policy. See `docs/design/lightplayer/quantity.md` §3.
+    AudioLevel,
 }
 
 impl Kind {
@@ -164,6 +176,7 @@ impl Kind {
             Self::ColorPalette => color_palette_struct(),
             Self::Gradient => gradient_struct(),
             Self::Texture => texture_struct(),
+            Self::AudioLevel => audio_level_struct(),
         }
     }
 
@@ -190,24 +203,16 @@ impl Kind {
     /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (F32
     /// narrowing and future widening).
     pub fn default_constraint(self) -> Constraint {
-        use Constraint::*;
         match self {
-            Self::Amplitude | Self::Ratio => Range {
-                min: 0.0,
-                max: 1.0,
+            Self::Amplitude | Self::Ratio | Self::Phase => Constraint::Range(ConstraintRange {
+                range: [0.0, 1.0],
                 step: None,
-            },
-            Self::Phase => Range {
-                min: 0.0,
-                max: 1.0,
+            }),
+            Self::Count => Constraint::Range(ConstraintRange {
+                range: [0.0, 2_147_483_647.0],
                 step: None,
-            },
-            Self::Count => Range {
-                min: 0.0,
-                max: 2_147_483_647.0,
-                step: None,
-            },
-            _ => Free,
+            }),
+            _ => Constraint::Free(ConstraintFree {}),
         }
     }
 
@@ -228,6 +233,7 @@ impl Kind {
             Self::Position2d => XyPad,
             Self::Position3d => NumberInput,
             Self::Texture => TexturePreview,
+            Self::AudioLevel => NumberInput,
         }
     }
 
@@ -239,12 +245,9 @@ impl Kind {
     /// (`quantity.md` §8).
     pub fn default_bind(self) -> Option<Binding> {
         match self {
-            Self::Instant => Some(Binding::Bus {
-                channel: ChannelName(String::from("time")),
-            }),
-            Self::Texture => Some(Binding::Bus {
-                channel: ChannelName(String::from("video/in/0")),
-            }),
+            Self::Instant => Some(Binding::Bus(ChannelName(String::from("time")))),
+            Self::Texture => Some(Binding::Bus(ChannelName(String::from("video/in/0")))),
+            Self::AudioLevel => Some(Binding::Bus(ChannelName(String::from("audio/in/0/level")))),
             _ => None,
         }
     }
@@ -353,6 +356,26 @@ fn texture_struct() -> LpsType {
     }
 }
 
+fn audio_level_struct() -> LpsType {
+    LpsType::Struct {
+        name: Some(String::from("AudioLevel")),
+        members: alloc::vec![
+            StructMember {
+                name: Some(String::from("low")),
+                ty: LpsType::Float,
+            },
+            StructMember {
+                name: Some(String::from("mid")),
+                ty: LpsType::Float,
+            },
+            StructMember {
+                name: Some(String::from("high")),
+                ty: LpsType::Float,
+            },
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +399,7 @@ mod tests {
             Kind::Position2d,
             Kind::Position3d,
             Kind::Texture,
+            Kind::AudioLevel,
         ] {
             let _ = k.storage();
         }
@@ -442,7 +466,7 @@ mod tests {
     #[test]
     fn default_bind_for_instant_is_time() {
         match Kind::Instant.default_bind() {
-            Some(Binding::Bus { channel }) => assert_eq!(channel.0, "time"),
+            Some(Binding::Bus(ChannelName(ch))) => assert_eq!(ch, "time"),
             other => panic!("expected Bus(time), got {other:?}"),
         }
     }
@@ -455,9 +479,8 @@ mod tests {
     #[test]
     fn default_constraint_for_amplitude_is_unit_range() {
         match Kind::Amplitude.default_constraint() {
-            Constraint::Range { min, max, step } => {
-                assert_eq!(min, 0.0);
-                assert_eq!(max, 1.0);
+            Constraint::Range(ConstraintRange { range, step }) => {
+                assert_eq!(range, [0.0, 1.0]);
                 assert!(step.is_none());
             }
             _ => panic!("expected Range[0,1]"),
@@ -471,5 +494,58 @@ mod tests {
         assert_eq!(s, "\"frequency\"");
         let back: Kind = serde_json::from_str(&s).unwrap();
         assert_eq!(k, back);
+    }
+
+    #[test]
+    fn audio_level_storage_is_three_floats() {
+        let s = Kind::AudioLevel.storage();
+        match s {
+            LpsType::Struct { members, .. } => {
+                assert_eq!(members.len(), AUDIO_LEVEL_BANDS);
+                assert_eq!(members[0].name.as_deref(), Some("low"));
+                assert_eq!(members[1].name.as_deref(), Some("mid"));
+                assert_eq!(members[2].name.as_deref(), Some("high"));
+                for m in &members {
+                    assert_eq!(m.ty, LpsType::Float);
+                }
+            }
+            _ => panic!("AudioLevel storage must be a Struct"),
+        }
+    }
+
+    #[test]
+    fn audio_level_dimension_is_dimensionless() {
+        assert_eq!(Kind::AudioLevel.dimension(), Dimension::Dimensionless);
+    }
+
+    #[test]
+    fn audio_level_default_constraint_is_free() {
+        assert!(matches!(
+            Kind::AudioLevel.default_constraint(),
+            Constraint::Free(ConstraintFree {})
+        ));
+    }
+
+    #[test]
+    fn audio_level_default_presentation_is_number_input() {
+        assert_eq!(
+            Kind::AudioLevel.default_presentation(),
+            Presentation::NumberInput
+        );
+    }
+
+    #[test]
+    fn audio_level_default_bind_is_audio_in_level() {
+        match Kind::AudioLevel.default_bind() {
+            Some(Binding::Bus(ChannelName(ch))) => assert_eq!(ch, "audio/in/0/level"),
+            other => panic!("expected Bus(audio/in/0/level), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn audio_level_serializes_as_snake_case() {
+        let k = Kind::AudioLevel;
+        let s = serde_json::to_string(&k).unwrap();
+        assert_eq!(s, "\"audio_level\"");
     }
 }

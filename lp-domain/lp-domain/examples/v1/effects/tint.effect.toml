@@ -1,0 +1,33 @@
+# Multiply input texture by a target color. Color is OKLCH-authored.
+
+schema_version = 1
+title          = "Tint"
+description    = "Multiplies the input texture by a target color."
+author         = "yona"
+
+[shader]
+glsl = """
+uniform vec2  outputSize;
+uniform vec3  param_color;
+uniform float param_amount;
+uniform sampler2D inputColor;
+
+vec4 render(vec2 pos) {
+    vec4 src = texture(inputColor, pos / outputSize);
+    vec3 tinted = mix(src.rgb, src.rgb * param_color, param_amount);
+    return vec4(tinted, src.a);
+}
+"""
+
+[input]
+bus = "video/in/0"
+
+[params.color]
+kind    = "color"
+default = { space = "oklch", coords = [0.72, 0.14, 285] }
+label   = "Tint Color"
+
+[params.amount]
+kind    = "amplitude"
+default = 0.5
+label   = "Amount"

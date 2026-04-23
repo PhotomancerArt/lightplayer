@@ -150,7 +150,7 @@ object = { version = "0.37.3", default-features = false, features = ['read_core'
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "preserve_order"] }
 schemars = { version = "1.2.1", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }

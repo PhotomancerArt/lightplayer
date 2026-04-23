@@ -1,0 +1,44 @@
+# Stam-style fluid sim. Implementation lives in Rust (lpfx::builtins::fluid);
+# this artifact carries the parameter surface and the audio binding.
+
+schema_version = 1
+title          = "Fluid"
+description    = "Stam-style fluid sim with audio-reactive emitters."
+author         = "yona"
+
+[shader]
+builtin = "fluid"
+
+[params.resolution]
+kind    = "count"
+range   = [8, 128]
+default = 32
+
+[params.viscosity]
+kind    = "amplitude"
+range   = [0.0, 0.01]
+default = 0.0001
+
+[params.fade]
+kind    = "amplitude"
+range   = [0.5, 1.0]
+default = 0.985
+
+[params.solver_hz]
+kind    = "frequency"
+range   = [10, 60]
+default = 30
+
+[params.intensity]
+kind    = "audio_level"
+default = { low = 0.0, mid = 0.0, high = 0.0 }
+# `audio_level` default-binds to "audio/in/0/level"; explicit override
+# would go here as `bind = { bus = "..." }`.
+
+[params.emitter_x]
+kind    = "amplitude"
+default = 0.5
+
+[params.emitter_y]
+kind    = "amplitude"
+default = 0.5

@@ -1,0 +1,31 @@
+# Directional wipe. `angle` controls direction, `softness` the band width.
+
+schema_version = 1
+title          = "Wipe"
+description    = "Directional reveal with a soft edge."
+author         = "yona"
+
+[shader]
+glsl = """
+uniform vec2  outputSize;
+uniform float progress;
+uniform float param_angle;
+uniform float param_softness;
+uniform sampler2D inputA;
+uniform sampler2D inputB;
+
+vec4 render(vec2 pos) {
+    vec2 uv = pos / outputSize;
+    float t = lpfn_wipe(uv, progress, param_angle, param_softness);
+    return mix(texture(inputA, uv), texture(inputB, uv), t);
+}
+"""
+
+[params.angle]
+kind    = "angle"
+default = 0.0
+
+[params.softness]
+kind    = "amplitude"
+range   = [0.0, 1.0]
+default = 0.1
