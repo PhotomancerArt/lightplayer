@@ -5,6 +5,23 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Constraint {
+    Free,
+    Range {
+        min: f32,
+        max: f32,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        step: Option<f32>,
+    },
+    Choice {
+        values: Vec<f32>,
+        labels: Vec<String>,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,21 +71,4 @@ mod tests {
         let back: Constraint = serde_json::from_str(&s).unwrap();
         assert_eq!(c, back);
     }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Constraint {
-    Free,
-    Range {
-        min: f32,
-        max: f32,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        step: Option<f32>,
-    },
-    Choice {
-        values: Vec<f32>,
-        labels: Vec<String>,
-    },
 }

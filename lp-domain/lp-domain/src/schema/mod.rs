@@ -2,6 +2,32 @@
 
 use core::marker::PhantomData;
 
+pub trait Artifact {
+    const KIND: &'static str;
+    const CURRENT_VERSION: u32;
+    // TODO(M5): add `: serde::de::DeserializeOwned` and `: schemars::JsonSchema` bounds
+    //          when the migration framework + codegen tooling come online.
+}
+
+pub trait Migration {
+    const KIND: &'static str;
+    const FROM: u32;
+
+    fn migrate(value: &mut toml::Value);
+}
+
+#[derive(Default)]
+pub struct Registry {
+    // TODO(M5): replace with the real registry shape (artifact factories + migration chains).
+    _stub: PhantomData<()>,
+}
+
+impl Registry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,31 +87,5 @@ mod tests {
     #[test]
     fn registry_is_constructible() {
         let _: Registry = Registry::new();
-    }
-}
-
-pub trait Artifact {
-    const KIND: &'static str;
-    const CURRENT_VERSION: u32;
-    // TODO(M5): add `: serde::de::DeserializeOwned` and `: schemars::JsonSchema` bounds
-    //          when the migration framework + codegen tooling come online.
-}
-
-pub trait Migration {
-    const KIND: &'static str;
-    const FROM: u32;
-
-    fn migrate(value: &mut toml::Value);
-}
-
-#[derive(Default)]
-pub struct Registry {
-    // TODO(M5): replace with the real registry shape (artifact factories + migration chains).
-    _stub: PhantomData<()>,
-}
-
-impl Registry {
-    pub fn new() -> Self {
-        Self::default()
     }
 }

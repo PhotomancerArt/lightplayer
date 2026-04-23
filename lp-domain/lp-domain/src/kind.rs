@@ -9,127 +9,6 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use lps_shared::StructMember;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn storage_is_exhaustive_and_concrete() {
-        for k in [
-            Kind::Amplitude,
-            Kind::Ratio,
-            Kind::Phase,
-            Kind::Count,
-            Kind::Bool,
-            Kind::Choice,
-            Kind::Instant,
-            Kind::Duration,
-            Kind::Frequency,
-            Kind::Angle,
-            Kind::Color,
-            Kind::ColorPalette,
-            Kind::Gradient,
-            Kind::Position2d,
-            Kind::Position3d,
-            Kind::Texture,
-        ] {
-            let _ = k.storage();
-        }
-    }
-
-    #[test]
-    fn float_scalar_storages() {
-        assert_eq!(Kind::Amplitude.storage(), LpsType::Float);
-        assert_eq!(Kind::Frequency.storage(), LpsType::Float);
-    }
-
-    #[test]
-    fn int_scalar_storages() {
-        assert_eq!(Kind::Count.storage(), LpsType::Int);
-        assert_eq!(Kind::Choice.storage(), LpsType::Int);
-    }
-
-    #[test]
-    fn position_storages() {
-        assert_eq!(Kind::Position2d.storage(), LpsType::Vec2);
-        assert_eq!(Kind::Position3d.storage(), LpsType::Vec3);
-    }
-
-    #[test]
-    fn texture_storage_has_four_int_fields() {
-        let s = Kind::Texture.storage();
-        match s {
-            LpsType::Struct { members, .. } => {
-                assert_eq!(members.len(), 4);
-                for m in members {
-                    assert_eq!(m.ty, LpsType::Int);
-                }
-            }
-            _ => panic!("Texture storage must be a Struct"),
-        }
-    }
-
-    #[test]
-    fn dimension_assignment() {
-        assert_eq!(Kind::Instant.dimension(), Dimension::Time);
-        assert_eq!(Kind::Duration.dimension(), Dimension::Time);
-        assert_eq!(Kind::Frequency.dimension(), Dimension::Frequency);
-        assert_eq!(Kind::Angle.dimension(), Dimension::Angle);
-        assert_eq!(Kind::Amplitude.dimension(), Dimension::Dimensionless);
-        assert_eq!(Kind::Phase.dimension(), Dimension::Dimensionless);
-    }
-
-    #[test]
-    fn default_presentation_table() {
-        assert_eq!(Kind::Amplitude.default_presentation(), Presentation::Fader);
-        assert_eq!(Kind::Frequency.default_presentation(), Presentation::Knob);
-        assert_eq!(Kind::Bool.default_presentation(), Presentation::Toggle);
-        assert_eq!(
-            Kind::Color.default_presentation(),
-            Presentation::ColorPicker
-        );
-        assert_eq!(Kind::Position2d.default_presentation(), Presentation::XyPad);
-        assert_eq!(
-            Kind::Texture.default_presentation(),
-            Presentation::TexturePreview
-        );
-    }
-
-    #[test]
-    fn default_bind_for_instant_is_time() {
-        match Kind::Instant.default_bind() {
-            Some(Binding::Bus { channel }) => assert_eq!(channel.0, "time"),
-            other => panic!("expected Bus(time), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn default_bind_for_color_is_none() {
-        assert!(Kind::Color.default_bind().is_none());
-    }
-
-    #[test]
-    fn default_constraint_for_amplitude_is_unit_range() {
-        match Kind::Amplitude.default_constraint() {
-            Constraint::Range { min, max, step } => {
-                assert_eq!(min, 0.0);
-                assert_eq!(max, 1.0);
-                assert!(step.is_none());
-            }
-            _ => panic!("expected Range[0,1]"),
-        }
-    }
-
-    #[test]
-    fn kind_serde_round_trips() {
-        let k = Kind::Frequency;
-        let s = serde_json::to_string(&k).unwrap();
-        assert_eq!(s, "\"frequency\"");
-        let back: Kind = serde_json::from_str(&s).unwrap();
-        assert_eq!(k, back);
-    }
-}
-
 pub const MAX_PALETTE_LEN: u32 = 16;
 pub const MAX_GRADIENT_STOPS: u32 = 16;
 
@@ -375,5 +254,126 @@ fn texture_struct() -> LpsType {
                 ty: LpsType::Int,
             },
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_is_exhaustive_and_concrete() {
+        for k in [
+            Kind::Amplitude,
+            Kind::Ratio,
+            Kind::Phase,
+            Kind::Count,
+            Kind::Bool,
+            Kind::Choice,
+            Kind::Instant,
+            Kind::Duration,
+            Kind::Frequency,
+            Kind::Angle,
+            Kind::Color,
+            Kind::ColorPalette,
+            Kind::Gradient,
+            Kind::Position2d,
+            Kind::Position3d,
+            Kind::Texture,
+        ] {
+            let _ = k.storage();
+        }
+    }
+
+    #[test]
+    fn float_scalar_storages() {
+        assert_eq!(Kind::Amplitude.storage(), LpsType::Float);
+        assert_eq!(Kind::Frequency.storage(), LpsType::Float);
+    }
+
+    #[test]
+    fn int_scalar_storages() {
+        assert_eq!(Kind::Count.storage(), LpsType::Int);
+        assert_eq!(Kind::Choice.storage(), LpsType::Int);
+    }
+
+    #[test]
+    fn position_storages() {
+        assert_eq!(Kind::Position2d.storage(), LpsType::Vec2);
+        assert_eq!(Kind::Position3d.storage(), LpsType::Vec3);
+    }
+
+    #[test]
+    fn texture_storage_has_four_int_fields() {
+        let s = Kind::Texture.storage();
+        match s {
+            LpsType::Struct { members, .. } => {
+                assert_eq!(members.len(), 4);
+                for m in members {
+                    assert_eq!(m.ty, LpsType::Int);
+                }
+            }
+            _ => panic!("Texture storage must be a Struct"),
+        }
+    }
+
+    #[test]
+    fn dimension_assignment() {
+        assert_eq!(Kind::Instant.dimension(), Dimension::Time);
+        assert_eq!(Kind::Duration.dimension(), Dimension::Time);
+        assert_eq!(Kind::Frequency.dimension(), Dimension::Frequency);
+        assert_eq!(Kind::Angle.dimension(), Dimension::Angle);
+        assert_eq!(Kind::Amplitude.dimension(), Dimension::Dimensionless);
+        assert_eq!(Kind::Phase.dimension(), Dimension::Dimensionless);
+    }
+
+    #[test]
+    fn default_presentation_table() {
+        assert_eq!(Kind::Amplitude.default_presentation(), Presentation::Fader);
+        assert_eq!(Kind::Frequency.default_presentation(), Presentation::Knob);
+        assert_eq!(Kind::Bool.default_presentation(), Presentation::Toggle);
+        assert_eq!(
+            Kind::Color.default_presentation(),
+            Presentation::ColorPicker
+        );
+        assert_eq!(Kind::Position2d.default_presentation(), Presentation::XyPad);
+        assert_eq!(
+            Kind::Texture.default_presentation(),
+            Presentation::TexturePreview
+        );
+    }
+
+    #[test]
+    fn default_bind_for_instant_is_time() {
+        match Kind::Instant.default_bind() {
+            Some(Binding::Bus { channel }) => assert_eq!(channel.0, "time"),
+            other => panic!("expected Bus(time), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_bind_for_color_is_none() {
+        assert!(Kind::Color.default_bind().is_none());
+    }
+
+    #[test]
+    fn default_constraint_for_amplitude_is_unit_range() {
+        match Kind::Amplitude.default_constraint() {
+            Constraint::Range { min, max, step } => {
+                assert_eq!(min, 0.0);
+                assert_eq!(max, 1.0);
+                assert!(step.is_none());
+            }
+            _ => panic!("expected Range[0,1]"),
+        }
+    }
+
+    #[test]
+    fn kind_serde_round_trips() {
+        let k = Kind::Frequency;
+        let s = serde_json::to_string(&k).unwrap();
+        assert_eq!(s, "\"frequency\"");
+        let back: Kind = serde_json::from_str(&s).unwrap();
+        assert_eq!(k, back);
     }
 }

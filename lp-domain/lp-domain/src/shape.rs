@@ -12,6 +12,99 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use lps_shared::StructMember;
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(tag = "shape", rename_all = "snake_case")]
+pub enum Shape {
+    Scalar {
+        kind: Kind,
+        constraint: Constraint,
+        default: ValueSpec,
+    },
+    Array {
+        element: Box<Slot>,
+        length: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default: Option<ValueSpec>,
+    },
+    Struct {
+        fields: Vec<(Name, Slot)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default: Option<ValueSpec>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct Slot {
+    pub shape: Shape,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind: Option<Binding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub present: Option<Presentation>,
+}
+
+impl Slot {
+    pub fn default_value(&self, ctx: &mut LoadCtx) -> LpsValue {
+        match &self.shape {
+            Shape::Scalar { default, .. } => default.materialize(ctx),
+            Shape::Array {
+                element,
+                length,
+                default,
+            } => match default {
+                Some(d) => d.materialize(ctx),
+                None => {
+                    let mut elems = Vec::with_capacity(*length as usize);
+                    for _ in 0..*length {
+                        elems.push(element.default_value(ctx));
+                    }
+                    LpsValue::Array(elems.into_boxed_slice())
+                }
+            },
+            Shape::Struct { fields, default } => match default {
+                Some(d) => d.materialize(ctx),
+                None => {
+                    let entries = fields
+                        .iter()
+                        .map(|(name, slot)| (name.0.clone(), slot.default_value(ctx)))
+                        .collect();
+                    LpsValue::Struct {
+                        name: None,
+                        fields: entries,
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn storage(&self) -> LpsType {
+        match &self.shape {
+            Shape::Scalar { kind, .. } => kind.storage(),
+            Shape::Array {
+                element, length, ..
+            } => LpsType::Array {
+                element: Box::new(element.storage()),
+                len: *length,
+            },
+            Shape::Struct { fields, .. } => LpsType::Struct {
+                name: None,
+                members: fields
+                    .iter()
+                    .map(|(name, slot)| StructMember {
+                        name: Some(name.0.clone()),
+                        ty: slot.storage(),
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,98 +294,5 @@ mod tests {
         let json = serde_json::to_string(&struct_slot).unwrap();
         let back: Slot = serde_json::from_str(&json).unwrap();
         assert_eq!(struct_slot, back);
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(tag = "shape", rename_all = "snake_case")]
-pub enum Shape {
-    Scalar {
-        kind: Kind,
-        constraint: Constraint,
-        default: ValueSpec,
-    },
-    Array {
-        element: Box<Slot>,
-        length: u32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default: Option<ValueSpec>,
-    },
-    Struct {
-        fields: Vec<(Name, Slot)>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default: Option<ValueSpec>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct Slot {
-    pub shape: Shape,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bind: Option<Binding>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub present: Option<Presentation>,
-}
-
-impl Slot {
-    pub fn default_value(&self, ctx: &mut LoadCtx) -> LpsValue {
-        match &self.shape {
-            Shape::Scalar { default, .. } => default.materialize(ctx),
-            Shape::Array {
-                element,
-                length,
-                default,
-            } => match default {
-                Some(d) => d.materialize(ctx),
-                None => {
-                    let mut elems = Vec::with_capacity(*length as usize);
-                    for _ in 0..*length {
-                        elems.push(element.default_value(ctx));
-                    }
-                    LpsValue::Array(elems.into_boxed_slice())
-                }
-            },
-            Shape::Struct { fields, default } => match default {
-                Some(d) => d.materialize(ctx),
-                None => {
-                    let entries = fields
-                        .iter()
-                        .map(|(name, slot)| (name.0.clone(), slot.default_value(ctx)))
-                        .collect();
-                    LpsValue::Struct {
-                        name: None,
-                        fields: entries,
-                    }
-                }
-            },
-        }
-    }
-
-    pub fn storage(&self) -> LpsType {
-        match &self.shape {
-            Shape::Scalar { kind, .. } => kind.storage(),
-            Shape::Array {
-                element, length, ..
-            } => LpsType::Array {
-                element: Box::new(element.storage()),
-                len: *length,
-            },
-            Shape::Struct { fields, .. } => LpsType::Struct {
-                name: None,
-                members: fields
-                    .iter()
-                    .map(|(name, slot)| StructMember {
-                        name: Some(name.0.clone()),
-                        ty: slot.storage(),
-                    })
-                    .collect(),
-            },
-        }
     }
 }

@@ -1,6 +1,22 @@
 //! Presentation enum (UI widget hint).
 //! See docs/design/lightplayer/quantity.md §9.
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Presentation {
+    Knob,
+    Fader,
+    Toggle,
+    NumberInput,
+    Dropdown,
+    XyPad,
+    ColorPicker,
+    PaletteEditor,
+    GradientEditor,
+    TexturePreview,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -30,20 +46,4 @@ mod tests {
         let s = serde_json::to_string(&Presentation::ColorPicker).unwrap();
         assert_eq!(s, "\"color_picker\"");
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum Presentation {
-    Knob,
-    Fader,
-    Toggle,
-    NumberInput,
-    Dropdown,
-    XyPad,
-    ColorPicker,
-    PaletteEditor,
-    GradientEditor,
-    TexturePreview,
 }

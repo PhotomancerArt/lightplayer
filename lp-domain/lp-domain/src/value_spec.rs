@@ -5,41 +5,6 @@ use crate::LpsValue;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn literal_materializes_to_itself() {
-        let mut ctx = LoadCtx::default();
-        let spec = ValueSpec::Literal(LpsValue::F32(0.5));
-        match spec.materialize(&mut ctx) {
-            LpsValue::F32(v) => assert_eq!(v, 0.5),
-            other => panic!("expected F32(0.5), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn texture_black_materializes_to_handle_zero() {
-        let mut ctx = LoadCtx::default();
-        let spec = ValueSpec::Texture(TextureSpec::Black);
-        let v = spec.materialize(&mut ctx);
-        match v {
-            LpsValue::Struct { fields, .. } => {
-                let handle = fields
-                    .iter()
-                    .find(|(n, _)| n == "handle")
-                    .expect("handle field");
-                match &handle.1 {
-                    LpsValue::I32(h) => assert_eq!(*h, 0),
-                    _ => panic!("handle must be I32"),
-                }
-            }
-            other => panic!("expected Struct, got {other:?}"),
-        }
-    }
-}
-
 /// Loader-side context. Phase 5 ships a stub; M3 fills with a real
 /// texture handle allocator and asset cache.
 #[derive(Default)]
@@ -254,5 +219,40 @@ fn texture_handle_value(ctx: &mut LoadCtx, format: i32, width: i32, height: i32)
             (String::from("height"), LpsValue::I32(height)),
             (String::from("handle"), LpsValue::I32(handle)),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn literal_materializes_to_itself() {
+        let mut ctx = LoadCtx::default();
+        let spec = ValueSpec::Literal(LpsValue::F32(0.5));
+        match spec.materialize(&mut ctx) {
+            LpsValue::F32(v) => assert_eq!(v, 0.5),
+            other => panic!("expected F32(0.5), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn texture_black_materializes_to_handle_zero() {
+        let mut ctx = LoadCtx::default();
+        let spec = ValueSpec::Texture(TextureSpec::Black);
+        let v = spec.materialize(&mut ctx);
+        match v {
+            LpsValue::Struct { fields, .. } => {
+                let handle = fields
+                    .iter()
+                    .find(|(n, _)| n == "handle")
+                    .expect("handle field");
+                match &handle.1 {
+                    LpsValue::I32(h) => assert_eq!(*h, 0),
+                    _ => panic!("handle must be I32"),
+                }
+            }
+            other => panic!("expected Struct, got {other:?}"),
+        }
     }
 }

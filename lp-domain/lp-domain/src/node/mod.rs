@@ -4,6 +4,14 @@ use crate::LpsValue;
 use crate::error::DomainError;
 use crate::types::{NodePath, PropPath, Uid};
 
+pub trait Node {
+    fn uid(&self) -> Uid;
+    fn path(&self) -> &NodePath;
+
+    fn get_property(&self, prop: &PropPath) -> Result<LpsValue, DomainError>;
+    fn set_property(&mut self, prop: &PropPath, value: LpsValue) -> Result<(), DomainError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,12 +101,4 @@ mod tests {
             other => panic!("expected F32, got {other:?}"),
         }
     }
-}
-
-pub trait Node {
-    fn uid(&self) -> Uid;
-    fn path(&self) -> &NodePath;
-
-    fn get_property(&self, prop: &PropPath) -> Result<LpsValue, DomainError>;
-    fn set_property(&mut self, prop: &PropPath, value: LpsValue) -> Result<(), DomainError>;
 }

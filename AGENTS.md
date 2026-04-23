@@ -154,6 +154,27 @@ cargo build --workspace \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
 
+## Code organization in Rust source files
+
+Inside a single `.rs` file, the reading order is **top → bottom = most
+important → least important → tests**. Concretely:
+
+1. Module-level docs, `use`s, type aliases, constants.
+2. Public types / entry points / the headline impl.
+3. Supporting types and their impls.
+4. Private helper functions.
+5. `#[cfg(test)] mod tests { ... }` — **always at the bottom of the file**,
+   never above the impl it exercises.
+
+Inside the test module, the same principle applies: the actual `#[test]`
+functions come first, shared test helpers live below them.
+
+This is the opposite of an older "tests first" convention you will see in
+many archived plan files under `docs/plans-old/`. That convention is
+deprecated. Do not adopt it in new code. If a plan file you are executing
+asks for "tests at the top", treat that as a stale instruction and put the
+test module at the bottom anyway.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:

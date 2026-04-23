@@ -4,136 +4,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloc::string::ToString;
-    use core::hash::{Hash, Hasher};
-
-    #[test]
-    fn uid_display_decimal() {
-        assert_eq!(Uid(0).to_string(), "0");
-        assert_eq!(Uid(7).to_string(), "7");
-        assert_eq!(Uid(u32::MAX).to_string(), u32::MAX.to_string());
-    }
-
-    #[test]
-    fn uid_equality_and_hashing() {
-        #[derive(Default)]
-        struct TestHasher(u64);
-        impl Hasher for TestHasher {
-            fn finish(&self) -> u64 {
-                self.0
-            }
-            fn write(&mut self, bytes: &[u8]) {
-                for &b in bytes {
-                    self.0 = self.0.wrapping_mul(31).wrapping_add(u64::from(b));
-                }
-            }
-        }
-
-        let a = Uid(5);
-        let b = Uid(5);
-        let c = Uid(7);
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-
-        let mut ha = TestHasher::default();
-        let mut hb = TestHasher::default();
-        let mut hc = TestHasher::default();
-        a.hash(&mut ha);
-        b.hash(&mut hb);
-        c.hash(&mut hc);
-        assert_eq!(ha.finish(), hb.finish());
-        assert_ne!(ha.finish(), hc.finish());
-    }
-
-    #[test]
-    fn name_parse_accepts_valid() {
-        for s in ["foo", "foo_bar_42", "_x", "X1"] {
-            Name::parse(s).unwrap_or_else(|e| panic!("rejected {s:?}: {e}"));
-        }
-    }
-
-    #[test]
-    fn name_parse_rejects_invalid() {
-        for s in ["", "1foo", "foo-bar", "foo bar", "foo.bar"] {
-            assert!(Name::parse(s).is_err(), "should have rejected {s:?}");
-        }
-    }
-
-    #[test]
-    fn node_path_round_trips() {
-        for s in [
-            "/main.show",
-            "/main.show/fluid.vis",
-            "/dome.rig/main.layout/sector4.fixture",
-        ] {
-            let parsed = NodePath::parse(s).unwrap();
-            assert_eq!(parsed.to_string(), s);
-        }
-    }
-
-    #[test]
-    fn node_path_rejects_malformed() {
-        for s in ["", "main.show", "/", "//", "/main", "/main.show//x.y"] {
-            assert!(NodePath::parse(s).is_err(), "should have rejected {s:?}");
-        }
-    }
-
-    #[test]
-    fn prop_path_via_reexport_speed() {
-        let segs = prop_path::parse_path("speed").unwrap();
-        assert_eq!(segs.len(), 1);
-    }
-
-    #[test]
-    fn prop_path_via_reexport_nested() {
-        let segs = prop_path::parse_path("config.spacing").unwrap();
-        assert_eq!(segs.len(), 2);
-    }
-
-    #[test]
-    fn node_prop_spec_round_trips() {
-        let s = "/main.show/fluid.vis#speed";
-        let parsed = NodePropSpec::parse(s).unwrap();
-        assert_eq!(parsed.to_string(), s);
-    }
-
-    #[test]
-    fn node_prop_spec_with_indexing_round_trips() {
-        let s = "/x.y#a.b[0]";
-        let parsed = NodePropSpec::parse(s).unwrap();
-        assert_eq!(parsed.to_string(), s);
-    }
-
-    #[test]
-    fn node_prop_spec_rejects_missing_hash() {
-        assert!(NodePropSpec::parse("/main.show").is_err());
-    }
-
-    #[test]
-    fn node_prop_spec_rejects_double_hash() {
-        assert!(NodePropSpec::parse("/main.show#a#b").is_err());
-    }
-
-    #[test]
-    fn artifact_spec_display_round_trips() {
-        assert_eq!(
-            ArtifactSpec(String::from("./fluid.vis")).to_string(),
-            "./fluid.vis",
-        );
-    }
-
-    #[test]
-    fn channel_name_display_round_trips() {
-        assert_eq!(
-            ChannelName(String::from("audio/in/0")).to_string(),
-            "audio/in/0",
-        );
-    }
-}
-
 // --- Uid ----------------------------------------------------------------
 
 #[derive(
@@ -370,5 +240,135 @@ pub struct ChannelName(pub String);
 impl fmt::Display for ChannelName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+    use core::hash::{Hash, Hasher};
+
+    #[test]
+    fn uid_display_decimal() {
+        assert_eq!(Uid(0).to_string(), "0");
+        assert_eq!(Uid(7).to_string(), "7");
+        assert_eq!(Uid(u32::MAX).to_string(), u32::MAX.to_string());
+    }
+
+    #[test]
+    fn uid_equality_and_hashing() {
+        #[derive(Default)]
+        struct TestHasher(u64);
+        impl Hasher for TestHasher {
+            fn finish(&self) -> u64 {
+                self.0
+            }
+            fn write(&mut self, bytes: &[u8]) {
+                for &b in bytes {
+                    self.0 = self.0.wrapping_mul(31).wrapping_add(u64::from(b));
+                }
+            }
+        }
+
+        let a = Uid(5);
+        let b = Uid(5);
+        let c = Uid(7);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+
+        let mut ha = TestHasher::default();
+        let mut hb = TestHasher::default();
+        let mut hc = TestHasher::default();
+        a.hash(&mut ha);
+        b.hash(&mut hb);
+        c.hash(&mut hc);
+        assert_eq!(ha.finish(), hb.finish());
+        assert_ne!(ha.finish(), hc.finish());
+    }
+
+    #[test]
+    fn name_parse_accepts_valid() {
+        for s in ["foo", "foo_bar_42", "_x", "X1"] {
+            Name::parse(s).unwrap_or_else(|e| panic!("rejected {s:?}: {e}"));
+        }
+    }
+
+    #[test]
+    fn name_parse_rejects_invalid() {
+        for s in ["", "1foo", "foo-bar", "foo bar", "foo.bar"] {
+            assert!(Name::parse(s).is_err(), "should have rejected {s:?}");
+        }
+    }
+
+    #[test]
+    fn node_path_round_trips() {
+        for s in [
+            "/main.show",
+            "/main.show/fluid.vis",
+            "/dome.rig/main.layout/sector4.fixture",
+        ] {
+            let parsed = NodePath::parse(s).unwrap();
+            assert_eq!(parsed.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn node_path_rejects_malformed() {
+        for s in ["", "main.show", "/", "//", "/main", "/main.show//x.y"] {
+            assert!(NodePath::parse(s).is_err(), "should have rejected {s:?}");
+        }
+    }
+
+    #[test]
+    fn prop_path_via_reexport_speed() {
+        let segs = prop_path::parse_path("speed").unwrap();
+        assert_eq!(segs.len(), 1);
+    }
+
+    #[test]
+    fn prop_path_via_reexport_nested() {
+        let segs = prop_path::parse_path("config.spacing").unwrap();
+        assert_eq!(segs.len(), 2);
+    }
+
+    #[test]
+    fn node_prop_spec_round_trips() {
+        let s = "/main.show/fluid.vis#speed";
+        let parsed = NodePropSpec::parse(s).unwrap();
+        assert_eq!(parsed.to_string(), s);
+    }
+
+    #[test]
+    fn node_prop_spec_with_indexing_round_trips() {
+        let s = "/x.y#a.b[0]";
+        let parsed = NodePropSpec::parse(s).unwrap();
+        assert_eq!(parsed.to_string(), s);
+    }
+
+    #[test]
+    fn node_prop_spec_rejects_missing_hash() {
+        assert!(NodePropSpec::parse("/main.show").is_err());
+    }
+
+    #[test]
+    fn node_prop_spec_rejects_double_hash() {
+        assert!(NodePropSpec::parse("/main.show#a#b").is_err());
+    }
+
+    #[test]
+    fn artifact_spec_display_round_trips() {
+        assert_eq!(
+            ArtifactSpec(String::from("./fluid.vis")).to_string(),
+            "./fluid.vis",
+        );
+    }
+
+    #[test]
+    fn channel_name_display_round_trips() {
+        assert_eq!(
+            ChannelName(String::from("audio/in/0")).to_string(),
+            "audio/in/0",
+        );
     }
 }

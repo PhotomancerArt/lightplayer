@@ -7,6 +7,22 @@
 
 use crate::types::ChannelName;
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Binding {
+    Bus { channel: ChannelName },
+}
+
+/// Trait stub — compose-time validation that a Slot's binding is
+/// type-compatible with its target bus channel. Real impl lands in M3+.
+pub trait BindingResolver {
+    /// The [`Kind`](crate::kind::Kind) that the channel currently carries (set by the first
+    /// binding to it). `None` means the channel doesn't exist yet and
+    /// will be declared by this binding.
+    fn channel_kind(&self, channel: &ChannelName) -> Option<crate::kind::Kind>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -30,20 +46,4 @@ mod tests {
         let json = serde_json::to_string(&b).unwrap();
         assert!(json.contains("audio/in/0"));
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum Binding {
-    Bus { channel: ChannelName },
-}
-
-/// Trait stub — compose-time validation that a Slot's binding is
-/// type-compatible with its target bus channel. Real impl lands in M3+.
-pub trait BindingResolver {
-    /// The [`Kind`](crate::kind::Kind) that the channel currently carries (set by the first
-    /// binding to it). `None` means the channel doesn't exist yet and
-    /// will be declared by this binding.
-    fn channel_kind(&self, channel: &ChannelName) -> Option<crate::kind::Kind>;
 }
