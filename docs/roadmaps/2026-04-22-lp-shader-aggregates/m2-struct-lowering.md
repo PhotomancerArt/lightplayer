@@ -5,8 +5,13 @@
 Add first-class GLSL struct support — locals, member access, whole-struct
 copy, function args/returns, nested structs — on top of the unified
 pass-by-pointer ABI established in M1. At end of M2, every struct-related
-filetest in the existing acceptance corpus passes on `jit.q32` and
-`wasm.q32` (and `rv32c.q32` / `rv32n.q32` per Q7).
+filetest in the existing acceptance corpus passes on **`wasm.q32`**,
+**`rv32c.q32`**, and **`rv32n.q32`** — the same three targets as
+`lps-filetests::DEFAULT_TARGETS` (see `lps-filetests/src/targets/mod.rs`).
+**`jit.q32` is not an acceptance target** (host Cranelift convenience only;
+CI and milestone gates do not hinge on it). **`rv32c.q32` and `rv32n.q32` must
+have parity** (same pass/fail set); any divergence is a backend bug to fix,
+not a reason to leave one RV32 path ignored.
 
 ## Suggested plan name
 
@@ -54,19 +59,20 @@ filetest in the existing acceptance corpus passes on `jit.q32` and
     member offset.
 - Extend `lp-shader/lps-frontend/src/lower_access.rs` for struct-member
   stores through an `inout`/`out` param pointer.
-- Toggle off `@unimplemented(jit.q32)` and `@unimplemented(wasm.q32)`
-  markers on:
+- Toggle off `@unimplemented(wasm.q32)`, `@unimplemented(rv32c.q32)`, and
+  `@unimplemented(rv32n.q32)` on the struct acceptance corpus (aggressive:
+  enable tests that should pass for this milestone so bugs surface):
   - All 9 files in `lp-shader/lps-filetests/filetests/struct/`
   - `lp-shader/lps-filetests/filetests/function/param-struct.glsl`
   - `lp-shader/lps-filetests/filetests/function/return-struct.glsl`
   - `lp-shader/lps-filetests/filetests/uniform/struct.glsl` (the
     items not already passing)
-- Per Q7: also toggle off `@unimplemented(rv32c.q32)` /
-  `@unimplemented(rv32n.q32)` markers as part of M2 acceptance, on
-  the same filetests, after running them through `lpvm-cranelift`
-  RV32 codegen. Anything that doesn't pass becomes a known issue
-  (with a TODO + filed follow-up) but should not block M2 unless it
-  reveals a foundational bug.
+  - `lp-shader/lps-filetests/filetests/global/type-struct.glsl` as needed
+- Default is to **fix failures uncovered by un-ignoring** within M2. Only if a
+  failure is clearly **orthogonal** to struct lowering (e.g. a pre-existing
+  RV32 codegen bug on an op the test happens to touch) may a specific case be
+  re-marked with `// TODO(bug-N): …` and a filed issue — not as a blanket
+  deferral of RV32.
 
 ### Out of scope
 
@@ -78,6 +84,9 @@ filetest in the existing acceptance corpus passes on `jit.q32` and
 
 ## Key decisions
 
+- **Acceptance targets.** `wasm.q32`, `rv32c.q32`, `rv32n.q32` only. Not
+  `jit.q32`. RV32 Cranelift vs native must stay in lockstep on the struct
+  corpus.
 - **Storage of struct locals: always slot-backed.** "Aggregates are
   always data" — already settled at the roadmap level. Whole-struct copy
   is `Memcpy`; member access is `Load`/`Store` at std430 offset.
@@ -87,12 +96,10 @@ filetest in the existing acceptance corpus passes on `jit.q32` and
   plan; LPIR slot lifetimes today don't have explicit scoping, so this
   is "alloc and never reuse"; perf cost is acceptable, optimisable
   later).
-- **Nested-`Compose` recursion.** Whether to use a single recursive
-  walker over nested `Compose` components (mirroring
-  `lower_array_initializer::collect_flat_compose_components`) or to lean
-  on the natural recursion through `lower_expr_vec`. Settled in the M2
-  plan after a print-IR check on `struct/constructor-nested.glsl` early
-  in implementation.
+- **Nested-`Compose` / slot materialisation.** Use a unified primitive that
+  writes a value of a given `LpsType` at a `(base, byte_offset)` into a slot
+  (recursing for nested struct and array members), shared with array init
+  where practical — not a flat-IR-vreg walk that ignores std430 padding.
 - **`param_aliases` for struct args.** Not used. Struct args go through
   the Memcpy-on-entry slot path (consistent with arrays).
 
@@ -108,8 +115,10 @@ filetest in the existing acceptance corpus passes on `jit.q32` and
     through pointer)
 - New file:
   - `lp-shader/lps-frontend/src/lower_struct.rs`
-- Filetest updates: `@unimplemented` markers toggled off across the
-  struct acceptance corpus (listed above).
+- Filetest updates: `@unimplemented(wasm.q32)`, `@unimplemented(rv32c.q32)`,
+  and `@unimplemented(rv32n.q32)` toggled off across the struct acceptance
+  corpus (listed above). `jit.q32` annotations are out of scope for M2
+  acceptance.
 
 ## Dependencies
 

@@ -256,7 +256,7 @@ Three plausible orderings:
   ABI. Migrate existing array `in` params from flat-scalar to pointer.
   All existing array tests stay green. No new GLSL features.
 - **M2: Struct lowering on the unified ABI.** All struct filetests pass
-  on `jit.q32` and `wasm.q32`.
+  on `wasm.q32`, `rv32c.q32`, and `rv32n.q32` (not `jit.q32`).
 - **M3: Arrays of structs (locals + params).** Extends `ArrayInfo` leaf
   to allow `LpsType::Struct`; the const-array-size filetest unblocks.
 - **M4: Uniform-struct-with-array-field.** Extends
@@ -353,7 +353,7 @@ sweep, not the primary RV32 validation point.
     extension; `StructInfo` + `struct_map`; `lower_struct.rs`;
     `AccessIndex`/`Compose`/`Store` extensions. All
     `struct/`+`function/{param,return}-struct.glsl` filetests pass on
-    `jit.q32` and `wasm.q32`.
+    `wasm.q32`, `rv32c.q32`, and `rv32n.q32` (not `jit.q32`).
   - **M3**: Arrays of structs (locals + params). `ArrayInfo` leaf
     extends to `LpsType::Struct`; element stride = std430-aligned
     struct size; `const/array-size/struct-field.glsl` unblocks.
