@@ -20,7 +20,7 @@
 //! | `Amplitude`, `Ratio`, `Phase`, `Instant`, `Duration`, `Frequency`, `Angle` | any TOML number → [`LpsValue::F32`][`LpsValue`] |
 //! | `Count`, `Choice` | integer → [`LpsValue::I32`][`LpsValue`] |
 //! | `Bool` | bool |
-//! | `Color` | table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`LpsType`](crate::LpsType) order: `space`, `coords`) |
+//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`LpsType`](crate::LpsType) order: `space`, `coords`) |
 //! | `ColorPalette` | table `{ space, count?, entries = [[f,f,f],…] }` (member order: `space`, `count`, `entries`) |
 //! | `Gradient` | table `{ space, method, count?, stops = [{at,c},…] }` (member order: `space`, `method`, `count`, `stops`) |
 //! | `Position2d` / `Position3d` | 2- or 3-long array of numbers → `Vec2` / `Vec3` |
@@ -531,6 +531,8 @@ fn colorspace_id(s: &str) -> Result<i32, FromTomlError> {
         "oklab" => 1,
         "linear_srgb" | "linearrgb" => 2,
         "srgb" => 3,
+        "hsl" => 4,
+        "hsv" => 5,
         _ => {
             return Err(FromTomlError(format!("unknown color space `{s}`")));
         }
@@ -545,8 +547,225 @@ fn colorspace_name(id: i32) -> Result<&'static str, FromTomlError> {
         1 => Ok("oklab"),
         2 => Ok("linear_srgb"),
         3 => Ok("srgb"),
+        4 => Ok("hsl"),
+        5 => Ok("hsv"),
         _ => Err(FromTomlError::msg("unknown color space I32 id")),
     }
+}
+
+/// Function name for CSS-style `Color` TOML serialization: `name(a b c)`.
+fn colorspace_css_serialize_name(id: i32) -> Result<&'static str, FromTomlError> {
+    match id {
+        0 => Ok("oklch"),
+        1 => Ok("oklab"),
+        2 => Ok("linear_srgb"),
+        3 => Ok("srgb"),
+        4 => Ok("hsl"),
+        5 => Ok("hsv"),
+        _ => Err(FromTomlError::msg("unknown color space I32 id")),
+    }
+}
+
+fn split_css_arg_tokens(body: &str) -> alloc::vec::Vec<&str> {
+    let mut out = alloc::vec::Vec::new();
+    for part in body.split(',') {
+        for tok in part.split_whitespace() {
+            if !tok.is_empty() {
+                out.push(tok);
+            }
+        }
+    }
+    out
+}
+
+fn parse_f32_loose(s: &str) -> Result<f32, FromTomlError> {
+    s.parse::<f32>()
+        .map_err(|_| FromTomlError(format!("color: invalid number `{s}`")))
+}
+
+/// CSS `100%` style token → 0.0..=1.0
+fn parse_css_percent(s: &str) -> Result<f32, FromTomlError> {
+    let Some(stripped) = s.strip_suffix('%') else {
+        return Err(FromTomlError::msg("color: internal percent parse"));
+    };
+    let p = parse_f32_loose(stripped.trim())?;
+    Ok(p / 100.0)
+}
+
+/// Hue: `120`, `120deg` (and optional `turn`/`rad` as multiples of 360/2π to degrees).
+fn parse_css_hue(s: &str) -> Result<f32, FromTomlError> {
+    let t = s.trim();
+    if let Some(n) = t.strip_suffix("deg") {
+        return parse_f32_loose(n.trim());
+    }
+    if let Some(n) = t.strip_suffix("turn") {
+        return Ok(parse_f32_loose(n.trim())? * 360.0);
+    }
+    if let Some(n) = t.strip_suffix("rad") {
+        return Ok(parse_f32_loose(n.trim())? * 180.0 / core::f32::consts::PI);
+    }
+    if let Some(n) = t.strip_suffix("grad") {
+        return Ok(parse_f32_loose(n.trim())? * 360.0 / 400.0);
+    }
+    parse_f32_loose(t)
+}
+
+/// sRGB 0–1 from one `rgb()` / `r` channel: `%` is CSS semantics; otherwise >1 means 0–255.
+fn parse_rgb_channel(tok: &str) -> Result<f32, FromTomlError> {
+    if tok.ends_with('%') {
+        return parse_css_percent(tok);
+    }
+    let v = parse_f32_loose(tok)?;
+    if v > 1.0 {
+        return Ok((v / 255.0).clamp(0.0, 1.0));
+    }
+    Ok(v.clamp(0.0, 1.0))
+}
+
+/// `hsl` / `hsv` S and L/V: `%` → 0–1; else plain number, or 0–100 when > 1.
+fn parse_hsl_hsv_sl(tok: &str) -> Result<f32, FromTomlError> {
+    if tok.ends_with('%') {
+        return parse_css_percent(tok);
+    }
+    let v = parse_f32_loose(tok)?;
+    if v > 1.0 { Ok(v / 100.0) } else { Ok(v) }
+}
+
+fn parse_hex_color(s: &str) -> Result<(i32, [f32; 3]), FromTomlError> {
+    let s = s.trim();
+    if !s.starts_with('#') {
+        return Err(FromTomlError::msg("color: internal hex parse"));
+    }
+    let hex = s.strip_prefix('#').unwrap();
+    let (r, g, b) = match hex.len() {
+        3 => {
+            let r = u8::from_str_radix(&hex[0..1].repeat(2), 16);
+            let g = u8::from_str_radix(&hex[1..2].repeat(2), 16);
+            let b = u8::from_str_radix(&hex[2..3].repeat(2), 16);
+            (r, g, b)
+        }
+        6 | 8 => {
+            let h = if hex.len() == 8 { &hex[..6] } else { hex };
+            let r = u8::from_str_radix(&h[0..2], 16);
+            let g = u8::from_str_radix(&h[2..4], 16);
+            let b = u8::from_str_radix(&h[4..6], 16);
+            (r, g, b)
+        }
+        _ => {
+            return Err(FromTomlError::msg(
+                "color: hex must be #rgb, #rrggbb, or #rrggbbaa",
+            ));
+        }
+    };
+    let r = r.map_err(|_| FromTomlError::msg("color: bad hex (red)"))?;
+    let g = g.map_err(|_| FromTomlError::msg("color: bad hex (green)"))?;
+    let b = b.map_err(|_| FromTomlError::msg("color: bad hex (blue)"))?;
+    let rf = f32::from(r) / 255.0;
+    let gf = f32::from(g) / 255.0;
+    let bf = f32::from(b) / 255.0;
+    Ok((3, [rf, gf, bf]))
+}
+
+fn color_struct_from_space_coords(space: i32, c: [f32; 3]) -> LpsValue {
+    LpsValue::Struct {
+        name: Some(String::from("Color")),
+        fields: alloc::vec![
+            (String::from("space"), LpsValue::I32(space)),
+            (String::from("coords"), LpsValue::Vec3(c)),
+        ],
+    }
+}
+
+/// Parse a CSS-style color string to `(space_id, coords)` for `Color` literals.
+fn parse_css_color_string(s: &str) -> Result<(i32, [f32; 3]), FromTomlError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(FromTomlError::msg("color: empty CSS string"));
+    }
+    if s.starts_with('#') {
+        return parse_hex_color(s);
+    }
+    let open = s
+        .find('(')
+        .ok_or_else(|| FromTomlError::msg("color: CSS function needs `(`"))?;
+    let close = s
+        .rfind(')')
+        .ok_or_else(|| FromTomlError::msg("color: CSS function needs `)`"))?;
+    if close <= open {
+        return Err(FromTomlError::msg("color: invalid `()` in CSS color"));
+    }
+    if close != s.len() - 1 {
+        return Err(FromTomlError::msg(
+            "color: unexpected text after `)` in CSS color",
+        ));
+    }
+    let fname = s[..open].trim().to_lowercase();
+    let inner = s[open + 1..close].trim();
+    let toks = split_css_arg_tokens(inner);
+    if toks.len() != 3 {
+        return Err(FromTomlError(format!(
+            "color: expected 3 channel values, got {} in `{fname}(…)`",
+            toks.len()
+        )));
+    }
+    let t0 = toks[0];
+    let t1 = toks[1];
+    let t2 = toks[2];
+    let out = match fname.as_str() {
+        "oklch" | "oklab" => {
+            let x = parse_f32_loose(t0)?;
+            let y = parse_f32_loose(t1)?;
+            let z = parse_f32_loose(t2)?;
+            let sp = if fname == "oklch" { 0 } else { 1 };
+            (sp, [x, y, z])
+        }
+        "linear_srgb" | "linearrgb" => {
+            let x = parse_f32_loose(t0)?;
+            let y = parse_f32_loose(t1)?;
+            let z = parse_f32_loose(t2)?;
+            (2, [x, y, z])
+        }
+        "srgb" => {
+            let x = parse_rgb_channel(t0)?;
+            let y = parse_rgb_channel(t1)?;
+            let z = parse_rgb_channel(t2)?;
+            (3, [x, y, z])
+        }
+        "rgb" | "rgba" => {
+            let x = parse_rgb_channel(t0)?;
+            let y = parse_rgb_channel(t1)?;
+            let z = parse_rgb_channel(t2)?;
+            (3, [x, y, z])
+        }
+        "hsl" | "hsla" => {
+            let h = parse_css_hue(t0)?;
+            let s = parse_hsl_hsv_sl(t1)?;
+            let l = parse_hsl_hsv_sl(t2)?;
+            (4, [h, s, l])
+        }
+        "hsv" | "hsva" => {
+            let h = parse_css_hue(t0)?;
+            let s = parse_hsl_hsv_sl(t1)?;
+            let v = parse_hsl_hsv_sl(t2)?;
+            (5, [h, s, v])
+        }
+        _ => {
+            return Err(FromTomlError(format!(
+                "color: unknown CSS color function `{fname}`"
+            )));
+        }
+    };
+    Ok(out)
+}
+
+/// Trim trailing zeros for a compact TOML/CSS representation.
+fn fmt_css_coord(f: f32) -> String {
+    let f = if f == 0.0f32 { 0.0f32 } else { f };
+    let mut s = format!("{f:.6}");
+    while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
+        s.pop();
+    }
+    s
 }
 
 fn interp_method_id(s: &str) -> Result<i32, FromTomlError> {
@@ -572,18 +791,38 @@ fn interp_method_name(id: i32) -> Result<&'static str, FromTomlError> {
 
 /// Parse `LpsValue` for struct kinds (Color, ColorPalette, Gradient).
 fn from_toml_struct_kind(value: &toml::Value, k: Kind) -> Result<LpsValue, FromTomlError> {
-    let t = value
-        .as_table()
-        .ok_or_else(|| FromTomlError::msg("expected a TOML table"))?;
     match k {
-        Kind::Color => lps_value_color(t),
-        Kind::ColorPalette => lps_value_color_palette(t),
-        Kind::Gradient => lps_value_gradient(t),
+        Kind::Color => lps_value_color(value),
+        Kind::ColorPalette => {
+            let t = value
+                .as_table()
+                .ok_or_else(|| FromTomlError::msg("expected a TOML table"))?;
+            lps_value_color_palette(t)
+        }
+        Kind::Gradient => {
+            let t = value
+                .as_table()
+                .ok_or_else(|| FromTomlError::msg("expected a TOML table"))?;
+            lps_value_gradient(t)
+        }
         _ => Err(FromTomlError::msg("internal: not a struct color kind")),
     }
 }
 
-fn lps_value_color(t: &toml::map::Map<String, toml::Value>) -> Result<LpsValue, FromTomlError> {
+fn lps_value_color(v: &toml::Value) -> Result<LpsValue, FromTomlError> {
+    match v {
+        toml::Value::String(s) => {
+            let (id, c) = parse_css_color_string(s)?;
+            Ok(color_struct_from_space_coords(id, c))
+        }
+        toml::Value::Table(t) => lps_value_color_table(t),
+        _ => Err(FromTomlError::msg(
+            "color: expected a CSS string or a table { space, coords }",
+        )),
+    }
+}
+
+fn lps_value_color_table(t: &toml::map::Map<String, toml::Value>) -> Result<LpsValue, FromTomlError> {
     let space = t
         .get("space")
         .and_then(toml::Value::as_str)
@@ -795,13 +1034,15 @@ fn lps_color_to_toml(v: &LpsValue) -> Result<toml::Value, FromTomlError> {
     }
     let sp = find_field_i32(fields, "space")?;
     let co = find_field_vec3_value(fields, "coords")?;
-    let mut m: toml::map::Map<String, toml::Value> = toml::map::Map::new();
-    m.insert(
-        String::from("space"),
-        toml::Value::String(colorspace_name(sp)?.to_string()),
+    let css = colorspace_css_serialize_name(sp)?;
+    let s = format!(
+        "{}({} {} {})",
+        css,
+        fmt_css_coord(co[0]),
+        fmt_css_coord(co[1]),
+        fmt_css_coord(co[2])
     );
-    m.insert("coords".to_string(), vec3_to_toml_array(&co)?);
-    Ok(toml::Value::Table(m))
+    Ok(toml::Value::String(s))
 }
 
 fn lps_color_palette_to_toml(v: &LpsValue) -> Result<toml::Value, FromTomlError> {
@@ -1105,16 +1346,77 @@ mod tests {
 
     #[test]
     fn color_literal_round_trips_in_toml() {
+        let css = toml::Value::String("oklch(0.7 0.15 90)".into());
+        let s = ValueSpec::from_toml_for_kind(&css, Kind::Color).unwrap();
+        let out = ValueSpec::to_toml_for_kind(&s, Kind::Color).unwrap();
+        assert_eq!(
+            out.as_str(),
+            Some("oklch(0.7 0.15 90)"),
+            "serialized Color must be a CSS function string: {out:?}"
+        );
+    }
+
+    #[test]
+    fn color_literal_accepts_table_backward_compat() {
         let toml = r#"
         space = "oklch"
-        coords = [0.7, 0.15, 90.0]
+        coords = [0.72, 0.14, 285]
         "#;
         let table: toml::Table = toml::from_str(toml).unwrap();
         let v = toml::Value::Table(table);
         let s = ValueSpec::from_toml_for_kind(&v, Kind::Color).unwrap();
         let out = ValueSpec::to_toml_for_kind(&s, Kind::Color).unwrap();
-        let t = out.as_table().expect("table");
-        assert_eq!(t.get("space").and_then(toml::Value::as_str), Some("oklch"));
+        assert_eq!(out.as_str(), Some("oklch(0.72 0.14 285)"));
+    }
+
+    #[test]
+    fn color_literal_parses_oklch_hex_and_rgb_strings() {
+        let g = 87.0f32 / 255.0;
+        let b = 51.0f32 / 255.0;
+        let cases: [(&str, toml::Value, i32, f32, f32, f32); 3] = [
+            (
+                "oklch",
+                toml::Value::String("oklch(0.72 0.14 285)".into()),
+                0,
+                0.72,
+                0.14,
+                285.0,
+            ),
+            ("hex", toml::Value::String("#ff5733".into()), 3, 1.0, g, b),
+            (
+                "rgb",
+                toml::Value::String("rgb(255 87 51)".into()),
+                3,
+                1.0,
+                g,
+                b,
+            ),
+        ];
+        for (_label, tval, sp, a, b0, c0) in cases {
+            let s = ValueSpec::from_toml_for_kind(&tval, Kind::Color).unwrap();
+            let got = s.materialize(&mut LoadCtx::default());
+            let LpsValue::Struct { fields, .. } = got else {
+                panic!("struct color");
+            };
+            let space = fields
+                .iter()
+                .find_map(|(n, v)| (n == "space").then(|| v))
+                .expect("space");
+            let coords = fields
+                .iter()
+                .find_map(|(n, v)| (n == "coords").then(|| v))
+                .expect("coords");
+            let LpsValue::I32(sid) = space else {
+                panic!("space");
+            };
+            let LpsValue::Vec3([x, y, z]) = coords else {
+                panic!("coords");
+            };
+            assert_eq!(*sid, sp);
+            assert!((x - a).abs() < 0.001, "x {x} vs {a}");
+            assert!((y - b0).abs() < 0.001, "y {y} vs {b0}");
+            assert!((z - c0).abs() < 0.001, "z {z} vs {c0}");
+        }
     }
 
     #[test]

@@ -25,7 +25,7 @@ use alloc::string::String;
 ///
 /// [params.color]
 /// kind    = "color"
-/// default = { space = "oklch", coords = [0.7, 0.15, 90] }
+/// default = "oklch(0.7 0.15 90)"
 /// ```
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]

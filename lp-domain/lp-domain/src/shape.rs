@@ -986,7 +986,7 @@ mod tests {
     }
 
     #[test]
-    fn color_slot_roundtrips_toml_inline_table() {
+    fn color_slot_roundtrips_toml_css_string() {
         let c = LpsValue::Struct {
             name: Some(String::from("Color")),
             fields: alloc::vec![
@@ -1007,6 +1007,10 @@ mod tests {
         };
         let t = toml::to_string(&slot).unwrap();
         assert!(!t.contains("kind = \"literal\""), "{t}");
+        assert!(
+            t.contains("oklch(0.7 0.15 90)"),
+            "default must serialize as a CSS color string, got: {t}"
+        );
         let back: Slot = toml::from_str(&t).unwrap();
         assert_eq!(slot, back);
     }

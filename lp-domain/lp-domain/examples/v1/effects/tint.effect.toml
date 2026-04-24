@@ -24,7 +24,7 @@ bus = "video/in/0"
 
 [params.color]
 kind    = "color"
-default = { space = "oklch", coords = [0.72, 0.14, 285] }
+default = "oklch(0.72 0.14 285)"
 label   = "Tint Color"
 
 [params.amount]
