@@ -779,4 +779,3 @@ fn scan_param_argument_indices(
     walk_block(&func.body, module, func, &mut m);
     m
 }
-

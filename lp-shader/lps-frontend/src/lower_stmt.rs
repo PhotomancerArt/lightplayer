@@ -11,7 +11,9 @@ use naga::{Block, Expression, Statement, SwitchValue, TypeInner};
 use crate::lower_access;
 use crate::lower_array::aggregate_storage_base_vreg;
 use crate::lower_call;
-use crate::lower_ctx::{debug_assert_not_param_readonly_aggregate_store, LowerCtx, naga_type_to_ir_types};
+use crate::lower_ctx::{
+    LowerCtx, debug_assert_not_param_readonly_aggregate_store, naga_type_to_ir_types,
+};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 use crate::naga_util::expr_type_inner;

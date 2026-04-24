@@ -12,7 +12,9 @@ use naga::{
 
 use crate::lower_binary::lower_binary_vec;
 use crate::lower_cast::{lower_as_scalar, lower_as_vec, root_scalar_kind};
-use crate::lower_ctx::{LowerCtx, UniformVmctxDeferred, VRegVec, naga_scalar_to_ir_type, vector_size_usize};
+use crate::lower_ctx::{
+    LowerCtx, UniformVmctxDeferred, VRegVec, naga_scalar_to_ir_type, vector_size_usize,
+};
 use crate::lower_error::LowerError;
 use crate::lower_math;
 use crate::lower_unary::lower_unary_vec;
@@ -280,12 +282,14 @@ fn lower_expr_vec_uncached(
                     Ok(base_vs[start..start + n].into())
                 }
                 TypeInner::Struct { .. } => match &ctx.func.expressions[*base] {
-                    Expression::GlobalVariable(gv_handle) => access_index_uniform_global_struct_member(
-                        ctx,
-                        expr,
-                        *gv_handle,
-                        *index as usize,
-                    ),
+                    Expression::GlobalVariable(gv_handle) => {
+                        access_index_uniform_global_struct_member(
+                            ctx,
+                            expr,
+                            *gv_handle,
+                            *index as usize,
+                        )
+                    }
                     Expression::LocalVariable(lv) => {
                         if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
                             if matches!(
@@ -352,134 +356,131 @@ fn lower_expr_vec_uncached(
                     Expression::Load { pointer } => {
                         let root = peel_load_chain(ctx.func, *pointer);
                         match &ctx.func.expressions[root] {
-                        Expression::LocalVariable(lv) => {
-                            if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
-                                if matches!(
-                                    &info.layout.kind,
-                                    crate::naga_util::AggregateKind::Struct { .. }
-                                ) {
-                                    return crate::lower_struct::load_struct_member_to_vregs(
+                            Expression::LocalVariable(lv) => {
+                                if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                                    if matches!(
+                                        &info.layout.kind,
+                                        crate::naga_util::AggregateKind::Struct { .. }
+                                    ) {
+                                        return crate::lower_struct::load_struct_member_to_vregs(
+                                            ctx,
+                                            &info,
+                                            *index as usize,
+                                        );
+                                    }
+                                }
+                                if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
+                                    return access_index_uniform_global_struct_member(
                                         ctx,
-                                        &info,
+                                        expr,
+                                        gv,
                                         *index as usize,
                                     );
                                 }
-                            }
-                            if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
-                                return access_index_uniform_global_struct_member(
-                                    ctx,
-                                    expr,
-                                    gv,
-                                    *index as usize,
-                                );
-                            }
-                            Err(LowerError::UnsupportedExpression(String::from(
-                                "AccessIndex: struct value behind Load is not a slot-backed struct local",
-                            )))
-                        }
-                        Expression::FunctionArgument(arg_i)
-                            if ctx.pointer_args.contains_key(arg_i) =>
-                        {
-                            let pointee = ctx.pointer_args[arg_i];
-                            if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
-                                let layout =
-                                    crate::naga_util::aggregate_layout(ctx.module, pointee)?
-                                        .ok_or_else(|| {
-                                            LowerError::Internal(String::from(
-                                                "struct member load: layout",
-                                            ))
-                                        })?;
-                                let members = layout.struct_members().ok_or_else(|| {
-                                    LowerError::Internal(String::from("struct load members"))
-                                })?;
-                                let midx = *index as usize;
-                                let m = members.get(midx).ok_or_else(|| {
-                                    LowerError::UnsupportedExpression(String::from(
-                                        "struct member index out of range",
-                                    ))
-                                })?;
-                                let naga_inner = &ctx.module.types[m.naga_ty].inner;
-                                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
-                                    ctx.module, naga_inner,
-                                )?;
-                                let base_ptr = ctx.arg_vregs_for(*arg_i)?[0];
-                                let mut out = VRegVec::new();
-                                for (j, ty) in ir_tys.iter().enumerate() {
-                                    let dst = ctx.fb.alloc_vreg(*ty);
-                                    ctx.fb.push(LpirOp::Load {
-                                        dst,
-                                        base: base_ptr,
-                                        offset: m.byte_offset + (j as u32) * 4,
-                                    });
-                                    out.push(dst);
-                                }
-                                Ok(out)
-                            } else {
                                 Err(LowerError::UnsupportedExpression(String::from(
-                                    "AccessIndex: inout param is not pointer-to-struct",
+                                    "AccessIndex: struct value behind Load is not a slot-backed struct local",
                                 )))
                             }
-                        }
-                        Expression::GlobalVariable(gv_handle) => {
-                            access_index_uniform_global_struct_member(
-                                ctx,
-                                expr,
-                                *gv_handle,
-                                *index as usize,
-                            )
-                        }
-                        Expression::AccessIndex { .. } => {
-                            if let Some((gv, mut chain)) =
-                                crate::lower_struct::peel_struct_access_index_chain_to_global(
-                                    ctx.func, root,
-                                )
+                            Expression::FunctionArgument(arg_i)
+                                if ctx.pointer_args.contains_key(arg_i) =>
                             {
-                                chain.push(*index);
-                                return uniform_global_access_index_path(ctx, expr, gv, &chain);
+                                let pointee = ctx.pointer_args[arg_i];
+                                if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
+                                    let layout =
+                                        crate::naga_util::aggregate_layout(ctx.module, pointee)?
+                                            .ok_or_else(|| {
+                                                LowerError::Internal(String::from(
+                                                    "struct member load: layout",
+                                                ))
+                                            })?;
+                                    let members = layout.struct_members().ok_or_else(|| {
+                                        LowerError::Internal(String::from("struct load members"))
+                                    })?;
+                                    let midx = *index as usize;
+                                    let m = members.get(midx).ok_or_else(|| {
+                                        LowerError::UnsupportedExpression(String::from(
+                                            "struct member index out of range",
+                                        ))
+                                    })?;
+                                    let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                                    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
+                                        ctx.module, naga_inner,
+                                    )?;
+                                    let base_ptr = ctx.arg_vregs_for(*arg_i)?[0];
+                                    let mut out = VRegVec::new();
+                                    for (j, ty) in ir_tys.iter().enumerate() {
+                                        let dst = ctx.fb.alloc_vreg(*ty);
+                                        ctx.fb.push(LpirOp::Load {
+                                            dst,
+                                            base: base_ptr,
+                                            offset: m.byte_offset + (j as u32) * 4,
+                                        });
+                                        out.push(dst);
+                                    }
+                                    Ok(out)
+                                } else {
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: inout param is not pointer-to-struct",
+                                    )))
+                                }
                             }
-                            Err(LowerError::UnsupportedExpression(String::from(
-                                "AccessIndex: struct value behind Load: uniform chain peel failed",
-                            )))
-                        }
-                        Expression::Access { .. } => {
-                            let _ = lower_expr_vec(ctx, root)?;
-                            if let Some(UniformVmctxDeferred::ElementAddr {
-                                addr_vreg,
-                                element,
-                            }) = ctx.uniform_vmctx_deferred.get(&root.index()).cloned()
-                            {
-                                let LpsType::Struct { members, .. } = element else {
-                                    return Err(LowerError::Internal(String::from(
-                                        "Load uniform element: expected struct",
-                                    )));
-                                };
-                                let midx = *index as usize;
-                                let m = members.get(midx).ok_or_else(|| {
-                                    LowerError::UnsupportedExpression(String::from(
-                                        "struct member index out of range",
-                                    ))
-                                })?;
-                                let rel = struct_member_start_offset_u32(
-                                    &members,
-                                    midx,
-                                    LayoutRules::Std430,
-                                )?;
-                                return load_lps_value_from_vmctx_with_base(
+                            Expression::GlobalVariable(gv_handle) => {
+                                access_index_uniform_global_struct_member(
                                     ctx,
-                                    addr_vreg,
-                                    rel,
-                                    &m.ty,
-                                );
+                                    expr,
+                                    *gv_handle,
+                                    *index as usize,
+                                )
                             }
-                            Err(LowerError::UnsupportedExpression(String::from(
-                                "AccessIndex: struct value behind Load: Access base has no uniform element addr",
-                            )))
+                            Expression::AccessIndex { .. } => {
+                                if let Some((gv, mut chain)) =
+                                    crate::lower_struct::peel_struct_access_index_chain_to_global(
+                                        ctx.func, root,
+                                    )
+                                {
+                                    chain.push(*index);
+                                    return uniform_global_access_index_path(ctx, expr, gv, &chain);
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: struct value behind Load: uniform chain peel failed",
+                                )))
+                            }
+                            Expression::Access { .. } => {
+                                let _ = lower_expr_vec(ctx, root)?;
+                                if let Some(UniformVmctxDeferred::ElementAddr {
+                                    addr_vreg,
+                                    element,
+                                }) = ctx.uniform_vmctx_deferred.get(&root.index()).cloned()
+                                {
+                                    let LpsType::Struct { members, .. } = element else {
+                                        return Err(LowerError::Internal(String::from(
+                                            "Load uniform element: expected struct",
+                                        )));
+                                    };
+                                    let midx = *index as usize;
+                                    let m = members.get(midx).ok_or_else(|| {
+                                        LowerError::UnsupportedExpression(String::from(
+                                            "struct member index out of range",
+                                        ))
+                                    })?;
+                                    let rel = struct_member_start_offset_u32(
+                                        &members,
+                                        midx,
+                                        LayoutRules::Std430,
+                                    )?;
+                                    return load_lps_value_from_vmctx_with_base(
+                                        ctx, addr_vreg, rel, &m.ty,
+                                    );
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: struct value behind Load: Access base has no uniform element addr",
+                                )))
+                            }
+                            _ => Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: struct value behind Load is not a slot-backed struct local",
+                            ))),
                         }
-                        _ => Err(LowerError::UnsupportedExpression(String::from(
-                            "AccessIndex: struct value behind Load is not a slot-backed struct local",
-                        ))),
                     }
-                    },
                     Expression::CallResult(_) => {
                         let info =
                             ctx.call_result_aggregates
@@ -505,10 +506,8 @@ fn lower_expr_vec_uncached(
                         )
                     }
                     Expression::Access { .. } => {
-                        if let Some(UniformVmctxDeferred::ElementAddr {
-                            addr_vreg,
-                            element,
-                        }) = ctx.uniform_vmctx_deferred.get(&base.index()).cloned()
+                        if let Some(UniformVmctxDeferred::ElementAddr { addr_vreg, element }) =
+                            ctx.uniform_vmctx_deferred.get(&base.index()).cloned()
                         {
                             let LpsType::Struct { members, .. } = element else {
                                 return Err(LowerError::Internal(String::from(
@@ -526,12 +525,7 @@ fn lower_expr_vec_uncached(
                                 midx,
                                 LayoutRules::Std430,
                             )?;
-                            return load_lps_value_from_vmctx_with_base(
-                                ctx,
-                                addr_vreg,
-                                rel,
-                                &m.ty,
-                            );
+                            return load_lps_value_from_vmctx_with_base(ctx, addr_vreg, rel, &m.ty);
                         }
                         Err(LowerError::UnsupportedExpression(String::from(
                             "AccessIndex: struct rvalue base not supported",
@@ -607,9 +601,11 @@ fn lower_expr_vec_uncached(
                                 let n = match size {
                                     ArraySize::Constant(nz) => nz.get(),
                                     ArraySize::Pending(_) | ArraySize::Dynamic => {
-                                        return Err(LowerError::UnsupportedExpression(String::from(
-                                            "AccessIndex on dynamically-sized array pointer",
-                                        )));
+                                        return Err(LowerError::UnsupportedExpression(
+                                            String::from(
+                                                "AccessIndex on dynamically-sized array pointer",
+                                            ),
+                                        ));
                                     }
                                 };
                                 if n == 0 {
@@ -617,9 +613,8 @@ fn lower_expr_vec_uncached(
                                         "AccessIndex on zero-sized array pointer",
                                     )));
                                 }
-                                let i = (*index)
-                                    .min(n.saturating_sub(1))
-                                    .min(len.saturating_sub(1));
+                                let i =
+                                    (*index).min(n.saturating_sub(1)).min(len.saturating_sub(1));
                                 let off = base_offset.wrapping_add(i.saturating_mul(stride));
                                 return load_lps_value_from_vmctx(ctx, off, &element);
                             }
@@ -650,9 +645,8 @@ fn lower_expr_vec_uncached(
                                             .min(len.saturating_sub(1));
                                         let stride =
                                             array_stride(&element, LayoutRules::Std430) as u32;
-                                        let off = info
-                                            .byte_offset
-                                            .wrapping_add(i.saturating_mul(stride));
+                                        let off =
+                                            info.byte_offset.wrapping_add(i.saturating_mul(stride));
                                         return load_lps_value_from_vmctx(ctx, off, &element);
                                     }
                                 }
@@ -664,122 +658,122 @@ fn lower_expr_vec_uncached(
                         TypeInner::Struct { .. } => {
                             let base_root = peel_load_chain(ctx.func, *base);
                             match &ctx.func.expressions[base_root] {
-                            Expression::GlobalVariable(gv_handle) => {
-                                access_index_uniform_global_struct_member(
-                                    ctx,
-                                    expr,
-                                    *gv_handle,
-                                    *index as usize,
-                                )
-                            }
-                            Expression::LocalVariable(lv) => {
-                                if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
-                                    if matches!(
-                                        &info.layout.kind,
-                                        crate::naga_util::AggregateKind::Struct { .. }
-                                    ) {
-                                        return crate::lower_struct::load_struct_member_to_vregs(
+                                Expression::GlobalVariable(gv_handle) => {
+                                    access_index_uniform_global_struct_member(
+                                        ctx,
+                                        expr,
+                                        *gv_handle,
+                                        *index as usize,
+                                    )
+                                }
+                                Expression::LocalVariable(lv) => {
+                                    if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                                        if matches!(
+                                            &info.layout.kind,
+                                            crate::naga_util::AggregateKind::Struct { .. }
+                                        ) {
+                                            return crate::lower_struct::load_struct_member_to_vregs(
                                             ctx,
                                             &info,
                                             *index as usize,
                                         );
+                                        }
                                     }
-                                }
-                                if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
-                                    return access_index_uniform_global_struct_member(
-                                        ctx,
-                                        expr,
-                                        gv,
-                                        *index as usize,
-                                    );
-                                }
-                                Err(LowerError::UnsupportedExpression(String::from(
-                                    "AccessIndex: pointer to struct must be a slot-backed struct local",
-                                )))
-                            }
-                            Expression::FunctionArgument(arg_i)
-                                if ctx.pointer_args.contains_key(arg_i) =>
-                            {
-                                let pointee = ctx.pointer_args[arg_i];
-                                if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
-                                    let layout =
-                                        crate::naga_util::aggregate_layout(ctx.module, pointee)?
-                                            .ok_or_else(|| {
-                                                LowerError::Internal(String::from(
-                                                    "struct member load: layout",
-                                                ))
-                                            })?;
-                                    let members = layout.struct_members().ok_or_else(|| {
-                                        LowerError::Internal(String::from("struct load members"))
-                                    })?;
-                                    let midx = *index as usize;
-                                    let m = members.get(midx).ok_or_else(|| {
-                                        LowerError::UnsupportedExpression(String::from(
-                                            "struct member index out of range",
-                                        ))
-                                    })?;
-                                    let naga_inner = &ctx.module.types[m.naga_ty].inner;
-                                    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
-                                        ctx.module, naga_inner,
-                                    )?;
-                                    let base = ctx.arg_vregs_for(*arg_i)?[0];
-                                    let mut out = VRegVec::new();
-                                    for (j, ty) in ir_tys.iter().enumerate() {
-                                        let dst = ctx.fb.alloc_vreg(*ty);
-                                        ctx.fb.push(LpirOp::Load {
-                                            dst,
-                                            base,
-                                            offset: m.byte_offset + (j as u32) * 4,
-                                        });
-                                        out.push(dst);
+                                    if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
+                                        return access_index_uniform_global_struct_member(
+                                            ctx,
+                                            expr,
+                                            gv,
+                                            *index as usize,
+                                        );
                                     }
-                                    return Ok(out);
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: pointer to struct must be a slot-backed struct local",
+                                    )))
                                 }
-                                Err(LowerError::UnsupportedExpression(String::from(
-                                    "AccessIndex: pointer to struct inout",
-                                )))
-                            }
-                            Expression::Access { .. } => {
-                                if let Some(UniformVmctxDeferred::ElementAddr {
-                                    addr_vreg,
-                                    element,
-                                }) = ctx
-                                    .uniform_vmctx_deferred
-                                    .get(&base_root.index())
-                                    .cloned()
+                                Expression::FunctionArgument(arg_i)
+                                    if ctx.pointer_args.contains_key(arg_i) =>
                                 {
-                                    let LpsType::Struct { members, .. } = element else {
-                                        return Err(LowerError::Internal(String::from(
-                                            "AccessIndex: ptr uniform element: expected struct",
-                                        )));
-                                    };
-                                    let midx = *index as usize;
-                                    let m = members.get(midx).ok_or_else(|| {
-                                        LowerError::UnsupportedExpression(String::from(
-                                            "struct member index out of range",
-                                        ))
-                                    })?;
-                                    let rel = struct_member_start_offset_u32(
-                                        &members,
-                                        midx,
-                                        LayoutRules::Std430,
-                                    )?;
-                                    return load_lps_value_from_vmctx_with_base(
-                                        ctx,
-                                        addr_vreg,
-                                        rel,
-                                        &m.ty,
-                                    );
+                                    let pointee = ctx.pointer_args[arg_i];
+                                    if let TypeInner::Struct { .. } =
+                                        &ctx.module.types[pointee].inner
+                                    {
+                                        let layout = crate::naga_util::aggregate_layout(
+                                            ctx.module, pointee,
+                                        )?
+                                        .ok_or_else(|| {
+                                            LowerError::Internal(String::from(
+                                                "struct member load: layout",
+                                            ))
+                                        })?;
+                                        let members = layout.struct_members().ok_or_else(|| {
+                                            LowerError::Internal(String::from(
+                                                "struct load members",
+                                            ))
+                                        })?;
+                                        let midx = *index as usize;
+                                        let m = members.get(midx).ok_or_else(|| {
+                                            LowerError::UnsupportedExpression(String::from(
+                                                "struct member index out of range",
+                                            ))
+                                        })?;
+                                        let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                                        let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
+                                            ctx.module, naga_inner,
+                                        )?;
+                                        let base = ctx.arg_vregs_for(*arg_i)?[0];
+                                        let mut out = VRegVec::new();
+                                        for (j, ty) in ir_tys.iter().enumerate() {
+                                            let dst = ctx.fb.alloc_vreg(*ty);
+                                            ctx.fb.push(LpirOp::Load {
+                                                dst,
+                                                base,
+                                                offset: m.byte_offset + (j as u32) * 4,
+                                            });
+                                            out.push(dst);
+                                        }
+                                        return Ok(out);
+                                    }
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: pointer to struct inout",
+                                    )))
                                 }
-                                Err(LowerError::UnsupportedExpression(String::from(
+                                Expression::Access { .. } => {
+                                    if let Some(UniformVmctxDeferred::ElementAddr {
+                                        addr_vreg,
+                                        element,
+                                    }) =
+                                        ctx.uniform_vmctx_deferred.get(&base_root.index()).cloned()
+                                    {
+                                        let LpsType::Struct { members, .. } = element else {
+                                            return Err(LowerError::Internal(String::from(
+                                                "AccessIndex: ptr uniform element: expected struct",
+                                            )));
+                                        };
+                                        let midx = *index as usize;
+                                        let m = members.get(midx).ok_or_else(|| {
+                                            LowerError::UnsupportedExpression(String::from(
+                                                "struct member index out of range",
+                                            ))
+                                        })?;
+                                        let rel = struct_member_start_offset_u32(
+                                            &members,
+                                            midx,
+                                            LayoutRules::Std430,
+                                        )?;
+                                        return load_lps_value_from_vmctx_with_base(
+                                            ctx, addr_vreg, rel, &m.ty,
+                                        );
+                                    }
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: pointer to struct: unsupported base",
+                                    )))
+                                }
+                                _ => Err(LowerError::UnsupportedExpression(String::from(
                                     "AccessIndex: pointer to struct: unsupported base",
-                                )))
+                                ))),
                             }
-                            _ => Err(LowerError::UnsupportedExpression(String::from(
-                                "AccessIndex: pointer to struct: unsupported base",
-                            ))),
-                            }
-                        },
+                        }
                         _ => Err(LowerError::UnsupportedExpression(format!(
                             "AccessIndex on pointer to {inner:?}"
                         ))),
@@ -831,9 +825,7 @@ fn lower_expr_vec_uncached(
                                 "AccessIndex on zero-sized array",
                             )));
                         }
-                        let i = (*index)
-                            .min(n.saturating_sub(1))
-                            .min(len.saturating_sub(1));
+                        let i = (*index).min(n.saturating_sub(1)).min(len.saturating_sub(1));
                         let off = base_offset.wrapping_add(i.saturating_mul(stride));
                         return load_lps_value_from_vmctx(ctx, off, &element);
                     }
@@ -931,7 +923,9 @@ fn lower_expr_vec_uncached(
                             imm: stride_i,
                         });
                         let off_imm = i32::try_from(field_base).map_err(|_| {
-                            LowerError::Internal(String::from("uniform array field offset: IaddImm"))
+                            LowerError::Internal(String::from(
+                                "uniform array field offset: IaddImm",
+                            ))
                         })?;
                         let byte_off = ctx.fb.alloc_vreg(IrType::I32);
                         ctx.fb.push(LpirOp::IaddImm {
@@ -1557,7 +1551,8 @@ fn uniform_global_access_index_path(
                     }
                 };
                 if i >= indices.len() {
-                    let lps_arr = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, m.naga_ty)?;
+                    let lps_arr =
+                        crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, m.naga_ty)?;
                     if let LpsType::Array { element, len } = &lps_arr {
                         let stride = array_stride(element.as_ref(), LayoutRules::Std430) as u32;
                         ctx.uniform_vmctx_deferred.insert(
@@ -1578,7 +1573,8 @@ fn uniform_global_access_index_path(
                 let elem_idx = indices[i];
                 i += 1;
                 let elem_idx = elem_idx.min(n.saturating_sub(1));
-                let lps_elem = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, *elem_ty_h)?;
+                let lps_elem =
+                    crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, *elem_ty_h)?;
                 let stride = array_stride(&lps_elem, LayoutRules::Std430) as u32;
                 off = off.wrapping_add(elem_idx.saturating_mul(stride));
                 naga_ty = *elem_ty_h;

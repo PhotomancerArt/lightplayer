@@ -10,13 +10,13 @@ use smallvec::smallvec;
 use lpir::{IrType, LpirOp, VReg};
 use lps_shared::LpsType;
 use naga::{
-    BinaryOperator, Expression, Function, Handle, Literal, LocalVariable, Module, ScalarKind,
-    Type, TypeInner,
+    BinaryOperator, Expression, Function, Handle, Literal, LocalVariable, Module, ScalarKind, Type,
+    TypeInner,
 };
 
 use crate::lower_ctx::{
-    debug_assert_not_param_readonly_aggregate_store, AggregateInfo, AggregateSlot, LowerCtx,
-    VRegVec, naga_type_to_ir_types, vector_size_usize,
+    AggregateInfo, AggregateSlot, LowerCtx, VRegVec,
+    debug_assert_not_param_readonly_aggregate_store, naga_type_to_ir_types, vector_size_usize,
 };
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
@@ -343,7 +343,9 @@ pub(crate) fn zero_array_region_in_slot(
     naga_array_ty: Handle<Type>,
 ) -> Result<(), LowerError> {
     let Some(layout) = crate::naga_util::aggregate_layout(module, naga_array_ty)? else {
-        return Err(LowerError::Internal(String::from("zero_array_region: not aggregate")));
+        return Err(LowerError::Internal(String::from(
+            "zero_array_region: not aggregate",
+        )));
     };
     let crate::naga_util::AggregateKind::Array {
         leaf_element_ty,
@@ -352,7 +354,9 @@ pub(crate) fn zero_array_region_in_slot(
         ..
     } = &layout.kind
     else {
-        return Err(LowerError::Internal(String::from("zero_array_region: not array")));
+        return Err(LowerError::Internal(String::from(
+            "zero_array_region: not array",
+        )));
     };
     let leaf_naga = *leaf_element_ty;
     let leaf_stride = *leaf_stride;
@@ -449,10 +453,7 @@ pub(crate) fn store_array_element_const(
     index: u32,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    debug_assert_not_param_readonly_aggregate_store(
-        info,
-        "store_array_element_const",
-    );
+    debug_assert_not_param_readonly_aggregate_store(info, "store_array_element_const");
     if info.element_count() == 0 {
         return Err(LowerError::Internal(String::from(
             "store_array_element_const: empty array",
@@ -486,10 +487,7 @@ pub(crate) fn store_array_element_dynamic(
     index_v: VReg,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    debug_assert_not_param_readonly_aggregate_store(
-        info,
-        "store_array_element_dynamic",
-    );
+    debug_assert_not_param_readonly_aggregate_store(info, "store_array_element_dynamic");
     let addr = array_element_address(ctx, info, ElementIndex::Dynamic(index_v))?;
     let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;

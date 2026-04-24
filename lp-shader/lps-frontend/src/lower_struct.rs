@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 use lpir::{FunctionBuilder, IrType, LpirOp, SlotId, VMCTX_VREG, VReg};
 use lps_shared::{LayoutRules, LpsType, array_stride};
@@ -13,18 +13,18 @@ use naga::{
 };
 
 use crate::lower_array::{
-    aggregate_storage_base_vreg, array_element_address_with_field_offset, ElementIndex,
+    ElementIndex, aggregate_storage_base_vreg, array_element_address_with_field_offset,
 };
 use crate::lower_array_multidim::{
     ArraySubscriptRoot, SubscriptOperand, peel_array_subscript_chain,
 };
-use alloc::vec::Vec;
 use crate::lower_ctx::{
-    debug_assert_not_param_readonly_aggregate_store, AggregateInfo, AggregateSlot, LowerCtx,
-    VRegVec, naga_type_to_ir_types,
+    AggregateInfo, AggregateSlot, LowerCtx, VRegVec,
+    debug_assert_not_param_readonly_aggregate_store, naga_type_to_ir_types,
 };
 use crate::lower_error::LowerError;
 use crate::naga_util::MemberInfo;
+use alloc::vec::Vec;
 
 /// Local array-of-struct access after Phase 1 layout: array subscripts (outer-first in
 /// [`SubscriptOperand`] order) and at most one struct field index (`ps[i].x` → `Some(x)`).
@@ -60,9 +60,7 @@ pub(crate) fn peel_arrayofstruct_chain(
         ArraySubscriptRoot::Local(lv) => {
             let outer = ctx.aggregate_map.get(&lv).cloned()?;
             match &outer.layout.kind {
-                crate::naga_util::AggregateKind::Array { .. } => {
-                    (outer, subscripts, 0u32)
-                }
+                crate::naga_util::AggregateKind::Array { .. } => (outer, subscripts, 0u32),
                 crate::naga_util::AggregateKind::Struct { .. } => {
                     let (off, array_naga_ty, rest) = struct_path_prefix_to_array_of_struct(
                         ctx.module,
@@ -155,10 +153,7 @@ fn aggregate_info_for_array_naga_in_struct_slot(
     slot: AggregateSlot,
 ) -> Option<AggregateInfo> {
     let layout = crate::naga_util::aggregate_layout(module, naga_array_ty).ok()??;
-    if !matches!(
-        &layout.kind,
-        crate::naga_util::AggregateKind::Array { .. }
-    ) {
+    if !matches!(&layout.kind, crate::naga_util::AggregateKind::Array { .. }) {
         return None;
     }
     Some(AggregateInfo {
@@ -173,7 +168,10 @@ fn subscripts_to_array_element_index(
     info: &AggregateInfo,
     subscripts: &[SubscriptOperand],
 ) -> Result<ElementIndex, LowerError> {
-    if subscripts.iter().all(|o| matches!(o, SubscriptOperand::Const(_))) {
+    if subscripts
+        .iter()
+        .all(|o| matches!(o, SubscriptOperand::Const(_)))
+    {
         let idxs: alloc::vec::Vec<u32> = subscripts
             .iter()
             .map(|o| match o {
@@ -206,12 +204,13 @@ pub(crate) fn load_array_struct_element(
     )?;
     let leaf_naga = chain.info.leaf_element_ty();
     if let Some(midx) = chain.first_member {
-        let layout = crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
-            LowerError::Internal(String::from("load_array_struct_element: leaf layout"))
+        let layout =
+            crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
+                LowerError::Internal(String::from("load_array_struct_element: leaf layout"))
+            })?;
+        let members = layout.struct_members().ok_or_else(|| {
+            LowerError::Internal(String::from("load_array_struct_element: members"))
         })?;
-        let members = layout
-            .struct_members()
-            .ok_or_else(|| LowerError::Internal(String::from("load_array_struct_element: members")))?;
         let m = members.get(midx as usize).ok_or_else(|| {
             LowerError::UnsupportedExpression(String::from(
                 "load_array_struct_element: member index OOB",
@@ -223,10 +222,9 @@ pub(crate) fn load_array_struct_element(
         let mut out = VRegVec::new();
         for (j, ty) in m.ir_tys.iter().enumerate() {
             let dst = ctx.fb.alloc_vreg(*ty);
-            let off = m
-                .byte_offset
-                .checked_add((j as u32) * 4)
-                .ok_or_else(|| LowerError::Internal(String::from("load_array_struct_element: off")))?;
+            let off = m.byte_offset.checked_add((j as u32) * 4).ok_or_else(|| {
+                LowerError::Internal(String::from("load_array_struct_element: off"))
+            })?;
             ctx.fb.push(LpirOp::Load {
                 dst,
                 base: elem_addr,
@@ -245,10 +243,7 @@ pub(crate) fn store_array_struct_element(
     chain: &ArrayOfStructChain,
     rhs: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    debug_assert_not_param_readonly_aggregate_store(
-        &chain.info,
-        "store_array_struct_element",
-    );
+    debug_assert_not_param_readonly_aggregate_store(&chain.info, "store_array_struct_element");
     let arr_index = subscripts_to_array_element_index(ctx, &chain.info, &chain.subscripts)?;
     let elem_addr = array_element_address_with_field_offset(
         ctx,
@@ -258,12 +253,13 @@ pub(crate) fn store_array_struct_element(
     )?;
     let leaf_naga = chain.info.leaf_element_ty();
     if let Some(midx) = chain.first_member {
-        let layout = crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
-            LowerError::Internal(String::from("store_array_struct_element: leaf layout"))
+        let layout =
+            crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
+                LowerError::Internal(String::from("store_array_struct_element: leaf layout"))
+            })?;
+        let members = layout.struct_members().ok_or_else(|| {
+            LowerError::Internal(String::from("store_array_struct_element: members"))
         })?;
-        let members = layout
-            .struct_members()
-            .ok_or_else(|| LowerError::Internal(String::from("store_array_struct_element: members")))?;
         let m = members.get(midx as usize).ok_or_else(|| {
             LowerError::UnsupportedStatement(String::from(
                 "store_array_struct_element: member index OOB",
@@ -271,9 +267,10 @@ pub(crate) fn store_array_struct_element(
         })?;
         if m.ir_tys.is_empty() {
             let lps_ty = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, m.naga_ty)?;
-            let sub = crate::naga_util::aggregate_layout(ctx.module, m.naga_ty)?.ok_or_else(|| {
-                LowerError::Internal(String::from("store_array_struct_element: nested layout"))
-            })?;
+            let sub =
+                crate::naga_util::aggregate_layout(ctx.module, m.naga_ty)?.ok_or_else(|| {
+                    LowerError::Internal(String::from("store_array_struct_element: nested layout"))
+                })?;
             return crate::lower_aggregate_write::store_lps_value_into_slot(
                 ctx,
                 elem_addr,
@@ -286,8 +283,7 @@ pub(crate) fn store_array_struct_element(
         }
         let naga_inner = &ctx.module.types[m.naga_ty].inner;
         let raw = ctx.ensure_expr_vec(rhs)?;
-        let srcs =
-            crate::lower_expr::coerce_assignment_vregs(ctx, None, naga_inner, rhs, raw)?;
+        let srcs = crate::lower_expr::coerce_assignment_vregs(ctx, None, naga_inner, rhs, raw)?;
         let ir_tys = naga_type_to_ir_types(ctx.module, naga_inner)?;
         if srcs.len() != ir_tys.len() {
             return Err(LowerError::UnsupportedStatement(format!(
@@ -306,11 +302,13 @@ pub(crate) fn store_array_struct_element(
         Ok(())
     } else {
         let lps_ty = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, leaf_naga)?;
-        let leaf_layout = crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
-            LowerError::Internal(String::from("store_array_struct_element: leaf layout"))
-        })?;
-        if crate::lower_aggregate_write::try_memcpy_leaf_slot_into_addr(ctx, elem_addr, leaf_naga, rhs)?
-        {
+        let leaf_layout =
+            crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
+                LowerError::Internal(String::from("store_array_struct_element: leaf layout"))
+            })?;
+        if crate::lower_aggregate_write::try_memcpy_leaf_slot_into_addr(
+            ctx, elem_addr, leaf_naga, rhs,
+        )? {
             return Ok(());
         }
         let agg = if matches!(lps_ty, LpsType::Struct { .. }) {
@@ -319,13 +317,7 @@ pub(crate) fn store_array_struct_element(
             None
         };
         crate::lower_aggregate_write::store_lps_value_into_slot(
-            ctx,
-            elem_addr,
-            0,
-            leaf_naga,
-            &lps_ty,
-            rhs,
-            agg,
+            ctx, elem_addr, 0, leaf_naga, &lps_ty, rhs, agg,
         )
     }
 }

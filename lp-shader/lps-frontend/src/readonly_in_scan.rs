@@ -11,7 +11,7 @@ use naga::{
 };
 
 use crate::lower_array_multidim::{
-    peel_access_chain, peel_access_index_chain, peel_array_subscript_chain, ArraySubscriptRoot,
+    ArraySubscriptRoot, peel_access_chain, peel_access_index_chain, peel_array_subscript_chain,
 };
 use crate::lower_error::LowerError;
 use crate::lower_struct::peel_struct_access_index_chain_to_local;
@@ -56,12 +56,7 @@ fn classify_one(module: &Module, func: &Function, arg_i: u32) -> Result<bool, Lo
 
 fn store_any_mutates_param(func: &Function, param_lv: Handle<LocalVariable>) -> bool {
     let mut found = false;
-    fn walk(
-        block: &Block,
-        func: &Function,
-        param_lv: Handle<LocalVariable>,
-        found: &mut bool,
-    ) {
+    fn walk(block: &Block, func: &Function, param_lv: Handle<LocalVariable>, found: &mut bool) {
         for stmt in block.iter() {
             if *found {
                 return;
@@ -154,23 +149,13 @@ fn call_any_passes_param_to_inout_out(
             }
         }
     }
-    walk(
-        &func.body,
-        module,
-        func,
-        param_index,
-        param_lv,
-        &mut found,
-    );
+    walk(&func.body, module, func, param_index, param_lv, &mut found);
     found
 }
 
 /// GLSL: only `inout` / `out` use [`Pointer`] in function address space; `in` aggregates are
 /// passed by value.
-fn callee_formal_is_function_pointer(
-    module: &Module,
-    arg: &naga::FunctionArgument,
-) -> bool {
+fn callee_formal_is_function_pointer(module: &Module, arg: &naga::FunctionArgument) -> bool {
     matches!(
         &module.types[arg.ty].inner,
         TypeInner::Pointer {
