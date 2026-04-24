@@ -19,7 +19,10 @@ use crate::lower_array_multidim::{
     ArraySubscriptRoot, SubscriptOperand, peel_array_subscript_chain,
 };
 use alloc::vec::Vec;
-use crate::lower_ctx::{AggregateInfo, AggregateSlot, LowerCtx, VRegVec, naga_type_to_ir_types};
+use crate::lower_ctx::{
+    debug_assert_not_param_readonly_aggregate_store, AggregateInfo, AggregateSlot, LowerCtx,
+    VRegVec, naga_type_to_ir_types,
+};
 use crate::lower_error::LowerError;
 use crate::naga_util::MemberInfo;
 
@@ -75,7 +78,7 @@ pub(crate) fn peel_arrayofstruct_chain(
                 }
             }
         }
-        // `inout` / `out` / pointer param to array of struct (callee: `ps[i].x = …`).
+        // `inout` / `out` / pointer param (see [`LowerCtx::pointer_args`]) — not by-value `in` (`ParamReadOnly` uses `Local`).
         ArraySubscriptRoot::Param(arg_i) => {
             let ainfo = ctx
                 .aggregate_info_for_subscript_root(ArraySubscriptRoot::Param(arg_i))
@@ -242,6 +245,10 @@ pub(crate) fn store_array_struct_element(
     chain: &ArrayOfStructChain,
     rhs: Handle<Expression>,
 ) -> Result<(), LowerError> {
+    debug_assert_not_param_readonly_aggregate_store(
+        &chain.info,
+        "store_array_struct_element",
+    );
     let arr_index = subscripts_to_array_element_index(ctx, &chain.info, &chain.subscripts)?;
     let elem_addr = array_element_address_with_field_offset(
         ctx,
@@ -794,6 +801,7 @@ pub(crate) fn store_struct_path_into_local(
     indices: &[u32],
     value: Handle<Expression>,
 ) -> Result<(), LowerError> {
+    debug_assert_not_param_readonly_aggregate_store(info, "store_struct_path_into_local");
     if !matches!(
         &info.layout.kind,
         crate::naga_util::AggregateKind::Struct { .. }
@@ -955,6 +963,7 @@ pub(crate) fn zero_fill_struct_slot(
     module: &Module,
     info: &AggregateInfo,
 ) -> Result<(), LowerError> {
+    // `Param` / `ParamReadOnly` never use stack zero-fill; only `Local` slots in prologue.
     let AggregateSlot::Local(slot) = info.slot else {
         return Err(LowerError::Internal(String::from(
             "zero_fill_struct_slot: not a local stack struct",

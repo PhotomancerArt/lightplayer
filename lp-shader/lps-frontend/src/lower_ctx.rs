@@ -15,6 +15,10 @@ use smallvec::SmallVec;
 
 use crate::lower_error::LowerError;
 use crate::lower_expr;
+use crate::readonly_in_scan::in_aggregate_param_read_only;
+
+/// See [`readonly_in_scan::local_for_in_aggregate_value_param_optional`].
+pub(crate) use crate::readonly_in_scan::local_for_in_aggregate_value_param_optional;
 
 /// Deferred VMContext addressing for uniform struct fields of array type (`uniform { T arr[n]; }`).
 #[derive(Clone, Debug)]
@@ -150,6 +154,9 @@ pub(crate) enum AggregateSlot {
     Local(SlotId),
     /// Pointer-to-array formal (`out` / `inout`); base address is [`LowerCtx::arg_vregs`]\[0\].
     Param(u32),
+    /// By-value `in` aggregate that the M5 scan proved read-only: no stack copy; base is the same
+    /// pointer as [`LowerCtx::arg_vregs`]\[`arg_i`]\[0\] (like [`AggregateSlot::Param`] for addressing).
+    ParamReadOnly(u32),
 }
 
 /// Stack [`SlotId`] and layout metadata for one aggregate-typed value (M1: arrays only).
@@ -208,6 +215,19 @@ impl AggregateInfo {
     pub(crate) fn align(&self) -> u32 {
         self.layout.align
     }
+}
+
+/// Debug-only: [`AggregateSlot::ParamReadOnly`] must never be written — proven by
+/// [`readonly_in_scan`](crate::readonly_in_scan). If this trips, the scan and lowering disagree.
+#[inline]
+pub(crate) fn debug_assert_not_param_readonly_aggregate_store(
+    info: &AggregateInfo,
+    site: &'static str,
+) {
+    debug_assert!(
+        !matches!(info.slot, AggregateSlot::ParamReadOnly(_)),
+        "store to read-only `in` aggregate (scan miss or lowering bug): {site}"
+    );
 }
 
 /// sret return buffer: hidden pointer at [`IrFunction::sret_arg`], `memcpy` the aggregate here, then
@@ -341,37 +361,54 @@ impl<'a> LowerCtx<'a> {
             }
         }
 
+        let in_aggregate_read_only = in_aggregate_param_read_only(module, func)?;
+
         let mut pending_in_aggregate_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
             BTreeMap::new();
         for spec in pending_in_aggregate_specs {
-            let param_ptr = arg_vregs
+            let use_readonly = in_aggregate_read_only
                 .get(&spec.arg_i)
-                .and_then(|v| v.first())
                 .copied()
-                .ok_or_else(|| {
-                    LowerError::Internal(String::from(
-                        "in array value param: missing pointer vreg after param pass",
-                    ))
-                })?;
-            let local_slot = fb.alloc_slot(spec.layout.total_size);
-            let local_addr = fb.alloc_vreg(IrType::Pointer);
-            fb.push(LpirOp::SlotAddr {
-                dst: local_addr,
-                slot: local_slot,
-            });
-            fb.push(LpirOp::Memcpy {
-                dst_addr: local_addr,
-                src_addr: param_ptr,
-                size: spec.layout.total_size,
-            });
-            pending_in_aggregate_value_param.insert(
-                spec.lv,
-                AggregateInfo {
-                    slot: AggregateSlot::Local(local_slot),
-                    layout: spec.layout,
-                    naga_ty: spec.naga_ty,
-                },
-            );
+                .unwrap_or(false);
+            if use_readonly {
+                pending_in_aggregate_value_param.insert(
+                    spec.lv,
+                    AggregateInfo {
+                        slot: AggregateSlot::ParamReadOnly(spec.arg_i),
+                        layout: spec.layout,
+                        naga_ty: spec.naga_ty,
+                    },
+                );
+            } else {
+                let param_ptr = arg_vregs
+                    .get(&spec.arg_i)
+                    .and_then(|v| v.first())
+                    .copied()
+                    .ok_or_else(|| {
+                        LowerError::Internal(String::from(
+                            "in array value param: missing pointer vreg after param pass",
+                        ))
+                    })?;
+                let local_slot = fb.alloc_slot(spec.layout.total_size);
+                let local_addr = fb.alloc_vreg(IrType::Pointer);
+                fb.push(LpirOp::SlotAddr {
+                    dst: local_addr,
+                    slot: local_slot,
+                });
+                fb.push(LpirOp::Memcpy {
+                    dst_addr: local_addr,
+                    src_addr: param_ptr,
+                    size: spec.layout.total_size,
+                });
+                pending_in_aggregate_value_param.insert(
+                    spec.lv,
+                    AggregateInfo {
+                        slot: AggregateSlot::Local(local_slot),
+                        layout: spec.layout,
+                        naga_ty: spec.naga_ty,
+                    },
+                );
+            }
         }
 
         let param_idx = scan_param_argument_indices(module, func);
@@ -544,6 +581,15 @@ impl<'a> LowerCtx<'a> {
                 ) {
                     crate::lower_array::lower_array_initializer(&mut ctx, &info, init_h)?;
                 } else {
+                    if matches!(info.slot, AggregateSlot::ParamReadOnly(_))
+                        && matches!(&func.expressions[init_h], Expression::ZeroValue(_))
+                    {
+                        continue;
+                    }
+                    debug_assert_not_param_readonly_aggregate_store(
+                        &info,
+                        "LowerCtx::new: struct local with initializer",
+                    );
                     let lps_ty =
                         crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, info.naga_ty)?;
                     let base =
@@ -616,6 +662,12 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// [`AggregateInfo`] for a peeled subscript chain root (local, pointer param, or call result).
+    ///
+    /// - [`ArraySubscriptRoot::Local`]: from [`Self::aggregate_map`], including by-value `in`
+    ///   aggregates ([`AggregateSlot::ParamReadOnly`]) and stack locals. Not the same as
+    ///   [`Self::pointer_args`] (those are `inout` / `out` / pointer formals only).
+    /// - [`ArraySubscriptRoot::Param`]: **only** pointer array/struct formals in [`Self::pointer_args`],
+    ///   not by-value `in` (those are never a `Param` root here; Naga uses a `LocalVariable` proxy).
     pub(crate) fn aggregate_info_for_subscript_root(
         &self,
         root: crate::lower_array_multidim::ArraySubscriptRoot,
@@ -624,6 +676,7 @@ impl<'a> LowerCtx<'a> {
         match root {
             ArraySubscriptRoot::Local(lv) => Ok(self.aggregate_map.get(&lv).cloned()),
             ArraySubscriptRoot::Param(arg_i) => {
+                // `pointer_args` only: by-value `in` aggregates are `Local` + `ParamReadOnly` in `aggregate_map`.
                 let Some(&pointee) = self.pointer_args.get(&arg_i) else {
                     return Ok(None);
                 };
@@ -662,49 +715,6 @@ impl<'a> LowerCtx<'a> {
         }
         Ok(vs[0])
     }
-}
-
-/// Naga GLSL: the [`LocalVariable`] for a by-value `in` array or struct param is matched by
-/// parameter name and type to `func.arguments[i]`.
-/// Shadow [`LocalVariable`] for a by-value aggregate parameter, if Naga emitted one (`const` params
-/// may omit it).
-fn local_for_in_aggregate_value_param_optional(
-    func: &Function,
-    module: &Module,
-    param_index: u32,
-) -> Result<Option<Handle<LocalVariable>>, LowerError> {
-    let i = param_index as usize;
-    let arg = func
-        .arguments
-        .get(i)
-        .ok_or_else(|| LowerError::Internal(String::from("in aggregate: bad argument index")))?;
-    if !matches!(
-        &module.types[arg.ty].inner,
-        TypeInner::Array { .. } | TypeInner::Struct { .. }
-    ) {
-        return Err(LowerError::Internal(String::from(
-            "in aggregate: not an array or struct type",
-        )));
-    }
-    if let Some(name) = &arg.name {
-        for (lv, v) in func.local_variables.iter() {
-            if v.ty == arg.ty && v.name.as_deref() == Some(name.as_str()) {
-                return Ok(Some(lv));
-            }
-        }
-    }
-    let mut found = None;
-    for (lv, v) in func.local_variables.iter() {
-        if v.ty == arg.ty {
-            if found.is_some() {
-                return Err(LowerError::Internal(String::from(
-                    "in aggregate: ambiguous local (use matching parameter name)",
-                )));
-            }
-            found = Some(lv);
-        }
-    }
-    Ok(found)
 }
 
 fn scan_param_argument_indices(

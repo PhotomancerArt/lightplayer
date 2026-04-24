@@ -11,7 +11,7 @@ use naga::{Block, Expression, Statement, SwitchValue, TypeInner};
 use crate::lower_access;
 use crate::lower_array::aggregate_storage_base_vreg;
 use crate::lower_call;
-use crate::lower_ctx::{LowerCtx, naga_type_to_ir_types};
+use crate::lower_ctx::{debug_assert_not_param_readonly_aggregate_store, LowerCtx, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 use crate::naga_util::expr_type_inner;
@@ -411,6 +411,10 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             }
             Expression::LocalVariable(lv) => {
                 if let Some(dst_info) = ctx.aggregate_map.get(lv).cloned() {
+                    debug_assert_not_param_readonly_aggregate_store(
+                        &dst_info,
+                        "lower_stmt: Store to aggregate local (whole value / sub-value lowering)",
+                    );
                     if matches!(
                         &dst_info.layout.kind,
                         crate::naga_util::AggregateKind::Struct { .. }

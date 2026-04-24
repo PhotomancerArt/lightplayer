@@ -1,5 +1,11 @@
 # Milestone 5 — Read-only-`in` optimisation
 
+## Status
+
+**Complete** — 2026-04-23. Implementation and notes under
+`docs/roadmaps/2026-04-22-lp-shader-aggregates/m5-readonly-in-optimisation/`
+(`plan.md`, `summary.md`). Measurement notes in `m5-bench.md`.
+
 ## Goal
 
 Recover the per-call slot-allocation + `Memcpy` cost paid by `in`

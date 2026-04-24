@@ -374,6 +374,8 @@ pub(crate) fn lower_access_expr_vec(
                                 "Access load: expected array aggregate layout",
                             ))
                         })?;
+                    // `pointer_args` only: `inout`/`out` array pointer, not M5 `ParamReadOnly` (those use
+                    // a `LocalVariable` entry in `aggregate_map`).
                     let info = crate::lower_ctx::AggregateInfo {
                         slot: crate::lower_ctx::AggregateSlot::Param(*arg_i),
                         layout,
@@ -594,6 +596,7 @@ pub(crate) fn store_through_access(
                                 "Access store: expected array aggregate layout",
                             ))
                         })?;
+                    // `pointer_args` only (see `Access load` array arm above).
                     let info = crate::lower_ctx::AggregateInfo {
                         slot: crate::lower_ctx::AggregateSlot::Param(*arg_i),
                         layout,

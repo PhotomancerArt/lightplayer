@@ -16,6 +16,7 @@ mod lower_array_multidim;
 mod lower_binary;
 mod lower_call;
 mod lower_cast;
+mod readonly_in_scan;
 mod lower_ctx;
 mod lower_error;
 mod lower_expr;

@@ -15,7 +15,8 @@ use naga::{
 };
 
 use crate::lower_ctx::{
-    AggregateInfo, AggregateSlot, LowerCtx, VRegVec, naga_type_to_ir_types, vector_size_usize,
+    debug_assert_not_param_readonly_aggregate_store, AggregateInfo, AggregateSlot, LowerCtx,
+    VRegVec, naga_type_to_ir_types, vector_size_usize,
 };
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
@@ -273,7 +274,7 @@ pub(crate) fn aggregate_storage_base_vreg(
 ) -> Result<VReg, LowerError> {
     match slot {
         AggregateSlot::Local(s) => Ok(array_slot_base(ctx, *s)),
-        AggregateSlot::Param(arg_i) => {
+        AggregateSlot::Param(arg_i) | AggregateSlot::ParamReadOnly(arg_i) => {
             ctx.arg_vregs_for(*arg_i)?.first().copied().ok_or_else(|| {
                 LowerError::Internal(String::from("array param: missing address vreg"))
             })
@@ -287,6 +288,7 @@ pub(crate) fn zero_fill_array_slot(
     module: &Module,
     info: &AggregateInfo,
 ) -> Result<(), LowerError> {
+    // `Param` / `ParamReadOnly` never use stack zero-fill in prologue; only `Local` slots.
     let AggregateSlot::Local(slot) = info.slot else {
         return Err(LowerError::Internal(String::from(
             "zero_fill_array_slot: not a local stack array",
@@ -447,6 +449,10 @@ pub(crate) fn store_array_element_const(
     index: u32,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
+    debug_assert_not_param_readonly_aggregate_store(
+        info,
+        "store_array_element_const",
+    );
     if info.element_count() == 0 {
         return Err(LowerError::Internal(String::from(
             "store_array_element_const: empty array",
@@ -480,6 +486,10 @@ pub(crate) fn store_array_element_dynamic(
     index_v: VReg,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
+    debug_assert_not_param_readonly_aggregate_store(
+        info,
+        "store_array_element_dynamic",
+    );
     let addr = array_element_address(ctx, info, ElementIndex::Dynamic(index_v))?;
     let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
@@ -508,8 +518,16 @@ pub(crate) fn lower_array_initializer(
     init_h: Handle<Expression>,
 ) -> Result<(), LowerError> {
     if matches!(&ctx.func.expressions[init_h], Expression::ZeroValue(_)) {
+        if matches!(info.slot, AggregateSlot::ParamReadOnly(_)) {
+            // No stack copy: zero-fill would store into the caller’s `in` buffer — not elided.
+            return Ok(());
+        }
         return zero_fill_array(ctx, ctx.module, info);
     }
+    debug_assert_not_param_readonly_aggregate_store(
+        info,
+        "lower_array_initializer: non-ZeroValue init",
+    );
     let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
     if crate::lower_aggregate_write::try_memcpy_aggregate_expr(ctx, base, 0, info, init_h)? {
         return Ok(());
@@ -719,8 +737,10 @@ pub(crate) fn copy_stack_array_slots(
     );
     let (AggregateSlot::Local(dst_slot), AggregateSlot::Local(src_slot)) = (dst.slot, src.slot)
     else {
-        return Err(LowerError::UnsupportedStatement(String::from(
-            "array copy: only local stack arrays",
+        return Err(LowerError::Internal(format!(
+            "array copy: expected two local stack slots (stack↔stack memcpy); \
+             got dst={:?} src={:?} (Param/ParamReadOnly cannot participate)",
+            dst.slot, src.slot
         )));
     };
     let sz = dst.total_size();
