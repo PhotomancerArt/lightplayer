@@ -2,7 +2,8 @@
 
 use alloc::format;
 use alloc::string::String;
-use lpir::{IrType, LpirOp, VReg};
+use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
+use lps_shared::{LayoutRules, LpsType, array_stride};
 use naga::{Expression, Handle, Scalar, TypeInner, VectorSize};
 
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_scalar_to_ir_type, vector_size_usize};
@@ -384,6 +385,47 @@ pub(crate) fn lower_access_expr_vec(
                     "Access on unsupported pointer argument type",
                 ))),
             }
+        }
+        Expression::GlobalVariable(gv) => {
+            let Some(info) = ctx.global_map.get(gv).cloned() else {
+                return Err(LowerError::Internal(format!(
+                    "Access global: {gv:?} not in global_map"
+                )));
+            };
+            let LpsType::Array { element, .. } = info.ty else {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "Access: global base is not an array",
+                )));
+            };
+            let element = *element;
+            let byte_offset = info.byte_offset;
+            let index_v = ctx.ensure_expr(*index)?;
+            let stride = array_stride(&element, LayoutRules::Std430) as u32;
+            let stride_i = i32::try_from(stride).map_err(|_| {
+                LowerError::Internal(String::from("uniform top-level array: stride"))
+            })?;
+            let prod = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::ImulImm {
+                dst: prod,
+                src: index_v,
+                imm: stride_i,
+            });
+            let off_imm = i32::try_from(byte_offset).map_err(|_| {
+                LowerError::Internal(String::from("uniform top-level array: base offset"))
+            })?;
+            let byte_off = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IaddImm {
+                dst: byte_off,
+                src: prod,
+                imm: off_imm,
+            });
+            let addr = ctx.fb.alloc_vreg(IrType::Pointer);
+            ctx.fb.push(LpirOp::Iadd {
+                dst: addr,
+                lhs: VMCTX_VREG,
+                rhs: byte_off,
+            });
+            crate::lower_expr::load_lps_value_from_vmctx_with_base(ctx, addr, 0, &element)
         }
         _ => Err(LowerError::UnsupportedExpression(String::from(
             "Access: unsupported base expression",

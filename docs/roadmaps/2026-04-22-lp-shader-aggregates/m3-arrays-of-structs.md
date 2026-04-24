@@ -1,5 +1,11 @@
 # Milestone 3 — Arrays of structs (locals + params)
 
+## Status
+
+**Complete** — 2026-04-23. All array-of-struct filetests pass on `wasm.q32`,
+`rv32c.q32`, and `rv32n.q32` with parity. Plan and phase notes live under
+`docs/roadmaps/2026-04-22-lp-shader-aggregates/m3-arrays-of-structs/`.
+
 ## Goal
 
 Extend `ArrayInfo` to allow `LpsType::Struct` as the leaf element type,

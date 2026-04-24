@@ -8,9 +8,10 @@ use alloc::vec::Vec;
 use smallvec::smallvec;
 
 use lpir::{IrType, LpirOp, VReg};
+use lps_shared::LpsType;
 use naga::{
     BinaryOperator, Expression, Function, Handle, Literal, LocalVariable, Module, ScalarKind,
-    TypeInner,
+    Type, TypeInner,
 };
 
 use crate::lower_ctx::{
@@ -152,6 +153,108 @@ pub(crate) fn clamp_array_index(
     Ok(out)
 }
 
+/// Element index for [`array_element_address`]: literal subscript or dynamic vreg (clamped for
+/// [`ElementIndex::Dynamic`]).
+pub(crate) enum ElementIndex {
+    Const(u32),
+    Dynamic(VReg),
+}
+
+/// Byte address of array element `index` within the aggregate slot (`base + index * leaf_stride`),
+/// with dynamic indices clamped like [`clamp_array_index`]. Constant indices use the same OOB clamp
+/// as dynamic loads (`index.min(element_count - 1)`).
+pub(crate) fn array_element_address(
+    ctx: &mut LowerCtx<'_>,
+    info: &AggregateInfo,
+    index: ElementIndex,
+) -> Result<VReg, LowerError> {
+    array_element_address_with_field_offset(ctx, info, index, 0)
+}
+
+/// Like [`array_element_address`], but the array's bytes start at `field_offset` from the aggregate
+/// slot base (e.g. `Point ps[N]` field inside a stack [`AggregateInfo`] struct local).
+pub(crate) fn array_element_address_with_field_offset(
+    ctx: &mut LowerCtx<'_>,
+    info: &AggregateInfo,
+    index: ElementIndex,
+    field_offset: u32,
+) -> Result<VReg, LowerError> {
+    if info.element_count() == 0 {
+        return Err(LowerError::Internal(String::from(
+            "array_element_address: empty array",
+        )));
+    }
+    let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
+    let stride = info.leaf_stride();
+    match index {
+        ElementIndex::Const(i) => {
+            let i = i.min(info.element_count() - 1);
+            let array_off = i.checked_mul(stride).ok_or_else(|| {
+                LowerError::Internal(String::from("array_element_address: const offset overflow"))
+            })?;
+            let total_off = field_offset
+                .checked_add(array_off)
+                .ok_or_else(|| LowerError::Internal(String::from("array_element_address: off")))?;
+            if total_off == 0 {
+                Ok(base)
+            } else {
+                let off_v = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: off_v,
+                    value: total_off as i32,
+                });
+                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Iadd {
+                    dst: addr,
+                    lhs: base,
+                    rhs: off_v,
+                });
+                Ok(addr)
+            }
+        }
+        ElementIndex::Dynamic(index_v) => {
+            let clamped = clamp_array_index(ctx, index_v, info.element_count())?;
+            let stride_v = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 {
+                dst: stride_v,
+                value: stride as i32,
+            });
+            let byte_off = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::Imul {
+                dst: byte_off,
+                lhs: clamped,
+                rhs: stride_v,
+            });
+            let addr = ctx.fb.alloc_vreg(IrType::I32);
+            if field_offset == 0 {
+                ctx.fb.push(LpirOp::Iadd {
+                    dst: addr,
+                    lhs: base,
+                    rhs: byte_off,
+                });
+            } else {
+                let off_extra = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: off_extra,
+                    value: field_offset as i32,
+                });
+                let sum = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Iadd {
+                    dst: sum,
+                    lhs: byte_off,
+                    rhs: off_extra,
+                });
+                ctx.fb.push(LpirOp::Iadd {
+                    dst: addr,
+                    lhs: base,
+                    rhs: sum,
+                });
+            }
+            Ok(addr)
+        }
+    }
+}
+
 pub(crate) fn array_slot_base(ctx: &mut LowerCtx<'_>, slot: lpir::SlotId) -> VReg {
     array_slot_base_fb(&mut ctx.fb, slot)
 }
@@ -189,10 +292,21 @@ pub(crate) fn zero_fill_array_slot(
             "zero_fill_array_slot: not a local stack array",
         )));
     };
-    let elem_inner = &module.types[info.leaf_element_ty()].inner;
-    let ir_tys = naga_type_to_ir_types(module, elem_inner)?;
+    let leaf_naga = info.leaf_element_ty();
+    let elem_inner = &module.types[leaf_naga].inner;
     let base = array_slot_base_fb(fb, slot);
 
+    if matches!(elem_inner, TypeInner::Struct { .. }) {
+        for i in 0..info.element_count() {
+            let byte_off = i.checked_mul(info.leaf_stride()).ok_or_else(|| {
+                LowerError::Internal(String::from("zero_fill_array_slot: stride overflow"))
+            })?;
+            crate::lower_struct::zero_struct_at_offset_fb(fb, module, base, byte_off, leaf_naga)?;
+        }
+        return Ok(());
+    }
+
+    let ir_tys = naga_type_to_ir_types(module, elem_inner)?;
     for i in 0..info.element_count() {
         let byte_off = i.checked_mul(info.leaf_stride()).ok_or_else(|| {
             LowerError::Internal(String::from("zero_fill_array_slot: stride overflow"))
@@ -218,6 +332,61 @@ pub(crate) fn zero_fill_array(
     zero_fill_array_slot(&mut ctx.fb, module, info)
 }
 
+/// Zero a [`TypeInner::Array]` region at `base + region_off` (e.g. array field inside a struct).
+pub(crate) fn zero_array_region_in_slot(
+    fb: &mut lpir::FunctionBuilder,
+    module: &Module,
+    base: VReg,
+    region_off: u32,
+    naga_array_ty: Handle<Type>,
+) -> Result<(), LowerError> {
+    let Some(layout) = crate::naga_util::aggregate_layout(module, naga_array_ty)? else {
+        return Err(LowerError::Internal(String::from("zero_array_region: not aggregate")));
+    };
+    let crate::naga_util::AggregateKind::Array {
+        leaf_element_ty,
+        leaf_stride,
+        element_count,
+        ..
+    } = &layout.kind
+    else {
+        return Err(LowerError::Internal(String::from("zero_array_region: not array")));
+    };
+    let leaf_naga = *leaf_element_ty;
+    let leaf_stride = *leaf_stride;
+    let element_count = *element_count;
+    let elem_inner = &module.types[leaf_naga].inner;
+    if matches!(elem_inner, TypeInner::Struct { .. }) {
+        for i in 0..element_count {
+            let bo = i
+                .checked_mul(leaf_stride)
+                .and_then(|b| region_off.checked_add(b))
+                .ok_or_else(|| {
+                    LowerError::Internal(String::from("zero_array_region: struct leaf off"))
+                })?;
+            crate::lower_struct::zero_struct_at_offset_fb(fb, module, base, bo, leaf_naga)?;
+        }
+        return Ok(());
+    }
+    let ir_tys = naga_type_to_ir_types(module, elem_inner)?;
+    for i in 0..element_count {
+        let elem_base = i
+            .checked_mul(leaf_stride)
+            .and_then(|b| region_off.checked_add(b))
+            .ok_or_else(|| LowerError::Internal(String::from("zero_array_region: elem off")))?;
+        for (j, ty) in ir_tys.iter().enumerate() {
+            let z = fb.alloc_vreg(*ty);
+            push_zero_for_ir_type(fb, z, *ty);
+            fb.push(LpirOp::Store {
+                base,
+                offset: elem_base + (j as u32) * 4,
+                value: z,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn push_zero_for_ir_type(fb: &mut lpir::FunctionBuilder, dst: VReg, ty: IrType) {
     match ty {
         IrType::F32 => fb.push(LpirOp::FconstF32 { dst, value: 0.0 }),
@@ -235,21 +404,16 @@ pub(crate) fn load_array_element_const(
             "load_array_element_const: empty array",
         )));
     }
-    // Match dynamic clamp: OOB constant indices clamp to the last element (see `clamp_array_index`).
-    let index = index.min(info.element_count() - 1);
     let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
-    let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
-    let byte_off = index
-        .checked_mul(info.leaf_stride())
-        .ok_or_else(|| LowerError::Internal(String::from("load_array_element_const: overflow")))?;
+    let addr = array_element_address(ctx, info, ElementIndex::Const(index))?;
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
         let dst = ctx.fb.alloc_vreg(*ty);
         ctx.fb.push(LpirOp::Load {
             dst,
-            base,
-            offset: byte_off + (j as u32) * 4,
+            base: addr,
+            offset: (j as u32) * 4,
         });
         out.push(dst);
     }
@@ -261,26 +425,7 @@ pub(crate) fn load_array_element_dynamic(
     info: &AggregateInfo,
     index_v: VReg,
 ) -> Result<VRegVec, LowerError> {
-    let clamped = clamp_array_index(ctx, index_v, info.element_count())?;
-    let stride_v = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::IconstI32 {
-        dst: stride_v,
-        value: info.leaf_stride() as i32,
-    });
-    let byte_off = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::Imul {
-        dst: byte_off,
-        lhs: clamped,
-        rhs: stride_v,
-    });
-    let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
-    let addr = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::Iadd {
-        dst: addr,
-        lhs: base,
-        rhs: byte_off,
-    });
-
+    let addr = array_element_address(ctx, info, ElementIndex::Dynamic(index_v))?;
     let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
     let mut out = VRegVec::new();
@@ -307,7 +452,6 @@ pub(crate) fn store_array_element_const(
             "store_array_element_const: empty array",
         )));
     }
-    let index = index.min(info.element_count() - 1);
     let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
     let srcs = coerce_assignment_vregs(ctx, None, elem_inner, value_expr, raw)?;
@@ -319,14 +463,11 @@ pub(crate) fn store_array_element_const(
             ir_tys.len()
         )));
     }
-    let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
-    let byte_off = index
-        .checked_mul(info.leaf_stride())
-        .ok_or_else(|| LowerError::Internal(String::from("store_array_element_const: overflow")))?;
+    let addr = array_element_address(ctx, info, ElementIndex::Const(index))?;
     for (j, &src) in srcs.iter().enumerate() {
         ctx.fb.push(LpirOp::Store {
-            base,
-            offset: byte_off + (j as u32) * 4,
+            base: addr,
+            offset: (j as u32) * 4,
             value: src,
         });
     }
@@ -339,26 +480,7 @@ pub(crate) fn store_array_element_dynamic(
     index_v: VReg,
     value_expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    let clamped = clamp_array_index(ctx, index_v, info.element_count())?;
-    let stride_v = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::IconstI32 {
-        dst: stride_v,
-        value: info.leaf_stride() as i32,
-    });
-    let byte_off = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::Imul {
-        dst: byte_off,
-        lhs: clamped,
-        rhs: stride_v,
-    });
-    let base = aggregate_storage_base_vreg(ctx, &info.slot)?;
-    let addr = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::Iadd {
-        dst: addr,
-        lhs: base,
-        rhs: byte_off,
-    });
-
+    let addr = array_element_address(ctx, info, ElementIndex::Dynamic(index_v))?;
     let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
     let srcs = coerce_assignment_vregs(ctx, None, elem_inner, value_expr, raw)?;
@@ -394,6 +516,16 @@ pub(crate) fn lower_array_initializer(
     }
     let leaf_naga = info.leaf_element_ty();
     let leaf_lps = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, leaf_naga)?;
+    let leaf_struct_layout = match &leaf_lps {
+        LpsType::Struct { .. } => Some(
+            crate::naga_util::aggregate_layout(ctx.module, leaf_naga)?.ok_or_else(|| {
+                LowerError::Internal(String::from(
+                    "array initializer: missing struct leaf aggregate layout",
+                ))
+            })?,
+        ),
+        _ => None,
+    };
     match &ctx.func.expressions[init_h] {
         Expression::Compose { .. } => {
             // Flatten to leaf components (row-major). Naga `LpsType` nesting for multi-dim arrays
@@ -411,7 +543,13 @@ pub(crate) fn lower_array_initializer(
                     .checked_mul(info.leaf_stride())
                     .ok_or_else(|| LowerError::Internal(String::from("init: byte_off overflow")))?;
                 crate::lower_aggregate_write::store_lps_value_into_slot(
-                    ctx, base, byte_off, leaf_naga, &leaf_lps, comp, None,
+                    ctx,
+                    base,
+                    byte_off,
+                    leaf_naga,
+                    &leaf_lps,
+                    comp,
+                    leaf_struct_layout.as_ref(),
                 )?;
             }
             for i in (flat.len() as u32)..info.element_count() {

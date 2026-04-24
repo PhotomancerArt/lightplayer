@@ -114,9 +114,17 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             }
         },
         Statement::Store { pointer, value } => match &ctx.func.expressions[*pointer] {
-            Expression::Access { .. } => lower_access::store_through_access(ctx, *pointer, *value),
+            Expression::Access { .. } => {
+                if let Some(chain) = crate::lower_struct::peel_arrayofstruct_chain(ctx, *pointer) {
+                    return crate::lower_struct::store_array_struct_element(ctx, &chain, *value);
+                }
+                lower_access::store_through_access(ctx, *pointer, *value)
+            }
             // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
             Expression::AccessIndex { .. } => {
+                if let Some(chain) = crate::lower_struct::peel_arrayofstruct_chain(ctx, *pointer) {
+                    return crate::lower_struct::store_array_struct_element(ctx, &chain, *value);
+                }
                 if let Some((lv, chain)) =
                     crate::lower_struct::peel_struct_access_index_chain_to_local(ctx.func, *pointer)
                 {

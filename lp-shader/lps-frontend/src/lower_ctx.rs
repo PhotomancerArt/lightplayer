@@ -16,6 +16,23 @@ use smallvec::SmallVec;
 use crate::lower_error::LowerError;
 use crate::lower_expr;
 
+/// Deferred VMContext addressing for uniform struct fields of array type (`uniform { T arr[n]; }`).
+#[derive(Clone, Debug)]
+pub(crate) enum UniformVmctxDeferred {
+    /// Array member at `base_offset` (bytes from VMContext); elements use `stride` and `element` layout.
+    ArrayField {
+        base_offset: u32,
+        element: lps_shared::LpsType,
+        stride: u32,
+        len: u32,
+    },
+    /// Dynamic element: `addr_vreg` points at `VMCTX + (base_offset + index * stride)` for the array field.
+    ElementAddr {
+        addr_vreg: VReg,
+        element: lps_shared::LpsType,
+    },
+}
+
 pub(crate) use crate::naga_util::{
     array_ty_pointer_arg_ir_type, naga_scalar_to_ir_type, naga_type_to_ir_types, naga_type_width,
     vector_size_usize,
@@ -59,6 +76,70 @@ pub(crate) struct GlobalVarInfo {
 
 /// Map from Naga GlobalVariable handle to its lowering info.
 pub(crate) type GlobalVarMap = BTreeMap<Handle<GlobalVariable>, GlobalVarInfo>;
+
+/// Naga stores `uniform Block { } name` instance as a function [`LocalVariable`] initialized from
+/// the corresponding [`GlobalVariable`]; map proxy locals to that global for VMContext loads.
+fn scan_uniform_instance_local_to_global(
+    module: &Module,
+    func: &Function,
+) -> BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>> {
+    let mut m = BTreeMap::new();
+    fn walk_block(
+        block: &naga::Block,
+        module: &Module,
+        func: &Function,
+        m: &mut BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
+    ) {
+        for stmt in block.iter() {
+            match stmt {
+                Statement::Store { pointer, value } => {
+                    if let Expression::LocalVariable(lv) = &func.expressions[*pointer] {
+                        let mut v = *value;
+                        while let Expression::Load { pointer: p } = &func.expressions[v] {
+                            v = *p;
+                        }
+                        if let Expression::GlobalVariable(gv) = &func.expressions[v] {
+                            if module.global_variables[*gv].space == AddressSpace::Uniform {
+                                m.insert(*lv, *gv);
+                            }
+                        }
+                    }
+                }
+                Statement::Block(inner) => walk_block(inner, module, func, m),
+                Statement::If { accept, reject, .. } => {
+                    walk_block(accept, module, func, m);
+                    walk_block(reject, module, func, m);
+                }
+                Statement::Switch { cases, .. } => {
+                    for case in cases.iter() {
+                        walk_block(&case.body, module, func, m);
+                    }
+                }
+                Statement::Loop {
+                    body, continuing, ..
+                } => {
+                    walk_block(body, module, func, m);
+                    walk_block(continuing, module, func, m);
+                }
+                _ => {}
+            }
+        }
+    }
+    walk_block(&func.body, module, func, &mut m);
+    for (lv, var) in func.local_variables.iter() {
+        if let Some(mut h) = var.init {
+            while let Expression::Load { pointer } = &func.expressions[h] {
+                h = *pointer;
+            }
+            if let Expression::GlobalVariable(gv) = &func.expressions[h] {
+                if module.global_variables[*gv].space == AddressSpace::Uniform {
+                    m.entry(lv).or_insert(*gv);
+                }
+            }
+        }
+    }
+    m
+}
 
 pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 
@@ -178,6 +259,10 @@ pub(crate) struct LowerCtx<'a> {
     pub sret: Option<SretCtx>,
     /// Map from Naga GlobalVariable handle to (vmctx_byte_offset, component_count, is_uniform).
     pub(crate) global_map: GlobalVarMap,
+    /// [`Expression::index`] → deferred uniform array field / indexed element (see [`UniformVmctxDeferred`]).
+    pub(crate) uniform_vmctx_deferred: BTreeMap<usize, UniformVmctxDeferred>,
+    /// `uniform Block { } instance` locals → backing [`GlobalVariable`] (uniform).
+    pub(crate) uniform_instance_locals: BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -420,6 +505,7 @@ impl<'a> LowerCtx<'a> {
         let expr_cache = vec![None; func.expressions.len()];
         let array_length_literal_fixes =
             crate::lower_array::scan_naga_multidim_array_length_literals(func, &aggregate_map);
+        let uniform_instance_locals = scan_uniform_instance_local_to_global(module, func);
 
         let mut ctx = Self {
             fb,
@@ -440,6 +526,8 @@ impl<'a> LowerCtx<'a> {
             return_types,
             sret,
             global_map,
+            uniform_vmctx_deferred: BTreeMap::new(),
+            uniform_instance_locals,
         };
 
         for (lv_handle, var) in func.local_variables.iter() {
@@ -681,3 +769,4 @@ fn scan_param_argument_indices(
     walk_block(&func.body, module, func, &mut m);
     m
 }
+

@@ -138,6 +138,9 @@ pub(crate) fn peel_access_index_chain(
 
 /// Walk nested `TypeInner::Array`, outermost dimension first; returns leaf type and byte stride
 /// per leaf (std430 element stride from [`crate::lower_aggregate_layout::array_element_stride`]).
+///
+/// The leaf may be any sized element type Naga places after the array nest (including
+/// [`TypeInner::Struct`]); stride is computed from the full `LpsType` layout.
 pub(crate) fn flatten_local_array_shape(
     module: &Module,
     func: &Function,
@@ -207,6 +210,8 @@ pub(crate) fn flatten_local_array_shape(
 
 /// Like [`flatten_local_array_shape`], but from an array [`naga::Type`] handle only (no initializer).
 /// Used for `in T[N]` function parameters, which are value types in Naga (not pointers).
+///
+/// Struct and other aggregate leaves are supported the same way as scalars and vectors.
 pub(crate) fn flatten_array_type_shape(
     module: &Module,
     mut cur_ty: Handle<Type>,

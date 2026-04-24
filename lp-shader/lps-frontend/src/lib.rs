@@ -216,6 +216,21 @@ float test() {
         lpir::validate_module(&ir).expect("validate");
     }
 
+    /// M3 Phase 1: struct leaf in stack array — declaration and zero-fill only.
+    #[test]
+    fn lower_array_of_struct_local_decl_validates() {
+        let src = r#"
+struct Point { float x; float y; };
+float f() {
+    Point ps[4];
+    return 0.0;
+}
+"#;
+        let naga = compile(src).unwrap();
+        let (ir, _) = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate");
+    }
+
     #[test]
     fn lower_inout_float_modify() {
         let src = r#"

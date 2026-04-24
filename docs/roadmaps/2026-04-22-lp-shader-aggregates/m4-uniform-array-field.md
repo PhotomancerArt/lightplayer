@@ -1,5 +1,11 @@
 # Milestone 4 — Uniform-struct-with-array-field
 
+## Status
+
+**Complete** — 2026-04-23. Uniform array fields work on `wasm.q32`,
+`rv32c.q32`, and `rv32n.q32`. `uniform/struct-array-field.glsl` and
+`uniform/array.glsl` both pass fully.
+
 ## Goal
 
 Extend `load_lps_value_from_vmctx` to recurse through array-typed struct

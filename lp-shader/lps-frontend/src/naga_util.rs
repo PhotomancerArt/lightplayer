@@ -383,9 +383,11 @@ pub(crate) fn expr_type_inner(
                 None => TypeInner::Scalar(scalar),
             }),
             // `AccessIndex` / `Access` on pointer-to-array is typed as the element value, not `ValuePointer`.
-            ty @ (TypeInner::Scalar(_) | TypeInner::Vector { .. } | TypeInner::Matrix { .. }) => {
-                Ok(ty.clone())
-            }
+            // `Access` on pointer-to-array-of-struct yields [`TypeInner::Struct`]; `Load` reads that value.
+            ty @ TypeInner::Scalar(_) => Ok(ty.clone()),
+            ty @ TypeInner::Vector { .. } => Ok(ty.clone()),
+            ty @ TypeInner::Matrix { .. } => Ok(ty.clone()),
+            ty @ TypeInner::Struct { .. } => Ok(ty.clone()),
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-pointer",
             ))),

@@ -179,6 +179,35 @@ pub(crate) fn store_lps_value_into_slot(
     }
 }
 
+/// `Memcpy` from a slot-backed aggregate whose [`AggregateInfo::naga_ty`] equals `leaf_naga_ty`
+/// (e.g. one element of an array-of-struct) into `dst_addr`.
+pub(crate) fn try_memcpy_leaf_slot_into_addr(
+    ctx: &mut LowerCtx<'_>,
+    dst_addr: VReg,
+    leaf_naga_ty: Handle<Type>,
+    expr_h: Handle<Expression>,
+) -> Result<bool, LowerError> {
+    let Some(src_info) = peel_slot_backed_aggregate_info(ctx, expr_h) else {
+        return Ok(false);
+    };
+    if src_info.naga_ty != leaf_naga_ty {
+        return Ok(false);
+    }
+    let Some(layout) = crate::naga_util::aggregate_layout(ctx.module, leaf_naga_ty)? else {
+        return Ok(false);
+    };
+    if src_info.total_size() != layout.total_size {
+        return Ok(false);
+    }
+    let src_base = aggregate_storage_base_vreg(ctx, &src_info.slot)?;
+    ctx.fb.push(LpirOp::Memcpy {
+        dst_addr,
+        src_addr: src_base,
+        size: layout.total_size,
+    });
+    Ok(true)
+}
+
 /// `Memcpy` from a slot-backed aggregate with the same Naga type as `info` (inferred-size arrays
 /// included: no `naga_to_lps` on the array handle).
 /// Returns `true` if the memcpy was emitted.
