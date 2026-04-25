@@ -5,7 +5,7 @@
 
 use lp_model::{LpPathBuf, config::LightplayerConfig, path::AsLpPath};
 use lp_server::LpServer;
-use lp_shared::fs::LpFs;
+use lpfs::LpFs;
 
 /// Config file path at filesystem root
 const CONFIG_PATH: &str = "/lightplayer.json";

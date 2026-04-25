@@ -17,9 +17,9 @@ use hashbrown::HashMap;
 use lp_engine::{LpGraphics, MemoryStatsFn};
 use lp_model::project::ProjectHandle;
 use lp_model::{LpPath, LpPathBuf};
-use lp_shared::fs::LpFs;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpfs::LpFs;
 
 /// Manages multiple project instances
 pub struct ProjectManager {

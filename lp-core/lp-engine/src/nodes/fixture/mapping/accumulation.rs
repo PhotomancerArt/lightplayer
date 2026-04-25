@@ -5,7 +5,23 @@ use super::sampling::create_sampler;
 use alloc::vec::Vec;
 use lps_q32::q32::Q32;
 
-/// Convert u8 (0-255) from sampler to Q32 (0-1)
+/// Convert u8 (0-255) from sampler to Q32 (0-1).
+///
+/// CAREFUL — do not "optimize" this with a 256-entry LUT.
+///
+/// 255 is a compile-time constant divisor, so LLVM lowers `(v * 65536)
+/// / 255` to a magic-multiply sequence (`(v * magic) >> shift`) at
+/// compile time. That's a few in-register instructions on RV32 and is
+/// faster than a static LUT load + bounds check.
+///
+/// A LUT was tried in commit 029f558e and reverted in 66cf034a after
+/// per-phase profiling caught a +43k cycle regression in
+/// `FixtureRuntime::render`. The `__divdi3` and `u64_div_rem` lines
+/// that show up in profiles are called by JIT shader math builtins
+/// (`__lps_*`, `__lp_lpfn_*`) and naga's compile-time evaluator, NOT
+/// from this function. See
+/// `docs/plans-old/2026-04-19-fixture-render-perf/00-notes.md`
+/// "Phase 02 retrospective" for the full investigation.
 fn u8_to_q32_normalized(v: u8) -> Q32 {
     Q32(((v as i64) * 65536 / 255) as i32)
 }
@@ -96,7 +112,7 @@ pub fn accumulate_from_mapping(
         {
             let channel = entry.channel() as usize;
             if channel < accumulators.r.len() {
-                let contribution_raw = entry.contribution_raw() as i32;
+                let contribution_raw = entry.contribution_raw();
 
                 let pixel_r = pixel[0];
                 let pixel_g = pixel[1];
@@ -108,15 +124,22 @@ pub fn accumulate_from_mapping(
                     accumulators.g[channel] += u8_to_q32_normalized(pixel_g);
                     accumulators.b[channel] += u8_to_q32_normalized(pixel_b);
                 } else {
-                    let frac = Q32(contribution_raw);
-                    let norm_r = u8_to_q32_normalized(pixel_r);
-                    let norm_g = u8_to_q32_normalized(pixel_g);
-                    let norm_b = u8_to_q32_normalized(pixel_b);
+                    let frac = contribution_raw; // [1, 65535]
+                    let norm_r = u8_to_q32_normalized(pixel_r).0 as u32; // [0, 65536]
+                    let norm_g = u8_to_q32_normalized(pixel_g).0 as u32;
+                    let norm_b = u8_to_q32_normalized(pixel_b).0 as u32;
 
-                    // Q32 multiplication: (a.0 * b.0) >> 16
-                    let accumulated_r = Q32(((norm_r.0 as i64 * frac.0 as i64) >> 16) as i32);
-                    let accumulated_g = Q32(((norm_g.0 as i64 * frac.0 as i64) >> 16) as i32);
-                    let accumulated_b = Q32(((norm_b.0 as i64 * frac.0 as i64) >> 16) as i32);
+                    debug_assert!(frac <= 0xFFFF);
+                    debug_assert!(
+                        norm_r <= 0x1_0000 && norm_g <= 0x1_0000 && norm_b <= 0x1_0000,
+                        "norm exceeds Q32 ONE; was the u8 LUT changed?",
+                    );
+
+                    // Q32 multiplication: (a.0 * b.0) >> 16. Both operands fit in u32 and
+                    // the product (~4.295e9 max) fits in u32::MAX, so no i64 needed.
+                    let accumulated_r = Q32(((norm_r * frac) >> 16) as i32);
+                    let accumulated_g = Q32(((norm_g * frac) >> 16) as i32);
+                    let accumulated_b = Q32(((norm_b * frac) >> 16) as i32);
 
                     accumulators.r[channel] += accumulated_r;
                     accumulators.g[channel] += accumulated_g;
@@ -132,4 +155,28 @@ pub fn accumulate_from_mapping(
     }
 
     accumulators
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn u32_mul_matches_i64_reference() {
+        // Reference: the old i64 path.
+        fn i64_ref(norm: i32, frac: i32) -> i32 {
+            ((norm as i64 * frac as i64) >> 16) as i32
+        }
+
+        // Walk every u8 input through u8_to_q32_normalized so we cover the
+        // exact `norm` values the production path produces.
+        for v in 0u8..=255 {
+            let norm = u8_to_q32_normalized(v).0;
+            for &frac in &[1i32, 2, 100, 1000, 0x4000, 0x8000, 0xC000, 0xFFFF] {
+                let new = ((norm as u32 * frac as u32) >> 16) as i32;
+                let old = i64_ref(norm, frac);
+                assert_eq!(new, old, "mismatch at norm={norm} (v={v}), frac={frac}");
+            }
+        }
+    }
 }

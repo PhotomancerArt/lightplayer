@@ -152,6 +152,7 @@ fn sym_call(
         args: push_vregs_slice(pool, args)?,
         rets: push_vregs_slice(pool, rets)?,
         callee_uses_sret: false,
+        caller_passes_sret_ptr: false,
         src_op: pack_src_op(src_op),
     });
     Ok(())
@@ -1261,11 +1262,13 @@ pub fn lower_lpir_op(
                 });
             }
             let callee_uses_sret = callee_return_uses_sret(ir, abi, *callee);
+            let caller_passes_sret_ptr = callee_sret_ptr_in_lpir_args(ir, *callee);
             out.push(VInst::Call {
                 target: symbols.intern(name),
                 args: push_vregs_slice(vreg_pool, args_slice)?,
                 rets: push_vregs_slice(vreg_pool, results_slice)?,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 src_op: po,
             });
             Ok(())
@@ -1903,15 +1906,29 @@ fn ir_params_to_glsl_kinds(params: &[lpir::IrType]) -> Vec<GlslParamKind> {
 fn callee_return_uses_sret(ir: &LpirModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
     let isa = abi.isa();
     if let Some(imp_idx) = ir.callee_as_import(callee) {
-        return isa.sret_uses_buffer_for(ir.imports[imp_idx].return_types.len() as u32);
+        let imp = &ir.imports[imp_idx];
+        return imp.sret || isa.sret_uses_buffer_for(imp.return_types.len() as u32);
     }
     let Some(f) = ir.callee_as_function(callee) else {
         return false;
     };
+    if f.sret_arg.is_some() {
+        return true;
+    }
     if let Some(fa) = abi.func_abi(f.name.as_str()) {
         fa.is_sret()
     } else {
         isa.sret_uses_buffer_for(f.return_types.len() as u32)
+    }
+}
+
+fn callee_sret_ptr_in_lpir_args(ir: &LpirModule, callee: CalleeRef) -> bool {
+    if let Some(imp_idx) = ir.callee_as_import(callee) {
+        ir.imports[imp_idx].sret
+    } else if let Some(f) = ir.callee_as_function(callee) {
+        f.sret_arg.is_some()
+    } else {
+        false
     }
 }
 
@@ -2033,6 +2050,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![],
             slots: vec![],
             body: vec![],
@@ -2264,12 +2282,14 @@ mod tests {
                 args,
                 rets,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_fadd_q32");
                 assert_eq!(args.vregs(&pool), &[FaVReg(0), FaVReg(1)]);
                 assert_eq!(rets.vregs(&pool), &[FaVReg(2)]);
                 assert!(!callee_uses_sret);
+                assert!(!caller_passes_sret_ptr);
                 assert_eq!(unpack_src_op(*src_op), Some(3));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2294,12 +2314,14 @@ mod tests {
                 args,
                 rets,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_fdiv_q32");
                 assert_eq!(args.vregs(&pool), &[FaVReg(0), FaVReg(1)]);
                 assert_eq!(rets.vregs(&pool), &[FaVReg(2)]);
                 assert!(!callee_uses_sret);
+                assert!(!caller_passes_sret_ptr);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2313,6 +2335,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32, IrType::I32, IrType::I32],
             slots: vec![],
             body: vec![],
@@ -2576,6 +2599,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32, IrType::I32],
             slots: vec![],
             body: vec![],
@@ -2649,6 +2673,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 3],
             slots: vec![],
             body: vec![],
@@ -2680,6 +2705,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 3],
             slots: vec![],
             body: vec![],
@@ -2710,6 +2736,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
             body: vec![],
@@ -2754,6 +2781,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
             body: vec![],
@@ -2806,6 +2834,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
             body: vec![],
@@ -2830,6 +2859,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
             body: vec![],
@@ -2873,12 +2903,14 @@ mod tests {
                 args,
                 rets,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_itof_s_q32");
                 assert_eq!(args.vregs(&pool), &[FaVReg(0)]);
                 assert_eq!(rets.vregs(&pool), &[FaVReg(1)]);
                 assert!(!callee_uses_sret);
+                assert!(!caller_passes_sret_ptr);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2902,12 +2934,14 @@ mod tests {
                 args,
                 rets,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_itof_u_q32");
                 assert_eq!(args.vregs(&pool), &[FaVReg(0)]);
                 assert_eq!(rets.vregs(&pool), &[FaVReg(1)]);
                 assert!(!callee_uses_sret);
+                assert!(!caller_passes_sret_ptr);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2931,12 +2965,14 @@ mod tests {
                 args,
                 rets,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_fsqrt_q32");
                 assert_eq!(args.vregs(&pool), &[FaVReg(0)]);
                 assert_eq!(rets.vregs(&pool), &[FaVReg(1)]);
                 assert!(!callee_uses_sret);
+                assert!(!caller_passes_sret_ptr);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -3257,6 +3293,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![IrType::I32],
+            sret_arg: None,
             vreg_types: vec![],
             slots: vec![],
             body: vec![],
@@ -3312,6 +3349,7 @@ mod tests {
             vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![IrType::I32],
+            sret_arg: None,
             vreg_types: vec![IrType::I32, IrType::I32], // v0=vmctx, v1=our value
             slots: vec![],
             body: vec![

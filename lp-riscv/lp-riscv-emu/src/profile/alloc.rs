@@ -60,7 +60,7 @@ mod tests {
     }"#,
         )
         .expect("parse");
-        assert_eq!(resolver.resolve(0x8000_0010), "palette_warm");
+        assert_eq!(resolver.resolve(0x8000_0010), "[jit] palette_warm");
     }
 
     #[test]
@@ -105,6 +105,19 @@ mod tests {
         .expect("parse");
         assert_eq!(resolver.resolve(0x1000), "static_fn");
         assert_eq!(resolver.resolve(0x8000_0000), "???");
+    }
+
+    #[test]
+    fn resolve_static_symbol_is_demangled_and_shortened() {
+        // v0-mangled `<lp_engine::...::FixtureRuntime as lp_engine::...::NodeRuntime>::render`
+        let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
+        let resolver = resolver_from_meta_json(&format!(
+            r#"{{
+            "symbols": [{{ "addr": 4096, "size": 16, "name": "{mangled}" }}]
+        }}"#
+        ))
+        .expect("parse");
+        assert_eq!(resolver.resolve(0x1000), "FixtureRuntime::render");
     }
 }
 
@@ -806,6 +819,11 @@ fn fmt_num(n: u64) -> String {
 
 // --- Symbol resolver (mirrors lp-cli profile heap_analysis/resolver) ---
 
+/// Visual prefix applied to JIT-emitted (dynamic) symbol display names so they
+/// stand out from static ELF symbols in heap-summary reports. Mirrors the same
+/// constant in `lp-cli/src/commands/profile/symbolize.rs`.
+const JIT_DISPLAY_PREFIX: &str = "[jit] ";
+
 #[derive(Debug, Deserialize)]
 struct TraceMetaSymbols {
     symbols: Vec<SymbolEntry>,
@@ -873,7 +891,7 @@ impl SymbolResolver {
             }
             let end = addr.saturating_add(size);
             let full = Self::demangle_name(&d.name);
-            let display = Self::shorten_demangled(&full);
+            let display = format!("{JIT_DISPLAY_PREFIX}{}", Self::shorten_demangled(&full));
             symbols.push((addr, end, full, display));
         }
 
@@ -971,11 +989,7 @@ impl SymbolResolver {
     }
 
     fn demangle_name(raw: &str) -> String {
-        if raw.starts_with("_Z") {
-            format!("{}", demangle(raw))
-        } else {
-            raw.to_string()
-        }
+        format!("{}", demangle(raw))
     }
 
     fn shorten_demangled(demangled: &str) -> String {

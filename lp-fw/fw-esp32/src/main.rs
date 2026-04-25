@@ -79,34 +79,120 @@ fn on_alloc_error(layout: Layout) -> ! {
 }
 
 mod board;
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 mod boot;
 mod jit_fns;
 mod logger;
+#[cfg(any(
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+    )),
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_fluid_demo",
+))]
 mod output;
 mod serial;
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 mod server_loop;
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 mod time;
-#[cfg(feature = "server")]
+#[cfg(all(
+    feature = "server",
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+    )),
+))]
 mod transport;
 
-#[cfg(not(feature = "memory_fs"))]
+#[cfg(all(
+    not(feature = "memory_fs"),
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+    )),
+))]
 mod flash_storage;
-#[cfg(not(feature = "memory_fs"))]
+#[cfg(all(
+    not(feature = "memory_fs"),
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+    )),
+))]
 mod lp_fs_flash;
 
-use alloc::{boxed::Box, rc::Rc, sync::Arc};
-use core::cell::RefCell;
-
-use board::esp32c6::init::{init_board, start_runtime};
-use lp_model::path::AsLpPath;
-use lp_server::{Graphics, LpGraphics, LpServer};
-use lp_shared::fs::LpFsMemory;
-use lp_shared::output::OutputProvider;
-
-use output::Esp32OutputProvider;
-use serial::io_task;
-use server_loop::run_server_loop;
-use time::Esp32TimeProvider;
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
+use {
+    alloc::{boxed::Box, rc::Rc, sync::Arc},
+    board::esp32c6::init::{init_board, start_runtime},
+    core::cell::RefCell,
+    lp_model::path::AsLpPath,
+    lp_server::{Graphics, LpGraphics, LpServer},
+    lp_shared::output::OutputProvider,
+    lpfs::LpFsMemory,
+    output::Esp32OutputProvider,
+    serial::io_task,
+    server_loop::run_server_loop,
+    time::Esp32TimeProvider,
+};
 
 #[cfg(feature = "test_rmt")]
 mod tests {
@@ -133,8 +219,29 @@ mod tests {
     pub mod test_json;
 }
 
+#[cfg(feature = "test_msafluid")]
+mod tests {
+    pub mod msafluid_solver;
+    pub mod test_msafluid;
+}
+
+#[cfg(feature = "test_fluid_demo")]
+mod tests {
+    pub mod fluid_demo;
+    pub mod msafluid_solver;
+}
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
         esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
@@ -147,19 +254,19 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(feature = "test_gpio")]
     {
         use tests::test_gpio::run_gpio_test;
-        run_gpio_test().await;
+        run_gpio_test(spawner).await;
     }
 
     #[cfg(feature = "test_rmt")]
     {
         use tests::test_rmt::run_rmt_test;
-        run_rmt_test().await;
+        run_rmt_test(spawner).await;
     }
 
     #[cfg(feature = "test_dither")]
     {
         use tests::test_dither::run_dithering_test;
-        run_dithering_test().await;
+        run_dithering_test(spawner).await;
     }
 
     #[cfg(feature = "test_usb")]
@@ -174,12 +281,26 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_test_json(spawner).await;
     }
 
+    #[cfg(feature = "test_msafluid")]
+    {
+        use tests::test_msafluid::run_msafluid_test;
+        run_msafluid_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_fluid_demo")]
+    {
+        use tests::fluid_demo::runner::run_fluid_demo;
+        run_fluid_demo(spawner).await;
+    }
+
     #[cfg(not(any(
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
         feature = "test_usb",
-        feature = "test_json"
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
     )))]
     {
         // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
@@ -188,7 +309,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash) = init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4) = init_board();
         esp_println::println!("[INIT] Board initialized, starting runtime...");
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
@@ -268,7 +389,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         esp_println::println!("[INIT] Output provider created");
 
         // Create filesystem: in-memory when memory_fs enabled, else flash-backed
-        let base_fs: Box<dyn lp_shared::fs::LpFs> = {
+        let base_fs: Box<dyn lpfs::LpFs> = {
             #[cfg(not(feature = "memory_fs"))]
             {
                 let flash_storage = esp_storage::FlashStorage::new(flash);

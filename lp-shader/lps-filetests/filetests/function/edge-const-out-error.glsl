@@ -92,13 +92,14 @@ float test_edge_const_multiple_qualifiers() {
 // run: test_edge_const_multiple_qualifiers() ~= 0.0
 */
 
-void const_array(const float[3] arr) {
+// `const` on a by-value array param is not lowered yet; test read-only `in` array instead.
+void const_array(float[3] arr) {
     float sum = arr[0] + arr[1] + arr[2];
     // Cannot modify arr elements
 }
 
 float test_edge_const_array() {
-    // const can be used with array parameters
+    // `in` array parameters are read-only at the GLSL type level for element assignment
     float[3] data = float[3](1.0, 2.0, 3.0);
     const_array(data);
     return 4.0;

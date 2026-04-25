@@ -20,8 +20,8 @@ use lp_model::{
     },
 };
 use lp_perf::{EVENT_FRAME, EVENT_PROJECT_LOAD};
-use lp_shared::fs::{LpFs, fs_event::FsChange};
 use lp_shared::time::TimeProvider;
+use lpfs::{FsChange, LpFs};
 
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
@@ -608,30 +608,21 @@ impl ProjectRuntime {
     pub fn handle_fs_changes(&mut self, changes: &[FsChange]) -> Result<(), Error> {
         // Process deletions first
         for change in changes {
-            if matches!(
-                change.change_type,
-                lp_shared::fs::fs_event::ChangeType::Delete
-            ) {
+            if matches!(change.change_type, lpfs::ChangeType::Delete) {
                 self.handle_delete_change(change)?;
             }
         }
 
         // Process creates (new node directories)
         for change in changes {
-            if matches!(
-                change.change_type,
-                lp_shared::fs::fs_event::ChangeType::Create
-            ) {
+            if matches!(change.change_type, lpfs::ChangeType::Create) {
                 self.handle_create_change(change)?;
             }
         }
 
         // Process modifies (existing files)
         for change in changes {
-            if matches!(
-                change.change_type,
-                lp_shared::fs::fs_event::ChangeType::Modify
-            ) {
+            if matches!(change.change_type, lpfs::ChangeType::Modify) {
                 self.handle_modify_change(change)?;
             }
         }
@@ -1351,7 +1342,7 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
         Ok(crate::runtime::contexts::TextureHandle::new(handle))
     }
 
-    fn get_node_fs(&self) -> &dyn lp_shared::fs::LpFs {
+    fn get_node_fs(&self) -> &dyn lpfs::LpFs {
         // SAFETY: We're returning a reference from a RefCell borrow, but the trait only allows
         // immutable access and we're not holding the borrow across any potential panics.
         // The borrow is valid for the lifetime of the returned reference.

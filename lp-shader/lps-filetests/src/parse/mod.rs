@@ -123,6 +123,14 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         }
     }
 
+    if test_types.is_empty() {
+        anyhow::bail!(
+            "{}: missing `// test …` directive (e.g. `// test run`, `// test error`, `// test compile`, `// test transform.q32`). \
+             Without one the harness cannot tell what kind of test this file is.",
+            path.display()
+        );
+    }
+
     let mut error_expectations = Vec::new();
     if test_types.contains(&TestType::Error) {
         for (line_num, line) in lines.iter().enumerate() {
@@ -207,5 +215,28 @@ float f() { return 1.0; }
         let r = parse_test_file(&p);
         let _ = std::fs::remove_file(&p);
         assert!(r.is_err(), "expected duplicate key error");
+    }
+
+    #[test]
+    fn missing_test_type_directive_errors() {
+        let p =
+            std::env::temp_dir().join(format!("lps_ft_no_test_type_{}.glsl", std::process::id()));
+        std::fs::write(
+            &p,
+            r"float f() { return 1.0; }
+// run: f() ~= 1.0
+",
+        )
+        .unwrap();
+        let r = parse_test_file(&p);
+        let _ = std::fs::remove_file(&p);
+        let err = r
+            .err()
+            .expect("expected parse error for file without `// test`")
+            .to_string();
+        assert!(
+            err.contains("missing `// test …` directive"),
+            "unexpected error: {err}"
+        );
     }
 }

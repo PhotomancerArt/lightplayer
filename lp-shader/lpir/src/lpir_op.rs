@@ -439,6 +439,7 @@ pub enum LpirOp {
     ExitBlock,
 
     // --- Call / return ---
+    /// VRegs in `args` are: `[vmctx, sret_dest_addr? …]`, then callee user args (sret if [`crate::lpir_module::IrFunction::sret_arg`]/import `sret`).
     Call {
         callee: CalleeRef,
         args: VRegRange,

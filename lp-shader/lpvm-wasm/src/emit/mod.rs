@@ -2,7 +2,7 @@
 
 mod builtin_wasm_import_types;
 mod control;
-mod func;
+pub(crate) mod func;
 mod imports;
 mod memory;
 mod ops;

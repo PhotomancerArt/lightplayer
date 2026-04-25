@@ -426,6 +426,10 @@ pub enum VInst {
         args: VRegSlice,
         rets: VRegSlice,
         callee_uses_sret: bool,
+        /// When set with [`Self::Call::callee_uses_sret`], LPIR `Call.args` already includes
+        /// the callee's hidden sret pointer (`[vmctx, sret, …]`). When clear, the emitter synthesizes
+        /// `a0` from the caller stack slot (legacy many-scalar-return path).
+        caller_passes_sret_ptr: bool,
         src_op: u16,
     },
     /// Return from function.
@@ -690,6 +694,7 @@ impl VInst {
                 args,
                 rets,
                 callee_uses_sret: _,
+                caller_passes_sret_ptr: _,
                 ..
             } => {
                 let name = symbols.name(*target);

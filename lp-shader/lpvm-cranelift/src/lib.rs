@@ -65,7 +65,7 @@ pub use compile::object_bytes_from_ir;
 pub use compile::{jit_from_ir, jit_from_ir_owned};
 pub use compile_options::{CompileOptions, MemoryStrategy};
 pub use direct_call::DirectCall;
-pub use emit::signature_for_ir_func;
+pub use emit::{signature_for_ir_func, signature_uses_struct_return};
 pub use error::{CompileError, CompilerError};
 pub use lpir::FloatMode;
 pub use lps_shared::path_resolve::PathError;

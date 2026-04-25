@@ -207,6 +207,15 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 /// Get references to the static message channels
 ///
 /// Used by main.rs to create MessageRouter for MessageRouterTransport.
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 pub fn get_message_channels() -> (
     &'static Channel<CriticalSectionRawMutex, String, 32>,
     &'static Channel<CriticalSectionRawMutex, String, 32>,
@@ -227,6 +236,15 @@ pub fn get_server_msg_channel()
 /// Lines are written without M! prefix so the client prints them.
 /// Shares the channel with server responses; when channel is full, log lines are dropped.
 /// (Cannot log the drop - would recurse into logger.)
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 pub fn log_write_to_outgoing(msg: &str) {
     use alloc::string::ToString;
     let _ = OUTGOING_MSG.sender().try_send(msg.to_string());

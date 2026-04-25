@@ -3,7 +3,7 @@
 //! Pushes a project to a host (e.g. serial device) and exits. Non-interactive.
 
 use anyhow::{Context, Result};
-use lp_shared::fs::{LpFs, LpFsStd};
+use lpfs::{LpFs, LpFsStd};
 use std::sync::Arc;
 
 use crate::client::{LpClient, client_connect};

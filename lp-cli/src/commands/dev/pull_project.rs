@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use lp_model::AsLpPath;
-use lp_shared::fs::LpFs;
+use lpfs::LpFs;
 
 use crate::client::LpClient;
 

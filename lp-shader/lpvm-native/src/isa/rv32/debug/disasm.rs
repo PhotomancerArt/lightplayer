@@ -142,6 +142,7 @@ mod tests {
             vmctx_vreg: VReg(0),
             param_count: 2,
             return_types: vec![IrType::I32],
+            sret_arg: None,
             vreg_types: vec![IrType::I32; 4],
             slots: vec![],
             body: vec![

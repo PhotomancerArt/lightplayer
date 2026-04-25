@@ -22,6 +22,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
     let func = IrFunction {
         name: "test_iadd".to_string(),
         is_entry: false,
+        sret_arg: None,
         vmctx_vreg: v(0),
         param_count: 2,
         return_types: vec![IrType::I32],

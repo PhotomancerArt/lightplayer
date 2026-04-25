@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use lp_model::{AsLpPath, project::ProjectConfig};
-use lp_shared::fs::{LpFs, LpFsStd};
+use lpfs::{LpFs, LpFsStd};
 use std::path::PathBuf;
 
 /// Validate that a local project exists and extract project info

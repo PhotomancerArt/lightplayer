@@ -5,6 +5,8 @@
 // from nested if statements. The emitter must correctly unwind the control
 // stack to maintain WASM structural balance.
 
+// test run
+
 // ----------------------------------------------------------------------------
 // Test 1: Return from 3-level nested if (the classic failing case)
 // ----------------------------------------------------------------------------

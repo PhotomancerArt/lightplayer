@@ -743,13 +743,11 @@ impl<'a> EmitContext<'a> {
                 args,
                 rets,
                 callee_uses_sret,
+                caller_passes_sret_ptr,
                 ..
             } => {
-                let cap = if *callee_uses_sret {
-                    ARG_REGS.len() - 1
-                } else {
-                    ARG_REGS.len()
-                };
+                let cap = crate::isa::IsaTarget::Rv32imac
+                    .lpir_call_stack_args_start(*callee_uses_sret, *caller_passes_sret_ptr);
 
                 // Store overflow args to the outgoing stack area at [SP + offset].
                 for i in cap..args.len() {
@@ -773,7 +771,7 @@ impl<'a> EmitContext<'a> {
                     }
                 }
 
-                if *callee_uses_sret {
+                if *callee_uses_sret && !*caller_passes_sret_ptr {
                     let sret_off = self
                         .frame
                         .sret_slot_offset_from_fp()
@@ -793,7 +791,7 @@ impl<'a> EmitContext<'a> {
                     symbol: String::from(self.symbols.name(*target)),
                 });
 
-                if *callee_uses_sret {
+                if *callee_uses_sret && !*caller_passes_sret_ptr {
                     let sret_off = self
                         .frame
                         .sret_slot_offset_from_fp()
@@ -1010,7 +1008,7 @@ mod tests {
                 parameters: vec![],
                 kind: LpsFnKind::UserDefined,
             },
-            0,
+            None,
         );
 
         let result = crate::emit::emit_lowered(&lowered, &abi).expect("emit_lowered");

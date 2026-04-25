@@ -5,18 +5,17 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use cranelift_codegen::data_value::DataValue;
-use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
 use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
-use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
+use lps_shared::{LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
     encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
     q32_to_lps_value_f32, validate_render_texture_sig_ir,
 };
-use lpvm_cranelift::{CompileOptions, signature_for_ir_func};
+use lpvm_cranelift::{CompileOptions, signature_for_ir_func, signature_uses_struct_return};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_header};
 
 use crate::error::NativeError;
@@ -158,6 +157,7 @@ impl NativeEmuInstance {
         entry: u32,
         full: &[i32],
         cycle_model: CycleModel,
+        return_ty_for_sret: Option<&LpsType>,
     ) -> Result<Vec<i32>, NativeError> {
         let isa = riscv32_lpvm_reference_isa()
             .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{e}"))))?;
@@ -170,6 +170,26 @@ impl NativeEmuInstance {
             &*isa,
         );
         let n_ret = ir_func.return_types.len();
+        let uses_sret = signature_uses_struct_return(&*isa, ir_func);
+        let struct_size = if uses_sret {
+            if ir_func.sret_arg.is_some() {
+                let rt = return_ty_for_sret.ok_or_else(|| {
+                    NativeError::Call(CallError::Unsupported(String::from(
+                        "internal: LPIR sret without host return type for sizing",
+                    )))
+                })?;
+                if matches!(rt, LpsType::Void) {
+                    return Err(NativeError::Call(CallError::Unsupported(String::from(
+                        "internal: sret_buffer sizing for void return",
+                    ))));
+                }
+                lps_shared::type_size(rt, LayoutRules::Std430)
+            } else {
+                ir_func.return_types.len() * 4
+            }
+        } else {
+            0usize
+        };
 
         let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
         let shared = self.module.arena.storage_arc();
@@ -189,12 +209,8 @@ impl NativeEmuInstance {
         let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
         emu.set_cycle_model(cycle_model);
 
-        let has_sr = sig
-            .params
-            .iter()
-            .any(|p| p.purpose == ArgumentPurpose::StructReturn);
-        let ret_result = if has_sr {
-            emu.call_function_with_struct_return(entry, &data_args, &sig, n_ret * 4)
+        let ret_result = if uses_sret {
+            emu.call_function_with_struct_return(entry, &data_args, &sig, struct_size)
         } else {
             emu.call_function(entry, &data_args, &sig)
         };
@@ -226,14 +242,27 @@ impl NativeEmuInstance {
                         }
                     }
                 }
-                if words.len() < n_ret {
-                    return Err(NativeError::Call(CallError::Unsupported(format!(
-                        "emulator returned {} words, signature expects {}",
-                        words.len(),
-                        n_ret
-                    ))));
+                if uses_sret {
+                    let need_words = (struct_size + 3) / 4;
+                    if words.len() < need_words {
+                        return Err(NativeError::Call(CallError::Unsupported(format!(
+                            "emulator returned {} words, sret needs {} words for {} bytes",
+                            words.len(),
+                            need_words,
+                            struct_size
+                        ))));
+                    }
+                    words.truncate(need_words);
+                } else {
+                    if words.len() < n_ret {
+                        return Err(NativeError::Call(CallError::Unsupported(format!(
+                            "emulator returned {} words, signature expects {}",
+                            words.len(),
+                            n_ret
+                        ))));
+                    }
+                    words.truncate(n_ret);
                 }
-                words.truncate(n_ret);
                 self.last_guest_instruction_count = Some(n_inst);
                 self.last_guest_cycle_count = Some(emu.get_cycle_count());
                 Ok(words)
@@ -285,7 +314,26 @@ impl NativeEmuInstance {
             CallError::Unsupported(format!("symbol `{name}` not in linked RV32 image"))
         })?;
 
-        self.run_emulator_call(&ir_func, entry, &full, cycle_model)
+        let return_ty_owned = if ir_func.sret_arg.is_some() {
+            let gfn = self
+                .module
+                .meta
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+            Some(gfn.return_type.clone())
+        } else {
+            None
+        };
+
+        self.run_emulator_call(
+            &ir_func,
+            entry,
+            &full,
+            cycle_model,
+            return_ty_owned.as_ref(),
+        )
     }
 
     fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), NativeError> {
@@ -431,7 +479,23 @@ impl LpvmInstance for NativeEmuInstance {
         })?;
         let vmctx = self.vmctx_guest as i32;
         let full = [vmctx, tex_offset, width as i32, height as i32];
-        self.run_emulator_call(&ir_func, entry, &full, CycleModel::default())?;
+        let return_ty_owned = if ir_func.sret_arg.is_some() {
+            self.module
+                .meta
+                .functions
+                .iter()
+                .find(|f| f.name == fn_name)
+                .map(|g| g.return_type.clone())
+        } else {
+            None
+        };
+        self.run_emulator_call(
+            &ir_func,
+            entry,
+            &full,
+            CycleModel::default(),
+            return_ty_owned.as_ref(),
+        )?;
         Ok(())
     }
 

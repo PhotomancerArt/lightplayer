@@ -3,13 +3,18 @@
 use std::format;
 
 use lpir::FloatMode;
-use lps_shared::LpsType;
+use lps_shared::layout::{type_alignment, type_size};
+use lps_shared::{LayoutRules, LpsType};
 use lpvm::{LpsValueF32, glsl_component_count};
 use wasm_encoder::ValType as WasmValType;
-use wasmtime::Val;
+use wasmtime::{Instance, Memory, Store, Val};
 
+use crate::aggregate_abi::{
+    aggregate_flat_q32_words_to_std430_bytes, encode_aggregate_std430_bytes,
+    q32_sret_bytes_to_flat_return_words, type_passed_as_aggregate_ptr,
+};
 use crate::error::WasmError;
-use crate::module::glsl_type_to_wasm_components;
+use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport, glsl_type_to_wasm_components};
 
 const Q16_16_SCALE: f32 = 65536.0;
 
@@ -149,7 +154,9 @@ fn glsl_value_to_wasm_flat(
 }
 
 /// Build wasmtime [`Val`] arguments from flattened Q32 `i32` lanes (`FloatMode::Q32` only).
-pub(crate) fn build_wasm_args_q32_flat(
+///
+/// Scalar / vector parameters only (no aggregate pointer ABI).
+pub(crate) fn build_wasm_args_q32_scalar_only(
     param_types: &[LpsType],
     export_param_slots: usize,
     words: &[i32],
@@ -301,7 +308,8 @@ pub(crate) fn wasm_vals_to_q32_words(
     Ok(out)
 }
 
-pub(crate) fn build_wasm_args(
+/// Scalar / vector parameters only (no aggregate pointer ABI).
+pub(crate) fn build_wasm_args_scalar_only(
     param_types: &[LpsType],
     export_param_slots: usize,
     args: &[LpsValueF32],
@@ -487,4 +495,230 @@ pub(crate) fn zero_results_for_type(ty: &LpsType, fm: FloatMode) -> Vec<Val> {
             _ => Val::I32(0),
         })
         .collect()
+}
+
+// --- Shadow stack + aggregate / sret host marshalling ---------------------------------
+
+pub(crate) struct ShadowStackFrame {
+    pub(crate) saved_sp: i32,
+}
+
+pub(crate) struct SretPlan {
+    pub(crate) ptr: i32,
+    pub(crate) size: usize,
+}
+
+pub(crate) fn shadow_stack_frame_open(
+    instance: &Instance,
+    store: &mut Store<()>,
+) -> Result<ShadowStackFrame, WasmError> {
+    let g = instance
+        .get_global(&mut *store, SHADOW_STACK_GLOBAL_EXPORT)
+        .ok_or_else(|| WasmError::runtime("missing exported shadow stack global"))?;
+    let cur = g
+        .get(&mut *store)
+        .i32()
+        .ok_or_else(|| WasmError::runtime("shadow stack global is not i32"))?;
+    Ok(ShadowStackFrame { saved_sp: cur })
+}
+
+pub(crate) fn shadow_stack_frame_close(
+    instance: &Instance,
+    store: &mut Store<()>,
+    frame: ShadowStackFrame,
+) -> Result<(), WasmError> {
+    let g = instance
+        .get_global(&mut *store, SHADOW_STACK_GLOBAL_EXPORT)
+        .ok_or_else(|| WasmError::runtime("missing exported shadow stack global"))?;
+    g.set(&mut *store, Val::I32(frame.saved_sp))
+        .map_err(|e| WasmError::runtime(format!("restore shadow sp: {e}")))?;
+    Ok(())
+}
+
+fn shadow_stack_alloc(
+    instance: &Instance,
+    store: &mut Store<()>,
+    size: u32,
+    align: u32,
+) -> Result<i32, WasmError> {
+    if align == 0 || (align & (align - 1)) != 0 {
+        return Err(WasmError::runtime(
+            "shadow alloc: align must be a non-zero power of 2",
+        ));
+    }
+    let g = instance
+        .get_global(&mut *store, SHADOW_STACK_GLOBAL_EXPORT)
+        .ok_or_else(|| WasmError::runtime("missing exported shadow stack global"))?;
+    let cur = g
+        .get(&mut *store)
+        .i32()
+        .ok_or_else(|| WasmError::runtime("shadow stack global is not i32"))?;
+    let mask = i32::try_from(align).map_err(|_| WasmError::runtime("shadow alloc align"))? - 1;
+    let size_i =
+        i32::try_from(size).map_err(|_| WasmError::runtime("shadow alloc size too large"))?;
+    let raw = cur
+        .checked_sub(size_i)
+        .ok_or_else(|| WasmError::runtime("shadow stack overflow"))?;
+    let ptr = raw & !mask;
+    g.set(&mut *store, Val::I32(ptr))
+        .map_err(|e| WasmError::runtime(format!("set shadow sp: {e}")))?;
+    Ok(ptr)
+}
+
+pub(crate) fn wasmtime_memory_write(
+    mem: &Memory,
+    store: &mut Store<()>,
+    ptr: i32,
+    bytes: &[u8],
+) -> Result<(), WasmError> {
+    let base = usize::try_from(ptr).map_err(|_| WasmError::runtime("negative guest pointer"))?;
+    mem.write(store, base, bytes)
+        .map_err(|e| WasmError::runtime(format!("linear memory write failed: {e}")))?;
+    Ok(())
+}
+
+pub(crate) fn wasmtime_memory_read(
+    mem: &Memory,
+    store: &Store<()>,
+    ptr: i32,
+    len: usize,
+) -> Result<Vec<u8>, WasmError> {
+    let base = usize::try_from(ptr).map_err(|_| WasmError::runtime("negative guest pointer"))?;
+    let end = base
+        .checked_add(len)
+        .ok_or_else(|| WasmError::runtime("guest read overflow"))?;
+    let data = mem
+        .data(store)
+        .get(base..end)
+        .ok_or_else(|| WasmError::runtime("guest read out of bounds"))?;
+    Ok(data.to_vec())
+}
+
+pub(crate) fn build_wasm_args_for_call(
+    instance: &Instance,
+    store: &mut Store<()>,
+    mem: &Memory,
+    export: &WasmExport,
+    args: &[LpsValueF32],
+    fm: FloatMode,
+    return_ty: &LpsType,
+) -> Result<(Vec<Val>, Option<SretPlan>), WasmError> {
+    if args.len() != export.param_types.len() {
+        return Err(WasmError::runtime(format!(
+            "wrong argument count: expected {}, got {}",
+            export.param_types.len(),
+            args.len()
+        )));
+    }
+    let mut wasm_args = vec![Val::I32(0)];
+    let mut sret = None;
+    if export.uses_sret {
+        let size_u = type_size(return_ty, LayoutRules::Std430);
+        let size =
+            u32::try_from(size_u).map_err(|_| WasmError::runtime("sret size exceeds u32"))?;
+        let align = u32::try_from(type_alignment(return_ty, LayoutRules::Std430))
+            .map_err(|_| WasmError::runtime("sret align exceeds u32"))?;
+        let ptr = shadow_stack_alloc(instance, store, size, align)?;
+        sret = Some(SretPlan { ptr, size: size_u });
+        wasm_args.push(Val::I32(ptr));
+    }
+    for (v, ty) in args.iter().zip(export.param_types.iter()) {
+        if type_passed_as_aggregate_ptr(ty) {
+            let bytes = encode_aggregate_std430_bytes(ty, v, fm)?;
+            let size =
+                u32::try_from(bytes.len()).map_err(|_| WasmError::runtime("aggregate arg size"))?;
+            let align = u32::try_from(type_alignment(ty, LayoutRules::Std430))
+                .map_err(|_| WasmError::runtime("aggregate align"))?;
+            let ptr = shadow_stack_alloc(instance, store, size, align)?;
+            wasmtime_memory_write(mem, store, ptr, &bytes)?;
+            wasm_args.push(Val::I32(ptr));
+        } else {
+            wasm_args.extend(glsl_value_to_wasm_flat(ty, v, fm)?);
+        }
+    }
+    if wasm_args.len() != export.params.len() {
+        return Err(WasmError::runtime(format!(
+            "internal: wasm arg count {} != export.params {}",
+            wasm_args.len(),
+            export.params.len()
+        )));
+    }
+    Ok((wasm_args, sret))
+}
+
+pub(crate) fn build_wasm_args_q32_for_call(
+    instance: &Instance,
+    store: &mut Store<()>,
+    mem: &Memory,
+    export: &WasmExport,
+    words: &[i32],
+    return_ty: &LpsType,
+) -> Result<(Vec<Val>, Option<SretPlan>), WasmError> {
+    let mut wasm_args = vec![Val::I32(0)];
+    let mut sret = None;
+    if export.uses_sret {
+        let size_u = type_size(return_ty, LayoutRules::Std430);
+        let size =
+            u32::try_from(size_u).map_err(|_| WasmError::runtime("sret size exceeds u32"))?;
+        let align = u32::try_from(type_alignment(return_ty, LayoutRules::Std430))
+            .map_err(|_| WasmError::runtime("sret align exceeds u32"))?;
+        let ptr = shadow_stack_alloc(instance, store, size, align)?;
+        sret = Some(SretPlan { ptr, size: size_u });
+        wasm_args.push(Val::I32(ptr));
+    }
+    let mut woff = 0usize;
+    for ty in &export.param_types {
+        if type_passed_as_aggregate_ptr(ty) {
+            let n = glsl_component_count(ty);
+            if woff + n > words.len() {
+                return Err(WasmError::runtime(format!(
+                    "not enough Q32 argument words at offset {woff}"
+                )));
+            }
+            let bytes = aggregate_flat_q32_words_to_std430_bytes(ty, &words[woff..woff + n])?;
+            woff += n;
+            let size =
+                u32::try_from(bytes.len()).map_err(|_| WasmError::runtime("aggregate arg size"))?;
+            let align = u32::try_from(type_alignment(ty, LayoutRules::Std430))
+                .map_err(|_| WasmError::runtime("aggregate align"))?;
+            let ptr = shadow_stack_alloc(instance, store, size, align)?;
+            wasmtime_memory_write(mem, store, ptr, &bytes)?;
+            wasm_args.push(Val::I32(ptr));
+        } else {
+            let n = glsl_component_count(ty);
+            if woff + n > words.len() {
+                return Err(WasmError::runtime(format!(
+                    "not enough Q32 argument words at offset {woff}"
+                )));
+            }
+            for i in 0..n {
+                wasm_args.push(Val::I32(words[woff + i]));
+            }
+            woff += n;
+        }
+    }
+    if woff != words.len() {
+        return Err(WasmError::runtime(format!(
+            "extra Q32 argument words: used {woff}, got {}",
+            words.len()
+        )));
+    }
+    if wasm_args.len() != export.params.len() {
+        return Err(WasmError::runtime(format!(
+            "internal: wasm arg count {} != export.params {}",
+            wasm_args.len(),
+            export.params.len()
+        )));
+    }
+    Ok((wasm_args, sret))
+}
+
+pub(crate) fn decode_sret_q32_return(
+    mem: &Memory,
+    store: &Store<()>,
+    plan: &SretPlan,
+    return_ty: &LpsType,
+) -> Result<Vec<i32>, WasmError> {
+    let bytes = wasmtime_memory_read(mem, store, plan.ptr, plan.size)?;
+    q32_sret_bytes_to_flat_return_words(return_ty, &bytes)
 }

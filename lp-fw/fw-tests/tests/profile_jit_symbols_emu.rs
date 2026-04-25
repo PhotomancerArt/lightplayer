@@ -24,7 +24,7 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 /// `ProjectBuilder::shader_basic` uses GLSL with entry point `render` (see `lp-shader`).
 const EXPECTED_JIT_FN: &str = "render";
@@ -177,15 +177,16 @@ async fn jit_symbols_round_trip_to_meta_and_symbolizer() {
     );
 
     let symbolizer = symbolizer_from_meta_json_str(&meta_content).expect("symbolizer from meta");
+    let expected_display = format!("[jit] {EXPECTED_JIT_FN}");
     assert_eq!(
         symbolizer.lookup(pc).as_ref(),
-        EXPECTED_JIT_FN,
-        "Symbolizer should resolve mid-function PC to JIT name"
+        expected_display,
+        "Symbolizer should resolve mid-function PC to JIT name with [jit] prefix"
     );
 }
 
 fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
-    use lp_shared::fs::LpFs;
+    use lpfs::LpFs;
 
     let entries = fs
         .list_dir("/".as_path(), true)

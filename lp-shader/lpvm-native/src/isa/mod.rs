@@ -101,4 +101,53 @@ impl IsaTarget {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.len(),
         }
     }
+
+    /// First LPIR call-arg index that spills to the outgoing stack area.
+    ///
+    /// Legacy sret callees reserve `a0` for a struct-return pointer injected by the
+    /// emitter, so only seven argument registers remain for explicit operands.
+    /// M1 sret passes that pointer as the second LPIR arg, so all eight `a*` regs
+    /// are available for the first eight operands.
+    pub fn lpir_call_stack_args_start(
+        self,
+        callee_uses_sret: bool,
+        caller_passes_sret_ptr: bool,
+    ) -> usize {
+        match self {
+            IsaTarget::Rv32imac => {
+                if callee_uses_sret && !caller_passes_sret_ptr {
+                    crate::isa::rv32::abi::ARG_REGS.len() - 1
+                } else {
+                    crate::isa::rv32::abi::ARG_REGS.len()
+                }
+            }
+        }
+    }
+
+    /// Target hardware GPR for the `arg_index`-th LPIR [`VInst::Call`] operand
+    /// (RV32 `a0`–`a7`), or `None` when the operand is stack-passed.
+    pub fn lpir_call_arg_target_hw(
+        self,
+        callee_uses_sret: bool,
+        caller_passes_sret_ptr: bool,
+        arg_index: usize,
+    ) -> Option<u8> {
+        match self {
+            IsaTarget::Rv32imac => {
+                let slot = if !callee_uses_sret {
+                    arg_index
+                } else if !caller_passes_sret_ptr {
+                    1usize.saturating_add(arg_index)
+                } else {
+                    // M1: LPIR order [vmctx, sret, …users] → hardware [a1, a0, a2, …].
+                    match arg_index {
+                        0 => 1,
+                        1 => 0,
+                        i => i,
+                    }
+                };
+                crate::isa::rv32::abi::ARG_REGS.get(slot).map(|p| p.hw)
+            }
+        }
+    }
 }

@@ -121,11 +121,13 @@ fn verify_allocs_within_pool(
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let offset = output.inst_alloc_offsets[inst_idx] as usize;
-        let (is_call, callee_uses_sret) = match inst {
+        let (is_call, callee_uses_sret, caller_passes_sret_ptr) = match inst {
             VInst::Call {
-                callee_uses_sret, ..
-            } => (true, *callee_uses_sret),
-            _ => (false, false),
+                callee_uses_sret,
+                caller_passes_sret_ptr,
+                ..
+            } => (true, *callee_uses_sret, *caller_passes_sret_ptr),
+            _ => (false, false, false),
         };
 
         let mut op_idx: usize = 0;
@@ -144,14 +146,16 @@ fn verify_allocs_within_pool(
             op_idx += 1;
             def_idx += 1;
         });
-        let arg_base = if callee_uses_sret { 1 } else { 0 };
         let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |_use_vreg| {
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
-                let allowed = isa.is_in_allocatable_pool(preg)
-                    || is_precolored_reg(preg)
-                    || (is_call && arg_base + use_idx < isa.call_arg_reg_count());
+                let call_arg_slot = is_call
+                    && isa
+                        .lpir_call_arg_target_hw(callee_uses_sret, caller_passes_sret_ptr, use_idx)
+                        .is_some();
+                let allowed =
+                    isa.is_in_allocatable_pool(preg) || is_precolored_reg(preg) || call_arg_slot;
                 assert!(
                     allowed,
                     "inst {inst_idx}: use allocated to non-allocatable register x{preg}"
@@ -168,10 +172,12 @@ fn verify_allocs_within_pool(
 fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput, func_abi: &FuncAbi) {
     let isa = func_abi.isa();
     for (inst_idx, inst) in vinsts.iter().enumerate() {
-        let callee_uses_sret = match inst {
+        let (callee_uses_sret, caller_passes_sret_ptr) = match inst {
             VInst::Call {
-                callee_uses_sret, ..
-            } => *callee_uses_sret,
+                callee_uses_sret,
+                caller_passes_sret_ptr,
+                ..
+            } => (*callee_uses_sret, *caller_passes_sret_ptr),
             _ => continue,
         };
 
@@ -194,10 +200,11 @@ fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput, f
         let mut num_defs: usize = 0;
         inst.for_each_def(vreg_pool, |_| num_defs += 1);
 
-        let arg_base = if callee_uses_sret { 1 } else { 0 };
         let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |_use_vreg| {
-            if let Some(expected) = isa.call_arg_reg_hw(arg_base + use_idx) {
+            if let Some(expected) =
+                isa.lpir_call_arg_target_hw(callee_uses_sret, caller_passes_sret_ptr, use_idx)
+            {
                 let actual = output.allocs[offset + num_defs + use_idx];
                 assert!(
                     actual == Alloc::Reg(expected),

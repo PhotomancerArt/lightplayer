@@ -12,9 +12,9 @@ use lp_model::{
     AsLpPath, ClientMessage, LpPath, LpPathBuf, ServerMessage,
     server::{AvailableProject, FsRequest, FsResponse, ServerMsgBody as ServerMessagePayload},
 };
-use lp_shared::fs::LpFs;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpfs::LpFs;
 
 /// Log memory stats if callback is provided and returns values
 fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {

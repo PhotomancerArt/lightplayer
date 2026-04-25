@@ -29,7 +29,7 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 /// UV-gradient shader: red varies with x, green varies with y.
 ///
@@ -222,7 +222,7 @@ async fn test_scene_render_position_varies_fw_emu() {
 /// `scene_render_emu.rs` — kept local to avoid widening the fw-tests
 /// public API for a one-off diagnostic).
 fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
-    use lp_shared::fs::LpFs;
+    use lpfs::LpFs;
 
     let entries = fs
         .list_dir("/".as_path(), true)

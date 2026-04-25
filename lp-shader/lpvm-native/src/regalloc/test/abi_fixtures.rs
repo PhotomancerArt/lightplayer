@@ -16,6 +16,6 @@ pub fn void_func_abi() -> FuncAbi {
             parameters: Vec::new(),
             kind: LpsFnKind::UserDefined,
         },
-        0,
+        None,
     )
 }

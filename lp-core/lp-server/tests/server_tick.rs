@@ -8,7 +8,7 @@ use lp_engine_client::ClientProjectView;
 use lp_model::{AsLpPath, AsLpPathBuf};
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::{LpFs, LpFsMemory};
+use lpfs::{LpFs, LpFsMemory};
 
 #[test]
 fn test_server_tick_propagates_to_projects() {

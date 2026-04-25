@@ -2684,6 +2684,7 @@ dependencies = [
  "lp-riscv-emu-guest",
  "lp-server",
  "lp-shared",
+ "lpfs",
  "lps-builtins",
  "serde_json",
  "tokio",
@@ -2709,12 +2710,15 @@ dependencies = [
  "esp-storage",
  "fw-core",
  "hashbrown 0.15.5",
+ "libm",
  "littlefs-rust",
  "log",
  "lp-model",
  "lp-perf",
  "lp-server",
  "lp-shared",
+ "lpfs",
+ "lps-q32",
  "ser-write-json",
  "serde",
  "smart-leds",
@@ -2737,6 +2741,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shared",
+ "lpfs",
  "serde_json",
  "serial_test",
  "serialport",
@@ -3697,12 +3702,14 @@ dependencies = [
  "lp-server",
  "lp-shader",
  "lp-shared",
+ "lpfs",
  "lpir",
  "lps-frontend",
  "lps-shared",
  "lpvm-cranelift",
  "lpvm-native",
  "notify",
+ "rustc-demangle",
  "serde",
  "serde_json",
  "serialport",
@@ -3728,6 +3735,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shared",
+ "lpfs",
  "serde",
  "serialport",
  "test-log",
@@ -3756,6 +3764,7 @@ dependencies = [
  "lp-perf",
  "lp-shader",
  "lp-shared",
+ "lpfs",
  "lpir",
  "lps-builtins",
  "lps-frontend",
@@ -3876,6 +3885,7 @@ dependencies = [
  "lp-engine-client",
  "lp-model",
  "lp-shared",
+ "lpfs",
 ]
 
 [[package]]
@@ -3893,13 +3903,12 @@ dependencies = [
 name = "lp-shared"
 version = "40.0.0"
 dependencies = [
- "hashbrown 0.15.5",
  "libm",
  "log",
  "lp-model",
+ "lpfs",
  "lps-shared",
  "serde",
- "tempfile",
 ]
 
 [[package]]
@@ -3909,6 +3918,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "lpfs"
+version = "40.0.0"
+dependencies = [
+ "hashbrown 0.15.5",
+ "log",
+ "lp-model",
+ "serde",
+ "tempfile",
 ]
 
 [[package]]
@@ -4092,6 +4112,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
+ "lps-frontend",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",

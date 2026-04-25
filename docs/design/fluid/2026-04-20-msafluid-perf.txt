@@ -1,0 +1,56 @@
+I (102) esp_image: segment 2: paddr=000158bc vaddr=420058bc size=17bc0h ( 97216) map
+I (130) esp_image: segment 3: paddr=0002d484 vaddr=40800014 size=01fd0h (  8144) load
+I (133) boot: Loaded app from partition at offset 0x10000
+I (134) boot: Disabling RNG early entropy source...
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] === MSAFluid perf experiment starting ===
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] esp32c6 @ 160000000 Hz, frame budget @ 30 fps = 5333333 cycles
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] sweep: N=[16, 32, 48, 64] x iters=[2, 4, 6, 8, 10] (steps=30, warmup=5)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] --- N=16 ---
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=16 iters= 2 avg=    953893 median=    953894 min=    953781 max=    954052 ( 17.8% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=16 iters= 4 avg=   1314991 median=   1314991 min=   1314819 max=   1315163 ( 24.6% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=16 iters= 6 avg=   1675936 median=   1675939 min=   1675671 max=   1676318 ( 31.4% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=16 iters= 8 avg=   2036973 median=   2036948 min=   2036291 max=   2037460 ( 38.1% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=16 iters=10 avg=   2398059 median=   2398034 min=   2397799 max=   2398333 ( 44.9% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] --- N=32 ---
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=32 iters= 2 avg=   3647271 median=   3647231 min=   3646742 max=   3648213 ( 68.3% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=32 iters= 4 avg=   5039279 median=   5039169 min=   5038365 max=   5040344 ( 94.4% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=32 iters= 6 avg=   6430694 median=   6430710 min=   6429560 max=   6431621 (120.5% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=32 iters= 8 avg=   7822724 median=   7822697 min=   7821631 max=   7824081 (146.6% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=32 iters=10 avg=   9214292 median=   9214007 min=   9212717 max=   9216600 (172.7% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] --- N=48 ---
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=48 iters= 2 avg=   8087334 median=   8086804 min=   8086091 max=   8089757 (151.6% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=48 iters= 4 avg=  11182545 median=  11182652 min=  11181616 max=  11183307 (209.6% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=48 iters= 6 avg=  14277549 median=  14277362 min=  14276163 max=  14279470 (267.7% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=48 iters= 8 avg=  17372321 median=  17372274 min=  17371141 max=  17373336 (325.7% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=48 iters=10 avg=  20467573 median=  20467639 min=  20466489 max=  20468888 (383.7% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] --- N=64 ---
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=64 iters= 2 avg=  14273864 median=  14272517 min=  14271227 max=  14279111 (267.6% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=64 iters= 4 avg=  19744978 median=  19744839 min=  19743191 max=  19747484 (370.2% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=64 iters= 6 avg=  25215114 median=  25215101 min=  25213675 max=  25218668 (472.7% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=64 iters= 8 avg=  30685478 median=  30685352 min=  30682103 max=  30690586 (575.3% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] N=64 iters=10 avg=  36156144 median=  36157254 min=  36152127 max=  36158979 (677.9% budget)
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] === SUMMARY ===
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] esp32c6 @ 160 MHz, frame budget @ 30 fps = 5333333 cycles
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=16 iters= 2: median=    953894 ( 17.8% budget) avg=    953893 min=    953781 max=    954052
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=16 iters= 4: median=   1314991 ( 24.6% budget) avg=   1314991 min=   1314819 max=   1315163
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=16 iters= 6: median=   1675939 ( 31.4% budget) avg=   1675936 min=   1675671 max=   1676318
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=16 iters= 8: median=   2036948 ( 38.1% budget) avg=   2036973 min=   2036291 max=   2037460
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=16 iters=10: median=   2398034 ( 44.9% budget) avg=   2398059 min=   2397799 max=   2398333
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=32 iters= 2: median=   3647231 ( 68.3% budget) avg=   3647271 min=   3646742 max=   3648213
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=32 iters= 4: median=   5039169 ( 94.4% budget) avg=   5039279 min=   5038365 max=   5040344
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=32 iters= 6: median=   6430710 (120.5% budget) avg=   6430694 min=   6429560 max=   6431621
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=32 iters= 8: median=   7822697 (146.6% budget) avg=   7822724 min=   7821631 max=   7824081
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=32 iters=10: median=   9214007 (172.7% budget) avg=   9214292 min=   9212717 max=   9216600
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=48 iters= 2: median=   8086804 (151.6% budget) avg=   8087334 min=   8086091 max=   8089757
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=48 iters= 4: median=  11182652 (209.6% budget) avg=  11182545 min=  11181616 max=  11183307
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=48 iters= 6: median=  14277362 (267.7% budget) avg=  14277549 min=  14276163 max=  14279470
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=48 iters= 8: median=  17372274 (325.7% budget) avg=  17372321 min=  17371141 max=  17373336
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=48 iters=10: median=  20467639 (383.7% budget) avg=  20467573 min=  20466489 max=  20468888
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=64 iters= 2: median=  14272517 (267.6% budget) avg=  14273864 min=  14271227 max=  14279111
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=64 iters= 4: median=  19744839 (370.2% budget) avg=  19744978 min=  19743191 max=  19747484
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=64 iters= 6: median=  25215101 (472.7% budget) avg=  25215114 min=  25213675 max=  25218668
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=64 iters= 8: median=  30685352 (575.3% budget) avg=  30685478 min=  30682103 max=  30690586
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=64 iters=10: median=  36157254 (677.9% budget) avg=  36156144 min=  36152127 max=  36158979
+[INFO] fw_esp32::tests::test_msafluid: [msafluid] === MEDIAN CYCLES MATRIX (rows=N, cols=iters) ===
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N \ iters          2          4          6          8         10 
+[INFO] fw_esp32::tests::test_msafluid: [msafluid]   N=16          

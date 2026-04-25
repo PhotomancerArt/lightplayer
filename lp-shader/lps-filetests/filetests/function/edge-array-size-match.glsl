@@ -124,12 +124,13 @@ bool test_edge_array_size_bool() {
 // @unimplemented(jit.q32)
 // run: test_edge_array_size_bool() == true
 
-float average(const float[5] arr) {
+// See param-array.glsl: const-qualified by-value array parameters are not lowered yet.
+float average(float[5] arr) {
     return (arr[0] + arr[1] + arr[2] + arr[3] + arr[4]) / 5.0;
 }
 
 float test_edge_array_size_const() {
-    // Const array parameters must match size
+    // `in` array parameters must match size (same as other aggregate tests)
     float[5] data = float[5](10.0, 20.0, 30.0, 40.0, 50.0);
     return average(data);
 }

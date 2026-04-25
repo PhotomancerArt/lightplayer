@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use lp_model::{AsLpPath, LpPath, LpPathBuf, NodeConfig, NodeKind, ProjectConfig};
-use lp_shared::fs::LpFs;
+use lpfs::LpFs;
 
 /// Determine node kind from path suffix
 pub(crate) fn node_kind_from_path(path: &LpPathBuf) -> Result<NodeKind, Error> {

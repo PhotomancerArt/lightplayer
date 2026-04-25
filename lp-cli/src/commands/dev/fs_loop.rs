@@ -3,7 +3,7 @@
 //! Monitors file changes in the project directory and syncs them to the server.
 
 use anyhow::{Context, Result};
-use lp_shared::fs::{LpFs, fs_event::FsChange};
+use lpfs::{FsChange, LpFs};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -445,7 +445,9 @@ fn parse_def_instruction(
                 target,
                 args: args_slice,
                 rets: rets_slice,
-                callee_uses_sret: false, // TODO: detect from rets.len()
+                // Textual VInst snapshot format does not encode sret; tests use defaults.
+                callee_uses_sret: false,
+                caller_passes_sret_ptr: false,
                 src_op: SRC_OP_NONE,
             })
         }
@@ -632,6 +634,7 @@ fn parse_nodef_instruction(
             args: args_slice,
             rets: rets_slice,
             callee_uses_sret: false,
+            caller_passes_sret_ptr: false,
             src_op: SRC_OP_NONE,
         });
     }

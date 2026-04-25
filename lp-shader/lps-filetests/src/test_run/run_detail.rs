@@ -151,12 +151,9 @@ pub fn run(
             stats.unsupported = unsupported_count;
             stats.passed = 0;
             let compile_err = format!("Compilation failed for test file {relative_path}:\n\n{e:#}");
-            // In Detail/Debug, print the compiler error on stderr; concise multi-file runs rely on
-            // per-file `(compile-fail)` parentheticals and the summary table instead.
-            if output_mode.show_full_output()
-                && compile_failed_lines.is_empty()
-                && (unimplemented_count > 0 || unsupported_count > 0)
-            {
+            // In Detail/Debug, always print the compiler error (including when some `// run:` expect
+            // success — the old guard hid the message and made compile-fail looks like a silent failure).
+            if output_mode.show_full_output() {
                 eprintln!("{compile_err}");
             }
             return Ok((

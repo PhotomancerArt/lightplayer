@@ -2,16 +2,21 @@
 
 use std::format;
 
-use js_sys::Array;
+use js_sys::{Array, ArrayBuffer, Reflect, Uint8Array, WebAssembly};
 use lpir::FloatMode;
-use lps_shared::LpsType;
+use lps_shared::layout::{type_alignment, type_size};
+use lps_shared::{LayoutRules, LpsType};
 use lpvm::{LpsValueF32, glsl_component_count};
 use wasm_bindgen::JsValue;
 
 use wasm_bindgen::JsCast;
 
+use crate::aggregate_abi::{
+    aggregate_flat_q32_words_to_std430_bytes, encode_aggregate_std430_bytes,
+    q32_sret_bytes_to_flat_return_words, type_passed_as_aggregate_ptr,
+};
 use crate::error::WasmError;
-use crate::module::glsl_type_to_wasm_components;
+use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport, glsl_type_to_wasm_components};
 
 const Q16_16_SCALE: f32 = 65536.0;
 
@@ -166,7 +171,8 @@ fn glsl_value_to_js_flat(
     })
 }
 
-pub(crate) fn build_js_args(
+/// Scalar / vector parameters only (no aggregate pointer ABI).
+pub(crate) fn build_js_args_scalar_only(
     param_types: &[LpsType],
     export_param_slots: usize,
     args: &[LpsValueF32],
@@ -196,7 +202,8 @@ pub(crate) fn build_js_args(
     Ok(arr)
 }
 
-pub(crate) fn build_js_args_q32_flat(
+/// Scalar / vector parameters only (no aggregate pointer ABI).
+pub(crate) fn build_js_args_q32_scalar_only(
     param_types: &[LpsType],
     export_param_slots: usize,
     words: &[i32],
@@ -522,4 +529,251 @@ fn decode_lps_from_js_slots(
             ))
         }
     }
+}
+
+// --- Shadow stack + aggregate / sret (browser) ------------------------------------------
+
+pub(crate) struct BrowserShadowFrame {
+    pub(crate) saved_sp: i32,
+}
+
+pub(crate) struct BrowserSretPlan {
+    pub(crate) ptr: i32,
+    pub(crate) size: usize,
+}
+
+pub(crate) fn browser_shadow_frame_open(
+    exports_obj: &JsValue,
+) -> Result<BrowserShadowFrame, WasmError> {
+    let global = Reflect::get(exports_obj, &JsValue::from_str(SHADOW_STACK_GLOBAL_EXPORT))
+        .map_err(|e| WasmError::runtime(format!("shadow global: {e:?}")))?;
+    let val = Reflect::get(&global, &JsValue::from_str("value"))
+        .map_err(|e| WasmError::runtime(format!("shadow global.value: {e:?}")))?;
+    let cur = val
+        .as_f64()
+        .ok_or_else(|| WasmError::runtime("shadow sp is not a number"))? as i32;
+    Ok(BrowserShadowFrame { saved_sp: cur })
+}
+
+pub(crate) fn browser_shadow_frame_close(
+    exports_obj: &JsValue,
+    frame: BrowserShadowFrame,
+) -> Result<(), WasmError> {
+    let global = Reflect::get(exports_obj, &JsValue::from_str(SHADOW_STACK_GLOBAL_EXPORT))
+        .map_err(|e| WasmError::runtime(format!("shadow global: {e:?}")))?;
+    Reflect::set(
+        &global,
+        &JsValue::from_str("value"),
+        &JsValue::from_f64(f64::from(frame.saved_sp)),
+    )
+    .map_err(|e| WasmError::runtime(format!("restore shadow sp: {e:?}")))?;
+    Ok(())
+}
+
+fn browser_shadow_alloc(exports_obj: &JsValue, size: u32, align: u32) -> Result<i32, WasmError> {
+    if align == 0 || (align & (align - 1)) != 0 {
+        return Err(WasmError::runtime(
+            "shadow alloc: align must be a non-zero power of 2",
+        ));
+    }
+    let global = Reflect::get(exports_obj, &JsValue::from_str(SHADOW_STACK_GLOBAL_EXPORT))
+        .map_err(|e| WasmError::runtime(format!("shadow global: {e:?}")))?;
+    let val = Reflect::get(&global, &JsValue::from_str("value"))
+        .map_err(|e| WasmError::runtime(format!("shadow global.value: {e:?}")))?;
+    let cur = val
+        .as_f64()
+        .ok_or_else(|| WasmError::runtime("shadow sp is not a number"))? as i32;
+    let mask = i32::try_from(align).map_err(|_| WasmError::runtime("shadow align"))? - 1;
+    let size_i =
+        i32::try_from(size).map_err(|_| WasmError::runtime("shadow alloc size too large"))?;
+    let raw = cur
+        .checked_sub(size_i)
+        .ok_or_else(|| WasmError::runtime("shadow stack overflow"))?;
+    let ptr = raw & !mask;
+    Reflect::set(
+        &global,
+        &JsValue::from_str("value"),
+        &JsValue::from_f64(f64::from(ptr)),
+    )
+    .map_err(|e| WasmError::runtime(format!("set shadow sp: {e:?}")))?;
+    Ok(ptr)
+}
+
+pub(crate) fn browser_memory_write(
+    mem: &WebAssembly::Memory,
+    ptr: i32,
+    bytes: &[u8],
+) -> Result<(), WasmError> {
+    let ab: ArrayBuffer = mem
+        .buffer()
+        .dyn_into()
+        .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
+    let len = ab.byte_length() as usize;
+    let base = usize::try_from(ptr).map_err(|_| WasmError::runtime("negative guest pointer"))?;
+    let end = base
+        .checked_add(bytes.len())
+        .ok_or_else(|| WasmError::runtime("guest write overflow"))?;
+    if end > len {
+        return Err(WasmError::runtime(format!(
+            "guest write out of bounds: end {end} len {len}"
+        )));
+    }
+    let view = Uint8Array::new_with_byte_offset_and_length(&ab, ptr as u32, bytes.len() as u32);
+    view.copy_from(bytes);
+    Ok(())
+}
+
+pub(crate) fn browser_memory_read(
+    mem: &WebAssembly::Memory,
+    ptr: i32,
+    len: usize,
+) -> Result<Vec<u8>, WasmError> {
+    let ab: ArrayBuffer = mem
+        .buffer()
+        .dyn_into()
+        .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
+    let mem_len = ab.byte_length() as usize;
+    let base = usize::try_from(ptr).map_err(|_| WasmError::runtime("negative guest pointer"))?;
+    let end = base
+        .checked_add(len)
+        .ok_or_else(|| WasmError::runtime("guest read overflow"))?;
+    if end > mem_len {
+        return Err(WasmError::runtime(format!(
+            "guest read out of bounds: end {end} len {mem_len}"
+        )));
+    }
+    let view = Uint8Array::new_with_byte_offset_and_length(&ab, ptr as u32, len as u32);
+    let mut out = vec![0u8; len];
+    view.copy_to(&mut out);
+    Ok(out)
+}
+
+pub(crate) fn build_js_args_for_call(
+    exports_obj: &JsValue,
+    mem: &WebAssembly::Memory,
+    export: &WasmExport,
+    args: &[LpsValueF32],
+    fm: FloatMode,
+    return_ty: &LpsType,
+) -> Result<(Array, Option<BrowserSretPlan>), WasmError> {
+    if args.len() != export.param_types.len() {
+        return Err(WasmError::runtime(format!(
+            "wrong argument count: expected {}, got {}",
+            export.param_types.len(),
+            args.len()
+        )));
+    }
+    let arr = Array::new();
+    arr.push(&JsValue::from_f64(0.0));
+    let mut sret = None;
+    if export.uses_sret {
+        let size_u = type_size(return_ty, LayoutRules::Std430);
+        let size =
+            u32::try_from(size_u).map_err(|_| WasmError::runtime("sret size exceeds u32"))?;
+        let align = u32::try_from(type_alignment(return_ty, LayoutRules::Std430))
+            .map_err(|_| WasmError::runtime("sret align exceeds u32"))?;
+        let ptr = browser_shadow_alloc(exports_obj, size, align)?;
+        sret = Some(BrowserSretPlan { ptr, size: size_u });
+        arr.push(&JsValue::from_f64(f64::from(ptr)));
+    }
+    for (v, ty) in args.iter().zip(export.param_types.iter()) {
+        if type_passed_as_aggregate_ptr(ty) {
+            let bytes = encode_aggregate_std430_bytes(ty, v, fm)?;
+            let size =
+                u32::try_from(bytes.len()).map_err(|_| WasmError::runtime("aggregate arg size"))?;
+            let align = u32::try_from(type_alignment(ty, LayoutRules::Std430))
+                .map_err(|_| WasmError::runtime("aggregate align"))?;
+            let ptr = browser_shadow_alloc(exports_obj, size, align)?;
+            browser_memory_write(mem, ptr, &bytes)?;
+            arr.push(&JsValue::from_f64(f64::from(ptr)));
+        } else {
+            for slot in glsl_value_to_js_flat(ty, v, fm)? {
+                arr.push(&slot);
+            }
+        }
+    }
+    if arr.length() as usize != export.params.len() {
+        return Err(WasmError::runtime(format!(
+            "internal: JS arg count {} != export.params {}",
+            arr.length(),
+            export.params.len()
+        )));
+    }
+    Ok((arr, sret))
+}
+
+pub(crate) fn build_js_args_q32_for_call(
+    exports_obj: &JsValue,
+    mem: &WebAssembly::Memory,
+    export: &WasmExport,
+    words: &[i32],
+    return_ty: &LpsType,
+) -> Result<(Array, Option<BrowserSretPlan>), WasmError> {
+    let arr = Array::new();
+    arr.push(&JsValue::from_f64(0.0));
+    let mut sret = None;
+    if export.uses_sret {
+        let size_u = type_size(return_ty, LayoutRules::Std430);
+        let size =
+            u32::try_from(size_u).map_err(|_| WasmError::runtime("sret size exceeds u32"))?;
+        let align = u32::try_from(type_alignment(return_ty, LayoutRules::Std430))
+            .map_err(|_| WasmError::runtime("sret align exceeds u32"))?;
+        let ptr = browser_shadow_alloc(exports_obj, size, align)?;
+        sret = Some(BrowserSretPlan { ptr, size: size_u });
+        arr.push(&JsValue::from_f64(f64::from(ptr)));
+    }
+    let mut woff = 0usize;
+    for ty in &export.param_types {
+        if type_passed_as_aggregate_ptr(ty) {
+            let n = glsl_component_count(ty);
+            if woff + n > words.len() {
+                return Err(WasmError::runtime(format!(
+                    "not enough Q32 argument words at offset {woff}"
+                )));
+            }
+            let bytes = aggregate_flat_q32_words_to_std430_bytes(ty, &words[woff..woff + n])?;
+            woff += n;
+            let size =
+                u32::try_from(bytes.len()).map_err(|_| WasmError::runtime("aggregate arg size"))?;
+            let align = u32::try_from(type_alignment(ty, LayoutRules::Std430))
+                .map_err(|_| WasmError::runtime("aggregate align"))?;
+            let ptr = browser_shadow_alloc(exports_obj, size, align)?;
+            browser_memory_write(mem, ptr, &bytes)?;
+            arr.push(&JsValue::from_f64(f64::from(ptr)));
+        } else {
+            let n = glsl_component_count(ty);
+            if woff + n > words.len() {
+                return Err(WasmError::runtime(format!(
+                    "not enough Q32 argument words at offset {woff}"
+                )));
+            }
+            for i in 0..n {
+                arr.push(&JsValue::from_f64(f64::from(words[woff + i])));
+            }
+            woff += n;
+        }
+    }
+    if woff != words.len() {
+        return Err(WasmError::runtime(format!(
+            "extra Q32 argument words: used {woff}, got {}",
+            words.len()
+        )));
+    }
+    if arr.length() as usize != export.params.len() {
+        return Err(WasmError::runtime(format!(
+            "internal: JS arg count {} != export.params {}",
+            arr.length(),
+            export.params.len()
+        )));
+    }
+    Ok((arr, sret))
+}
+
+pub(crate) fn decode_browser_sret_q32_return(
+    mem: &WebAssembly::Memory,
+    plan: &BrowserSretPlan,
+    return_ty: &LpsType,
+) -> Result<Vec<i32>, WasmError> {
+    let bytes = browser_memory_read(mem, plan.ptr, plan.size)?;
+    q32_sret_bytes_to_flat_return_words(return_ty, &bytes)
 }

@@ -22,10 +22,6 @@ vec4 test_shared_array_size_colors() {
     return sum;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_array_size_colors() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_shared_array_size_transforms() {
@@ -37,10 +33,6 @@ mat3 test_shared_array_size_transforms() {
     return combined;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_array_size_transforms() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_shared_array_size_weights() {
@@ -52,10 +44,6 @@ float test_shared_array_size_weights() {
     return total;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_array_size_weights() ~= 0.0
 
 int test_shared_array_size_indices() {
@@ -69,10 +57,6 @@ int test_shared_array_size_indices() {
     return max_index;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_array_size_indices() == 0
 
 float test_shared_array_size_combined() {
@@ -88,8 +72,4 @@ float test_shared_array_size_combined() {
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_shared_array_size_combined() ~= 0.0

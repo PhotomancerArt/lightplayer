@@ -2,6 +2,8 @@
 // Simplest Early Return: The minimal case that fails
 // ============================================================================
 
+// test run
+
 // This is the simplest pattern: return from if-then, followed by return after
 float simple_if_return(float x) {
     if (x >= 0.0) {
