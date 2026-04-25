@@ -8,9 +8,11 @@ use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
 use lpvm::AllocError;
 use lpvm::LpvmEngine;
 
+use crate::compile_px_desc::CompilePxDesc;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 use crate::texture_buf::LpsTextureBuf;
+use crate::texture_interface::validate_texture_interface;
 
 /// Shader compilation and shared-memory texture allocation.
 pub struct LpsEngine<E: LpvmEngine> {
@@ -44,10 +46,31 @@ impl<E: LpvmEngine> LpsEngine<E> {
     where
         E::Module: 'static,
     {
+        let desc = CompilePxDesc::new(glsl, output_format, config.clone());
+        self.compile_px_desc(desc)
+    }
+
+    /// Compile GLSL into a pixel shader using a [`CompilePxDesc`].
+    ///
+    /// `desc.textures` must list exactly one entry per GLSL `uniform sampler2D`
+    /// declared in the source (and no extra keys).
+    pub fn compile_px_desc(&self, desc: CompilePxDesc<'_>) -> Result<LpsPxShader, LpsError>
+    where
+        E::Module: 'static,
+    {
+        let CompilePxDesc {
+            glsl,
+            output_format,
+            compiler_config,
+            textures,
+        } = desc;
+
         let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
         let (mut ir, mut meta) =
             lps_frontend::lower(&naga).map_err(|e| LpsError::Lower(format!("{e}")))?;
         drop(naga);
+
+        validate_texture_interface(&meta, &textures)?;
 
         let render_fn_index = validate_render_sig(&meta, output_format)?;
 
@@ -61,7 +84,7 @@ impl<E: LpvmEngine> LpsEngine<E> {
 
         let module = self
             .engine
-            .compile_with_config(&ir, &meta, config)
+            .compile_with_config(&ir, &meta, &compiler_config)
             .map_err(|e| LpsError::Compile(format!("{e}")))?;
         LpsPxShader::new(
             module,

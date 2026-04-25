@@ -5,9 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use core::cell::RefCell;
 
-use lps_shared::{
-    LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat,
-};
+use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureStorageFormat};
 use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
 
 use crate::error::LpsError;
@@ -30,8 +28,8 @@ pub(crate) trait PxShaderBackend {
 /// [`PxShaderBackend`]. Owns both: the module is retained for the lifetime
 /// of the instance (compiled code may be referenced by the instance).
 struct BackendAdapter<M: LpvmModule> {
-    #[allow(dead_code, reason = "retain compiled module for instance lifetime")]
-    module: M,
+    /// Retained so the compiled module outlives `instance` (code may reference module memory).
+    _module: M,
     instance: M::Instance,
 }
 
@@ -117,7 +115,10 @@ impl LpsPxShader {
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;
-        let inner: Box<dyn PxShaderBackend> = Box::new(BackendAdapter { module, instance });
+        let inner: Box<dyn PxShaderBackend> = Box::new(BackendAdapter {
+            _module: module,
+            instance,
+        });
 
         Ok(Self {
             inner: RefCell::new(inner),

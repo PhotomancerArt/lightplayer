@@ -128,6 +128,8 @@ pub fn glsl_component_count(ty: &LpsType) -> usize {
         LpsType::Mat2 => 4,
         LpsType::Mat3 => 9,
         LpsType::Mat4 => 16,
+        // Opaque texture handle + dimensions (`Texture2DUniform`: four `u32` words).
+        LpsType::Texture2D => 4,
         LpsType::Array { element, len } => {
             glsl_component_count(element).saturating_mul(*len as usize)
         }
@@ -220,6 +222,10 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
         }
 
         (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
+
+        (LpsType::Texture2D, _) => Err(CallError::Unsupported(traced_msg!(
+            "Texture2D is not writable via Level-1 Q32 flattening; use a typed Texture2D binding helper"
+        ))),
 
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
             Err(CallError::Unsupported(traced_msg!(
@@ -383,6 +389,11 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, Cal
             ],
         ]),
         LpsType::Array { .. } => dense_q32_decode_array(ty, words)?,
+        LpsType::Texture2D => {
+            return Err(CallError::Unsupported(traced_msg!(
+                "decode_q32_return: Texture2D is not supported in Level-1 Q32 return decode"
+            )));
+        }
     })
 }
 

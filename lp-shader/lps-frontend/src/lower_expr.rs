@@ -1751,6 +1751,19 @@ pub(crate) fn load_lps_value_from_vmctx_with_base(
             }
             Ok(out)
         }
+        LpsType::Texture2D => {
+            let mut out = VRegVec::new();
+            for i in 0..4 {
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Load {
+                    dst,
+                    base,
+                    offset: base_byte_offset.wrapping_add(i * 4),
+                });
+                out.push(dst);
+            }
+            Ok(out)
+        }
         LpsType::Mat2 | LpsType::Mat3 | LpsType::Mat4 => {
             let col_ty = ty.matrix_column_type().ok_or_else(|| {
                 LowerError::Internal(String::from("load_lps_value_from_vmctx: matrix columns"))

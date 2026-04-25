@@ -47,6 +47,9 @@ pub use naga_types::{CompileError, FunctionInfo, NagaModule, naga_module_from_pa
 pub use parse::{compile, prepared_glsl_for_compile, user_snippet_first_physical_line};
 
 #[cfg(test)]
+mod sampler2d_metadata_tests;
+
+#[cfg(test)]
 mod tests {
     use alloc::boxed::Box;
     use alloc::string::String;

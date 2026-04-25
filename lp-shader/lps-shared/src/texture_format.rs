@@ -41,9 +41,60 @@ impl TextureStorageFormat {
     }
 }
 
+/// Compile-time filter mode for a texture binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextureFilter {
+    Nearest,
+    Linear,
+}
+
+/// Edge sampling mode on one axis of a 2D texture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextureWrap {
+    ClampToEdge,
+    Repeat,
+    MirrorRepeat,
+}
+
+/// Optional shape hint for validation or lowering (2D vs 1D-along-y strip).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextureShapeHint {
+    General2D,
+    HeightOne,
+}
+
+/// Full compile-time description of a 2D texture binding (format + sampling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextureBindingSpec {
+    pub format: TextureStorageFormat,
+    pub filter: TextureFilter,
+    pub wrap_x: TextureWrap,
+    pub wrap_y: TextureWrap,
+    pub shape_hint: TextureShapeHint,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texture_binding_spec_construct_and_compare() {
+        let a = TextureBindingSpec {
+            format: TextureStorageFormat::Rgba16Unorm,
+            filter: TextureFilter::Linear,
+            wrap_x: TextureWrap::Repeat,
+            wrap_y: TextureWrap::ClampToEdge,
+            shape_hint: TextureShapeHint::HeightOne,
+        };
+        let b = TextureBindingSpec {
+            format: TextureStorageFormat::Rgba16Unorm,
+            filter: TextureFilter::Linear,
+            wrap_x: TextureWrap::Repeat,
+            wrap_y: TextureWrap::ClampToEdge,
+            shape_hint: TextureShapeHint::HeightOne,
+        };
+        assert_eq!(a, b);
+    }
 
     #[test]
     fn rgba16_unorm_bytes_per_pixel() {

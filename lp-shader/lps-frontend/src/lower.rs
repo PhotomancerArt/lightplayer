@@ -97,10 +97,23 @@ fn compute_global_layout(
     let mut globals_members: Vec<StructMember> = Vec::new();
 
     for (gv_handle, gv) in module.global_variables.iter() {
-        // Map AddressSpace to uniform/global
+        // Map Naga type to LpsType first (needed for Handle / texture resources).
+        let lps_ty = naga_type_handle_to_lps(module, gv.ty)
+            .map_err(|e| LowerError::UnsupportedType(format!("{e:?}")))?;
+
+        // Map AddressSpace to uniform/global (Naga uses `Handle` for bound textures/samplers).
         let (is_uniform, is_supported) = match gv.space {
             AddressSpace::Uniform => (true, true),
             AddressSpace::Private => (false, true),
+            AddressSpace::Handle => {
+                if matches!(lps_ty, LpsType::Texture2D) {
+                    (true, true)
+                } else {
+                    return Err(LowerError::UnsupportedExpression(format!(
+                        "GlobalVariable address space Handle is only supported for Texture2D-like types, got {lps_ty:?}"
+                    )));
+                }
+            }
             _ => (false, false),
         };
 
@@ -110,10 +123,6 @@ fn compute_global_layout(
                 gv.space
             )));
         }
-
-        // Map Naga type to LpsType
-        let lps_ty = naga_type_handle_to_lps(module, gv.ty)
-            .map_err(|e| LowerError::UnsupportedType(format!("{e:?}")))?;
 
         // Determine component count for scalarization
         let component_count = lps_scalar_component_count(&lps_ty);
@@ -223,6 +232,7 @@ fn lps_scalar_component_count(ty: &LpsType) -> u32 {
         LpsType::Mat2 => 4,
         LpsType::Mat3 => 9,
         LpsType::Mat4 => 16,
+        LpsType::Texture2D => 4,
         LpsType::Array { element, len } => lps_scalar_component_count(element).saturating_mul(*len),
         LpsType::Struct { members, .. } => members
             .iter()

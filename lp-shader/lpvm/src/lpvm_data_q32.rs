@@ -192,6 +192,7 @@ fn value_matches_type(ty: &LpsType, v: &LpsValueF32) -> Result<(), DataError> {
         (LpsType::Mat2, LpsValueF32::Mat2x2(_)) => Ok(()),
         (LpsType::Mat3, LpsValueF32::Mat3x3(_)) => Ok(()),
         (LpsType::Mat4, LpsValueF32::Mat4x4(_)) => Ok(()),
+        (LpsType::Texture2D, _) => Err(DataError::texture_uniform_requires_binding_helper()),
         (LpsType::Array { element, len }, LpsValueF32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(DataError::type_mismatch(
@@ -335,6 +336,12 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF
             }
             LpsValueF32::Mat4x4(m)
         }
+        LpsType::Texture2D => LpsValueF32::UVec4([
+            u32_from_bytes(&data[0..4]),
+            u32_from_bytes(&data[4..8]),
+            u32_from_bytes(&data[8..12]),
+            u32_from_bytes(&data[12..16]),
+        ]),
         LpsType::Array { element, len } => {
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
@@ -466,6 +473,9 @@ fn write_value(
                 write_f32(&mut data[base + 12..base + 16], m[col][3]);
             }
         }
+        (LpsType::Texture2D, _) => {
+            return Err(DataError::texture_uniform_requires_binding_helper());
+        }
         (LpsType::Array { element, len }, LpsValueF32::Array(items)) => {
             debug_assert_eq!(items.len(), *len as usize);
             let stride = array_stride(element, rules);
@@ -526,6 +536,7 @@ mod tests {
     use alloc::boxed::Box;
     use alloc::vec;
     use lps_shared::StructMember;
+    use lps_shared::path_resolve::PathError;
 
     #[test]
     fn round_trip_struct_vec3_float() {
@@ -566,5 +577,53 @@ mod tests {
         let mut d = LpvmDataQ32::new(ty);
         d.set_f32("[1]", 9.0).unwrap();
         assert!((d.get_f32("[1]").unwrap() - 9.0).abs() < 1e-6);
+    }
+
+    fn uniforms_with_tex() -> LpsType {
+        LpsType::Struct {
+            name: Some(String::from("Uniforms")),
+            members: vec![
+                StructMember {
+                    name: Some(String::from("u_time")),
+                    ty: LpsType::Float,
+                },
+                StructMember {
+                    name: Some(String::from("tex")),
+                    ty: LpsType::Texture2D,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn from_value_rejects_texture2d_even_with_uvec4_shape() {
+        let err =
+            match LpvmDataQ32::from_value(LpsType::Texture2D, &LpsValueF32::UVec4([1, 2, 3, 4])) {
+                Ok(_) => panic!("expected Texture2D from_value to fail"),
+                Err(e) => e,
+            };
+        assert!(matches!(
+            err,
+            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D uniform"
+        ));
+    }
+
+    #[test]
+    fn set_rejects_texture2d_member_scalar_value() {
+        let ty = uniforms_with_tex();
+        let mut d = LpvmDataQ32::new(ty);
+        let err = d.set("tex", LpsValueF32::F32(1.0)).unwrap_err();
+        assert!(matches!(
+            err,
+            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D uniform"
+        ));
+    }
+
+    #[test]
+    fn set_rejects_texture2d_subpath() {
+        let ty = uniforms_with_tex();
+        let mut d = LpvmDataQ32::new(ty);
+        let err = d.set("tex.ptr", LpsValueF32::U32(0)).unwrap_err();
+        assert!(matches!(err, DataError::Path(PathError::NotAField { .. })));
     }
 }

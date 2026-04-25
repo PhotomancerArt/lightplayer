@@ -37,6 +37,21 @@ impl LpsTextureBuf {
         self.buffer.as_ptr()
     }
 
+    #[must_use]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[must_use]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    #[must_use]
+    pub fn format(&self) -> TextureStorageFormat {
+        self.format
+    }
+
     /// Row stride in bytes (tightly packed, no padding).
     #[must_use]
     pub fn row_stride(&self) -> usize {
@@ -52,15 +67,15 @@ impl LpsTextureBuf {
 
 impl TextureBuffer for LpsTextureBuf {
     fn width(&self) -> u32 {
-        self.width
+        LpsTextureBuf::width(self)
     }
 
     fn height(&self) -> u32 {
-        self.height
+        LpsTextureBuf::height(self)
     }
 
     fn format(&self) -> TextureStorageFormat {
-        self.format
+        LpsTextureBuf::format(self)
     }
 
     fn data(&self) -> &[u8] {

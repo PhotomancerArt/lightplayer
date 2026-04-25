@@ -131,6 +131,9 @@ fn type_walk(ty: &LpsType, segs: &[LpsPathSeg]) -> Result<LpsType, PathError> {
         (LpsPathSeg::Field(_name), LpsType::Void) => Err(PathError::NotAField {
             ty: String::from("void"),
         }),
+        (LpsPathSeg::Field(_name), LpsType::Texture2D) => Err(PathError::NotAField {
+            ty: String::from("Texture2D"),
+        }),
         (
             LpsPathSeg::Field(_name),
             scalar @ (LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool),
@@ -159,6 +162,9 @@ fn offset_walk(
             let (off, sub) = struct_field_offset(members, name, rules, base)?;
             offset_walk(sub, &segs[1..], rules, off)
         }
+        (LpsPathSeg::Field(_name), LpsType::Texture2D) => Err(PathError::NotAField {
+            ty: String::from("Texture2D"),
+        }),
         (
             LpsPathSeg::Field(name),
             vec_ty @ (LpsType::Vec2
@@ -197,6 +203,9 @@ fn offset_walk(
             let stride = array_stride(element, rules);
             offset_walk(element, &segs[1..], rules, base + idx * stride)
         }
+        (LpsPathSeg::Index(_), LpsType::Texture2D) => Err(PathError::NotIndexable {
+            ty: String::from("Texture2D"),
+        }),
         (LpsPathSeg::Index(_), _) => Err(PathError::NotIndexable { ty: type_name(ty) }),
         (LpsPathSeg::Field(name), _) => Err(PathError::FieldNotFound {
             field: name.clone(),
@@ -332,5 +341,34 @@ mod tests {
             a.offset_for_path("[3]", LayoutRules::Std430, 0).unwrap(),
             12
         );
+    }
+
+    #[test]
+    fn texture2d_rejects_field_paths() {
+        let tex = LpsType::Texture2D;
+        assert!(matches!(
+            tex.type_at_path("ptr"),
+            Err(PathError::NotAField { ref ty }) if ty == "Texture2D"
+        ));
+        let err = tex
+            .offset_for_path("ptr", LayoutRules::Std430, 0)
+            .unwrap_err();
+        assert!(matches!(err, PathError::NotAField { ref ty } if ty == "Texture2D"));
+    }
+
+    #[test]
+    fn texture2d_index_only_inside_array() {
+        let tex = LpsType::Texture2D;
+        assert!(matches!(
+            tex.type_at_path("[0]"),
+            Err(PathError::NotIndexable { ref ty })
+                if ty.contains("Texture2D")
+        ));
+
+        let arr = LpsType::Array {
+            element: Box::new(LpsType::Texture2D),
+            len: 2,
+        };
+        assert_eq!(arr.type_at_path("[0]").unwrap(), LpsType::Texture2D);
     }
 }

@@ -1,7 +1,7 @@
 //! Core GLSL type and function-signature shapes (no parser, no codegen).
 //!
 //! Includes [`LpsType`] / [`LpsValueF32`], std430 [`layout`], string path parsing ([`path`]),
-//! texture layout ([`TextureStorageFormat`], [`TextureBuffer`]),
+//! texture layout ([`TextureStorageFormat`], [`TextureBindingSpec`], [`TextureBuffer`]),
 //! and path projection on types and values ([`path_resolve`], [`value_path`]).
 //!
 //! Used by `lps-exec`, `lpvm`, and `lps-filetests`.
@@ -30,5 +30,7 @@ pub use lps_value_q32::{
 };
 pub use sig::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, ParamQualifier};
 pub use texture_buffer::TextureBuffer;
-pub use texture_format::TextureStorageFormat;
+pub use texture_format::{
+    TextureBindingSpec, TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap,
+};
 pub use types::{LayoutRules, LpsType, StructMember};

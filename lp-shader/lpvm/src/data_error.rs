@@ -21,6 +21,15 @@ impl DataError {
             message: message.into(),
         }
     }
+
+    /// [`LpsType::Texture2D`] uses an opaque ABI descriptor; it must not be written through
+    /// ordinary [`crate::encode_uniform_write`] / [`crate::LpvmDataQ32`] value paths.
+    pub fn texture_uniform_requires_binding_helper() -> Self {
+        Self::type_mismatch(
+            "Texture2D uniform",
+            "use a typed Texture2D binding/descriptor helper; ordinary uniform and LpvmDataQ32 value writes are not supported",
+        )
+    }
 }
 
 impl core::fmt::Display for DataError {

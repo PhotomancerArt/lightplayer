@@ -151,7 +151,8 @@ pub(crate) fn store_lps_value_into_slot(
         | LpsType::BVec4
         | LpsType::Mat2
         | LpsType::Mat3
-        | LpsType::Mat4 => {
+        | LpsType::Mat4
+        | LpsType::Texture2D => {
             let _ = agg_layout;
             let inner = &ctx.module.types[naga_dest].inner;
             let raw = ctx.ensure_expr_vec(expr_h)?;
@@ -345,7 +346,8 @@ pub(crate) fn zero_leaf_lps_in_slot(
         | LpsType::BVec4
         | LpsType::Mat2
         | LpsType::Mat3
-        | LpsType::Mat4 => {
+        | LpsType::Mat4
+        | LpsType::Texture2D => {
             let inner = &ctx.module.types[naga_ty].inner;
             let ir_tys = naga_type_to_ir_types(ctx.module, inner)?;
             for (j, ty) in ir_tys.iter().enumerate() {

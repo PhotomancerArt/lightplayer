@@ -78,6 +78,12 @@ fn glsl_value_to_wasm_flat(
             Val::I32(a[2] as i32),
             Val::I32(a[3] as i32),
         ],
+        (Texture2D, LpsValueF32::UVec4(a)) => vec![
+            Val::I32(a[0] as i32),
+            Val::I32(a[1] as i32),
+            Val::I32(a[2] as i32),
+            Val::I32(a[3] as i32),
+        ],
         (BVec2, LpsValueF32::BVec2(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
@@ -257,6 +263,12 @@ fn push_q32_words_from_val_slice(
             }
             Ok(())
         }
+        Texture2D => {
+            for _ in 0..4 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
         Array { element, len } => {
             for _ in 0..*len {
                 push_q32_words_from_val_slice(element, vals, fm, off, out)?;
@@ -409,6 +421,15 @@ pub(crate) fn wasm_vals_to_lps_value(
                 4,
             )),
             _ => Err(WasmError::runtime("expected four i32 for uvec4")),
+        },
+        Texture2D => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => Ok((
+                LpsValueF32::UVec4([*a as u32, *b as u32, *c as u32, *d as u32]),
+                4,
+            )),
+            _ => Err(WasmError::runtime(
+                "expected four i32 for Texture2D uniform",
+            )),
         },
         BVec2 => match (&vals[0], &vals[1]) {
             (Val::I32(a), Val::I32(b)) => Ok((LpsValueF32::BVec2([*a != 0, *b != 0]), 2)),

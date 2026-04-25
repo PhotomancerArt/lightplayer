@@ -73,6 +73,11 @@ pub fn lps_value_f32_to_q32(
     ty: &LpsType,
     v: &LpsValueF32,
 ) -> Result<LpsValueQ32, LpsValueQ32Error> {
+    if matches!(ty, LpsType::Texture2D) {
+        return Err(LpsValueQ32Error::Unsupported(String::from(
+            "Texture2D is not convertible via lps_value_f32_to_q32; use a typed Texture2D binding helper",
+        )));
+    }
     Ok(match (ty, v) {
         (LpsType::Float, LpsValueF32::F32(x)) => LpsValueQ32::F32(f32_to_q32_abi(*x)),
         (LpsType::Int, LpsValueF32::I32(x)) => LpsValueQ32::I32(*x),
@@ -204,6 +209,11 @@ pub fn lps_value_f32_to_q32(
 
 /// Convert [`LpsValueQ32`] to [`LpsValueF32`] (`Q32` components become `f32` via [`Q32::to_f32`]).
 pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32, LpsValueQ32Error> {
+    if matches!(ty, LpsType::Texture2D) {
+        return Err(LpsValueQ32Error::Unsupported(String::from(
+            "Texture2D is not convertible via q32_to_lps_value_f32; use a typed Texture2D binding helper",
+        )));
+    }
     let bad = || LpsValueQ32Error::TypeMismatch(format!("return shape mismatch for type {ty:?}"));
 
     Ok(match (ty, v) {
