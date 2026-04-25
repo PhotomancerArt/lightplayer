@@ -8,7 +8,7 @@ use crate::LpsValueF32;
 use crate::data_error::DataError;
 use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 use lps_shared::path_resolve::LpsTypePathExt;
-use lps_shared::{LayoutRules, LpsType, StructMember};
+use lps_shared::{LayoutRules, LpsTexture2DDescriptor, LpsType, StructMember};
 
 /// Shader data as represented in LPVM memory
 pub struct LpvmDataQ32 {
@@ -192,7 +192,11 @@ fn value_matches_type(ty: &LpsType, v: &LpsValueF32) -> Result<(), DataError> {
         (LpsType::Mat2, LpsValueF32::Mat2x2(_)) => Ok(()),
         (LpsType::Mat3, LpsValueF32::Mat3x3(_)) => Ok(()),
         (LpsType::Mat4, LpsValueF32::Mat4x4(_)) => Ok(()),
-        (LpsType::Texture2D, _) => Err(DataError::texture_uniform_requires_binding_helper()),
+        (LpsType::Texture2D, LpsValueF32::Texture2D(_)) => Ok(()),
+        (LpsType::Texture2D, _) => Err(DataError::type_mismatch(
+            "LpsType::Texture2D",
+            "expected LpsValueF32::Texture2D (opaque descriptor), not a uvec4 stand-in",
+        )),
         (LpsType::Array { element, len }, LpsValueF32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(DataError::type_mismatch(
@@ -336,12 +340,12 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF
             }
             LpsValueF32::Mat4x4(m)
         }
-        LpsType::Texture2D => LpsValueF32::UVec4([
-            u32_from_bytes(&data[0..4]),
-            u32_from_bytes(&data[4..8]),
-            u32_from_bytes(&data[8..12]),
-            u32_from_bytes(&data[12..16]),
-        ]),
+        LpsType::Texture2D => LpsValueF32::Texture2D(LpsTexture2DDescriptor {
+            ptr: u32_from_bytes(&data[0..4]),
+            width: u32_from_bytes(&data[4..8]),
+            height: u32_from_bytes(&data[8..12]),
+            row_stride: u32_from_bytes(&data[12..16]),
+        }),
         LpsType::Array { element, len } => {
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
@@ -473,8 +477,17 @@ fn write_value(
                 write_f32(&mut data[base + 12..base + 16], m[col][3]);
             }
         }
+        (LpsType::Texture2D, LpsValueF32::Texture2D(d)) => {
+            write_u32(&mut data[0..4], d.ptr);
+            write_u32(&mut data[4..8], d.width);
+            write_u32(&mut data[8..12], d.height);
+            write_u32(&mut data[12..16], d.row_stride);
+        }
         (LpsType::Texture2D, _) => {
-            return Err(DataError::texture_uniform_requires_binding_helper());
+            return Err(DataError::type_mismatch(
+                "LpsType::Texture2D",
+                "expected LpsValueF32::Texture2D (opaque descriptor), not a uvec4 stand-in",
+            ));
         }
         (LpsType::Array { element, len }, LpsValueF32::Array(items)) => {
             debug_assert_eq!(items.len(), *len as usize);
@@ -596,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn from_value_rejects_texture2d_even_with_uvec4_shape() {
+    fn from_value_rejects_texture2d_uvec4_stand_in() {
         let err =
             match LpvmDataQ32::from_value(LpsType::Texture2D, &LpsValueF32::UVec4([1, 2, 3, 4])) {
                 Ok(_) => panic!("expected Texture2D from_value to fail"),
@@ -604,7 +617,7 @@ mod tests {
             };
         assert!(matches!(
             err,
-            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D uniform"
+            DataError::TypeMismatch { ref expected, .. } if expected == "LpsType::Texture2D"
         ));
     }
 
@@ -615,7 +628,7 @@ mod tests {
         let err = d.set("tex", LpsValueF32::F32(1.0)).unwrap_err();
         assert!(matches!(
             err,
-            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D uniform"
+            DataError::TypeMismatch { ref expected, .. } if expected == "LpsType::Texture2D"
         ));
     }
 
@@ -625,5 +638,20 @@ mod tests {
         let mut d = LpvmDataQ32::new(ty);
         let err = d.set("tex.ptr", LpsValueF32::U32(0)).unwrap_err();
         assert!(matches!(err, DataError::Path(PathError::NotAField { .. })));
+    }
+
+    #[test]
+    fn from_value_round_trips_typed_texture2d() {
+        use lps_shared::LpsTexture2DDescriptor;
+
+        let d = LpsTexture2DDescriptor {
+            ptr: 0xab,
+            width: 4,
+            height: 5,
+            row_stride: 32,
+        };
+        let v = LpsValueF32::Texture2D(d);
+        let data = LpvmDataQ32::from_value(LpsType::Texture2D, &v).expect("from_value");
+        assert!(data.to_value().expect("to_value").eq(&v));
     }
 }

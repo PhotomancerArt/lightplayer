@@ -8,7 +8,7 @@ use lps_shared::{
 use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
-use crate::{CompilePxDesc, LpsEngine, LpsError, LpsPxShader, Texture2DUniform};
+use crate::{CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor};
 
 fn test_engine() -> LpsEngine<WasmLpvmEngine> {
     let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("WasmLpvmEngine::new");
@@ -49,19 +49,19 @@ fn compile_px_wrapper_and_compile_px_desc_empty_textures_match() {
 }
 
 #[test]
-fn texture2d_uniform_layout() {
-    assert_eq!(core::mem::size_of::<Texture2DUniform>(), 16);
-    assert_eq!(core::mem::align_of::<Texture2DUniform>(), 4);
+fn texture2d_descriptor_layout() {
+    assert_eq!(core::mem::size_of::<LpsTexture2DDescriptor>(), 16);
+    assert_eq!(core::mem::align_of::<LpsTexture2DDescriptor>(), 4);
 }
 
 #[test]
-fn texture2d_uniform_from_alloc_texture_fields() {
+fn texture2d_descriptor_from_alloc_texture_fields() {
     let engine = test_engine();
     let w = 17u32;
     let h = 23u32;
     let format = TextureStorageFormat::Rgb16Unorm;
     let tex = engine.alloc_texture(w, h, format).expect("alloc_texture");
-    let u = Texture2DUniform::from_texture(&tex);
+    let u = tex.to_texture2d_descriptor();
     assert_eq!(u.width, w);
     assert_eq!(u.height, h);
     assert_eq!(u.row_stride, (w as usize * format.bytes_per_pixel()) as u32);

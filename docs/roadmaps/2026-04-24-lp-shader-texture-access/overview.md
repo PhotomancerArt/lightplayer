@@ -63,7 +63,7 @@ TextureBindingSpec map
 lps-frontend validates and lowers texture calls
         │
         ▼
-LPIR loads Texture2DUniform fields from uniforms
+LPIR loads LpsTexture2DDescriptor fields from uniforms
         │
         ▼
 format-specialized loads + conversion
@@ -76,7 +76,7 @@ The ABI descriptor is:
 
 ```rust
 #[repr(C)]
-struct Texture2DUniform {
+struct LpsTexture2DDescriptor {
     ptr: u32,
     width: u32,
     height: u32,

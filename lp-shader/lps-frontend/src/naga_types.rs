@@ -95,6 +95,11 @@ fn function_info(
                 ),
                 _ => (naga_type_handle_to_lps(module, arg.ty)?, ParamQualifier::In),
             };
+            if matches!(ty, LpsType::Texture2D) {
+                return Err(CompileError::UnsupportedType(String::from(
+                    "sampler2D / Texture2D function parameters are not supported (no parameter binding metadata yet)",
+                )));
+            }
             Ok(FnParam {
                 name: pname,
                 ty,
@@ -310,5 +315,103 @@ fn naga_image_to_lps_texture2d(
                 ))),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod texture2d_param_tests {
+    use alloc::string::String;
+    use alloc::vec;
+
+    use super::*;
+
+    use naga::{
+        Function, FunctionResult, ImageClass, ImageDimension, Module, Scalar, ScalarKind, Span,
+        Type, TypeInner, VectorSize,
+    };
+
+    #[test]
+    fn function_info_rejects_texture2d_parameter() {
+        let mut module = Module::default();
+        let vec4_ty = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Vector {
+                    size: VectorSize::Quad,
+                    scalar: Scalar {
+                        kind: ScalarKind::Float,
+                        width: 4,
+                    },
+                },
+            },
+            Span::UNDEFINED,
+        );
+        let image_ty = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Image {
+                    dim: ImageDimension::D2,
+                    arrayed: false,
+                    class: ImageClass::Sampled {
+                        kind: ScalarKind::Float,
+                        multi: false,
+                    },
+                },
+            },
+            Span::UNDEFINED,
+        );
+        let sampler_ty = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Sampler { comparison: false },
+            },
+            Span::UNDEFINED,
+        );
+        let combined = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Struct {
+                    members: vec![
+                        naga::StructMember {
+                            name: None,
+                            ty: image_ty,
+                            binding: None,
+                            offset: 0,
+                        },
+                        naga::StructMember {
+                            name: None,
+                            ty: sampler_ty,
+                            binding: None,
+                            offset: 0,
+                        },
+                    ],
+                    span: 0,
+                },
+            },
+            Span::UNDEFINED,
+        );
+
+        let mut func = Function::default();
+        func.name = Some(String::from("f"));
+        func.arguments.push(naga::FunctionArgument {
+            name: Some(String::from("tex")),
+            ty: combined,
+            binding: None,
+        });
+        func.result = Some(FunctionResult {
+            ty: vec4_ty,
+            binding: None,
+        });
+        let fh = module.functions.append(func, Span::UNDEFINED);
+        let func_ref = &module.functions[fh];
+
+        let err = super::function_info(&module, func_ref, String::from("f")).unwrap_err();
+        let CompileError::UnsupportedType(msg) = err else {
+            panic!("{err:?}");
+        };
+        assert!(
+            msg.contains("function parameters") || msg.contains("parameter"),
+            "{msg}"
+        );
     }
 }

@@ -31,6 +31,7 @@ pub use lps_value_q32::{
 pub use sig::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, ParamQualifier};
 pub use texture_buffer::TextureBuffer;
 pub use texture_format::{
-    TextureBindingSpec, TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap,
+    LpsTexture2DDescriptor, TextureBindingSpec, TextureFilter, TextureShapeHint,
+    TextureStorageFormat, TextureWrap,
 };
 pub use types::{LayoutRules, LpsType, StructMember};

@@ -22,12 +22,12 @@ impl DataError {
         }
     }
 
-    /// [`LpsType::Texture2D`] uses an opaque ABI descriptor; it must not be written through
-    /// ordinary [`crate::encode_uniform_write`] / [`crate::LpvmDataQ32`] value paths.
+    /// [`LpsType::Texture2D`] is bound through typed [`lps_shared::LpsTexture2DDescriptor`]
+    /// data; the uniform string path and raw `uvec4` shape are not accepted here.
     pub fn texture_uniform_requires_binding_helper() -> Self {
         Self::type_mismatch(
-            "Texture2D uniform",
-            "use a typed Texture2D binding/descriptor helper; ordinary uniform and LpvmDataQ32 value writes are not supported",
+            "Texture2D",
+            "set_uniform / encode paths do not accept texture slots; use a dedicated texture binding API with LpsTexture2DDescriptor (not a uvec4 stand-in)",
         )
     }
 }

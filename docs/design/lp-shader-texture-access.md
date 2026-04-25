@@ -161,7 +161,7 @@ region:
 
 ```rust
 #[repr(C)]
-pub struct Texture2DUniform {
+pub struct LpsTexture2DDescriptor {
     pub ptr: u32,
     pub width: u32,
     pub height: u32,
@@ -172,10 +172,9 @@ pub struct Texture2DUniform {
 `row_stride` is included in v0 even when textures are tightly packed. It costs
 one word and avoids a future ABI break for subviews or non-tight rows.
 
-The public runtime API should provide typed helpers or values built from
-`LpsTextureBuf`; callers should not normally hand-author raw pointer structs.
-For example, a future API might expose `LpsValueF32::Texture2D(...)` or a
-uniform builder helper that writes a `Texture2DUniform` from an `LpsTextureBuf`.
+Callers should not hand-author raw pointer structs: use
+`LpsTextureBuf::to_texture2d_descriptor()` to build
+`LpsValueF32::Texture2D(LpsTexture2DDescriptor)`.
 
 ### Runtime Binding and Validation
 

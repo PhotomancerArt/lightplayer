@@ -14,15 +14,14 @@ mod px_shader;
 pub mod synth;
 mod texture_buf;
 mod texture_interface;
-mod texture_uniform;
 
 pub use compile_px_desc::{CompilePxDesc, TextureBindingSpecs};
 pub use engine::LpsEngine;
 pub use error::LpsError;
+pub use lps_shared::LpsTexture2DDescriptor;
 pub use lpvm::AllocError;
 pub use px_shader::LpsPxShader;
 pub use texture_buf::LpsTextureBuf;
-pub use texture_uniform::Texture2DUniform;
 
 pub use lps_shared::{
     LpsModuleSig, LpsValueF32, TextureBindingSpec, TextureBuffer, TextureStorageFormat,

@@ -175,6 +175,30 @@ fn naga_type_maps_combined_sampler2d_struct_to_texture2d() {
     assert_eq!(t, LpsType::Texture2D);
 }
 
+/// `sampler2D` in a function parameter list: Naga GLSL-IN does not parse that form; if it did, we would reject in metadata.
+#[test]
+fn compile_rejects_sampler2d_function_parameter() {
+    let glsl = "vec4 f(sampler2D tex) { return vec4(0.0); }\n";
+    let err = match compile(glsl) {
+        Ok(_) => panic!("expected failure for sampler2D parameter"),
+        Err(e) => e,
+    };
+    match err {
+        CompileError::Parse(msg) => {
+            assert!(
+                msg.contains("sampler2D") || msg.contains("Expected"),
+                "parse error should mention the bad token or expected token: {msg}"
+            );
+        }
+        CompileError::UnsupportedType(msg) => {
+            assert!(
+                msg.contains("function parameters") || msg.contains("sampler2D"),
+                "{msg}"
+            );
+        }
+    }
+}
+
 /// Error substrings (for later compile validation): 3D sampled image.
 #[test]
 fn naga_image_3d_unsupported_type_message() {

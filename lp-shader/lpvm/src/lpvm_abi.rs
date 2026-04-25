@@ -17,7 +17,9 @@ use core::fmt;
 
 use lps_q32::Q32;
 use lps_shared::layout::{round_up, type_alignment, type_size};
-use lps_shared::{FnParam, LayoutRules, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier};
+use lps_shared::{
+    FnParam, LayoutRules, LpsTexture2DDescriptor, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier,
+};
 
 /// Split a single slice of flattened Q32 argument words (per-parameter order) into
 /// [`LpsValueQ32`] values matching `params`.
@@ -128,7 +130,7 @@ pub fn glsl_component_count(ty: &LpsType) -> usize {
         LpsType::Mat2 => 4,
         LpsType::Mat3 => 9,
         LpsType::Mat4 => 16,
-        // Opaque texture handle + dimensions (`Texture2DUniform`: four `u32` words).
+        // Opaque texture handle + dimensions ([`LpsTexture2DDescriptor`]: four `u32` words).
         LpsType::Texture2D => 4,
         LpsType::Array { element, len } => {
             glsl_component_count(element).saturating_mul(*len as usize)
@@ -223,9 +225,16 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
 
         (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
 
-        (LpsType::Texture2D, _) => Err(CallError::Unsupported(traced_msg!(
-            "Texture2D is not writable via Level-1 Q32 flattening; use a typed Texture2D binding helper"
-        ))),
+        (LpsType::Texture2D, LpsValueQ32::Texture2D(d)) => Ok(alloc::vec![
+            d.ptr as i32,
+            d.width as i32,
+            d.height as i32,
+            d.row_stride as i32,
+        ]),
+
+        (LpsType::Texture2D, _) => Err(CallError::TypeMismatch(
+            "LpsType::Texture2D expects LpsValueQ32::Texture2D (descriptor)".to_string(),
+        )),
 
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
             Err(CallError::Unsupported(traced_msg!(
@@ -264,6 +273,7 @@ fn got_ty_name(v: &LpsValueQ32) -> &'static str {
         LpsValueQ32::Mat4x4(_) => "Mat4x4",
         LpsValueQ32::Array(_) => "Array",
         LpsValueQ32::Struct { .. } => "Struct",
+        LpsValueQ32::Texture2D(_) => "Texture2D",
     }
 }
 
@@ -389,11 +399,12 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, Cal
             ],
         ]),
         LpsType::Array { .. } => dense_q32_decode_array(ty, words)?,
-        LpsType::Texture2D => {
-            return Err(CallError::Unsupported(traced_msg!(
-                "decode_q32_return: Texture2D is not supported in Level-1 Q32 return decode"
-            )));
-        }
+        LpsType::Texture2D => LpsValueQ32::Texture2D(LpsTexture2DDescriptor {
+            ptr: words[0] as u32,
+            width: words[1] as u32,
+            height: words[2] as u32,
+            row_stride: words[3] as u32,
+        }),
     })
 }
 

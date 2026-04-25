@@ -143,9 +143,11 @@ mod tests {
             encode_uniform_write(&sig, "tex", &LpsValueF32::F32(1.0), FloatMode::F32).unwrap_err();
         match err {
             DataError::TypeMismatch { expected, message } => {
-                assert_eq!(expected, "Texture2D uniform");
+                assert_eq!(expected, "Texture2D");
                 assert!(
-                    message.contains("typed Texture2D binding"),
+                    message.contains("LpsTexture2DDescriptor")
+                        | message.contains("binding API")
+                        | message.contains("dedicated"),
                     "message was: {message}"
                 );
             }
@@ -165,7 +167,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D uniform"
+            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D"
         ));
     }
 
@@ -184,7 +186,7 @@ mod tests {
             encode_uniform_write_q32(&sig, "tex", &LpsValueQ32::UVec4([1, 2, 3, 4])).unwrap_err();
         assert!(matches!(
             err,
-            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D uniform"
+            DataError::TypeMismatch { ref expected, .. } if expected == "Texture2D"
         ));
     }
 
