@@ -21,15 +21,6 @@ impl DataError {
             message: message.into(),
         }
     }
-
-    /// [`LpsType::Texture2D`] is bound through typed [`lps_shared::LpsTexture2DDescriptor`]
-    /// data; the uniform string path and raw `uvec4` shape are not accepted here.
-    pub fn texture_uniform_requires_binding_helper() -> Self {
-        Self::type_mismatch(
-            "Texture2D",
-            "set_uniform / encode paths do not accept texture slots; use a dedicated texture binding API with LpsTexture2DDescriptor (not a uvec4 stand-in)",
-        )
-    }
 }
 
 impl core::fmt::Display for DataError {

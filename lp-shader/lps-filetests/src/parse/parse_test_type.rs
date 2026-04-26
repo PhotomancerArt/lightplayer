@@ -13,6 +13,8 @@ pub fn parse_test_type(line: &str) -> Option<TestType> {
         Some(TestType::Run)
     } else if trimmed == "// test error" {
         Some(TestType::Error)
+    } else if trimmed == "// test parse-error" {
+        Some(TestType::ParseError)
     } else {
         None
     }
@@ -54,6 +56,18 @@ mod tests {
     fn test_parse_test_type_error() {
         assert_eq!(parse_test_type("// test error"), Some(TestType::Error));
         assert_eq!(parse_test_type("  // test error  "), Some(TestType::Error));
+    }
+
+    #[test]
+    fn test_parse_test_type_parse_error() {
+        assert_eq!(
+            parse_test_type("// test parse-error"),
+            Some(TestType::ParseError)
+        );
+        assert_eq!(
+            parse_test_type("  // test parse-error  "),
+            Some(TestType::ParseError)
+        );
     }
 
     #[test]

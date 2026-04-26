@@ -5,8 +5,15 @@
 
 use anyhow::Result;
 use lps_filetests::{parse, run_filetest};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+/// `// test parse-error` files intentionally fail [`parse::parse_test_file`]; the harness validates the error.
+fn file_declares_parse_error_test(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|s| s.lines().any(|l| l.trim() == "// test parse-error"))
+        .unwrap_or(false)
+}
 
 // Ignored: we do not want filetests to run as part of `cargo test`.
 // They should be run separately using the `scripts/glsl-filetests.sh` script.
@@ -57,31 +64,35 @@ fn filetests() -> Result<()> {
             .unwrap_or(path)
             .to_string_lossy();
 
-        // Parse the file to get test count
-        let test_file = match parse::parse_test_file(path) {
-            Ok(tf) => tf,
+        // Parse the file to get test count (parse-error files may fail here by design).
+        let test_file_opt = match parse::parse_test_file(path) {
+            Ok(tf) => Some(tf),
             Err(e) => {
-                print!("test {relative_path} ... ");
-                println_colored("FAILED (parse error)", colors::RED);
-                if should_color() {
-                    println!("  {}Error:{} {:#}", colors::RED, colors::RESET, e);
+                if file_declares_parse_error_test(path) {
+                    None
                 } else {
-                    println!("  Error: {e:#}");
+                    print!("test {relative_path} ... ");
+                    println_colored("FAILED (parse error)", colors::RED);
+                    if should_color() {
+                        println!("  {}Error:{} {:#}", colors::RED, colors::RESET, e);
+                    } else {
+                        println!("  Error: {e:#}");
+                    }
+                    failed += 1;
+                    continue;
                 }
-                failed += 1;
-                continue;
             }
         };
 
         // Count test cases (respecting filters)
-        let test_count = if let Some(ref filter_line) = test_line_filter {
-            test_file
+        let test_count = match (&test_file_opt, test_line_filter) {
+            (Some(tf), Some(filter_line)) => tf
                 .run_directives
                 .iter()
-                .filter(|d| d.line_number == *filter_line)
-                .count()
-        } else {
-            test_file.run_directives.len()
+                .filter(|d| d.line_number == filter_line)
+                .count(),
+            (Some(tf), None) => tf.run_directives.len(),
+            (None, _) => 1,
         };
 
         let test_label = if test_count > 0 {

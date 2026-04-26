@@ -3,6 +3,8 @@
 use crate::targets::Target;
 use lp_riscv_emu::LogLevel;
 use lpir::CompilerConfig;
+use lps_shared::TextureBindingSpec;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use super::filetest_lpvm::CompiledShader;
@@ -60,6 +62,68 @@ pub fn compile_for_target(
     _relative_path: &str,
     log_level: LogLevel,
     compiler_config: &CompilerConfig,
+    texture_specs: &BTreeMap<String, TextureBindingSpec>,
 ) -> anyhow::Result<CompiledShader> {
-    CompiledShader::compile_glsl(source, target, log_level, compiler_config)
+    CompiledShader::compile_glsl(source, target, log_level, compiler_config, texture_specs)
+}
+
+#[cfg(test)]
+mod texture_spec_compile_tests {
+    use super::*;
+    use crate::targets::{Backend, ExecMode, FloatMode, Isa, Target};
+    use lp_riscv_emu::LogLevel;
+    use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
+
+    fn jit_q32_target() -> Target {
+        Target {
+            backend: Backend::Jit,
+            float_mode: FloatMode::Q32,
+            isa: Isa::Native,
+            exec_mode: ExecMode::Jit,
+        }
+    }
+
+    fn sample_spec() -> TextureBindingSpec {
+        TextureBindingSpec {
+            format: TextureStorageFormat::Rgba16Unorm,
+            filter: TextureFilter::Nearest,
+            wrap_x: TextureWrap::ClampToEdge,
+            wrap_y: TextureWrap::ClampToEdge,
+            shape_hint: TextureShapeHint::General2D,
+        }
+    }
+
+    #[test]
+    fn compile_fails_when_sampler2d_without_texture_spec() {
+        let glsl = r#"
+float add(float a, float b) { return a + b; }
+uniform sampler2D tex;
+"#;
+        let target = jit_q32_target();
+        let cfg = CompilerConfig::default();
+        let empty = BTreeMap::new();
+        let err = match compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &empty) {
+            Err(e) => e,
+            Ok(_) => panic!("expected texture spec validation error"),
+        };
+        let s = format!("{err:#}");
+        assert!(
+            s.contains("tex") && s.contains("no texture binding spec"),
+            "{s}"
+        );
+    }
+
+    #[test]
+    fn compile_succeeds_when_sampler2d_has_matching_spec() {
+        let glsl = r#"
+float add(float a, float b) { return a + b; }
+uniform sampler2D tex;
+"#;
+        let target = jit_q32_target();
+        let cfg = CompilerConfig::default();
+        let mut specs = BTreeMap::new();
+        specs.insert(String::from("tex"), sample_spec());
+        compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &specs)
+            .expect("compile with matching texture spec");
+    }
 }
