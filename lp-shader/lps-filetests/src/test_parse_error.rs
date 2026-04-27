@@ -39,9 +39,7 @@ pub fn run_parse_error_test(
                 stats.failed = 1;
                 Ok((
                     Err(anyhow!(
-                        "parse failed, but message did not contain expected substring {:?}.\n\nActual error:\n{}",
-                        expected,
-                        msg
+                        "parse failed, but message did not contain expected substring {expected:?}.\n\nActual error:\n{msg}"
                     )),
                     stats,
                     Vec::new(),

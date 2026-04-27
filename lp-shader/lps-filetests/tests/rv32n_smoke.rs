@@ -93,7 +93,7 @@ fn rv32n_native_emulator_compiles_and_runs_iadd() {
     // Verify result is 8
     match result {
         LpsValueF32::I32(v) => assert_eq!(v, 8, "5 + 3 = 8"),
-        other => panic!("expected I32, got {:?}", other),
+        other => panic!("expected I32, got {other:?}"),
     }
 
     let n = instance
