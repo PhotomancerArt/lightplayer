@@ -66,6 +66,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
         }],
         uniforms_type: None,
         globals_type: None,
+        ..Default::default()
     };
 
     (module, sig)

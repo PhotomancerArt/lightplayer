@@ -592,10 +592,10 @@ vec4 render(vec2 pos) { return vec4(0.0); }
         test_default_texture_binding_spec(),
     );
     match engine.compile_px_desc(desc) {
-        Err(LpsError::Validation(msg)) => {
+        Err(LpsError::Lower(msg)) => {
             assert!(msg.contains("inputColor"), "msg: {msg}");
         }
-        Err(e) => panic!("expected Validation, got {e:?}"),
+        Err(e) => panic!("expected Lower from texture-spec validation during lower, got {e:?}"),
         Ok(_) => panic!("expected validation error"),
     }
 }

@@ -1083,6 +1083,30 @@ fn lower_expr_vec_uncached(
         } => lower_math::lower_math_vec(ctx, *fun, *arg, *arg1, *arg2, *arg3),
         Expression::Relational { fun, argument } => lower_relational(ctx, *fun, *argument),
         Expression::ArrayLength(array_h) => crate::lower_array::lower_array_length(ctx, *array_h),
+        Expression::ImageLoad {
+            image,
+            coordinate: _,
+            array_index,
+            sample,
+            level,
+        } => {
+            if sample.is_some() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "texelFetch: multisampled image loads are not supported",
+                )));
+            }
+            if array_index.is_some() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "texelFetch: layered/arrayed image loads are not supported",
+                )));
+            }
+            let Some(level_expr) = level else {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "imageLoad(storage) not supported",
+                )));
+            };
+            crate::lower_texture::lower_image_load_texel_fetch(ctx, *image, *level_expr)
+        }
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
         ))),

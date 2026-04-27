@@ -16,6 +16,7 @@ use smallvec::SmallVec;
 use crate::lower_error::LowerError;
 use crate::lower_expr;
 use crate::readonly_in_scan::in_aggregate_param_read_only;
+use lps_shared::TextureBindingSpec;
 
 /// See [`readonly_in_scan::local_for_in_aggregate_value_param_optional`].
 pub(crate) use crate::readonly_in_scan::local_for_in_aggregate_value_param_optional;
@@ -283,6 +284,8 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) uniform_vmctx_deferred: BTreeMap<usize, UniformVmctxDeferred>,
     /// `uniform Block { } instance` locals → backing [`GlobalVariable`] (uniform).
     pub(crate) uniform_instance_locals: BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
+    /// Compile-time [`TextureBindingSpec`] keyed by sampler uniform name ([`crate::LowerOptions`]).
+    pub(crate) texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -294,6 +297,7 @@ impl<'a> LowerCtx<'a> {
         import_map: &BTreeMap<String, CalleeRef>,
         lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
         global_map: GlobalVarMap,
+        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
     ) -> Result<Self, LowerError> {
         let return_abi = crate::naga_util::func_return_ir_types_with_sret(
             module,
@@ -565,6 +569,7 @@ impl<'a> LowerCtx<'a> {
             global_map,
             uniform_vmctx_deferred: BTreeMap::new(),
             uniform_instance_locals,
+            texture_specs,
         };
 
         for (lv_handle, var) in func.local_variables.iter() {

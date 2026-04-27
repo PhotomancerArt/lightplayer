@@ -113,13 +113,15 @@ struct LpsTexture2DDescriptor {
 
 ## Scope estimate
 
-Six milestones:
+Eight milestones:
 
 | # | Milestone | Strategy |
 |---|-----------|----------|
 | M1 | Texture interface foundation | Full plan |
 | M2 | Texture filetest fixtures and diagnostics | Full plan |
-| M3 | `texelFetch` lowering and backend validation | Full plan |
+| M3a | Texture-aware lowering contract | Full plan |
+| M3b | Core `texelFetch` codegen | Full plan |
+| M3c | Runtime validation and backend filetests | Full plan |
 | M4 | Filtered `texture()` sampling and wrap modes | Full plan |
 | M5 | Height-one palette lookup and lp-shader API integration | Small plan |
 | M6 | Integration validation and cleanup | Small plan |

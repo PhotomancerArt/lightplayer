@@ -77,6 +77,7 @@ mod tests {
                 }],
             }),
             globals_type: None,
+            ..Default::default()
         };
         let specs = BTreeMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
@@ -95,6 +96,7 @@ mod tests {
                 members: vec![],
             }),
             globals_type: None,
+            ..Default::default()
         };
         let mut specs = BTreeMap::new();
         specs.insert(
@@ -126,6 +128,7 @@ mod tests {
                 }],
             }),
             globals_type: None,
+            ..Default::default()
         };
         let mut specs = BTreeMap::new();
         specs.insert(
@@ -147,6 +150,7 @@ mod tests {
             functions: vec![],
             uniforms_type: None,
             globals_type: None,
+            ..Default::default()
         };
         let specs = BTreeMap::new();
         validate_texture_binding_specs_against_module(&meta, &specs).unwrap();
@@ -164,6 +168,7 @@ mod tests {
                 }],
             }),
             globals_type: None,
+            ..Default::default()
         };
         let specs = BTreeMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();

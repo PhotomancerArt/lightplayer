@@ -107,7 +107,10 @@ fn collect_glsl_error_test_diagnostics(
         Err(e) => return Err(vec![naga_compile_error_to_glsl(e)]),
     };
 
-    let (ir, meta) = match lps_frontend::lower(&naga_module) {
+    let lower_options = lps_frontend::LowerOptions {
+        texture_specs: texture_specs.clone(),
+    };
+    let (ir, meta) = match lps_frontend::lower_with_options(&naga_module, &lower_options) {
         Ok(x) => x,
         Err(e) => return Err(vec![lower_error_to_glsl(e)]),
     };

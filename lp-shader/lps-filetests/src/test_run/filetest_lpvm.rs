@@ -171,9 +171,15 @@ impl FiletestInstance {
     }
 }
 
-fn lower_glsl(source: &str) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
+fn lower_glsl(
+    source: &str,
+    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
     let naga = lps_frontend::compile(source).map_err(|e| anyhow::anyhow!("{e}"))?;
-    lps_frontend::lower(&naga).map_err(|e| anyhow::anyhow!("{e}"))
+    let options = lps_frontend::LowerOptions {
+        texture_specs: texture_specs.clone(),
+    };
+    lps_frontend::lower_with_options(&naga, &options).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 impl CompiledShader {
@@ -184,7 +190,7 @@ impl CompiledShader {
         compiler_config: &CompilerConfig,
         texture_specs: &BTreeMap<String, TextureBindingSpec>,
     ) -> anyhow::Result<Self> {
-        let (ir, meta) = lower_glsl(source)?;
+        let (ir, meta) = lower_glsl(source, texture_specs)?;
         lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let fm = match target.float_mode {

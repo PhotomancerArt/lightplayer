@@ -32,6 +32,7 @@ mod tests {
                 }],
             }),
             globals_type: None,
+            ..Default::default()
         };
         let specs = TextureBindingSpecs::new();
         let err = validate_texture_interface(&meta, &specs).expect_err("expected name error");

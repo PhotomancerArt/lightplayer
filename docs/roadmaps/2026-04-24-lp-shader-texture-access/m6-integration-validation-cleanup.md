@@ -62,7 +62,7 @@ Small plan: `plan.md`.
 
 ## Dependencies
 
-- Depends on Milestones 1-5.
+- Depends on Milestones 1-5, including the M3a/M3b/M3c `texelFetch` split.
 
 ## Execution strategy
 

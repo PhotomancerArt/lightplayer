@@ -126,4 +126,24 @@ uniform sampler2D tex;
         compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &specs)
             .expect("compile with matching texture spec");
     }
+
+    #[test]
+    fn compile_fails_when_texture_spec_names_unknown_sampler() {
+        let glsl = r#"
+float add(float a, float b) { return a + b; }
+"#;
+        let target = jit_q32_target();
+        let cfg = CompilerConfig::default();
+        let mut specs = BTreeMap::new();
+        specs.insert(String::from("orphanTex"), sample_spec());
+        let err = match compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &specs) {
+            Err(e) => e,
+            Ok(_) => panic!("expected texture spec validation error"),
+        };
+        let s = format!("{err:#}");
+        assert!(
+            s.contains("orphanTex") && s.contains("does not match any shader sampler2D"),
+            "{s}"
+        );
+    }
 }

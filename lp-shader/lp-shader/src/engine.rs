@@ -66,8 +66,11 @@ impl<E: LpvmEngine> LpsEngine<E> {
         } = desc;
 
         let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
-        let (mut ir, mut meta) =
-            lps_frontend::lower(&naga).map_err(|e| LpsError::Lower(format!("{e}")))?;
+        let lower_options = lps_frontend::LowerOptions {
+            texture_specs: textures.clone(),
+        };
+        let (mut ir, mut meta) = lps_frontend::lower_with_options(&naga, &lower_options)
+            .map_err(|e| LpsError::Lower(format!("{e}")))?;
         drop(naga);
 
         validate_texture_interface(&meta, &textures)?;

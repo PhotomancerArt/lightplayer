@@ -12,8 +12,8 @@ use lpir::{
     ModuleBuilder, VMCTX_VREG, VReg,
 };
 use lps_shared::{
-    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE,
-    type_alignment, type_size,
+    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, TextureBindingSpec,
+    VMCTX_HEADER_SIZE, type_alignment, type_size, validate_texture_binding_specs_against_module,
 };
 use naga::{AddressSpace, Expression, Function, GlobalVariable, Handle, Module};
 
@@ -23,12 +23,32 @@ use crate::lower_error::LowerError;
 use crate::lower_lpfn;
 use crate::naga_types::naga_type_handle_to_lps;
 
+/// Options for Naga → LPIR lowering (e.g. compile-time texture binding metadata).
+#[derive(Clone, Debug, Default)]
+pub struct LowerOptions {
+    /// When non-empty, must match every `Texture2D` uniform (validated before lowering; see
+    /// [`lps_shared::validate_texture_binding_specs_against_module`]). An empty map skips that check
+    /// so `lower()` stays usable when specs are applied later.
+    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+}
+
 /// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
 ///
-/// Registers `@glsl::*`, `@lpir::*`, and `@lpfn::*` imports as needed, then emits one [`lpir::IrFunction`] per
+/// Same as [`lower_with_options`] with default options (no texture specs). Registers `@glsl::*`,
+/// `@lpir::*`, and `@lpfn::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the
 /// scalar subset.
 pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), LowerError> {
+    lower_with_options(naga_module, &LowerOptions::default())
+}
+
+/// Lower with [`LowerOptions`]. When `options.texture_specs` is non-empty, runs binding validation, then
+/// copies specs into [`LpsModuleSig::texture_specs`]. An empty spec map defers validation to match
+/// texture-free [`lower`].
+pub fn lower_with_options(
+    naga_module: &NagaModule,
+    options: &LowerOptions,
+) -> Result<(LpirModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
     let import_map = register_math_imports(&mut mb);
     let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
@@ -43,8 +63,15 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
     let mut glsl_meta = LpsModuleSig {
         uniforms_type,
         globals_type,
+        texture_specs: options.texture_specs.clone(),
         ..Default::default()
     };
+    // Non-empty `texture_specs` ⇒ run M1/M2-style binding validation before IR lowering. Empty map
+    // defers validation (e.g. `lower()` without options, then `validate_texture_binding_specs_against_module`).
+    if !options.texture_specs.is_empty() {
+        validate_texture_binding_specs_against_module(&glsl_meta, &options.texture_specs)
+            .map_err(LowerError::UnsupportedExpression)?;
+    }
 
     // Lower user functions.
     for (handle, info) in &naga_module.functions {
@@ -57,6 +84,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             &import_map,
             &lpfn_map,
             global_map.clone(),
+            &options.texture_specs,
         )
         .map_err(|e| LowerError::InFunction {
             name: info.name.clone(),
@@ -410,9 +438,17 @@ fn lower_function(
     import_map: &BTreeMap<String, CalleeRef>,
     lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
     global_map: GlobalVarMap,
+    texture_specs: &BTreeMap<String, TextureBindingSpec>,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
-        module, func, name, func_map, import_map, lpfn_map, global_map,
+        module,
+        func,
+        name,
+        func_map,
+        import_map,
+        lpfn_map,
+        global_map,
+        texture_specs,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

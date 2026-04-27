@@ -26,6 +26,7 @@ mod lower_math_helpers;
 mod lower_matrix;
 mod lower_stmt;
 mod lower_struct;
+mod lower_texture;
 mod lower_unary;
 mod naga_types;
 mod naga_util;
@@ -33,10 +34,12 @@ mod parse;
 mod readonly_in_scan;
 pub mod std_math_handler;
 
-pub use lower::lower;
+pub use lower::{LowerOptions, lower, lower_with_options};
 pub use lower_error::LowerError;
 
-pub use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+pub use lps_shared::{
+    FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec,
+};
 
 /// Back-compat alias; prefer [`ParamQualifier`].
 pub type GlslParamQualifier = ParamQualifier;

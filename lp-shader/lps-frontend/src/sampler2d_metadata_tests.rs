@@ -6,6 +6,7 @@
 //!
 //! Naga then emits a sampled 2D `Image` in `AddressSpace::Handle` for the separate-texture form.
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 
@@ -16,7 +17,7 @@ use crate::CompileError;
 use crate::LpsModuleSig;
 use crate::LpsType;
 use crate::compile;
-use crate::lower;
+use crate::lower::{LowerOptions, lower, lower_with_options};
 use crate::naga_types::naga_type_handle_to_lps;
 
 /// Milestone public surface: `uniform sampler2D` (rewritten before Naga; see `parse.rs`).
@@ -224,4 +225,153 @@ fn naga_image_3d_unsupported_type_message() {
         panic!("{err:?}");
     };
     assert!(msg.contains("3D"), "{msg}");
+}
+
+fn sample_texture_binding_spec() -> lps_shared::TextureBindingSpec {
+    use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
+    lps_shared::TextureBindingSpec {
+        format: TextureStorageFormat::Rgba16Unorm,
+        filter: TextureFilter::Nearest,
+        wrap_x: TextureWrap::ClampToEdge,
+        wrap_y: TextureWrap::ClampToEdge,
+        shape_hint: TextureShapeHint::General2D,
+    }
+}
+
+#[test]
+fn lower_default_produces_empty_texture_specs() {
+    let glsl = r#"
+float add(float a, float b) { return a + b; }
+"#;
+    let naga = compile(glsl).expect("compile");
+    let (_ir, sig) = lower(&naga).expect("lower");
+    assert!(sig.texture_specs.is_empty());
+}
+
+#[test]
+fn lower_with_options_matching_spec_retained_in_module_sig() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
+"#;
+    let naga = compile(glsl).expect("parse");
+    let spec = sample_texture_binding_spec();
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(String::from("inputColor"), spec.clone());
+    let options = LowerOptions { texture_specs };
+    let (_ir, sig) = lower_with_options(&naga, &options).expect("lower");
+    assert_eq!(sig.texture_specs.get("inputColor"), Some(&spec));
+}
+
+#[test]
+fn lower_with_options_missing_spec_errors_with_sampler_name() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
+"#;
+    let naga = compile(glsl).expect("parse");
+    let mut texture_specs = BTreeMap::new();
+    // Non-empty options → validation runs; wrong key so `inputColor` is still missing.
+    texture_specs.insert(String::from("otherSampler"), sample_texture_binding_spec());
+    let options = LowerOptions { texture_specs };
+    let e = lower_with_options(&naga, &options).expect_err("expected spec error");
+    let s = alloc::format!("{e}");
+    assert!(
+        s.contains("inputColor") && s.contains("no texture binding spec"),
+        "{s}"
+    );
+}
+
+#[test]
+fn lower_with_options_extra_spec_errors_with_spec_name() {
+    let glsl = r#"
+float f() { return 1.0; }
+"#;
+    let naga = compile(glsl).expect("parse");
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(String::from("onlyInSpecMap"), sample_texture_binding_spec());
+    let options = LowerOptions { texture_specs };
+    let e = lower_with_options(&naga, &options).expect_err("expected extra spec error");
+    let s = alloc::format!("{e}");
+    assert!(
+        s.contains("onlyInSpecMap") && s.contains("does not match any shader sampler2D"),
+        "{s}"
+    );
+}
+
+#[test]
+fn texel_fetch_valid_direct_sampler_zero_lod_reaches_m3b_placeholder_diagnostic() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let naga = compile(glsl).expect("compile");
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
+    let opts = LowerOptions { texture_specs };
+    let e = lower_with_options(&naga, &opts).expect_err("M3b placeholder");
+    let s = alloc::format!("{e}");
+    assert!(
+        (s.contains("M3b") || s.contains("data path")) && s.contains("texelFetch"),
+        "{s}"
+    );
+    assert!(s.contains("inputColor"), "{s}");
+}
+
+#[test]
+fn texel_fetch_nonzero_literal_lod_diagnostic_includes_texelfetch_lod_and_value() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 1);
+}
+"#;
+    let naga = compile(glsl).expect("compile");
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
+    let opts = LowerOptions { texture_specs };
+    let e = lower_with_options(&naga, &opts).expect_err("nonzero lod");
+    let s = alloc::format!("{e}");
+    assert!(s.contains("texelFetch"), "{s}");
+    assert!(
+        s.contains("lod") && s.contains('1'),
+        "unexpected diagnostic: {s}"
+    );
+}
+
+#[test]
+fn texel_fetch_dynamic_lod_diagnostic_includes_texel_fetch_and_dynamic_lod() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), int(pos.y));
+}
+"#;
+    let naga = compile(glsl).expect("compile");
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
+    let opts = LowerOptions { texture_specs };
+    let e = lower_with_options(&naga, &opts).expect_err("dynamic lod");
+    let s = alloc::format!("{e}");
+    assert!(s.contains("texelFetch") && s.contains("dynamic lod"), "{s}");
+}
+
+#[test]
+fn texel_fetch_missing_texture_spec_named_at_lowering_when_options_map_empty() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let naga = compile(glsl).expect("compile");
+    let opts = LowerOptions::default();
+    let e = lower_with_options(&naga, &opts).expect_err("missing spec at texel lowering");
+    let s = alloc::format!("{e}");
+    assert!(
+        s.contains("inputColor") && s.contains("texture binding spec"),
+        "{s}"
+    );
 }
