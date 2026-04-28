@@ -675,7 +675,7 @@ fn compile_px_texture_free_succeeds_without_texture_specs() {
         .expect("compile_px");
 }
 
-// Runtime texture binding validation (M3c phase 2)
+// Runtime texture binding validation
 
 #[test]
 fn render_frame_texel_fetch_with_typed_texture_binding_succeeds() {

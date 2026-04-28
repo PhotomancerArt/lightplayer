@@ -8,7 +8,7 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 
 ### Recommended: script (matches CI)
 
-From the workspace root (`lp2025`):
+From the repository root:
 
 ```bash
 # Default backend: jit.q32 only (fast local default)
@@ -42,7 +42,6 @@ To run it explicitly (uses `DEFAULT_TARGETS` = `rv32c.q32` + `wasm.q32`, same as
 `--target`):
 
 ```bash
-cd lp2025/lps
 cargo test -p lps-filetests --test filetests -- --ignored --nocapture
 
 # Filter by path substring
@@ -58,6 +57,54 @@ For wasm/rv32c via the harness you would need separate tooling; prefer
 cd lp-shader/lps-filetests
 cargo test --test filetests -- --ignored
 ```
+
+## Texture fixtures (`sampler2D`)
+
+Execution tests may declare compile-time texture specs and inline pixel fixtures.
+Canonical examples live under `filetests/texture/`. Integration validation for
+texture reads should use the script (multiple backends), not cargo tests alone:
+
+```bash
+scripts/filetests.sh --target wasm.q32,rv32n.q32,rv32c.q32 texture/
+```
+
+### `// texture-spec:`
+
+One line per sampler uniform name:
+
+```text
+// texture-spec: <name> format=<fmt> filter=<flt> shape=<shape> <wrap fields>
+```
+
+Required keys: `format`, `filter`, `shape`, and either `wrap=<mode>` (both axes)
+or both `wrap_x=` and `wrap_y=`. Optional: `wrap=` plus `wrap_x=` / `wrap_y=` to
+override one axis (see `texture_mixed_axis_wrap.glsl`).
+
+- **format:** `r16unorm`, `rgb16unorm`, `rgba16unorm`
+- **filter:** `nearest`, `linear`
+- **wrap:** `clamp` or `clamp-to-edge`, `repeat`, `mirror-repeat` (underscore
+  spellings also accepted)
+- **shape:** `2d` (general 2D), `height-one` or `height_one` (single-row strip;
+  fixture height must be `1`)
+
+### `// texture-data:`
+
+Header:
+
+```text
+// texture-data: <name> <W>x<H> <format>
+```
+
+Same `<format>` spelling as `texture-spec`. Following lines are `//` comments
+whose bodies list pixels in row-major order; whitespace separates pixels, commas
+separate channels inside a pixel. Channels may be normalized floats or four-digit
+hex values per channel.
+
+Every `texture-spec` name must have a matching `texture-data` block and vice
+versa. See `src/parse/parse_texture.rs` for parsing rules.
+
+Semantics and supported `texture()` / `texelFetch` formats:
+[`docs/design/lp-shader-texture-access.md`](../../docs/design/lp-shader-texture-access.md).
 
 ## Unsupported vs failed (especially `wasm.q32`)
 
@@ -139,7 +186,6 @@ regressions), use the filetests app with **exactly one** `--target` and `--mark-
 You will be prompted to type `yes`, or pass `--assume-yes` for scripts.
 
 ```bash
-cd lp2025/lps
 cargo run -p lps-filetests-app -- test --target jit.q32 --mark-unimplemented --assume-yes
 # or: LP_MARK_UNIMPLEMENTED=1 with the same binary (still requires single target)
 ```
@@ -154,7 +200,6 @@ line immediately before each failing `// run:`. Re-run the suite after marking; 
 Update expectations in place when outputs change intentionally:
 
 ```bash
-cd lp2025/lps
 CRANELIFT_TEST_BLESS=1 cargo test -p lps-filetests --test filetests -- --ignored --nocapture
 ```
 
@@ -162,7 +207,8 @@ Always review diffs after BLESS.
 
 ## Test organization
 
-Tests live under `filetests/` (e.g. `math/`, `operators/`, `type_errors/`).
+Tests live under `filetests/` (e.g. `math/`, `operators/`, `type_errors/`,
+`texture/`).
 
 ## Adding new tests
 

@@ -47,6 +47,17 @@ in `[docs/design/q32.md](../docs/design/q32.md)`.
 
 Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
+## Texture reads (`sampler2D`)
+
+Shaders may declare `sampler2D` uniforms and call `texelFetch` and `texture`.
+Compile-time policy (`TextureBindingSpec`, keyed by uniform name) and runtime
+buffers are wired outside GLSL — see `CompilePxDesc::with_texture_spec`,
+`lp_shader::texture_binding::{texture2d, height_one}`, and
+`LpsTextureBuf::{to_texture2d_value, to_named_texture_uniform}` in `lp-shader`.
+
+Full contract (formats, wraps/filters, guest vs host metadata, filetests,
+follow-ups): [`docs/design/lp-shader-texture-access.md`](../docs/design/lp-shader-texture-access.md).
+
 ## Crate index
 
 **Full table:** `[CRATES.md](CRATES.md)`.

@@ -1,5 +1,5 @@
-//! GLSL `texelFetch` → Naga [`naga::Expression::ImageLoad`] (M3a/M3b) and
-//! GLSL `texture(sampler2D, vec2)` → [`naga::Expression::ImageSample`] (M4 builtin sampling).
+//! GLSL `texelFetch` → Naga [`naga::Expression::ImageLoad`] and
+//! GLSL `texture(sampler2D, vec2)` → [`naga::Expression::ImageSample`] (filtered sampling builtins).
 
 use alloc::format;
 use alloc::string::String;
@@ -205,7 +205,7 @@ pub(crate) fn lower_image_sample_texture(
             args.push(wrap_y_abi);
         }
         TextureShapeHint::HeightOne => {
-            // `wrap_y` and the normalized v coordinate are intentionally omitted (M4 height-one path).
+            // `wrap_y` and the normalized v coordinate are intentionally omitted on the height-one path.
             args.push(desc.row_stride);
             args.push(u_q32);
             args.push(filter_abi);

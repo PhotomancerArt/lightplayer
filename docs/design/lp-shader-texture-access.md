@@ -15,8 +15,9 @@ storage format, filter policy, wrap policy, and shape hints.
 
 Runtime texture data is represented by `LpsTextureBuf`. In the guest ABI, a
 logical texture uniform lowers to a small uniform descriptor containing a guest
-pointer and dimensions. Higher layers such as lpfx/domain decide where textures
-come from; `lp-shader` only validates and consumes the texture binding contract.
+pointer and dimensions. Callers outside `lp-shader` decide how textures are
+produced and routed; `lp-shader` validates and consumes the compile-time binding
+contract and runtime buffers supplied to it.
 
 ## Goals
 
@@ -27,8 +28,8 @@ come from; `lp-shader` only validates and consumes the texture binding contract.
 - Avoid per-sample dynamic format/filter/wrap dispatch on the RV32/Q32 path.
 - Make texture binding strict and diagnosable: missing specs, mismatched
   formats, and broken shape promises should fail early.
-- Treat filetests as the primary validation tool, with fixtures that can later
-  be reused for wgpu comparison.
+- Treat GLSL filetests as the primary integration signal for texture reads; a
+  dedicated wgpu comparison harness is future work.
 - Support efficient height-one texture lookup without adding a separate 1D
   resource type.
 
@@ -64,8 +65,7 @@ The missing feature is shader-side texture reads. Product-facing use cases are:
 - Transitions that read two input textures and blend or warp them.
 - Palettes/gradients, likely baked by a higher layer into height-one textures.
 
-The `lp-domain` work already stores shaders in TOML visual definitions and uses
-conventions such as:
+Downstream tooling may use conventions such as:
 
 ```glsl
 uniform sampler2D inputColor;
@@ -73,8 +73,8 @@ uniform sampler2D inputA;
 uniform sampler2D inputB;
 ```
 
-Those names and routes belong to lpfx/domain. `lp-shader` needs only a strict
-binding contract for sampler uniforms that appear in the shader.
+Uniform naming and routing are not enforced inside `lp-shader`; it needs only a
+strict `TextureBindingSpec` entry per `sampler2D` uniform that appears in GLSL.
 
 ## Design
 
@@ -102,8 +102,9 @@ texture resource and sampler policy are separate binding concepts.
 
 ### Compile-Time Binding Contract
 
-Compilation receives a descriptor map keyed by sampler uniform name. The exact
-Rust shape can evolve, but the stable concept is:
+Compilation receives a map keyed by sampler uniform name (`String` →
+`TextureBindingSpec`). Shared vocabulary lives in `lps-shared` next to
+`TextureStorageFormat`.
 
 ```rust
 pub struct TextureBindingSpec {
@@ -131,24 +132,33 @@ pub enum TextureShapeHint {
 }
 ```
 
-Core descriptor vocabulary belongs in `lps-shared`, next to
-`TextureStorageFormat`, so `lps-frontend`, `lp-shader`, filetests, and future
-WGSL/wgpu support share one vocabulary.
+Pixel shaders compile through `CompilePxDesc`, which holds
+`textures: BTreeMap<String, TextureBindingSpec>`. Prefer building specs with
+`CompilePxDesc::new` and `CompilePxDesc::with_texture_spec` rather than wiring ad hoc maps.
 
-Compilation should receive texture specs through a named compile descriptor
-rather than growing positional arguments:
+Convenience constructors live in `lp_shader::texture_binding`:
+
+- `texture_binding::texture2d(format, filter, wrap_x, wrap_y)` — general 2D sampling.
+- `texture_binding::height_one(format, filter, wrap_x)` — height-one strip; sets
+  `wrap_y` to `ClampToEdge` and pairs with `TextureShapeHint::HeightOne`.
+
+Example:
 
 ```rust
-pub struct CompilePxDesc<'a> {
-    pub glsl: &'a str,
-    pub output_format: TextureStorageFormat,
-    pub textures: BTreeMap<String, TextureBindingSpec>,
-    pub compiler_config: CompilerConfig,
-}
-```
+use lp_shader::{CompilePxDesc, texture_binding};
+use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
 
-The compile descriptor name and exact ownership can change, but the API should
-make texture binding metadata explicit.
+let desc = CompilePxDesc::new(glsl, TextureStorageFormat::Rgba16Unorm, compiler_config)
+    .with_texture_spec(
+        "inputColor",
+        texture_binding::texture2d(
+            TextureStorageFormat::Rgba16Unorm,
+            TextureFilter::Nearest,
+            TextureWrap::ClampToEdge,
+            TextureWrap::ClampToEdge,
+        ),
+    );
+```
 
 ### Logical Type and ABI
 
@@ -172,15 +182,21 @@ pub struct LpsTexture2DDescriptor {
 `row_stride` is included in v0 even when textures are tightly packed. It costs
 one word and avoids a future ABI break for subviews or non-tight rows.
 
-Callers should not hand-author raw pointer structs: use
-`LpsTextureBuf::to_texture2d_descriptor()` to build
-`LpsValueF32::Texture2D(LpsTexture2DDescriptor)`.
+Host-side runtime values use `LpsTexture2DValue`: the guest descriptor plus
+`TextureStorageFormat` and `byte_len` (backing allocation size). Only the four
+`LpsTexture2DDescriptor` lanes participate in guest uniform memory; format and
+byte length are used by host validation, not written into LPVM uniform slots.
+
+Callers with an allocated `LpsTextureBuf` should prefer `to_texture2d_value()`
+(or `to_named_texture_uniform(name)` for `(String, LpsValueF32)` fields) so
+validation sees consistent format and storage size. `to_texture2d_descriptor()`
+remains available for the raw guest layout alone.
 
 ### Runtime Binding and Validation
 
-At runtime, lpfx or another caller provides `LpsTextureBuf` values for the
-texture uniforms. `lp-shader` validates them against the compile-time spec
-before rendering.
+At runtime, the embedder provides buffer-backed texture values for the sampler
+uniforms (typically `LpsTextureBuf` → `LpsTexture2DValue`). `lp-shader`
+validates them against the compile-time spec before rendering.
 
 Validation is fail-fast:
 
@@ -196,6 +212,10 @@ Validation is fail-fast:
 - Unsupported filter/wrap combinations for a target/profile: compile error
   tied to the sampler name.
 
+Filtered sampling with an unsupported storage format is rejected during
+frontend lowering with a diagnostic that includes the sampler uniform name (for
+example `Rgb16Unorm` with `texture()` — see below).
+
 No sentinel value is required in `LpsTextureBuf` for v0. The normal safety
 boundary is typed construction plus validation at binding/render time.
 
@@ -207,10 +227,14 @@ The foundation operation is:
 texelFetch(sampler2D tex, ivec2 coord, int lod)
 ```
 
-Only `lod == 0` is supported in v0. `texelFetch` uses integer pixel
-coordinates and the sampler's format to emit format-specific loads and
-conversion. This is the first implementation slice because it proves the
-descriptor contract, runtime binding, filetest support, and backend lowering.
+Only `lod == 0` is supported in v0. `texelFetch` uses integer pixel coordinates
+and the sampler's format to emit format-specific loads and conversion.
+
+Supported storage formats for `texelFetch`:
+
+- `R16Unorm`
+- `Rgb16Unorm`
+- `Rgba16Unorm`
 
 Filtered sampling is:
 
@@ -219,12 +243,20 @@ texture(sampler2D tex, vec2 uv)
 ```
 
 `texture` uses normalized coordinates, the binding's filter policy, and the
-binding's wrap policies. Required filter modes are `Nearest` and `Linear`.
-Required wrap modes are `ClampToEdge`, `Repeat`, and `MirrorRepeat`.
+binding's wrap policies.
 
-`Rgb16Unorm` remains supported on the CPU path because it already exists in
-`TextureStorageFormat`, but it is not WebGPU-portable. WebGPU has no 3-channel
-texture formats.
+Supported storage formats for filtered `texture()` today:
+
+- `R16Unorm`
+- `Rgba16Unorm`
+
+`Rgb16Unorm` is supported for `texelFetch` but **not** for filtered `texture()`
+in the current lowering: attempting filtered sampling on `Rgb16Unorm` is a
+compile-time error tied to the sampler. Adding a dedicated format path or builtin
+would be prerequisite if filtered RGB16 becomes required.
+
+Required filter modes are `Nearest` and `Linear`. Required wrap modes are
+`ClampToEdge`, `Repeat`, and `MirrorRepeat`.
 
 ### Height-One Textures
 
@@ -232,9 +264,11 @@ V0 texture resources are 2D only. Linear visuals such as palettes and gradients
 are represented as width-by-one 2D textures. A binding may declare
 `TextureShapeHint::HeightOne` to promise that runtime textures have `height == 1`.
 
-This is an optimization hint, not a separate resource type. It lets the compiler
-choose cheaper palette/gradient sampling paths while preserving one texture ABI
-and one runtime buffer type.
+This is an optimization hint, not a separate resource type. GLSL still uses
+`sampler2D` and `vec2` UVs; lowering selects a path that **ignores `uv.y`** and
+does not apply vertical wrap semantics for that sampler (the
+`texture_binding::height_one` helper fixes `wrap_y` to `ClampToEdge` on the unused
+axis). Validation rejects runtime textures with `height != 1` when this hint is set.
 
 Palette stop baking is out of scope for `lp-shader`. Higher layers should bake
 UI-style gradient stops into a texture and pass that texture to `lp-shader`.
@@ -260,53 +294,62 @@ wgpu backend is real enough to validate the source and runtime mapping.
 
 ### Filetests
 
-Texture filetests should extend the existing `.glsl` comment-directive style.
-They need to declare both compile-time texture specs and runtime fixture data.
+Canonical texture GLSL tests live under
+`lp-shader/lps-filetests/filetests/texture/`. They extend the usual `.glsl`
+comment-directive style: each sampler needs a matching compile-time
+`// texture-spec:` and runtime `// texture-data:` block before shader source.
+
+Run the texture corpus with the repo script (not Rust unit tests alone), for example:
+
+```bash
+scripts/filetests.sh --target wasm.q32,rv32n.q32,rv32c.q32 texture/
+```
 
 Example:
 
 ```glsl
 // texture-spec: inputColor format=rgba16unorm filter=nearest wrap=clamp shape=2d
 // texture-data: inputColor 3x1 rgba16unorm
-//   1.0,0,0,1.0 0,1.0,0,1.0 0,0,1.0,1.0
-//
-// run: sample_red() ~= vec4(1.0, 0.0, 0.0, 1.0)
+//   1.0,0.0,0.0,1.0 0.0,1.0,0.0,1.0 0.0,0.0,1.0,1.0
 
 uniform sampler2D inputColor;
 
 vec4 sample_red() {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
+
+// run: sample_red() ~= vec4(1.0, 0.0, 0.0, 1.0)
 ```
+
+Texture directives (see `lp-shader/lps-filetests/README.md`):
+
+- `// texture-spec: <name> format=<...> filter=<...> shape=<...>` plus either
+  `wrap=<both axes>` or both `wrap_x=` and `wrap_y=`.
+  - Formats: `r16unorm`, `rgb16unorm`, `rgba16unorm`.
+  - Filters: `nearest`, `linear`.
+  - Wraps: `clamp` (or `clamp-to-edge`), `repeat`, `mirror-repeat` (underscore
+    variants accepted).
+  - Shapes: `2d` (`General2D`), `height-one` or `height_one` (`HeightOne`).
+- `// texture-data: <name> <W>x<H> <format>` followed by comment lines listing
+  pixels in row-major order.
 
 Fixture data uses pixel-grouped channel values, not raw bytes:
 
 - Pixels are separated by whitespace.
 - Channels inside a pixel are comma-separated with no spaces.
-- Prefer normalized float channels for readable tests:
-  `1.0,0,0,1.0`.
-- Allow exact hex storage values for precision/boundary cases:
-  `ffff,0000,0000,ffff`.
+- Prefer normalized float channels for readable tests (`1.0,0.0,0.0,1.0`).
+- Allow exact four-digit hex channel values per channel where needed.
 - Channel count must match the storage format.
 - The parser encodes fixture values into the target texture storage format.
 
-Tiny inline fixtures should cover v0. Sidecar image/fixture files can be added
-later if larger test inputs become necessary.
+Tiny inline fixtures cover the shipped milestones. Sidecar fixtures remain a
+possible extension if larger inputs are needed.
 
-Filetests should include both positive behavior tests and negative diagnostics:
+Negative tests in the same directory cover missing/extra specs, fixture/shape
+mismatches, unsupported filtered formats, and parse failures.
 
-- missing texture spec for a shader sampler,
-- extra spec for a nonexistent sampler,
-- missing runtime texture data,
-- format mismatch,
-- height-one promise violated,
-- unsupported filter/wrap combinations,
-- exact `texelFetch` results,
-- approximate filtered sampling results where GPU and Q32 may differ by a small
-  tolerance.
-
-The fixture format should stay backend-neutral so future wgpu comparison can
-reuse the same declarations.
+A future wgpu comparison harness may reuse the same declarations; that tooling
+is not part of the shipped validation story yet.
 
 ## Decisions
 
@@ -324,8 +367,8 @@ reuse the same declarations.
 
 - **Decision:** `TextureBindingSpec` supplies format/filter/wrap/shape by
   sampler uniform name.
-- **Why:** lpfx/domain already own visual context and resource routing. Shader
-  source should not need to duplicate sampler state.
+- **Why:** Resource routing lives outside `lp-shader`. Shader source should not
+  duplicate sampler state.
 - **Rejected alternatives:** Hard-code conventions only; require all texture
   policy in GLSL.
 
@@ -355,10 +398,13 @@ reuse the same declarations.
 - **Rejected alternatives:** Start with palette helper because it is
   product-visible.
 
-## Open Questions
+## Future work (explicitly not shipped here)
 
-None for this design. Roadmap planning should still choose milestone boundaries
-and exact Rust names.
+- Dedicated wgpu comparison runner for the same filetest fixtures.
+- WGSL source input (paired with a real wgpu backend).
+- `clamp_to_border` sampler addressing.
+- Mipmaps and manual/explicit LOD beyond implicit base level for `texture()`.
+- Larger sidecar fixtures if inline pixel blocks become unwieldy.
 
 ## Related Documents
 
@@ -366,10 +412,11 @@ and exact Rust names.
 - `docs/design/lpir/08-glsl-mapping.md`
 - `docs/roadmaps/2026-04-16-lp-shader-textures/`
 - `docs/roadmaps/2026-04-22-lp-shader-aggregates/`
-- `/Users/yona/dev/photomancer/feature/lightplayer-emu-perf/docs/roadmaps/2026-04-23-lp-render-mvp/`
-- `/Users/yona/dev/photomancer/feature/lightplayer-emu-perf/lp-domain/lp-domain/`
+- `docs/roadmaps/2026-04-24-lp-shader-texture-access/`
 
 ## Changelog
 
+- 2026-04-28: Document M1–M5 shipped behavior (APIs, formats, filetests, validation
+  split between guest descriptor and host `LpsTexture2DValue` metadata).
 - 2026-04-24: Initial design captured from the texture access design-small
   discussion.

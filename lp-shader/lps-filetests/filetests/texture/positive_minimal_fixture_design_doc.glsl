@@ -1,5 +1,5 @@
 // test run
-// Same texture-spec / texture-data / uniform as docs/design (milestone 2 example).
+// Same texture-spec / texture-data / uniform as docs/design/lp-shader-texture-access.md (fixture excerpt).
 // Minimal texelFetch on default targets (rv32n.q32, rv32c.q32, wasm.q32).
 
 // texture-spec: inputColor format=rgba16unorm filter=nearest wrap=clamp shape=2d

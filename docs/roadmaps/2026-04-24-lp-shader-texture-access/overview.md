@@ -1,5 +1,9 @@
 # lp-shader Texture Access Roadmap
 
+**Status:** Milestones M1–M5 (texture binding, filetests, lowering, filtered
+sampling, height-one API) are implemented in-tree. M6 is documentation,
+validation, and cleanup — see `m6-integration-validation-cleanup/plan.md`.
+
 ## Motivation / rationale
 
 `lp-shader` can already render *to* textures through the synthesized

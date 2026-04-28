@@ -20,7 +20,7 @@ use crate::compile;
 use crate::lower::{LowerOptions, lower, lower_with_options};
 use crate::naga_types::naga_type_handle_to_lps;
 
-/// Milestone public surface: `uniform sampler2D` (rewritten before Naga; see `parse.rs`).
+/// `uniform sampler2D` in user GLSL (rewritten before Naga; see `parse.rs`).
 #[test]
 fn uniform_sampler2d_includes_texture2d_in_uniforms_type() {
     let glsl = r#"
