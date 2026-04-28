@@ -29,5 +29,4 @@ Implement inversesqrt builtin function.
 - Unit tests pass with appropriate tolerance (3%)
 - Function registered in builtin generator (auto-generated)
 - Code compiles without warnings
-- Tests pass: `scripts/glsl-filetests.sh builtins/exp-inversesqrt.glsl`
-
+- Tests pass: `scripts/filetests.sh builtins/exp-inversesqrt.glsl`

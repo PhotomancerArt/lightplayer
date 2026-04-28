@@ -22,6 +22,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
     let func = IrFunction {
         name: "test_iadd".to_string(),
         is_entry: false,
+        sret_arg: None,
         vmctx_vreg: v(0),
         param_count: 2,
         return_types: vec![IrType::I32],
@@ -65,6 +66,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
         }],
         uniforms_type: None,
         globals_type: None,
+        ..Default::default()
     };
 
     (module, sig)
@@ -92,7 +94,7 @@ fn rv32n_native_emulator_compiles_and_runs_iadd() {
     // Verify result is 8
     match result {
         LpsValueF32::I32(v) => assert_eq!(v, 8, "5 + 3 = 8"),
-        other => panic!("expected I32, got {:?}", other),
+        other => panic!("expected I32, got {other:?}"),
     }
 
     let n = instance

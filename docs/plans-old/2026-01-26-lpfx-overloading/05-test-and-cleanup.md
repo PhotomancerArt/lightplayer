@@ -19,7 +19,7 @@ Regenerate `lpfn_fns.rs`, run filetests to verify overload resolution works, fix
 
 ### Run Tests
 
-1. Run all lpfn filetests: `scripts/glsl-filetests.sh lpfn/lp_`
+1. Run all lpfn filetests: `scripts/filetests.sh lpfn/lp_`
 2. Verify both `lpfn_hsv2rgb(vec3)` and `lpfn_hsv2rgb(vec4)` work correctly
 3. Ensure all lpfn filetests pass
 
@@ -34,7 +34,7 @@ Regenerate `lpfn_fns.rs`, run filetests to verify overload resolution works, fix
 
 - `lpfn_fns.rs` regenerated with multiple entries for overloaded functions
 - `just fix ci` passes without errors
-- All lpfn filetests pass (`scripts/glsl-filetests.sh lpfn/lp_`)
+- All lpfn filetests pass (`scripts/filetests.sh lpfn/lp_`)
 - Both `lpfn_hsv2rgb(vec3)` and `lpfn_hsv2rgb(vec4)` work correctly
 - No warnings in codebase
 - Code formatted with `cargo +nightly fmt`

@@ -17,6 +17,7 @@ test = ["std"]
 
 [dependencies]
 lps-builtin-ids = { path = "../lps-builtin-ids" }
+lps-shared = { path = "../lps-shared" }
 lpvm = { path = "../lpvm", default-features = false }
 lpfn-impl-macro = { path = "../lpfn-impl-macro" }
 lps-q32 = { path = "../lps-q32" }

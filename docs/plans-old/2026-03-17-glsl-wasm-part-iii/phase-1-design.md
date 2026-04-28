@@ -37,6 +37,7 @@ impl WasmRValue {
 ```
 
 **Call sites to update:**
+
 - `emit_rvalue` → returns `Result<WasmRValue, GlslDiagnostics>`
 - `emit_declaration_to_sink` – uses result for init; can ignore return type (just need success)
 - `emit_return_to_sink` – uses result; can ignore (return type already known from function)
@@ -74,6 +75,7 @@ sink.i32_sub();
 **Alternative:** Have `emit_rvalue` return `WasmRValue` and pass `lhs_rvalue.ty` and `rhs_rvalue.ty` into `emit_binary_op`. This avoids a separate inference pass. Prefer this: single source of truth.
 
 **Dispatch logic for arithmetic (Add, Sub, Mult, Div, Mod):**
+
 - Both operands Int/UInt/Bool → integer mode (i32 ops)
 - Either operand Float + Q32 → Q32 mode (i32 ops with Q32 semantics for mul/div)
 - Either operand Float + Float mode → f32 ops
@@ -99,6 +101,7 @@ For `%`: GLSL modulo semantics may differ from WASM remainder. GLSL: `a - floor(
 **Semantics:** Q16.16 fixed-point. Value `a` represents `a / 2^16`. So `a * b` (in fixed-point) = `(a * b) / 2^16`. With 64-bit intermediate: `(i64(a) * i64(b)) >> 16`, then wrap to i32.
 
 **WASM sequence:**
+
 ```wasm
 local.get $a
 i64.extend_i32_s
@@ -119,6 +122,7 @@ Stack: push a, extend; push b, extend; mul → 64-bit product; shift right 16; w
 **Semantics:** `a / b` in Q16.16 = `(a / b) * 2^16` (keeping Q16.16 result). So `(a << 16) / b`.
 
 **WASM sequence:**
+
 ```wasm
 local.get $a
 i64.extend_i32_s
@@ -141,6 +145,7 @@ Stack: a → i64; shift left 16; b → i64; div_s; wrap.
 **WASM:** `i32.rem_s` implements `a - trunc(a/b)*b` (truncation toward zero). For positive operands, trunc and floor match. For negative operands they can differ (e.g. `mod(-7, 2)` floor → 1, trunc → -1).
 
 **Options:**
+
 1. **Use `i32.rem_s`** – matches positive case; negative case differs from GLSL spec. Simple.
 2. **Inline floor division** – requires branching on signs to implement floor from trunc; non-trivial.
 3. **Defer to builtin** – Phase 6 builtins can implement correct `mod`.
@@ -174,7 +179,7 @@ If we don't need the result (expression statement), we still emit the same; the 
 
 ## 9. Compound assignment
 
-**Ops:** `+=`, `-=`, `*=`, `/=`. Emit: `local.get(idx)`, emit rhs, emit binary op, `local.set(idx)`. Result is the new value, so we could `local.tee` instead of `local.set` if we need to leave it on the stack. For compound assignment the result *is* the stored value, so: emit get, rhs, op, then tee (stores and leaves value). Same as simple assignment pattern.
+**Ops:** `+=`, `-=`, `*=`, `/=`. Emit: `local.get(idx)`, emit rhs, emit binary op, `local.set(idx)`. Result is the new value, so we could `local.tee` instead of `local.set` if we need to leave it on the stack. For compound assignment the result _is_ the stored value, so: emit get, rhs, op, then tee (stores and leaves value). Same as simple assignment pattern.
 
 ```rust
 // x += 10;
@@ -196,6 +201,7 @@ Map: `Add` -> `Add`, `Sub` -> `Sub`, `Mult` -> `Mult`, `Div` -> `Div`.
 **New:** `emit_binary_op(sink, op, lhs_ty, rhs_ty, numeric) -> Result<(), GlslDiagnostics>`
 
 So we can dispatch:
+
 - For Mult: if both integer-like → `i32.mul`; if either float + Q32 → Q32 mul sequence
 - For Div: same
 - For Mod: integer-like → `i32.rem_s`; Q32 → (use rem_s per above) or defer
@@ -221,24 +227,25 @@ Simpler: `emit_literal` returns `Type` based on expr variant. `emit_variable` re
 
 ## File change summary
 
-| File | Changes |
-|------|---------|
-| `codegen/rvalue.rs` | Add `WasmRValue` (already exists) |
-| `codegen/expr/mod.rs` | emit_rvalue returns WasmRValue; handle Assignment; fix unary minus |
-| `codegen/expr/binary.rs` | Add lhs_ty, rhs_ty params; implement Mult, Div, Mod; Q32 mul/div sequences; type-based dispatch |
-| `codegen/expr/literal.rs` | Return Type (or add type helper) |
-| `codegen/expr/variable.rs` | Return Type from lookup |
-| `codegen/expr/type_infer.rs` | Already exists; may use for binary result type |
-| `codegen/expr/assignment.rs` | New: emit_assignment_rvalue |
-| `codegen/stmt/declaration.rs` | emit_rvalue now returns WasmRValue; drop return |
-| `codegen/stmt/return_.rs` | Same |
-| `codegen/stmt/expr_stmt.rs` | Same |
+| File                          | Changes                                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| `codegen/rvalue.rs`           | Add `WasmRValue` (already exists)                                                               |
+| `codegen/expr/mod.rs`         | emit_rvalue returns WasmRValue; handle Assignment; fix unary minus                              |
+| `codegen/expr/binary.rs`      | Add lhs_ty, rhs_ty params; implement Mult, Div, Mod; Q32 mul/div sequences; type-based dispatch |
+| `codegen/expr/literal.rs`     | Return Type (or add type helper)                                                                |
+| `codegen/expr/variable.rs`    | Return Type from lookup                                                                         |
+| `codegen/expr/type_infer.rs`  | Already exists; may use for binary result type                                                  |
+| `codegen/expr/assignment.rs`  | New: emit_assignment_rvalue                                                                     |
+| `codegen/stmt/declaration.rs` | emit_rvalue now returns WasmRValue; drop return                                                 |
+| `codegen/stmt/return_.rs`     | Same                                                                                            |
+| `codegen/stmt/expr_stmt.rs`   | Same                                                                                            |
 
 ---
 
 ## Validation
 
 After implementation:
+
 - `cargo test -p lps-wasm`
-- `scripts/glsl-filetests.sh` or equivalent with `--target wasm.q32`
+- `scripts/filetests.sh` or equivalent with `--target wasm.q32`
 - Expect: scalar int/uint/float tests passing (those without unimplemented features in other functions)

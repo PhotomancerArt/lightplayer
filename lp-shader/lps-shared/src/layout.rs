@@ -48,6 +48,7 @@ fn std430_size(ty: &LpsType) -> usize {
         Mat2 => 2 * std430_size(&Vec2),
         Mat3 => 3 * std430_size(&Vec3),
         Mat4 => 4 * std430_size(&Vec4),
+        Texture2D => 16,
         Array { element, len } => array_stride(element, LayoutRules::Std430) * (*len as usize),
         Struct { members, .. } => struct_data_size(members, LayoutRules::Std430),
     }
@@ -64,6 +65,7 @@ fn std430_alignment(ty: &LpsType) -> usize {
         Mat2 => std430_alignment(&Vec2),
         Mat3 => std430_alignment(&Vec3),
         Mat4 => std430_alignment(&Vec4),
+        Texture2D => 4,
         Array { element, .. } => std430_alignment(element),
         Struct { members, .. } => struct_alignment(members, LayoutRules::Std430),
     }
@@ -86,4 +88,55 @@ fn struct_data_size(members: &[StructMember], rules: LayoutRules) -> usize {
     }
     let align = struct_alignment(members, rules);
     round_up(offset, align)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::boxed::Box;
+    use alloc::string::String;
+    use alloc::vec;
+
+    use crate::path_resolve::LpsTypePathExt;
+
+    #[test]
+    fn std430_texture2d_size_and_alignment() {
+        let t = LpsType::Texture2D;
+        assert_eq!(type_size(&t, LayoutRules::Std430), 16);
+        assert_eq!(type_alignment(&t, LayoutRules::Std430), 4);
+    }
+
+    #[test]
+    fn std430_struct_float_texture_float_offsets_and_size() {
+        let s = LpsType::Struct {
+            name: Some(String::from("T")),
+            members: vec![
+                StructMember {
+                    name: Some(String::from("a")),
+                    ty: LpsType::Float,
+                },
+                StructMember {
+                    name: Some(String::from("tex")),
+                    ty: LpsType::Texture2D,
+                },
+                StructMember {
+                    name: Some(String::from("b")),
+                    ty: LpsType::Float,
+                },
+            ],
+        };
+        assert_eq!(type_size(&s, LayoutRules::Std430), 24);
+        assert_eq!(s.offset_for_path("a", LayoutRules::Std430, 0).unwrap(), 0);
+        assert_eq!(s.offset_for_path("tex", LayoutRules::Std430, 0).unwrap(), 4);
+        assert_eq!(s.offset_for_path("b", LayoutRules::Std430, 0).unwrap(), 20);
+    }
+
+    #[test]
+    fn std430_array_of_texture2d_uses_element_stride() {
+        let a = LpsType::Array {
+            element: Box::new(LpsType::Texture2D),
+            len: 2,
+        };
+        assert_eq!(type_size(&a, LayoutRules::Std430), 32);
+    }
 }

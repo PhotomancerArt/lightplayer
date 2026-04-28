@@ -26,5 +26,5 @@ Map **`Self::Error`** from instances to `anyhow::Error` / `GlslError` consistent
 ```bash
 cargo check -p lps-filetests
 cargo test -p lps-filetests
-./scripts/glsl-filetests.sh --target jit.q32  # if available; narrow filter
+./scripts/filetests.sh --target jit.q32  # if available; narrow filter
 ```

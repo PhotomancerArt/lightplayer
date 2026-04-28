@@ -20,7 +20,7 @@ cargo +nightly fmt
 
 ```bash
 cargo test -p lps-frontend -p lpir -p lpvm-cranelift -p lps-filetests -p lps-wasm
-./scripts/glsl-filetests.sh
+./scripts/filetests.sh
 just test-filetests
 ```
 
@@ -44,9 +44,9 @@ cargo clippy -p lps-frontend -p lpir -p lpvm-cranelift -p lps-filetests -p lps-w
 ## Plan cleanup
 
 - Add **`summary.md`** to this directory with:
-    - What shipped (phases completed)
-    - Known follow-ups (arrays/structs, any deferred harness work)
-    - Final filetest pass rates (jit / wasm / rv32) if measured
+  - What shipped (phases completed)
+  - Known follow-ups (arrays/structs, any deferred harness work)
+  - Final filetest pass rates (jit / wasm / rv32) if measured
 - **Move** the entire `docs/plans/2026-03-29-lpir-feature-parity/` directory to
   `docs/plans-done/2026-03-29-lpir-feature-parity/` (preserve date + name).
 

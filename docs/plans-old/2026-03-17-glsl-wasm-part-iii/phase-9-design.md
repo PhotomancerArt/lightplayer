@@ -87,7 +87,7 @@ cargo test
 cargo build -p lps-wasm
 cargo test -p lps-wasm
 cargo test -p lps-filetests
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 cargo +nightly fmt --check
 just build-fw-esp32
 ```
@@ -98,9 +98,9 @@ just build-fw-esp32
 
 ## File change summary
 
-| File                                  | Changes                          |
-|---------------------------------------|----------------------------------|
-| Various                               | Fix warnings, formatting         |
+| File                              | Changes                          |
+| --------------------------------- | -------------------------------- |
+| Various                           | Fix warnings, formatting         |
 | lp-shader/lps-wasm/README.md      | Document features, mechanism     |
 | lp-shader/lps-filetests/README.md | Pass counts, annotation patterns |
-| lp-shader/README.md                   | Crate table if needed            |
+| lp-shader/README.md               | Crate table if needed            |

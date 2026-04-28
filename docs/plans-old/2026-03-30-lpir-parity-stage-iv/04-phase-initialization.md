@@ -22,7 +22,7 @@ for (lv_handle, var) in func.local_variables.iter() {
     let Some(init_h) = var.init else {
         continue;
     };
-    
+
     // Check if this is an array
     if let Some(array_info) = ctx.array_map.get(&lv_handle) {
         lower_array_initializer(ctx, *lv_handle, array_info, init_h)?;
@@ -52,14 +52,14 @@ pub(crate) fn lower_array_initializer(
             // Full or partial initialization: int arr[5] = {1, 2, 3}
             lower_array_compose(ctx, array_info, components)?;
         }
-        
+
         _ => {
             return Err(LowerError::UnsupportedExpression(
                 "array initializer must be a compose expression".into()
             ));
         }
     }
-    
+
     Ok(())
 }
 
@@ -71,29 +71,29 @@ fn lower_array_compose(
 ) -> Result<(), LowerError> {
     let num_init = components.len() as u32;
     let num_total = array_info.element_count;
-    
+
     // Get slot base address
     let base_addr = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::SlotAddr {
         dst: base_addr,
         slot: array_info.slot,
     });
-    
+
     // Store each initializer element
     for (i, &comp_expr) in components.iter().enumerate() {
         let byte_offset = (i as u32) * array_info.element_size;
         store_element_at_offset(ctx, array_info, base_addr, byte_offset, comp_expr)?;
     }
-    
+
     // Zero-fill remaining elements if partial initialization
     if num_init < num_total {
         // Create zero value(s) for element type
         let elem_inner = &ctx.module.types[array_info.element_ty].inner;
         let elem_ir_types = naga_type_to_ir_types(elem_inner)?;
-        
+
         for i in num_init..num_total {
             let byte_offset = i * array_info.element_size;
-            
+
             // Store zero for each component of the element
             for (j, ty) in elem_ir_types.iter().enumerate() {
                 let zero = ctx.fb.alloc_vreg(*ty);
@@ -102,7 +102,7 @@ fn lower_array_compose(
                 } else {
                     ctx.fb.push(Op::IconstI32 { dst: zero, value: 0 });
                 }
-                
+
                 let comp_offset = byte_offset + (j as u32 * 4);
                 ctx.fb.push(Op::Store {
                     base: base_addr,
@@ -112,7 +112,7 @@ fn lower_array_compose(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -125,7 +125,7 @@ fn store_element_at_offset(
     expr: Handle<naga::Expression>,
 ) -> Result<(), LowerError> {
     let srcs = ctx.ensure_expr_vec(expr)?;
-    
+
     for (i, &src) in srcs.iter().enumerate() {
         let offset = byte_offset + (i as u32 * 4);
         ctx.fb.push(Op::Store {
@@ -134,7 +134,7 @@ fn store_element_at_offset(
             value: src,
         });
     }
-    
+
     Ok(())
 }
 ```
@@ -196,13 +196,13 @@ int test_single_element_initialization() {
 int phase3() {
     int arr1[3] = {10, 20, 30};
     int x = arr1[0] + arr1[1] + arr1[2];
-    
+
     int arr2[5] = {1, 2, 3};
     int y = arr2[0] + arr2[4];
-    
+
     int arr3[] = {100, 200, 300};
     int z = arr3[0] + arr3[2];
-    
+
     return x + y + z;
 }
 // run: phase3() == 461
@@ -211,7 +211,7 @@ int phase3() {
 ## Validation
 
 ```bash
-scripts/glsl-filetests.sh array/phase/3-initialization.glsl
+scripts/filetests.sh array/phase/3-initialization.glsl
 ```
 
 Expected: All 5 tests pass.

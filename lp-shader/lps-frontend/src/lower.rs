@@ -12,8 +12,8 @@ use lpir::{
     ModuleBuilder, VMCTX_VREG, VReg,
 };
 use lps_shared::{
-    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, VMCTX_HEADER_SIZE,
-    type_alignment, type_size,
+    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, TextureBindingSpec,
+    VMCTX_HEADER_SIZE, type_alignment, type_size, validate_texture_binding_specs_against_module,
 };
 use naga::{AddressSpace, Expression, Function, GlobalVariable, Handle, Module};
 
@@ -23,14 +23,46 @@ use crate::lower_error::LowerError;
 use crate::lower_lpfn;
 use crate::naga_types::naga_type_handle_to_lps;
 
+/// Options for Naga → LPIR lowering (e.g. compile-time texture binding metadata).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LowerOptions {
+    /// When non-empty, must match every `Texture2D` uniform (validated before lowering; see
+    /// [`lps_shared::validate_texture_binding_specs_against_module`]). An empty map skips that check
+    /// so `lower()` stays usable when specs are applied later.
+    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    /// Whether `texelFetch` lowering emits coordinate clamp ops (see [`lpir::TexelFetchBoundsMode`]).
+    pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+}
+
+impl Default for LowerOptions {
+    fn default() -> Self {
+        Self {
+            texture_specs: BTreeMap::new(),
+            texel_fetch_bounds: lpir::TexelFetchBoundsMode::default(),
+        }
+    }
+}
+
 /// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
 ///
-/// Registers `@glsl::*`, `@lpir::*`, and `@lpfn::*` imports as needed, then emits one [`lpir::IrFunction`] per
+/// Same as [`lower_with_options`] with default options (no texture specs). Registers `@glsl::*`,
+/// `@lpir::*`, and `@lpfn::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the
 /// scalar subset.
 pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), LowerError> {
+    lower_with_options(naga_module, &LowerOptions::default())
+}
+
+/// Lower with [`LowerOptions`]. When `options.texture_specs` is non-empty, runs binding validation, then
+/// copies specs into [`LpsModuleSig::texture_specs`]. An empty spec map defers validation to match
+/// texture-free [`lower`].
+pub fn lower_with_options(
+    naga_module: &NagaModule,
+    options: &LowerOptions,
+) -> Result<(LpirModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
-    let import_map = register_math_imports(&mut mb);
+    let mut import_map = register_math_imports(&mut mb);
+    import_map.extend(register_texture_imports(&mut mb));
     let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
     for (i, (handle, _)) in naga_module.functions.iter().enumerate() {
@@ -43,8 +75,15 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
     let mut glsl_meta = LpsModuleSig {
         uniforms_type,
         globals_type,
+        texture_specs: options.texture_specs.clone(),
         ..Default::default()
     };
+    // Non-empty `texture_specs` ⇒ run M1/M2-style binding validation before IR lowering. Empty map
+    // defers validation (e.g. `lower()` without options, then `validate_texture_binding_specs_against_module`).
+    if !options.texture_specs.is_empty() {
+        validate_texture_binding_specs_against_module(&glsl_meta, &options.texture_specs)
+            .map_err(LowerError::UnsupportedExpression)?;
+    }
 
     // Lower user functions.
     for (handle, info) in &naga_module.functions {
@@ -57,6 +96,8 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
             &import_map,
             &lpfn_map,
             global_map.clone(),
+            &options.texture_specs,
+            options.texel_fetch_bounds,
         )
         .map_err(|e| LowerError::InFunction {
             name: info.name.clone(),
@@ -87,6 +128,17 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
     Ok((mb.finish(), glsl_meta))
 }
 
+/// Naga-only companion sampler from `parse.rs` (`uniform sampler __lp_samp_*`); not part of the
+/// runtime uniform ABI.
+fn is_lp_synthetic_naga_sampler(gv: &GlobalVariable, lps_ty: &LpsType) -> bool {
+    gv.space == AddressSpace::Handle
+        && matches!(lps_ty, LpsType::UInt)
+        && gv
+            .name
+            .as_deref()
+            .is_some_and(|n| n.starts_with("__lp_samp_"))
+}
+
 /// Compute layout for global variables (uniforms and private globals).
 /// Returns (global_map, uniforms_type, globals_type).
 fn compute_global_layout(
@@ -97,10 +149,29 @@ fn compute_global_layout(
     let mut globals_members: Vec<StructMember> = Vec::new();
 
     for (gv_handle, gv) in module.global_variables.iter() {
-        // Map AddressSpace to uniform/global
+        // Map Naga type to LpsType first (needed for Handle / texture resources).
+        let lps_ty = naga_type_handle_to_lps(module, gv.ty)
+            .map_err(|e| LowerError::UnsupportedType(format!("{e:?}")))?;
+
+        // Map AddressSpace to uniform/global (Naga uses `Handle` for bound textures/samplers).
         let (is_uniform, is_supported) = match gv.space {
             AddressSpace::Uniform => (true, true),
             AddressSpace::Private => (false, true),
+            AddressSpace::Handle => {
+                let texture2d = matches!(lps_ty, LpsType::Texture2D);
+                let synth_sampler = matches!(lps_ty, LpsType::UInt)
+                    && gv
+                        .name
+                        .as_deref()
+                        .is_some_and(|n| n.starts_with("__lp_samp_"));
+                if texture2d || synth_sampler {
+                    (true, true)
+                } else {
+                    return Err(LowerError::UnsupportedExpression(format!(
+                        "GlobalVariable address space Handle is only supported for Texture2D-like types, got {lps_ty:?}"
+                    )));
+                }
+            }
             _ => (false, false),
         };
 
@@ -111,12 +182,22 @@ fn compute_global_layout(
             )));
         }
 
-        // Map Naga type to LpsType
-        let lps_ty = naga_type_handle_to_lps(module, gv.ty)
-            .map_err(|e| LowerError::UnsupportedType(format!("{e:?}")))?;
-
         // Determine component count for scalarization
         let component_count = lps_scalar_component_count(&lps_ty);
+
+        if is_lp_synthetic_naga_sampler(gv, &lps_ty) {
+            global_map.insert(
+                gv_handle,
+                GlobalVarInfo {
+                    byte_offset: 0,
+                    ty: lps_ty,
+                    component_count,
+                    is_uniform: true,
+                    vmctx_backed: false,
+                },
+            );
+            continue;
+        }
 
         let member = StructMember {
             name: gv.name.clone(),
@@ -136,6 +217,7 @@ fn compute_global_layout(
                 ty: lps_ty,
                 component_count,
                 is_uniform,
+                vmctx_backed: true,
             },
         );
     }
@@ -162,6 +244,9 @@ fn compute_global_layout(
 
     for (gv_handle, _gv) in module.global_variables.iter() {
         if let Some(info) = global_map.get_mut(&gv_handle) {
+            if !info.vmctx_backed {
+                continue;
+            }
             let align = type_alignment(&info.ty, LayoutRules::Std430) as u32;
             if info.is_uniform {
                 uniforms_offset = round_up_u32(uniforms_offset, align);
@@ -223,6 +308,7 @@ fn lps_scalar_component_count(ty: &LpsType) -> u32 {
         LpsType::Mat2 => 4,
         LpsType::Mat3 => 9,
         LpsType::Mat4 => 16,
+        LpsType::Texture2D => 4,
         LpsType::Array { element, len } => lps_scalar_component_count(element).saturating_mul(*len),
         LpsType::Struct { members, .. } => members
             .iter()
@@ -258,6 +344,9 @@ fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<
     for (_gv_handle, info, init_expr) in globals_with_init {
         if info.is_uniform {
             // Uniforms shouldn't have initializers - skip or error
+            continue;
+        }
+        if !info.vmctx_backed {
             continue;
         }
 
@@ -360,6 +449,7 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
                 return_types: rets.to_vec(),
                 lpfn_glsl_params: None,
                 needs_vmctx,
+                sret: false,
             });
             m.insert(format!("{module}::{name}"), r);
         };
@@ -391,6 +481,33 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
     m
 }
 
+/// `@texture::*` sampler builtins (result pointer ABI; [`ImportDecl::sret`]).
+fn register_texture_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> {
+    let mut m = BTreeMap::new();
+    let mut reg = |func_name: &str, user_param_count: usize| {
+        let mut param_types = Vec::with_capacity(user_param_count);
+        param_types.push(IrType::Pointer);
+        for _ in 1..user_param_count {
+            param_types.push(IrType::I32);
+        }
+        let r = mb.add_import(ImportDecl {
+            module_name: String::from("texture"),
+            func_name: String::from(func_name),
+            param_types,
+            return_types: Vec::new(),
+            lpfn_glsl_params: None,
+            needs_vmctx: false,
+            sret: true,
+        });
+        m.insert(format!("texture::{func_name}"), r);
+    };
+    reg("texture2d_rgba16_unorm", 10);
+    reg("texture1d_rgba16_unorm", 7);
+    reg("texture2d_r16_unorm", 10);
+    reg("texture1d_r16_unorm", 7);
+    m
+}
+
 fn lower_function(
     module: &Module,
     func: &Function,
@@ -399,9 +516,19 @@ fn lower_function(
     import_map: &BTreeMap<String, CalleeRef>,
     lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
     global_map: GlobalVarMap,
+    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
-        module, func, name, func_map, import_map, lpfn_map, global_map,
+        module,
+        func,
+        name,
+        func_map,
+        import_map,
+        lpfn_map,
+        global_map,
+        texture_specs,
+        texel_fetch_bounds,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

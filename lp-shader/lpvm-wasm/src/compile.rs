@@ -6,8 +6,9 @@ use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::emit;
+use crate::emit::func::wasm_function_signature;
 use crate::error::WasmError;
-use crate::module::{WasmExport, WasmModule, WasmValType};
+use crate::module::{WasmExport, WasmModule};
 use crate::options::WasmOptions;
 
 /// Result of LPIR → WASM compilation: bytes, export layout, and the signature table.
@@ -80,18 +81,15 @@ fn collect_exports(ir: &LpirModule, meta: &LpsModuleSig, options: &WasmOptions) 
         .values()
         .zip(meta.functions.iter())
         .map(|(ir_f, sig)| {
-            let mut params: Vec<_> = alloc::vec![WasmValType::I32];
-            params.extend(sig.parameters.iter().flat_map(|p| {
-                crate::module::glsl_type_to_wasm_components(&p.ty, options.float_mode)
-            }));
-            let results =
-                crate::module::glsl_type_to_wasm_components(&sig.return_type, options.float_mode);
+            let (params, results) = wasm_function_signature(ir_f, options.float_mode);
+            let uses_sret = ir_f.sret_arg.is_some();
             WasmExport {
                 name: ir_f.name.clone(),
                 params,
                 results,
                 return_type: sig.return_type.clone(),
                 param_types: sig.parameters.iter().map(|p| p.ty.clone()).collect(),
+                uses_sret,
             }
         })
         .collect()

@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use lpir::IrType;
 use lps_shared::{LpsFnSig, LpsType};
 
 use crate::abi::PReg;
@@ -56,6 +57,8 @@ pub fn scalar_count_of_type(ty: &LpsType) -> usize {
         LpsType::Vec2 | LpsType::IVec2 | LpsType::UVec2 | LpsType::BVec2 => 2,
         LpsType::Vec3 | LpsType::IVec3 | LpsType::UVec3 | LpsType::BVec3 => 3,
         LpsType::Vec4 | LpsType::IVec4 | LpsType::UVec4 | LpsType::BVec4 => 4,
+        // [`LpsType::Texture2D`] / [`lps_shared::LpsTexture2DDescriptor`]: four `u32` lanes (std430 size 16).
+        LpsType::Texture2D => 4,
         LpsType::Mat2 => 4,
         LpsType::Mat3 => 9,
         LpsType::Mat4 => 16,
@@ -75,6 +78,13 @@ pub fn entry_param_scalar_count(sig: &LpsFnSig) -> usize {
     n
 }
 
+/// Scalar argument words for one LPIR parameter type (M1 aggregate `in` is one [`IrType::Pointer`]).
+pub fn ir_type_scalar_words(ty: IrType) -> usize {
+    match ty {
+        IrType::I32 | IrType::F32 | IrType::Pointer => 1,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +99,6 @@ mod tests {
         assert_eq!(scalar_count_of_type(&LpsType::Mat2), 4);
         assert_eq!(scalar_count_of_type(&LpsType::Mat3), 9);
         assert_eq!(scalar_count_of_type(&LpsType::Mat4), 16);
+        assert_eq!(scalar_count_of_type(&LpsType::Texture2D), 4);
     }
 }

@@ -8,7 +8,6 @@ use alloc::format;
 use alloc::sync::Arc;
 
 use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
-use lps_shared::TextureBuffer;
 use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};
 
 use super::lp_gfx::LpGraphics;

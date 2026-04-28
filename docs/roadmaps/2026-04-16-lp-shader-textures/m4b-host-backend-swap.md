@@ -106,7 +106,7 @@ to gate Wasmtime behind a non-default feature.
 
 ### `lp-cli` target table
 
-`lp-cli shader-debug` and `glsl-filetests.sh` may list
+`lp-cli shader-debug` and `filetests.sh` may list
 backends/targets. Rename or remove "cranelift" entries that referred
 to the live host path. Keep a target for the Wasmtime path. Filetests
 that ran via the cranelift backend should auto-route to the Wasmtime
@@ -133,7 +133,7 @@ cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-
 cargo check -p lp-engine --target wasm32-unknown-unknown
 
 # Filetests / CI gate
-scripts/glsl-filetests.sh --concise
+scripts/filetests.sh --concise
 just ci
 ```
 

@@ -343,47 +343,57 @@ pub enum LpirOp {
         dst: VReg,
         slot: SlotId,
     },
+    /// 32-bit load: `dst = i32[base + offset]`.
+    /// Precondition: `base + offset` is 4-byte aligned.
     Load {
         dst: VReg,
         base: VReg,
         offset: u32,
     },
+    /// 32-bit store: writes `value` as a word at `[base + offset]`.
+    /// Precondition: `base + offset` is 4-byte aligned.
     Store {
         base: VReg,
         offset: u32,
         value: VReg,
     },
     /// 8-bit store: writes the low 8 bits of `value` to `[base + offset]`.
+    /// No alignment requirement.
     Store8 {
         base: VReg,
         offset: u32,
         value: VReg,
     },
     /// 16-bit store: writes the low 16 bits of `value` to `[base + offset]`.
+    /// Precondition: `base + offset` is 2-byte aligned.
     Store16 {
         base: VReg,
         offset: u32,
         value: VReg,
     },
     /// 8-bit zero-extending load: `dst = u8[base + offset]`.
+    /// No alignment requirement.
     Load8U {
         dst: VReg,
         base: VReg,
         offset: u32,
     },
     /// 8-bit sign-extending load: `dst = i8[base + offset]` (sign-extended to i32).
+    /// No alignment requirement.
     Load8S {
         dst: VReg,
         base: VReg,
         offset: u32,
     },
     /// 16-bit zero-extending load.
+    /// Precondition: `base + offset` is 2-byte aligned.
     Load16U {
         dst: VReg,
         base: VReg,
         offset: u32,
     },
     /// 16-bit sign-extending load.
+    /// Precondition: `base + offset` is 2-byte aligned.
     Load16S {
         dst: VReg,
         base: VReg,
@@ -439,6 +449,7 @@ pub enum LpirOp {
     ExitBlock,
 
     // --- Call / return ---
+    /// VRegs in `args` are: `[vmctx, sret_dest_addr? …]`, then callee user args (sret if [`crate::lpir_module::IrFunction::sret_arg`]/import `sret`).
     Call {
         callee: CalleeRef,
         args: VRegRange,

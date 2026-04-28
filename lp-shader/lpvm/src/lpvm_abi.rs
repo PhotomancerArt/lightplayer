@@ -1,7 +1,14 @@
-//! Flattened word ABI for Q32 LPVM calls (`Vec<i32>` user arguments / returns).
+//! Flattened **dense Q32 lane** words for Level-1 LPVM helpers (`Vec<i32>` scalars / small
+//! composites passed to [`crate::LpvmInstance::call_q32`] and friends).
 //!
-//! Pairs with [`lps_shared::LpsValueQ32`] on the host; float components use raw
-//! [`Q32::to_fixed`] / [`Q32::from_fixed`] (`i32` lane words).
+//! Scalar, vector, and matrix types map one-to-one to consecutive `i32` lanes (float lanes use
+//! [`Q32::to_fixed`] / [`Q32::from_fixed`]). Arrays use the same **dense** lane order (all lanes of
+//! element `0`, then element `1`, …) so the emulator host can pack them into a guest buffer before
+//! passing a pointer — see `lp-shader/lpvm-emu/src/host_marshal.rs`.
+//!
+//! **Aggregate memory layout elsewhere** (slots, uniforms, sret buffers, wasm shadow stack) is
+//! [`crate::LpvmDataQ32`] over `lps_shared::layout` std430; per-backend pointer/sret marshalling
+//! lives in `lpvm-cranelift`, `lpvm-native`, `lpvm-emu`, and `lpvm-wasm` (M1 pointer ABI).
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -9,7 +16,11 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use lps_q32::Q32;
-use lps_shared::{FnParam, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier};
+use lps_shared::layout::{round_up, type_alignment, type_size};
+use lps_shared::{
+    FnParam, LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, LpsValueF32,
+    LpsValueQ32, ParamQualifier,
+};
 
 /// Split a single slice of flattened Q32 argument words (per-parameter order) into
 /// [`LpsValueQ32`] values matching `params`.
@@ -21,13 +32,13 @@ pub fn unflatten_q32_args(
     let mut off = 0;
     for p in params {
         if p.qualifier != ParamQualifier::In {
-            return Err(CallError::Unsupported(String::from(
-                "out/inout parameters are not supported by Level-1 call_q32 yet",
+            return Err(CallError::Unsupported(traced_msg!(
+                "out/inout parameters are not supported by Level-1 call_q32 yet"
             )));
         }
         let n = glsl_component_count(&p.ty);
         if off + n > words.len() {
-            return Err(CallError::Unsupported(format!(
+            return Err(CallError::Unsupported(traced_msg!(
                 "not enough Q32 argument words at parameter `{}`: need {}, have {} total",
                 p.name,
                 off + n,
@@ -39,7 +50,7 @@ pub fn unflatten_q32_args(
         out.push(v);
     }
     if off != words.len() {
-        return Err(CallError::Unsupported(format!(
+        return Err(CallError::Unsupported(traced_msg!(
             "extra Q32 argument words: used {}, got {} total",
             off,
             words.len()
@@ -120,6 +131,8 @@ pub fn glsl_component_count(ty: &LpsType) -> usize {
         LpsType::Mat2 => 4,
         LpsType::Mat3 => 9,
         LpsType::Mat4 => 16,
+        // Opaque texture handle + dimensions ([`LpsTexture2DDescriptor`]: four `u32` words).
+        LpsType::Texture2D => 4,
         LpsType::Array { element, len } => {
             glsl_component_count(element).saturating_mul(*len as usize)
         }
@@ -132,8 +145,8 @@ pub fn glsl_component_count(ty: &LpsType) -> usize {
 /// Flatten one function parameter using Q32 lane encoding.
 pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, CallError> {
     if param.qualifier != ParamQualifier::In {
-        return Err(CallError::Unsupported(String::from(
-            "out/inout parameters are not supported by Level-1 call() yet",
+        return Err(CallError::Unsupported(traced_msg!(
+            "out/inout parameters are not supported by Level-1 call() yet"
         )));
     }
     match (&param.ty, arg) {
@@ -211,29 +224,25 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
             Ok(w)
         }
 
-        (LpsType::Array { element, len }, LpsValueQ32::Array(items)) => {
-            if items.len() != *len as usize {
-                return Err(CallError::TypeMismatch(format!(
-                    "array argument length mismatch: expected {}, got {}",
-                    len,
-                    items.len()
-                )));
-            }
-            let sub = FnParam {
-                name: String::new(),
-                ty: element.as_ref().clone(),
-                qualifier: param.qualifier,
-            };
-            let mut out = Vec::new();
-            for it in items.iter() {
-                out.extend(flatten_q32_arg(&sub, it)?);
-            }
-            Ok(out)
+        (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
+
+        (LpsType::Texture2D, LpsValueQ32::Texture2D(v)) => {
+            let d = v.descriptor;
+            Ok(alloc::vec![
+                d.ptr as i32,
+                d.width as i32,
+                d.height as i32,
+                d.row_stride as i32,
+            ])
         }
 
+        (LpsType::Texture2D, _) => Err(CallError::TypeMismatch(
+            "LpsType::Texture2D expects LpsValueQ32::Texture2D (typed host value)".to_string(),
+        )),
+
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
-            Err(CallError::Unsupported(String::from(
-                "struct parameters are not supported by Level-1 call() yet",
+            Err(CallError::Unsupported(traced_msg!(
+                "struct parameters are not supported by Level-1 call() yet"
             )))
         }
 
@@ -268,27 +277,50 @@ fn got_ty_name(v: &LpsValueQ32) -> &'static str {
         LpsValueQ32::Mat4x4(_) => "Mat4x4",
         LpsValueQ32::Array(_) => "Array",
         LpsValueQ32::Struct { .. } => "Struct",
+        LpsValueQ32::Texture2D(_) => "Texture2D",
     }
 }
 
 /// Decode flattened return words into [`LpsValueQ32`].
 pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, CallError> {
-    let n = glsl_component_count(ty);
+    let n = match ty {
+        LpsType::Struct { .. } => (type_size(ty, LayoutRules::Std430) + 3) / 4,
+        _ => glsl_component_count(ty),
+    };
     if words.len() < n {
-        return Err(CallError::Unsupported(format!(
+        return Err(CallError::Unsupported(traced_msg!(
             "not enough return values: need {n}, got {}",
             words.len()
         )));
     }
     Ok(match ty {
-        LpsType::Struct { .. } => {
-            return Err(CallError::Unsupported(String::from(
-                "struct returns are not supported by Level-1 call() yet",
-            )));
+        LpsType::Struct { name, members } => {
+            let mut byte_off = 0usize;
+            let mut fields = Vec::new();
+            for (i, m) in members.iter().enumerate() {
+                let align = type_alignment(&m.ty, LayoutRules::Std430);
+                byte_off = round_up(byte_off, align);
+                let m_size = type_size(&m.ty, LayoutRules::Std430);
+                let w0 = byte_off / 4;
+                let m_words = (m_size + 3) / 4;
+                if words.len() < w0 + m_words {
+                    return Err(CallError::Unsupported(traced_msg!(
+                        "struct decode: truncated member after byte offset {byte_off}"
+                    )));
+                }
+                let val = decode_q32_return(&m.ty, &words[w0..w0 + m_words])?;
+                let fname = m.name.clone().unwrap_or_else(|| alloc::format!("_{i}"));
+                fields.push((fname, val));
+                byte_off += m_size;
+            }
+            LpsValueQ32::Struct {
+                name: name.clone(),
+                fields,
+            }
         }
         LpsType::Void => {
-            return Err(CallError::Unsupported(String::from(
-                "decode_q32_return called for void",
+            return Err(CallError::Unsupported(traced_msg!(
+                "decode_q32_return called for void"
             )));
         }
         LpsType::Float => LpsValueQ32::F32(Q32::from_fixed(words[0])),
@@ -370,15 +402,58 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, Cal
                 Q32::from_fixed(words[15]),
             ],
         ]),
-        LpsType::Array { element, len } => {
-            let per = glsl_component_count(element);
-            let mut elems = Vec::with_capacity(*len as usize);
-            for i in 0..(*len as usize) {
-                let start = i * per;
-                let end = start + per;
-                elems.push(decode_q32_return(element, &words[start..end])?);
-            }
-            LpsValueQ32::Array(elems.into_boxed_slice())
-        }
+        LpsType::Array { .. } => dense_q32_decode_array(ty, words)?,
+        LpsType::Texture2D => LpsValueQ32::Texture2D(LpsTexture2DValue::from_guest_descriptor(
+            LpsTexture2DDescriptor {
+                ptr: words[0] as u32,
+                width: words[1] as u32,
+                height: words[2] as u32,
+                row_stride: words[3] as u32,
+            },
+        )),
     })
+}
+
+/// Dense packed lanes for array-typed parameters (see module docs — not padded std430 traversal).
+fn dense_q32_flatten_array(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, CallError> {
+    let (LpsType::Array { element, len }, LpsValueQ32::Array(items)) = (&param.ty, arg) else {
+        return Err(CallError::TypeMismatch(format!(
+            "argument type mismatch: expected {:?}, got {:?}",
+            &param.ty,
+            got_ty_name(arg)
+        )));
+    };
+    if items.len() != *len as usize {
+        return Err(CallError::TypeMismatch(format!(
+            "array argument length mismatch: expected {}, got {}",
+            len,
+            items.len()
+        )));
+    }
+    let sub = FnParam {
+        name: String::new(),
+        ty: element.as_ref().clone(),
+        qualifier: param.qualifier,
+    };
+    let mut out = Vec::new();
+    for it in items.iter() {
+        out.extend(flatten_q32_arg(&sub, it)?);
+    }
+    Ok(out)
+}
+
+fn dense_q32_decode_array(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, CallError> {
+    let LpsType::Array { element, len } = ty else {
+        return Err(CallError::Unsupported(traced_msg!(
+            "dense_q32_decode_array: not an array type"
+        )));
+    };
+    let per = glsl_component_count(element);
+    let mut elems = Vec::with_capacity(*len as usize);
+    for i in 0..(*len as usize) {
+        let start = i * per;
+        let end = start + per;
+        elems.push(decode_q32_return(element, &words[start..end])?);
+    }
+    Ok(LpsValueQ32::Array(elems.into_boxed_slice()))
 }

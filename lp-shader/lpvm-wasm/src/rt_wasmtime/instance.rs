@@ -15,9 +15,11 @@ use wasmtime::{Instance, Val};
 use super::WasmLpvmSharedRuntime;
 use super::link;
 use super::marshal::{
-    build_wasm_args, build_wasm_args_q32_flat, wasm_vals_to_lps_value, wasm_vals_to_q32_words,
-    zero_results_for_type,
+    build_wasm_args_for_call, build_wasm_args_q32_for_call, build_wasm_args_q32_scalar_only,
+    build_wasm_args_scalar_only, decode_sret_q32_return, shadow_stack_frame_close,
+    shadow_stack_frame_open, wasm_vals_to_lps_value, wasm_vals_to_q32_words, zero_results_for_type,
 };
+use crate::aggregate_abi::{decode_aggregate_std430_bytes, export_needs_shadow_marshal};
 use crate::error::WasmError;
 use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport};
 
@@ -256,14 +258,12 @@ impl LpvmInstance for WasmLpvmInstance {
         }
 
         let return_ty = export.return_type.clone();
-        let wasm_args = build_wasm_args(
-            &export.param_types,
-            export.params.len(),
-            args,
-            self.float_mode,
-        )?;
-
-        let mut results = zero_results_for_type(&return_ty, self.float_mode);
+        let needs_shadow = export_needs_shadow_marshal(&export);
+        if needs_shadow && self.shadow_stack_base.is_none() {
+            return Err(WasmError::runtime(
+                "aggregate/sret calling convention requires an exported shadow stack global",
+            ));
+        }
 
         let mut guard = self.runtime.lock();
         // Reset globals before each shader call to ensure per-pixel isolation
@@ -277,8 +277,55 @@ impl LpvmInstance for WasmLpvmInstance {
             .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
 
         self.prepare_call(store, mem)?;
+
+        let shadow_frame = if needs_shadow {
+            Some(shadow_stack_frame_open(&self.instance, store)?)
+        } else {
+            None
+        };
+
+        let (wasm_args, sret_plan) = if needs_shadow {
+            build_wasm_args_for_call(
+                &self.instance,
+                store,
+                &mem,
+                &export,
+                args,
+                self.float_mode,
+                &return_ty,
+            )?
+        } else {
+            (
+                build_wasm_args_scalar_only(
+                    &export.param_types,
+                    export.params.len(),
+                    args,
+                    self.float_mode,
+                )?,
+                None,
+            )
+        };
+
+        let mut results = if export.uses_sret {
+            Vec::new()
+        } else {
+            zero_results_for_type(&return_ty, self.float_mode)
+        };
+
         func.call(&mut *store, &wasm_args, &mut results)
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+
+        if let Some(frame) = shadow_frame {
+            shadow_stack_frame_close(&self.instance, store, frame)?;
+        }
+
+        if export.uses_sret {
+            let plan = sret_plan.ok_or_else(|| {
+                WasmError::runtime("internal: sret export without sret allocation plan")
+            })?;
+            let bytes = super::marshal::wasmtime_memory_read(&mem, store, plan.ptr, plan.size)?;
+            return decode_aggregate_std430_bytes(&return_ty, &bytes, self.float_mode);
+        }
 
         let (val, consumed) = wasm_vals_to_lps_value(&return_ty, &results, self.float_mode)?;
         if consumed != results.len() {
@@ -317,7 +364,12 @@ impl LpvmInstance for WasmLpvmInstance {
         })?;
 
         let return_ty = export.return_type.clone();
-        let wasm_args = build_wasm_args_q32_flat(&export.param_types, export.params.len(), args)?;
+        let needs_shadow = export_needs_shadow_marshal(&export);
+        if needs_shadow && self.shadow_stack_base.is_none() {
+            return Err(WasmError::runtime(
+                "aggregate/sret calling convention requires an exported shadow stack global",
+            ));
+        }
 
         let mut guard = self.runtime.lock();
         // Reset globals before each shader call to ensure per-pixel isolation
@@ -332,16 +384,49 @@ impl LpvmInstance for WasmLpvmInstance {
 
         self.prepare_call(store, mem)?;
 
+        let shadow_frame = if needs_shadow {
+            Some(shadow_stack_frame_open(&self.instance, store)?)
+        } else {
+            None
+        };
+
+        let (wasm_args, sret_plan) = if needs_shadow {
+            build_wasm_args_q32_for_call(&self.instance, store, &mem, &export, args, &return_ty)?
+        } else {
+            (
+                build_wasm_args_q32_scalar_only(&export.param_types, export.params.len(), args)?,
+                None,
+            )
+        };
+
         if matches!(return_ty, LpsType::Void) {
             let mut results: Vec<Val> = Vec::new();
             func.call(&mut *store, &wasm_args, &mut results)
                 .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+            if let Some(frame) = shadow_frame {
+                shadow_stack_frame_close(&self.instance, store, frame)?;
+            }
             return Ok(Vec::new());
         }
 
-        let mut results = zero_results_for_type(&return_ty, self.float_mode);
+        let mut results = if export.uses_sret {
+            Vec::new()
+        } else {
+            zero_results_for_type(&return_ty, self.float_mode)
+        };
         func.call(&mut *store, &wasm_args, &mut results)
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+
+        if let Some(frame) = shadow_frame {
+            shadow_stack_frame_close(&self.instance, store, frame)?;
+        }
+
+        if export.uses_sret {
+            let plan = sret_plan.ok_or_else(|| {
+                WasmError::runtime("internal: sret export without sret allocation plan")
+            })?;
+            return decode_sret_q32_return(&mem, store, &plan, &return_ty);
+        }
 
         wasm_vals_to_q32_words(&return_ty, &results, self.float_mode)
     }

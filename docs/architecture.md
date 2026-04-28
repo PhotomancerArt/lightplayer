@@ -167,7 +167,7 @@ expected results; the harness compiles and executes on three backends:
 - **wasm.q32** — WASM via `lps-wasm` + Wasmtime
 - **rv32.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
 
-Run with `./scripts/glsl-filetests.sh` or `just test-filetests`.
+Run with `./scripts/filetests.sh` or `just test-filetests`.
 
 ## RISC-V Tooling (`lp-riscv/`)
 

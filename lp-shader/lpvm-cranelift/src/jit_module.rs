@@ -11,7 +11,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::FuncId;
 use lpir::FloatMode;
 use lpir::lpir_module::LpirModule;
-use lps_shared::LpsModuleSig;
+use lps_shared::{LpsModuleSig, LpsType};
+use lpvm::glsl_component_count;
 
 use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};
@@ -140,7 +141,23 @@ pub(crate) fn build_jit_module(
 
     let mut jit_module = JITModule::new(jit_builder);
 
-    let lowered = lower_lpir_into_module(&mut jit_module, ir, options, LpirFuncEmitOrder::Source)?;
+    let mut lowered =
+        lower_lpir_into_module(&mut jit_module, ir, options, LpirFuncEmitOrder::Source)?;
+
+    // Aggregate sret: LPIR `return_types` is empty; host invoke still needs the logical word
+    // count — take it from GLSL metadata when `IrFunction::sret_arg` is set.
+    for f in ir.functions.values() {
+        if f.sret_arg.is_some() {
+            if let Some(gfn) = glsl_meta.functions.iter().find(|g| g.name == f.name) {
+                let n = if matches!(gfn.return_type, LpsType::Void) {
+                    0
+                } else {
+                    glsl_component_count(&gfn.return_type)
+                };
+                lowered.logical_return_words.insert(f.name.clone(), n);
+            }
+        }
+    }
 
     jit_module.finalize_definitions().map_err(|e| {
         CompilerError::Codegen(CompileError::cranelift(alloc::format!(

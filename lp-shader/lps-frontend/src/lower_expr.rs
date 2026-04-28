@@ -6,13 +6,15 @@ use alloc::vec::Vec;
 use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
 use lps_shared::{LayoutRules, LpsType, array_stride, type_alignment, type_size};
 use naga::{
-    ArraySize, BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind,
-    TypeInner,
+    ArraySize, BinaryOperator, Expression, GlobalVariable, Handle, Literal, RelationalFunction,
+    ScalarKind, TypeInner,
 };
 
 use crate::lower_binary::lower_binary_vec;
 use crate::lower_cast::{lower_as_scalar, lower_as_vec, root_scalar_kind};
-use crate::lower_ctx::{LowerCtx, VRegVec, naga_scalar_to_ir_type, vector_size_usize};
+use crate::lower_ctx::{
+    LowerCtx, UniformVmctxDeferred, VRegVec, naga_scalar_to_ir_type, vector_size_usize,
+};
 use crate::lower_error::LowerError;
 use crate::lower_math;
 use crate::lower_unary::lower_unary_vec;
@@ -56,9 +58,9 @@ fn lower_expr_vec_uncached(
         Expression::FunctionArgument(i) => ctx.arg_vregs_for(*i),
         Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
             Expression::LocalVariable(lv) => {
-                if ctx.array_map.contains_key(lv) {
+                if ctx.aggregate_map.contains_key(lv) {
                     return Err(LowerError::UnsupportedExpression(String::from(
-                        "Load of whole array local is not supported",
+                        "Load of whole aggregate (array/struct) local is not supported",
                     )));
                 }
                 // Snapshot into fresh VRegs so the loaded value does not alias the local's
@@ -66,7 +68,7 @@ fn lower_expr_vec_uncached(
                 // Load expression handle).
                 let srcs = ctx.resolve_local(*lv)?;
                 let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
-                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(lv_ty)?;
+                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(ctx.module, lv_ty)?;
                 if srcs.len() != ir_tys.len() {
                     return Err(LowerError::Internal(format!(
                         "Load local: {} vregs vs {} IR types for {:?}",
@@ -96,7 +98,15 @@ fn lower_expr_vec_uncached(
                     )));
                 };
                 let base_inner = &ctx.module.types[base_ty_h].inner;
-                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(base_inner)?;
+                if matches!(base_inner, TypeInner::Struct { .. }) {
+                    return crate::lower_struct::load_struct_value_vregs_from_base(
+                        ctx,
+                        ctx.arg_vregs_for(idx)?[0],
+                        0,
+                        base_ty_h,
+                    );
+                }
+                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(ctx.module, base_inner)?;
                 let addr = ctx.arg_vregs_for(idx)?[0];
                 let mut vregs = VRegVec::new();
                 for (j, ty) in ir_tys.iter().enumerate() {
@@ -112,21 +122,25 @@ fn lower_expr_vec_uncached(
             }
             Expression::GlobalVariable(gv_handle) => {
                 // Load from a global variable (uniform or private global).
-                let (byte_offset, ty) = {
-                    let Some(info) = ctx.global_map.get(gv_handle) else {
-                        return Err(LowerError::Internal(format!(
-                            "GlobalVariable {gv_handle:?} not found in global_map"
-                        )));
-                    };
-                    (info.byte_offset, info.ty.clone())
+                let Some(info) = ctx.global_map.get(gv_handle).cloned() else {
+                    return Err(LowerError::Internal(format!(
+                        "GlobalVariable {gv_handle:?} not found in global_map"
+                    )));
                 };
-                load_lps_value_from_vmctx(ctx, byte_offset, &ty)
+                if !info.vmctx_backed {
+                    return load_lp_synthetic_naga_sampler_stub(ctx, &info.ty);
+                }
+                load_lps_value_from_vmctx(ctx, info.byte_offset, &info.ty)
             }
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-local pointer",
             ))),
         },
         Expression::CallResult(_) => {
+            if let Some(info) = ctx.call_result_aggregates.get(&expr).cloned() {
+                let addr = crate::lower_array::aggregate_storage_base_vreg(ctx, &info.slot)?;
+                return Ok(smallvec::smallvec![addr]);
+            }
             let i = expr.index();
             ctx.expr_cache
                 .get(i)
@@ -137,6 +151,13 @@ fn lower_expr_vec_uncached(
                         "CallResult used before matching Call statement",
                     ))
                 })
+        }
+        Expression::Compose { ty, .. }
+            if matches!(&ctx.module.types[*ty].inner, TypeInner::Struct { .. }) =>
+        {
+            Err(LowerError::UnsupportedExpression(String::from(
+                "struct Compose without destination slot — phase 05 routes call args",
+            )))
         }
         Expression::Compose { components, .. } => {
             let mut result = VRegVec::new();
@@ -170,39 +191,81 @@ fn lower_expr_vec_uncached(
             Ok(result)
         }
         Expression::AccessIndex { base, index } => {
+            if let Some(chain) = crate::lower_struct::peel_arrayofstruct_chain(ctx, expr) {
+                return crate::lower_struct::load_array_struct_element(ctx, &chain);
+            }
+            if let Some((lv, chain)) =
+                crate::lower_struct::peel_struct_access_index_chain_to_local(ctx.func, expr)
+            {
+                if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+                    if matches!(
+                        &info.layout.kind,
+                        crate::naga_util::AggregateKind::Struct { .. }
+                    ) {
+                        return crate::lower_struct::load_struct_path_from_local(
+                            ctx, &info, &chain,
+                        );
+                    }
+                }
+            }
+            if let Some((gv, chain)) =
+                crate::lower_struct::peel_struct_access_index_chain_to_global(ctx.func, expr)
+            {
+                let mut root_ty = ctx.module.global_variables[gv].ty;
+                if let TypeInner::Pointer { base: inner, .. } = &ctx.module.types[root_ty].inner {
+                    root_ty = *inner;
+                }
+                if !chain.is_empty()
+                    && matches!(&ctx.module.types[root_ty].inner, TypeInner::Struct { .. })
+                {
+                    if global_peel_chain_ends_at_array_field(&ctx.module, gv, &chain)? {
+                        return uniform_global_access_index_path(ctx, expr, gv, &chain);
+                    }
+                    return crate::lower_struct::load_struct_path_from_global(ctx, gv, &chain);
+                }
+            }
             if let Some((root, ops)) =
                 crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
             {
-                if let Some(info) = ctx.array_info_for_subscript_root(root)? {
-                    if ops.len() == info.dimensions.len() {
-                        if ops.iter().all(|o| {
-                            matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
-                        }) {
-                            use crate::lower_array_multidim::SubscriptOperand::Const as SConst;
-                            let idxs: alloc::vec::Vec<u32> = ops
-                                .iter()
-                                .map(|o| match o {
-                                    SConst(c) => *c,
-                                    _ => 0,
-                                })
-                                .collect();
-                            let flat = crate::lower_array_multidim::flat_index_const_clamped(
-                                &info.dimensions,
-                                &idxs,
+                if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
+                    if matches!(
+                        &info.layout.kind,
+                        crate::naga_util::AggregateKind::Array { .. }
+                    ) {
+                        if ops.len() == info.dimensions().len() {
+                            if ops.iter().all(|o| {
+                                matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
+                            }) {
+                                use crate::lower_array_multidim::SubscriptOperand::Const as SConst;
+                                let idxs: alloc::vec::Vec<u32> = ops
+                                    .iter()
+                                    .map(|o| match o {
+                                        SConst(c) => *c,
+                                        _ => 0,
+                                    })
+                                    .collect();
+                                let flat = crate::lower_array_multidim::flat_index_const_clamped(
+                                    &info.dimensions(),
+                                    &idxs,
+                                )?;
+                                return crate::lower_array::load_array_element_const(
+                                    ctx, &info, flat,
+                                );
+                            }
+                            let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
+                                ctx,
+                                &info.dimensions(),
+                                &ops,
                             )?;
-                            return crate::lower_array::load_array_element_const(ctx, &info, flat);
+                            return crate::lower_array::load_array_element_dynamic(
+                                ctx, &info, flat_v,
+                            );
                         }
-                        let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
-                            ctx,
-                            &info.dimensions,
-                            &ops,
-                        )?;
-                        return crate::lower_array::load_array_element_dynamic(ctx, &info, flat_v);
-                    }
-                    if ops.len() < info.dimensions.len() {
-                        return Err(LowerError::UnsupportedExpression(String::from(
-                            "partial indexing of multi-dimensional array as rvalue is not supported",
-                        )));
+                        if ops.len() < info.dimensions().len() {
+                            return Err(LowerError::UnsupportedExpression(String::from(
+                                "partial indexing of multi-dimensional array as rvalue is not supported",
+                            )));
+                        }
                     }
                 }
             }
@@ -218,6 +281,260 @@ fn lower_expr_vec_uncached(
                     let start = (*index as usize) * n;
                     Ok(base_vs[start..start + n].into())
                 }
+                TypeInner::Struct { .. } => match &ctx.func.expressions[*base] {
+                    Expression::GlobalVariable(gv_handle) => {
+                        access_index_uniform_global_struct_member(
+                            ctx,
+                            expr,
+                            *gv_handle,
+                            *index as usize,
+                        )
+                    }
+                    Expression::LocalVariable(lv) => {
+                        if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                            if matches!(
+                                &info.layout.kind,
+                                crate::naga_util::AggregateKind::Struct { .. }
+                            ) {
+                                return crate::lower_struct::load_struct_member_to_vregs(
+                                    ctx,
+                                    &info,
+                                    *index as usize,
+                                );
+                            }
+                        }
+                        if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
+                            return access_index_uniform_global_struct_member(
+                                ctx,
+                                expr,
+                                gv,
+                                *index as usize,
+                            );
+                        }
+                        Err(LowerError::UnsupportedExpression(String::from(
+                            "AccessIndex: struct rvalue LocalVariable not supported",
+                        )))
+                    }
+                    Expression::FunctionArgument(arg_i) => {
+                        let arg_ty = ctx
+                            .func
+                            .arguments
+                            .get(*arg_i as usize)
+                            .ok_or_else(|| {
+                                LowerError::Internal(String::from("bad argument index"))
+                            })?
+                            .ty;
+                        let layout = crate::naga_util::aggregate_layout(ctx.module, arg_ty)?
+                            .ok_or_else(|| {
+                                LowerError::Internal(String::from("struct member load: layout"))
+                            })?;
+                        let members = layout.struct_members().ok_or_else(|| {
+                            LowerError::Internal(String::from("struct member load: members"))
+                        })?;
+                        let midx = *index as usize;
+                        let m = members.get(midx).ok_or_else(|| {
+                            LowerError::UnsupportedExpression(String::from(
+                                "struct member index out of range",
+                            ))
+                        })?;
+                        let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                        let ir_tys =
+                            crate::lower_ctx::naga_type_to_ir_types(ctx.module, naga_inner)?;
+                        let base_ptr = ctx.arg_vregs_for(*arg_i)?[0];
+                        let mut out = VRegVec::new();
+                        for (j, ty) in ir_tys.iter().enumerate() {
+                            let dst = ctx.fb.alloc_vreg(*ty);
+                            ctx.fb.push(LpirOp::Load {
+                                dst,
+                                base: base_ptr,
+                                offset: m.byte_offset + (j as u32) * 4,
+                            });
+                            out.push(dst);
+                        }
+                        Ok(out)
+                    }
+                    Expression::Load { pointer } => {
+                        let root = peel_load_chain(ctx.func, *pointer);
+                        match &ctx.func.expressions[root] {
+                            Expression::LocalVariable(lv) => {
+                                if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                                    if matches!(
+                                        &info.layout.kind,
+                                        crate::naga_util::AggregateKind::Struct { .. }
+                                    ) {
+                                        return crate::lower_struct::load_struct_member_to_vregs(
+                                            ctx,
+                                            &info,
+                                            *index as usize,
+                                        );
+                                    }
+                                }
+                                if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
+                                    return access_index_uniform_global_struct_member(
+                                        ctx,
+                                        expr,
+                                        gv,
+                                        *index as usize,
+                                    );
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: struct value behind Load is not a slot-backed struct local",
+                                )))
+                            }
+                            Expression::FunctionArgument(arg_i)
+                                if ctx.pointer_args.contains_key(arg_i) =>
+                            {
+                                let pointee = ctx.pointer_args[arg_i];
+                                if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
+                                    let layout =
+                                        crate::naga_util::aggregate_layout(ctx.module, pointee)?
+                                            .ok_or_else(|| {
+                                                LowerError::Internal(String::from(
+                                                    "struct member load: layout",
+                                                ))
+                                            })?;
+                                    let members = layout.struct_members().ok_or_else(|| {
+                                        LowerError::Internal(String::from("struct load members"))
+                                    })?;
+                                    let midx = *index as usize;
+                                    let m = members.get(midx).ok_or_else(|| {
+                                        LowerError::UnsupportedExpression(String::from(
+                                            "struct member index out of range",
+                                        ))
+                                    })?;
+                                    let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                                    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
+                                        ctx.module, naga_inner,
+                                    )?;
+                                    let base_ptr = ctx.arg_vregs_for(*arg_i)?[0];
+                                    let mut out = VRegVec::new();
+                                    for (j, ty) in ir_tys.iter().enumerate() {
+                                        let dst = ctx.fb.alloc_vreg(*ty);
+                                        ctx.fb.push(LpirOp::Load {
+                                            dst,
+                                            base: base_ptr,
+                                            offset: m.byte_offset + (j as u32) * 4,
+                                        });
+                                        out.push(dst);
+                                    }
+                                    Ok(out)
+                                } else {
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: inout param is not pointer-to-struct",
+                                    )))
+                                }
+                            }
+                            Expression::GlobalVariable(gv_handle) => {
+                                access_index_uniform_global_struct_member(
+                                    ctx,
+                                    expr,
+                                    *gv_handle,
+                                    *index as usize,
+                                )
+                            }
+                            Expression::AccessIndex { .. } => {
+                                if let Some((gv, mut chain)) =
+                                    crate::lower_struct::peel_struct_access_index_chain_to_global(
+                                        ctx.func, root,
+                                    )
+                                {
+                                    chain.push(*index);
+                                    return uniform_global_access_index_path(ctx, expr, gv, &chain);
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: struct value behind Load: uniform chain peel failed",
+                                )))
+                            }
+                            Expression::Access { .. } => {
+                                let _ = lower_expr_vec(ctx, root)?;
+                                if let Some(UniformVmctxDeferred::ElementAddr {
+                                    addr_vreg,
+                                    element,
+                                }) = ctx.uniform_vmctx_deferred.get(&root.index()).cloned()
+                                {
+                                    let LpsType::Struct { members, .. } = element else {
+                                        return Err(LowerError::Internal(String::from(
+                                            "Load uniform element: expected struct",
+                                        )));
+                                    };
+                                    let midx = *index as usize;
+                                    let m = members.get(midx).ok_or_else(|| {
+                                        LowerError::UnsupportedExpression(String::from(
+                                            "struct member index out of range",
+                                        ))
+                                    })?;
+                                    let rel = struct_member_start_offset_u32(
+                                        &members,
+                                        midx,
+                                        LayoutRules::Std430,
+                                    )?;
+                                    return load_lps_value_from_vmctx_with_base(
+                                        ctx, addr_vreg, rel, &m.ty,
+                                    );
+                                }
+                                Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: struct value behind Load: Access base has no uniform element addr",
+                                )))
+                            }
+                            _ => Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: struct value behind Load is not a slot-backed struct local",
+                            ))),
+                        }
+                    }
+                    Expression::CallResult(_) => {
+                        let info =
+                            ctx.call_result_aggregates
+                                .get(base)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    LowerError::Internal(String::from(
+                                        "AccessIndex: struct CallResult without aggregate slot",
+                                    ))
+                                })?;
+                        if !matches!(
+                            &info.layout.kind,
+                            crate::naga_util::AggregateKind::Struct { .. }
+                        ) {
+                            return Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: expected struct aggregate call result",
+                            )));
+                        }
+                        crate::lower_struct::load_struct_member_to_vregs(
+                            ctx,
+                            &info,
+                            *index as usize,
+                        )
+                    }
+                    Expression::Access { .. } => {
+                        if let Some(UniformVmctxDeferred::ElementAddr { addr_vreg, element }) =
+                            ctx.uniform_vmctx_deferred.get(&base.index()).cloned()
+                        {
+                            let LpsType::Struct { members, .. } = element else {
+                                return Err(LowerError::Internal(String::from(
+                                    "AccessIndex: uniform array element is not a struct",
+                                )));
+                            };
+                            let midx = *index as usize;
+                            let m = members.get(midx).ok_or_else(|| {
+                                LowerError::UnsupportedExpression(String::from(
+                                    "struct member index out of range",
+                                ))
+                            })?;
+                            let rel = struct_member_start_offset_u32(
+                                &members,
+                                midx,
+                                LayoutRules::Std430,
+                            )?;
+                            return load_lps_value_from_vmctx_with_base(ctx, addr_vreg, rel, &m.ty);
+                        }
+                        Err(LowerError::UnsupportedExpression(String::from(
+                            "AccessIndex: struct rvalue base not supported",
+                        )))
+                    }
+                    _ => Err(LowerError::UnsupportedExpression(String::from(
+                        "AccessIndex: struct rvalue base not supported",
+                    ))),
+                },
                 // Naga types locals as `Pointer` to value type; `v.x` is `AccessIndex` on that pointer.
                 TypeInner::Pointer { base: ty_h, .. } => {
                     let inner = &ctx.module.types[ty_h].inner;
@@ -262,39 +579,201 @@ fn lower_expr_vec_uncached(
                             let start = (*index as usize) * n;
                             Ok(m[start..start + n].into())
                         }
-                        TypeInner::Struct { .. } => match &ctx.func.expressions[*base] {
-                            Expression::GlobalVariable(gv_handle) => {
-                                let (byte_offset, member_ty) = {
-                                    let Some(info) = ctx.global_map.get(gv_handle) else {
-                                        return Err(LowerError::Internal(format!(
-                                            "GlobalVariable {gv_handle:?} not found in global_map"
-                                        )));
-                                    };
-                                    let LpsType::Struct { members, .. } = &info.ty else {
-                                        return Err(LowerError::Internal(String::from(
-                                            "AccessIndex: uniform global is not a struct",
-                                        )));
-                                    };
-                                    let idx = *index as usize;
-                                    let Some(m) = members.get(idx) else {
-                                        return Err(LowerError::UnsupportedExpression(format!(
-                                            "AccessIndex struct member index {idx} out of range (len {})",
-                                            members.len()
-                                        )));
-                                    };
-                                    let rel = struct_member_start_offset_u32(
-                                        members,
-                                        idx,
-                                        LayoutRules::Std430,
-                                    )?;
-                                    (info.byte_offset.wrapping_add(rel), m.ty.clone())
+                        TypeInner::Array {
+                            base: _elem_ty_h,
+                            size,
+                            ..
+                        } => {
+                            let field_source = match &ctx.func.expressions[*base] {
+                                Expression::Load { pointer } => peel_load_chain(ctx.func, *pointer),
+                                _ => *base,
+                            };
+                            if let Some(UniformVmctxDeferred::ArrayField {
+                                base_offset,
+                                element,
+                                stride,
+                                len,
+                            }) = ctx
+                                .uniform_vmctx_deferred
+                                .get(&field_source.index())
+                                .cloned()
+                            {
+                                let n = match size {
+                                    ArraySize::Constant(nz) => nz.get(),
+                                    ArraySize::Pending(_) | ArraySize::Dynamic => {
+                                        return Err(LowerError::UnsupportedExpression(
+                                            String::from(
+                                                "AccessIndex on dynamically-sized array pointer",
+                                            ),
+                                        ));
+                                    }
                                 };
-                                load_lps_value_from_vmctx(ctx, byte_offset, &member_ty)
+                                if n == 0 {
+                                    return Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex on zero-sized array pointer",
+                                    )));
+                                }
+                                let i =
+                                    (*index).min(n.saturating_sub(1)).min(len.saturating_sub(1));
+                                let off = base_offset.wrapping_add(i.saturating_mul(stride));
+                                return load_lps_value_from_vmctx(ctx, off, &element);
                             }
-                            _ => Err(LowerError::UnsupportedExpression(String::from(
-                                "AccessIndex: pointer to struct must be a uniform GlobalVariable",
-                            ))),
-                        },
+                            if let Expression::GlobalVariable(gv_handle) =
+                                &ctx.func.expressions[field_source]
+                            {
+                                if let Some(info) = ctx.global_map.get(gv_handle).cloned() {
+                                    if let LpsType::Array { element, len } = info.ty {
+                                        let n = match size {
+                                            ArraySize::Constant(nz) => nz.get(),
+                                            ArraySize::Pending(_) | ArraySize::Dynamic => {
+                                                return Err(LowerError::UnsupportedExpression(
+                                                    String::from(
+                                                        "AccessIndex on dynamically-sized array pointer",
+                                                    ),
+                                                ));
+                                            }
+                                        };
+                                        if n == 0 {
+                                            return Err(LowerError::UnsupportedExpression(
+                                                String::from(
+                                                    "AccessIndex on zero-sized array pointer",
+                                                ),
+                                            ));
+                                        }
+                                        let i = (*index)
+                                            .min(n.saturating_sub(1))
+                                            .min(len.saturating_sub(1));
+                                        let stride =
+                                            array_stride(&element, LayoutRules::Std430) as u32;
+                                        let off =
+                                            info.byte_offset.wrapping_add(i.saturating_mul(stride));
+                                        return load_lps_value_from_vmctx(ctx, off, &element);
+                                    }
+                                }
+                            }
+                            Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: pointer-to-array base is not a deferred uniform field",
+                            )))
+                        }
+                        TypeInner::Struct { .. } => {
+                            let base_root = peel_load_chain(ctx.func, *base);
+                            match &ctx.func.expressions[base_root] {
+                                Expression::GlobalVariable(gv_handle) => {
+                                    access_index_uniform_global_struct_member(
+                                        ctx,
+                                        expr,
+                                        *gv_handle,
+                                        *index as usize,
+                                    )
+                                }
+                                Expression::LocalVariable(lv) => {
+                                    if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                                        if matches!(
+                                            &info.layout.kind,
+                                            crate::naga_util::AggregateKind::Struct { .. }
+                                        ) {
+                                            return crate::lower_struct::load_struct_member_to_vregs(
+                                            ctx,
+                                            &info,
+                                            *index as usize,
+                                        );
+                                        }
+                                    }
+                                    if let Some(&gv) = ctx.uniform_instance_locals.get(lv) {
+                                        return access_index_uniform_global_struct_member(
+                                            ctx,
+                                            expr,
+                                            gv,
+                                            *index as usize,
+                                        );
+                                    }
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: pointer to struct must be a slot-backed struct local",
+                                    )))
+                                }
+                                Expression::FunctionArgument(arg_i)
+                                    if ctx.pointer_args.contains_key(arg_i) =>
+                                {
+                                    let pointee = ctx.pointer_args[arg_i];
+                                    if let TypeInner::Struct { .. } =
+                                        &ctx.module.types[pointee].inner
+                                    {
+                                        let layout = crate::naga_util::aggregate_layout(
+                                            ctx.module, pointee,
+                                        )?
+                                        .ok_or_else(|| {
+                                            LowerError::Internal(String::from(
+                                                "struct member load: layout",
+                                            ))
+                                        })?;
+                                        let members = layout.struct_members().ok_or_else(|| {
+                                            LowerError::Internal(String::from(
+                                                "struct load members",
+                                            ))
+                                        })?;
+                                        let midx = *index as usize;
+                                        let m = members.get(midx).ok_or_else(|| {
+                                            LowerError::UnsupportedExpression(String::from(
+                                                "struct member index out of range",
+                                            ))
+                                        })?;
+                                        let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                                        let ir_tys = crate::lower_ctx::naga_type_to_ir_types(
+                                            ctx.module, naga_inner,
+                                        )?;
+                                        let base = ctx.arg_vregs_for(*arg_i)?[0];
+                                        let mut out = VRegVec::new();
+                                        for (j, ty) in ir_tys.iter().enumerate() {
+                                            let dst = ctx.fb.alloc_vreg(*ty);
+                                            ctx.fb.push(LpirOp::Load {
+                                                dst,
+                                                base,
+                                                offset: m.byte_offset + (j as u32) * 4,
+                                            });
+                                            out.push(dst);
+                                        }
+                                        return Ok(out);
+                                    }
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: pointer to struct inout",
+                                    )))
+                                }
+                                Expression::Access { .. } => {
+                                    if let Some(UniformVmctxDeferred::ElementAddr {
+                                        addr_vreg,
+                                        element,
+                                    }) =
+                                        ctx.uniform_vmctx_deferred.get(&base_root.index()).cloned()
+                                    {
+                                        let LpsType::Struct { members, .. } = element else {
+                                            return Err(LowerError::Internal(String::from(
+                                                "AccessIndex: ptr uniform element: expected struct",
+                                            )));
+                                        };
+                                        let midx = *index as usize;
+                                        let m = members.get(midx).ok_or_else(|| {
+                                            LowerError::UnsupportedExpression(String::from(
+                                                "struct member index out of range",
+                                            ))
+                                        })?;
+                                        let rel = struct_member_start_offset_u32(
+                                            &members,
+                                            midx,
+                                            LayoutRules::Std430,
+                                        )?;
+                                        return load_lps_value_from_vmctx_with_base(
+                                            ctx, addr_vreg, rel, &m.ty,
+                                        );
+                                    }
+                                    Err(LowerError::UnsupportedExpression(String::from(
+                                        "AccessIndex: pointer to struct: unsupported base",
+                                    )))
+                                }
+                                _ => Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: pointer to struct: unsupported base",
+                                ))),
+                            }
+                        }
                         _ => Err(LowerError::UnsupportedExpression(format!(
                             "AccessIndex on pointer to {inner:?}"
                         ))),
@@ -319,6 +798,37 @@ fn lower_expr_vec_uncached(
                     size,
                     ..
                 } => {
+                    let field_source = match &ctx.func.expressions[*base] {
+                        Expression::Load { pointer } => peel_load_chain(ctx.func, *pointer),
+                        _ => *base,
+                    };
+                    if let Some(UniformVmctxDeferred::ArrayField {
+                        base_offset,
+                        element,
+                        stride,
+                        len,
+                    }) = ctx
+                        .uniform_vmctx_deferred
+                        .get(&field_source.index())
+                        .cloned()
+                    {
+                        let n = match size {
+                            ArraySize::Constant(nz) => nz.get(),
+                            ArraySize::Pending(_) | ArraySize::Dynamic => {
+                                return Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex on dynamically-sized array value",
+                                )));
+                            }
+                        };
+                        if n == 0 {
+                            return Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex on zero-sized array",
+                            )));
+                        }
+                        let i = (*index).min(n.saturating_sub(1)).min(len.saturating_sub(1));
+                        let off = base_offset.wrapping_add(i.saturating_mul(stride));
+                        return load_lps_value_from_vmctx(ctx, off, &element);
+                    }
                     let n = match size {
                         ArraySize::Constant(nz) => nz.get(),
                         ArraySize::Pending(_) | ArraySize::Dynamic => {
@@ -333,7 +843,8 @@ fn lower_expr_vec_uncached(
                         )));
                     }
                     let elem_inner = &ctx.module.types[elem_ty_h].inner;
-                    let elem_ir_count = crate::lower_ctx::naga_type_to_ir_types(elem_inner)?.len();
+                    let elem_ir_count =
+                        crate::lower_ctx::naga_type_to_ir_types(ctx.module, elem_inner)?.len();
                     let base_vs = lower_expr_vec(ctx, *base)?;
                     let total = (n as usize).checked_mul(elem_ir_count).ok_or_else(|| {
                         LowerError::Internal(String::from("AccessIndex array: vreg count overflow"))
@@ -366,7 +877,7 @@ fn lower_expr_vec_uncached(
                 if let Some((root, _)) =
                     crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
                 {
-                    if ctx.array_info_for_subscript_root(root)?.is_some() {
+                    if ctx.aggregate_info_for_subscript_root(root)?.is_some() {
                         return crate::lower_access::lower_access_expr_vec(ctx, expr);
                     }
                 }
@@ -375,9 +886,67 @@ fn lower_expr_vec_uncached(
                     if let Some((lv, _)) =
                         crate::lower_array_multidim::peel_access_chain(ctx.func, expr)
                     {
-                        if ctx.array_map.contains_key(&lv) {
+                        if ctx.aggregate_map.contains_key(&lv) {
                             return crate::lower_access::lower_access_expr_vec(ctx, expr);
                         }
+                    }
+                }
+                if is_mixed_chain {
+                    let field_source = match base_expr {
+                        Expression::Load { pointer } => peel_load_chain(ctx.func, *pointer),
+                        _ => *base,
+                    };
+                    // Install `ArrayField` defers (etc.) on `field_source` before lookup — `Access` may be
+                    // lowered before the base `AccessIndex` is visited otherwise.
+                    let _ = lower_expr_vec(ctx, field_source)?;
+                    if let Some(UniformVmctxDeferred::ArrayField {
+                        base_offset: field_base,
+                        element,
+                        stride,
+                        ..
+                    }) = ctx
+                        .uniform_vmctx_deferred
+                        .get(&field_source.index())
+                        .cloned()
+                    {
+                        let Expression::Access { index, .. } = &ctx.func.expressions[expr] else {
+                            return Err(LowerError::Internal(String::from("Access shape")));
+                        };
+                        let index_v = ctx.ensure_expr(*index)?;
+                        let stride_i = i32::try_from(stride).map_err(|_| {
+                            LowerError::Internal(String::from("uniform array stride: ImulImm"))
+                        })?;
+                        let prod = ctx.fb.alloc_vreg(IrType::I32);
+                        ctx.fb.push(LpirOp::ImulImm {
+                            dst: prod,
+                            src: index_v,
+                            imm: stride_i,
+                        });
+                        let off_imm = i32::try_from(field_base).map_err(|_| {
+                            LowerError::Internal(String::from(
+                                "uniform array field offset: IaddImm",
+                            ))
+                        })?;
+                        let byte_off = ctx.fb.alloc_vreg(IrType::I32);
+                        ctx.fb.push(LpirOp::IaddImm {
+                            dst: byte_off,
+                            src: prod,
+                            imm: off_imm,
+                        });
+                        let addr = ctx.fb.alloc_vreg(IrType::Pointer);
+                        ctx.fb.push(LpirOp::Iadd {
+                            dst: addr,
+                            lhs: VMCTX_VREG,
+                            rhs: byte_off,
+                        });
+                        ctx.uniform_vmctx_deferred.insert(
+                            expr.index(),
+                            UniformVmctxDeferred::ElementAddr {
+                                addr_vreg: addr,
+                                element: element.clone(),
+                            },
+                        );
+                        return Ok(VRegVec::new());
                     }
                 }
                 // Not an array - handle as matrix/vector dynamic index.
@@ -514,6 +1083,57 @@ fn lower_expr_vec_uncached(
         } => lower_math::lower_math_vec(ctx, *fun, *arg, *arg1, *arg2, *arg3),
         Expression::Relational { fun, argument } => lower_relational(ctx, *fun, *argument),
         Expression::ArrayLength(array_h) => crate::lower_array::lower_array_length(ctx, *array_h),
+        Expression::ImageLoad {
+            image,
+            coordinate,
+            array_index,
+            sample,
+            level,
+        } => {
+            if sample.is_some() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "texelFetch: multisampled image loads are not supported",
+                )));
+            }
+            if array_index.is_some() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "texelFetch: layered/arrayed image loads are not supported",
+                )));
+            }
+            let Some(level_expr) = level else {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "imageLoad(storage) not supported",
+                )));
+            };
+            crate::lower_texture::lower_image_load_texel_fetch(
+                ctx,
+                *image,
+                *coordinate,
+                *level_expr,
+            )
+        }
+        Expression::ImageSample {
+            image,
+            sampler,
+            gather,
+            coordinate,
+            array_index,
+            offset,
+            level,
+            depth_ref,
+            clamp_to_edge,
+        } => crate::lower_texture::lower_image_sample_texture(
+            ctx,
+            *image,
+            *sampler,
+            *gather,
+            *coordinate,
+            *array_index,
+            *offset,
+            *level,
+            *depth_ref,
+            *clamp_to_edge,
+        ),
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
         ))),
@@ -754,7 +1374,7 @@ pub(crate) fn coerce_assignment_vregs(
 ) -> Result<VRegVec, LowerError> {
     let dst_tys: Vec<IrType> = match dst_ty_handle {
         Some(h) => crate::naga_util::ir_types_for_naga_type(ctx.module, h)?,
-        None => crate::lower_ctx::naga_type_to_ir_types(dst_ty_inner)?.to_vec(),
+        None => crate::lower_ctx::naga_type_to_ir_types(ctx.module, dst_ty_inner)?.to_vec(),
     };
     let dst_scalar_kind = match dst_ty_handle {
         Some(h) => type_handle_scalar_kind(ctx.module, h)?,
@@ -856,7 +1476,7 @@ fn snapshot_load_result_vregs(
     srcs: VRegVec,
 ) -> Result<VRegVec, LowerError> {
     let value_inner = expr_type_inner(ctx.module, ctx.func, load_expr)?;
-    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(&value_inner)?;
+    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(ctx.module, &value_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::Internal(format!(
             "Load snapshot: {} vregs vs {} types for {:?}",
@@ -872,6 +1492,209 @@ fn snapshot_load_result_vregs(
         out.push(dst);
     }
     Ok(out)
+}
+
+fn peel_load_chain(func: &naga::Function, mut h: Handle<Expression>) -> Handle<Expression> {
+    while let Expression::Load { pointer } = &func.expressions[h] {
+        h = *pointer;
+    }
+    h
+}
+
+/// True when `indices` (from [`peel_struct_access_index_chain_to_global`]) selects a struct member
+/// of array type and does not include a const element index — must use deferred uniform array path.
+fn global_peel_chain_ends_at_array_field(
+    module: &naga::Module,
+    gv: Handle<GlobalVariable>,
+    indices: &[u32],
+) -> Result<bool, LowerError> {
+    if indices.is_empty() {
+        return Ok(false);
+    }
+    let mut naga_ty = module.global_variables[gv].ty;
+    if let TypeInner::Pointer { base: inner, .. } = &module.types[naga_ty].inner {
+        naga_ty = *inner;
+    }
+    if !matches!(&module.types[naga_ty].inner, TypeInner::Struct { .. }) {
+        return Ok(false);
+    }
+    let mut i = 0usize;
+    while i < indices.len() {
+        let layout = crate::naga_util::aggregate_layout(module, naga_ty)?
+            .ok_or_else(|| LowerError::Internal(String::from("ends_at_array: layout")))?;
+        let members = layout
+            .struct_members()
+            .ok_or_else(|| LowerError::Internal(String::from("ends_at_array: members")))?;
+        let midx = indices[i] as usize;
+        let m = members.get(midx).ok_or_else(|| {
+            LowerError::UnsupportedExpression(String::from("ends_at_array: member OOB"))
+        })?;
+        i += 1;
+        let mem_inner = &module.types[m.naga_ty].inner;
+        match mem_inner {
+            TypeInner::Array { .. } => return Ok(i == indices.len()),
+            TypeInner::Struct { .. } => {
+                naga_ty = m.naga_ty;
+            }
+            _ => return Ok(false),
+        }
+    }
+    Ok(false)
+}
+
+/// Walk `indices` from `gv` (struct member / const array element indices as Naga [`AccessIndex`] chains).
+/// Defers when the final step selects an **array-typed struct member** (uniform array field).
+fn uniform_global_access_index_path(
+    ctx: &mut LowerCtx<'_>,
+    access_index_expr: Handle<Expression>,
+    gv: Handle<GlobalVariable>,
+    indices: &[u32],
+) -> Result<VRegVec, LowerError> {
+    if indices.is_empty() {
+        return Err(LowerError::Internal(String::from(
+            "uniform_global_access_index_path: empty path",
+        )));
+    }
+    let ginfo = ctx.global_map.get(&gv).cloned().ok_or_else(|| {
+        LowerError::Internal(format!(
+            "GlobalVariable {gv:?} not found in global_map (path load)",
+        ))
+    })?;
+    let gv_rec = &ctx.module.global_variables[gv];
+    let mut naga_ty = gv_rec.ty;
+    if let TypeInner::Pointer { base: inner, .. } = &ctx.module.types[naga_ty].inner {
+        naga_ty = *inner;
+    }
+    if !matches!(&ctx.module.types[naga_ty].inner, TypeInner::Struct { .. }) {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "uniform path: root not a struct",
+        )));
+    }
+    let mut off = ginfo.byte_offset;
+    let mut i = 0usize;
+    while i < indices.len() {
+        let layout = crate::naga_util::aggregate_layout(ctx.module, naga_ty)?
+            .ok_or_else(|| LowerError::Internal(String::from("uniform path: layout")))?;
+        let members = layout
+            .struct_members()
+            .ok_or_else(|| LowerError::Internal(String::from("uniform path: members")))?;
+        let midx = indices[i] as usize;
+        let m = members.get(midx).ok_or_else(|| {
+            LowerError::UnsupportedExpression(String::from("uniform path: member OOB"))
+        })?;
+        off = off
+            .checked_add(m.byte_offset)
+            .ok_or_else(|| LowerError::Internal(String::from("uniform path: offset")))?;
+        i += 1;
+        let mem_inner = &ctx.module.types[m.naga_ty].inner;
+        match mem_inner {
+            TypeInner::Array {
+                base: elem_ty_h,
+                size,
+                ..
+            } => {
+                let n = match size {
+                    ArraySize::Constant(nz) => nz.get(),
+                    ArraySize::Pending(_) | ArraySize::Dynamic => {
+                        return Err(LowerError::UnsupportedExpression(String::from(
+                            "uniform path: dynamic outer array in chain",
+                        )));
+                    }
+                };
+                if i >= indices.len() {
+                    let lps_arr =
+                        crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, m.naga_ty)?;
+                    if let LpsType::Array { element, len } = &lps_arr {
+                        let stride = array_stride(element.as_ref(), LayoutRules::Std430) as u32;
+                        ctx.uniform_vmctx_deferred.insert(
+                            access_index_expr.index(),
+                            UniformVmctxDeferred::ArrayField {
+                                base_offset: off,
+                                element: (*element.as_ref()).clone(),
+                                stride,
+                                len: *len,
+                            },
+                        );
+                        return Ok(VRegVec::new());
+                    }
+                    return Err(LowerError::Internal(String::from(
+                        "uniform path: array member without index and not LpsType::Array",
+                    )));
+                }
+                let elem_idx = indices[i];
+                i += 1;
+                let elem_idx = elem_idx.min(n.saturating_sub(1));
+                let lps_elem =
+                    crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, *elem_ty_h)?;
+                let stride = array_stride(&lps_elem, LayoutRules::Std430) as u32;
+                off = off.wrapping_add(elem_idx.saturating_mul(stride));
+                naga_ty = *elem_ty_h;
+            }
+            TypeInner::Struct { .. } => {
+                naga_ty = m.naga_ty;
+                if i >= indices.len() {
+                    let lps = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, naga_ty)?;
+                    return load_lps_value_from_vmctx(ctx, off, &lps);
+                }
+            }
+            _ => {
+                if i != indices.len() {
+                    return Err(LowerError::Internal(String::from(
+                        "uniform path: tail indices on non-aggregate",
+                    )));
+                }
+                let lps = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, m.naga_ty)?;
+                return load_lps_value_from_vmctx(ctx, off, &lps);
+            }
+        }
+    }
+    Err(LowerError::Internal(String::from(
+        "uniform_global_access_index_path: fallthrough",
+    )))
+}
+
+/// `AccessIndex` on a uniform struct-typed [`GlobalVariable`] (member may be a deferred array field).
+fn access_index_uniform_global_struct_member(
+    ctx: &mut LowerCtx<'_>,
+    access_index_expr: Handle<Expression>,
+    gv_handle: Handle<GlobalVariable>,
+    member_index: usize,
+) -> Result<VRegVec, LowerError> {
+    let (byte_offset, member_ty) = {
+        let Some(info) = ctx.global_map.get(&gv_handle) else {
+            return Err(LowerError::Internal(format!(
+                "GlobalVariable {gv_handle:?} not found in global_map"
+            )));
+        };
+        let LpsType::Struct { members, .. } = &info.ty else {
+            return Err(LowerError::Internal(String::from(
+                "AccessIndex: uniform global is not a struct",
+            )));
+        };
+        let Some(m) = members.get(member_index) else {
+            return Err(LowerError::UnsupportedExpression(format!(
+                "AccessIndex struct member index {member_index} out of range (len {})",
+                members.len()
+            )));
+        };
+        let rel = struct_member_start_offset_u32(members, member_index, LayoutRules::Std430)?;
+        (info.byte_offset.wrapping_add(rel), m.ty.clone())
+    };
+    if let LpsType::Array { element, len } = &member_ty {
+        let rules = LayoutRules::Std430;
+        let stride = array_stride(element.as_ref(), rules) as u32;
+        ctx.uniform_vmctx_deferred.insert(
+            access_index_expr.index(),
+            UniformVmctxDeferred::ArrayField {
+                base_offset: byte_offset,
+                element: (*element.as_ref()).clone(),
+                stride,
+                len: *len,
+            },
+        );
+        return Ok(VRegVec::new());
+    }
+    load_lps_value_from_vmctx(ctx, byte_offset, &member_ty)
 }
 
 fn round_up_u32_vmctx(size: u32, alignment: u32) -> u32 {
@@ -903,9 +1726,37 @@ fn struct_member_start_offset_u32(
     )))
 }
 
+/// Stub value for parse-synthesized `__lp_samp_*` globals (no VMContext slot; lowering ignores it
+/// for `texture()` except when Naga still references the handle).
+fn load_lp_synthetic_naga_sampler_stub(
+    ctx: &mut LowerCtx<'_>,
+    ty: &LpsType,
+) -> Result<VRegVec, LowerError> {
+    match ty {
+        LpsType::UInt | LpsType::Int | LpsType::Bool => {
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 { dst, value: 0 });
+            Ok(smallvec::smallvec![dst])
+        }
+        _ => Err(LowerError::Internal(format!(
+            "synthetic Naga sampler global: unexpected LPS type {ty:?}"
+        ))),
+    }
+}
+
 /// Load a value of `ty` from VMContext at `base_byte_offset` using std430 member layout.
 fn load_lps_value_from_vmctx(
     ctx: &mut LowerCtx<'_>,
+    base_byte_offset: u32,
+    ty: &LpsType,
+) -> Result<VRegVec, LowerError> {
+    load_lps_value_from_vmctx_with_base(ctx, VMCTX_VREG, base_byte_offset, ty)
+}
+
+/// Like [`load_lps_value_from_vmctx`], but loads from `base` + `base_byte_offset` (e.g. dynamic VMContext address).
+pub(crate) fn load_lps_value_from_vmctx_with_base(
+    ctx: &mut LowerCtx<'_>,
+    base: VReg,
     base_byte_offset: u32,
     ty: &LpsType,
 ) -> Result<VRegVec, LowerError> {
@@ -915,7 +1766,7 @@ fn load_lps_value_from_vmctx(
             let dst = ctx.fb.alloc_vreg(IrType::F32);
             ctx.fb.push(LpirOp::Load {
                 dst,
-                base: VMCTX_VREG,
+                base,
                 offset: base_byte_offset,
             });
             Ok(smallvec::smallvec![dst])
@@ -924,7 +1775,7 @@ fn load_lps_value_from_vmctx(
             let dst = ctx.fb.alloc_vreg(IrType::I32);
             ctx.fb.push(LpirOp::Load {
                 dst,
-                base: VMCTX_VREG,
+                base,
                 offset: base_byte_offset,
             });
             Ok(smallvec::smallvec![dst])
@@ -938,7 +1789,7 @@ fn load_lps_value_from_vmctx(
                 let dst = ctx.fb.alloc_vreg(IrType::F32);
                 ctx.fb.push(LpirOp::Load {
                     dst,
-                    base: VMCTX_VREG,
+                    base,
                     offset: base_byte_offset.wrapping_add(i * 4),
                 });
                 out.push(dst);
@@ -962,7 +1813,20 @@ fn load_lps_value_from_vmctx(
                 let dst = ctx.fb.alloc_vreg(IrType::I32);
                 ctx.fb.push(LpirOp::Load {
                     dst,
-                    base: VMCTX_VREG,
+                    base,
+                    offset: base_byte_offset.wrapping_add(i * 4),
+                });
+                out.push(dst);
+            }
+            Ok(out)
+        }
+        LpsType::Texture2D => {
+            let mut out = VRegVec::new();
+            for i in 0..4 {
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Load {
+                    dst,
+                    base,
                     offset: base_byte_offset.wrapping_add(i * 4),
                 });
                 out.push(dst);
@@ -981,8 +1845,9 @@ fn load_lps_value_from_vmctx(
             for _ in 0..cols {
                 let align = type_alignment(&col_ty, rules) as u32;
                 col_off = round_up_u32_vmctx(col_off, align);
-                out.extend(load_lps_value_from_vmctx(
+                out.extend(load_lps_value_from_vmctx_with_base(
                     ctx,
+                    base,
                     base_byte_offset.wrapping_add(col_off),
                     &col_ty,
                 )?);
@@ -996,8 +1861,9 @@ fn load_lps_value_from_vmctx(
             for m in members {
                 let align = type_alignment(&m.ty, rules) as u32;
                 member_off = round_up_u32_vmctx(member_off, align);
-                out.extend(load_lps_value_from_vmctx(
+                out.extend(load_lps_value_from_vmctx_with_base(
                     ctx,
+                    base,
                     base_byte_offset.wrapping_add(member_off),
                     &m.ty,
                 )?);
@@ -1010,8 +1876,9 @@ fn load_lps_value_from_vmctx(
             let stride = array_stride(element, rules) as u32;
             for i in 0..*len {
                 let off = i.saturating_mul(stride);
-                out.extend(load_lps_value_from_vmctx(
+                out.extend(load_lps_value_from_vmctx_with_base(
                     ctx,
+                    base,
                     base_byte_offset.wrapping_add(off),
                     element,
                 )?);

@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, FuncId, ImportId, IrType, VReg, VRegRange};
 
-/// VReg that holds the VMContext pointer for the current function. Always [`VReg`] `(0)`;
-/// user parameters use [`VReg`] `(1..)` in [`IrFunction::vreg_types`].
+/// VReg that holds the VMContext pointer for the current function. Always [`VReg`] `(0)`.
+/// User parameters follow optional hidden slots (see [`IrFunction::user_param_vreg`]).
 pub const VMCTX_VREG: VReg = VReg(0);
 
 /// External function declaration (`import @module::name(...)`).
@@ -24,6 +24,13 @@ pub struct ImportDecl {
     /// When true, the native/WASM callee takes the VMContext pointer as its first argument
     /// (not represented in [`Self::param_types`]); lowering passes [`VMCTX_VREG`] first.
     pub needs_vmctx: bool,
+    /// When `true`, the *first* entry of `param_types` is a hidden
+    /// `IrType::Pointer` sret destination. Callers must allocate the
+    /// destination buffer and pass its address as the first arg
+    /// (immediately after vmctx if `needs_vmctx`); the callee writes
+    /// its return value into that buffer and the actual `return_types`
+    /// is empty.
+    pub sret: bool,
 }
 
 /// Stack slot in a function (`slot ssN, size`).
@@ -39,9 +46,13 @@ pub struct IrFunction {
     pub is_entry: bool,
     /// VReg holding the VMContext pointer; always [`VMCTX_VREG`].
     pub vmctx_vreg: VReg,
-    /// User-visible parameter count (excluding VMContext).
+    /// User-visible parameter count (excluding VMContext **and** sret).
     pub param_count: u16,
     pub return_types: Vec<IrType>,
+    /// When `Some(vreg)`, the function returns its aggregate value via
+    /// a hidden `IrType::Pointer` parameter at `vreg`. `vreg` lives at
+    /// `VReg(vmctx_vreg.0 + 1)`. `return_types` is empty in this case.
+    pub sret_arg: Option<VReg>,
     pub vreg_types: Vec<IrType>,
     pub slots: Vec<SlotDecl>,
     pub body: Vec<LpirOp>,
@@ -49,17 +60,23 @@ pub struct IrFunction {
 }
 
 impl IrFunction {
+    /// Number of hidden VRegs preceding user params (vmctx + optional sret).
+    #[inline]
+    pub fn hidden_param_slots(&self) -> u32 {
+        1 + self.sret_arg.is_some() as u32
+    }
+
     /// VReg for user parameter `user_index` (`0` = first GLSL parameter).
     #[inline]
     pub fn user_param_vreg(&self, user_index: u16) -> VReg {
         debug_assert!(user_index < self.param_count);
-        VReg(self.vmctx_vreg.0 + 1 + user_index as u32)
+        VReg(self.vmctx_vreg.0 + self.hidden_param_slots() + u32::from(user_index))
     }
 
-    /// Total parameter slots including VMContext (`1 + param_count`).
+    /// Total parameter slots including VMContext **and** sret (`hidden + param_count`).
     #[inline]
     pub fn total_param_slots(&self) -> u16 {
-        1u16.saturating_add(self.param_count)
+        (self.hidden_param_slots() as u16).saturating_add(self.param_count)
     }
 
     /// Slice of [`Self::vreg_pool`] described by `range`.

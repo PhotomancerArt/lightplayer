@@ -118,20 +118,18 @@ fn contains_call(vinsts: &[VInst]) -> bool {
 
 /// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
 pub fn max_outgoing_stack_bytes(vinsts: &[VInst], func_abi: &FuncAbi) -> u32 {
-    let arg_regs = func_abi.arg_regs();
     let mut max_bytes = 0u32;
     for inst in vinsts {
         if let VInst::Call {
             args,
             callee_uses_sret,
+            caller_passes_sret_ptr,
             ..
         } = inst
         {
-            let cap = if *callee_uses_sret {
-                arg_regs.len() - 1
-            } else {
-                arg_regs.len()
-            };
+            let cap = func_abi
+                .isa()
+                .lpir_call_stack_args_start(*callee_uses_sret, *caller_passes_sret_ptr);
             let n = args.len();
             if n > cap {
                 let stack_words = (n - cap) as u32;
@@ -173,7 +171,7 @@ mod tests {
                 parameters: vec![],
                 kind: lps_shared::LpsFnKind::UserDefined,
             },
-            0,
+            None,
         );
 
         let result = emit_lowered(&lowered, &abi);

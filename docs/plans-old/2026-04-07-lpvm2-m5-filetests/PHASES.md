@@ -96,7 +96,7 @@ Single reference for the eight phases. Per-phase files: `01-phase-…md` through
 - Errors: append **`instance.debug_state()`** when `Some(_)`.
 - Map instance **`Error`** to `anyhow` / `GlslError` like today.
 
-**Validate:** `cargo test -p lps-filetests`; spot-check `./scripts/glsl-filetests.sh` with a filter.
+**Validate:** `cargo test -p lps-filetests`; spot-check `./scripts/filetests.sh` with a filter.
 
 ---
 
@@ -111,7 +111,7 @@ Single reference for the eight phases. Per-phase files: `01-phase-…md` through
 - Remove **`lps-exec`** from **`lps-filetests/Cargo.toml`** if unused.
 - Update **`test_run/mod.rs`**.
 
-**Validate:** `rg "lps_exec|GlslExecutable" lp-shader/lps-filetests`; `just test-filetests` (or full `glsl-filetests.sh`); `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server` if shader crates changed.
+**Validate:** `rg "lps_exec|GlslExecutable" lp-shader/lps-filetests`; `just test-filetests` (or full `filetests.sh`); `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server` if shader crates changed.
 
 ---
 
@@ -133,13 +133,13 @@ Single reference for the eight phases. Per-phase files: `01-phase-…md` through
 
 ## Phase order (checklist)
 
-| # | Deliverable |
-|---|-------------|
-| 1 | `LpvmInstance` + `call_q32` + `debug_state` defaults (`lpvm`) |
-| 2 | `CraneliftInstance` exact `call_q32` |
-| 3 | `EmuInstance` exact `call_q32` + `debug_state` |
-| 4 | WASM instances satisfy trait |
-| 5 | Filetests: engine + module per file |
-| 6 | `execution.rs`: `call` / `call_q32`, errors |
-| 7 | Remove `GlslExecutable` wrappers |
-| 8 | Cleanup, CI matrix, `summary.md`, `plans-done`, commit |
+| #   | Deliverable                                                   |
+| --- | ------------------------------------------------------------- |
+| 1   | `LpvmInstance` + `call_q32` + `debug_state` defaults (`lpvm`) |
+| 2   | `CraneliftInstance` exact `call_q32`                          |
+| 3   | `EmuInstance` exact `call_q32` + `debug_state`                |
+| 4   | WASM instances satisfy trait                                  |
+| 5   | Filetests: engine + module per file                           |
+| 6   | `execution.rs`: `call` / `call_q32`, errors                   |
+| 7   | Remove `GlslExecutable` wrappers                              |
+| 8   | Cleanup, CI matrix, `summary.md`, `plans-done`, commit        |

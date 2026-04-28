@@ -262,7 +262,7 @@ test-rust:
     cargo test
 
 test-filetests:
-    scripts/glsl-filetests.sh
+    scripts/filetests.sh
 
 # ============================================================================
 # Testing - lp-app only
@@ -279,9 +279,9 @@ test-glsl:
     cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 test-glsl-filetests:
-    scripts/glsl-filetests.sh
-    scripts/glsl-filetests.sh --target wasm.q32
-    scripts/glsl-filetests.sh --target rv32.q32c
+    scripts/filetests.sh
+    scripts/filetests.sh --target wasm.q32
+    scripts/filetests.sh --target rv32.q32c
 
 # ============================================================================
 # CI and validation

@@ -209,7 +209,7 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
    runs at end of loop body. `br` back to loop header.
 3. Implement while loops: same pattern as for without init/update.
 4. Implement do-while loops: `block { loop { body... condition...
-   br_if 0 (back to loop)... } }`.
+br_if 0 (back to loop)... } }`.
 5. Implement break (`br` to enclosing block) and continue (`br` to
    loop header).
 6. Validate: control flow tests passing.
@@ -233,10 +233,10 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
    allocate multiple WASM locals for vec2/3/4.
 2. Extend type mapping: vectors → multiple WASM values.
 3. Implement vector constructors:
-    - `vec2(x, y)`, `vec3(x, y, z)`, `vec4(x, y, z, w)` — push
-      each component.
-    - `vec3(scalar)` — replicate scalar to all components.
-    - `vec3(vec2, scalar)`, `vec4(vec3, scalar)`, etc. — mixed.
+   - `vec2(x, y)`, `vec3(x, y, z)`, `vec4(x, y, z, w)` — push
+     each component.
+   - `vec3(scalar)` — replicate scalar to all components.
+   - `vec3(vec2, scalar)`, `vec4(vec3, scalar)`, etc. — mixed.
 4. Implement component access (`.x`, `.y`, `.z`, `.w`) via
    `local.get(base + offset)`.
 5. Implement swizzle (`.xy`, `.rgb`, `.xyzw`, etc.) — emit multiple
@@ -308,26 +308,26 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
 4. Fix any warnings.
 5. Verify `just build-fw-esp32` still works.
 6. Update READMEs:
-    - `lp-shader/lps-wasm/README.md`: document supported features,
-      builtin import mechanism, vector representation.
-    - `lp-shader/lps-filetests/README.md`: update with current
-      wasm.q32 pass counts and annotation patterns.
-    - `lp-shader/README.md`: update crate table if needed.
+   - `lp-shader/lps-wasm/README.md`: document supported features,
+     builtin import mechanism, vector representation.
+   - `lp-shader/lps-filetests/README.md`: update with current
+     wasm.q32 pass counts and annotation patterns.
+   - `lp-shader/README.md`: update crate table if needed.
 
 ## Feature → filetest mapping (approximate)
 
 | Feature                    | Test directories unlocked           | Est. tests |
-|----------------------------|-------------------------------------|------------|
-| Assignment, int mul/div    | scalar/int/*, scalar/uint/*         | ~28        |
-| Q32 float mul/div          | scalar/float/*                      | ~13        |
-| Type constructors/coercion | scalar/*/from-*.glsl                | ~12        |
-| Logical ops, ternary       | scalar/bool/*, control/ternary/*    | ~29        |
-| If/else                    | control/if/*, control/if_else/*     | ~10        |
-| For/while/do-while         | control/for/*, control/while/*, etc | ~40        |
-| User function calls        | function/*                          | ~40        |
-| Vectors                    | vec/*, uvec*/*                      | ~200+      |
-| Builtins                   | builtins/*                          | ~63        |
-| Matrices                   | matrix/*                            | ~68        |
+| -------------------------- | ----------------------------------- | ---------- |
+| Assignment, int mul/div    | scalar/int/_, scalar/uint/_         | ~28        |
+| Q32 float mul/div          | scalar/float/\*                     | ~13        |
+| Type constructors/coercion | scalar/_/from-_.glsl                | ~12        |
+| Logical ops, ternary       | scalar/bool/_, control/ternary/_    | ~29        |
+| If/else                    | control/if/_, control/if_else/_     | ~10        |
+| For/while/do-while         | control/for/_, control/while/_, etc | ~40        |
+| User function calls        | function/\*                         | ~40        |
+| Vectors                    | vec/_, uvec_/\*                     | ~200+      |
+| Builtins                   | builtins/\*                         | ~63        |
+| Matrices                   | matrix/\*                           | ~68        |
 
 Note: matrices are NOT required for rainbow.shader and are out of scope
 for this plan. They can remain `@unimplemented(backend=wasm)`.
@@ -340,7 +340,7 @@ cargo test
 cargo build -p lps-wasm
 cargo test -p lps-wasm
 cargo test -p lps-filetests
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 cargo +nightly fmt --check
 just build-fw-esp32
 ```
@@ -358,7 +358,7 @@ codegen implementation. Risk areas:
   constructors are particularly fiddly.
 
 - **Builtin import ABI.** Vector-argument builtins (e.g. `clamp(vec3,
-  float, float)`) need careful ABI design. The Cranelift backend passes
+float, float)`) need careful ABI design. The Cranelift backend passes
   vectors as multiple scalar parameters (sret for return). The WASM
   backend must match whatever the builtins expect.
 

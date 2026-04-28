@@ -113,13 +113,13 @@ Per phase validation:
 
 ```bash
 # Phase 1
-scripts/glsl-filetests.sh array/phase/1-foundation.glsl
+scripts/filetests.sh array/phase/1-foundation.glsl
 
 # Phase 2
-scripts/glsl-filetests.sh array/phase/2-bounds-checking.glsl
+scripts/filetests.sh array/phase/2-bounds-checking.glsl
 
 # Phase 3
-scripts/glsl-filetests.sh array/phase/3-initialization.glsl
+scripts/filetests.sh array/phase/3-initialization.glsl
 
 # Full validation
 cargo test -p lps-filetests --test filetests -- jit.q32

@@ -426,6 +426,14 @@ pub enum VInst {
         args: VRegSlice,
         rets: VRegSlice,
         callee_uses_sret: bool,
+        /// When set with [`Self::Call::callee_uses_sret`], LPIR `Call.args` already includes
+        /// the callee's hidden sret pointer (`[vmctx, sret, …]`). When clear, the emitter synthesizes
+        /// `a0` from the caller stack slot (legacy many-scalar-return path).
+        caller_passes_sret_ptr: bool,
+        /// When `caller_passes_sret_ptr` is set: if true, RV32 assigns the first two args like
+        /// shader calls (`vmctx → a1`, `sret → a0`). If false (`@texture::*`-style `[sret, …]` with
+        /// no [`ImportDecl::needs_vmctx`]), arguments map sequentially from `a0`.
+        caller_sret_vm_abi_swap: bool,
         src_op: u16,
     },
     /// Return from function.
@@ -690,6 +698,8 @@ impl VInst {
                 args,
                 rets,
                 callee_uses_sret: _,
+                caller_passes_sret_ptr: _,
+                caller_sret_vm_abi_swap: _,
                 ..
             } => {
                 let name = symbols.name(*target);

@@ -76,7 +76,7 @@ fn parse_optional_code(s: &str) -> (Option<String>, &str) {
 }
 
 /// Extract content between `{{` and `}}`.
-fn extract_brace_content(s: &str) -> Option<String> {
+pub(crate) fn extract_brace_content(s: &str) -> Option<String> {
     let open = s.find("{{")?;
     let rest = &s[open + 2..];
     let close = rest.find("}}")?;

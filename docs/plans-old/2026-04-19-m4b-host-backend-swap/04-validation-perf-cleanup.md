@@ -143,7 +143,7 @@ a reasonable baseline; raise the count if a single run is too fast
 to be diagnostic.
 
 Capture: did the failure pattern reproduce? (Expected: no.) If it
-*does* reproduce, **stop and report** — that's a real bug in phase
+_does_ reproduce, **stop and report** — that's a real bug in phase
 1 or 2 that needs a fix, not a workaround.
 
 ### Step 3 — Host binary size
@@ -183,11 +183,11 @@ to `cfg(target_arch = …)`. See the plan dir for full context.
 
 ## Measurements
 
-| Metric                             | Pre-swap                 | Post-swap                 | Delta            |
-|------------------------------------|--------------------------|---------------------------|------------------|
-| `time cargo check -p lp-server`    | <captured baseline or "—"> | <captured>                 | <delta or "—">   |
-| `lp-cli` release binary size       | <captured or "—">         | <captured>                 | <delta or "—">   |
-| Cold cargo check (clean target)    | <captured or "—">         | <captured>                 | <delta or "—">   |
+| Metric                          | Pre-swap                   | Post-swap  | Delta          |
+| ------------------------------- | -------------------------- | ---------- | -------------- |
+| `time cargo check -p lp-server` | <captured baseline or "—"> | <captured> | <delta or "—"> |
+| `lp-cli` release binary size    | <captured or "—">          | <captured> | <delta or "—"> |
+| Cold cargo check (clean target) | <captured or "—">          | <captured> | <delta or "—"> |
 
 If a baseline could not be captured (no easy access to a pre-M4b
 worktree), say so explicitly per row instead of leaving blank.
@@ -233,7 +233,7 @@ Two edits:
    ```bash
    cargo test -p lp-engine --features wasmtime  # or whatever the new feature is
    cargo build --features wasmtime -p fw-emu
-   scripts/glsl-filetests.sh --concise            # no regressions
+   scripts/filetests.sh --concise            # no regressions
    ```
 
    These are obsolete — there is no `wasmtime` feature, and
@@ -258,7 +258,7 @@ Two edits:
    cargo check -p lp-engine --target wasm32-unknown-unknown
 
    # Filetests / CI gate
-   scripts/glsl-filetests.sh --concise
+   scripts/filetests.sh --concise
    just ci
    ```
 

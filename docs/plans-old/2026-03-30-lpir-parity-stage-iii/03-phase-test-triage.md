@@ -3,6 +3,7 @@
 ## Scope of phase
 
 Triage Naga-limited tests:
+
 1. Rewrite tests using non-standard GLSL syntax to use standard syntax
 2. Annotate valid GLSL that Naga can't parse with `@unimplemented(reason="Naga frontend limitation")`
 
@@ -17,6 +18,7 @@ Triage Naga-limited tests:
 ### Identify test files to triage
 
 From roadmap analysis, focus on:
+
 - `vec/bvec{2,3,4}/fn-mix.glsl` - Naga can't resolve `mix(bvec, bvec, bvec)` overload
 - `control/while/variable-scope.glsl` - check if non-standard syntax exists
 
@@ -49,11 +51,13 @@ If found, rewrite to standard syntax.
 ### Other files to check
 
 From parity audit:
+
 - `builtins/matrix-compmult.glsl` - `matrixCompMult` unknown function (Naga parse)
 - `builtins/common-isnan.glsl` / `common-isinf.glsl` - `Float literal is infinite` parse error
 - `control/while/variable-scope.glsl` - variable declaration in condition
 
 Apply decision tree:
+
 - Can it be rewritten to standard GLSL? -> Rewrite
 - Is it valid standard GLSL Naga can't handle? -> Annotate
 
@@ -64,15 +68,15 @@ Apply decision tree:
 cd /Users/yona/dev/photomancer/lp2025
 
 # Check fn-mix tests are properly annotated
-./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec2/fn-mix.glsl"
-./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec3/fn-mix.glsl"
-./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec4/fn-mix.glsl"
+./scripts/filetests.sh --target jit.q32 "vec/bvec2/fn-mix.glsl"
+./scripts/filetests.sh --target jit.q32 "vec/bvec3/fn-mix.glsl"
+./scripts/filetests.sh --target jit.q32 "vec/bvec4/fn-mix.glsl"
 
 # Check while/variable-scope after any rewrite
-./scripts/glsl-filetests.sh --target jit.q32 "control/while/variable-scope.glsl"
+./scripts/filetests.sh --target jit.q32 "control/while/variable-scope.glsl"
 
 # Verify suite still passes overall
-./scripts/glsl-filetests.sh --target jit.q32
+./scripts/filetests.sh --target jit.q32
 ```
 
 ## Notes

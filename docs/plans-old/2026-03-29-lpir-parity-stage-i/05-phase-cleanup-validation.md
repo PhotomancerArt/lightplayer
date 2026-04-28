@@ -25,7 +25,7 @@ TIER_A="builtins/common-isnan.glsl builtins/common-isinf.glsl \
   matrix/mat4/op-equal.glsl matrix/mat4/op-not-equal.glsl"
 for t in jit.q32 wasm.q32 rv32.q32; do
   echo "=== $t ==="
-  ./scripts/glsl-filetests.sh --target "$t" $TIER_A
+  ./scripts/filetests.sh --target "$t" $TIER_A
 done
 ```
 
@@ -34,9 +34,9 @@ Re-run **Tier B** paths (from [`summary.md`](./summary.md)) the same way.
 ### Full filetest matrix (regression)
 
 ```bash
-./scripts/glsl-filetests.sh --summary
-./scripts/glsl-filetests.sh --target wasm.q32 --summary
-./scripts/glsl-filetests.sh --target rv32.q32c --summary
+./scripts/filetests.sh --summary
+./scripts/filetests.sh --target wasm.q32 --summary
+./scripts/filetests.sh --target rv32.q32c --summary
 ```
 
 Or use `just test-filetests` if your workflow runs the three-target sweep.
@@ -45,7 +45,7 @@ Optional narrower regression (still **per target** if you use it):
 
 ```bash
 for t in jit.q32 wasm.q32 rv32.q32; do
-  ./scripts/glsl-filetests.sh --target "$t" "matrix/*op-*equal*" \
+  ./scripts/filetests.sh --target "$t" "matrix/*op-*equal*" \
     builtins/common-isnan.glsl builtins/common-isinf.glsl
 done
 ```

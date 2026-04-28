@@ -569,6 +569,15 @@ pub fn format_glsl_value(value: &LpsValueF32) -> String {
                 None => format!("struct({inner})"),
             }
         }
+        LpsValueF32::Texture2D(v) => format!(
+            "/* Texture2D ptr={} {}x{} stride={} fmt={:?} bytes={} */",
+            v.descriptor.ptr,
+            v.descriptor.width,
+            v.descriptor.height,
+            v.descriptor.row_stride,
+            v.format,
+            v.byte_len
+        ),
     }
 }
 
@@ -595,6 +604,7 @@ fn glsl_array_type_prefix(elem: Option<&LpsValueF32>) -> Option<&'static str> {
         LpsValueF32::Mat4x4(_) => "mat4",
         LpsValueF32::Array(_) => return None,
         LpsValueF32::Struct { .. } => return None,
+        LpsValueF32::Texture2D(_) => return None,
     })
 }
 

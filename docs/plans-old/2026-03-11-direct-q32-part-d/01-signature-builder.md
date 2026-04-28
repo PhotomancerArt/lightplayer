@@ -77,7 +77,7 @@ For Q32 mode: pass `types::I32` (or `numeric.scalar_type()`).
 
 ```bash
 cargo check -p lps-compiler --features std
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 Existing callers all pass `types::F32` — no behavioral change yet.

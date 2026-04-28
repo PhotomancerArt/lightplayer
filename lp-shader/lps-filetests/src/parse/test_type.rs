@@ -1,6 +1,47 @@
 //! Test type enum and related types.
 
 use crate::targets::Annotation;
+use lps_shared::TextureBindingSpec;
+use lps_shared::TextureStorageFormat;
+use std::collections::BTreeMap;
+
+/// File-level `// texture-spec:` map keyed by sampler uniform name.
+pub type TextureSpecs = BTreeMap<String, TextureBindingSpec>;
+/// Parsed `// texture-data:` blocks keyed by name.
+pub type TextureFixtures = BTreeMap<String, TextureFixture>;
+
+/// One loaded texture pixel fixture from a `// texture-data:` block.
+#[derive(Debug, Clone)]
+pub struct TextureFixture {
+    /// Sampler / binding name; must match a `// texture-spec:` and shader uniform.
+    pub name: String,
+    /// Width in texels.
+    pub width: u32,
+    /// Height in texels.
+    pub height: u32,
+    /// Storage format (must be consistent with the spec and pixel rows).
+    pub format: TextureStorageFormat,
+    /// Row-major pixel data.
+    pub pixels: Vec<TextureFixturePixel>,
+    /// Line number of the `// texture-data:` header.
+    pub line_number: usize,
+}
+
+/// Pixels in a 2D texture row (one or more per comment line, whitespace-separated).
+#[derive(Debug, Clone)]
+pub struct TextureFixturePixel {
+    /// One entry per format channel in order.
+    pub channels: Vec<TextureFixtureChannel>,
+}
+
+/// A single channel: normalized float in `[0, 1]`, or exact u16 unorm storage from hex.
+#[derive(Debug, Clone)]
+pub enum TextureFixtureChannel {
+    /// Normalized float; encoded later with canonical unorm conversion.
+    NormalizedFloat(f32),
+    /// Exact 16-bit unorm storage from a 4-hex-digit token.
+    ExactHex(u16),
+}
 
 /// Test type directive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +54,8 @@ pub enum TestType {
     Run,
     /// `test error` - expect compile error(s), match inline expectations
     Error,
+    /// `test parse-error` - expect [`crate::parse::parse_test_file`] to fail (directive / fixture parse)
+    ParseError,
 }
 
 /// CLIF expectations extracted from test file comments.
@@ -59,6 +102,9 @@ pub struct RunDirective {
     pub annotations: Vec<Annotation>,
     /// `// set_uniform:` lines immediately before this `// run:` (applied before execution).
     pub set_uniforms: Vec<SetUniform>,
+    /// `// EXPECT_SETUP_FAILURE: {{msg}}` lines before this `// run:`: fixture bind / encode must fail
+    /// with an error containing this substring before execution.
+    pub expected_setup_failure: Option<String>,
 }
 
 /// An error expectation parsed from `// expected-error {{...}}` and optional `// expected-error-code: E0xxx`.
@@ -99,4 +145,8 @@ pub struct TestFile {
     pub error_expectations: Vec<ErrorExpectation>,
     /// `// compile-opt(key, value)` lines merged into [`lpir::CompilerConfig`] before compilation.
     pub config_overrides: Vec<(String, String)>,
+    /// `// texture-spec:` lines (compile-time binding contract).
+    pub texture_specs: TextureSpecs,
+    /// `// texture-data:` blocks (runtime pixel fixtures).
+    pub texture_fixtures: TextureFixtures,
 }

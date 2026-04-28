@@ -93,6 +93,7 @@ pub fn parse_run_directive(
         line_number,
         annotations,
         set_uniforms: Vec::new(),
+        expected_setup_failure: None,
     })
 }
 

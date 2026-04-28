@@ -14,6 +14,28 @@
 
 extern crate alloc;
 
+/// `path:line: …` at the **macro invocation** site ([`core::file!`], [`core::line!`]).
+///
+/// Takes the same arguments as [`alloc::format!`] (literal only, or `"…{}"` plus values).
+///
+/// ```ignore
+/// CallError::Unsupported(traced_msg!("fixed message"));
+/// CallError::Unsupported(traced_msg!("need {}, got {}", need, got));
+/// ```
+///
+/// Prior art: `emit_err!` in `lpvm-native`, `log`'s `trace!`, many `internal_error!` macros.
+#[macro_export]
+macro_rules! traced_msg {
+    ($($arg:tt)*) => {{
+        $crate::alloc::format!(
+            "{}:{}: {}",
+            ::core::file!(),
+            ::core::line!(),
+            $crate::alloc::format!($($arg)*)
+        )
+    }};
+}
+
 mod buffer;
 mod data_error;
 mod debug;

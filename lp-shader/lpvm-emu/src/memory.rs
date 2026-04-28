@@ -38,6 +38,19 @@ impl EmuSharedArena {
         }
     }
 
+    /// Bump allocator over an existing backing store (same `Arc` as [`lp_riscv_emu::Memory::new_with_shared`]).
+    /// `bump_start` is the first byte offset available for allocation (leave room for vmctx / headers).
+    pub(crate) fn attach_shared_backing(
+        storage: Arc<std::sync::Mutex<Vec<u8>>>,
+        bump_start: usize,
+    ) -> Self {
+        Self {
+            storage,
+            next: Arc::new(AtomicUsize::new(bump_start)),
+            shared_start: DEFAULT_SHARED_START,
+        }
+    }
+
     /// Same backing storage as [`LpvmMemory`] allocations (for [`lp_riscv_emu::Memory::new_with_shared`]).
     pub fn storage_arc(&self) -> Arc<std::sync::Mutex<Vec<u8>>> {
         self.storage.clone()

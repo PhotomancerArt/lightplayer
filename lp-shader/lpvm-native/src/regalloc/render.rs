@@ -571,6 +571,7 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             args,
             rets,
             callee_uses_sret,
+            caller_passes_sret_ptr,
             ..
         } => {
             let name = symbols
@@ -602,6 +603,9 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             s.push_str(&name);
             if *callee_uses_sret {
                 s.push_str(" sret");
+                if *caller_passes_sret_ptr {
+                    s.push_str("-ptrargs");
+                }
             }
             s.push_str(" (");
             s.push_str(&args_s);

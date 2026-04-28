@@ -5,6 +5,7 @@
 //! - `glsl_q32_math_builtin_id`: `@glsl::*` scalar imports.
 //! - `lpir_q32_builtin_id`: `@lpir::*` library ops (e.g. `sqrt`).
 //! - `glsl_lpfn_q32_builtin_id`: `lpfn_*` overloads keyed by parameter types.
+//! - `texture_q32_builtin_id`: `@texture::*` sampler builtins (logical vec4 return via out-pointer).
 //!
 //! Regenerate: `cargo run -p lps-builtins-gen-app` or `scripts/build-builtins.sh`
 
@@ -95,6 +96,18 @@ pub fn lpir_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
 pub fn vm_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
     match (name, arg_count) {
         ("__lp_get_fuel", 0) => Some(BuiltinId::LpVmGetFuelQ32),
+        _ => None,
+    }
+}
+
+/// Map `@texture::*` import base name + user-visible argument count to a Q32 builtin.
+/// Frontend may suffix the name with `_<naga id>` — strip that suffix before lookup.
+pub fn texture_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
+    match (name, arg_count) {
+        ("texture1d_r16_unorm", 7) => Some(BuiltinId::LpTexTexture1dR16UnormQ32),
+        ("texture1d_rgba16_unorm", 7) => Some(BuiltinId::LpTexTexture1dRgba16UnormQ32),
+        ("texture2d_r16_unorm", 10) => Some(BuiltinId::LpTexTexture2dR16UnormQ32),
+        ("texture2d_rgba16_unorm", 10) => Some(BuiltinId::LpTexTexture2dRgba16UnormQ32),
         _ => None,
     }
 }
@@ -223,7 +236,7 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
 mod glsl_builtin_mapping_tests {
     use super::{
         GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id,
-        vm_q32_builtin_id,
+        texture_q32_builtin_id, vm_q32_builtin_id,
     };
     use crate::BuiltinId;
 
@@ -256,6 +269,14 @@ mod glsl_builtin_mapping_tests {
         assert_eq!(
             vm_q32_builtin_id("__lp_get_fuel", 0),
             Some(BuiltinId::LpVmGetFuelQ32)
+        );
+    }
+
+    #[test]
+    fn texture_sampler_builtin_id_generation() {
+        assert_eq!(
+            texture_q32_builtin_id("texture2d_rgba16_unorm", 10),
+            Some(BuiltinId::LpTexTexture2dRgba16UnormQ32)
         );
     }
 

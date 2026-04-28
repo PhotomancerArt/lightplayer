@@ -31,8 +31,8 @@
 ## Validate
 
 ```bash
-bash scripts/glsl-filetests.sh --target jit.q32 matrix/mat2/incdec-matrix-element.glsl matrix/mat2/incdec-matrix-column.glsl
-bash scripts/glsl-filetests.sh --target jit.q32 operators/incdec-matrix-element.glsl operators/incdec-matrix-column.glsl
+bash scripts/filetests.sh --target jit.q32 matrix/mat2/incdec-matrix-element.glsl matrix/mat2/incdec-matrix-column.glsl
+bash scripts/filetests.sh --target jit.q32 operators/incdec-matrix-element.glsl operators/incdec-matrix-column.glsl
 ```
 
 Extend to mat3/mat4 paths when mat2 is green.

@@ -5,6 +5,7 @@
 
 extern crate alloc;
 
+mod aggregate_abi;
 mod compile;
 mod emit;
 pub mod error;

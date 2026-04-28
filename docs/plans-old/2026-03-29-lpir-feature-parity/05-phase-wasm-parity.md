@@ -17,14 +17,14 @@ gap is genuinely WASM-only and documented.
 1. Run a **slice** of the matrix and bvec directories on wasm:
 
 ```bash
-./scripts/glsl-filetests.sh --target wasm.q32 vec/bvec2/
-./scripts/glsl-filetests.sh --target wasm.q32 matrix/mat2/
+./scripts/filetests.sh --target wasm.q32 vec/bvec2/
+./scripts/filetests.sh --target wasm.q32 matrix/mat2/
 ```
 
 2. Compare failures against **jit.q32** for the same files; classify as:
-    - shared bug (fix in naga/LPIR)
-    - WASM emitter bug (fix in `lps-wasm`)
-    - intentional platform limit (rare; document with `@unsupported(backend=wasm)` and `reason=`)
+   - shared bug (fix in naga/LPIR)
+   - WASM emitter bug (fix in `lps-wasm`)
+   - intentional platform limit (rare; document with `@unsupported(backend=wasm)` and `reason=`)
 
 3. **Do not** remove file-level `@unimplemented(backend=wasm)` wholesale without proving the
    backend passes; triage incrementally.
@@ -33,13 +33,13 @@ gap is genuinely WASM-only and documented.
 
 ```bash
 cargo test -p lps-wasm
-./scripts/glsl-filetests.sh --target wasm.q32 vec/bvec2/fn-all.glsl matrix/mat2/op-add.glsl
+./scripts/filetests.sh --target wasm.q32 vec/bvec2/fn-all.glsl matrix/mat2/op-add.glsl
 ```
 
 (Host Cranelift parity:)
 
 ```bash
-./scripts/glsl-filetests.sh vec/bvec2/fn-all.glsl matrix/mat2/op-add.glsl
+./scripts/filetests.sh vec/bvec2/fn-all.glsl matrix/mat2/op-add.glsl
 ```
 
 ```bash

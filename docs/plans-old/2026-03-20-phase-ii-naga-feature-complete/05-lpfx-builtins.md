@@ -169,8 +169,8 @@ fn extract_functions(module: &Module) -> Result<Vec<(Handle<Function>, FunctionI
 ## Validate
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "lpfn/"
-scripts/glsl-filetests.sh --target wasm.q32
+scripts/filetests.sh --target wasm.q32 "lpfn/"
+scripts/filetests.sh --target wasm.q32
 cargo check -p lps-wasm
 cargo check -p lps-frontend
 ```

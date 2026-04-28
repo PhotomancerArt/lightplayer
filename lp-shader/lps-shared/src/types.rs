@@ -25,6 +25,9 @@ pub enum LpsType {
     Mat2,
     Mat3,
     Mat4,
+    /// Logical 2D texture (GLSL `sampler2D`); opaque, not a struct of descriptor fields.
+    /// ABI size/alignment for std430 is fixed in [`crate::layout`].
+    Texture2D,
     /// Fixed-size array `T[n]`; ABI is `n` flattened scalars (row-major).
     Array {
         element: Box<LpsType>,

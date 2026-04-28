@@ -138,6 +138,38 @@ fn parse_typed_array_constructor(s: &str) -> Result<Option<LpsValueF32>> {
     Ok(Some(LpsValueF32::Array(elems.into_boxed_slice())))
 }
 
+/// `Point2D(0.0, 1.0)` / `Color(vec3(...), 0.9)` for filetests. Field names are empty; comparison
+/// matches actual struct fields by position (see [`compare_results`]).
+fn parse_user_struct_constructor(s: &str) -> Result<Option<LpsValueF32>> {
+    let s = s.trim();
+    if parse_typed_array_prefix(s).is_some() {
+        return Ok(None);
+    }
+    let Ok((type_name, arg_strings)) = parse_function_call(s) else {
+        return Ok(None);
+    };
+    if type_name.is_empty()
+        || !type_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
+    {
+        return Ok(None);
+    }
+    if matches!(type_name.as_str(), "Mat2" | "Mat3" | "Mat4") {
+        return Ok(None);
+    }
+    let mut fields = Vec::with_capacity(arg_strings.len());
+    for arg in arg_strings {
+        let v = parse_glsl_value(&arg)?;
+        fields.push((String::new(), v));
+    }
+    Ok(Some(LpsValueF32::Struct {
+        name: Some(type_name),
+        fields,
+    }))
+}
+
 /// Parse a GLSL value from a string.
 /// Supports scalars, vectors, and matrices.
 pub fn parse_glsl_value(s: &str) -> Result<LpsValueF32> {
@@ -170,6 +202,11 @@ pub fn parse_glsl_value(s: &str) -> Result<LpsValueF32> {
 
     // Typed array constructors: float[3](1.0, 2.0, 3.0), vec2[2](...)
     if let Some(v) = parse_typed_array_constructor(s)? {
+        return Ok(v);
+    }
+
+    // User-defined struct: `Color(vec3(1.0, 0.0, 0.0), 1.0)` (field names omitted; compared by position).
+    if let Some(v) = parse_user_struct_constructor(s)? {
         return Ok(v);
     }
 
@@ -285,8 +322,49 @@ pub fn compare_results(
     comparison: ComparisonOp,
     tolerance: Option<f32>,
 ) -> Result<(), String> {
+    fn struct_positional_match(
+        expected_fields: &[(String, LpsValueF32)],
+        actual_fields: &[(String, LpsValueF32)],
+        tolerance: Option<f32>,
+        exact: bool,
+    ) -> bool {
+        if expected_fields.len() != actual_fields.len() {
+            return false;
+        }
+        if !expected_fields.iter().all(|(k, _)| k.is_empty()) {
+            return false;
+        }
+        expected_fields
+            .iter()
+            .zip(actual_fields.iter())
+            .all(|((_, ve), (_, va))| {
+                if exact {
+                    ve.eq(va)
+                } else {
+                    ve.approx_eq(va, tolerance.unwrap_or(LpsValueF32::DEFAULT_TOLERANCE))
+                }
+            })
+    }
+
     match comparison {
         ComparisonOp::Exact => {
+            if let (
+                LpsValueF32::Struct {
+                    fields: ef,
+                    name: en,
+                },
+                LpsValueF32::Struct {
+                    fields: af,
+                    name: an,
+                },
+            ) = (expected, actual)
+            {
+                if struct_positional_match(ef, af, None, true)
+                    && (en.is_none() || an.is_none() || en == an)
+                {
+                    return Ok(());
+                }
+            }
             if actual.eq(expected) {
                 Ok(())
             } else {
@@ -298,14 +376,31 @@ pub fn compare_results(
             }
         }
         ComparisonOp::Approx => {
-            let tolerance = tolerance.unwrap_or(LpsValueF32::DEFAULT_TOLERANCE);
-            if actual.approx_eq(expected, tolerance) {
+            let tol = tolerance.unwrap_or(LpsValueF32::DEFAULT_TOLERANCE);
+            if let (
+                LpsValueF32::Struct {
+                    fields: ef,
+                    name: en,
+                },
+                LpsValueF32::Struct {
+                    fields: af,
+                    name: an,
+                },
+            ) = (expected, actual)
+            {
+                if struct_positional_match(ef, af, Some(tol), false)
+                    && (en.is_none() || an.is_none() || en == an)
+                {
+                    return Ok(());
+                }
+            }
+            if actual.approx_eq(expected, tol) {
                 Ok(())
             } else {
                 Err(format!(
                     "expected {} (tolerance: {}), got {}",
                     format_glsl_value(expected),
-                    tolerance,
+                    tol,
                     format_glsl_value(actual)
                 ))
             }

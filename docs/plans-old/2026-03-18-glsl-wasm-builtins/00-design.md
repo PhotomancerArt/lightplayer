@@ -24,7 +24,7 @@ Non-goals for this plan: browser UI (playground shell is separate); matrix built
 ## Decisions (summary)
 
 | Topic                 | Decision                                                                                                             |
-|-----------------------|----------------------------------------------------------------------------------------------------------------------|
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Import discovery      | Pre-scan AST for builtin / LPFX calls before codegen                                                                 |
 | Vector builtins       | Match Cranelift: component-wise scalar imports; compound builtins inline                                             |
 | Import module/name    | `"builtins"` / `BuiltinId::name()`                                                                                   |
@@ -109,29 +109,29 @@ Generated artifacts (paths TBD in implementation):
 ## Main components
 
 | Component                        | Role                                                          |
-|----------------------------------|---------------------------------------------------------------|
+| -------------------------------- | ------------------------------------------------------------- |
 | `builtin_scan`                   | AST walk; records which `BuiltinId` / imports are needed      |
 | `imports`                        | WASM import section: builtins funcs + memory; stable ordering |
 | `glsl_to_builtin_id` (generated) | Map GLSL name + arg count → `Option<BuiltinId>`               |
 | `codegen/expr/builtins`          | Inline set (clamp, mix, …) vs `call` to import                |
-| `lps-builtins-wasm`          | Produces `builtins.wasm` with imported memory                 |
+| `lps-builtins-wasm`              | Produces `builtins.wasm` with imported memory                 |
 | `wasm_runner`                    | Loads `builtins.wasm`, wires memory + exports, runs shader    |
 
 ## Phases
 
-| # | File                               | Title                                            |
-|---|------------------------------------|--------------------------------------------------|
-| 1 | `01-builtins-wasm-artifact.md`     | `builtins.wasm` crate + import-memory            |
-| 2 | `02-generated-mappings.md`         | Generated `glsl_to_builtin_id` + generator       |
-| 3 | `03-shader-imports-and-memory.md`  | Pre-scan, import section, memory import, indices |
-| 4 | `04-builtin-codegen.md`            | Inline vs import, FunCall                        |
-| 5 | `05-wasmtime-linking.md`           | Wasmtime + shared memory + `builtins.wasm`       |
-| 6 | `06-lpfn-out-params.md`            | LPFX, out params, memory slots                   |
-| 7 | `07-rainbow-validation-cleanup.md` | Rainbow, filetests, docs, plan done              |
+| #   | File                               | Title                                            |
+| --- | ---------------------------------- | ------------------------------------------------ |
+| 1   | `01-builtins-wasm-artifact.md`     | `builtins.wasm` crate + import-memory            |
+| 2   | `02-generated-mappings.md`         | Generated `glsl_to_builtin_id` + generator       |
+| 3   | `03-shader-imports-and-memory.md`  | Pre-scan, import section, memory import, indices |
+| 4   | `04-builtin-codegen.md`            | Inline vs import, FunCall                        |
+| 5   | `05-wasmtime-linking.md`           | Wasmtime + shared memory + `builtins.wasm`       |
+| 6   | `06-lpfn-out-params.md`            | LPFX, out params, memory slots                   |
+| 7   | `07-rainbow-validation-cleanup.md` | Rainbow, filetests, docs, plan done              |
 
 ## Validate (repo-wide)
 
 - `cargo build` / `cargo test` for touched crates
-- `scripts/glsl-filetests.sh --target wasm.q32` (builtins directories as they unlock)
+- `scripts/filetests.sh --target wasm.q32` (builtins directories as they unlock)
 - `cargo +nightly fmt`
 - `just build-fw-esp32` if workspace policy requires

@@ -12,6 +12,9 @@ mod interp;
 #[path = "tests/validate.rs"]
 mod validate;
 
+#[path = "tests/sret_roundtrip.rs"]
+mod sret_roundtrip;
+
 use alloc::string::{String, ToString};
 use core::mem::size_of;
 

@@ -6,7 +6,7 @@ use alloc::format;
 use alloc::vec::Vec;
 
 use cranelift_codegen::data_value::DataValue;
-use cranelift_codegen::ir::{ArgumentPurpose, Signature};
+use cranelift_codegen::ir::Signature;
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::settings::{self, Configurable};
 use lp_riscv_elf::ElfLoadInfo;
@@ -20,7 +20,8 @@ use lpvm_cranelift::error::CompileError;
 use lpvm_cranelift::{CompileOptions, CompilerError, signature_for_ir_func};
 use target_lexicon::Triple;
 
-use crate::memory::DEFAULT_SHARED_CAPACITY;
+use crate::host_marshal::{emulator_struct_return_buffer, ir_user_args_from_q32_words};
+use crate::memory::{DEFAULT_SHARED_CAPACITY, EmuSharedArena};
 
 /// RV32 guest [`VmContext`](lpvm::VmContext) header: `fuel` (u64 LE) + `trap` (u32) + `metadata` (u32).
 pub(crate) const GUEST_VMCTX_BYTES: usize = 16;
@@ -99,22 +100,18 @@ pub fn glsl_q32_call_emulated(
         .values()
         .find(|f| f.name == name)
         .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-    let param_count = ir_func.param_count as usize;
     let mut flat: Vec<i32> = Vec::new();
     for (p, a) in gfn.parameters.iter().zip(args.iter()) {
         flat.extend(flatten_q32_arg(p, a)?);
     }
-    if flat.len() != param_count {
-        return Err(CallError::Unsupported(format!(
-            "flattened argument count {} does not match IR param_count {}",
-            flat.len(),
-            param_count
-        )));
-    }
+    let shared = shared_backing_for_call();
+    const SCRATCH_BASE: usize = 256;
+    let arena = EmuSharedArena::attach_shared_backing(shared.clone(), SCRATCH_BASE);
+    let ir_words = ir_user_args_from_q32_words(ir_func, &gfn.parameters, &flat, &arena)?;
     let vmctx_word = DEFAULT_SHARED_START as i32;
-    let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
+    let mut full: Vec<i32> = Vec::with_capacity(1 + ir_words.len());
     full.push(vmctx_word);
-    full.extend_from_slice(&flat);
+    full.extend_from_slice(&ir_words);
     let isa = riscv32_reference_isa().map_err(|e| CallError::Unsupported(format!("{e}")))?;
     let sig = signature_for_ir_func(
         ir_func,
@@ -124,18 +121,15 @@ pub fn glsl_q32_call_emulated(
         &*isa,
     );
     let n_ret = ir_func.return_types.len();
+    let (uses_sret, struct_size) =
+        emulator_struct_return_buffer(&*isa, ir_func, Some(&gfn.return_type))?;
     let entry = *load.symbol_map.get(name).ok_or_else(|| {
         CallError::Unsupported(format!("symbol `{name}` not in linked RV32 image"))
     })?;
     let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
-    let shared = shared_backing_for_call();
     let mut emu = emulator_with_shared(load, shared);
-    let has_sr = sig
-        .params
-        .iter()
-        .any(|p| p.purpose == ArgumentPurpose::StructReturn);
-    let ret = if has_sr {
-        emu.call_function_with_struct_return(entry, &data_args, &sig, n_ret * 4)
+    let ret = if uses_sret {
+        emu.call_function_with_struct_return(entry, &data_args, &sig, struct_size)
             .map_err(|e| CallError::Unsupported(format!("emulator: {e:?}")))?
     } else {
         emu.call_function(entry, &data_args, &sig)
@@ -152,14 +146,26 @@ pub fn glsl_q32_call_emulated(
             }
         }
     }
-    if words.len() < n_ret {
-        return Err(CallError::Unsupported(format!(
-            "emulator returned {} words, signature expects {}",
-            words.len(),
-            n_ret
-        )));
+    if uses_sret {
+        let need_words = (struct_size + 3) / 4;
+        if words.len() < need_words {
+            return Err(CallError::Unsupported(format!(
+                "emulator returned {} words, sret needs {}",
+                words.len(),
+                need_words
+            )));
+        }
+        words.truncate(need_words);
+    } else {
+        if words.len() < n_ret {
+            return Err(CallError::Unsupported(format!(
+                "emulator returned {} words, signature expects {}",
+                words.len(),
+                n_ret
+            )));
+        }
+        words.truncate(n_ret);
     }
-    words.truncate(n_ret);
     if gfn.return_type == LpsType::Void {
         return Ok(GlslReturn {
             value: None,
@@ -203,6 +209,11 @@ pub fn run_loaded_function_i32(
             )))
         })?;
     let isa = riscv32_reference_isa()?;
+    if lpvm_cranelift::signature_uses_struct_return(&*isa, f) {
+        return Err(CompilerError::Codegen(CompileError::unsupported(
+            "run_loaded_function_i32: struct-return calls (explicit or implicit) are not supported; use EmuInstance or glsl_q32_call_emulated",
+        )));
+    }
     let sig = signature_for_ir_func(
         f,
         CallConv::SystemV,
@@ -225,15 +236,7 @@ pub(crate) fn run_loaded_function_i32_with_sig(
         )))
     })?;
 
-    let has_sr = signature
-        .params
-        .iter()
-        .any(|p| p.purpose == ArgumentPurpose::StructReturn);
-    let expected_args = if has_sr {
-        signature.params.len().saturating_sub(2)
-    } else {
-        signature.params.len().saturating_sub(1)
-    };
+    let expected_args = signature.params.len().saturating_sub(1);
     if args.len() != expected_args {
         return Err(CompilerError::Codegen(CompileError::unsupported(format!(
             "`{func_name}`: expected {} args, got {}",
@@ -250,17 +253,9 @@ pub(crate) fn run_loaded_function_i32_with_sig(
     let shared = shared_backing_for_call();
     let mut emu = emulator_with_shared(load_info, shared);
 
-    let ret = if has_sr {
-        emu.call_function_with_struct_return(entry, &data_args, signature, 4)
-            .map_err(|e| {
-                CompilerError::Codegen(CompileError::cranelift(format!("emulator: {e:?}")))
-            })?
-    } else {
-        emu.call_function(entry, &data_args, signature)
-            .map_err(|e| {
-                CompilerError::Codegen(CompileError::cranelift(format!("emulator: {e:?}")))
-            })?
-    };
+    let ret = emu
+        .call_function(entry, &data_args, signature)
+        .map_err(|e| CompilerError::Codegen(CompileError::cranelift(format!("emulator: {e:?}"))))?;
 
     match ret.as_slice() {
         [DataValue::I32(v)] => Ok(*v),

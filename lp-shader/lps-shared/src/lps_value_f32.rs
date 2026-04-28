@@ -2,6 +2,8 @@
 
 use alloc::boxed::Box;
 
+use crate::texture_format::LpsTexture2DValue;
+
 /// Shader value as rust enum, heap-allocated
 ///
 /// ## Matrix Storage Format
@@ -49,6 +51,8 @@ pub enum LpsValueF32 {
         name: Option<alloc::string::String>,
         fields: alloc::vec::Vec<(alloc::string::String, LpsValueF32)>,
     },
+    /// 2D texture reference (`LpsType::Texture2D`): guest descriptor lanes plus host storage metadata.
+    Texture2D(LpsTexture2DValue),
 }
 
 impl LpsValueF32 {
@@ -90,13 +94,18 @@ impl LpsValueF32 {
                     fields: fb,
                 },
             ) => {
-                na == nb
-                    && fa.len() == fb.len()
-                    && fa
-                        .iter()
-                        .zip(fb.iter())
-                        .all(|((ka, va), (kb, vb))| ka == kb && va.eq(vb))
+                let name_ok = na.is_none() || nb.is_none() || na == nb;
+                if !name_ok || fa.len() != fb.len() {
+                    return false;
+                }
+                if fa.iter().all(|(k, _)| k.is_empty()) {
+                    return fa.iter().zip(fb.iter()).all(|((_, va), (_, vb))| va.eq(vb));
+                }
+                fa.iter()
+                    .zip(fb.iter())
+                    .all(|((ka, va), (kb, vb))| ka == kb && va.eq(vb))
             }
+            (LpsValueF32::Texture2D(a), LpsValueF32::Texture2D(b)) => a == b,
             _ => false, // Type mismatch
         }
     }
@@ -163,13 +172,21 @@ impl LpsValueF32 {
                     fields: fb,
                 },
             ) => {
-                na == nb
-                    && fa.len() == fb.len()
-                    && fa
+                let name_ok = na.is_none() || nb.is_none() || na == nb;
+                if !name_ok || fa.len() != fb.len() {
+                    return false;
+                }
+                if fa.iter().all(|(k, _)| k.is_empty()) {
+                    return fa
                         .iter()
                         .zip(fb.iter())
-                        .all(|((ka, va), (kb, vb))| ka == kb && va.approx_eq(vb, tolerance))
+                        .all(|((_, va), (_, vb))| va.approx_eq(vb, tolerance));
+                }
+                fa.iter()
+                    .zip(fb.iter())
+                    .all(|((ka, va), (kb, vb))| ka == kb && va.approx_eq(vb, tolerance))
             }
+            (LpsValueF32::Texture2D(a), LpsValueF32::Texture2D(b)) => a == b,
             _ => false, // Type mismatch
         }
     }

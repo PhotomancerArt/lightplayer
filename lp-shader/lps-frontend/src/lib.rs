@@ -9,9 +9,12 @@ pub use naga;
 
 pub mod lower;
 mod lower_access;
+mod lower_aggregate_layout;
+mod lower_aggregate_write;
 mod lower_array;
 mod lower_array_multidim;
 mod lower_binary;
+mod lower_call;
 mod lower_cast;
 mod lower_ctx;
 mod lower_error;
@@ -22,16 +25,21 @@ mod lower_math_geom;
 mod lower_math_helpers;
 mod lower_matrix;
 mod lower_stmt;
+mod lower_struct;
+mod lower_texture;
 mod lower_unary;
 mod naga_types;
 mod naga_util;
 mod parse;
+mod readonly_in_scan;
 pub mod std_math_handler;
 
-pub use lower::lower;
+pub use lower::{LowerOptions, lower, lower_with_options};
 pub use lower_error::LowerError;
 
-pub use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+pub use lps_shared::{
+    FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec,
+};
 
 /// Back-compat alias; prefer [`ParamQualifier`].
 pub type GlslParamQualifier = ParamQualifier;
@@ -40,6 +48,9 @@ pub type LpsSig = FnParam;
 
 pub use naga_types::{CompileError, FunctionInfo, NagaModule, naga_module_from_parsed};
 pub use parse::{compile, prepared_glsl_for_compile, user_snippet_first_physical_line};
+
+#[cfg(test)]
+mod sampler2d_metadata_tests;
 
 #[cfg(test)]
 mod tests {
@@ -207,6 +218,21 @@ float test() {
     #[test]
     fn lower_void_implicit_return_validates() {
         let src = "void f() { }";
+        let naga = compile(src).unwrap();
+        let (ir, _) = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    /// M3 Phase 1: struct leaf in stack array — declaration and zero-fill only.
+    #[test]
+    fn lower_array_of_struct_local_decl_validates() {
+        let src = r#"
+struct Point { float x; float y; };
+float f() {
+    Point ps[4];
+    return 0.0;
+}
+"#;
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
@@ -514,6 +540,92 @@ float test_main() {
     // which require additional type mapping work. The infrastructure for uniforms is in place
     // (uniforms_type field in LpsModuleSig), but struct-to-struct type conversion is a TODO.
     // See the spec for M1 - uniform blocks can be added as follow-up work.
+
+    /// M1 pointer ABI: `in` array is one pointer param and entry [`LpirOp::Memcpy`].
+    #[test]
+    fn m1_in_array_param_is_pointer_and_entry_memcpy() {
+        use lpir::{IrType, LpirOp};
+        let glsl = r#"
+        void f(in float[4] a) { }
+    "#;
+        let naga = compile(glsl).expect("parse");
+        let (ir, _) = super::lower(&naga).expect("lower");
+        let f = ir.functions.values().find(|x| x.name == "f").expect("f");
+        assert_eq!(f.param_count, 1, "one user param (pointer)");
+        let u0 = f.user_param_vreg(0);
+        assert_eq!(f.vreg_types[u0.0 as usize], IrType::Pointer);
+        let memcpy_first = f
+            .body
+            .iter()
+            .find(|op| matches!(op, LpirOp::Memcpy { .. }))
+            .expect("entry memcpy");
+        assert!(matches!(
+            memcpy_first,
+            LpirOp::Memcpy { size, .. } if *size == 16
+        ));
+    }
+
+    /// M1: aggregate return uses sret, void return, empty return vregs in IR.
+    #[test]
+    fn m1_array_return_uses_sret_and_void_return_op() {
+        use lpir::{LpirOp, VReg};
+        let glsl = r#"
+        float[4] g() {
+            float[4] a;
+            a[0] = 1.0;
+            return a;
+        }
+    "#;
+        let naga = compile(glsl).expect("parse");
+        let (ir, _) = super::lower(&naga).expect("lower");
+        let g = ir.functions.values().find(|x| x.name == "g").expect("g");
+        assert_eq!(g.sret_arg, Some(VReg(1)));
+        assert!(g.return_types.is_empty());
+        assert_eq!(g.param_count, 0);
+        let ret = g
+            .body
+            .iter()
+            .rfind(|op| matches!(op, LpirOp::Return { .. }))
+            .expect("return op");
+        match ret {
+            LpirOp::Return { values } => assert_eq!(values.count, 0),
+            _ => panic!(),
+        }
+    }
+
+    /// M1: calling a `float[4]`-returning function passes sret as arg slot 1 (after vmctx).
+    #[test]
+    fn m1_call_array_return_arg_order_vmctx_sret_user() {
+        use lpir::{IrType, LpirOp, VMCTX_VREG};
+        let glsl = r#"
+        float[4] make() {
+            float[4] a;
+            a[0] = 1.0;
+            return a;
+        }
+        float z() {
+            return make()[0];
+        }
+    "#;
+        let naga = compile(glsl).expect("parse");
+        let (ir, _) = super::lower(&naga).expect("lower");
+        let z = ir.functions.values().find(|x| x.name == "z").expect("z");
+        let call = z
+            .body
+            .iter()
+            .find_map(|op| match op {
+                LpirOp::Call {
+                    callee: _,
+                    args,
+                    results: _,
+                } => Some(*args),
+                _ => None,
+            })
+            .expect("expected a Call in z");
+        let vregs = z.pool_slice(call);
+        assert_eq!(vregs[0], VMCTX_VREG);
+        assert_eq!(z.vreg_types[vregs[1].0 as usize], IrType::Pointer);
+    }
 }
 
 pub use lpir::FloatMode;

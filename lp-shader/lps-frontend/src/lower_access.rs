@@ -2,7 +2,8 @@
 
 use alloc::format;
 use alloc::string::String;
-use lpir::{IrType, LpirOp, VReg};
+use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
+use lps_shared::{LayoutRules, LpsType, array_stride};
 use naga::{Expression, Handle, Scalar, TypeInner, VectorSize};
 
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_scalar_to_ir_type, vector_size_usize};
@@ -271,11 +272,15 @@ pub(crate) fn lower_access_expr_vec(
     if let Some((root, ops)) =
         crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
-            if ops.len() == info.dimensions.len() {
+        if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
+            if matches!(
+                &info.layout.kind,
+                crate::naga_util::AggregateKind::Array { .. }
+            ) && ops.len() == info.dimensions().len()
+            {
                 let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
                     ctx,
-                    &info.dimensions,
+                    &info.dimensions(),
                     &ops,
                 )?;
                 return crate::lower_array::load_array_element_dynamic(ctx, &info, flat_v);
@@ -286,15 +291,19 @@ pub(crate) fn lower_access_expr_vec(
     if let Some((lv, idx_handles)) =
         crate::lower_array_multidim::peel_access_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_map.get(&lv).cloned() {
-            if idx_handles.len() == info.dimensions.len() {
+        if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+            if matches!(
+                &info.layout.kind,
+                crate::naga_util::AggregateKind::Array { .. }
+            ) && idx_handles.len() == info.dimensions().len()
+            {
                 let mut vregs = alloc::vec::Vec::new();
                 for &h in &idx_handles {
                     vregs.push(ctx.ensure_expr(h)?);
                 }
                 let flat = crate::lower_array::emit_row_major_flat_index_vregs(
                     ctx,
-                    &info.dimensions,
+                    &info.dimensions(),
                     &vregs,
                 )?;
                 return crate::lower_array::load_array_element_dynamic(ctx, &info, flat);
@@ -309,8 +318,13 @@ pub(crate) fn lower_access_expr_vec(
     let index_v = ctx.ensure_expr(*index)?;
     match &ctx.func.expressions[*base] {
         Expression::LocalVariable(lv) => {
-            if let Some(info) = ctx.array_map.get(lv).cloned() {
-                return crate::lower_array::load_array_element_dynamic(ctx, &info, index_v);
+            if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                if matches!(
+                    &info.layout.kind,
+                    crate::naga_util::AggregateKind::Array { .. }
+                ) {
+                    return crate::lower_array::load_array_element_dynamic(ctx, &info, index_v);
+                }
             }
             let inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
             match *inner {
@@ -354,22 +368,18 @@ pub(crate) fn lower_access_expr_vec(
                     matrix_column_dynamic(ctx, &vs, index_v, columns, rows, scalar)
                 }
                 TypeInner::Array { .. } => {
-                    let (dimensions, leaf_ty, leaf_stride) =
-                        crate::lower_array_multidim::flatten_array_type_shape(ctx.module, pointee)?;
-                    let element_count = dimensions
-                        .iter()
-                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                    let layout = crate::naga_util::aggregate_layout(ctx.module, pointee)?
                         .ok_or_else(|| {
                             LowerError::Internal(String::from(
-                                "Access load: array element count overflow",
+                                "Access load: expected array aggregate layout",
                             ))
                         })?;
-                    let info = crate::lower_ctx::ArrayInfo {
-                        slot: crate::lower_ctx::ArraySlot::Param(*arg_i),
-                        dimensions,
-                        leaf_element_ty: leaf_ty,
-                        leaf_stride,
-                        element_count,
+                    // `pointer_args` only: `inout`/`out` array pointer, not M5 `ParamReadOnly` (those use
+                    // a `LocalVariable` entry in `aggregate_map`).
+                    let info = crate::lower_ctx::AggregateInfo {
+                        slot: crate::lower_ctx::AggregateSlot::Param(*arg_i),
+                        layout,
+                        naga_ty: pointee,
                     };
                     crate::lower_array::load_array_element_dynamic(ctx, &info, index_v)
                 }
@@ -377,6 +387,52 @@ pub(crate) fn lower_access_expr_vec(
                     "Access on unsupported pointer argument type",
                 ))),
             }
+        }
+        Expression::GlobalVariable(gv) => {
+            let Some(info) = ctx.global_map.get(gv).cloned() else {
+                return Err(LowerError::Internal(format!(
+                    "Access global: {gv:?} not in global_map"
+                )));
+            };
+            if !info.vmctx_backed {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "Access: global has no VMContext layout (internal sampler stub)",
+                )));
+            }
+            let LpsType::Array { element, .. } = info.ty else {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "Access: global base is not an array",
+                )));
+            };
+            let element = *element;
+            let byte_offset = info.byte_offset;
+            let index_v = ctx.ensure_expr(*index)?;
+            let stride = array_stride(&element, LayoutRules::Std430) as u32;
+            let stride_i = i32::try_from(stride).map_err(|_| {
+                LowerError::Internal(String::from("uniform top-level array: stride"))
+            })?;
+            let prod = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::ImulImm {
+                dst: prod,
+                src: index_v,
+                imm: stride_i,
+            });
+            let off_imm = i32::try_from(byte_offset).map_err(|_| {
+                LowerError::Internal(String::from("uniform top-level array: base offset"))
+            })?;
+            let byte_off = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IaddImm {
+                dst: byte_off,
+                src: prod,
+                imm: off_imm,
+            });
+            let addr = ctx.fb.alloc_vreg(IrType::Pointer);
+            ctx.fb.push(LpirOp::Iadd {
+                dst: addr,
+                lhs: VMCTX_VREG,
+                rhs: byte_off,
+            });
+            crate::lower_expr::load_lps_value_from_vmctx_with_base(ctx, addr, 0, &element)
         }
         _ => Err(LowerError::UnsupportedExpression(String::from(
             "Access: unsupported base expression",
@@ -394,11 +450,15 @@ pub(crate) fn store_through_access(
     if let Some((root, ops)) =
         crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
-            if ops.len() == info.dimensions.len() {
+        if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
+            if matches!(
+                &info.layout.kind,
+                crate::naga_util::AggregateKind::Array { .. }
+            ) && ops.len() == info.dimensions().len()
+            {
                 let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
                     ctx,
-                    &info.dimensions,
+                    &info.dimensions(),
                     &ops,
                 )?;
                 return crate::lower_array::store_array_element_dynamic(ctx, &info, flat_v, value);
@@ -409,15 +469,19 @@ pub(crate) fn store_through_access(
     if let Some((lv, idx_handles)) =
         crate::lower_array_multidim::peel_access_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_map.get(&lv).cloned() {
-            if idx_handles.len() == info.dimensions.len() {
+        if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+            if matches!(
+                &info.layout.kind,
+                crate::naga_util::AggregateKind::Array { .. }
+            ) && idx_handles.len() == info.dimensions().len()
+            {
                 let mut vregs = alloc::vec::Vec::new();
                 for &h in &idx_handles {
                     vregs.push(ctx.ensure_expr(h)?);
                 }
                 let flat = crate::lower_array::emit_row_major_flat_index_vregs(
                     ctx,
-                    &info.dimensions,
+                    &info.dimensions(),
                     &vregs,
                 )?;
                 return crate::lower_array::store_array_element_dynamic(ctx, &info, flat, value);
@@ -432,8 +496,15 @@ pub(crate) fn store_through_access(
     let index_v = ctx.ensure_expr(*index)?;
     match &ctx.func.expressions[*base] {
         Expression::LocalVariable(lv) => {
-            if let Some(info) = ctx.array_map.get(lv).cloned() {
-                return crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value);
+            if let Some(info) = ctx.aggregate_map.get(lv).cloned() {
+                if matches!(
+                    &info.layout.kind,
+                    crate::naga_util::AggregateKind::Array { .. }
+                ) {
+                    return crate::lower_array::store_array_element_dynamic(
+                        ctx, &info, index_v, value,
+                    );
+                }
             }
             let inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
             let dsts = ctx.resolve_local(*lv)?;
@@ -524,22 +595,17 @@ pub(crate) fn store_through_access(
                     Ok(())
                 }
                 TypeInner::Array { .. } => {
-                    let (dimensions, leaf_ty, leaf_stride) =
-                        crate::lower_array_multidim::flatten_array_type_shape(ctx.module, pointee)?;
-                    let element_count = dimensions
-                        .iter()
-                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                    let layout = crate::naga_util::aggregate_layout(ctx.module, pointee)?
                         .ok_or_else(|| {
                             LowerError::Internal(String::from(
-                                "Access store: array element count overflow",
+                                "Access store: expected array aggregate layout",
                             ))
                         })?;
-                    let info = crate::lower_ctx::ArrayInfo {
-                        slot: crate::lower_ctx::ArraySlot::Param(*arg_i),
-                        dimensions,
-                        leaf_element_ty: leaf_ty,
-                        leaf_stride,
-                        element_count,
+                    // `pointer_args` only (see `Access load` array arm above).
+                    let info = crate::lower_ctx::AggregateInfo {
+                        slot: crate::lower_ctx::AggregateSlot::Param(*arg_i),
+                        layout,
+                        naga_ty: pointee,
                     };
                     crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value)
                 }

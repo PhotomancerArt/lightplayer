@@ -70,7 +70,7 @@ instruction router.
 ```bash
 cargo build -p lps-compiler
 cargo test -p lps-compiler
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 Run filetests to ensure existing shaders still produce correct results (with fast_math=false by

@@ -37,10 +37,9 @@ Create infrastructure so that:
 
 ## Acceptance Criteria
 
-`scripts/glsl-filetests.sh builtins/trig-sin.glsl` must pass.
+`scripts/filetests.sh builtins/trig-sin.glsl` must pass.
 
 ## Scope
 
 This plan focuses on infrastructure. Only `sin` and `cos` are implemented as examples. Future plans
 can add more functions using the same infrastructure.
-

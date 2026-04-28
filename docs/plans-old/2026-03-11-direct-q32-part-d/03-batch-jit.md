@@ -76,7 +76,7 @@ itself is correct.
 
 ```bash
 cargo check -p lps-compiler --features std
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 This is the critical validation point — filetests must pass with Q32

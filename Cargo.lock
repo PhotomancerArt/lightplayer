@@ -4235,6 +4235,7 @@ dependencies = [
  "lpfn-impl-macro",
  "lps-builtin-ids",
  "lps-q32",
+ "lps-shared",
  "lpvm",
 ]
 
@@ -4376,6 +4377,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
+ "lps-frontend",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",
