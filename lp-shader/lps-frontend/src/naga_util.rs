@@ -85,6 +85,7 @@ pub(crate) fn naga_type_to_ir_types(
             }
             Ok(out)
         }
+        TypeInner::Pointer { base, .. } => naga_type_to_ir_types(module, &module.types[base].inner),
         _ => Err(LowerError::UnsupportedType(format!(
             "unsupported type for LPIR: {inner:?}"
         ))),

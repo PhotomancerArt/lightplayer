@@ -43,11 +43,7 @@ uint test_uniform_no_init_uint() {
     return int(seed + 100u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_uniform_no_init_uint() == 100
+// run: test_uniform_no_init_uint() == 100u
 
 bool test_uniform_no_init_bool() {
     // Uniform bool without initialization

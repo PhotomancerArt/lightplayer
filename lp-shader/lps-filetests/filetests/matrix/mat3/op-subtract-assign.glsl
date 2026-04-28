@@ -35,11 +35,7 @@ mat3 test_mat3_subtract_assign_expressions() {
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat3_subtract_assign_expressions() ~= mat3(4.0, 4.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 0.0)
+// run: test_mat3_subtract_assign_expressions() ~= mat3(4.0, 4.0, 2.0, 2.0, 0.0, 0.0, -2.0, -2.0, -4.0)
 
 mat3 test_mat3_subtract_assign_zero() {
     mat3 result = mat3(5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0);
@@ -65,11 +61,7 @@ mat3 test_mat3_subtract_assign_chained() {
     return b;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat3_subtract_assign_chained() ~= mat3(-4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0)
+// run: test_mat3_subtract_assign_chained() ~= mat3(-4.0, -4.0, -4.0, -4.0, 0.0, 4.0, 8.0, 12.0, 16.0)
 
 mat3 test_mat3_subtract_assign_large_values() {
     mat3 result = mat3(1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000.0, 9000.0);

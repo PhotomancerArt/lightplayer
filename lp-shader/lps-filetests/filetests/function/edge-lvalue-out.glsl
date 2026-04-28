@@ -1,4 +1,7 @@
 // test run
+//
+// `out`/`inout` to non-local l-values (Access) is out of scope here; see
+// docs/roadmaps/2026-04-24-filetest-q32-cleanup/deferred-access-lvalue-out-inout.md
 
 // ============================================================================
 // Lvalue Required for Out/Inout: out/inout require lvalues (variables)
@@ -15,10 +18,6 @@ float test_edge_lvalue_out_variable() {
     return value;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_out_variable() ~= 42.0
 
 void set_vector(out vec2 result) {
@@ -32,10 +31,6 @@ vec2 test_edge_lvalue_out_vector() {
     return vec;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_out_vector() ~= vec2(1.0, 2.0)
 
 void modify_value(inout float value) {
@@ -49,10 +44,6 @@ float test_edge_lvalue_inout_variable() {
     return x;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_inout_variable() ~= 10.0
 
 /*
@@ -95,10 +86,6 @@ float test_edge_lvalue_out_array_element() {
     return arr[1];
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_out_array_element() ~= 99.0
 
 void scale_component(inout float component) {
@@ -112,10 +99,6 @@ float test_edge_lvalue_inout_swizzle() {
     return vec.y;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_inout_swizzle() ~= 6.0
 
 /*
@@ -147,10 +130,6 @@ float test_edge_lvalue_out_struct_field() {
     return d.value;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_out_struct_field() ~= 123.0
 
 void increment(inout int value) {
@@ -164,8 +143,4 @@ int test_edge_lvalue_inout_int() {
     return x;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_lvalue_inout_int() == 11

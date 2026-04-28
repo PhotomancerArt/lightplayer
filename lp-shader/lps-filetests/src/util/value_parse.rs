@@ -310,7 +310,11 @@ fn parse_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<f32>, GlslE
         }
     }
 
-    if components.len() != dim {
+    // GLSL: single scalar splats to all lanes (e.g. `vec4(1.0)` → four 1.0s).
+    if components.len() == 1 && dim > 1 {
+        let s = components[0];
+        components = vec![s; dim];
+    } else if components.len() != dim {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!(
@@ -398,7 +402,10 @@ fn parse_bool_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<bool>,
         }
     }
 
-    if components.len() != dim {
+    if components.len() == 1 && dim > 1 {
+        let s = components[0];
+        components = vec![s; dim];
+    } else if components.len() != dim {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!(
@@ -559,7 +566,10 @@ fn parse_int_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<i32>, G
         }
     }
 
-    if components.len() != dim {
+    if components.len() == 1 && dim > 1 {
+        let s = components[0];
+        components = vec![s; dim];
+    } else if components.len() != dim {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!(
@@ -683,7 +693,10 @@ fn parse_uint_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<u32>, 
         }
     }
 
-    if components.len() != dim {
+    if components.len() == 1 && dim > 1 {
+        let s = components[0];
+        components = vec![s; dim];
+    } else if components.len() != dim {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!(
@@ -827,6 +840,51 @@ fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], 
 #[cfg(test)]
 mod tests {
     use super::{LpsValueF32, parse_lps_value_literal};
+
+    #[test]
+    fn test_parse_vec4_splat_single_float() {
+        let v = parse_lps_value_literal("vec4(1.0)").unwrap();
+        match v {
+            LpsValueF32::Vec4(a) => assert_eq!(a, [1.0, 1.0, 1.0, 1.0]),
+            _ => panic!("expected Vec4"),
+        }
+    }
+
+    #[test]
+    fn test_parse_vec2_splat_from_int() {
+        let v = parse_lps_value_literal("vec2(2)").unwrap();
+        match v {
+            LpsValueF32::Vec2(a) => assert_eq!(a, [2.0, 2.0]),
+            _ => panic!("expected Vec2"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ivec3_splat() {
+        let v = parse_lps_value_literal("ivec3(-1)").unwrap();
+        match v {
+            LpsValueF32::IVec3(a) => assert_eq!(a, [-1, -1, -1]),
+            _ => panic!("expected IVec3"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bvec2_splat() {
+        let v = parse_lps_value_literal("bvec2(true)").unwrap();
+        match v {
+            LpsValueF32::BVec2(a) => assert_eq!(a, [true, true]),
+            _ => panic!("expected BVec2"),
+        }
+    }
+
+    #[test]
+    fn test_parse_uvec4_splat() {
+        let v = parse_lps_value_literal("uvec4(7u)").unwrap();
+        match v {
+            LpsValueF32::UVec4(a) => assert_eq!(a, [7, 7, 7, 7]),
+            _ => panic!("expected UVec4"),
+        }
+    }
 
     #[test]
     fn test_parse_mat2_from_column_vectors() {

@@ -10,10 +10,10 @@ vec2 test_unpackhalf2x16_zero() {
     return unpackHalf2x16(0u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_unpackhalf2x16_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_unpackhalf2x16_ones() {
@@ -21,10 +21,10 @@ vec2 test_unpackhalf2x16_ones() {
     return unpackHalf2x16(100664832u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_unpackhalf2x16_ones() ~= vec2(1.0, 1.0)
 
 vec2 test_unpackhalf2x16_half() {
@@ -32,10 +32,10 @@ vec2 test_unpackhalf2x16_half() {
     return unpackHalf2x16(50331648u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_unpackhalf2x16_half() ~= vec2(0.5, 0.5)
 
 vec2 test_unpackhalf2x16_neg_one() {
@@ -43,10 +43,10 @@ vec2 test_unpackhalf2x16_neg_one() {
     return unpackHalf2x16(100664832u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_unpackhalf2x16_neg_one() ~= vec2(-1.0, 1.0)
 
 vec2 test_unpackhalf2x16_two() {
@@ -54,10 +54,10 @@ vec2 test_unpackhalf2x16_two() {
     return unpackHalf2x16(100663296u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_unpackhalf2x16_two() ~= vec2(2.0, 2.0)
 
 vec2 test_unpackhalf2x16_small() {
@@ -65,10 +65,10 @@ vec2 test_unpackhalf2x16_small() {
     return unpackHalf2x16(50331648u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_unpackhalf2x16_small() ~= vec2(0.1, 0.1)
 
 

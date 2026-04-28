@@ -35,11 +35,7 @@ uint test_uniform_readonly_uint() {
     return int(random_seed + 1u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_uniform_readonly_uint() == 1
+// run: test_uniform_readonly_uint() == 1u
 
 bool test_uniform_readonly_bool() {
     // Uniform bool is read-only

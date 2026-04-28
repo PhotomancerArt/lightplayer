@@ -8,8 +8,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::{IrType, LpirOp, SlotId, VMCTX_VREG, VReg};
-use naga::{Expression, Function, Handle, LocalVariable, TypeInner};
+use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
+use naga::{Expression, Handle, TypeInner};
 use smallvec::smallvec;
 
 use crate::lower_array::aggregate_storage_base_vreg;
@@ -59,19 +59,6 @@ fn aggregate_arg_pointer(
         callee_arg_ty,
     )?;
     aggregate_storage_base_vreg(ctx, &info.slot)
-}
-
-/// `inout` / `out` pointer formals: must be a local.
-fn call_arg_pointer_local(
-    func: &Function,
-    expr: Handle<Expression>,
-) -> Result<Handle<LocalVariable>, LowerError> {
-    match &func.expressions[expr] {
-        Expression::LocalVariable(lv) => Ok(*lv),
-        _ => Err(LowerError::UnsupportedExpression(String::from(
-            "inout/out call argument must be a local variable",
-        ))),
-    }
 }
 
 fn record_call_result_aggregate(
@@ -276,31 +263,15 @@ pub(crate) fn lower_user_call(
             }
         }
     }
-    let mut inout_copybacks: Vec<(Handle<LocalVariable>, SlotId)> = Vec::new();
+    let mut inout_writebacks: Vec<crate::lower_lvalue::WritableWriteback> = Vec::new();
     for (i, &arg_h) in arguments.iter().enumerate() {
         let callee_arg = &f.arguments[i];
         let callee_inner = &ctx.module.types[callee_arg.ty].inner;
         if let TypeInner::Pointer { base, .. } = callee_inner {
-            let lv = call_arg_pointer_local(ctx.func, arg_h)?;
-            if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
-                let addr = aggregate_storage_base_vreg(ctx, &info.slot)?;
-                arg_vs.push(addr);
-            } else {
-                let local_vregs = ctx.resolve_local(lv)?;
-                let base_inner = &ctx.module.types[*base].inner;
-                let ir_tys = naga_type_to_ir_types(ctx.module, base_inner)?;
-                let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
-                let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-                ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
-                for (j, &src) in local_vregs.iter().enumerate() {
-                    ctx.fb.push(LpirOp::Store {
-                        base: addr,
-                        offset: (j * 4) as u32,
-                        value: src,
-                    });
-                }
-                arg_vs.push(addr);
-                inout_copybacks.push((lv, slot));
+            let wa = crate::lower_lvalue::resolve_writable_actual(ctx, arg_h, *base)?;
+            arg_vs.push(wa.addr);
+            if let Some(wb) = wa.writeback {
+                inout_writebacks.push(wb);
             }
         } else if aggregate_layout(ctx.module, callee_arg.ty)?.is_some() {
             let addr = aggregate_arg_pointer(ctx, arg_h, callee_arg.ty)?;
@@ -311,20 +282,8 @@ pub(crate) fn lower_user_call(
         }
     }
     ctx.fb.push_call(callee_ref, &arg_vs, &result_vs);
-    for (lv, slot) in &inout_copybacks {
-        let local_vregs = ctx.resolve_local(*lv)?;
-        let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-        ctx.fb.push(LpirOp::SlotAddr {
-            dst: addr,
-            slot: *slot,
-        });
-        for (j, dst_v) in local_vregs.iter().enumerate() {
-            ctx.fb.push(LpirOp::Load {
-                dst: *dst_v,
-                base: addr,
-                offset: (j * 4) as u32,
-            });
-        }
+    for wb in inout_writebacks {
+        crate::lower_lvalue::apply_writable_writeback(ctx, wb)?;
     }
     Ok(())
 }

@@ -20,6 +20,7 @@ mod lower_ctx;
 mod lower_error;
 mod lower_expr;
 mod lower_lpfn;
+mod lower_lvalue;
 mod lower_math;
 mod lower_math_geom;
 mod lower_math_helpers;
@@ -129,6 +130,19 @@ mod tests {
             .map(|(i, _)| i + 1)
             .expect("marker line");
         assert_eq!(phys, first);
+    }
+
+    #[test]
+    fn const_in_parameter_order_normalizes_for_naga() {
+        // GLSL 4.x `const in T` is rewritten to Naga-accepted `in const T` (see parse.rs).
+        let src = "void g(const in float x) {}\nfloat f() { g(1.0); return 1.0; }\n";
+        let prep = super::prepared_glsl_for_compile(src);
+        assert!(
+            prep.contains("const float x"),
+            "expected const + type after normalization: {prep}"
+        );
+        let result = compile(src);
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 
     #[test]
