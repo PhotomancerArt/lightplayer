@@ -9,7 +9,9 @@ use crate::parse::test_type::{
     TextureFixture, TextureFixtureChannel, TextureFixtures, TextureSpecs,
 };
 use crate::test_run::filetest_lpvm::{CompiledShader, FiletestInstance};
-use lps_shared::{LpsTexture2DDescriptor, TextureShapeHint, TextureStorageFormat};
+use lps_shared::{
+    LpsTexture2DDescriptor, LpsTexture2DValue, TextureShapeHint, TextureStorageFormat,
+};
 use lpvm::{LpsValueF32, LpvmBuffer};
 
 /// Tightly packed host-side texture bytes for a single fixture (see [`encode_texture_fixture`]).
@@ -110,7 +112,12 @@ pub fn bind_texture_fixtures_for_run(
             height: encoded.height,
             row_stride: encoded.row_stride,
         };
-        inst.set_uniform(name.as_str(), &LpsValueF32::Texture2D(desc))
+        let tex_val = LpsTexture2DValue {
+            descriptor: desc,
+            format: encoded.format,
+            byte_len: encoded.bytes.len(),
+        };
+        inst.set_uniform(name.as_str(), &LpsValueF32::Texture2D(tex_val))
             .map_err(|e| anyhow::anyhow!("set_uniform texture {name:?}: {e}"))?;
         keep_alive.push(buf);
     }

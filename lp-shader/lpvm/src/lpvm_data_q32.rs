@@ -8,7 +8,7 @@ use crate::LpsValueF32;
 use crate::data_error::DataError;
 use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 use lps_shared::path_resolve::LpsTypePathExt;
-use lps_shared::{LayoutRules, LpsTexture2DDescriptor, LpsType, StructMember};
+use lps_shared::{LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, StructMember};
 
 /// Shader data as represented in LPVM memory
 pub struct LpvmDataQ32 {
@@ -340,12 +340,14 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF
             }
             LpsValueF32::Mat4x4(m)
         }
-        LpsType::Texture2D => LpsValueF32::Texture2D(LpsTexture2DDescriptor {
-            ptr: u32_from_bytes(&data[0..4]),
-            width: u32_from_bytes(&data[4..8]),
-            height: u32_from_bytes(&data[8..12]),
-            row_stride: u32_from_bytes(&data[12..16]),
-        }),
+        LpsType::Texture2D => LpsValueF32::Texture2D(LpsTexture2DValue::from_guest_descriptor(
+            LpsTexture2DDescriptor {
+                ptr: u32_from_bytes(&data[0..4]),
+                width: u32_from_bytes(&data[4..8]),
+                height: u32_from_bytes(&data[8..12]),
+                row_stride: u32_from_bytes(&data[12..16]),
+            },
+        )),
         LpsType::Array { element, len } => {
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
@@ -477,7 +479,8 @@ fn write_value(
                 write_f32(&mut data[base + 12..base + 16], m[col][3]);
             }
         }
-        (LpsType::Texture2D, LpsValueF32::Texture2D(d)) => {
+        (LpsType::Texture2D, LpsValueF32::Texture2D(v)) => {
+            let d = v.descriptor;
             write_u32(&mut data[0..4], d.ptr);
             write_u32(&mut data[4..8], d.width);
             write_u32(&mut data[8..12], d.height);
@@ -548,8 +551,8 @@ mod tests {
     use super::*;
     use alloc::boxed::Box;
     use alloc::vec;
-    use lps_shared::StructMember;
     use lps_shared::path_resolve::PathError;
+    use lps_shared::{StructMember, TextureStorageFormat};
 
     #[test]
     fn round_trip_struct_vec3_float() {
@@ -641,17 +644,29 @@ mod tests {
     }
 
     #[test]
-    fn from_value_round_trips_typed_texture2d() {
-        use lps_shared::LpsTexture2DDescriptor;
+    fn from_value_round_trips_typed_texture2d_descriptor_lanes() {
+        use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue};
 
-        let d = LpsTexture2DDescriptor {
+        let descriptor = LpsTexture2DDescriptor {
             ptr: 0xab,
             width: 4,
             height: 5,
             row_stride: 32,
         };
-        let v = LpsValueF32::Texture2D(d);
+        let tv = LpsTexture2DValue {
+            descriptor,
+            format: TextureStorageFormat::Rgb16Unorm,
+            byte_len: 2048,
+        };
+        let v = LpsValueF32::Texture2D(tv);
         let data = LpvmDataQ32::from_value(LpsType::Texture2D, &v).expect("from_value");
-        assert!(data.to_value().expect("to_value").eq(&v));
+        let got = data.to_value().expect("to_value");
+        match (v, got) {
+            (LpsValueF32::Texture2D(stored), LpsValueF32::Texture2D(read_back)) => {
+                assert_eq!(stored.descriptor, read_back.descriptor);
+                assert_eq!(read_back.byte_len, 0);
+            }
+            _ => panic!("expected Texture2D"),
+        }
     }
 }

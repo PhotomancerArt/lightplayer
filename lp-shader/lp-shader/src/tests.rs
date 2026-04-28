@@ -69,6 +69,19 @@ fn texture2d_descriptor_from_alloc_texture_fields() {
 }
 
 #[test]
+fn texture_buf_to_texture2d_value_matches_descriptor_format_and_byte_len() {
+    let engine = test_engine();
+    let w = 3u32;
+    let h = 4u32;
+    let format = TextureStorageFormat::Rgba16Unorm;
+    let tex = engine.alloc_texture(w, h, format).expect("alloc_texture");
+    let tv = tex.to_texture2d_value();
+    assert_eq!(tv.descriptor, tex.to_texture2d_descriptor());
+    assert_eq!(tv.format, format);
+    assert_eq!(tv.byte_len, tex.buffer().size());
+}
+
+#[test]
 fn compile_px_returns_monomorphic_lps_pxshader() {
     let glsl = r#"
         vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }
@@ -611,6 +624,405 @@ fn compile_px_texture_free_succeeds_without_texture_specs() {
             &lpir::CompilerConfig::default(),
         )
         .expect("compile_px");
+}
+
+// Runtime texture binding validation (M3c phase 2)
+
+#[test]
+fn render_frame_texel_fetch_with_typed_texture_binding_succeeds() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let mut input_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let px = input_tex.data_mut();
+    let r = unorm16_bytes_from_f32(0.125);
+    let g = unorm16_bytes_from_f32(0.25);
+    let b = unorm16_bytes_from_f32(0.375);
+    let a = unorm16_bytes_from_f32(1.0);
+    let pixel = [r[0], r[1], g[0], g[1], b[0], b[1], a[0], a[1]];
+    px[..8].copy_from_slice(&pixel);
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("inputColor"),
+            LpsValueF32::Texture2D(input_tex.to_texture2d_value()),
+        )],
+    };
+
+    let mut out_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    shader
+        .render_frame(&uniforms, &mut out_tex)
+        .expect("render_frame");
+
+    for chunk in out_tex.data().chunks_exact(8) {
+        assert_eq!(chunk, &pixel[..]);
+    }
+}
+
+#[test]
+fn render_frame_missing_texture_uniform_field_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(msg.contains("inputColor"), "{msg}");
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_wrong_value_type_for_texture_uniform_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(String::from("inputColor"), LpsValueF32::F32(0.0))],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor") && msg.contains("Texture2D"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_texture_format_mismatch_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let input_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let mut tv = input_tex.to_texture2d_value();
+    tv.format = TextureStorageFormat::R16Unorm;
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(String::from("inputColor"), LpsValueF32::Texture2D(tv))],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor") && msg.contains("format mismatch"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_texture_height_one_mismatch_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    let mut spec = test_default_texture_binding_spec();
+    spec.shape_hint = TextureShapeHint::HeightOne;
+    desc.textures.insert(String::from("inputColor"), spec);
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let input_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("inputColor"),
+            LpsValueF32::Texture2D(input_tex.to_texture2d_value()),
+        )],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor")
+                    && (msg.contains("height-one") || msg.contains("height 1")),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_texture_row_stride_too_small_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let input_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let mut tv = input_tex.to_texture2d_value();
+    tv.descriptor.row_stride = 8;
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(String::from("inputColor"), LpsValueF32::Texture2D(tv))],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor") && msg.contains("row_stride"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_texture_row_stride_not_load_aligned_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let input_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let mut tv = input_tex.to_texture2d_value();
+    tv.descriptor.row_stride = 9;
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(String::from("inputColor"), LpsValueF32::Texture2D(tv))],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor") && msg.contains("row_stride"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_texture_ptr_alignment_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let input_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let mut tv = input_tex.to_texture2d_value();
+    tv.descriptor.ptr = tv.descriptor.ptr.saturating_add(1);
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(String::from("inputColor"), LpsValueF32::Texture2D(tv))],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor") && msg.contains("aligned"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_texture_footprint_exceeds_byte_len_returns_render_error() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let mut desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    );
+    desc.textures.insert(
+        String::from("inputColor"),
+        test_default_texture_binding_spec(),
+    );
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let input_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let mut tv = input_tex.to_texture2d_value();
+    tv.byte_len = 16;
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(String::from("inputColor"), LpsValueF32::Texture2D(tv))],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("inputColor") && msg.contains("footprint"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
 }
 
 /// Mirror the synth's exact arithmetic so test expectations and

@@ -33,7 +33,7 @@ pub use sig::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, ParamQualifier};
 pub use texture_binding_validate::validate_texture_binding_specs_against_module;
 pub use texture_buffer::TextureBuffer;
 pub use texture_format::{
-    LpsTexture2DDescriptor, TextureBindingSpec, TextureFilter, TextureShapeHint,
+    LpsTexture2DDescriptor, LpsTexture2DValue, TextureBindingSpec, TextureFilter, TextureShapeHint,
     TextureStorageFormat, TextureWrap,
 };
 pub use types::{LayoutRules, LpsType, StructMember};

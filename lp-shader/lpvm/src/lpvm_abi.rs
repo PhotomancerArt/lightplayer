@@ -18,7 +18,8 @@ use core::fmt;
 use lps_q32::Q32;
 use lps_shared::layout::{round_up, type_alignment, type_size};
 use lps_shared::{
-    FnParam, LayoutRules, LpsTexture2DDescriptor, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier,
+    FnParam, LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, LpsValueF32,
+    LpsValueQ32, ParamQualifier,
 };
 
 /// Split a single slice of flattened Q32 argument words (per-parameter order) into
@@ -225,15 +226,18 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
 
         (LpsType::Array { .. }, LpsValueQ32::Array(_)) => dense_q32_flatten_array(param, arg),
 
-        (LpsType::Texture2D, LpsValueQ32::Texture2D(d)) => Ok(alloc::vec![
-            d.ptr as i32,
-            d.width as i32,
-            d.height as i32,
-            d.row_stride as i32,
-        ]),
+        (LpsType::Texture2D, LpsValueQ32::Texture2D(v)) => {
+            let d = v.descriptor;
+            Ok(alloc::vec![
+                d.ptr as i32,
+                d.width as i32,
+                d.height as i32,
+                d.row_stride as i32,
+            ])
+        }
 
         (LpsType::Texture2D, _) => Err(CallError::TypeMismatch(
-            "LpsType::Texture2D expects LpsValueQ32::Texture2D (descriptor)".to_string(),
+            "LpsType::Texture2D expects LpsValueQ32::Texture2D (typed host value)".to_string(),
         )),
 
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
@@ -399,12 +403,14 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueQ32, Cal
             ],
         ]),
         LpsType::Array { .. } => dense_q32_decode_array(ty, words)?,
-        LpsType::Texture2D => LpsValueQ32::Texture2D(LpsTexture2DDescriptor {
-            ptr: words[0] as u32,
-            width: words[1] as u32,
-            height: words[2] as u32,
-            row_stride: words[3] as u32,
-        }),
+        LpsType::Texture2D => LpsValueQ32::Texture2D(LpsTexture2DValue::from_guest_descriptor(
+            LpsTexture2DDescriptor {
+                ptr: words[0] as u32,
+                width: words[1] as u32,
+                height: words[2] as u32,
+                row_stride: words[3] as u32,
+            },
+        )),
     })
 }
 

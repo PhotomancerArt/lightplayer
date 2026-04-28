@@ -569,9 +569,14 @@ pub fn format_glsl_value(value: &LpsValueF32) -> String {
                 None => format!("struct({inner})"),
             }
         }
-        LpsValueF32::Texture2D(d) => format!(
-            "/* Texture2D ptr={} {}x{} stride={} */",
-            d.ptr, d.width, d.height, d.row_stride
+        LpsValueF32::Texture2D(v) => format!(
+            "/* Texture2D ptr={} {}x{} stride={} fmt={:?} bytes={} */",
+            v.descriptor.ptr,
+            v.descriptor.width,
+            v.descriptor.height,
+            v.descriptor.row_stride,
+            v.format,
+            v.byte_len
         ),
     }
 }

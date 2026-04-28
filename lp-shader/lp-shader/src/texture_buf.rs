@@ -1,6 +1,6 @@
 //! Texture buffer backed by [`lpvm::LpvmBuffer`] shared memory.
 
-use lps_shared::{LpsTexture2DDescriptor, TextureBuffer, TextureStorageFormat};
+use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, TextureBuffer, TextureStorageFormat};
 use lpvm::LpvmBuffer;
 use lpvm::LpvmPtr;
 
@@ -67,6 +67,16 @@ impl LpsTextureBuf {
             width: self.width,
             height: self.height,
             row_stride: row as u32,
+        }
+    }
+
+    /// Typed host value (`descriptor` + [`TextureStorageFormat`] + backing size) for uniforms / validation.
+    #[must_use]
+    pub fn to_texture2d_value(&self) -> LpsTexture2DValue {
+        LpsTexture2DValue {
+            descriptor: self.to_texture2d_descriptor(),
+            format: self.format,
+            byte_len: self.buffer.size(),
         }
     }
 

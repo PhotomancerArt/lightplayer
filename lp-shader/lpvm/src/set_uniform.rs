@@ -110,7 +110,10 @@ mod tests {
 
     use crate::PathError;
     use lps_shared::VMCTX_HEADER_SIZE;
-    use lps_shared::{LpsModuleSig, LpsTexture2DDescriptor, LpsType, StructMember};
+    use lps_shared::{
+        LpsModuleSig, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, StructMember,
+        TextureStorageFormat,
+    };
 
     fn sig_with_tex_uniform() -> LpsModuleSig {
         LpsModuleSig {
@@ -195,8 +198,13 @@ mod tests {
             height: 1,
             row_stride: 16,
         };
+        let tv = LpsTexture2DValue {
+            descriptor: d,
+            format: TextureStorageFormat::Rgba16Unorm,
+            byte_len: 4096,
+        };
         let (off, bytes) =
-            encode_uniform_write(&sig, "tex", &LpsValueF32::Texture2D(d), FloatMode::F32)
+            encode_uniform_write(&sig, "tex", &LpsValueF32::Texture2D(tv), FloatMode::F32)
                 .expect("typed Texture2D");
         assert_eq!(off, VMCTX_HEADER_SIZE + 4);
         let mut want = [0u8; 16];
@@ -216,8 +224,13 @@ mod tests {
             height: 1,
             row_stride: 16,
         };
+        let tv = LpsTexture2DValue {
+            descriptor: d,
+            format: TextureStorageFormat::Rgba16Unorm,
+            byte_len: 4096,
+        };
         let (off, bytes) =
-            encode_uniform_write_q32(&sig, "tex", &LpsValueQ32::Texture2D(d)).expect("typed q32");
+            encode_uniform_write_q32(&sig, "tex", &LpsValueQ32::Texture2D(tv)).expect("typed q32");
         assert_eq!(off, VMCTX_HEADER_SIZE + 4);
         let mut want = [0u8; 16];
         want[0..4].copy_from_slice(&(d.ptr as i32).to_le_bytes());

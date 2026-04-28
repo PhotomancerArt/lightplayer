@@ -12,7 +12,7 @@ use core::fmt;
 use lps_q32::Q32;
 use lps_q32::q32_encode::q32_encode;
 
-use crate::texture_format::LpsTexture2DDescriptor;
+use crate::texture_format::LpsTexture2DValue;
 use crate::{LpsType, LpsValueF32};
 
 /// Fixed-point semantic values aligned with [`LpsValueF32`] shape.
@@ -42,8 +42,8 @@ pub enum LpsValueQ32 {
         name: Option<String>,
         fields: Vec<(String, LpsValueQ32)>,
     },
-    /// Same ABI token as [`LpsValueF32::Texture2D`].
-    Texture2D(LpsTexture2DDescriptor),
+    /// Same host payload as [`LpsValueF32::Texture2D`] (guest uniform still encodes descriptor lanes only).
+    Texture2D(LpsTexture2DValue),
 }
 
 /// Conversion error for [`lps_value_f32_to_q32`] / [`q32_to_lps_value_f32`].
@@ -77,7 +77,7 @@ pub fn lps_value_f32_to_q32(
     v: &LpsValueF32,
 ) -> Result<LpsValueQ32, LpsValueQ32Error> {
     Ok(match (ty, v) {
-        (LpsType::Texture2D, LpsValueF32::Texture2D(d)) => LpsValueQ32::Texture2D(*d),
+        (LpsType::Texture2D, LpsValueF32::Texture2D(v)) => LpsValueQ32::Texture2D(*v),
         (LpsType::Texture2D, _) => {
             return Err(LpsValueQ32Error::TypeMismatch(String::from(
                 "LpsType::Texture2D expects LpsValueF32::Texture2D (opaque descriptor), not a uvec4 stand-in",
@@ -216,7 +216,7 @@ pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32,
     let bad = || LpsValueQ32Error::TypeMismatch(format!("return shape mismatch for type {ty:?}"));
 
     Ok(match (ty, v) {
-        (LpsType::Texture2D, LpsValueQ32::Texture2D(d)) => LpsValueF32::Texture2D(d),
+        (LpsType::Texture2D, LpsValueQ32::Texture2D(v)) => LpsValueF32::Texture2D(v),
         (LpsType::Texture2D, _) => {
             return Err(LpsValueQ32Error::TypeMismatch(String::from(
                 "LpsType::Texture2D expects LpsValueQ32::Texture2D (opaque descriptor), not a uvec4 stand-in",
@@ -326,6 +326,7 @@ pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TextureStorageFormat;
 
     #[test]
     fn round_trip_scalar_float() {
@@ -338,18 +339,22 @@ mod tests {
 
     #[test]
     fn texture2d_f32_q32_noop() {
-        use crate::LpsTexture2DDescriptor;
+        use crate::{LpsTexture2DDescriptor, LpsTexture2DValue};
 
         let ty = LpsType::Texture2D;
-        let d = LpsTexture2DDescriptor {
-            ptr: 0x10,
-            width: 2,
-            height: 3,
-            row_stride: 8,
+        let tv = LpsTexture2DValue {
+            descriptor: LpsTexture2DDescriptor {
+                ptr: 0x10,
+                width: 2,
+                height: 3,
+                row_stride: 8,
+            },
+            format: TextureStorageFormat::Rgba16Unorm,
+            byte_len: 96,
         };
-        let v = LpsValueF32::Texture2D(d);
+        let v = LpsValueF32::Texture2D(tv);
         let q = lps_value_f32_to_q32(&ty, &v).unwrap();
-        assert_eq!(q, LpsValueQ32::Texture2D(d));
+        assert_eq!(q, LpsValueQ32::Texture2D(tv));
         let back = q32_to_lps_value_f32(&ty, q).unwrap();
         assert!(back.eq(&v));
     }

@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 
-use crate::texture_format::LpsTexture2DDescriptor;
+use crate::texture_format::LpsTexture2DValue;
 
 /// Shader value as rust enum, heap-allocated
 ///
@@ -51,8 +51,8 @@ pub enum LpsValueF32 {
         name: Option<alloc::string::String>,
         fields: alloc::vec::Vec<(alloc::string::String, LpsValueF32)>,
     },
-    /// 2D texture reference (`LpsType::Texture2D`), as an opaque std430 four-`u32` descriptor.
-    Texture2D(LpsTexture2DDescriptor),
+    /// 2D texture reference (`LpsType::Texture2D`): guest descriptor lanes plus host storage metadata.
+    Texture2D(LpsTexture2DValue),
 }
 
 impl LpsValueF32 {

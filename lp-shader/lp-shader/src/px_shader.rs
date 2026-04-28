@@ -211,6 +211,25 @@ impl LpsPxShader {
                 .find(|(n, _)| n == name)
                 .map(|(_, v)| v)
                 .ok_or_else(|| LpsError::Render(format!("missing uniform field `{name}`")))?;
+            if member.ty == LpsType::Texture2D {
+                match value {
+                    LpsValueF32::Texture2D(tv) => {
+                        let spec = self.meta.texture_specs.get(name).ok_or_else(|| {
+                            LpsError::Render(format!(
+                                "texture uniform `{name}`: missing texture binding spec in module metadata"
+                            ))
+                        })?;
+                        crate::runtime_texture_validation::validate_runtime_texture_binding(
+                            name, tv, spec,
+                        )?;
+                    }
+                    _ => {
+                        return Err(LpsError::Render(format!(
+                            "texture uniform `{name}` expects `LpsValueF32::Texture2D` (e.g. from `LpsTextureBuf::to_texture2d_value()`)"
+                        )));
+                    }
+                }
+            }
             inner.set_uniform(name, value)?;
         }
         Ok(())
