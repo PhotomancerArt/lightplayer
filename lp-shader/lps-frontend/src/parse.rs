@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use naga::{Module, ShaderStage};
 
-use crate::naga_types::{naga_module_from_parsed, CompileError, NagaModule};
+use crate::naga_types::{CompileError, NagaModule, naga_module_from_parsed};
 
 /// LPFX preamble and `#line 1` sent to Naga before the user snippet (same layout as [`compile`]).
 const LPFX_PREFIX: &str = concat!(

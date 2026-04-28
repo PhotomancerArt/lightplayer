@@ -9,20 +9,19 @@ use alloc::vec::Vec;
 
 use lpir::{
     CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrFunction, IrType, LpirModule, LpirOp,
-    ModuleBuilder, VReg, VMCTX_VREG,
+    ModuleBuilder, VMCTX_VREG, VReg,
 };
 use lps_shared::{
-    type_alignment, type_size, validate_texture_binding_specs_against_module, LayoutRules,
-    LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, TextureBindingSpec,
-    VMCTX_HEADER_SIZE,
+    LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember, TextureBindingSpec,
+    VMCTX_HEADER_SIZE, type_alignment, type_size, validate_texture_binding_specs_against_module,
 };
 use naga::{AddressSpace, Expression, Function, GlobalVariable, Handle, Module};
 
+use crate::NagaModule;
 use crate::lower_ctx::{GlobalVarInfo, GlobalVarMap, LowerCtx};
 use crate::lower_error::LowerError;
 use crate::lower_lpfn;
 use crate::naga_types::naga_type_handle_to_lps;
-use crate::NagaModule;
 
 /// Options for Naga → LPIR lowering (e.g. compile-time texture binding metadata).
 #[derive(Clone, Debug, PartialEq, Eq)]
