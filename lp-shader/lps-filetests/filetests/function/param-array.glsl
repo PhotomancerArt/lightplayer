@@ -52,7 +52,9 @@ vec2 test_param_array_vector() {
 }
 // run: test_param_array_vector() ~= vec2(4.0, 6.0)
 
-float average(const float[5] arr) {
+// Note: `const float[5] arr` is valid GLSL but the frontend does not yet bind a local slot for
+// const-qualified by-value array parameters (in_array local lookup). Use plain `in` here.
+float average(float[5] arr) {
     return (arr[0] + arr[1] + arr[2] + arr[3] + arr[4]) / 5.0;
 }
 

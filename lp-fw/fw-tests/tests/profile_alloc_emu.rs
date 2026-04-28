@@ -31,7 +31,7 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 const FRAMES: u32 = 3;
 const HEAP_START: u32 = 0x8000_0000;
@@ -262,7 +262,7 @@ async fn test_profile_alloc_produces_valid_output() {
 }
 
 fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
-    use lp_shared::fs::LpFs;
+    use lpfs::LpFs;
 
     let entries = fs
         .list_dir("/".as_path(), true)

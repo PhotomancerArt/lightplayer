@@ -18,8 +18,11 @@ use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport};
 use super::BrowserLpvmModule;
 use super::link;
 use super::marshal::{
-    build_js_args, build_js_args_q32_flat, js_result_to_lps_value, js_result_to_q32_words,
+    browser_shadow_frame_close, browser_shadow_frame_open, build_js_args_for_call,
+    build_js_args_q32_for_call, build_js_args_q32_scalar_only, build_js_args_scalar_only,
+    decode_browser_sret_q32_return, js_result_to_lps_value, js_result_to_q32_words,
 };
+use crate::aggregate_abi::{decode_aggregate_std430_bytes, export_needs_shadow_marshal};
 use lpir::LpirModule;
 
 struct RenderTextureEntry {
@@ -182,12 +185,12 @@ impl LpvmInstance for BrowserLpvmInstance {
         }
 
         let return_ty = export.return_type.clone();
-        let js_args = build_js_args(
-            &export.param_types,
-            export.params.len(),
-            args,
-            self.float_mode,
-        )?;
+        let needs_shadow = export_needs_shadow_marshal(&export);
+        if needs_shadow && self.shadow_stack_base.is_none() {
+            return Err(WasmError::runtime(
+                "aggregate/sret calling convention requires an exported shadow stack global",
+            ));
+        }
 
         let func_val = Reflect::get(&self.exports_obj, &JsValue::from_str(name))
             .map_err(|e| WasmError::runtime(format!("get export {name}: {e:?}")))?;
@@ -196,9 +199,57 @@ impl LpvmInstance for BrowserLpvmInstance {
             .map_err(|_| WasmError::runtime(format!("'{name}' is not a function")))?;
 
         self.prepare_call()?;
+
+        let shadow_frame = if needs_shadow {
+            Some(browser_shadow_frame_open(&self.exports_obj)?)
+        } else {
+            None
+        };
+
+        let (js_args, sret_plan) = if needs_shadow {
+            let mem = self
+                .memory
+                .as_ref()
+                .ok_or_else(|| WasmError::runtime("no linear memory for aggregate call"))?;
+            build_js_args_for_call(
+                &self.exports_obj,
+                mem,
+                &export,
+                args,
+                self.float_mode,
+                &return_ty,
+            )?
+        } else {
+            (
+                build_js_args_scalar_only(
+                    &export.param_types,
+                    export.params.len(),
+                    args,
+                    self.float_mode,
+                )?,
+                None,
+            )
+        };
+
         let result = func
             .apply(&JsValue::NULL, &js_args)
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+
+        if let Some(frame) = shadow_frame {
+            browser_shadow_frame_close(&self.exports_obj, frame)?;
+        }
+
+        if export.uses_sret {
+            let plan = sret_plan.ok_or_else(|| {
+                WasmError::runtime("internal: sret export without sret allocation plan")
+            })?;
+            let mem = self
+                .memory
+                .as_ref()
+                .ok_or_else(|| WasmError::runtime("no linear memory for sret read"))?;
+            let bytes = super::marshal::browser_memory_read(mem, plan.ptr, plan.size)?;
+            return decode_aggregate_std430_bytes(&return_ty, &bytes, self.float_mode);
+        }
 
         js_result_to_lps_value(&return_ty, &result, self.float_mode)
     }
@@ -230,7 +281,12 @@ impl LpvmInstance for BrowserLpvmInstance {
         })?;
 
         let return_ty = export.return_type.clone();
-        let js_args = build_js_args_q32_flat(&export.param_types, export.params.len(), args)?;
+        let needs_shadow = export_needs_shadow_marshal(&export);
+        if needs_shadow && self.shadow_stack_base.is_none() {
+            return Err(WasmError::runtime(
+                "aggregate/sret calling convention requires an exported shadow stack global",
+            ));
+        }
 
         let func_val = Reflect::get(&self.exports_obj, &JsValue::from_str(name))
             .map_err(|e| WasmError::runtime(format!("get export {name}: {e:?}")))?;
@@ -239,12 +295,47 @@ impl LpvmInstance for BrowserLpvmInstance {
             .map_err(|_| WasmError::runtime(format!("'{name}' is not a function")))?;
 
         self.prepare_call()?;
+
+        let shadow_frame = if needs_shadow {
+            Some(browser_shadow_frame_open(&self.exports_obj)?)
+        } else {
+            None
+        };
+
+        let (js_args, sret_plan) = if needs_shadow {
+            let mem = self
+                .memory
+                .as_ref()
+                .ok_or_else(|| WasmError::runtime("no linear memory for aggregate call"))?;
+            build_js_args_q32_for_call(&self.exports_obj, mem, &export, args, &return_ty)?
+        } else {
+            (
+                build_js_args_q32_scalar_only(&export.param_types, export.params.len(), args)?,
+                None,
+            )
+        };
+
         let result = func
             .apply(&JsValue::NULL, &js_args)
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
 
+        if let Some(frame) = shadow_frame {
+            browser_shadow_frame_close(&self.exports_obj, frame)?;
+        }
+
         if matches!(return_ty, LpsType::Void) {
             return Ok(Vec::new());
+        }
+
+        if export.uses_sret {
+            let plan = sret_plan.ok_or_else(|| {
+                WasmError::runtime("internal: sret export without sret allocation plan")
+            })?;
+            let mem = self
+                .memory
+                .as_ref()
+                .ok_or_else(|| WasmError::runtime("no linear memory for sret read"))?;
+            return decode_browser_sret_q32_return(mem, &plan, &return_ty);
         }
 
         js_result_to_q32_words(&return_ty, &result, self.float_mode)

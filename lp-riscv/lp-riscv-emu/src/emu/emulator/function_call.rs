@@ -196,7 +196,9 @@ impl Riscv32Emulator {
     /// # Arguments
     ///
     /// * `func_entry` - Program counter of function entry point
-    /// * `args` - Function arguments as DataValues (excluding StructReturn pointer)
+    /// * `args` - `DataValues` for every [`Signature::params`] **except** the
+    ///   `StructReturn` slot (typically `vmctx` + user args only). The emulator
+    ///   inserts the return buffer pointer at the StructReturn index.
     /// * `signature` - Function signature (must have StructReturn parameter)
     /// * `struct_size` - Size of the struct return buffer in bytes
     ///
@@ -224,29 +226,6 @@ impl Riscv32Emulator {
         self.instruction_count = 0;
         self.cycle_count = 0;
 
-        // Allocate buffer for struct return
-        let buffer_addr = allocate_struct_return_buffer(self, struct_size)?;
-
-        // Place struct return pointer in a0
-        place_struct_return_pointer(self, buffer_addr)?;
-
-        // Create flags
-        let flags = create_flags_with_multi_ret()?;
-
-        // Compute argument locations (skip StructReturn parameter)
-        // StructReturn takes a0, so we don't need return area
-        let arg_locations =
-            abi_helper::compute_arg_locations(signature, &flags, false).map_err(|e| {
-                EmulatorError::InvalidInstruction {
-                    pc: self.pc,
-                    instruction: 0,
-                    reason: format!("Failed to compute argument locations: {e:?}"),
-                    regs: self.regs,
-                }
-            })?;
-
-        // Filter out StructReturn parameter from arg_locations
-        // StructReturn is typically the first parameter
         let struct_ret_index = signature
             .params
             .iter()
@@ -258,18 +237,67 @@ impl Riscv32Emulator {
                 regs: self.regs,
             })?;
 
-        // Place remaining arguments (skip StructReturn)
-        let filtered_arg_locations: Vec<ArgLocation> = arg_locations
+        let struct_ret_slots = signature
+            .params
             .iter()
-            .enumerate()
-            .filter_map(|(i, loc)| {
-                if i == struct_ret_index {
-                    None // Skip StructReturn parameter
-                } else {
-                    Some(loc.clone())
+            .filter(|p| p.purpose == ArgumentPurpose::StructReturn)
+            .count();
+        if struct_ret_slots != 1 {
+            return Err(EmulatorError::InvalidInstruction {
+                pc: self.pc,
+                instruction: 0,
+                reason: format!(
+                    "expected exactly one StructReturn parameter, got {struct_ret_slots}"
+                ),
+                regs: self.regs,
+            });
+        }
+
+        let expected_without_sret = signature.params.len().saturating_sub(1);
+        if args.len() != expected_without_sret {
+            return Err(EmulatorError::InvalidInstruction {
+                pc: self.pc,
+                instruction: 0,
+                reason: format!(
+                    "StructReturn call: expected {expected_without_sret} caller args (vmctx + user, no sret pointer), got {}",
+                    args.len()
+                ),
+                regs: self.regs,
+            });
+        }
+
+        // Allocate buffer for struct return (RAM); pass its address via normal ABI placement.
+        let buffer_addr = allocate_struct_return_buffer(self, struct_size)?;
+
+        let flags = create_flags_with_multi_ret()?;
+        let arg_locations =
+            abi_helper::compute_arg_locations(signature, &flags, false).map_err(|e| {
+                EmulatorError::InvalidInstruction {
+                    pc: self.pc,
+                    instruction: 0,
+                    reason: format!("Failed to compute argument locations: {e:?}"),
+                    regs: self.regs,
                 }
-            })
-            .collect();
+            })?;
+
+        let mut combined: Vec<DataValue> = Vec::with_capacity(signature.params.len());
+        let mut ai = 0usize;
+        for pi in 0..signature.params.len() {
+            if pi == struct_ret_index {
+                combined.push(DataValue::I32(buffer_addr as i32));
+            } else {
+                let dv = args
+                    .get(ai)
+                    .ok_or_else(|| EmulatorError::InvalidInstruction {
+                        pc: self.pc,
+                        instruction: 0,
+                        reason: format!("missing argument value at caller index {ai}"),
+                        regs: self.regs,
+                    })?;
+                combined.push(dv.clone());
+                ai += 1;
+            }
+        }
 
         // Setup stack (no return area needed for StructReturn)
         let ram_size = self.memory.ram().len();
@@ -277,8 +305,8 @@ impl Riscv32Emulator {
         let entry_sp = (stack_top - 16) as i32; // 16-byte aligned, with some space
         self.regs[2] = entry_sp; // SP register
 
-        // Place arguments
-        place_arguments(self, args, &filtered_arg_locations, entry_sp)?;
+        // Place arguments (vmctx, sret pointer, user args, …) using the real Cranelift layout.
+        place_arguments(self, &combined, &arg_locations, entry_sp)?;
 
         // Set up return address (ra/x1) to a halt address outside code region
         let code_start = self.memory.code_start();
@@ -508,15 +536,6 @@ fn place_return_area_pointer(
     return_area_addr: u32,
 ) -> Result<(), EmulatorError> {
     emulator.regs[10] = return_area_addr as i32; // a0 = return area pointer
-    Ok(())
-}
-
-/// Place struct return buffer pointer in a0 register.
-fn place_struct_return_pointer(
-    emulator: &mut Riscv32Emulator,
-    buffer_addr: u32,
-) -> Result<(), EmulatorError> {
-    emulator.regs[10] = buffer_addr as i32; // a0 = struct return buffer pointer
     Ok(())
 }
 
@@ -1119,13 +1138,6 @@ mod tests {
         let mut emulator = create_test_emulator();
         place_return_area_pointer(&mut emulator, 0x80001000).unwrap();
         assert_eq!(emulator.regs[10], 0x80001000u32 as i32);
-    }
-
-    #[test]
-    fn test_place_struct_return_pointer() {
-        let mut emulator = create_test_emulator();
-        place_struct_return_pointer(&mut emulator, 0x80002000).unwrap();
-        assert_eq!(emulator.regs[10], 0x80002000u32 as i32);
     }
 
     #[test]

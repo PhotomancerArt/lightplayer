@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use lp_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lp_engine_client::ClientProjectView;
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 
 #[test]
 fn test_scene_render() {

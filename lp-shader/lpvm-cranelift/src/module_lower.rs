@@ -107,12 +107,6 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     let mut func_names = Vec::with_capacity(indices.len());
     let mut ir_param_counts = Vec::with_capacity(indices.len());
 
-    let callee_struct_return: alloc::vec::Vec<bool> = ir
-        .functions
-        .values()
-        .map(|f| emit::signature_uses_struct_return(module.isa(), f))
-        .collect();
-
     for &fid in &indices {
         let f = &ir.functions[&fid];
         logical_return_words.insert(f.name.clone(), f.return_types.len());
@@ -141,6 +135,14 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     for (emit_pos, &fid) in indices.iter().enumerate() {
         let r = func_id_to_ir_rank[&fid];
         id_at_ir[r] = Some(func_ids[emit_pos]);
+    }
+
+    // Per-IR-rank flag: does the callee's Cranelift signature use StructReturn?
+    // Indexed by IR rank (BTreeMap key order), matching `func_id_to_ir_rank` and `id_at_ir`.
+    let mut callee_struct_return: Vec<bool> = vec![false; ir.functions.len()];
+    for (fid, f) in ir.functions.iter() {
+        let r = func_id_to_ir_rank[fid];
+        callee_struct_return[r] = emit::signature_uses_struct_return(module.isa(), f);
     }
 
     let mut ctx = module.make_context();

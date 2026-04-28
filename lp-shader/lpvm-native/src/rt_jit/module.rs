@@ -62,9 +62,8 @@ impl NativeJitModule {
 
         let gfn = self.inner.meta.functions.iter().find(|f| f.name == name)?;
 
-        let slots = ir_func.total_param_slots() as usize;
         let func_abi = match self.inner.isa {
-            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, slots),
+            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, Some(ir_func)),
         };
 
         Some(NativeJitDirectCall {

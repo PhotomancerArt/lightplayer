@@ -1,4 +1,4 @@
-➜  lightplayer-native git:(feature/native) ✗ scripts/glsl-filetests.sh lpvm/native/perf -t rv32,rv32lp
+➜  lightplayer-native git:(feature/native) ✗ scripts/filetests.sh lpvm/native/perf -t rv32,rv32lp
 
 Running 7 test file(s)...
 

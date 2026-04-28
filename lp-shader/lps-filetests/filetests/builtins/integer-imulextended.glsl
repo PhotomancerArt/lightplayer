@@ -13,10 +13,9 @@ uvec4 test_imulextended_int_small() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_imulextended_int_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_imulextended_int_neg_pos() {
@@ -26,10 +25,9 @@ uvec4 test_imulextended_int_neg_pos() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_imulextended_int_neg_pos() == uvec4(4294967290u, 4294967295u, 0u, 0u)
 
 uvec4 test_imulextended_int_neg_neg() {
@@ -39,10 +37,9 @@ uvec4 test_imulextended_int_neg_neg() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_imulextended_int_neg_neg() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_imulextended_int_large() {
@@ -52,10 +49,9 @@ uvec4 test_imulextended_int_large() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_imulextended_int_large() == uvec4(1410065408u, 2u, 0u, 0u)
 
 

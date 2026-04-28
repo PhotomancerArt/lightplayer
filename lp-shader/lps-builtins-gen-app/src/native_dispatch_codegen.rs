@@ -30,6 +30,10 @@ fn guest_pointer_out_plan(fn_name: &str) -> Option<Vec<(usize, usize, &'static s
         "__lp_lpfn_psrdnoise2_q32" => Some(vec![(5, 2, "i32")]),
         "__lp_lpfn_psrdnoise3_f32" => Some(vec![(7, 3, "f32")]),
         "__lp_lpfn_psrdnoise3_q32" => Some(vec![(7, 3, "i32")]),
+        "__lp_texture1d_r16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lp_texture1d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lp_texture2d_r16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lp_texture2d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
         "__lps_sincos_q32" => Some(vec![(1, 1, "i32"), (2, 1, "i32")]),
         _ => None,
     }
@@ -189,6 +193,145 @@ fn emit_get_fuel_arm() -> &'static str {
             Ok(())"#
 }
 
+/// Texture builtins pass descriptor `ptr` as a **guest linear-memory byte offset**. Wasmtime dispatch
+/// must translate that offset through [`wasmtime::Memory::data`] before sampling — unlike native JIT,
+/// where `ptr` may be used as an address-sized token compatible with `ptr as *const u8`.
+fn is_texture_guest_offset_builtin(symbol_name: &str) -> bool {
+    matches!(
+        symbol_name,
+        "__lp_texture2d_rgba16_unorm_q32"
+            | "__lp_texture1d_rgba16_unorm_q32"
+            | "__lp_texture2d_r16_unorm_q32"
+            | "__lp_texture1d_r16_unorm_q32"
+    )
+}
+
+fn emit_texture_guest_dispatch(symbol_name: &str) -> String {
+    match symbol_name {
+        "__lp_texture2d_rgba16_unorm_q32" => r#"            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32() as u32;
+            let p5 = params[5].unwrap_i32();
+            let p6 = params[6].unwrap_i32();
+            let p7 = params[7].unwrap_i32() as u32;
+            let p8 = params[8].unwrap_i32() as u32;
+            let p9 = params[9].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture2dUnormSampleArgs {
+                width: p2,
+                height: p3,
+                row_stride: p4,
+                u: p5,
+                v: p6,
+                filter_abi: p7,
+                wrap_x_abi: p8,
+                wrap_y_abi: p9,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::rgba16_unorm_q32::texture2d_rgba16_unorm_sample(tex_base_host, args)
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+"#
+        .to_string(),
+        "__lp_texture1d_rgba16_unorm_q32" => r#"            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32();
+            let p5 = params[5].unwrap_i32() as u32;
+            let p6 = params[6].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture1dUnormSampleArgs {
+                width: p2,
+                row_stride: p3,
+                u: p4,
+                filter_abi: p5,
+                wrap_x_abi: p6,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::rgba16_unorm_q32::texture1d_rgba16_unorm_sample(tex_base_host, args)
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+"#
+        .to_string(),
+        "__lp_texture2d_r16_unorm_q32" => r#"            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32() as u32;
+            let p5 = params[5].unwrap_i32();
+            let p6 = params[6].unwrap_i32();
+            let p7 = params[7].unwrap_i32() as u32;
+            let p8 = params[8].unwrap_i32() as u32;
+            let p9 = params[9].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture2dUnormSampleArgs {
+                width: p2,
+                height: p3,
+                row_stride: p4,
+                u: p5,
+                v: p6,
+                filter_abi: p7,
+                wrap_x_abi: p8,
+                wrap_y_abi: p9,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::r16_unorm_q32::texture2d_r16_unorm_sample(tex_base_host, args)
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+"#
+        .to_string(),
+        "__lp_texture1d_r16_unorm_q32" => r#"            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32();
+            let p5 = params[5].unwrap_i32() as u32;
+            let p6 = params[6].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture1dUnormSampleArgs {
+                width: p2,
+                row_stride: p3,
+                u: p4,
+                filter_abi: p5,
+                wrap_x_abi: p6,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::r16_unorm_q32::texture1d_r16_unorm_sample(tex_base_host, args)
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+"#
+        .to_string(),
+        other => panic!("emit_texture_guest_dispatch: unknown texture builtin `{other}`"),
+    }
+}
+
 /// Generate `lpvm-wasm/src/rt_wasmtime/native_builtin_dispatch.rs`.
 pub(crate) fn generate_native_wasmtime_dispatch(path: &Path, builtins: &[BuiltinInfo]) {
     for b in builtins {
@@ -233,6 +376,10 @@ pub(super) fn dispatch_native_builtin(
         if b.symbol_name == "__lp_vm_get_fuel_q32" {
             body.push_str(emit_get_fuel_arm());
             body.push('\n');
+        } else if guest_pointer_out_plan(&b.function_name).is_some()
+            && is_texture_guest_offset_builtin(&b.symbol_name)
+        {
+            body.push_str(&emit_texture_guest_dispatch(&b.symbol_name));
         } else if let Some(ref plan) = guest_pointer_out_plan(&b.function_name) {
             body.push_str(&emit_pointer_arm(b, plan));
         } else {
@@ -246,4 +393,30 @@ pub(super) fn dispatch_native_builtin(
         fs::create_dir_all(parent).expect("create native_builtin_dispatch parent dir");
     }
     fs::write(path, body).expect("write native_builtin_dispatch.rs");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::emit_texture_guest_dispatch;
+
+    #[test]
+    fn wasmtime_texture_dispatch_uses_linear_memory_base_and_public_sampler() {
+        let code = emit_texture_guest_dispatch("__lp_texture2d_rgba16_unorm_q32");
+        assert!(
+            code.contains("mem.data(&caller)"),
+            "expected wasmtime Memory::data for guest offset translation:\n{code}"
+        );
+        assert!(
+            code.contains("wrapping_add(tex_guest_off)"),
+            "expected host base = linear_memory.as_ptr() + guest offset:\n{code}"
+        );
+        assert!(
+            code.contains("texture2d_rgba16_unorm_sample"),
+            "expected Rust sampler helper, not extern `__lp_texture*`:\n{code}"
+        );
+        assert!(
+            !code.contains("__lp_texture2d_rgba16_unorm_q32"),
+            "must not call extern that casts guest offset to host pointer:\n{code}"
+        );
+    }
 }

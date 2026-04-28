@@ -13,12 +13,13 @@ Most questions have been answered in the previous planning session. This documen
 
 3. ✅ **Should the rerun commands include both `DEBUG=1` and non-DEBUG versions?**
    - **Answer:** Yes, show both commands with labels:
+
      ```
      Rerun just this test:
-       scripts/glsl-filetests.sh filename:line
-     
+       scripts/filetests.sh filename:line
+
      Rerun with debugging:
-       DEBUG=1 scripts/glsl-filetests.sh filename:line
+       DEBUG=1 scripts/filetests.sh filename:line
      ```
 
 4. ✅ **Should we extract the debug info formatting into separate functions?**
@@ -36,4 +37,3 @@ Most questions have been answered in the previous planning session. This documen
 ## Remaining Questions
 
 None - ready to proceed with implementation.
-

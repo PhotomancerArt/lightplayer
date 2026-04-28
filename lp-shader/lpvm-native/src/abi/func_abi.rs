@@ -144,16 +144,18 @@ pub struct ModuleAbi {
 impl ModuleAbi {
     /// Build from surface signatures and LPIR imports (import return shapes affect caller sret).
     pub fn from_ir_and_sig(isa: IsaTarget, ir: &LpirModule, sig: &LpsModuleSig) -> Self {
-        use crate::abi::classify::entry_param_scalar_count;
         use crate::isa::rv32::abi::func_abi_rv32;
 
         let mut func_abis = BTreeMap::new();
         let mut max_sret_bytes = 0u32;
 
         for fn_sig in &sig.functions {
-            let n = entry_param_scalar_count(fn_sig);
+            let ir_func = ir.functions.values().find(|f| f.name == fn_sig.name);
             let fa = match isa {
-                IsaTarget::Rv32imac => func_abi_rv32(fn_sig, n),
+                IsaTarget::Rv32imac => match ir_func {
+                    Some(f) => func_abi_rv32(fn_sig, Some(f)),
+                    None => func_abi_rv32(fn_sig, None),
+                },
             };
             if let Some(w) = fa.sret_word_count() {
                 max_sret_bytes = max_sret_bytes.max(w * 4);
@@ -162,9 +164,18 @@ impl ModuleAbi {
         }
 
         for imp in &ir.imports {
-            let n = imp.return_types.len() as u32;
-            if isa.sret_uses_buffer_for(n) {
-                max_sret_bytes = max_sret_bytes.max(n * 4);
+            if imp.sret {
+                let words = imp.return_types.len() as u32;
+                // Note: aggregate-sret imports have empty LPIR `return_types`; sizing for those
+                // paths is handled where the import is linked with host / call-site metadata.
+                if words > 0 {
+                    max_sret_bytes = max_sret_bytes.max(words * 4);
+                }
+            } else {
+                let n = imp.return_types.len() as u32;
+                if isa.sret_uses_buffer_for(n) {
+                    max_sret_bytes = max_sret_bytes.max(n * 4);
+                }
             }
         }
 
@@ -190,11 +201,11 @@ impl ModuleAbi {
 
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
     use alloc::vec;
 
     use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType};
 
-    use crate::abi::classify::entry_param_scalar_count;
     use crate::isa::rv32::abi as rv32;
 
     #[test]
@@ -205,7 +216,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert!(!abi.is_sret());
         assert!(abi.allocatable().contains(rv32::S1));
     }
@@ -218,8 +229,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let n = entry_param_scalar_count(&sig);
-        let abi = rv32::func_abi_rv32(&sig, n);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert!(abi.is_sret());
         assert!(!abi.allocatable().contains(rv32::S1));
     }
@@ -232,7 +242,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.precolors(), &[(0u32, rv32::A0)]);
     }
 
@@ -244,7 +254,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.precolors(), &[(0u32, rv32::A1)]);
     }
 
@@ -256,7 +266,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         let a = abi.allocatable();
         assert!(!a.contains(rv32::A0));
         assert!(!a.contains(rv32::T0));
@@ -271,7 +281,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.precolor_of(0), Some(rv32::A0));
         assert_eq!(abi.precolor_of(99), None);
     }
@@ -284,7 +294,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.precolor_of(0), Some(rv32::A1));
     }
 
@@ -296,7 +306,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.sret_word_count(), Some(16));
     }
 
@@ -308,7 +318,7 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.sret_word_count(), None);
     }
 
@@ -320,8 +330,51 @@ mod tests {
             parameters: vec![],
             kind: LpsFnKind::UserDefined,
         };
-        let abi = rv32::func_abi_rv32(&sig, 1);
+        let abi = rv32::func_abi_rv32(&sig, None);
         assert_eq!(abi.stack_alignment(), 16);
+    }
+
+    #[test]
+    fn m1_sret_arg_abi_from_ir() {
+        use lpir::{FuncId, IrFunction, IrType, LpirModule, VReg};
+
+        let sig = LpsFnSig {
+            name: "ret_arr".into(),
+            return_type: LpsType::Array {
+                element: Box::new(LpsType::Float),
+                len: 4,
+            },
+            parameters: vec![],
+            kind: LpsFnKind::UserDefined,
+        };
+        let f = IrFunction {
+            name: "ret_arr".into(),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 0,
+            return_types: vec![],
+            sret_arg: Some(VReg(1)),
+            vreg_types: vec![IrType::Pointer, IrType::Pointer],
+            slots: vec![],
+            body: vec![],
+            vreg_pool: vec![],
+        };
+        let mut ir = LpirModule::default();
+        ir.functions.insert(FuncId(0), f);
+
+        let m = super::ModuleAbi::from_ir_and_sig(
+            crate::isa::IsaTarget::Rv32imac,
+            &ir,
+            &LpsModuleSig {
+                functions: vec![sig],
+                ..Default::default()
+            },
+        );
+        let abi = m.func_abi("ret_arr").expect("abi");
+        assert!(abi.is_sret());
+        assert_eq!(abi.sret_word_count(), Some(4));
+        assert_eq!(abi.precolor_of(0), Some(rv32::A1));
+        assert_eq!(abi.precolor_of(1), Some(rv32::A0));
     }
 
     #[test]
@@ -377,6 +430,7 @@ mod tests {
             return_types: vec![IrType::I32; 5],
             lpfn_glsl_params: None,
             needs_vmctx: false,
+            sret: false,
         });
         let sig = LpsModuleSig::default();
         let m = super::ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);

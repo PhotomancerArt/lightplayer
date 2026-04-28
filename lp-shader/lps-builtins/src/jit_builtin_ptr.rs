@@ -19,6 +19,7 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
             fadd_q32, fdiv_q32, fdiv_recip_q32, float_misc_q32, fmul_q32, fnearest_q32, fsqrt_q32,
             fsub_q32, ftoi_sat_q32, itof_s_q32, itof_u_q32, unorm_conv_q32,
         },
+        texture::{r16_unorm_q32, rgba16_unorm_q32},
         vm::get_fuel_q32,
     };
     match builtin {
@@ -249,6 +250,18 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         }
         BuiltinId::LpLpfnWorley3ValueQ32 => {
             generative::worley::worley3_value_q32::__lp_lpfn_worley3_value_q32 as *const u8
+        }
+        BuiltinId::LpTexTexture1dR16UnormQ32 => {
+            r16_unorm_q32::__lp_texture1d_r16_unorm_q32 as *const u8
+        }
+        BuiltinId::LpTexTexture1dRgba16UnormQ32 => {
+            rgba16_unorm_q32::__lp_texture1d_rgba16_unorm_q32 as *const u8
+        }
+        BuiltinId::LpTexTexture2dR16UnormQ32 => {
+            r16_unorm_q32::__lp_texture2d_r16_unorm_q32 as *const u8
+        }
+        BuiltinId::LpTexTexture2dRgba16UnormQ32 => {
+            rgba16_unorm_q32::__lp_texture2d_rgba16_unorm_q32 as *const u8
         }
         BuiltinId::LpVmGetFuelQ32 => get_fuel_q32::__lp_vm_get_fuel_q32 as *const u8,
     }

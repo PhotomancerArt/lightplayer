@@ -9,6 +9,7 @@ Remove old `shader-rv32fa` and `shader-rv32` commands entirely. Clean up any tem
 ### 1. Delete Old Command Files
 
 Remove these directories entirely:
+
 - `lp-cli/src/commands/shader_rv32/`
 - `lp-cli/src/commands/shader_rv32fa/`
 
@@ -19,6 +20,7 @@ Remove any feature flags or dependencies that were only for the old commands (if
 ### 3. Clean Up Warnings
 
 Check for and fix:
+
 - Unused imports in modified files
 - Dead code warnings from removed functionality
 - Missing documentation on new public items
@@ -70,7 +72,7 @@ grep -r "unimplemented!" lp-shader/ lp-cli/src/
 The filetest detail mode should now use `ModuleDebugInfo`. Ensure it still prints useful information:
 
 ```bash
-scripts/glsl-filetests.sh --target rv32fa.q32 lpvm/native/perf/caller-save-pressure.glsl
+scripts/filetests.sh --target rv32fa.q32 lpvm/native/perf/caller-save-pressure.glsl
 # Check that debug output is still visible in detail mode
 ```
 
@@ -90,6 +92,7 @@ Completed work:
 5. Removed old `shader-rv32fa` and `shader-rv32` commands
 
 Result:
+
 - Single command `lp-cli shader-debug -t <backend> <file.glsl>`
 - Always shows all available sections clearly labeled
 - Copy-pasteable help text for discoverability
@@ -97,6 +100,7 @@ Result:
 ```
 
 Move plan to done:
+
 ```bash
 mkdir -p docs/plans-done
 mv docs/plans/2026-04-14-debug-unification docs/plans-done/
@@ -105,6 +109,7 @@ mv docs/plans/2026-04-14-debug-unification docs/plans-done/
 ## Commit
 
 Commit message:
+
 ```
 feat(debug): unify compiler debug output with shader-debug command
 
@@ -141,5 +146,5 @@ lp-cli shader-debug -t rv32 lp-shader/lps-filetests/filetests/debug/rainbow-noct
 # Run full test suite
 cargo test -p lpvm-native --lib
 cargo test -p lpvm-native --lib
-scripts/glsl-filetests.sh --target rv32fa.q32,rv32.q32 lpvm/native/perf/
+scripts/filetests.sh --target rv32fa.q32,rv32.q32 lpvm/native/perf/
 ```

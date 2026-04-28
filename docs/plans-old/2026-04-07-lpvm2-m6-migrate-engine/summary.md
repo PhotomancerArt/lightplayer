@@ -106,8 +106,8 @@ After all phases:
 
 ```bash
 # File tests across all targets
-./scripts/glsl-filetests.sh --target rv32.q32c
-./scripts/glsl-filetests.sh --target wasm.q32
+./scripts/filetests.sh --target rv32.q32c
+./scripts/filetests.sh --target wasm.q32
 
 # Firmware tests
 cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu

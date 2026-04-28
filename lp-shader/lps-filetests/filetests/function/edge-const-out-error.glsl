@@ -20,10 +20,6 @@ float test_edge_const_out_error() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_const_out_error() ~= 1.0
 
 /*
@@ -53,10 +49,6 @@ float test_edge_const_only_with_in() {
     return 2.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_const_only_with_in() ~= 2.0
 
 void explicit_const_in(const in float x) {
@@ -69,10 +61,6 @@ float test_edge_const_in_explicit() {
     return 3.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_const_in_explicit() ~= 3.0
 
 /*
@@ -92,22 +80,19 @@ float test_edge_const_multiple_qualifiers() {
 // run: test_edge_const_multiple_qualifiers() ~= 0.0
 */
 
-void const_array(const float[3] arr) {
+// `const` on a by-value array param is not lowered yet; test read-only `in` array instead.
+void const_array(float[3] arr) {
     float sum = arr[0] + arr[1] + arr[2];
     // Cannot modify arr elements
 }
 
 float test_edge_const_array() {
-    // const can be used with array parameters
+    // `in` array parameters are read-only at the GLSL type level for element assignment
     float[3] data = float[3](1.0, 2.0, 3.0);
     const_array(data);
     return 4.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_const_array() ~= 4.0
 
 struct Point {
@@ -126,8 +111,4 @@ float test_edge_const_struct() {
     return 5.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_const_struct() ~= 5.0

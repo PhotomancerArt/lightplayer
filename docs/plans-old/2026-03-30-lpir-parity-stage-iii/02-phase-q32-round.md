@@ -53,16 +53,16 @@ Remove line 15-16:
 ```bash
 # Run the specific test
 cd /Users/yona/dev/photomancer/lp2025
-./scripts/glsl-filetests.sh --target jit.q32 "const/builtin/extended.glsl:17"
+./scripts/filetests.sh --target jit.q32 "const/builtin/extended.glsl:17"
 
 # Expected: passes with round(2.5) = 3.0 (not 2.0)
 
 # Run full extended test file
-./scripts/glsl-filetests.sh --target jit.q32 "const/builtin/extended.glsl"
+./scripts/filetests.sh --target jit.q32 "const/builtin/extended.glsl"
 
 # Verify roundEven still works (different builtin)
-./scripts/glsl-filetests.sh --target jit.q32 "builtins/common-roundeven.glsl"
+./scripts/filetests.sh --target jit.q32 "builtins/common-roundeven.glsl"
 
 # Check no regressions
-./scripts/glsl-filetests.sh --target jit.q32 "builtins/common-round.glsl"
+./scripts/filetests.sh --target jit.q32 "builtins/common-round.glsl"
 ```

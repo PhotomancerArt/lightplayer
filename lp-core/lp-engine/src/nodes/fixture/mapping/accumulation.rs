@@ -5,30 +5,25 @@ use super::sampling::create_sampler;
 use alloc::vec::Vec;
 use lps_q32::q32::Q32;
 
-/// Lookup table for u8 → Q32 normalization, populated from the exact
-/// formula `Q32((v * 65536) / 255)` for v ∈ 0..=255.
+/// Convert u8 (0-255) from sampler to Q32 (0-1).
 ///
-/// This kills the `__divdi3` / `u64_div_rem` calls that the divide
-/// generated on RV32. Bit-exact with the old `u8_to_q32_normalized`
-/// formula by construction.
-static U8_TO_Q32: [Q32; 256] = {
-    let mut table = [Q32::ZERO; 256];
-    let mut v = 0usize;
-    while v < 256 {
-        // Same formula as the old function. Cast chain matches exactly.
-        table[v] = Q32(((v as i64) * 65536 / 255) as i32);
-        v += 1;
-    }
-    table
-};
-
-/// Convert u8 (0–255) from sampler to Q32 (0–1).
+/// CAREFUL — do not "optimize" this with a 256-entry LUT.
 ///
-/// Bit-exact with `Q32(((v as i64) * 65536 / 255) as i32)`; backed by a
-/// const-evaluated 256-entry LUT (see `U8_TO_Q32`).
-#[inline]
+/// 255 is a compile-time constant divisor, so LLVM lowers `(v * 65536)
+/// / 255` to a magic-multiply sequence (`(v * magic) >> shift`) at
+/// compile time. That's a few in-register instructions on RV32 and is
+/// faster than a static LUT load + bounds check.
+///
+/// A LUT was tried in commit 029f558e and reverted in 66cf034a after
+/// per-phase profiling caught a +43k cycle regression in
+/// `FixtureRuntime::render`. The `__divdi3` and `u64_div_rem` lines
+/// that show up in profiles are called by JIT shader math builtins
+/// (`__lps_*`, `__lp_lpfn_*`) and naga's compile-time evaluator, NOT
+/// from this function. See
+/// `docs/plans-old/2026-04-19-fixture-render-perf/00-notes.md`
+/// "Phase 02 retrospective" for the full investigation.
 fn u8_to_q32_normalized(v: u8) -> Q32 {
-    U8_TO_Q32[v as usize]
+    Q32(((v as i64) * 65536 / 255) as i32)
 }
 
 /// Channel accumulator result
@@ -165,22 +160,6 @@ pub fn accumulate_from_mapping(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn u8_to_q32_lut_matches_division_formula() {
-        for v in 0u8..=255 {
-            let lut = U8_TO_Q32[v as usize].0;
-            let formula = ((v as i64) * 65536 / 255) as i32;
-            assert_eq!(lut, formula, "LUT mismatch at v={v}");
-        }
-    }
-
-    #[test]
-    fn u8_to_q32_normalized_uses_lut() {
-        for v in 0u8..=255 {
-            assert_eq!(u8_to_q32_normalized(v), U8_TO_Q32[v as usize]);
-        }
-    }
 
     #[test]
     fn u32_mul_matches_i64_reference() {

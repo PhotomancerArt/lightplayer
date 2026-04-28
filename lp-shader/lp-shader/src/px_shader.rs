@@ -5,9 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use core::cell::RefCell;
 
-use lps_shared::{
-    LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat,
-};
+use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureStorageFormat};
 use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
 
 use crate::error::LpsError;
@@ -30,8 +28,8 @@ pub(crate) trait PxShaderBackend {
 /// [`PxShaderBackend`]. Owns both: the module is retained for the lifetime
 /// of the instance (compiled code may be referenced by the instance).
 struct BackendAdapter<M: LpvmModule> {
-    #[allow(dead_code, reason = "retain compiled module for instance lifetime")]
-    module: M,
+    /// Retained so the compiled module outlives `instance` (code may reference module memory).
+    _module: M,
     instance: M::Instance,
 }
 
@@ -117,7 +115,10 @@ impl LpsPxShader {
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;
-        let inner: Box<dyn PxShaderBackend> = Box::new(BackendAdapter { module, instance });
+        let inner: Box<dyn PxShaderBackend> = Box::new(BackendAdapter {
+            _module: module,
+            instance,
+        });
 
         Ok(Self {
             inner: RefCell::new(inner),
@@ -210,6 +211,25 @@ impl LpsPxShader {
                 .find(|(n, _)| n == name)
                 .map(|(_, v)| v)
                 .ok_or_else(|| LpsError::Render(format!("missing uniform field `{name}`")))?;
+            if member.ty == LpsType::Texture2D {
+                match value {
+                    LpsValueF32::Texture2D(tv) => {
+                        let spec = self.meta.texture_specs.get(name).ok_or_else(|| {
+                            LpsError::Render(format!(
+                                "texture uniform `{name}`: missing texture binding spec in module metadata"
+                            ))
+                        })?;
+                        crate::runtime_texture_validation::validate_runtime_texture_binding(
+                            name, tv, spec,
+                        )?;
+                    }
+                    _ => {
+                        return Err(LpsError::Render(format!(
+                            "texture uniform `{name}` expects `LpsValueF32::Texture2D` (e.g. from `LpsTextureBuf::to_texture2d_value()`)"
+                        )));
+                    }
+                }
+            }
             inner.set_uniform(name, value)?;
         }
         Ok(())

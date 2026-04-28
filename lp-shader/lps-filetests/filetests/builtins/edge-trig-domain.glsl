@@ -14,12 +14,10 @@ float test_asin_domain_over() {
     return asin(1.5);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
-// @unsupported(jit.q32)
+// @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
-// @unsupported(wasm.q32)
+// @unsupported(jit.q32)
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {

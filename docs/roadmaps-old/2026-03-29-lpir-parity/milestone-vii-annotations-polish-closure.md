@@ -20,7 +20,7 @@ Zero unexpected failures on all targets. All deferred items annotated. Plan and 
   marked `@unimplemented(reason="Naga frontend limitation")`.
 - **Q32 edge tests**: verify `@unsupported(float_mode=q32, reason="…")` on all IEEE-dependent
   cases.
-- **Remove stale annotations**: run `LP_FIX_XFAIL=1 ./scripts/glsl-filetests.sh` (or `--fix`)
+- **Remove stale annotations**: run `LP_FIX_XFAIL=1 ./scripts/filetests.sh` (or `--fix`)
   to strip `@unimplemented` from tests that now pass.
 - **Baseline tooling** (introduced for this roadmap): `--mark-unimplemented` /
   `LP_MARK_UNIMPLEMENTED=1` plus optional `--assume-yes`; document in README if the workflow
@@ -37,9 +37,9 @@ Zero unexpected failures on all targets. All deferred items annotated. Plan and 
 
 ### Validation
 
-- `./scripts/glsl-filetests.sh` → exit 0 (jit.q32).
-- `./scripts/glsl-filetests.sh --target wasm.q32` → exit 0.
-- `./scripts/glsl-filetests.sh --target rv32.q32c` → exit 0.
+- `./scripts/filetests.sh` → exit 0 (jit.q32).
+- `./scripts/filetests.sh --target wasm.q32` → exit 0.
+- `./scripts/filetests.sh --target rv32.q32c` → exit 0.
 - `cargo test -p lps-frontend -p lpir -p lpvm-cranelift -p lps-filetests -p lps-wasm`.
 - `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`.
 - `cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu`.

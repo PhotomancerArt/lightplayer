@@ -46,7 +46,11 @@ pub fn run_error_test(
         ..Default::default()
     };
 
-    let result = collect_glsl_error_test_diagnostics(&test_file.glsl_source, &options);
+    let result = collect_glsl_error_test_diagnostics(
+        &test_file.glsl_source,
+        &test_file.texture_specs,
+        &options,
+    );
 
     let mut stats = TestCaseStats::default();
     stats.total = 1;
@@ -80,6 +84,7 @@ pub fn run_error_test(
 
 fn collect_glsl_error_test_diagnostics(
     user_source: &str,
+    texture_specs: &std::collections::BTreeMap<String, lps_shared::TextureBindingSpec>,
     options: &CompileOptions,
 ) -> Result<(), Vec<GlslError>> {
     let prep = lps_frontend::prepared_glsl_for_compile(user_source);
@@ -102,10 +107,20 @@ fn collect_glsl_error_test_diagnostics(
         Err(e) => return Err(vec![naga_compile_error_to_glsl(e)]),
     };
 
-    let (ir, meta) = match lps_frontend::lower(&naga_module) {
+    let lower_options = lps_frontend::LowerOptions {
+        texture_specs: texture_specs.clone(),
+        ..Default::default()
+    };
+    let (ir, meta) = match lps_frontend::lower_with_options(&naga_module, &lower_options) {
         Ok(x) => x,
         Err(e) => return Err(vec![lower_error_to_glsl(e)]),
     };
+
+    if let Err(msg) =
+        lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
+    {
+        return Err(vec![GlslError::new(ErrorCode::E0400, msg)]);
+    }
 
     match jit_from_ir_owned(ir, meta, options) {
         Ok(_) => Ok(()),

@@ -22,7 +22,7 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::LpFsMemory;
+use lpfs::LpFsMemory;
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -182,7 +182,7 @@ async fn test_scene_render_fw_emu_async() {
 
 /// Collect all files from project filesystem
 fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
-    use lp_shared::fs::LpFs;
+    use lpfs::LpFs;
 
     // List all files recursively
     let entries = fs

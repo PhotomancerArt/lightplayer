@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::boxed::Box;
-use lp_shared::fs::fs_event::FsChange;
+use lpfs::FsChange;
 
 pub mod fixture;
 pub mod output;

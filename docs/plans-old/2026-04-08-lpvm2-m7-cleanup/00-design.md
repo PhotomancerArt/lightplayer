@@ -146,6 +146,6 @@ After cleanup:
 - `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server` ✓
 - `cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu` ✓
 - `cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu` ✓
-- `./scripts/glsl-filetests.sh --target rv32.q32c --target wasm.q32` ✓
+- `./scripts/filetests.sh --target rv32.q32c --target wasm.q32` ✓
 - `cargo +nightly fmt --check` ✓
 - No warnings in affected crates

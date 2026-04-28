@@ -7,6 +7,7 @@ Final sweep: remove temporary code, fix warnings, verify formatting, write summa
 ## Cleanup
 
 Grep the git diff for:
+
 - `TODO` comments — resolve or document as intentional
 - `dbg!`, `println!`, `eprintln!` in non-test code — remove
 - `#[allow(dead_code)]` added during development — remove if the code is no longer dead
@@ -18,8 +19,8 @@ Grep the git diff for:
 cargo build
 cargo test
 cargo +nightly fmt --check
-./scripts/glsl-filetests.sh --target wasm.q32
-./scripts/glsl-filetests.sh --target cranelift.q32
+./scripts/filetests.sh --target wasm.q32
+./scripts/filetests.sh --target cranelift.q32
 ```
 
 All must pass. No new warnings in touched crates.
@@ -27,6 +28,7 @@ All must pass. No new warnings in touched crates.
 ## Plan cleanup
 
 Add `summary.md` to this directory with:
+
 - What shipped (bullet list)
 - Known limitations
 - Follow-ups (e.g. memory layout growth, browser playground, matrix builtins)

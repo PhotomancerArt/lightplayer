@@ -30,6 +30,7 @@ one test is sufficient. For mode-dependent operations (add, mul, div),
 test each mode.
 
 Priorities:
+
 1. `emit_const` — verify `float_to_fixed16x16` is applied correctly
 2. `emit_add` (wrapping) — verify `iadd`
 3. `emit_mul` (wrapping) — verify the 5-instruction multiply sequence
@@ -55,10 +56,10 @@ cargo test -p lps-compiler --features std -- numeric
 ```
 
 The Q32Strategy doesn't affect compiler output yet (it's not wired into
-the pipeline until Plan D), so `scripts/glsl-filetests.sh` should pass
+the pipeline until Plan D), so `scripts/filetests.sh` should pass
 unchanged — but run it as a sanity check that Plan A's FloatStrategy
 wiring is still correct.
 
 ```bash
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```

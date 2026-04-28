@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::output::OutputProvider;
 use lp_model::{FrameId, NodeHandle, NodeSpecifier};
-use lp_shared::fs::LpFs;
+use lpfs::LpFs;
 
 /// Handle for resolved texture nodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -262,7 +262,7 @@ test-rust:
     cargo test
 
 test-filetests:
-    scripts/glsl-filetests.sh
+    scripts/filetests.sh
 
 # ============================================================================
 # Testing - lp-app only
@@ -279,9 +279,9 @@ test-glsl:
     cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 test-glsl-filetests:
-    scripts/glsl-filetests.sh
-    scripts/glsl-filetests.sh --target wasm.q32
-    scripts/glsl-filetests.sh --target rv32.q32c
+    scripts/filetests.sh
+    scripts/filetests.sh --target wasm.q32
+    scripts/filetests.sh --target rv32.q32c
 
 # ============================================================================
 # CI and validation
@@ -387,6 +387,14 @@ fwtest-json-esp32c6: install-rv32-target
 # Run firmware with test_oom: allocates until OOM, verifies catch_unwind recovers
 fwtest-oom-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
+# Run firmware with test_msafluid: MSAFluid solver perf experiment, prints mcycle per step
+fwtest-msafluid-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_msafluid,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
+# Run firmware with test_fluid_demo: live RGB MSAFluid demo on examples/basic ring fixture (GPIO4)
+fwtest-fluid-demo-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \

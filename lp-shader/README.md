@@ -47,6 +47,17 @@ in `[docs/design/q32.md](../docs/design/q32.md)`.
 
 Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
+## Texture reads (`sampler2D`)
+
+Shaders may declare `sampler2D` uniforms and call `texelFetch` and `texture`.
+Compile-time policy (`TextureBindingSpec`, keyed by uniform name) and runtime
+buffers are wired outside GLSL — see `CompilePxDesc::with_texture_spec`,
+`lp_shader::texture_binding::{texture2d, height_one}`, and
+`LpsTextureBuf::{to_texture2d_value, to_named_texture_uniform}` in `lp-shader`.
+
+Full contract (formats, wraps/filters, guest vs host metadata, filetests,
+follow-ups): [`docs/design/lp-shader-texture-access.md`](../docs/design/lp-shader-texture-access.md).
+
 ## Crate index
 
 **Full table:** `[CRATES.md](CRATES.md)`.
@@ -56,12 +67,12 @@ Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 - `lps-frontend/` — GLSL parsing (Naga) and lowering to LPIR
 - `lpir/` — LightPlayer IR (types, ops, builder, parser, printer, interpreter, validator)
 - `lps-shared/`, `lps-diagnostics/`, `lpvm/` — shared types and errors for
-tests / exec helpers
+  tests / exec helpers
 
 ### Q32 Fixed-Point Types
 
 - `lps-q32/` — `Q32` fixed-point scalar, vector/matrix types (`Vec2Q32`–`Vec4Q32`,
-`Mat2Q32`–`Mat4Q32`), component-wise helpers, encode/decode for compiler constants
+  `Mat2Q32`–`Mat4Q32`), component-wise helpers, encode/decode for compiler constants
 
 ### Codegen
 
@@ -91,18 +102,18 @@ In-browser GLSL → WASM demo (workspace root `lp-app/web-demo/`): `just web-dem
 
 ```bash
 # Default targets (rv32n.q32, rv32c.q32, etc.)
-./scripts/glsl-filetests.sh
+./scripts/filetests.sh
 
 # Specific backend
-./scripts/glsl-filetests.sh --target wasm.q32
-./scripts/glsl-filetests.sh --target rv32n.q32
-./scripts/glsl-filetests.sh --target rv32c.q32
+./scripts/filetests.sh --target wasm.q32
+./scripts/filetests.sh --target rv32n.q32
+./scripts/filetests.sh --target rv32c.q32
 
 # Full matrix (same as CI)
 just test-filetests
 ```
 
-See `scripts/glsl-filetests.sh --help` for targets, filters, and thread control.
+See `scripts/filetests.sh --help` for targets, filters, and thread control.
 
 ```bash
 # Run via cargo (jit.q32 only)

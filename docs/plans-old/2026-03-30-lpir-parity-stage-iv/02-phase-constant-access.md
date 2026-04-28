@@ -30,12 +30,12 @@ Expression::AccessIndex { base, index } => {
     let base_inner = expr_type_inner(ctx.module, ctx.func, *base)?;
     match base_inner {
         // ... existing vector/matrix handling ...
-        
+
         TypeInner::Pointer { base: ty_h, space } => {
             let inner = &ctx.module.types[*ty_h].inner;
             match inner {
                 // ... existing vector/matrix handling ...
-                
+
                 TypeInner::Array { base: elem, .. } => {
                     // Array access with constant index
                     let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
@@ -43,21 +43,21 @@ Expression::AccessIndex { base, index } => {
                             "AccessIndex: array pointer base must be LocalVariable".into()
                         ));
                     };
-                    
+
                     let array_info = ctx.resolve_array(*lv)?;
                     let elem_inner = &ctx.module.types[*elem].inner;
                     let elem_ir_types = naga_type_to_ir_types(elem_inner)?;
-                    
+
                     // Compute byte offset: index * element_size
                     let byte_offset = (*index as u32) * array_info.element_size;
-                    
+
                     // Get slot base address
                     let base_addr = ctx.fb.alloc_vreg(IrType::I32);
                     ctx.fb.push(Op::SlotAddr {
                         dst: base_addr,
                         slot: array_info.slot,
                     });
-                    
+
                     // Load each component of the element
                     let mut result = VRegVec::new();
                     for (i, ty) in elem_ir_types.iter().enumerate() {
@@ -70,16 +70,16 @@ Expression::AccessIndex { base, index } => {
                         });
                         result.push(dst);
                     }
-                    
+
                     Ok(result)
                 }
-                
+
                 _ => Err(LowerError::UnsupportedExpression(
                     format!("AccessIndex on pointer to {inner:?}")
                 )),
             }
         }
-        
+
         other => Err(LowerError::UnsupportedExpression(
             format!("AccessIndex on {other:?}")
         )),
@@ -98,7 +98,7 @@ Statement::Store { pointer, value } => {
         Expression::LocalVariable(lv) => {
             // ... existing non-array store handling ...
         }
-        
+
         Expression::AccessIndex { base, index } => {
             let base_expr = &ctx.func.expressions[*base];
             if let Expression::LocalVariable(lv) = base_expr {
@@ -106,17 +106,17 @@ Statement::Store { pointer, value } => {
                 if let Some(array_info) = ctx.array_map.get(lv) {
                     // Array element store
                     let byte_offset = (*index as u32) * array_info.element_size;
-                    
+
                     // Get value to store
                     let srcs = ctx.ensure_expr_vec(*value)?;
-                    
+
                     // Get slot base address
                     let base_addr = ctx.fb.alloc_vreg(IrType::I32);
                     ctx.fb.push(Op::SlotAddr {
                         dst: base_addr,
                         slot: array_info.slot,
                     });
-                    
+
                     // Store each component
                     for (i, &src) in srcs.iter().enumerate() {
                         let offset = byte_offset + (i as u32 * 4);
@@ -126,15 +126,15 @@ Statement::Store { pointer, value } => {
                             value: src,
                         });
                     }
-                    
+
                     return Ok(());
                 }
             }
-            
+
             // Fall through to existing AccessIndex store handling
             // ... existing code ...
         }
-        
+
         // ... other cases ...
     }
 }
@@ -199,7 +199,7 @@ int phase1() {
 ## Validation
 
 ```bash
-scripts/glsl-filetests.sh array/phase/1-foundation.glsl
+scripts/filetests.sh array/phase/1-foundation.glsl
 ```
 
 Expected: All 6 tests in 1-foundation.glsl pass.

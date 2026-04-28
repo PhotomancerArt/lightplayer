@@ -7,9 +7,9 @@ use alloc::{format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
 use lp_engine::{LpGraphics, MemoryStatsFn, ProjectRuntime};
 use lp_model::{LpPath, LpPathBuf};
-use lp_shared::fs::{FsVersion, LpFs};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpfs::{FsVersion, LpFs};
 
 /// A project instance wrapping a ProjectRuntime
 pub struct Project {

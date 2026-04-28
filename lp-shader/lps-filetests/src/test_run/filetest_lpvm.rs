@@ -2,8 +2,11 @@
 
 use lp_riscv_emu::{CycleModel, LogLevel};
 use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
-use lps_shared::{LpsFnSig, LpsModuleSig};
-use lpvm::{LpsValueF32, LpsValueQ32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
+use lps_shared::{LpsFnSig, LpsModuleSig, TextureBindingSpec};
+use lpvm::{
+    LpsValueF32, LpsValueQ32, LpvmBuffer, LpvmEngine, LpvmInstance, LpvmMemory, LpvmModule,
+    ModuleDebugInfo,
+};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
 use lpvm_native::{
@@ -14,19 +17,23 @@ use lpvm_wasm::{
     WasmOptions as LpvmWasmOptions,
     rt_wasmtime::{WasmLpvmEngine, WasmLpvmInstance, WasmLpvmModule},
 };
+use std::collections::BTreeMap;
 
 use crate::targets::{Backend, FloatMode as TargetFloatMode, Target};
 
 /// Compiled artifact for one test file and target.
+///
+/// Each variant retains the backend `lpvm::LpvmEngine` so host code can allocate in the same shared
+/// memory arena the instantiated module uses (texture fixtures, etc.).
 pub enum CompiledShader {
     /// Host Cranelift JIT (`jit.q32`).
-    Jit(CraneliftModule),
+    Jit(CraneliftEngine, CraneliftModule),
     /// Linked RV32 + shared arena via Cranelift (`rv32c.q32`).
-    Emu(EmuModule),
+    Emu(EmuEngine, EmuModule),
     /// Linked RV32 + shared arena via `lpvm-native` (`rv32n.q32`).
-    NativeFa(FaEmuModule),
+    NativeFa(FaEmuEngine, FaEmuModule),
     /// wasmtime module (`wasm.q32`).
-    Wasm(WasmLpvmModule),
+    Wasm(WasmLpvmEngine, WasmLpvmModule),
 }
 
 /// Per-`// run:` instantiation (mutable VM context / store).
@@ -44,28 +51,40 @@ pub enum FiletestInstance {
 impl CompiledShader {
     pub(crate) fn module_sig(&self) -> &LpsModuleSig {
         match self {
-            Self::Jit(m) => m.signatures(),
-            Self::Emu(m) => m.signatures(),
-            Self::NativeFa(m) => m.signatures(),
-            Self::Wasm(m) => m.signatures(),
+            Self::Jit(_, m) => m.signatures(),
+            Self::Emu(_, m) => m.signatures(),
+            Self::NativeFa(_, m) => m.signatures(),
+            Self::Wasm(_, m) => m.signatures(),
         }
     }
 
     pub(crate) fn instantiate(&self) -> anyhow::Result<FiletestInstance> {
         Ok(match self {
-            Self::Jit(m) => {
+            Self::Jit(_, m) => {
                 FiletestInstance::Jit(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
-            Self::Emu(m) => {
+            Self::Emu(_, m) => {
                 FiletestInstance::Emu(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
-            Self::NativeFa(m) => {
+            Self::NativeFa(_, m) => {
                 FiletestInstance::NativeFa(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
-            Self::Wasm(m) => {
+            Self::Wasm(_, m) => {
                 FiletestInstance::Wasm(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
         })
+    }
+
+    /// Allocate bytes in this backend's shared memory (same arena as the compiled module).
+    pub(crate) fn alloc_shared(&self, size: usize, align: usize) -> anyhow::Result<LpvmBuffer> {
+        let mem: &dyn LpvmMemory = match self {
+            Self::Jit(e, _) => e.memory(),
+            Self::Emu(e, _) => e.memory(),
+            Self::NativeFa(e, _) => e.memory(),
+            Self::Wasm(e, _) => e.memory(),
+        };
+        mem.alloc(size, align)
+            .map_err(|e| anyhow::anyhow!("shared memory alloc: {e}"))
     }
 }
 
@@ -152,9 +171,17 @@ impl FiletestInstance {
     }
 }
 
-fn lower_glsl(source: &str) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
+fn lower_glsl(
+    source: &str,
+    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
     let naga = lps_frontend::compile(source).map_err(|e| anyhow::anyhow!("{e}"))?;
-    lps_frontend::lower(&naga).map_err(|e| anyhow::anyhow!("{e}"))
+    let options = lps_frontend::LowerOptions {
+        texture_specs: texture_specs.clone(),
+        texel_fetch_bounds,
+    };
+    lps_frontend::lower_with_options(&naga, &options).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 impl CompiledShader {
@@ -163,8 +190,15 @@ impl CompiledShader {
         target: &Target,
         emu_log_level: LogLevel,
         compiler_config: &CompilerConfig,
+        texture_specs: &BTreeMap<String, TextureBindingSpec>,
     ) -> anyhow::Result<Self> {
-        let (ir, meta) = lower_glsl(source)?;
+        let (ir, meta) = lower_glsl(
+            source,
+            texture_specs,
+            compiler_config.texture.texel_fetch_bounds,
+        )?;
+        lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         let fm = match target.float_mode {
             TargetFloatMode::Q32 => LpirFloatMode::Q32,
             TargetFloatMode::F32 => LpirFloatMode::F32,
@@ -178,11 +212,17 @@ impl CompiledShader {
         match target.backend {
             Backend::Jit => {
                 let engine = CraneliftEngine::new(opts);
-                Ok(Self::Jit(engine.compile(&ir, &meta)?))
+                let module = engine
+                    .compile(&ir, &meta)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(Self::Jit(engine, module))
             }
             Backend::Rv32 => {
                 let engine = EmuEngine::new(opts);
-                Ok(Self::Emu(engine.compile(&ir, &meta)?))
+                let module = engine
+                    .compile(&ir, &meta)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(Self::Emu(engine, module))
             }
             Backend::Rv32fa => {
                 let alloc_trace = std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1";
@@ -194,7 +234,10 @@ impl CompiledShader {
                     ..Default::default()
                 };
                 let engine = FaEmuEngine::new(native_opts);
-                Ok(Self::NativeFa(engine.compile(&ir, &meta)?))
+                let module = engine
+                    .compile(&ir, &meta)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(Self::NativeFa(engine, module))
             }
             Backend::Wasm => {
                 let wasm_opts = LpvmWasmOptions {
@@ -203,7 +246,10 @@ impl CompiledShader {
                     ..Default::default()
                 };
                 let engine = WasmLpvmEngine::new(wasm_opts).map_err(|e| anyhow::anyhow!("{e}"))?;
-                Ok(Self::Wasm(engine.compile(&ir, &meta)?))
+                let module = engine
+                    .compile(&ir, &meta)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(Self::Wasm(engine, module))
             }
         }
     }
@@ -218,18 +264,18 @@ impl CompiledShader {
     /// Returns None if the backend doesn't provide debug info.
     pub(crate) fn debug_info(&self) -> Option<&ModuleDebugInfo> {
         match self {
-            Self::Jit(_) => None,
-            Self::Emu(m) => m.debug_info(),
-            Self::NativeFa(m) => m.debug_info(),
-            Self::Wasm(_) => None,
+            Self::Jit(_, _) => None,
+            Self::Emu(_, m) => m.debug_info(),
+            Self::NativeFa(_, m) => m.debug_info(),
+            Self::Wasm(_, _) => None,
         }
     }
 
     pub(crate) fn lpir_module(&self) -> Option<&LpirModule> {
         match self {
-            Self::Emu(m) => m.lpir_module(),
-            Self::NativeFa(m) => m.lpir_module(),
-            Self::Jit(_) | Self::Wasm(_) => None,
+            Self::Emu(_, m) => m.lpir_module(),
+            Self::NativeFa(_, m) => m.lpir_module(),
+            Self::Jit(_, _) | Self::Wasm(_, _) => None,
         }
     }
 }

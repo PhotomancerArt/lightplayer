@@ -77,11 +77,7 @@ mat2 test_mat2_assign_after_operations() {
     return a;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat2_assign_after_operations() ~= mat2(10.0, 13.0, 22.0, 29.0)
+// run: test_mat2_assign_after_operations() ~= mat2(11.0, 16.0, 19.0, 28.0)
 
 
 

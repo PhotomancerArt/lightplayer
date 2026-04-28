@@ -94,6 +94,6 @@ grep -r '\[expect-fail\]' lp-shader/lps-filetests/filetests/ --include='*.gen.gl
 ## Validate
 
 ```
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 cargo +nightly fmt -- --check
 ```

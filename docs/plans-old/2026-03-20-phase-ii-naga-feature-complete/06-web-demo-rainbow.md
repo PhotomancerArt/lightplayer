@@ -36,14 +36,14 @@ for the old backend's imports. Verify the linkage still works:
 const builtinsModule = await WebAssembly.compile(builtinsBytes);
 const memory = new WebAssembly.Memory({ initial: 1 });
 const builtinsInstance = await WebAssembly.instantiate(builtinsModule, {
-    env: { memory }
+  env: { memory },
 });
 
 // Compile and link shader
 const shaderModule = await WebAssembly.compile(shaderBytes);
 const shaderInstance = await WebAssembly.instantiate(shaderModule, {
-    builtins: builtinsInstance.exports,
-    env: { memory }
+  builtins: builtinsInstance.exports,
+  env: { memory },
 });
 ```
 
@@ -58,7 +58,7 @@ the rainbow renders in the browser.
 Run the rainbow filetest first:
 
 ```bash
-DEBUG=1 scripts/glsl-filetests.sh --target wasm.q32 "debug/rainbow.glsl"
+DEBUG=1 scripts/filetests.sh --target wasm.q32 "debug/rainbow.glsl"
 ```
 
 This will surface any missing expressions or statements that rainbow.glsl
@@ -78,7 +78,7 @@ filetest has appropriate tolerances.
 ## Validate
 
 ```bash
-DEBUG=1 scripts/glsl-filetests.sh --target wasm.q32 "debug/rainbow.glsl"
+DEBUG=1 scripts/filetests.sh --target wasm.q32 "debug/rainbow.glsl"
 just web-demo
 # Open browser, verify rainbow renders
 ```

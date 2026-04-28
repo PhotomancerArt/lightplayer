@@ -58,8 +58,7 @@ pub fn collect_fa_data(
         let lowered = lower_ops(func, ir, &module_abi, &lower_opts)
             .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;
 
-        let slots = func.total_param_slots() as usize;
-        let func_abi = func_abi_rv32(fn_sig, slots);
+        let func_abi = func_abi_rv32(fn_sig, Some(func));
         let alloc_result =
             allocate(&lowered, &func_abi).map_err(|e| anyhow::anyhow!("regalloc: {e}"))?;
 

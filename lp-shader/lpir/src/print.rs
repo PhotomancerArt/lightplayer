@@ -66,11 +66,34 @@ pub fn print_module(module: &LpirModule) -> String {
 
 fn print_import(out: &mut String, imp: &ImportDecl) {
     let _ = write!(out, "import @{}::{}", imp.module_name, imp.func_name);
-    print_param_types(out, &imp.param_types);
+    print_import_param_types(out, &imp.param_types, imp.sret);
     if !imp.return_types.is_empty() {
         let _ = write!(out, " -> ");
         print_return_types(out, &imp.return_types);
     }
+}
+
+/// Import parameter list, including optional `sret ptr` on the first slot.
+fn print_import_param_types(out: &mut String, types: &[IrType], sret: bool) {
+    if !sret {
+        return print_param_types(out, types);
+    }
+    let _ = write!(out, "(");
+    let mut i = 0usize;
+    let mut first = true;
+    if let Some(t) = types.first() {
+        let _ = write!(out, "sret {t}");
+        i = 1;
+        first = false;
+    }
+    for t in types[i..].iter() {
+        if !first {
+            let _ = write!(out, ", ");
+        }
+        first = false;
+        let _ = write!(out, "{t}");
+    }
+    let _ = write!(out, ")");
 }
 
 fn print_param_types(out: &mut String, types: &[IrType]) {
@@ -105,12 +128,19 @@ fn print_function(out: &mut String, func: &IrFunction, module: &LpirModule) {
     }
     let _ = write!(out, "func @{}", func.name);
     let _ = write!(out, "(");
+    let mut first = true;
+    if let Some(sret) = func.sret_arg {
+        let _ = write!(out, "sret {sret}");
+        first = false;
+    }
     let vm = func.vmctx_vreg.0 as usize;
+    let h = func.hidden_param_slots() as usize;
     for i in 0..func.param_count as usize {
-        if i > 0 {
+        if !first {
             let _ = write!(out, ", ");
         }
-        let j = vm + 1 + i;
+        first = false;
+        let j = vm + h + i;
         let _ = write!(out, "{}:{}", VReg(j as u32), func.vreg_types[j]);
     }
     let _ = write!(out, ")");
@@ -128,8 +158,11 @@ fn print_function(out: &mut String, func: &IrFunction, module: &LpirModule) {
         defined: vec![false; func.vreg_types.len()],
     };
     st.defined[vm] = true;
+    if let Some(s) = func.sret_arg {
+        st.defined[s.0 as usize] = true;
+    }
     for i in 0..func.param_count as usize {
-        st.defined[vm + 1 + i] = true;
+        st.defined[vm + h + i] = true;
     }
     let mut stack: Vec<Block> = Vec::new();
     let mut pc = 0usize;

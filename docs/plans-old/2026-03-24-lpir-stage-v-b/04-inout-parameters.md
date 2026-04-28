@@ -202,6 +202,6 @@ let off_vreg = if offset_idx == 0 {
 ```bash
 cargo test -p lps-frontend -q
 cargo test -p lps-wasm -q
-scripts/glsl-filetests.sh function/edge-inout-both.glsl
-scripts/glsl-filetests.sh function/
+scripts/filetests.sh function/edge-inout-both.glsl
+scripts/filetests.sh function/
 ```

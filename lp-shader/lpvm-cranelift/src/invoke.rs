@@ -32,8 +32,8 @@ struct CRet4 {
     v3: i32,
 }
 
-/// System V / RISC-V32: [`crate::emit::signature_for_ir_func`] places **StructReturn first**, then
-/// **vmctx**, then user scalars (so `a0`/`rdi` = sret, `a1`/`rsi` = vmctx on RV32 / System V).
+/// System V / RISC-V32: matches [`crate::emit::signature_for_ir_func`]: **sret buffer pointer**
+/// first (`a0` / `rdi`), then **vmctx** (`a1` / `rsi`), then user scalars.
 #[cfg(any(
     target_arch = "riscv32",
     all(

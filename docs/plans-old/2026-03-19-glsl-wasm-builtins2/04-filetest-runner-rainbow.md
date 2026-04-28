@@ -78,7 +78,7 @@ Potential issues to watch for:
 Run the full filetest suite for WASM and check which builtins filetests now pass:
 
 ```bash
-./scripts/glsl-filetests.sh --target wasm.q32
+./scripts/filetests.sh --target wasm.q32
 ```
 
 For filetests that pass, remove `@unimplemented(backend=wasm)`. Only remove the annotation for tests
@@ -92,7 +92,7 @@ that actually pass — don't speculatively remove. Focus on:
 Check that Cranelift filetests are not regressed:
 
 ```bash
-./scripts/glsl-filetests.sh --target cranelift.q32
+./scripts/filetests.sh --target cranelift.q32
 ```
 
 ### 5. `test_q32_float_mul` ignore removal
@@ -108,6 +108,6 @@ cd lps && cargo test -p lps-wasm
 cd lps && cargo test -p lps-filetests
 cargo build
 cargo +nightly fmt --check
-./scripts/glsl-filetests.sh --target wasm.q32
-./scripts/glsl-filetests.sh --target cranelift.q32
+./scripts/filetests.sh --target wasm.q32
+./scripts/filetests.sh --target cranelift.q32
 ```

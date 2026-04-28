@@ -49,7 +49,7 @@ and passes across all targets.
   - `cargo test -p lps-filetests`
   - Full **filetest matrix** (CI parity): `jit.q32` / `jit.f32` / `rv32.q32` /
     `rv32.f32` / `wasm.q32` / `wasm.f32` as listed in M5 phase 8 — e.g.
-    `just test-filetests` or `./scripts/glsl-filetests.sh` with builtins built
+    `just test-filetests` or `./scripts/filetests.sh` with builtins built
     (`scripts/build-builtins.sh` for RV32-linked paths).
   - `cargo +nightly fmt --check`
 - Verify no warnings in affected crates

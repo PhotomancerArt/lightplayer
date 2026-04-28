@@ -89,6 +89,9 @@ pub fn interpret_with_depth(
         .find(|f| f.name == func_name)
         .ok_or_else(|| InterpError::FunctionNotFound(func_name.to_string()))?;
     let mut full = alloc::vec![Value::I32(0); 1];
+    if func.sret_arg.is_some() {
+        full.push(Value::I32(0));
+    }
     full.extend_from_slice(args);
     exec_func(module, func, &full, imports, 0, max_depth)
 }
@@ -104,11 +107,13 @@ fn exec_func(
     if depth > max_depth {
         return Err(InterpError::StackOverflow);
     }
-    let expected = 1usize + func.param_count as usize;
+    let h = func.hidden_param_slots() as usize;
+    let expected = h + func.param_count as usize;
     if args.len() != expected {
         return Err(InterpError::Internal(format!(
-            "expected {} args (vmctx + {} user), got {}",
+            "expected {} args (vmctx + {} hidden incl. sret + {} user), got {}",
             expected,
+            h,
             func.param_count,
             args.len()
         )));
@@ -117,8 +122,11 @@ fn exec_func(
     let mut regs: Vec<Option<Value>> = alloc::vec![None; func.vreg_types.len()];
     let vm = func.vmctx_vreg.0 as usize;
     regs[vm] = Some(args[0]);
+    for k in 1..h {
+        regs[vm + k] = Some(args[k]);
+    }
     for i in 0..func.param_count as usize {
-        regs[vm + 1 + i] = Some(args[1 + i]);
+        regs[vm + h + i] = Some(args[h + i]);
     }
 
     let slot_off = slot_offsets(func);
@@ -292,11 +300,13 @@ fn exec_func(
                     let imp = &module.imports[ii];
                     imports.call(imp.module_name.as_str(), imp.func_name.as_str(), &call_args)?
                 } else if let Some(callee_fn) = module.callee_as_function(*callee) {
-                    if call_args.len() != 1 + callee_fn.param_count as usize {
+                    let ch = callee_fn.hidden_param_slots() as usize;
+                    let want = ch + callee_fn.param_count as usize;
+                    if call_args.len() != want {
                         return Err(InterpError::Internal(format!(
-                            "local call arg count {} != 1 + callee param_count {}",
+                            "local call arg count {} != callee total param slots {}",
                             call_args.len(),
-                            callee_fn.param_count
+                            want
                         )));
                     }
                     exec_func(module, callee_fn, &call_args, imports, depth + 1, max_depth)?

@@ -11,9 +11,9 @@ use hashbrown::HashMap;
 use log;
 use lp_engine::LpGraphics;
 use lp_model::{LpPath, LpPathBuf, Message};
-use lp_shared::fs::{FsChange, LpFs};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpfs::{FsChange, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
@@ -56,7 +56,7 @@ impl LpServer {
     /// extern crate alloc;
     /// use lp_model::AsLpPath;
     /// use lp_server::LpServer;
-    /// use lp_shared::fs::LpFsStd;
+    /// use lpfs::LpFsStd;
     /// use lp_shared::output::MemoryOutputProvider;
     /// use alloc::{boxed::Box, rc::Rc, sync::Arc};
     /// use core::cell::RefCell;
@@ -114,7 +114,7 @@ impl LpServer {
     /// extern crate alloc;
     /// use lp_model::{AsLpPath, Message};
     /// use lp_server::LpServer;
-    /// use lp_shared::fs::LpFsMemory;
+    /// use lpfs::LpFsMemory;
     /// use lp_shared::output::MemoryOutputProvider;
     /// use alloc::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
     /// use core::cell::RefCell;

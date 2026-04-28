@@ -175,7 +175,7 @@ Naga sometimes emits `Unary { op: LogicalNot, expr }` where `expr` is Sint
 Run control flow filetests:
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "control/"
+scripts/filetests.sh --target wasm.q32 "control/"
 ```
 
 Expected: `while/`, `do_while/`, `for/` tests that only use scalars should pass.
@@ -198,8 +198,8 @@ in `emit.rs` implements the detection.
 ## Validate
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "control/"
-scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
+scripts/filetests.sh --target wasm.q32 "control/"
+scripts/filetests.sh --target wasm.q32 "scalar/"
 cargo check -p lps-wasm
 ```
 

@@ -147,7 +147,7 @@ Suggested: Same — keep as late milestone.
 
 Suggested: Existing tools are sufficient.
 
-**Answer**: Yes. The filetest runner (`scripts/glsl-filetests.sh -t rv32,rv32fa`)
+**Answer**: Yes. The filetest runner (`scripts/filetests.sh -t rv32,rv32fa`)
 gives total instruction counts and `vs fastest` ratio. The `shader-debug` CLI
 gives per-function drill-down. No new infrastructure needed.
 

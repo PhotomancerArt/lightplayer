@@ -107,25 +107,26 @@ pub(crate) fn emit_memory(
             def_v(builder, vars, *dst, val);
         }
         LpirOp::Load16U { dst, base, offset } => {
+            let Ok(off) = i32::try_from(*offset) else {
+                return Err(CompileError::unsupported(
+                    "load16u offset does not fit in i32",
+                ));
+            };
             let ptr = operand_as_ptr(builder, vars, ctx, *base);
-            let val = builder.ins().uload16(
-                types::I32,
-                MemFlags::new(),
-                ptr,
-                i32::try_from(*offset)
-                    .map_err(|_| CompileError::unsupported("load16u offset does not fit in i32"))?,
-            );
+            // Halfword semantics via `load i16` + extend (RV32 target validator rejects `uload16`).
+            let half = builder.ins().load(types::I16, MemFlags::new(), ptr, off);
+            let val = builder.ins().uextend(types::I32, half);
             def_v(builder, vars, *dst, val);
         }
         LpirOp::Load16S { dst, base, offset } => {
+            let Ok(off) = i32::try_from(*offset) else {
+                return Err(CompileError::unsupported(
+                    "load16s offset does not fit in i32",
+                ));
+            };
             let ptr = operand_as_ptr(builder, vars, ctx, *base);
-            let val = builder.ins().sload16(
-                types::I32,
-                MemFlags::new(),
-                ptr,
-                i32::try_from(*offset)
-                    .map_err(|_| CompileError::unsupported("load16s offset does not fit in i32"))?,
-            );
+            let half = builder.ins().load(types::I16, MemFlags::new(), ptr, off);
+            let val = builder.ins().sextend(types::I32, half);
             def_v(builder, vars, *dst, val);
         }
         LpirOp::Memcpy {

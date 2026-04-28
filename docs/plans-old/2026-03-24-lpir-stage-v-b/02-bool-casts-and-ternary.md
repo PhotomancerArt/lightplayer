@@ -51,9 +51,9 @@ is a ternary (Select). After fixing the Bool case, check:
 
 1. Does `test_ternary_float_to_int_conversion` now pass?
 2. If not, trace the Naga expression tree:
-    - The ternary result should be `Expression::Select { ... }` with float type.
-    - The `int result = ...` assignment wraps it in `As(float → Sint)`.
-    - Verify the `As(float → Sint)` path emits `Op::FtoiSatS` in Q32 mode.
+   - The ternary result should be `Expression::Select { ... }` with float type.
+   - The `int result = ...` assignment wraps it in `As(float → Sint)`.
+   - Verify the `As(float → Sint)` path emits `Op::FtoiSatS` in Q32 mode.
 
 ### Tests
 
@@ -69,6 +69,6 @@ Filetests to validate:
 
 ```bash
 cargo test -p lps-frontend -q
-scripts/glsl-filetests.sh scalar/bool/
-scripts/glsl-filetests.sh control/ternary/type_conversions.glsl
+scripts/filetests.sh scalar/bool/
+scripts/filetests.sh control/ternary/type_conversions.glsl
 ```

@@ -216,9 +216,8 @@ impl NativeJitInstance {
             .cloned()
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
 
-        let slots = ir_func.total_param_slots() as usize;
         let func_abi = match self.module.inner.isa {
-            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(&gfn, slots),
+            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(&gfn, Some(ir_func)),
         };
         let is_sret = func_abi.is_sret();
         let n_ret = ir_func.return_types.len();

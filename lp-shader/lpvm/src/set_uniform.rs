@@ -102,3 +102,148 @@ pub fn encode_uniform_write_q32(
 fn flatten_err_to_data(e: CallError) -> DataError {
     DataError::type_mismatch("flatten_q32", format!("{e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    use crate::PathError;
+    use lps_shared::VMCTX_HEADER_SIZE;
+    use lps_shared::{
+        LpsModuleSig, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, StructMember,
+        TextureStorageFormat,
+    };
+
+    fn sig_with_tex_uniform() -> LpsModuleSig {
+        LpsModuleSig {
+            uniforms_type: Some(LpsType::Struct {
+                name: Some(String::from("Uniforms")),
+                members: vec![
+                    StructMember {
+                        name: Some(String::from("u_time")),
+                        ty: LpsType::Float,
+                    },
+                    StructMember {
+                        name: Some(String::from("tex")),
+                        ty: LpsType::Texture2D,
+                    },
+                ],
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn encode_uniform_write_rejects_texture2d_scalar_mismatch() {
+        let sig = sig_with_tex_uniform();
+        let err =
+            encode_uniform_write(&sig, "tex", &LpsValueF32::F32(1.0), FloatMode::F32).unwrap_err();
+        match err {
+            DataError::TypeMismatch { expected, message } => {
+                assert_eq!(expected, "LpsType::Texture2D");
+                assert!(message.contains("uvec4 stand-in"), "message was: {message}");
+            }
+            other => panic!("expected TypeMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_uniform_write_rejects_texture2d_uvec4_descriptor_shape() {
+        let sig = sig_with_tex_uniform();
+        let err = encode_uniform_write(
+            &sig,
+            "tex",
+            &LpsValueF32::UVec4([1, 2, 3, 4]),
+            FloatMode::F32,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DataError::TypeMismatch { ref expected, .. } if expected == "LpsType::Texture2D"
+        ));
+    }
+
+    #[test]
+    fn encode_uniform_write_rejects_texture2d_subpath() {
+        let sig = sig_with_tex_uniform();
+        let err = encode_uniform_write(&sig, "tex.ptr", &LpsValueF32::U32(0), FloatMode::F32)
+            .unwrap_err();
+        assert!(matches!(err, DataError::Path(PathError::NotAField { .. })));
+    }
+
+    #[test]
+    fn encode_uniform_write_q32_rejects_texture2d_uvec4_descriptor_shape() {
+        let sig = sig_with_tex_uniform();
+        let err =
+            encode_uniform_write_q32(&sig, "tex", &LpsValueQ32::UVec4([1, 2, 3, 4])).unwrap_err();
+        match err {
+            DataError::TypeMismatch { expected, message } => {
+                assert_eq!(expected, "flatten_q32");
+                assert!(
+                    message.contains("LpsValueQ32::Texture2D"),
+                    "message: {message}"
+                );
+            }
+            other => panic!("expected TypeMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_uniform_write_accepts_texture2d_typed_value() {
+        let sig = sig_with_tex_uniform();
+        let d = LpsTexture2DDescriptor {
+            ptr: 0x1000,
+            width: 2,
+            height: 1,
+            row_stride: 16,
+        };
+        let tv = LpsTexture2DValue {
+            descriptor: d,
+            format: TextureStorageFormat::Rgba16Unorm,
+            byte_len: 4096,
+        };
+        let (off, bytes) =
+            encode_uniform_write(&sig, "tex", &LpsValueF32::Texture2D(tv), FloatMode::F32)
+                .expect("typed Texture2D");
+        assert_eq!(off, VMCTX_HEADER_SIZE + 4);
+        let mut want = [0u8; 16];
+        want[0..4].copy_from_slice(&d.ptr.to_le_bytes());
+        want[4..8].copy_from_slice(&d.width.to_le_bytes());
+        want[8..12].copy_from_slice(&d.height.to_le_bytes());
+        want[12..16].copy_from_slice(&d.row_stride.to_le_bytes());
+        assert_eq!(bytes.as_slice(), want);
+    }
+
+    #[test]
+    fn encode_uniform_write_q32_accepts_texture2d_typed_value() {
+        let sig = sig_with_tex_uniform();
+        let d = LpsTexture2DDescriptor {
+            ptr: 0x1000,
+            width: 2,
+            height: 1,
+            row_stride: 16,
+        };
+        let tv = LpsTexture2DValue {
+            descriptor: d,
+            format: TextureStorageFormat::Rgba16Unorm,
+            byte_len: 4096,
+        };
+        let (off, bytes) =
+            encode_uniform_write_q32(&sig, "tex", &LpsValueQ32::Texture2D(tv)).expect("typed q32");
+        assert_eq!(off, VMCTX_HEADER_SIZE + 4);
+        let mut want = [0u8; 16];
+        want[0..4].copy_from_slice(&(d.ptr as i32).to_le_bytes());
+        want[4..8].copy_from_slice(&(d.width as i32).to_le_bytes());
+        want[8..12].copy_from_slice(&(d.height as i32).to_le_bytes());
+        want[12..16].copy_from_slice(&(d.row_stride as i32).to_le_bytes());
+        assert_eq!(bytes.as_slice(), want);
+    }
+
+    #[test]
+    fn encode_uniform_write_q32_rejects_texture2d_subpath() {
+        let sig = sig_with_tex_uniform();
+        let err = encode_uniform_write_q32(&sig, "tex.ptr", &LpsValueQ32::U32(0)).unwrap_err();
+        assert!(matches!(err, DataError::Path(PathError::NotAField { .. })));
+    }
+}

@@ -3,7 +3,7 @@
 ## Primary validation
 
 ```bash
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 This is the main correctness check. The filetests cover the full

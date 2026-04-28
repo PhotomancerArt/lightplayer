@@ -75,10 +75,10 @@ ensure the component is expanded correctly.
 ```bash
 # Run bvec cast tests
 cd /Users/yona/dev/photomancer/lp2025
-./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec2/to-float.glsl" "vec/bvec2/to-int.glsl"
+./scripts/filetests.sh --target jit.q32 "vec/bvec2/to-float.glsl" "vec/bvec2/to-int.glsl"
 
 # Verify no regressions
-./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec2/"
+./scripts/filetests.sh --target jit.q32 "vec/bvec2/"
 
 # Check compilation
 cargo check -p lps-frontend

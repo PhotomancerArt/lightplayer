@@ -10,7 +10,7 @@ use lp_model::{
     project::FrameId,
 };
 use lp_shared::DisplayPipelineOptions;
-use lp_shared::fs::fs_event::FsChange;
+use lpfs::FsChange;
 
 /// Output node runtime
 pub struct OutputRuntime {

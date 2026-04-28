@@ -1111,6 +1111,138 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpTexTexture1dR16UnormQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32();
+            let p5 = params[5].unwrap_i32() as u32;
+            let p6 = params[6].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture1dUnormSampleArgs {
+                width: p2,
+                row_stride: p3,
+                u: p4,
+                filter_abi: p5,
+                wrap_x_abi: p6,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::r16_unorm_q32::texture1d_r16_unorm_sample(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpTexTexture1dRgba16UnormQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32();
+            let p5 = params[5].unwrap_i32() as u32;
+            let p6 = params[6].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture1dUnormSampleArgs {
+                width: p2,
+                row_stride: p3,
+                u: p4,
+                filter_abi: p5,
+                wrap_x_abi: p6,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::rgba16_unorm_q32::texture1d_rgba16_unorm_sample(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpTexTexture2dR16UnormQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32() as u32;
+            let p5 = params[5].unwrap_i32();
+            let p6 = params[6].unwrap_i32();
+            let p7 = params[7].unwrap_i32() as u32;
+            let p8 = params[8].unwrap_i32() as u32;
+            let p9 = params[9].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture2dUnormSampleArgs {
+                width: p2,
+                height: p3,
+                row_stride: p4,
+                u: p5,
+                v: p6,
+                filter_abi: p7,
+                wrap_x_abi: p8,
+                wrap_y_abi: p9,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::r16_unorm_q32::texture2d_r16_unorm_sample(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpTexTexture2dRgba16UnormQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32() as u32;
+            let p5 = params[5].unwrap_i32();
+            let p6 = params[6].unwrap_i32();
+            let p7 = params[7].unwrap_i32() as u32;
+            let p8 = params[8].unwrap_i32() as u32;
+            let p9 = params[9].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture2dUnormSampleArgs {
+                width: p2,
+                height: p3,
+                row_stride: p4,
+                u: p5,
+                v: p6,
+                filter_abi: p7,
+                wrap_x_abi: p8,
+                wrap_y_abi: p9,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::rgba16_unorm_q32::texture2d_rgba16_unorm_sample(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
         BuiltinId::LpVmGetFuelQ32 => {
             let vmctx_word = params[0].unwrap_i32();
             let mem = linked_env_memory;

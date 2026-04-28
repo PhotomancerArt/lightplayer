@@ -35,11 +35,7 @@ mat3 test_mat3_multiply_assign_matrix_expressions() {
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat3_multiply_assign_matrix_expressions() ~= mat3(2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0)
+// run: test_mat3_multiply_assign_matrix_expressions() ~= mat3(1.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 2.0)
 
 mat3 test_mat3_multiply_assign_scalar() {
     mat3 result = mat3(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);

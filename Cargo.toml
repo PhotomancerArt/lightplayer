@@ -2,6 +2,7 @@
 members = [
     # lp-base workspace members
     "lp-base/lp-perf",
+    "lp-base/lpfs",
     # lp-app workspace members
     "lp-core/lp-engine",
     "lp-core/lp-engine-client",
@@ -50,6 +51,8 @@ resolver = "2"
 # They're still in workspace members so they can use workspace dependencies
 # Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [
+    # lp-base workspace members
+    "lp-base/lpfs",
     # lp-app workspace members
     "lp-core/lp-engine",
     "lp-core/lp-engine-client",

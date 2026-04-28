@@ -29,6 +29,7 @@ pub fn glsl_type_to_wasm_components(ty: &LpsType, float_mode: FloatMode) -> Vec<
         LpsType::Mat2 => alloc::vec![scalar_float_vt(float_mode); 4],
         LpsType::Mat3 => alloc::vec![scalar_float_vt(float_mode); 9],
         LpsType::Mat4 => alloc::vec![scalar_float_vt(float_mode); 16],
+        LpsType::Texture2D => alloc::vec![WasmValType::I32; 4],
         LpsType::Array { element, len } => {
             let inner = glsl_type_to_wasm_components(element, float_mode);
             let mut out = Vec::with_capacity(inner.len().saturating_mul(*len as usize));
@@ -117,6 +118,8 @@ pub struct WasmExport {
     pub results: Vec<WasmValType>,
     pub return_type: LpsType,
     pub param_types: Vec<LpsType>,
+    /// `IrFunction::sret_arg` — aggregate (etc.) return via hidden pointer param; wasm has no results.
+    pub uses_sret: bool,
 }
 
 impl WasmModule {

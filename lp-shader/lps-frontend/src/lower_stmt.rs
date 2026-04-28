@@ -5,14 +5,17 @@ use alloc::string::String;
 
 use alloc::vec::Vec;
 
-use lpir::{IrType, LpirOp, SlotId, VMCTX_VREG};
-use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
+use lpir::{LpirOp, VMCTX_VREG};
+use naga::{Block, Expression, Statement, SwitchValue, TypeInner};
 
 use crate::lower_access;
-use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
+use crate::lower_array::aggregate_storage_base_vreg;
+use crate::lower_call;
+use crate::lower_ctx::{
+    LowerCtx, debug_assert_not_param_readonly_aggregate_store, naga_type_to_ir_types,
+};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
-use crate::lower_lpfn;
 use crate::naga_util::expr_type_inner;
 
 pub(crate) fn lower_block(ctx: &mut LowerCtx<'_>, block: &Block) -> Result<(), LowerError> {
@@ -94,12 +97,17 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
         }
         Statement::Return { value } => match value {
             Some(expr) => {
-                let mut vs = ctx.ensure_expr_vec(*expr)?;
-                if let Some(res) = &ctx.func.result {
-                    let dst_inner = &ctx.module.types[res.ty].inner;
-                    vs = coerce_assignment_vregs(ctx, Some(res.ty), dst_inner, *expr, vs)?;
+                if let Some(sret) = ctx.sret.clone() {
+                    crate::lower_call::write_aggregate_return_into_sret(ctx, *expr, &sret)?;
+                    ctx.fb.push_return(&[]);
+                } else {
+                    let mut vs = ctx.ensure_expr_vec(*expr)?;
+                    if let Some(res) = &ctx.func.result {
+                        let dst_inner = &ctx.module.types[res.ty].inner;
+                        vs = coerce_assignment_vregs(ctx, Some(res.ty), dst_inner, *expr, vs)?;
+                    }
+                    ctx.fb.push_return(&vs);
                 }
-                ctx.fb.push_return(&vs);
                 Ok(())
             }
             None => {
@@ -108,16 +116,56 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             }
         },
         Statement::Store { pointer, value } => match &ctx.func.expressions[*pointer] {
-            Expression::Access { .. } => lower_access::store_through_access(ctx, *pointer, *value),
+            Expression::Access { .. } => {
+                if let Some(chain) = crate::lower_struct::peel_arrayofstruct_chain(ctx, *pointer) {
+                    return crate::lower_struct::store_array_struct_element(ctx, &chain, *value);
+                }
+                lower_access::store_through_access(ctx, *pointer, *value)
+            }
             // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
             Expression::AccessIndex { .. } => {
+                if let Some(chain) = crate::lower_struct::peel_arrayofstruct_chain(ctx, *pointer) {
+                    return crate::lower_struct::store_array_struct_element(ctx, &chain, *value);
+                }
+                if let Some((lv, chain)) =
+                    crate::lower_struct::peel_struct_access_index_chain_to_local(ctx.func, *pointer)
+                {
+                    if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+                        if matches!(
+                            &info.layout.kind,
+                            crate::naga_util::AggregateKind::Struct { .. }
+                        ) {
+                            return crate::lower_struct::store_struct_path_into_local(
+                                ctx, &info, &chain, *value,
+                            );
+                        }
+                    }
+                }
+                if let Some((gv, chain)) =
+                    crate::lower_struct::peel_struct_access_index_chain_to_global(
+                        ctx.func, *pointer,
+                    )
+                {
+                    let gv_ty = ctx.module.global_variables[gv].ty;
+                    if !chain.is_empty()
+                        && matches!(&ctx.module.types[gv_ty].inner, TypeInner::Struct { .. })
+                    {
+                        return crate::lower_struct::store_struct_path_into_global(
+                            ctx, gv, &chain, *value,
+                        );
+                    }
+                }
                 if let Some((lv, idxs)) =
                     crate::lower_array_multidim::peel_access_index_chain(ctx.func, *pointer)
                 {
-                    if let Some(info) = ctx.array_map.get(&lv).cloned() {
-                        if idxs.len() == info.dimensions.len() {
+                    if let Some(info) = ctx.aggregate_map.get(&lv).cloned() {
+                        if matches!(
+                            &info.layout.kind,
+                            crate::naga_util::AggregateKind::Array { .. }
+                        ) && idxs.len() == info.dimensions().len()
+                        {
                             let flat = crate::lower_array_multidim::flat_index_const_clamped(
-                                &info.dimensions,
+                                &info.dimensions(),
                                 &idxs,
                             )?;
                             return crate::lower_array::store_array_element_const(
@@ -131,22 +179,28 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 {
                     use crate::lower_array_multidim::SubscriptOperand;
                     if ops.iter().all(|o| matches!(o, SubscriptOperand::Const(_))) {
-                        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
-                            let idxs: Vec<u32> = ops
-                                .iter()
-                                .map(|o| match o {
-                                    SubscriptOperand::Const(c) => *c,
-                                    SubscriptOperand::Dynamic(_) => 0,
-                                })
-                                .collect();
-                            if idxs.len() == info.dimensions.len() {
-                                let flat = crate::lower_array_multidim::flat_index_const_clamped(
-                                    &info.dimensions,
-                                    &idxs,
-                                )?;
-                                return crate::lower_array::store_array_element_const(
-                                    ctx, &info, flat, *value,
-                                );
+                        if let Some(info) = ctx.aggregate_info_for_subscript_root(root)? {
+                            if matches!(
+                                &info.layout.kind,
+                                crate::naga_util::AggregateKind::Array { .. }
+                            ) {
+                                let idxs: Vec<u32> = ops
+                                    .iter()
+                                    .map(|o| match o {
+                                        SubscriptOperand::Const(c) => *c,
+                                        SubscriptOperand::Dynamic(_) => 0,
+                                    })
+                                    .collect();
+                                if idxs.len() == info.dimensions().len() {
+                                    let flat =
+                                        crate::lower_array_multidim::flat_index_const_clamped(
+                                            &info.dimensions(),
+                                            &idxs,
+                                        )?;
+                                    return crate::lower_array::store_array_element_const(
+                                        ctx, &info, flat, *value,
+                                    );
+                                }
                             }
                         }
                     }
@@ -220,7 +274,133 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                             ))),
                         }
                     }
+                    Expression::GlobalVariable(gv) => {
+                        lower_access::uniform_global_must_not_write(ctx, *gv)?;
+                        let root_inner =
+                            lower_access::gv_root_value_inner_after_ptr(ctx.module, *gv);
+                        match &root_inner {
+                            TypeInner::Vector { scalar, size } => {
+                                let comp = *index as usize;
+                                let n = crate::lower_ctx::vector_size_usize(*size);
+                                if comp >= n {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "global vector AccessIndex {comp} out of range (len {n})"
+                                    )));
+                                }
+                                let base_off = lower_access::gv_vmctx_byte_offset(ctx, *gv)?;
+                                let scalar_inner = TypeInner::Scalar(*scalar);
+                                let raw = ctx.ensure_expr_vec(*value)?;
+                                let srcs =
+                                    coerce_assignment_vregs(ctx, None, &scalar_inner, *value, raw)?;
+                                if srcs.len() != 1 {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "component store expects one scalar, got {} values",
+                                        srcs.len()
+                                    )));
+                                }
+                                ctx.fb.push(LpirOp::Store {
+                                    base: VMCTX_VREG,
+                                    offset: base_off
+                                        .saturating_add((comp as u32).saturating_mul(4)),
+                                    value: srcs[0],
+                                });
+                                Ok(())
+                            }
+                            TypeInner::Matrix {
+                                columns,
+                                rows,
+                                scalar,
+                            } => {
+                                let ncols = crate::lower_ctx::vector_size_usize(*columns);
+                                let nrows = crate::lower_ctx::vector_size_usize(*rows);
+                                let col = *index as usize;
+                                if col >= ncols {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "global matrix column AccessIndex {col} out of range (cols {ncols})"
+                                    )));
+                                }
+                                let col_ty = TypeInner::Vector {
+                                    size: *rows,
+                                    scalar: *scalar,
+                                };
+                                let raw = ctx.ensure_expr_vec(*value)?;
+                                let srcs =
+                                    coerce_assignment_vregs(ctx, None, &col_ty, *value, raw)?;
+                                if srcs.len() != nrows {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "matrix column store expects {nrows} values, got {}",
+                                        srcs.len()
+                                    )));
+                                }
+                                let base_off = lower_access::gv_vmctx_byte_offset(ctx, *gv)?;
+                                for r in 0..nrows {
+                                    ctx.fb.push(LpirOp::Store {
+                                        base: VMCTX_VREG,
+                                        offset: base_off.saturating_add(
+                                            ((col * nrows + r) as u32).saturating_mul(4),
+                                        ),
+                                        value: srcs[r],
+                                    });
+                                }
+                                Ok(())
+                            }
+                            _ => Err(LowerError::UnsupportedStatement(String::from(
+                                "AccessIndex store on non-vector non-matrix global",
+                            ))),
+                        }
+                    }
                     Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
+                        let pointee = ctx.pointer_args[arg_i];
+                        if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
+                            let layout = crate::naga_util::aggregate_layout(ctx.module, pointee)?
+                                .ok_or_else(|| {
+                                LowerError::Internal(String::from("struct inout: layout"))
+                            })?;
+                            let members = layout.struct_members().ok_or_else(|| {
+                                LowerError::Internal(String::from("struct inout: members"))
+                            })?;
+                            let m = members.get(*index as usize).ok_or_else(|| {
+                                LowerError::UnsupportedStatement(String::from(
+                                    "struct member inout: index out of range",
+                                ))
+                            })?;
+                            let addr = ctx.arg_vregs_for(*arg_i)?[0];
+                            if let Some(sub_layout) =
+                                crate::naga_util::aggregate_layout(ctx.module, m.naga_ty)?
+                            {
+                                let lps_ty = crate::lower_aggregate_layout::naga_to_lps_type(
+                                    ctx.module, m.naga_ty,
+                                )?;
+                                return crate::lower_aggregate_write::store_lps_value_into_slot(
+                                    ctx,
+                                    addr,
+                                    m.byte_offset,
+                                    m.naga_ty,
+                                    &lps_ty,
+                                    *value,
+                                    Some(&sub_layout),
+                                );
+                            }
+                            let naga_inner = &ctx.module.types[m.naga_ty].inner;
+                            let raw = ctx.ensure_expr_vec(*value)?;
+                            let srcs = coerce_assignment_vregs(ctx, None, naga_inner, *value, raw)?;
+                            let ir_tys = naga_type_to_ir_types(ctx.module, naga_inner)?;
+                            if srcs.len() != ir_tys.len() {
+                                return Err(LowerError::UnsupportedStatement(format!(
+                                    "struct inout store: {} vs {} components",
+                                    srcs.len(),
+                                    ir_tys.len()
+                                )));
+                            }
+                            for (j, &s) in srcs.iter().enumerate() {
+                                ctx.fb.push(LpirOp::Store {
+                                    base: addr,
+                                    offset: m.byte_offset + (j as u32) * 4,
+                                    value: s,
+                                });
+                            }
+                            return Ok(());
+                        }
                         let store_ty = expr_type_inner(ctx.module, ctx.func, *pointer)?;
                         let dst_inner = match store_ty {
                             TypeInner::ValuePointer {
@@ -307,7 +487,30 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 }
             }
             Expression::LocalVariable(lv) => {
-                if let Some(dst_info) = ctx.array_map.get(lv).cloned() {
+                if let Some(dst_info) = ctx.aggregate_map.get(lv).cloned() {
+                    debug_assert_not_param_readonly_aggregate_store(
+                        &dst_info,
+                        "lower_stmt: Store to aggregate local (whole value / sub-value lowering)",
+                    );
+                    if matches!(
+                        &dst_info.layout.kind,
+                        crate::naga_util::AggregateKind::Struct { .. }
+                    ) {
+                        let lps_ty = crate::lower_aggregate_layout::naga_to_lps_type(
+                            ctx.module,
+                            dst_info.naga_ty,
+                        )?;
+                        let base = aggregate_storage_base_vreg(ctx, &dst_info.slot)?;
+                        return crate::lower_aggregate_write::store_lps_value_into_slot(
+                            ctx,
+                            base,
+                            0,
+                            dst_info.naga_ty,
+                            &lps_ty,
+                            *value,
+                            Some(&dst_info.layout),
+                        );
+                    }
                     match &ctx.func.expressions[*value] {
                         Expression::Compose { .. } | Expression::ZeroValue(_) => {
                             return crate::lower_array::lower_array_initializer(
@@ -315,9 +518,26 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                             );
                         }
                         Expression::FunctionArgument(arg_i) => {
-                            let src = ctx.arg_vregs_for(*arg_i)?;
-                            return crate::lower_array::store_array_from_flat_vregs(
-                                ctx, &dst_info, &src,
+                            let param_ptr = ctx.arg_vregs_for(*arg_i)?[0];
+                            let dst = aggregate_storage_base_vreg(ctx, &dst_info.slot)?;
+                            ctx.fb.push(LpirOp::Memcpy {
+                                dst_addr: dst,
+                                src_addr: param_ptr,
+                                size: dst_info.total_size(),
+                            });
+                            return Ok(());
+                        }
+                        Expression::CallResult(_) => {
+                            let src_info =
+                                ctx.call_result_aggregates.get(value).cloned().ok_or_else(
+                                    || {
+                                        LowerError::UnsupportedStatement(String::from(
+                                            "array assignment: rhs call result missing aggregate metadata",
+                                        ))
+                                    },
+                                )?;
+                            return crate::lower_array::copy_stack_array_slots(
+                                ctx, &dst_info, &src_info,
                             );
                         }
                         _ => {
@@ -331,7 +551,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                 ))
                             })?;
                             let src_info =
-                                ctx.array_map.get(&src_lv).cloned().ok_or_else(|| {
+                                ctx.aggregate_map.get(&src_lv).cloned().ok_or_else(|| {
                                     LowerError::UnsupportedStatement(String::from(
                                         "array assignment: rhs not a stack array",
                                     ))
@@ -362,7 +582,25 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             Expression::FunctionArgument(i) if ctx.pointer_args.contains_key(i) => {
                 let base_ty_h = ctx.pointer_args[i];
                 let base_inner = &ctx.module.types[base_ty_h].inner;
-                let ir_tys = naga_type_to_ir_types(base_inner)?;
+                if matches!(base_inner, TypeInner::Struct { .. }) {
+                    let layout = crate::naga_util::aggregate_layout(ctx.module, base_ty_h)?
+                        .ok_or_else(|| {
+                            LowerError::Internal(String::from("inout struct: layout"))
+                        })?;
+                    let lps_ty =
+                        crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, base_ty_h)?;
+                    let base = ctx.arg_vregs_for(*i)?[0];
+                    return crate::lower_aggregate_write::store_lps_value_into_slot(
+                        ctx,
+                        base,
+                        0,
+                        base_ty_h,
+                        &lps_ty,
+                        *value,
+                        Some(&layout),
+                    );
+                }
+                let ir_tys = naga_type_to_ir_types(ctx.module, base_inner)?;
                 let addr = ctx.arg_vregs_for(*i)?[0];
                 let srcs = ctx.ensure_expr_vec(*value)?;
                 if ir_tys.len() != srcs.len() {
@@ -388,6 +626,12 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                         "GlobalVariable {gv_handle:?} not found in global_map"
                     ))
                 })?;
+
+                if !info.vmctx_backed {
+                    return Err(LowerError::UnsupportedStatement(String::from(
+                        "cannot store to synthetic Naga sampler stub",
+                    )));
+                }
 
                 if info.is_uniform {
                     return Err(LowerError::UnsupportedStatement(String::from(
@@ -440,7 +684,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             function,
             arguments,
             result,
-        } => lower_user_call(ctx, *function, arguments, *result),
+        } => lower_call::lower_user_call(ctx, *function, arguments, *result),
         Statement::Kill
         | Statement::ControlBarrier(_)
         | Statement::MemoryBarrier(_)
@@ -459,177 +703,9 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
     }
 }
 
-fn call_arg_pointer_local(
-    func: &naga::Function,
-    expr: Handle<Expression>,
-) -> Result<Handle<LocalVariable>, LowerError> {
-    match &func.expressions[expr] {
-        Expression::LocalVariable(lv) => Ok(*lv),
-        _ => Err(LowerError::UnsupportedExpression(String::from(
-            "inout/out call argument must be a local variable",
-        ))),
-    }
-}
-
-/// Naga may pass a stack array as `LocalVariable` or `Load` of that local (implicit decay).
-fn call_arg_array_local(
-    ctx: &LowerCtx<'_>,
-    mut expr: Handle<Expression>,
-) -> Result<Handle<LocalVariable>, LowerError> {
-    loop {
-        match &ctx.func.expressions[expr] {
-            Expression::Load { pointer } => expr = *pointer,
-            Expression::LocalVariable(lv) => {
-                if ctx.array_map.contains_key(lv) {
-                    return Ok(*lv);
-                }
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "array call argument must be a local array",
-                )));
-            }
-            _ => {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "array call argument must be a local array",
-                )));
-            }
-        }
-    }
-}
-
 /// `true` if this block does not end with an explicit `return`.
 pub(crate) fn void_block_missing_return(block: &Block) -> bool {
     !matches!(block.last(), Some(Statement::Return { .. }))
-}
-
-fn lower_user_call(
-    ctx: &mut LowerCtx<'_>,
-    callee: Handle<naga::Function>,
-    arguments: &[Handle<Expression>],
-    result: Option<Handle<Expression>>,
-) -> Result<(), LowerError> {
-    let f = &ctx.module.functions[callee];
-    let name = f.name.as_deref().unwrap_or("");
-    if name.starts_with("lpfn_") {
-        return lower_lpfn::lower_lpfn_call(ctx, callee, arguments, result);
-    }
-    if f.body.is_empty() {
-        if name == "__lp_get_fuel" {
-            if let Some(res_h) = result {
-                let key = "vm::__lp_get_fuel";
-                let callee = ctx
-                    .import_map
-                    .get(key)
-                    .copied()
-                    .ok_or_else(|| LowerError::Internal(format!("missing import {key}")))?;
-                let r = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push_call(callee, &[VMCTX_VREG], &[r]);
-                let mut vregs = VRegVec::new();
-                vregs.push(r);
-                if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
-                    *slot = Some(vregs);
-                }
-            }
-            return Ok(());
-        }
-        if result.is_some() {
-            return Err(LowerError::Internal(String::from(
-                "call to empty-bodied function with result",
-            )));
-        }
-        return Ok(());
-    }
-    let callee_ref = ctx
-        .func_map
-        .get(&callee)
-        .copied()
-        .ok_or_else(|| LowerError::Internal(format!("callee not in export map: {name:?}")))?;
-    let mut arg_vs = Vec::new();
-    // Add VMContext as first arg (vreg 0) for shader-to-shader calls.
-    // All shader functions expect VMContext as their first parameter.
-    arg_vs.push(VMCTX_VREG);
-    let mut inout_copybacks: Vec<(Handle<LocalVariable>, SlotId)> = Vec::new();
-    for (i, &arg_h) in arguments.iter().enumerate() {
-        let callee_arg = &f.arguments[i];
-        let callee_inner = &ctx.module.types[callee_arg.ty].inner;
-        if let TypeInner::Pointer { base, .. } = callee_inner {
-            let lv = call_arg_pointer_local(ctx.func, arg_h)?;
-            if let Some(info) = ctx.array_map.get(&lv).cloned() {
-                // Stack array already lives in a slot; pass that address (no temp slot / vreg marshal).
-                let addr = crate::lower_array::array_storage_base_vreg(ctx, &info.slot)?;
-                arg_vs.push(addr);
-            } else {
-                let local_vregs = ctx.resolve_local(lv)?;
-                let base_inner = &ctx.module.types[*base].inner;
-                let ir_tys = naga_type_to_ir_types(base_inner)?;
-                let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
-                let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-                ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
-                for (j, &src) in local_vregs.iter().enumerate() {
-                    ctx.fb.push(LpirOp::Store {
-                        base: addr,
-                        offset: (j * 4) as u32,
-                        value: src,
-                    });
-                }
-                arg_vs.push(addr);
-                inout_copybacks.push((lv, slot));
-            }
-        } else if matches!(
-            &ctx.module.types[callee_arg.ty].inner,
-            TypeInner::Array { .. }
-        ) {
-            let lv = call_arg_array_local(ctx, arg_h)?;
-            let info = ctx.array_map.get(&lv).cloned().ok_or_else(|| {
-                LowerError::UnsupportedExpression(String::from(
-                    "array call argument: not a stack-slot array",
-                ))
-            })?;
-            let flat = crate::lower_array::load_array_flat_vregs_for_call(ctx, &info)?;
-            arg_vs.extend(flat);
-        } else {
-            let vs = ctx.ensure_expr_vec(arg_h)?;
-            arg_vs.extend_from_slice(&vs);
-        }
-    }
-    let mut result_vs = Vec::new();
-    if let Some(res_h) = result {
-        let res_ty = f
-            .result
-            .as_ref()
-            .ok_or_else(|| LowerError::Internal(String::from("call result for void function")))?;
-        let inner = &ctx.module.types[res_ty.ty].inner;
-        let ir_tys: Vec<IrType> = if matches!(inner, TypeInner::Array { .. }) {
-            crate::naga_util::array_type_flat_ir_types(ctx.module, res_ty.ty)?
-        } else {
-            naga_type_to_ir_types(inner)?.to_vec()
-        };
-        let mut vregs = VRegVec::new();
-        for ty in &ir_tys {
-            let v = ctx.fb.alloc_vreg(*ty);
-            vregs.push(v);
-            result_vs.push(v);
-        }
-        if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
-            *slot = Some(vregs);
-        }
-    }
-    ctx.fb.push_call(callee_ref, &arg_vs, &result_vs);
-    for (lv, slot) in &inout_copybacks {
-        let local_vregs = ctx.resolve_local(*lv)?;
-        let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-        ctx.fb.push(LpirOp::SlotAddr {
-            dst: addr,
-            slot: *slot,
-        });
-        for (j, dst_v) in local_vregs.iter().enumerate() {
-            ctx.fb.push(LpirOp::Load {
-                dst: *dst_v,
-                base: addr,
-                offset: (j * 4) as u32,
-            });
-        }
-    }
-    Ok(())
 }
 
 /// `true` when `body` ends with `if (…) { break; }` — the do-while exit pattern

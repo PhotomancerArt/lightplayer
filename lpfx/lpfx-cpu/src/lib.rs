@@ -18,8 +18,8 @@ use alloc::vec::Vec;
 
 use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
 use lpir::CompilerConfig;
+use lps_shared::TextureStorageFormat;
 use lps_shared::lps_value_f32::LpsValueF32;
-use lps_shared::{TextureBuffer, TextureStorageFormat};
 
 use lpfx::engine::{FxEngine, FxInstance};
 use lpfx::texture::TextureId;
@@ -172,6 +172,7 @@ fn fx_value_to_lps(value: &FxValue) -> LpsValueF32 {
 mod tests {
     use super::*;
     use lpfx::{FxModule, defaults_from_manifest};
+    use lps_shared::TextureBuffer;
 
     const NOISE_FX_TOML: &str = include_str!("../../../examples/noise.fx/fx.toml");
     const NOISE_FX_GLSL: &str = include_str!("../../../examples/noise.fx/main.glsl");

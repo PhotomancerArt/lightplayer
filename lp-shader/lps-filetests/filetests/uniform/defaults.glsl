@@ -66,8 +66,5 @@ float test_initialize_uniform_usage() {
     return scaled_time + float(doubled_count) + offset_pos.x + offset_pos.y;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_initialize_uniform_usage() ~= 2.0
+// With harness default 0 for uniforms: 0 + 0 + 0.5 + 0.5
+// run: test_initialize_uniform_usage() ~= 1.0

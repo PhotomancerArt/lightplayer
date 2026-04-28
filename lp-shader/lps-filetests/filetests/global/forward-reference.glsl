@@ -12,7 +12,8 @@ float test_forward_reference_use_before_declare() {
     return global_after_function + 10.0;
 }
 
-// run: test_forward_reference_use_before_declare() ~= 10.0
+// Initializer below applies before any function runs (single logical global); value is 42.0 here.
+// run: test_forward_reference_use_before_declare() ~= 52.0
 
 // Global declaration comes after function definition
 float global_after_function = 42.0;
@@ -33,16 +34,14 @@ vec2 test_forward_reference_vec() {
     return global_vec_after + vec2(1.0, 1.0);
 }
 
-// run: test_forward_reference_vec() ~= vec2(1.0, 1.0)
+// Same as scalar case: vec2(5,10) is visible before this call.
+// run: test_forward_reference_vec() ~= vec2(6.0, 11.0)
 
 mat3 test_forward_reference_mat() {
     // Function uses mat3 global declared later
     return global_mat_after * 2.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_forward_reference_mat() ~= mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
 
 // Declarations after function definitions

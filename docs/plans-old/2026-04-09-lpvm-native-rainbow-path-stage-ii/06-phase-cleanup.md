@@ -31,11 +31,11 @@ Fix any warnings about unused imports, dead code, etc.
 cargo test -p lpvm-native
 
 # Filetests - all control flow
-./scripts/glsl-filetests.sh --target rv32lp.q32 "control/if_else/" --concise
+./scripts/filetests.sh --target rv32lp.q32 "control/if_else/" --concise
 
 # Filetests - key regression tests
-./scripts/glsl-filetests.sh --target rv32lp.q32 "scalar/int/op-equal.glsl"
-./scripts/glsl-filetests.sh --target rv32lp.q32 "scalar/int/op-divide.glsl"
+./scripts/filetests.sh --target rv32lp.q32 "scalar/int/op-equal.glsl"
+./scripts/filetests.sh --target rv32lp.q32 "scalar/int/op-divide.glsl"
 
 # ESP32 build validation
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
@@ -50,6 +50,7 @@ cargo +nightly fmt -p lpvm-native
 ### 5. Verify exports in lib.rs
 
 Ensure new VInst variants are exported if needed:
+
 ```rust
 pub use vinst::{Br, BrIf, IcmpCond, IeqImm32, /* ... */};
 ```

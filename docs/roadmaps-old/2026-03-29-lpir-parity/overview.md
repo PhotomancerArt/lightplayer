@@ -12,13 +12,13 @@ backends.
 
 ## Done bar
 
-`./scripts/glsl-filetests.sh` exits **0** on `jit.q32`: zero unexpected failures. Every file
+`./scripts/filetests.sh` exits **0** on `jit.q32`: zero unexpected failures. Every file
 either passes or is annotated `@unimplemented` (structs, Naga parse limitations) or `@unsupported`
 (Q32 edge semantics). Same standard for WASM and RV32 after the multi-backend milestone.
 
 ## Baseline marking (optional, before Milestone I)
 
-To keep **each milestone starting from a green suite** (only *new* failures are visible), you can
+To keep **each milestone starting from a green suite** (only _new_ failures are visible), you can
 pre-mark every current failure as an expected gap:
 
 1. Run the filetests app with **exactly one** target, e.g. `jit.q32` (default if you omit
@@ -26,8 +26,7 @@ pre-mark every current failure as an expected gap:
 2. Use `--mark-unimplemented` (or `LP_MARK_UNIMPLEMENTED=1`). You will be prompted to type `yes`
    unless you pass `--assume-yes`.
 3. The runner adds `// @unimplemented(backend=jit)` **before the first `// run:`** when the whole
-   module fails to compile in **summary** mode (the usual multi-file run), or *
-   *`// @unimplemented(backend=jit)`**
+   module fails to compile in **summary** mode (the usual multi-file run), or \* \*`// @unimplemented(backend=jit)`**
    immediately before each failing `// run:`** when the file compiled but individual directives
    failed (or in single-file **detail** mode, where there is no whole-file compile step).
 4. Re-run the suite; exit code should be **0** with failures counted as expected `@unimplemented`.
@@ -35,7 +34,7 @@ pre-mark every current failure as an expected gap:
    `LP_FIX_XFAIL=1` / `--fix` to strip markers from tests that now pass.
 
 Requires: `cargo run -p lps-filetests-app -- test --target jit.q32 --mark-unimplemented`
-(or equivalent via `scripts/glsl-filetests.sh` with those flags in the argument list).
+(or equivalent via `scripts/filetests.sh` with those flags in the argument list).
 
 ## Architecture
 
@@ -79,7 +78,7 @@ lp-shader/
 ## Milestones
 
 | #      | Focus                                                                    | Files unblocked         | Primary crate          |
-|--------|--------------------------------------------------------------------------|-------------------------|------------------------|
+| ------ | ------------------------------------------------------------------------ | ----------------------- | ---------------------- |
 | (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green             | `lps-filetests`        |
 | I      | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21                     | `lps-frontend`         |
 | II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lps-frontend`         |

@@ -3,6 +3,7 @@
 ## Scope of Work
 
 Implement the RISC-V RV32 sret (struct-return) calling convention for functions returning >4 scalars:
+
 - mat4 (16 scalars), large structs, multiple vec4s
 - Caller allocates buffer, passes pointer in a0
 - Real args shifted to a1-a7
@@ -64,7 +65,7 @@ emit_function_bytes(ir_func, sig):
              - Emit: sw temp, offset(a0)  # store to sret buffer
          If Direct:
            For each val:
-             - Load val to temp (if spilled)  
+             - Load val to temp (if spilled)
              - Emit: mv REG[i], temp  # move to a0-a3
     7. Emit epilogue
 ```
@@ -97,7 +98,7 @@ impl AbiInfo {
 ### Key Changes
 
 1. **abi.rs**: Add `AbiInfo::from_lps_sig()` helper
-2. **emit.rs**: 
+2. **emit.rs**:
    - Add `sig` parameter to `emit_function_bytes()`
    - Use `AbiInfo` to determine Ret emission strategy
    - For Sret: emit `sw` to a0-relative offsets instead of register moves
@@ -139,17 +140,20 @@ Callee stores with:
 ## Testing Strategy
 
 **Unit tests** (abi.rs):
+
 - `abi_info_mat4_is_sret()` - mat4 → Sret with 64-byte size
 - `abi_info_vec4_is_direct()` - vec4 → Direct
 - `abi_info_args_shifted_for_sret()` - real args start at a1
 
 **Filetests**:
+
 - `spill_pressure.glsl` - mat4 return, 16 scalars
 - Add `mat/mat4_return.glsl` - dedicated mat4 return test
 
 **Validation**:
+
 ```bash
 cargo test -p lpvm-native abi::tests
 cargo test -p lpvm-native --lib
-scripts/glsl-filetests.sh --target rv32lp.q32 scalar/spill_pressure.glsl
+scripts/filetests.sh --target rv32lp.q32 scalar/spill_pressure.glsl
 ```

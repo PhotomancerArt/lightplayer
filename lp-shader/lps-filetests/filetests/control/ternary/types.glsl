@@ -15,9 +15,6 @@ int test_ternary_vec2() {
     return int(result.x + result.y);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_vec2() == 3
 
 int test_ternary_vec3() {
@@ -28,9 +25,6 @@ int test_ternary_vec3() {
     return int(result.x + result.y + result.z);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_vec3() == 15
 
 int test_ternary_vec4() {
@@ -41,9 +35,6 @@ int test_ternary_vec4() {
     return int(result.x + result.y);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_vec4() == 3
 
 int test_ternary_ivec2() {
@@ -54,9 +45,6 @@ int test_ternary_ivec2() {
     return result.x + result.y;
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_ivec2() == 70
 
 int test_ternary_bvec2() {
@@ -67,9 +55,6 @@ int test_ternary_bvec2() {
     return (result.x ? 1 : 0) + (result.y ? 1 : 0);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_bvec2() == 1
 
 // Matrix types
@@ -81,9 +66,6 @@ int test_ternary_mat2() {
     return int(result[0][0] + result[1][1]);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_mat2() == 5
 
 int test_ternary_mat3() {
@@ -94,9 +76,6 @@ int test_ternary_mat3() {
     return int(result[0][0] * 10.0);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_mat3() == 20
 
 // Structure types
@@ -114,9 +93,6 @@ int test_ternary_struct() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_ternary_struct() == 3
 
 struct Color {
@@ -128,15 +104,12 @@ struct Color {
 int test_ternary_struct_complex() {
     bool b = false;
     Color c1 = Color(0.1, 0.2, 0.3);
-    Color c2 = Color(0.4, 0.5, 0.6);
+    // Use halves so (r+g+b)*10 is exact in q32; 0.4+0.5+0.6 rounds down after *10.
+    Color c2 = Color(0.5, 0.5, 0.5);
     Color result = b ? c1 : c2;
     return int((result.r + result.g + result.b) * 10.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_ternary_struct_complex() == 15
 
 // Array types (if supported)
@@ -150,9 +123,6 @@ int test_ternary_array_element() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_ternary_array_element() == 1
 
 // Mixed vector component access
@@ -164,9 +134,6 @@ int test_ternary_vec_component() {
     return int(result);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_vec_component() == 5
 
 // Nested with different types
@@ -180,9 +147,6 @@ int test_ternary_nested_types() {
     return int(result.x + result.y);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
 // run: test_ternary_nested_types() == 7
 
 

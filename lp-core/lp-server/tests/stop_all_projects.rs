@@ -7,7 +7,7 @@ use lp_engine::MemoryOutputProvider;
 use lp_model::{AsLpPath, AsLpPathBuf, ClientMessage, ClientRequest};
 use lp_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
 use lp_shared::ProjectBuilder;
-use lp_shared::fs::{LpFs, LpFsMemory};
+use lpfs::{LpFs, LpFsMemory};
 
 #[test]
 fn test_stop_all_projects() {

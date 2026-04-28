@@ -96,8 +96,14 @@ impl DisplayPipeline {
     }
 
     /// Rotate buffers: prev<-current, current<-next
+    ///
+    /// Only invalidates `has_prev` when we actually overwrite `prev` (i.e.
+    /// when `current` exists and gets swapped into `prev`). Without that
+    /// guard, calling `rotate_frames` from `tick()` in the "missing
+    /// current, advance next" path silently drops the previously captured
+    /// `prev` frame, which permanently disables temporal interpolation in
+    /// loops that interleave ticks with `write_frame` calls.
     fn rotate_frames(&mut self) {
-        self.has_prev = false;
         if self.has_current {
             core::mem::swap(&mut self.prev, &mut self.current);
             self.prev_ts = self.current_ts;
@@ -308,6 +314,57 @@ mod tests {
         pipeline.tick(500, &mut out);
         assert_eq!(out[0], out[1], "R and G should match for low gray");
         assert_eq!(out[1], out[2], "G and B should match for low gray");
+    }
+
+    #[test]
+    fn interleaved_ticks_preserve_prev_for_interpolation() {
+        let mut opts = DisplayPipelineOptions::default();
+        opts.lut_enabled = false;
+        opts.dithering_enabled = false;
+        opts.interpolation_enabled = true;
+        let mut pipeline = DisplayPipeline::new(1, opts).unwrap();
+
+        // Forward-stamped writes (frame_ts = now + period). Real loop pattern:
+        //   write_frame(period,   A) at t=0
+        //   ... ticks at t=10..(period-10) ...
+        //   write_frame(2*period, B) at t=period
+        //   ... ticks at t=period+10..(2*period-10) ...
+        //   write_frame(3*period, C) at t=2*period
+        //   ... ticks in the [period, 2*period) window which now actually
+        //   straddles the (prev_ts=period, current_ts=2*period) interval
+        //   used for interpolation.
+        // Frame A=red, B=green, C=blue.
+        let red: [u16; 3] = [65535, 0, 0];
+        let green: [u16; 3] = [0, 65535, 0];
+        let blue: [u16; 3] = [0, 0, 65535];
+
+        let period: u64 = 1000;
+        let mut out = [0u8; 3];
+
+        pipeline.write_frame(period, &red);
+        for t in (10..period).step_by(50) {
+            pipeline.tick(t, &mut out);
+        }
+
+        pipeline.write_frame(2 * period, &green);
+        for t in ((period + 10)..(2 * period)).step_by(50) {
+            pipeline.tick(t, &mut out);
+        }
+
+        pipeline.write_frame(3 * period, &blue);
+        // Tick midway through the (prev=green @ 2*period, current=blue @ 3*period)
+        // window. With the rotate_frames bug, has_prev would be false here and
+        // we'd render `current` (pure blue). With the fix, we should see a
+        // 50/50 lerp of green and blue.
+        pipeline.tick(2 * period + period / 2, &mut out);
+        assert!(
+            out[1] > 50 && out[2] > 50,
+            "expected interpolated green+blue (got R={}, G={}, B={})",
+            out[0],
+            out[1],
+            out[2]
+        );
+        assert_eq!(out[0], 0, "red should be zero");
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 Add `--target <name>` flag to `lps-filetests-app` CLI. Thread the
 target filter through `lib.rs::run()` to the runner. Update
-`scripts/glsl-filetests.sh` help text.
+`scripts/filetests.sh` help text.
 
 ## Code Organization Reminders
 
@@ -62,7 +62,7 @@ Pass `active_targets` to `run_filetest_with_line_filter`.
 
 Accept `targets: &[&Target]` and pass through to the runner.
 
-### Update `scripts/glsl-filetests.sh`
+### Update `scripts/filetests.sh`
 
 Pass through `--target` flag if provided. Update help text to mention the
 flag and list valid targets.

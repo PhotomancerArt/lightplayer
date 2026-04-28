@@ -24,12 +24,8 @@ int test_for_loop_expression_modified_in_body() {
     return i;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
-// run: test_for_loop_expression_modified_in_body() == 5
+// GLSL: after each iteration the loop-expression runs; body sets i=5 then i++ yields 6.
+// run: test_for_loop_expression_modified_in_body() == 6
 
 int test_for_loop_expression_break() {
     int i = 0;

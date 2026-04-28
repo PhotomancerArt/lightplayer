@@ -1,6 +1,5 @@
 //! Project builder for creating test projects with a fluent API
 
-use crate::fs::LpFs;
 use alloc::{format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
 use lp_model::nodes::fixture::ColorOrder;
@@ -14,6 +13,7 @@ use lp_model::nodes::{
 };
 use lp_model::path::LpPathBuf;
 use lp_model::{AsLpPath, AsLpPathBuf, glsl_opts::GlslOpts};
+use lpfs::LpFs;
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {
@@ -97,7 +97,7 @@ impl ProjectBuilder {
     }
 
     /// Helper to write files
-    fn write_file_helper(&self, path: &str, data: &[u8]) -> Result<(), crate::error::FsError> {
+    fn write_file_helper(&self, path: &str, data: &[u8]) -> Result<(), lpfs::FsError> {
         self.fs.borrow().write_file(path.as_path(), data)
     }
 
@@ -362,8 +362,8 @@ impl FixtureBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::LpFsMemory;
     use lp_model::json;
+    use lpfs::LpFsMemory;
 
     #[test]
     fn test_project_builder_creates_valid_json() {
