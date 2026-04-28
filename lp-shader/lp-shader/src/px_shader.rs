@@ -1,11 +1,15 @@
 //! Compiled pixel shader: module + instance, uniforms at render time.
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use core::cell::RefCell;
 
-use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, TextureStorageFormat};
+use lps_shared::{
+    LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, StructMember, TextureBindingSpec,
+    TextureStorageFormat,
+};
 use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
 
 use crate::error::LpsError;
@@ -201,41 +205,135 @@ impl LpsPxShader {
         };
 
         let mut inner = self.inner.borrow_mut();
-        for member in members {
-            let name = member
-                .name
-                .as_deref()
-                .ok_or_else(|| LpsError::Render(String::from("uniform member has no name")))?;
-            let value = fields
-                .iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, v)| v)
-                .ok_or_else(|| LpsError::Render(format!("missing uniform field `{name}`")))?;
-            if member.ty == LpsType::Texture2D {
-                match value {
-                    LpsValueF32::Texture2D(tv) => {
-                        let spec = self.meta.texture_specs.get(name).ok_or_else(|| {
-                            LpsError::Render(format!(
-                                "texture uniform `{name}`: missing texture binding spec in module metadata"
-                            ))
-                        })?;
-                        crate::runtime_texture_validation::validate_runtime_texture_binding(
-                            name, tv, spec,
-                        )?;
-                    }
-                    _ => {
-                        return Err(LpsError::Render(format!(
-                            "texture uniform `{name}` expects `LpsValueF32::Texture2D` (e.g. from `LpsTextureBuf::to_texture2d_value()`)"
-                        )));
-                    }
-                }
-            }
-            inner.set_uniform(name, value)?;
-        }
-        Ok(())
+        apply_uniform_fields(
+            inner.as_mut(),
+            members,
+            fields,
+            "",
+            &self.meta.texture_specs,
+        )
     }
 }
 
 // SAFETY: Engine invokes `render_frame` from a single thread during rendering.
 unsafe impl Send for LpsPxShader {}
 unsafe impl Sync for LpsPxShader {}
+
+fn uniform_dotted_path(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        String::from(name)
+    } else {
+        format!("{prefix}.{name}")
+    }
+}
+
+fn apply_uniform_fields(
+    inner: &mut dyn PxShaderBackend,
+    members: &[StructMember],
+    fields: &[(String, LpsValueF32)],
+    path_prefix: &str,
+    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+) -> Result<(), LpsError> {
+    for member in members {
+        let name = member
+            .name
+            .as_deref()
+            .ok_or_else(|| LpsError::Render(String::from("uniform member has no name")))?;
+        let path = uniform_dotted_path(path_prefix, name);
+        let value = fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .ok_or_else(|| LpsError::Render(format!("missing uniform field `{path}`")))?;
+
+        match &member.ty {
+            LpsType::Struct {
+                members: sub_members,
+                ..
+            } => {
+                let LpsValueF32::Struct {
+                    fields: sub_fields, ..
+                } = value
+                else {
+                    return Err(LpsError::Render(format!(
+                        "uniform `{path}` expects `LpsValueF32::Struct`"
+                    )));
+                };
+                apply_uniform_fields(inner, sub_members, sub_fields, &path, texture_specs)?;
+            }
+            LpsType::Texture2D => {
+                match value {
+                    LpsValueF32::Texture2D(tv) => {
+                        let spec = texture_specs.get(&path).ok_or_else(|| {
+                            LpsError::Render(format!(
+                                "texture uniform `{path}`: missing texture binding spec in module metadata"
+                            ))
+                        })?;
+                        crate::runtime_texture_validation::validate_runtime_texture_binding(
+                            &path, tv, spec,
+                        )?;
+                    }
+                    _ => {
+                        return Err(LpsError::Render(format!(
+                            "texture uniform `{path}` expects `LpsValueF32::Texture2D` (e.g. from `LpsTextureBuf::to_texture2d_value()`)"
+                        )));
+                    }
+                }
+                inner.set_uniform(&path, value)?;
+            }
+            _ => {
+                inner.set_uniform(&path, value)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Test-only backend: records [`PxShaderBackend::set_uniform`] paths (see [`px_shader_from_parts_for_test`]).
+#[cfg(test)]
+pub(crate) struct RecordingUniformBackend {
+    pub(crate) paths: alloc::rc::Rc<core::cell::RefCell<alloc::vec::Vec<String>>>,
+}
+
+#[cfg(test)]
+impl RecordingUniformBackend {
+    pub(crate) fn new(paths: alloc::rc::Rc<core::cell::RefCell<alloc::vec::Vec<String>>>) -> Self {
+        Self { paths }
+    }
+}
+
+#[cfg(test)]
+impl PxShaderBackend for RecordingUniformBackend {
+    fn call_render_texture(
+        &mut self,
+        _name: &str,
+        _texture: &mut LpvmBuffer,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), LpsError> {
+        Ok(())
+    }
+
+    fn set_uniform(&mut self, path: &str, _value: &LpsValueF32) -> Result<(), LpsError> {
+        self.paths.borrow_mut().push(String::from(path));
+        Ok(())
+    }
+}
+
+/// Assemble a [`LpsPxShader`] without JIT validation (tests only).
+#[cfg(test)]
+pub(crate) fn px_shader_from_parts_for_test(
+    inner: Box<dyn PxShaderBackend>,
+    meta: LpsModuleSig,
+    output_format: TextureStorageFormat,
+    render_texture_fn_name: String,
+    render_fn_index: usize,
+) -> LpsPxShader {
+    LpsPxShader {
+        inner: RefCell::new(inner),
+        output_format,
+        meta,
+        render_texture_fn_name,
+        render_fn_index,
+    }
+}
