@@ -126,6 +126,19 @@ mod tests {
     }
 
     #[test]
+    fn const_in_parameter_order_normalizes_for_naga() {
+        // GLSL 4.x `const in T` is rewritten to Naga-accepted `in const T` (see parse.rs).
+        let src = "void g(const in float x) {}\nfloat f() { g(1.0); return 1.0; }\n";
+        let prep = super::prepared_glsl_for_compile(src);
+        assert!(
+            prep.contains("const float x"),
+            "expected const + type after normalization: {prep}"
+        );
+        let result = compile(src);
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    #[test]
     fn float_main_does_not_get_duplicate_void_main_suffix() {
         let src = "float main() { return 1.0; }\n";
         let prep = super::prepared_glsl_for_compile(src);

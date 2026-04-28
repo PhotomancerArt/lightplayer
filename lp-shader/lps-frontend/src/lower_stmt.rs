@@ -452,6 +452,19 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                             });
                             return Ok(());
                         }
+                        Expression::CallResult(_) => {
+                            let src_info =
+                                ctx.call_result_aggregates.get(value).cloned().ok_or_else(
+                                    || {
+                                        LowerError::UnsupportedStatement(String::from(
+                                            "array assignment: rhs call result missing aggregate metadata",
+                                        ))
+                                    },
+                                )?;
+                            return crate::lower_array::copy_stack_array_slots(
+                                ctx, &dst_info, &src_info,
+                            );
+                        }
                         _ => {
                             let src_lv = crate::lower_array::peel_array_local_value(
                                 ctx.func,

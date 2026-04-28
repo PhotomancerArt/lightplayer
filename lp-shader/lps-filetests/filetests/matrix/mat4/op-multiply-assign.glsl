@@ -35,11 +35,7 @@ mat4 test_mat4_multiply_assign_matrix_expressions() {
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat4_multiply_assign_matrix_expressions() ~= mat4(2.0, 2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+// run: test_mat4_multiply_assign_matrix_expressions() ~= mat4(1.0, 2.0, 2.0, 4.0, 0.0, 1.0, 0.0, 2.0, 1.0, 1.0, 2.0, 2.0, 0.0, 1.0, 0.0, 2.0)
 
 mat4 test_mat4_multiply_assign_scalar() {
     mat4 result = mat4(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0);

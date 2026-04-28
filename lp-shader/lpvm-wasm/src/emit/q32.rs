@@ -1,5 +1,6 @@
 //! Q16.16 fixed-point helpers for WASM emission.
 
+use lps_q32::Q32_FRAC;
 use wasm_encoder::{BlockType, InstructionSink, ValType};
 
 use crate::emit::FdivRecipLocals;
@@ -249,6 +250,30 @@ pub(crate) fn emit_q32_fabs(sink: &mut InstructionSink<'_>, src: u32, dst: u32) 
     sink.local_set(dst);
 }
 
+/// Q16.16 → `int` (truncate toward zero). Matches [`lps_builtins::...::ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32`]
+/// and [`lpvm_cranelift::q32_emit::emit_to_sint`].
+pub(crate) fn emit_q32_ftoi_sat_s(sink: &mut InstructionSink<'_>, src: u32, dst: u32) {
+    let t = BlockType::Result(ValType::I32);
+    sink.local_get(src).i32_const(0).i32_lt_s().if_(t);
+    sink.local_get(src).i32_const(Q32_FRAC).i32_add();
+    sink.else_();
+    sink.local_get(src);
+    sink.end();
+    sink.i32_const(16).i32_shr_s().local_set(dst);
+}
+
+/// Q16.16 → `uint` (negative → 0). Matches `__lp_lpir_ftoi_sat_u_q32`.
+pub(crate) fn emit_q32_ftoi_sat_u(sink: &mut InstructionSink<'_>, src: u32, dst: u32) {
+    let t = BlockType::Result(ValType::I32);
+    emit_q32_ftoi_sat_s(sink, src, dst);
+    sink.local_get(dst).i32_const(0).i32_lt_s().if_(t);
+    sink.i32_const(0);
+    sink.else_();
+    sink.local_get(dst);
+    sink.end();
+    sink.local_set(dst);
+}
+
 pub(crate) fn emit_q32_itof_s(sink: &mut InstructionSink<'_>, src: u32, dst: u32, scratch: u32) {
     sink.local_get(src)
         .i64_extend_i32_s()
@@ -258,12 +283,34 @@ pub(crate) fn emit_q32_itof_s(sink: &mut InstructionSink<'_>, src: u32, dst: u32
     sink.local_set(dst);
 }
 
+/// `uint` → Q16.16, matching [`lpvm_cranelift::q32_emit::emit_from_uint`].
+/// `scratch` is the function's i64 slot (Q32 fadd path); we store a sign-extended `i32` there.
 pub(crate) fn emit_q32_itof_u(sink: &mut InstructionSink<'_>, src: u32, dst: u32, scratch: u32) {
-    sink.local_get(src)
-        .i64_extend_i32_u()
-        .i64_const(16)
-        .i64_shl();
-    emit_q32_sat_from_i64(sink, scratch);
+    const MAX_I32_PER_Q32: i32 = 32767;
+    const SMIN_BOUND: i32 = 0x8000; // first i32 not representable as Q32 int mag; `v < this` keeps `v` in smin
+    let t = BlockType::Result(ValType::I32);
+    sink.local_get(src);
+    sink.i32_const(SMIN_BOUND);
+    sink.i32_lt_s();
+    sink.if_(t);
+    sink.local_get(src);
+    sink.else_();
+    sink.i32_const(MAX_I32_PER_Q32);
+    sink.end();
+    sink.i64_extend_i32_s();
+    sink.local_set(scratch);
+    // (src < 0) ? MAX : smin
+    sink.local_get(src);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.if_(t);
+    sink.i32_const(MAX_I32_PER_Q32);
+    sink.else_();
+    sink.local_get(scratch);
+    sink.i32_wrap_i64();
+    sink.end();
+    sink.i32_const(16);
+    sink.i32_shl();
     sink.local_set(dst);
 }
 

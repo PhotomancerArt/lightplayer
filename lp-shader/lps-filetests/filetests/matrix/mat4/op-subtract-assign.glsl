@@ -35,11 +35,7 @@ mat4 test_mat4_subtract_assign_expressions() {
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat4_subtract_assign_expressions() ~= mat4(4.0, 4.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, -2.0, -1.0, -4.0, -5.0, -6.0, -7.0, -8.0, -9.0)
+// run: test_mat4_subtract_assign_expressions() ~= mat4(4.0, 4.0, 2.0, 2.0, 0.0, 0.0, -2.0, -2.0, -4.0, -4.0, -6.0, -6.0, -8.0, -8.0, -10.0, -10.0)
 
 mat4 test_mat4_subtract_assign_zero() {
     mat4 result = mat4(5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0);
@@ -65,11 +61,7 @@ mat4 test_mat4_subtract_assign_chained() {
     return b;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat4_subtract_assign_chained() ~= mat4(-4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0)
+// run: test_mat4_subtract_assign_chained() ~= mat4(-4.0, -4.0, -4.0, -4.0, 0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0, 44.0)
 
 mat4 test_mat4_subtract_assign_large_values() {
     mat4 result = mat4(1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000.0, 9000.0, 10000.0, 11000.0, 12000.0, 13000.0, 14000.0, 15000.0, 16000.0);

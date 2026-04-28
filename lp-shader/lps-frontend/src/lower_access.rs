@@ -609,6 +609,34 @@ pub(crate) fn store_through_access(
                 ))),
             }
         }
+        Expression::GlobalVariable(gv) => {
+            let ginfo = ctx.global_map.get(gv).ok_or_else(|| {
+                LowerError::Internal(format!("Access store global: {gv:?} not in global_map"))
+            })?;
+            if ginfo.is_uniform {
+                return Err(LowerError::UnsupportedStatement(String::from(
+                    "cannot write to uniform variable",
+                )));
+            }
+            let naga_ty = ctx.module.global_variables[*gv].ty;
+            let layout =
+                crate::naga_util::aggregate_layout(ctx.module, naga_ty)?.ok_or_else(|| {
+                    LowerError::Internal(String::from(
+                        "Access store: global subscript — expected array aggregate layout",
+                    ))
+                })?;
+            if !matches!(&layout.kind, crate::naga_util::AggregateKind::Array { .. }) {
+                return Err(LowerError::UnsupportedStatement(String::from(
+                    "subscript store: global base is not an array",
+                )));
+            }
+            let info = crate::lower_ctx::AggregateInfo {
+                slot: crate::lower_ctx::AggregateSlot::Global(*gv),
+                layout,
+                naga_ty,
+            };
+            crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value)
+        }
         _ => Err(LowerError::UnsupportedStatement(String::from(
             "store through Access: unsupported base",
         ))),

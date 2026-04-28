@@ -67,11 +67,8 @@ vec4 test_roundeven_vec4() {
     return roundEven(vec4(1.1, 2.9, -0.5, 4.0));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_roundeven_vec4() ~= vec4(1.0, 3.0, -1.0, 4.0)
+// -0.5 is halfway between 0 and -1; roundEven ties to the even integer 0.
+// run: test_roundeven_vec4() ~= vec4(1.0, 3.0, 0.0, 4.0)
 
 
 

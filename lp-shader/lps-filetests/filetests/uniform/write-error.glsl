@@ -67,8 +67,5 @@ float test_edge_uniform_write_error_calculations() {
     return scaled_time + offset_pos.x + offset_pos.y + bright_color.x;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_edge_uniform_write_error_calculations() ~= 2.7
+// Zeros + 0.5+0.5 + 0.2 from vec3(0.2,…) first component
+// run: test_edge_uniform_write_error_calculations() ~= 1.2

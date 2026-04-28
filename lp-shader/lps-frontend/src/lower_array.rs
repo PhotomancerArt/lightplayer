@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use smallvec::smallvec;
 
-use lpir::{IrType, LpirOp, VReg};
+use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
 use lps_shared::LpsType;
 use naga::{
     BinaryOperator, Expression, Function, Handle, Literal, LocalVariable, Module, ScalarKind, Type,
@@ -278,6 +278,32 @@ pub(crate) fn aggregate_storage_base_vreg(
             ctx.arg_vregs_for(*arg_i)?.first().copied().ok_or_else(|| {
                 LowerError::Internal(String::from("array param: missing address vreg"))
             })
+        }
+        AggregateSlot::Global(gv) => {
+            let ginfo = ctx.global_map.get(gv).ok_or_else(|| {
+                LowerError::Internal(String::from(
+                    "array global: GlobalVariable not in global_map",
+                ))
+            })?;
+            let off = ginfo.byte_offset;
+            if off == 0 {
+                Ok(VMCTX_VREG)
+            } else {
+                let off_v = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: off_v,
+                    value: i32::try_from(off).map_err(|_| {
+                        LowerError::Internal(String::from("array global: byte_offset overflow"))
+                    })?,
+                });
+                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Iadd {
+                    dst: addr,
+                    lhs: VMCTX_VREG,
+                    rhs: off_v,
+                });
+                Ok(addr)
+            }
         }
     }
 }

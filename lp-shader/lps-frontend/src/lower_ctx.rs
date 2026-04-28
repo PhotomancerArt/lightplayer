@@ -157,6 +157,8 @@ pub(crate) enum AggregateSlot {
     /// By-value `in` aggregate that the M5 scan proved read-only: no stack copy; base is the same
     /// pointer as [`LowerCtx::arg_vregs`]\[`arg_i`]\[0\] (like [`AggregateSlot::Param`] for addressing).
     ParamReadOnly(u32),
+    /// Array-typed private global: base address is `VMContext +` [`GlobalVarInfo::byte_offset`].
+    Global(Handle<GlobalVariable>),
 }
 
 /// Stack [`SlotId`] and layout metadata for one aggregate-typed value (M1: arrays only).

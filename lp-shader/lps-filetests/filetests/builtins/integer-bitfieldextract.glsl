@@ -12,10 +12,9 @@ int test_bitfieldextract_int_simple() {
     return bitfieldExtract(240, 4, 4);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_bitfieldextract_int_simple() == 15
 
 int test_bitfieldextract_int_lsb() {
@@ -23,10 +22,9 @@ int test_bitfieldextract_int_lsb() {
     return bitfieldExtract(170, 0, 4);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_bitfieldextract_int_lsb() == 10
 
 int test_bitfieldextract_int_msb() {
@@ -34,10 +32,9 @@ int test_bitfieldextract_int_msb() {
     return bitfieldExtract(170, 4, 4);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_bitfieldextract_int_msb() == 10
 
 uint test_bitfieldextract_uint_simple() {
@@ -45,10 +42,9 @@ uint test_bitfieldextract_uint_simple() {
     return bitfieldExtract(240u, 4, 4);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_bitfieldextract_uint_simple() == 15u
 
 uint test_bitfieldextract_uint_single_bit() {
@@ -56,10 +52,9 @@ uint test_bitfieldextract_uint_single_bit() {
     return bitfieldExtract(4u, 2, 1);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_bitfieldextract_uint_single_bit() == 1u
 
 ivec2 test_bitfieldextract_ivec2() {
@@ -67,10 +62,9 @@ ivec2 test_bitfieldextract_ivec2() {
     return bitfieldExtract(ivec2(240, 170), 4, 4);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
 // run: test_bitfieldextract_ivec2() == ivec2(15, 10)
 
 

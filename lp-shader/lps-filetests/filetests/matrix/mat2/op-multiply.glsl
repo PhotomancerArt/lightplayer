@@ -17,15 +17,11 @@ mat2 test_mat2_multiply_simple() {
     // Simple matrix multiplication
     mat2 a = mat2(1.0, 2.0, 3.0, 4.0);
     mat2 b = mat2(5.0, 6.0, 7.0, 8.0);
-    // Result: [1*5+2*7, 1*6+2*8, 3*5+4*7, 3*6+4*8] = [19, 22, 43, 50]
+    // GLSL column-major: mat2(1,2,3,4) has columns (1,2) and (3,4); product uses linear algebra.
     return a * b;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat2_multiply_simple() ~= mat2(19.0, 22.0, 43.0, 50.0)
+// run: test_mat2_multiply_simple() ~= mat2(23.0, 34.0, 31.0, 46.0)
 
 mat2 test_mat2_multiply_scale() {
     // Scaling matrix multiplication
@@ -34,11 +30,7 @@ mat2 test_mat2_multiply_scale() {
     return a * b;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat2_multiply_scale() ~= mat2(2.0, 4.0, 9.0, 12.0)
+// run: test_mat2_multiply_scale() ~= mat2(2.0, 6.0, 6.0, 12.0)
 
 mat2 test_mat2_multiply_zero() {
     mat2 a = mat2(1.0, 2.0, 3.0, 4.0);
@@ -60,11 +52,7 @@ mat2 test_mat2_multiply_expressions() {
     return mat2(1.0, 1.0, 0.0, 1.0) * mat2(1.0, 0.0, 1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat2_multiply_expressions() ~= mat2(2.0, 1.0, 1.0, 1.0)
+// run: test_mat2_multiply_expressions() ~= mat2(1.0, 1.0, 1.0, 2.0)
 
 mat2 test_mat2_multiply_in_assignment() {
     mat2 result = mat2(1.0, 2.0, 3.0, 4.0);
@@ -82,8 +70,4 @@ mat2 test_mat2_multiply_associative() {
     // (a * b) * c result depends on the matrices
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat2_multiply_associative() ~= mat2(6.0, 6.0, 14.0, 14.0)
+// run: test_mat2_multiply_associative() ~= mat2(8.0, 12.0, 8.0, 12.0)

@@ -60,11 +60,7 @@ float test_mat4_determinant_negative() {
     return determinant(m);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_mat4_determinant_negative() ~= -1.0
+// run: test_mat4_determinant_negative() ~= 1.0
 
 float test_mat4_determinant_fractional() {
     mat4 m = mat4(0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5);
