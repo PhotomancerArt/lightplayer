@@ -1,5 +1,7 @@
 // test run
 
+// Default targets: rv32n.q32, rv32c.q32, wasm.q32 - multi-channel aligned Load16U/Rgba16Unorm path.
+
 // Rgba16Unorm texelFetch: exact channel values for adjacent texels (fixture-backed checks).
 
 // texture-spec: inputColor format=rgba16unorm filter=nearest wrap=clamp shape=2d

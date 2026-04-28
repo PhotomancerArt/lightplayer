@@ -1,4 +1,3 @@
-use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{InstBuilder, MemFlags, Value, types};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::lpir_module::IrFunction;
@@ -108,57 +107,26 @@ pub(crate) fn emit_memory(
             def_v(builder, vars, *dst, val);
         }
         LpirOp::Load16U { dst, base, offset } => {
-            let ptr = operand_as_ptr(builder, vars, ctx, *base);
-            let off = i32::try_from(*offset)
-                .map_err(|_| CompileError::unsupported("load16u offset does not fit in i32"))?;
-            let val = if ctx.riscv_decompose_load16u {
-                // Cranelift RISC-V32 does not legalize sub-i32 memory ops (`uload16` / `uload8`).
-                // Emulated RV32 rejects misaligned `lw`, so read LE u16 via two 4-byte aligned loads
-                // and bitwise extract using the *full* address `(ptr+off) & 3` (ptr may be unaligned).
-                let addr = if off == 0 {
-                    ptr
-                } else {
-                    builder.ins().iadd_imm(ptr, i64::from(off))
-                };
-                let byte_lo = builder.ins().band_imm(addr, 3);
-                let word0_base = builder.ins().band_imm(addr, -4);
-                let w0 = builder
-                    .ins()
-                    .load(types::I32, MemFlags::new(), word0_base, 0);
-                let word1_base = builder.ins().iadd_imm(word0_base, 4);
-                let w1 = builder
-                    .ins()
-                    .load(types::I32, MemFlags::new(), word1_base, 0);
-                let r0 = builder.ins().band_imm(w0, 0xffff);
-                let r1 = {
-                    let s = builder.ins().ushr_imm(w0, 8);
-                    builder.ins().band_imm(s, 0xffff)
-                };
-                let r2 = builder.ins().ushr_imm(w0, 16);
-                let lo = builder.ins().ushr_imm(w0, 24);
-                let hi = builder.ins().band_imm(w1, 0xff);
-                let hi_shift = builder.ins().ishl_imm(hi, 8);
-                let r3 = builder.ins().bor(lo, hi_shift);
-                let c2 = builder.ins().icmp_imm(IntCC::Equal, byte_lo, 2);
-                let inner = builder.ins().select(c2, r2, r3);
-                let c1 = builder.ins().icmp_imm(IntCC::Equal, byte_lo, 1);
-                let mid = builder.ins().select(c1, r1, inner);
-                let c0 = builder.ins().icmp_imm(IntCC::Equal, byte_lo, 0);
-                builder.ins().select(c0, r0, mid)
-            } else {
-                builder.ins().uload16(types::I32, MemFlags::new(), ptr, off)
+            let Ok(off) = i32::try_from(*offset) else {
+                return Err(CompileError::unsupported(
+                    "load16u offset does not fit in i32",
+                ));
             };
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            // Halfword semantics via `load i16` + extend (RV32 target validator rejects `uload16`).
+            let half = builder.ins().load(types::I16, MemFlags::new(), ptr, off);
+            let val = builder.ins().uextend(types::I32, half);
             def_v(builder, vars, *dst, val);
         }
         LpirOp::Load16S { dst, base, offset } => {
+            let Ok(off) = i32::try_from(*offset) else {
+                return Err(CompileError::unsupported(
+                    "load16s offset does not fit in i32",
+                ));
+            };
             let ptr = operand_as_ptr(builder, vars, ctx, *base);
-            let val = builder.ins().sload16(
-                types::I32,
-                MemFlags::new(),
-                ptr,
-                i32::try_from(*offset)
-                    .map_err(|_| CompileError::unsupported("load16s offset does not fit in i32"))?,
-            );
+            let half = builder.ins().load(types::I16, MemFlags::new(), ptr, off);
+            let val = builder.ins().sextend(types::I32, half);
             def_v(builder, vars, *dst, val);
         }
         LpirOp::Memcpy {

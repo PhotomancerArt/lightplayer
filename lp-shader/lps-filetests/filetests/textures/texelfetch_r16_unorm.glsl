@@ -1,5 +1,8 @@
 // test run
 
+// Default filetest targets (see lps-filetests `DEFAULT_TARGETS`): rv32n.q32, rv32c.q32, wasm.q32.
+// Exercises naturally aligned LPIR Load16U on 16-bit texture channels and vec4 fill rules.
+
 // R16Unorm: single stored channel; G/B must fill 0 and A fills 1.0.
 
 // texture-spec: t format=r16unorm filter=nearest wrap=clamp shape=2d

@@ -1,5 +1,7 @@
 // test run
 
+// Default targets: rv32n.q32, rv32c.q32, wasm.q32 - aligned Load16U per channel via texelFetch.
+
 // Rgb16Unorm loads three stored channels; alpha must widen to 1.0.
 
 // texture-spec: t format=rgb16unorm filter=nearest wrap=clamp shape=2d

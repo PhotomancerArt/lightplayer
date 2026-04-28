@@ -11,7 +11,6 @@ use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
 use lpir::lpir_module::LpirModule;
 use lpir::types::FuncId as LpirFuncId;
-use target_lexicon::Architecture;
 
 use crate::builtins::{self, LpirBuiltinFuncIds};
 use crate::compile_options::{CompileOptions, MemoryStrategy};
@@ -64,8 +63,6 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
 
     let call_conv = module.isa().default_call_conv();
     let pointer_type = module.isa().pointer_type();
-    let riscv_decompose_load16u =
-        matches!(module.isa().triple().architecture, Architecture::Riscv32(_));
 
     let import_func_ids = if mode == FloatMode::Q32 {
         builtins::declare_module_imports(module, ir, pointer_type)
@@ -210,7 +207,6 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 lpir_builtins,
                 uses_struct_return,
                 callee_struct_return: &callee_struct_return,
-                riscv_decompose_load16u,
             };
 
             translate_function(f, &mut builder, &emit_ctx).map_err(|e| {

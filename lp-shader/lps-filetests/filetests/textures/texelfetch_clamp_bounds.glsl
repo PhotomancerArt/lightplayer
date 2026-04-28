@@ -1,5 +1,7 @@
 // test run
 
+// Default targets: rv32n.q32, rv32c.q32, wasm.q32 - clamp math + Rgba16Unorm / aligned Load16U reads.
+
 // v0 texelFetch policy: clamp out-of-range integer coordinates to edge texels (memory-safe).
 
 // texture-spec: t format=rgba16unorm filter=nearest wrap=clamp shape=2d

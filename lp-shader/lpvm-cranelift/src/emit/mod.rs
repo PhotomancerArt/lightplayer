@@ -51,8 +51,6 @@ pub(crate) struct EmitCtx<'a> {
     /// sret callees (e.g. RV32 `vec3 foo()` callee with no `sret_arg` LPIR vreg) and load
     /// results back from the buffer.
     pub callee_struct_return: &'a [bool],
-    /// RV32 backend does not support Cranelift `uload16` yet; compose from aligned word loads.
-    pub riscv_decompose_load16u: bool,
 }
 
 pub(crate) enum CtrlFrame {

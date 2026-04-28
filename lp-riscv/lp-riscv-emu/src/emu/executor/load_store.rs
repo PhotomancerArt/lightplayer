@@ -595,7 +595,9 @@ mod tests {
 
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
+    use crate::emu::memory::DEFAULT_RAM_START;
     use crate::emu::memory::Memory;
+    use crate::{EmulatorError, Riscv32Emulator, StepResult};
     use lp_riscv_inst::{Gpr, encode};
 
     #[test]
@@ -647,5 +649,126 @@ mod tests {
 
         assert_eq!(memory.read_word(ram_addr).unwrap(), 0x12345678);
         assert!(result.log.is_none());
+    }
+
+    /// `lhu` at a 2-byte-aligned address through a full emulator step succeeds.
+    #[test]
+    fn step_lhu_even_address_succeeds() {
+        let mut ram = vec![0u8; 16];
+        ram[0] = 0xcd;
+        ram[1] = 0xab;
+        let inst = encode::lhu(Gpr::new(3), Gpr::new(1), 0);
+        let mut emu = emu_with_single_inst(inst, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        assert!(matches!(emu.step(), Ok(StepResult::Continue)));
+        assert_eq!(emu.get_register(Gpr::new(3)), 0xabcd);
+    }
+
+    #[test]
+    fn step_lhu_odd_address_reports_unaligned() {
+        let mut ram = vec![0u8; 16];
+        ram[1] = 0x34;
+        ram[2] = 0x12;
+        let inst = encode::lhu(Gpr::new(3), Gpr::new(1), 1);
+        let mut emu = emu_with_single_inst(inst, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        match emu.step() {
+            Err(EmulatorError::UnalignedAccess {
+                address,
+                alignment,
+                pc,
+                ..
+            }) => {
+                assert_eq!(address, DEFAULT_RAM_START + 1);
+                assert_eq!(alignment, 2);
+                assert_eq!(pc, 0);
+            }
+            other => panic!("expected UnalignedAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_lh_even_address_succeeds() {
+        let mut ram = vec![0u8; 16];
+        // Little-endian halfword 0xff00 sign-extends to -256.
+        ram[0] = 0x00;
+        ram[1] = 0xff;
+        let inst = encode::lh(Gpr::new(3), Gpr::new(1), 0);
+        let mut emu = emu_with_single_inst(inst, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        assert!(matches!(emu.step(), Ok(StepResult::Continue)));
+        assert_eq!(emu.get_register(Gpr::new(3)), -256);
+    }
+
+    #[test]
+    fn step_lh_odd_address_reports_unaligned() {
+        let mut ram = vec![0u8; 16];
+        ram[1] = 0x00;
+        ram[2] = 0xff;
+        let inst = encode::lh(Gpr::new(3), Gpr::new(1), 1);
+        let mut emu = emu_with_single_inst(inst, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        match emu.step() {
+            Err(EmulatorError::UnalignedAccess {
+                address,
+                alignment,
+                pc,
+                ..
+            }) => {
+                assert_eq!(address, DEFAULT_RAM_START + 1);
+                assert_eq!(alignment, 2);
+                assert_eq!(pc, 0);
+            }
+            other => panic!("expected UnalignedAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_lw_word_aligned_succeeds() {
+        let mut ram = vec![0u8; 16];
+        ram[0] = 0x78;
+        ram[1] = 0x56;
+        ram[2] = 0x34;
+        ram[3] = 0x12;
+        let inst = encode::lw(Gpr::new(3), Gpr::new(1), 0);
+        let mut emu = emu_with_single_inst(inst, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        assert!(matches!(emu.step(), Ok(StepResult::Continue)));
+        assert_eq!(emu.get_register(Gpr::new(3)), 0x1234_5678);
+    }
+
+    #[test]
+    fn step_lw_two_byte_aligned_only_reports_unaligned() {
+        let ram = vec![0u8; 16];
+        let inst = encode::lw(Gpr::new(3), Gpr::new(1), 2);
+        let mut emu = emu_with_single_inst(inst, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        match emu.step() {
+            Err(EmulatorError::UnalignedAccess {
+                address,
+                alignment,
+                pc,
+                ..
+            }) => {
+                assert_eq!(address, DEFAULT_RAM_START + 2);
+                assert_eq!(alignment, 4);
+                assert_eq!(pc, 0);
+            }
+            other => panic!("expected UnalignedAccess, got {other:?}"),
+        }
+    }
+
+    fn emu_with_single_inst(inst: u32, ram: alloc::vec::Vec<u8>) -> Riscv32Emulator {
+        let mut code = vec![0u8; 4];
+        code.copy_from_slice(&inst.to_le_bytes());
+        // `Riscv32Emulator::new` uses `Memory::with_default_addresses`, which leaves
+        // `allow_unaligned_access` false unless `with_allow_unaligned_access` is used.
+        Riscv32Emulator::new(code, ram)
     }
 }
