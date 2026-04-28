@@ -1,6 +1,10 @@
 //! Texture buffer backed by [`lpvm::LpvmBuffer`] shared memory.
 
-use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, TextureBuffer, TextureStorageFormat};
+use alloc::string::String;
+
+use lps_shared::{
+    LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32, TextureBuffer, TextureStorageFormat,
+};
 use lpvm::LpvmBuffer;
 use lpvm::LpvmPtr;
 
@@ -78,6 +82,20 @@ impl LpsTextureBuf {
             format: self.format,
             byte_len: self.buffer.size(),
         }
+    }
+
+    /// One named [`LpsValueF32::Texture2D`] field for [`crate::LpsPxShader::render_frame`] uniforms.
+    ///
+    /// Does not copy texels; embedders fill [`crate::TextureBuffer::data_mut`] separately (for example
+    /// after baking palette stops upstream). Use with a compile-time [`crate::TextureBindingSpec`] that
+    /// matches this buffer’s format and dimensions (e.g. [`crate::texture_binding::height_one`] when
+    /// [`crate::LpsTextureBuf::height`] is `1`).
+    #[must_use]
+    pub fn to_named_texture_uniform(&self, name: impl Into<String>) -> (String, LpsValueF32) {
+        (
+            name.into(),
+            LpsValueF32::Texture2D(self.to_texture2d_value()),
+        )
     }
 
     /// Underlying shared allocation (host pointer, size, guest base).
