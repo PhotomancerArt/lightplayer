@@ -1,8 +1,9 @@
 //! Function signature shapes (no registry / overload resolution).
 
+use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
 
-use crate::{LayoutRules, LpsType, VMCTX_HEADER_SIZE};
+use crate::{LayoutRules, LpsType, TextureBindingSpec, VMCTX_HEADER_SIZE};
 
 /// Whether a function in `LpsModuleSig.functions` is user-authored
 /// or synthesised by the toolchain.
@@ -57,6 +58,10 @@ pub struct LpsModuleSig {
     /// Struct type describing the globals region layout (std430).
     /// Members correspond to private global declarations. `None` if no globals.
     pub globals_type: Option<LpsType>,
+    /// Compile-time [`TextureBindingSpec`] per sampler uniform name. Empty when the module has no
+    /// textures or when using the texture-free default lower path; populated after validation by the
+    /// options-aware frontend entry.
+    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
 }
 
 impl LpsModuleSig {
@@ -129,6 +134,7 @@ mod tests {
             }],
             uniforms_type: None,
             globals_type: None,
+            ..Default::default()
         };
         assert_eq!(m.functions[0].name, "add");
         assert_eq!(m.functions[0].parameters.len(), 2);

@@ -9,7 +9,7 @@
   exposes them.
 - **`lps-filetests`**: WASM path compiles through `lps-frontend` + `lps-wasm`; `wasm_runner` builds
   signatures from `WasmExport`.
-- **Scalar `wasm.q32`**: `./scripts/glsl-filetests.sh --target wasm.q32 scalar` passes (432 tests);
+- **Scalar `wasm.q32`**: `./scripts/filetests.sh --target wasm.q32 scalar` passes (432 tests);
   3 cases marked expected-failure via `@unimplemented(backend=wasm)` where Naga constant-folding
   differs from runtime semantics (`scalar/float/op-divide`, `op-subtract`, `scalar/uint/from-float`
   negative literal).

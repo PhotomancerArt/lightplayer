@@ -17,6 +17,7 @@ Create GLSL filetests to verify stack parameter passing works correctly end-to-e
 **File**: `lp-shader/lps-filetests/filetests/function/param-many.glsl`
 
 Comprehensive test with various "many parameter" scenarios:
+
 - 9 scalar params (2 on stack)
 - mat3 with scalar (10 slots, 2 on stack)
 - mat4 alone (16 slots, 8 on stack)
@@ -30,6 +31,7 @@ Comprehensive test with various "many parameter" scenarios:
 **File**: `lp-shader/lps-filetests/filetests/function/param-mixed.glsl`
 
 Added mat4 test cases with mixed qualifiers:
+
 - `extract_diagonal(in mat4, out vec4)` - large input with output
 - `scale_mat4(inout mat4, in float)` - inout with large type
 - `process_mat4(in, out, inout)` - all three qualifiers with mat4
@@ -48,11 +50,11 @@ The `combine_transforms_nested(mat2 a, mat2 b)` test has 9 slots. This should no
 cd /Users/yona/dev/photomancer/feature/lightplayer-native
 
 # Run new stack param tests
-scripts/glsl-filetests.sh lpvm/native/stack-params-simple.glsl --target rv32lp.q32
-scripts/glsl-filetests.sh lpvm/native/stack-params-mixed.glsl --target rv32lp.q32
+scripts/filetests.sh lpvm/native/stack-params-simple.glsl --target rv32lp.q32
+scripts/filetests.sh lpvm/native/stack-params-mixed.glsl --target rv32lp.q32
 
 # Run the previously failing test
-scripts/glsl-filetests.sh function/call-nested.glsl --target rv32lp.q32
+scripts/filetests.sh function/call-nested.glsl --target rv32lp.q32
 ```
 
 Expected: All tests pass, showing correct stack parameter handling.

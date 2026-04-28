@@ -17,10 +17,10 @@ validation in `lps-frontend` (or diagnostics layer) so errors are attributed bef
 1. Run the failing files and list actual vs expected:
 
 ```bash
-./scripts/glsl-filetests.sh type_errors/incdec-bool.glsl
-./scripts/glsl-filetests.sh type_errors/incdec-non-lvalue.glsl
-./scripts/glsl-filetests.sh type_errors/incdec-nested.glsl
-./scripts/glsl-filetests.sh type_errors/expected-error-line-offset.glsl
+./scripts/filetests.sh type_errors/incdec-bool.glsl
+./scripts/filetests.sh type_errors/incdec-non-lvalue.glsl
+./scripts/filetests.sh type_errors/incdec-nested.glsl
+./scripts/filetests.sh type_errors/expected-error-line-offset.glsl
 ```
 
 2. Add validation passes or earlier Naga hooks so invalid inc/dec and lvalues fail with the
@@ -33,7 +33,7 @@ validation in `lps-frontend` (or diagnostics layer) so errors are attributed bef
 ```bash
 cargo test -p lps-frontend
 cargo test -p lps-filetests
-./scripts/glsl-filetests.sh type_errors/
+./scripts/filetests.sh type_errors/
 ```
 
 ```bash

@@ -4,7 +4,7 @@
 
 - **Target matrix:** `jit.q32`, `wasm.q32`, `rv32.q32`; annotations `@jit` / `@wasm` / `@rv32`;
   legacy `cranelift` backend name removed from the filetest runner.
-- **`DEFAULT_TARGETS`:** `jit.q32` only for fast default runs (`scripts/glsl-filetests.sh` with no
+- **`DEFAULT_TARGETS`:** `jit.q32` only for fast default runs (`scripts/filetests.sh` with no
   `--target`, and `run_filetest` / ignored integration test).
 - **Execution stack:** filetests compile and run through `lps-exec` and related crates (
   `lps-shared`, `lpvm`, `lps-diagnostics`); legacy `lps-cranelift` is not a

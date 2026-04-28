@@ -12,6 +12,7 @@ use core::str::FromStr;
 pub struct CompilerConfig {
     pub inline: InlineConfig,
     pub q32: lps_q32::q32_options::Q32Options,
+    pub texture: TextureConfig,
 }
 
 impl Default for CompilerConfig {
@@ -19,6 +20,7 @@ impl Default for CompilerConfig {
         Self {
             inline: InlineConfig::default(),
             q32: lps_q32::q32_options::Q32Options::default(),
+            texture: TextureConfig::default(),
         }
     }
 }
@@ -76,6 +78,57 @@ impl Default for InlineConfig {
             small_func_threshold: 20,
             max_growth_budget: None,
             module_op_budget: None,
+        }
+    }
+}
+
+/// Texture-related lowering options (filetest [`CompilerConfig::apply`] keys).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextureConfig {
+    pub texel_fetch_bounds: TexelFetchBoundsMode,
+}
+
+impl Default for TextureConfig {
+    fn default() -> Self {
+        Self {
+            texel_fetch_bounds: TexelFetchBoundsMode::ClampToEdge,
+        }
+    }
+}
+
+/// Whether lowered `texelFetch` emits coordinate clamp ops (memory-safe vs unchecked).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TexelFetchBoundsMode {
+    /// Clamp integer coordinates into `[0, width-1]` / `[0, height-1]` before loads.
+    ClampToEdge,
+    /// Omit clamp ops (undefined if coordinates are out of range; benchmarking only).
+    Unchecked,
+}
+
+impl Default for TexelFetchBoundsMode {
+    fn default() -> Self {
+        Self::ClampToEdge
+    }
+}
+
+impl fmt::Display for TexelFetchBoundsMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            TexelFetchBoundsMode::ClampToEdge => "clamp-to-edge",
+            TexelFetchBoundsMode::Unchecked => "unchecked",
+        })
+    }
+}
+
+impl FromStr for TexelFetchBoundsMode {
+    type Err = ();
+
+    /// Accepts lowercase names: `clamp-to-edge`, `unchecked`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "clamp-to-edge" => Ok(TexelFetchBoundsMode::ClampToEdge),
+            "unchecked" => Ok(TexelFetchBoundsMode::Unchecked),
+            _ => Err(()),
         }
     }
 }
@@ -138,6 +191,10 @@ impl CompilerConfig {
             }
             "q32.div" => {
                 self.q32.div = value.trim().parse().map_err(|_| invalid(key, value))?;
+            }
+            "texture.texel_fetch_bounds" => {
+                self.texture.texel_fetch_bounds =
+                    value.trim().parse().map_err(|_| invalid(key, value))?;
             }
             _ => {
                 return Err(ConfigError::UnknownKey {
@@ -245,5 +302,49 @@ mod tests {
         assert!(c.apply("q32.add_sub", "bogus").is_err());
         assert!(c.apply("q32.mul", "reciprocal").is_err());
         assert!(c.apply("q32.div", "wrapping").is_err());
+    }
+
+    #[test]
+    fn default_texture_texel_fetch_bounds_is_clamp_to_edge() {
+        assert_eq!(
+            CompilerConfig::default().texture.texel_fetch_bounds,
+            TexelFetchBoundsMode::ClampToEdge,
+        );
+    }
+
+    #[test]
+    fn apply_texture_texel_fetch_bounds_unchecked() {
+        let mut c = CompilerConfig::default();
+        c.apply("texture.texel_fetch_bounds", "unchecked").unwrap();
+        assert_eq!(
+            c.texture.texel_fetch_bounds,
+            TexelFetchBoundsMode::Unchecked,
+        );
+    }
+
+    #[test]
+    fn apply_texture_texel_fetch_bounds_clamp_to_edge() {
+        let mut c = CompilerConfig::default();
+        c.apply("texture.texel_fetch_bounds", "unchecked").unwrap();
+        c.apply("texture.texel_fetch_bounds", "clamp-to-edge")
+            .unwrap();
+        assert_eq!(
+            c.texture.texel_fetch_bounds,
+            TexelFetchBoundsMode::ClampToEdge,
+        );
+    }
+
+    #[test]
+    fn apply_texture_texel_fetch_bounds_invalid_value_errors() {
+        let mut c = CompilerConfig::default();
+        assert!(c.apply("texture.texel_fetch_bounds", "bogus").is_err());
+    }
+
+    #[test]
+    fn texel_fetch_bounds_mode_from_str_and_display_round_trip() {
+        for s in ["clamp-to-edge", "unchecked"] {
+            let m: TexelFetchBoundsMode = s.parse().expect(s);
+            assert_eq!(m.to_string(), s);
+        }
     }
 }

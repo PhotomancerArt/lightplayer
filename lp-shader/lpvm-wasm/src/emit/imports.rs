@@ -10,7 +10,7 @@ use lpir::FloatMode;
 use lpir::{CalleeRef, ImportDecl, ImportId, IrFunction, IrType, LpirModule, LpirOp};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, vm_q32_builtin_id,
+    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
 };
 
 /// After pruning: WASM import function index `i` corresponds to `filtered[i]`.
@@ -151,18 +151,50 @@ fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
                 )
             })
         }
+        "texture" => {
+            let base = texture_strip_suffix(&decl.func_name)?;
+            let ac = decl.param_types.len();
+            texture_q32_builtin_id(base, ac).ok_or_else(|| {
+                format!(
+                    "unsupported texture import `{}` (arg count {ac})",
+                    decl.func_name
+                )
+            })
+        }
         m => Err(format!("unsupported import module `{m}`")),
     }
 }
 
 /// `lpfn_saturate_3` → `lpfn_saturate`.
 fn lpfn_strip_suffix(func_name: &str) -> Result<&str, String> {
+    strip_trailing_numeric_import_suffix(func_name, "lpfn")
+}
+
+fn texture_strip_suffix(func_name: &str) -> Result<&str, String> {
+    Ok(strip_optional_numeric_import_suffix(func_name))
+}
+
+fn strip_trailing_numeric_import_suffix<'a>(
+    func_name: &'a str,
+    module: &str,
+) -> Result<&'a str, String> {
     let (base, tail) = func_name
         .rsplit_once('_')
-        .ok_or_else(|| format!("malformed lpfn import name `{func_name}`"))?;
+        .ok_or_else(|| format!("malformed {module} import name `{func_name}`"))?;
     tail.parse::<u32>()
-        .map_err(|_| format!("malformed lpfn import name `{func_name}`"))?;
+        .map_err(|_| format!("malformed {module} import name `{func_name}`"))?;
     Ok(base)
+}
+
+fn strip_optional_numeric_import_suffix(func_name: &str) -> &str {
+    let Some((base, tail)) = func_name.rsplit_once('_') else {
+        return func_name;
+    };
+    if tail.parse::<u32>().is_ok() {
+        base
+    } else {
+        func_name
+    }
 }
 
 pub(crate) fn build_filtered_imports(ir: &LpirModule) -> Result<FilteredImports, String> {

@@ -9,6 +9,7 @@ Final cleanup, validation, and plan completion.
 ### 1. Remove TODO comments and debug code
 
 Search for:
+
 ```bash
 grep -r "TODO\|FIXME\|XXX\|dbg!\|println!" lp-shader/lpvm-native/src/ --include="*.rs"
 ```
@@ -47,15 +48,15 @@ Expected: All 88+ tests pass.
 
 ```bash
 # Stack param specific tests
-scripts/glsl-filetests.sh function/param-many.glsl --target rv32lp.q32
-scripts/glsl-filetests.sh function/param-mixed.glsl --target rv32lp.q32
+scripts/filetests.sh function/param-many.glsl --target rv32lp.q32
+scripts/filetests.sh function/param-mixed.glsl --target rv32lp.q32
 
 # Previously failing test that motivated this work
-scripts/glsl-filetests.sh function/call-nested.glsl --target rv32lp.q32
+scripts/filetests.sh function/call-nested.glsl --target rv32lp.q32
 
 # Broader function test coverage
-scripts/glsl-filetests.sh function/call-simple.glsl --target rv32lp.q32
-scripts/glsl-filetests.sh function/call-multiple.glsl --target rv32lp.q32
+scripts/filetests.sh function/call-simple.glsl --target rv32lp.q32
+scripts/filetests.sh function/call-multiple.glsl --target rv32lp.q32
 ```
 
 Expected: All tests pass (0 compile-fail, 0 fail).

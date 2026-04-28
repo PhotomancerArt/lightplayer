@@ -153,9 +153,9 @@ to store.
 ## Validate
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "function/"
-scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
-scripts/glsl-filetests.sh --target wasm.q32 "vec/"
+scripts/filetests.sh --target wasm.q32 "function/"
+scripts/filetests.sh --target wasm.q32 "scalar/"
+scripts/filetests.sh --target wasm.q32 "vec/"
 cargo check -p lps-wasm
 ```
 

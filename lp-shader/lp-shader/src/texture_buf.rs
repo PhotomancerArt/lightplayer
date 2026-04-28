@@ -1,6 +1,10 @@
 //! Texture buffer backed by [`lpvm::LpvmBuffer`] shared memory.
 
-use lps_shared::{TextureBuffer, TextureStorageFormat};
+use alloc::string::String;
+
+use lps_shared::{
+    LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32, TextureBuffer, TextureStorageFormat,
+};
 use lpvm::LpvmBuffer;
 use lpvm::LpvmPtr;
 
@@ -37,10 +41,61 @@ impl LpsTextureBuf {
         self.buffer.as_ptr()
     }
 
+    #[must_use]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[must_use]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    #[must_use]
+    pub fn format(&self) -> TextureStorageFormat {
+        self.format
+    }
+
     /// Row stride in bytes (tightly packed, no padding).
     #[must_use]
     pub fn row_stride(&self) -> usize {
         self.width as usize * self.format.bytes_per_pixel()
+    }
+
+    /// Opaque std430 token for this resource (`LpsType::Texture2D`).
+    #[must_use]
+    pub fn to_texture2d_descriptor(&self) -> LpsTexture2DDescriptor {
+        let row = self.row_stride();
+        LpsTexture2DDescriptor {
+            ptr: self.guest_ptr().guest_value() as u32,
+            width: self.width,
+            height: self.height,
+            row_stride: row as u32,
+        }
+    }
+
+    /// Typed host value (`descriptor` + [`TextureStorageFormat`] + backing size) for uniforms / validation.
+    #[must_use]
+    pub fn to_texture2d_value(&self) -> LpsTexture2DValue {
+        LpsTexture2DValue {
+            descriptor: self.to_texture2d_descriptor(),
+            format: self.format,
+            byte_len: self.buffer.size(),
+        }
+    }
+
+    /// One named [`LpsValueF32::Texture2D`] field for [`crate::LpsPxShader::render_frame`] uniforms.
+    ///
+    /// Does not copy texels; embedders fill [`crate::TextureBuffer::data_mut`] separately (for example
+    /// after baking palette stops upstream). Use with a compile-time [`crate::TextureBindingSpec`] that
+    /// matches this buffer’s format and dimensions (e.g. [`crate::texture_binding::height_one`] when
+    /// [`crate::LpsTextureBuf::height`] is `1`).
+    #[must_use]
+    pub fn to_named_texture_uniform(&self, name: impl Into<String>) -> (String, LpsValueF32) {
+        (
+            name.into(),
+            LpsValueF32::Texture2D(self.to_texture2d_value()),
+        )
     }
 
     /// Underlying shared allocation (host pointer, size, guest base).
@@ -52,15 +107,15 @@ impl LpsTextureBuf {
 
 impl TextureBuffer for LpsTextureBuf {
     fn width(&self) -> u32 {
-        self.width
+        LpsTextureBuf::width(self)
     }
 
     fn height(&self) -> u32 {
-        self.height
+        LpsTextureBuf::height(self)
     }
 
     fn format(&self) -> TextureStorageFormat {
-        self.format
+        LpsTextureBuf::format(self)
     }
 
     fn data(&self) -> &[u8] {

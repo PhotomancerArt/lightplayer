@@ -12,7 +12,7 @@
 
 ## Implementation details
 
-1. Use `scripts/glsl-filetests.sh --target <t> <patterns…>` with globs from the expected-passing list.
+1. Use `scripts/filetests.sh --target <t> <patterns…>` with globs from the expected-passing list.
 
 2. WASM-specific issues (e.g. float traps) get **`@unsupported(backend=wasm, …)`** only when normatively required, mirroring stage I policy.
 
@@ -26,7 +26,7 @@
 
 ```bash
 for t in jit.q32 wasm.q32 rv32.q32; do
-  bash scripts/glsl-filetests.sh --target "$t" \
+  bash scripts/filetests.sh --target "$t" \
     matrix/mat2/incdec-matrix-element.glsl matrix/mat3/incdec-matrix-element.glsl matrix/mat4/incdec-matrix-element.glsl \
     matrix/mat2/incdec-matrix-column.glsl matrix/mat3/incdec-matrix-column.glsl matrix/mat4/incdec-matrix-column.glsl \
     operators/incdec-matrix-element.glsl operators/incdec-matrix-column.glsl operators/incdec-matrix.glsl \

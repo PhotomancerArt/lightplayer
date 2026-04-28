@@ -31,7 +31,7 @@ Mechanically (subject to design phase):
   their existing `dimensions/leaf_*` fields).
 - `naga_util.rs::naga_type_to_ir_types` learns `TypeInner::Struct` (flatten
   to std430-ordered scalar IR types). `expr_type_inner` /
-  `expr_scalar_kind` learn the `AccessIndex` arms for *value* structs (today
+  `expr_scalar_kind` learn the `AccessIndex` arms for _value_ structs (today
   only the `Pointer→Struct` global-uniform arm exists).
 - `lower_expr.rs`:
   - `Expression::AccessIndex` on a struct local (typed `Load` at the
@@ -39,7 +39,7 @@ Mechanically (subject to design phase):
   - `Expression::Compose` for `LpsType::Struct` writes into a destination
     slot when one is known, else into a freshly allocated temp slot
     (R6 mitigation).
-  - `Expression::Load` of a whole struct local should *not* fall through
+  - `Expression::Load` of a whole struct local should _not_ fall through
     to `naga_type_to_ir_types` and produce a flat-vreg bundle. Every
     consumer that today special-cases `aggregate_map` for arrays will also
     special-case it for structs first.
@@ -97,7 +97,7 @@ Mechanically (subject to design phase):
 ### What does **not** work today (the M2 gap)
 
 - `naga_type_to_ir_types(TypeInner::Struct {..})` → `UnsupportedType
-  ("unsupported type for LPIR")`.
+("unsupported type for LPIR")`.
 - `LowerCtx::new` only allocates aggregate slots for `TypeInner::Array`
   locals/params; struct locals would fall through to a generic vreg path
   that immediately fails.
@@ -138,14 +138,14 @@ Mechanically (subject to design phase):
 
 ### Confirmation-style batch (Q1–Q6)
 
-| #   | Question                                                                                                                                                                                          | Context                                                                                                                                                                                                          | Suggested answer                                                                              |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Q1  | Reuse `AggregateInfo` (extend) for both arrays and structs rather than introducing a separate `StructInfo`.                                                                                       | `slot`/`total_size` fields are identical; array-only fields (`dimensions`, `leaf_*`, `element_count`) can be neutral defaults for structs. Avoids parallel maps and parallel call-result handling.               | Yes — extend `AggregateInfo` with an `AggregateKind { Array{..}, Struct{..} }` payload.       |
-| Q2  | Cache per-member offset+IR types on the struct payload at slot-allocation time (rather than recomputing from `LpsType::Struct` per access).                                                       | Member offsets are stable per type handle; matches `dimensions/leaf_stride` precedent for arrays.                                                                                                                | Yes.                                                                                          |
-| Q3  | Module name `lower_struct.rs` (sibling of `lower_array.rs`).                                                                                                                                      | Mirrors the milestone doc.                                                                                                                                                                                       | Yes.                                                                                          |
-| Q4  | Treat `Load(struct local)` as an unsupported `lower_expr_vec` case; require every consumer to dispatch on `aggregate_map` (struct kind) **before** calling `ensure_expr_vec`.                     | Mirrors how arrays work today (`Load(array local) → UnsupportedExpression` is the existing guard). Avoids a flat-vreg fallback that hides ABI mistakes.                                                          | Yes.                                                                                          |
-| Q5  | Struct rvalue temp-slot lifetime: "alloc and never reuse" within a function (no slot reuse).                                                                                                      | Already settled in milestone doc.                                                                                                                                                                                | Yes.                                                                                          |
-| Q6  | Filetest annotation toggle scope: M2 toggles off `wasm.q32`, `rv32c.q32`, and `rv32n.q32` on the struct corpus (not `jit.q32`). Use `--fix` to clean; fix failures in M2.                         | Aligns with `DEFAULT_TARGETS` and roadmap M2 acceptance.                                                                                                                                                        | Yes (superseded wording — see roadmap).                                                       |
+| #   | Question                                                                                                                                                                      | Context                                                                                                                                                                                            | Suggested answer                                                                        |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Q1  | Reuse `AggregateInfo` (extend) for both arrays and structs rather than introducing a separate `StructInfo`.                                                                   | `slot`/`total_size` fields are identical; array-only fields (`dimensions`, `leaf_*`, `element_count`) can be neutral defaults for structs. Avoids parallel maps and parallel call-result handling. | Yes — extend `AggregateInfo` with an `AggregateKind { Array{..}, Struct{..} }` payload. |
+| Q2  | Cache per-member offset+IR types on the struct payload at slot-allocation time (rather than recomputing from `LpsType::Struct` per access).                                   | Member offsets are stable per type handle; matches `dimensions/leaf_stride` precedent for arrays.                                                                                                  | Yes.                                                                                    |
+| Q3  | Module name `lower_struct.rs` (sibling of `lower_array.rs`).                                                                                                                  | Mirrors the milestone doc.                                                                                                                                                                         | Yes.                                                                                    |
+| Q4  | Treat `Load(struct local)` as an unsupported `lower_expr_vec` case; require every consumer to dispatch on `aggregate_map` (struct kind) **before** calling `ensure_expr_vec`. | Mirrors how arrays work today (`Load(array local) → UnsupportedExpression` is the existing guard). Avoids a flat-vreg fallback that hides ABI mistakes.                                            | Yes.                                                                                    |
+| Q5  | Struct rvalue temp-slot lifetime: "alloc and never reuse" within a function (no slot reuse).                                                                                  | Already settled in milestone doc.                                                                                                                                                                  | Yes.                                                                                    |
+| Q6  | Filetest annotation toggle scope: M2 toggles off `wasm.q32`, `rv32c.q32`, and `rv32n.q32` on the struct corpus (not `jit.q32`). Use `--fix` to clean; fix failures in M2.     | Aligns with `DEFAULT_TARGETS` and roadmap M2 acceptance.                                                                                                                                           | Yes (superseded wording — see roadmap).                                                 |
 
 ### Discussion-style queue (asked one at a time after Q1–Q6)
 
@@ -169,6 +169,6 @@ Mechanically (subject to design phase):
   target; `wasm` / `rv32c` / `rv32n` are the M2 gates; RV32 parity required.
 - Plan phase write-ups: `01-design.md` plus `02-aggregate-layout-refactor.md`
   … `06-enable-and-validate.md`. GLSL filetests run via
-  `scripts/glsl-filetests.sh` (or `cargo run -p lps-filetests-app --bin
-  lps-filetests-app -- test …` from `lp-shader/`), not the ignored
+  `scripts/filetests.sh` (or `cargo run -p lps-filetests-app --bin
+lps-filetests-app -- test …` from `lp-shader/`), not the ignored
   `cargo test -p lps-filetests --test filetests` harness.

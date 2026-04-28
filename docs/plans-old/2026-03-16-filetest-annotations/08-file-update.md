@@ -51,11 +51,13 @@ for this directive is correct since the test now passes everywhere.
 ### Update `src/lib.rs` — fix/bless behavior
 
 Update the `fix_xfail` code path:
+
 - When a test has an unexpected pass, call `file_update.remove_annotation`
   instead of `file_update.remove_expect_fail_marker`
 - Update the display messages: "expect-fail" → "annotation"
 
 Update the `mark_failing_expected` code path:
+
 - When marking failing tests, call `file_update.add_annotation` instead of
   `file_update.add_expect_fail_marker`
 - The annotation to add is `// @unimplemented()` (no filter — broken
@@ -63,12 +65,14 @@ Update the `mark_failing_expected` code path:
 - Update the display messages accordingly
 
 Consider renaming environment variables:
+
 - `LP_FIX_XFAIL` → keep for now (or rename to `LP_FIX_ANNOTATIONS`)
 - `LP_MARK_FAILING_TESTS_EXPECTED` → keep for now
 
 ### Update display strings
 
 Throughout `lib.rs`, update user-facing messages:
+
 - "expect-fail" → "expected-failure" or "annotation"
 - "[expect-fail]" → "@unimplemented()" in marker-related messages
 - "unexpected-pass" stays the same (it's accurate)
@@ -90,10 +94,11 @@ cargo +nightly fmt -- --check
 ```
 
 Manual test:
+
 ```
 # Mark a test as expected-failure, then fix it
-LP_MARK_FAILING_TESTS_EXPECTED=1 scripts/glsl-filetests.sh scalar/int/op-add.glsl
+LP_MARK_FAILING_TESTS_EXPECTED=1 scripts/filetests.sh scalar/int/op-add.glsl
 # Verify @unimplemented() was added
 # Then remove it:
-scripts/glsl-filetests.sh --fix scalar/int/op-add.glsl
+scripts/filetests.sh --fix scalar/int/op-add.glsl
 ```

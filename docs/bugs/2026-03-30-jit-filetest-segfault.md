@@ -8,7 +8,7 @@ after all test results are printed, during process shutdown.
 ## Affected Command
 
 ```bash
-scripts/glsl-filetests.sh 'array/*.glsl' --fix
+scripts/filetests.sh 'array/*.glsl' --fix
 ```
 
 ## Symptoms
@@ -23,29 +23,29 @@ scripts/glsl-filetests.sh 'array/*.glsl' --fix
 ### Fails (multiple files with JIT)
 
 ```bash
-scripts/glsl-filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
+scripts/filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
 # Output shows all test results, then:
-# scripts/glsl-filetests.sh: line 256: NNNNN Segmentation fault: 11
+# scripts/filetests.sh: line 256: NNNNN Segmentation fault: 11
 ```
 
 ### Works (single file with JIT)
 
 ```bash
-scripts/glsl-filetests.sh 'array/constructor-explicit.glsl'
+scripts/filetests.sh 'array/constructor-explicit.glsl'
 # Completes cleanly, exit code 0 or 1
 ```
 
 ### Works (multiple files with WASM)
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
+scripts/filetests.sh --target wasm.q32 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
 # Completes cleanly
 ```
 
 ### Fails (multiple files even with single thread)
 
 ```bash
-LP_FILETESTS_THREADS=1 scripts/glsl-filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
+LP_FILETESTS_THREADS=1 scripts/filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
 # Still segfaults
 ```
 
@@ -139,27 +139,27 @@ parallel execution of WASM/RV32 tests.
 
 ```bash
 # WASM (default includes wasm.q32)
-scripts/glsl-filetests.sh 'array/*.glsl' --fix
+scripts/filetests.sh 'array/*.glsl' --fix
 
 # RV32 only
-scripts/glsl-filetests.sh --target rv32.q32c 'array/*.glsl' --fix
+scripts/filetests.sh --target rv32.q32c 'array/*.glsl' --fix
 
 # Both
-scripts/glsl-filetests.sh --target wasm.q32,rv32.q32 'array/*.glsl' --fix
+scripts/filetests.sh --target wasm.q32,rv32.q32 'array/*.glsl' --fix
 ```
 
 ### Option 2: Single-threaded for JIT
 
 ```bash
 # Use LP_FILETESTS_THREADS=1 when testing JIT specifically
-LP_FILETESTS_THREADS=1 scripts/glsl-filetests.sh --target jit.q32 'array/*.glsl'
+LP_FILETESTS_THREADS=1 scripts/filetests.sh --target jit.q32 'array/*.glsl'
 ```
 
 ### Option 3: Iterate Single Files for JIT
 
 ```bash
 for f in array/*.glsl; do
-    scripts/glsl-filetests.sh --target jit.q32 "$f" || true
+    scripts/filetests.sh --target jit.q32 "$f" || true
 done
 ```
 
@@ -170,7 +170,7 @@ To pinpoint the crash location:
 1. **Run with lldb** to get backtrace:
 
    ```bash
-   lldb -- scripts/glsl-filetests.sh 'array/*.glsl'
+   lldb -- scripts/filetests.sh 'array/*.glsl'
    # At lldb prompt: run, then after crash: bt
    ```
 

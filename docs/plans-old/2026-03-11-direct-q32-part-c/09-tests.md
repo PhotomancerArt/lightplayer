@@ -25,7 +25,7 @@ helpers side is worthwhile.
 The filetests are the primary validation:
 
 ```bash
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 Since Plan C doesn't wire Q32Strategy into the pipeline (that's Plan D),
@@ -36,6 +36,7 @@ the filetests should pass unchanged — the float path is untouched.
 A true integration test of Q32 dispatch requires the pipeline to be
 connected. This happens in Plan D. At that point, compile a shader with
 Q32 mode and verify:
+
 - Trig calls go to `__lp_q32_sin`, not `sinf`
 - LPFX calls go to `__lpfn_*_q32`, not `__lpfn_*_f32`
 - `isinf` is expanded inline, not emitted as a call
@@ -45,5 +46,5 @@ Q32 mode and verify:
 ```bash
 cargo check -p lps-compiler --features std
 cargo test -p lps-compiler --features std
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```

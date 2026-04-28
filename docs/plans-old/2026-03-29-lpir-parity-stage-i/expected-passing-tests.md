@@ -10,16 +10,16 @@ must pass on all three (unless a line is intentionally `@unsupported`, see below
 
 Run these paths on **each** target (see commands in [`05-phase-cleanup-validation.md`](./05-phase-cleanup-validation.md)):
 
-| # | Path |
-|---|------|
-| 1 | `builtins/common-isnan.glsl` |
-| 2 | `builtins/common-isinf.glsl` |
-| 3 | `matrix/mat2/op-equal.glsl` |
-| 4 | `matrix/mat2/op-not-equal.glsl` |
-| 5 | `matrix/mat3/op-equal.glsl` |
-| 6 | `matrix/mat3/op-not-equal.glsl` |
-| 7 | `matrix/mat4/op-equal.glsl` |
-| 8 | `matrix/mat4/op-not-equal.glsl` |
+| #   | Path                            |
+| --- | ------------------------------- |
+| 1   | `builtins/common-isnan.glsl`    |
+| 2   | `builtins/common-isinf.glsl`    |
+| 3   | `matrix/mat2/op-equal.glsl`     |
+| 4   | `matrix/mat2/op-not-equal.glsl` |
+| 5   | `matrix/mat3/op-equal.glsl`     |
+| 6   | `matrix/mat3/op-not-equal.glsl` |
+| 7   | `matrix/mat4/op-equal.glsl`     |
+| 8   | `matrix/mat4/op-not-equal.glsl` |
 
 **Annotations:**
 
@@ -43,7 +43,7 @@ three-target bar** as Tier A.
 
 ## What “pass” means
 
-- Exit code **0** from `scripts/glsl-filetests.sh --target <t> <paths…>`.
+- Exit code **0** from `scripts/filetests.sh --target <t> <paths…>`.
 - No unexpected failures: every `// run:` is either green or explicitly `@unsupported` / expected
   failure per annotation rules.
 

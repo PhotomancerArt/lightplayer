@@ -20,6 +20,6 @@ Run tests to verify that vector return support works correctly. Ensure existing 
 
 ## Implementation Notes
 
-- Run: `scripts/glsl-filetests.sh lpfn`
+- Run: `scripts/filetests.sh lpfn`
 - Verify all test files pass
 - Check for any compiler warnings or errors

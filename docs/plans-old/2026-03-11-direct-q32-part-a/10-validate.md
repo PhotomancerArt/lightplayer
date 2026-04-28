@@ -9,7 +9,7 @@ Primary validation — the GLSL filetests fully cover compiler correctness
 and are the fastest way to verify:
 
 ```bash
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 Then the compiler unit tests:
@@ -64,7 +64,7 @@ cargo +nightly fmt
 Verify the total number of changes matches expectations:
 
 | Phase                  | Sites    |
-|------------------------|----------|
+| ---------------------- | -------- |
 | 3. Scalar arithmetic   | ~10      |
 | 4. Constants           | ~21      |
 | 5. Comparisons         | ~16      |

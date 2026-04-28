@@ -11,6 +11,7 @@ use crate::test_run::filetest_lpvm::FiletestInstance;
 use crate::test_run::parse_assert;
 use crate::test_run::record_result;
 use crate::test_run::set_uniform;
+use crate::test_run::texture_fixture;
 use anyhow::Result;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
@@ -100,6 +101,7 @@ pub fn run(
         &relative_path,
         log_level,
         &compiler_config,
+        &test_file.texture_specs,
     ) {
         Ok(c) => {
             // Print compile-time debug (same building blocks as `shader-debug.sh`: LPIR,
@@ -274,6 +276,61 @@ pub fn run(
                     directive.line_number,
                 );
                 let msg = format!("instantiate failed: {e:#}");
+                eprintln_if_detail(output_mode, &msg);
+                errors.push(e.context(msg));
+                continue;
+            }
+        };
+
+        let _texture_alloc_handles = match texture_fixture::bind_texture_fixtures_for_run(
+            &compiled,
+            &mut inst,
+            &test_file.texture_specs,
+            &test_file.texture_fixtures,
+        ) {
+            Ok(v) => {
+                if let Some(exp) = directive.expected_setup_failure.as_ref() {
+                    record_result(
+                        disposition,
+                        false,
+                        &mut stats,
+                        &mut failed_lines,
+                        &mut unexpected_pass_lines,
+                        directive.line_number,
+                    );
+                    let msg = format!(
+                        "expected texture setup failure containing {exp:?}, but fixture bind succeeded"
+                    );
+                    eprintln_if_detail(output_mode, &msg);
+                    errors.push(anyhow::anyhow!(msg));
+                    continue;
+                }
+                v
+            }
+            Err(e) => {
+                let err_str = format!("{e:#}");
+                if let Some(exp) = directive.expected_setup_failure.as_ref() {
+                    if err_str.contains(exp.as_str()) {
+                        record_result(
+                            disposition,
+                            true,
+                            &mut stats,
+                            &mut failed_lines,
+                            &mut unexpected_pass_lines,
+                            directive.line_number,
+                        );
+                        continue;
+                    }
+                }
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
+                let msg = format!("texture fixture bind failed: {e:#}");
                 eprintln_if_detail(output_mode, &msg);
                 errors.push(e.context(msg));
                 continue;
@@ -737,10 +794,10 @@ fn format_error(
                 "Rerun with debugging:".to_string()
             };
             format!(
-                "{rerun_title}\n  scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}"
+                "{rerun_title}\n  scripts/filetests.sh --target {target_name} {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/filetests.sh --target {target_name} {filename}:{line_number}"
             )
         } else {
-            format!("scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}")
+            format!("scripts/filetests.sh --target {target_name} {filename}:{line_number}")
         };
         parts.push(rerun_section);
     }

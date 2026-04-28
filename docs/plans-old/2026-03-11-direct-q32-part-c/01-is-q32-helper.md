@@ -25,7 +25,7 @@ All subsequent phases use `self.is_q32()` to branch on numeric mode.
 
 ```bash
 cargo check -p lps-compiler --features std
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 No behavioral change — just a helper.

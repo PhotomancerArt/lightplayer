@@ -88,8 +88,8 @@ cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
 
 ```bash
 # Run all filetest targets
-./scripts/glsl-filetests.sh --target rv32.q32c
-./scripts/glsl-filetests.sh --target wasm.q32
+./scripts/filetests.sh --target rv32.q32c
+./scripts/filetests.sh --target wasm.q32
 
 # If scripts don't exist, run via cargo:
 cargo test -p lps-filetests -- --target rv32.q32c

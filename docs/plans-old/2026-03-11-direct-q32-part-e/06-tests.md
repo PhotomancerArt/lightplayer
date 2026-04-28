@@ -2,7 +2,7 @@
 
 ## Primary validation
 
-`scripts/glsl-filetests.sh` — the full shader test suite. This exercises
+`scripts/filetests.sh` — the full shader test suite. This exercises
 the entire pipeline end-to-end with Q32 direct emission. Must pass
 unchanged after all cleanup.
 

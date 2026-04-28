@@ -91,7 +91,7 @@ the old version. The new version is ~80-100 lines.
 ```bash
 cargo check -p lps-compiler --features std
 cargo test -p lps-compiler --features std -- streaming
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 The existing streaming tests (`test_glsl_jit_streaming_basic`,

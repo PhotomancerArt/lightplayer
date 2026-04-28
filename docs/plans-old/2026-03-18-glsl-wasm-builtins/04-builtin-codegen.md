@@ -29,4 +29,4 @@
 - `test_q32_sin_compiles` in `lps-wasm/tests/basic.rs` (WASM module with `sin` → import `call`; host linker still required to run).
 - Later: `clamp(0.5, 0.0, 1.0)`, vector `sin(vec3(...))` with wasmtime + `builtins.wasm` or stubs, and one vector case `sin(vec3(...))` if ready.
 - `cargo test -p lps-wasm`
-- Filetests: start with `filetests/builtins/` subsets — `./scripts/glsl-filetests.sh builtins/ --target wasm.q32` (exact path per repo layout).
+- Filetests: start with `filetests/builtins/` subsets — `./scripts/filetests.sh builtins/ --target wasm.q32` (exact path per repo layout).

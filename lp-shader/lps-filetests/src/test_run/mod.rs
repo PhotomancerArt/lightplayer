@@ -7,6 +7,7 @@ pub mod parse_assert;
 pub mod run;
 pub mod run_detail;
 pub mod set_uniform;
+pub mod texture_fixture;
 
 // Re-exports
 pub use run::{PerTargetStats, run_test_file, run_test_file_with_line_filter};

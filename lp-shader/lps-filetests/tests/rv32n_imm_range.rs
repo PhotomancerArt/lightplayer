@@ -220,6 +220,7 @@ where
         }],
         uniforms_type: None,
         globals_type: None,
+        ..Default::default()
     };
 
     (module, sig)

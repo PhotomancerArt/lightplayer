@@ -121,6 +121,10 @@ pub enum BuiltinId {
     LpLpfnWorley3ValueF32,
     LpLpfnWorley3ValueQ32,
     LpVmGetFuelQ32,
+    LpTexTexture1dR16UnormQ32,
+    LpTexTexture1dRgba16UnormQ32,
+    LpTexTexture2dR16UnormQ32,
+    LpTexTexture2dRgba16UnormQ32,
 }
 
 impl BuiltinId {
@@ -238,6 +242,10 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => "__lp_lpfn_worley3_value_f32",
             BuiltinId::LpLpfnWorley3ValueQ32 => "__lp_lpfn_worley3_value_q32",
             BuiltinId::LpVmGetFuelQ32 => "__lp_vm_get_fuel_q32",
+            BuiltinId::LpTexTexture1dR16UnormQ32 => "__lp_texture1d_r16_unorm_q32",
+            BuiltinId::LpTexTexture1dRgba16UnormQ32 => "__lp_texture1d_rgba16_unorm_q32",
+            BuiltinId::LpTexTexture2dR16UnormQ32 => "__lp_texture2d_r16_unorm_q32",
+            BuiltinId::LpTexTexture2dRgba16UnormQ32 => "__lp_texture2d_rgba16_unorm_q32",
         }
     }
 
@@ -355,6 +363,10 @@ impl BuiltinId {
             "__lp_lpfn_worley3_value_f32" => Some(BuiltinId::LpLpfnWorley3ValueF32),
             "__lp_lpfn_worley3_value_q32" => Some(BuiltinId::LpLpfnWorley3ValueQ32),
             "__lp_vm_get_fuel_q32" => Some(BuiltinId::LpVmGetFuelQ32),
+            "__lp_texture1d_r16_unorm_q32" => Some(BuiltinId::LpTexTexture1dR16UnormQ32),
+            "__lp_texture1d_rgba16_unorm_q32" => Some(BuiltinId::LpTexTexture1dRgba16UnormQ32),
+            "__lp_texture2d_r16_unorm_q32" => Some(BuiltinId::LpTexTexture2dR16UnormQ32),
+            "__lp_texture2d_rgba16_unorm_q32" => Some(BuiltinId::LpTexTexture2dRgba16UnormQ32),
             _ => None,
         }
     }
@@ -473,6 +485,10 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32,
             BuiltinId::LpLpfnWorley3ValueQ32,
             BuiltinId::LpVmGetFuelQ32,
+            BuiltinId::LpTexTexture1dR16UnormQ32,
+            BuiltinId::LpTexTexture1dRgba16UnormQ32,
+            BuiltinId::LpTexTexture2dR16UnormQ32,
+            BuiltinId::LpTexTexture2dRgba16UnormQ32,
         ]
     }
 
@@ -590,6 +606,10 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => Module::Lpfn,
             BuiltinId::LpLpfnWorley3ValueQ32 => Module::Lpfn,
             BuiltinId::LpVmGetFuelQ32 => Module::Vm,
+            BuiltinId::LpTexTexture1dR16UnormQ32 => Module::Texture,
+            BuiltinId::LpTexTexture1dRgba16UnormQ32 => Module::Texture,
+            BuiltinId::LpTexTexture2dR16UnormQ32 => Module::Texture,
+            BuiltinId::LpTexTexture2dRgba16UnormQ32 => Module::Texture,
         }
     }
 
@@ -707,6 +727,10 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => "worley3_value",
             BuiltinId::LpLpfnWorley3ValueQ32 => "worley3_value",
             BuiltinId::LpVmGetFuelQ32 => "get_fuel",
+            BuiltinId::LpTexTexture1dR16UnormQ32 => "texture1d_r16_unorm",
+            BuiltinId::LpTexTexture1dRgba16UnormQ32 => "texture1d_rgba16_unorm",
+            BuiltinId::LpTexTexture2dR16UnormQ32 => "texture2d_r16_unorm",
+            BuiltinId::LpTexTexture2dRgba16UnormQ32 => "texture2d_rgba16_unorm",
         }
     }
 
@@ -824,6 +848,10 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => Some(Mode::F32),
             BuiltinId::LpLpfnWorley3ValueQ32 => Some(Mode::Q32),
             BuiltinId::LpVmGetFuelQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture1dR16UnormQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture1dRgba16UnormQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture2dR16UnormQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture2dRgba16UnormQ32 => Some(Mode::Q32),
         }
     }
 
@@ -941,6 +969,10 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => false,
             BuiltinId::LpLpfnWorley3ValueQ32 => false,
             BuiltinId::LpVmGetFuelQ32 => true,
+            BuiltinId::LpTexTexture1dR16UnormQ32 => false,
+            BuiltinId::LpTexTexture1dRgba16UnormQ32 => false,
+            BuiltinId::LpTexTexture2dR16UnormQ32 => false,
+            BuiltinId::LpTexTexture2dRgba16UnormQ32 => false,
         }
     }
 }
@@ -951,6 +983,7 @@ pub enum Module {
     Lpir,
     Glsl,
     Vm,
+    Texture,
     Lpfn,
 }
 
@@ -967,4 +1000,5 @@ pub use glsl_builtin_mapping::GlslParamKind;
 pub use glsl_builtin_mapping::glsl_lpfn_q32_builtin_id;
 pub use glsl_builtin_mapping::glsl_q32_math_builtin_id;
 pub use glsl_builtin_mapping::lpir_q32_builtin_id;
+pub use glsl_builtin_mapping::texture_q32_builtin_id;
 pub use glsl_builtin_mapping::vm_q32_builtin_id;

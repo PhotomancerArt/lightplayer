@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use naga::{
-    AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, Type, TypeInner, VectorSize,
+    AddressSpace, ArraySize, Function, Handle, ImageClass, ImageDimension, Module, ScalarKind,
+    StructMember as NagaStructMember, Type, TypeInner, VectorSize,
 };
 
 use lps_shared::{FnParam, LpsType, ParamQualifier, StructMember};
@@ -94,6 +95,11 @@ fn function_info(
                 ),
                 _ => (naga_type_handle_to_lps(module, arg.ty)?, ParamQualifier::In),
             };
+            if matches!(ty, LpsType::Texture2D) {
+                return Err(CompileError::UnsupportedType(String::from(
+                    "sampler2D / Texture2D function parameters are not supported (no parameter binding metadata yet)",
+                )));
+            }
             Ok(FnParam {
                 name: pname,
                 ty,
@@ -121,6 +127,9 @@ pub(crate) fn naga_type_handle_to_lps(
     match *inner {
         TypeInner::Pointer { base, .. } => naga_type_handle_to_lps(module, base),
         TypeInner::Struct { ref members, .. } => {
+            if naga_combined_float_sampler2d_struct(module, members) {
+                return Ok(LpsType::Texture2D);
+            }
             let t = &module.types[ty_h];
             let mut out = Vec::with_capacity(members.len());
             for m in members {
@@ -219,9 +228,192 @@ pub(crate) fn naga_type_inner_to_glsl(
                 ))),
             }
         }
+        TypeInner::Image {
+            dim,
+            arrayed,
+            class,
+        } => naga_image_to_lps_texture2d(dim, arrayed, class),
+        TypeInner::Sampler { comparison: true } => Err(CompileError::UnsupportedType(
+            String::from("comparison / shadow sampler (sampler2DShadow, etc.)"),
+        )),
+        TypeInner::Sampler { comparison: false } => {
+            // Naga `uniform sampler` companion to `texture2D` (see `parse.rs` rewrite for `texture()`).
+            // Guest std430 reserves one u32 lane; runtime does not interpret it.
+            Ok(LpsType::UInt)
+        }
+        TypeInner::BindingArray { .. } => Err(CompileError::UnsupportedType(String::from(
+            "binding_array of texture/sampler (texture arrays) not supported",
+        ))),
         TypeInner::Struct { .. } => Err(CompileError::UnsupportedType(String::from(
             "struct type must be mapped with naga_type_handle_to_lps",
         ))),
         _ => Err(CompileError::UnsupportedType(format!("{inner:?}"))),
+    }
+}
+
+/// Naga's GLSL `sampler2D` / combined sampler constructor uses a 2-tuple of (image, sampler).
+fn naga_combined_float_sampler2d_struct(module: &Module, members: &[NagaStructMember]) -> bool {
+    if members.len() != 2 {
+        return false;
+    }
+    let t0 = &module.types[members[0].ty].inner;
+    let t1 = &module.types[members[1].ty].inner;
+    matches!(
+        (t0, t1),
+        (
+            &TypeInner::Image {
+                dim: ImageDimension::D2,
+                arrayed: false,
+                class: ImageClass::Sampled {
+                    kind: ScalarKind::Float,
+                    multi: false,
+                },
+            },
+            &TypeInner::Sampler { comparison: false }
+        )
+    )
+}
+
+/// Map a sampled [`TypeInner::Image`] to [`LpsType::Texture2D`]; other image forms are rejected.
+fn naga_image_to_lps_texture2d(
+    dim: ImageDimension,
+    arrayed: bool,
+    class: ImageClass,
+) -> Result<LpsType, CompileError> {
+    match class {
+        ImageClass::Storage { .. } => Err(CompileError::UnsupportedType(String::from(
+            "storage image (image2D) not supported",
+        ))),
+        ImageClass::Depth { .. } => Err(CompileError::UnsupportedType(String::from(
+            "depth / shadow image not supported",
+        ))),
+        ImageClass::External => Err(CompileError::UnsupportedType(String::from(
+            "external texture not supported",
+        ))),
+        ImageClass::Sampled { kind, multi } => {
+            if multi {
+                return Err(CompileError::UnsupportedType(String::from(
+                    "multisampled texture (sampler2DMS) not supported",
+                )));
+            }
+            if kind != ScalarKind::Float {
+                return Err(CompileError::UnsupportedType(String::from(
+                    "only GLSL `sampler2D` / `texture2D` (float) is supported; integer/uint samplers are not supported",
+                )));
+            }
+            match (dim, arrayed) {
+                (ImageDimension::D2, false) => Ok(LpsType::Texture2D),
+                (ImageDimension::D1, _) => Err(CompileError::UnsupportedType(String::from(
+                    "1D texture (sampler1D) not supported",
+                ))),
+                (ImageDimension::D3, _) => Err(CompileError::UnsupportedType(String::from(
+                    "3D texture (sampler3D) not supported",
+                ))),
+                (ImageDimension::Cube, _) => Err(CompileError::UnsupportedType(String::from(
+                    "cube map texture (samplerCube) not supported",
+                ))),
+                (ImageDimension::D2, true) => Err(CompileError::UnsupportedType(String::from(
+                    "2D array texture (sampler2DArray) not supported",
+                ))),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod texture2d_param_tests {
+    use alloc::string::String;
+    use alloc::vec;
+
+    use super::*;
+
+    use naga::{
+        Function, FunctionResult, ImageClass, ImageDimension, Module, Scalar, ScalarKind, Span,
+        Type, TypeInner, VectorSize,
+    };
+
+    #[test]
+    fn function_info_rejects_texture2d_parameter() {
+        let mut module = Module::default();
+        let vec4_ty = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Vector {
+                    size: VectorSize::Quad,
+                    scalar: Scalar {
+                        kind: ScalarKind::Float,
+                        width: 4,
+                    },
+                },
+            },
+            Span::UNDEFINED,
+        );
+        let image_ty = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Image {
+                    dim: ImageDimension::D2,
+                    arrayed: false,
+                    class: ImageClass::Sampled {
+                        kind: ScalarKind::Float,
+                        multi: false,
+                    },
+                },
+            },
+            Span::UNDEFINED,
+        );
+        let sampler_ty = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Sampler { comparison: false },
+            },
+            Span::UNDEFINED,
+        );
+        let combined = module.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Struct {
+                    members: vec![
+                        naga::StructMember {
+                            name: None,
+                            ty: image_ty,
+                            binding: None,
+                            offset: 0,
+                        },
+                        naga::StructMember {
+                            name: None,
+                            ty: sampler_ty,
+                            binding: None,
+                            offset: 0,
+                        },
+                    ],
+                    span: 0,
+                },
+            },
+            Span::UNDEFINED,
+        );
+
+        let mut func = Function::default();
+        func.name = Some(String::from("f"));
+        func.arguments.push(naga::FunctionArgument {
+            name: Some(String::from("tex")),
+            ty: combined,
+            binding: None,
+        });
+        func.result = Some(FunctionResult {
+            ty: vec4_ty,
+            binding: None,
+        });
+        let fh = module.functions.append(func, Span::UNDEFINED);
+        let func_ref = &module.functions[fh];
+
+        let err = super::function_info(&module, func_ref, String::from("f")).unwrap_err();
+        let CompileError::UnsupportedType(msg) = err else {
+            panic!("{err:?}");
+        };
+        assert!(
+            msg.contains("function parameters") || msg.contains("parameter"),
+            "{msg}"
+        );
     }
 }

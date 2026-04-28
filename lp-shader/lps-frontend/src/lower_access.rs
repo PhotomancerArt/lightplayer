@@ -394,6 +394,11 @@ pub(crate) fn lower_access_expr_vec(
                     "Access global: {gv:?} not in global_map"
                 )));
             };
+            if !info.vmctx_backed {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "Access: global has no VMContext layout (internal sampler stub)",
+                )));
+            }
             let LpsType::Array { element, .. } = info.ty else {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "Access: global base is not an array",

@@ -9,7 +9,6 @@ use alloc::boxed::Box;
 use alloc::format;
 
 use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
-use lps_shared::TextureBuffer;
 use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_browser::BrowserLpvmEngine;
 

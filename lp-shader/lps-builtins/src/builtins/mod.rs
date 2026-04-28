@@ -49,4 +49,5 @@
 pub mod glsl;
 pub mod lpfn;
 pub mod lpir;
+pub mod texture;
 pub mod vm;

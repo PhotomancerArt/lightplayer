@@ -158,6 +158,7 @@ impl AllocTestBuilder {
         ret_iregs: &[u16],
         callee_uses_sret: bool,
         caller_passes_sret_ptr: bool,
+        caller_sret_vm_abi_swap: bool,
     ) -> AllocTestResult {
         let args_s = arg_iregs
             .iter()
@@ -183,11 +184,13 @@ impl AllocTestBuilder {
             if let VInst::Call {
                 callee_uses_sret: cu,
                 caller_passes_sret_ptr: cp,
+                caller_sret_vm_abi_swap: sw,
                 ..
             } = inst
             {
                 *cu = callee_uses_sret;
                 *cp = caller_passes_sret_ptr;
+                *sw = caller_sret_vm_abi_swap;
             }
         }
         self.run_vinst_inner(vinsts, vreg_pool, symbols)
@@ -331,7 +334,7 @@ mod tests {
 
     #[test]
     fn smoke_run_call_allocates() {
-        let r = alloc_test().run_call("callee", &[0, 1], &[2], false, false);
+        let r = alloc_test().run_call("callee", &[0, 1], &[2], false, false, false);
         assert!(
             r.rendered.contains("Call callee"),
             "expected Call in render: {}",
@@ -341,7 +344,7 @@ mod tests {
 
     #[test]
     fn smoke_run_call_sret_flag_in_render() {
-        let r = alloc_test().run_call("big", &[0], &[1, 2, 3, 4], true, false);
+        let r = alloc_test().run_call("big", &[0], &[1, 2, 3, 4], true, false, false);
         r.expect_spill_slots(0);
         assert!(r.rendered.contains("Call big sret"));
     }

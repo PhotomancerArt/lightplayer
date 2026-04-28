@@ -15,7 +15,7 @@ Completed 2026-04-23. Struct acceptance corpus and default-target filetests pass
 Approximate `git diff --stat` for `lp-shader/lps-filetests/filetests/` plus targeted frontend files in this milestone:
 
 - Removed stale `@unimplemented(wasm.q32)`, `@unimplemented(rv32c.q32)`, `@unimplemented(rv32n.q32)` across the M2 struct corpus (`struct/*`, `function/param-struct.glsl`, `function/return-struct.glsl`, `uniform/struct.glsl`, `global/type-struct.glsl`).
-- Full-suite `./scripts/glsl-filetests.sh --fix --assume-yes` also dropped stale markers in a few non-struct files that were unexpectedly passing (`control/ternary/types.glsl`, `function/param-default-in.glsl`, `function/scope-local.glsl`).
+- Full-suite `./scripts/filetests.sh --fix --assume-yes` also dropped stale markers in a few non-struct files that were unexpectedly passing (`control/ternary/types.glsl`, `function/param-default-in.glsl`, `function/scope-local.glsl`).
 - `struct/define-nested.glsl`: removed invalid self-referencing `struct Node { Node next; }` (parse error); kept `// @unimplemented(jit.q32)` on runnable cases.
 - `global/type-struct.glsl`: corrected `test_type_struct_nested` expectation (11.0 not 12.0); made four read-only tests **self-contained** (each writes globals before read) so they pass with **fresh instance per `// run:`**; `jit.q32` markers unchanged where present.
 

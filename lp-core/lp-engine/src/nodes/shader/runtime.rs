@@ -20,7 +20,6 @@ use lp_model::{
 };
 use lp_perf::EVENT_SHADER_COMPILE;
 use lpfs::{ChangeType, FsChange};
-use lps_shared::TextureBuffer;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 

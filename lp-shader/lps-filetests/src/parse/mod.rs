@@ -2,18 +2,22 @@
 
 pub mod parse_annotation;
 pub mod parse_compile_opt;
+pub(crate) mod parse_expect_parse_failure;
+pub(crate) mod parse_expect_setup_failure;
 pub mod parse_expected_error;
 pub mod parse_run;
 pub mod parse_set_uniform;
 pub mod parse_source;
 pub mod parse_target;
 pub mod parse_test_type;
+pub mod parse_texture;
 pub mod parse_trap;
 pub mod test_type;
 
 // Re-exports
 pub use test_type::{
     ClifExpectations, ComparisonOp, ErrorExpectation, RunDirective, SetUniform, TestFile, TestType,
+    TextureFixture, TextureFixtureChannel, TextureFixturePixel, TextureFixtures, TextureSpecs,
     TrapExpectation,
 };
 
@@ -68,18 +72,56 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
     let mut pending_set_uniforms: Vec<SetUniform> = Vec::new();
     let mut config_overrides: Vec<(String, String)> = Vec::new();
     let mut seen_compile_opt_keys: HashSet<String> = HashSet::new();
+    let mut texture_specs: test_type::TextureSpecs = std::collections::BTreeMap::new();
+    let mut texture_fixtures: test_type::TextureFixtures = std::collections::BTreeMap::new();
+    let mut in_texture_data: Option<parse_texture::TextureDataPartial> = None;
+    let mut pending_setup_failure: Option<String> = None;
 
     let mut in_block_comment = false;
-    for (line_num, line) in lines.iter().enumerate() {
-        let line_number = line_num + 1;
+    let mut i = 0;
+    while i < lines.len() {
+        let line_number = i + 1;
+        let line = &lines[i];
         let logical = strip_block_comment_fragments(line, &mut in_block_comment);
+
+        if in_texture_data.is_some() {
+            match parse_texture::process_texture_data_line(
+                &mut in_texture_data,
+                &logical,
+                line_number,
+            )? {
+                parse_texture::TextureDataLineStep::Consuming => {
+                    i += 1;
+                    continue;
+                }
+                parse_texture::TextureDataLineStep::BlockDone {
+                    fixture,
+                    reprocess_current_line,
+                } => {
+                    if texture_fixtures
+                        .insert(fixture.name.clone(), fixture)
+                        .is_some()
+                    {
+                        anyhow::bail!("line {line_number}: duplicate `texture-data` name");
+                    }
+                    if reprocess_current_line {
+                        // Re-run main parser on the same file line.
+                    } else {
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+        }
 
         if let Some(test_type) = parse_test_type::parse_test_type(&logical) {
             test_types.push(test_type);
+            i += 1;
             continue;
         }
 
         if parse_target::parse_target_directive(&logical).is_some() {
+            i += 1;
             continue;
         }
 
@@ -90,12 +132,14 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
                 anyhow::bail!("line {line_number}: duplicate `compile-opt` key {key:?}");
             }
             config_overrides.push((key, value));
+            i += 1;
             continue;
         }
 
         if let Ok(Some(annotation)) = parse_annotation::parse_annotation_line(&logical, line_number)
         {
             pending_annotations.push(annotation);
+            i += 1;
             continue;
         }
 
@@ -104,6 +148,38 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
                 body,
                 line_number,
             )?);
+            i += 1;
+            continue;
+        }
+
+        if parse_texture::is_texture_spec_line(&logical) {
+            let (name, spec) = parse_texture::parse_texture_spec_line(&logical, line_number)?;
+            if texture_specs.insert(name, spec).is_some() {
+                anyhow::bail!("line {line_number}: duplicate `texture-spec` name");
+            }
+            i += 1;
+            continue;
+        }
+
+        if parse_texture::is_texture_data_header_line(&logical) {
+            in_texture_data = Some(parse_texture::parse_texture_data_header(
+                &logical,
+                line_number,
+            )?);
+            i += 1;
+            continue;
+        }
+
+        if let Some(msg) =
+            parse_expect_setup_failure::parse_expect_setup_failure_line(&logical, line_number)?
+        {
+            if pending_setup_failure.is_some() {
+                anyhow::bail!(
+                    "line {line_number}: duplicate EXPECT_SETUP_FAILURE before a // run: directive"
+                );
+            }
+            pending_setup_failure = Some(msg);
+            i += 1;
             continue;
         }
 
@@ -113,13 +189,33 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
                 parse_run::parse_run_directive(run_line, line_number, legacy_expect_fail)?;
             directive.annotations = std::mem::take(&mut pending_annotations);
             directive.set_uniforms = std::mem::take(&mut pending_set_uniforms);
+            directive.expected_setup_failure = pending_setup_failure.take();
             run_directives.push(directive);
+            i += 1;
             continue;
         }
 
         if let Some(trap_exp) = parse_trap::parse_trap_expectation(&logical, line_number)? {
             trap_expectations.push(trap_exp);
+            i += 1;
             continue;
+        }
+
+        i += 1;
+    }
+
+    if pending_setup_failure.is_some() {
+        anyhow::bail!(
+            "{}: EXPECT_SETUP_FAILURE: must be followed by a // run: directive",
+            path.display()
+        );
+    }
+
+    if let Some(p) = in_texture_data.take() {
+        let f = parse_texture::into_texture_fixture(p)?;
+        let name = f.name.clone();
+        if texture_fixtures.insert(name.clone(), f).is_some() {
+            anyhow::bail!("duplicate `texture-data` name {name}");
         }
     }
 
@@ -150,6 +246,8 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         clif_expectations,
         error_expectations,
         config_overrides,
+        texture_specs,
+        texture_fixtures,
     })
 }
 
