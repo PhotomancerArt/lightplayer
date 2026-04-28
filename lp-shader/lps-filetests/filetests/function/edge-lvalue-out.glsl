@@ -18,9 +18,6 @@ float test_edge_lvalue_out_variable() {
     return value;
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_out_variable() ~= 42.0
 
 void set_vector(out vec2 result) {
@@ -34,9 +31,6 @@ vec2 test_edge_lvalue_out_vector() {
     return vec;
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_out_vector() ~= vec2(1.0, 2.0)
 
 void modify_value(inout float value) {
@@ -50,9 +44,6 @@ float test_edge_lvalue_inout_variable() {
     return x;
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_inout_variable() ~= 10.0
 
 /*
@@ -95,9 +86,6 @@ float test_edge_lvalue_out_array_element() {
     return arr[1];
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_out_array_element() ~= 99.0
 
 void scale_component(inout float component) {
@@ -111,9 +99,6 @@ float test_edge_lvalue_inout_swizzle() {
     return vec.y;
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_inout_swizzle() ~= 6.0
 
 /*
@@ -145,9 +130,6 @@ float test_edge_lvalue_out_struct_field() {
     return d.value;
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_out_struct_field() ~= 123.0
 
 void increment(inout int value) {
@@ -161,7 +143,4 @@ int test_edge_lvalue_inout_int() {
     return x;
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
 // run: test_edge_lvalue_inout_int() == 11

@@ -20,6 +20,7 @@ mod lower_ctx;
 mod lower_error;
 mod lower_expr;
 mod lower_lpfn;
+mod lower_lvalue;
 mod lower_math;
 mod lower_math_geom;
 mod lower_math_helpers;

@@ -694,6 +694,21 @@ impl<'a> LowerCtx<'a> {
             ArraySubscriptRoot::CallResult(expr) => {
                 Ok(self.call_result_aggregates.get(&expr).cloned())
             }
+            ArraySubscriptRoot::Global(gv) => {
+                let mut naga_ty = self.module.global_variables[gv].ty;
+                if let TypeInner::Pointer { base, .. } = &self.module.types[naga_ty].inner {
+                    naga_ty = *base;
+                }
+                Ok(
+                    crate::naga_util::aggregate_layout(self.module, naga_ty)?.map(|layout| {
+                        AggregateInfo {
+                            slot: AggregateSlot::Global(gv),
+                            layout,
+                            naga_ty,
+                        }
+                    }),
+                )
+            }
         }
     }
 

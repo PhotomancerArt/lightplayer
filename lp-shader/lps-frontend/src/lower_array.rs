@@ -473,6 +473,65 @@ pub(crate) fn load_array_element_dynamic(
     Ok(out)
 }
 
+pub(crate) fn store_array_element_const_vregs(
+    ctx: &mut LowerCtx<'_>,
+    info: &AggregateInfo,
+    index: u32,
+    srcs: &[VReg],
+) -> Result<(), LowerError> {
+    debug_assert_not_param_readonly_aggregate_store(info, "store_array_element_const_vregs");
+    if info.element_count() == 0 {
+        return Err(LowerError::Internal(String::from(
+            "store_array_element_const_vregs: empty array",
+        )));
+    }
+    let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
+    let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
+    if srcs.len() != ir_tys.len() {
+        return Err(LowerError::UnsupportedStatement(format!(
+            "store_array_element_const_vregs: {} vs {} components",
+            srcs.len(),
+            ir_tys.len()
+        )));
+    }
+    let addr = array_element_address(ctx, info, ElementIndex::Const(index))?;
+    for (j, &src) in srcs.iter().enumerate() {
+        ctx.fb.push(LpirOp::Store {
+            base: addr,
+            offset: (j as u32) * 4,
+            value: src,
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn store_array_element_dynamic_vregs(
+    ctx: &mut LowerCtx<'_>,
+    info: &AggregateInfo,
+    index_v: VReg,
+    srcs: &[VReg],
+) -> Result<(), LowerError> {
+    debug_assert_not_param_readonly_aggregate_store(info, "store_array_element_dynamic_vregs");
+    let addr = array_element_address(ctx, info, ElementIndex::Dynamic(index_v))?;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty()].inner;
+    let ir_tys = naga_type_to_ir_types(ctx.module, elem_inner)?;
+    if srcs.len() != ir_tys.len() {
+        return Err(LowerError::UnsupportedStatement(format!(
+            "store_array_element_dynamic_vregs: {} vs {} components",
+            srcs.len(),
+            ir_tys.len()
+        )));
+    }
+    for (j, &src) in srcs.iter().enumerate() {
+        ctx.fb.push(LpirOp::Store {
+            base: addr,
+            offset: (j as u32) * 4,
+            value: src,
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn store_array_element_const(
     ctx: &mut LowerCtx<'_>,
     info: &AggregateInfo,
