@@ -18,7 +18,7 @@ values. Run full filetest suite to verify all P0 fixes. Final cleanup.
 ### 1. Strip stale `@unimplemented` markers
 
 ```bash
-scripts/glsl-filetests.sh --fix
+scripts/filetests.sh --fix
 ```
 
 This removes `@unimplemented(backend=wasm)` from tests that now pass on
@@ -57,7 +57,7 @@ directive is outside. Move it inside or comment it differently.
 ### 3. Re-bless rainbow expected values
 
 ```bash
-scripts/glsl-filetests.sh debug/rainbow.glsl --target cranelift.q32
+scripts/filetests.sh debug/rainbow.glsl --target cranelift.q32
 ```
 
 Capture the actual values from cranelift.q32 output and update the expected
@@ -84,7 +84,7 @@ to:
 ### 5. Full filetest run
 
 ```bash
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```
 
 Verify all previously-failing tests now pass (or are correctly annotated).
@@ -119,5 +119,5 @@ cargo test -p lps-wasm -q
 cargo test -p lps-frontend -q
 cargo +nightly fmt --check -p lps-wasm -p lps-frontend
 cargo clippy -p lps-wasm -p lps-frontend -- -D warnings
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```

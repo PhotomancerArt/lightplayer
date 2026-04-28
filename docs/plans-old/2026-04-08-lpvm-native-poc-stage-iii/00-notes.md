@@ -93,7 +93,7 @@ cargo test -p lpvm-native --features emu
 ### Success criteria
 
 ```bash
-./scripts/glsl-filetests.sh filetests/scalar/float/op-add.glsl rv32lp.q32
+./scripts/filetests.sh filetests/scalar/float/op-add.glsl rv32lp.q32
 # Produces: PASS with numeric result matching expected
 ```
 

@@ -29,6 +29,7 @@ pub fn glsl_type_to_wasm_components(ty: &LpsType, float_mode: FloatMode) -> Vec<
         LpsType::Mat2 => alloc::vec![scalar_float_vt(float_mode); 4],
         LpsType::Mat3 => alloc::vec![scalar_float_vt(float_mode); 9],
         LpsType::Mat4 => alloc::vec![scalar_float_vt(float_mode); 16],
+        LpsType::Texture2D => alloc::vec![WasmValType::I32; 4],
         LpsType::Array { element, len } => {
             let inner = glsl_type_to_wasm_components(element, float_mode);
             let mut out = Vec::with_capacity(inner.len().saturating_mul(*len as usize));

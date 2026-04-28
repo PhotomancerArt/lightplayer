@@ -17,8 +17,8 @@ threading (single-threaded runs may still fail).
 1. **Reproduce**
 
 ```bash
-./scripts/glsl-filetests.sh uvec2/fn-equal.glsl
-LP_FILETESTS_THREADS=1 ./scripts/glsl-filetests.sh 2>&1 | grep fn-equal
+./scripts/filetests.sh uvec2/fn-equal.glsl
+LP_FILETESTS_THREADS=1 ./scripts/filetests.sh 2>&1 | grep fn-equal
 ```
 
 2. **Instrument** — temporary logging (remove before final commit of this phase) around compile
@@ -34,8 +34,8 @@ LP_FILETESTS_THREADS=1 ./scripts/glsl-filetests.sh 2>&1 | grep fn-equal
 
 ```bash
 cargo test -p lps-filetests
-LP_FILETESTS_THREADS=1 ./scripts/glsl-filetests.sh
-./scripts/glsl-filetests.sh uvec2/fn-equal.glsl vec/uvec2/fn-equal.gen.glsl
+LP_FILETESTS_THREADS=1 ./scripts/filetests.sh
+./scripts/filetests.sh uvec2/fn-equal.glsl vec/uvec2/fn-equal.gen.glsl
 ```
 
 ```bash

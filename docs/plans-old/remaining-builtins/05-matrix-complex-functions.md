@@ -50,5 +50,4 @@ Implement matrix builtins for complex operations: determinant and inverse.
 - Unit tests pass for all matrix sizes (2x2, 3x3, 4x4)
 - Functions registered in builtin generator
 - Code compiles without warnings
-- Tests pass: `scripts/glsl-filetests.sh builtins/matrix-determinant.glsl`, etc.
-
+- Tests pass: `scripts/filetests.sh builtins/matrix-determinant.glsl`, etc.

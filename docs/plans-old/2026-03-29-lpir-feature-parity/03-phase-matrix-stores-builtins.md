@@ -28,8 +28,8 @@
 4. **Tests**
 
 ```bash
-./scripts/glsl-filetests.sh matrix/mat2/op-assign.glsl matrix/mat2/incdec-matrix-element.glsl
-./scripts/glsl-filetests.sh builtins/matrix-compmult.glsl builtins/matrix-inverse.glsl
+./scripts/filetests.sh matrix/mat2/op-assign.glsl matrix/mat2/incdec-matrix-element.glsl
+./scripts/filetests.sh builtins/matrix-compmult.glsl builtins/matrix-inverse.glsl
 ```
 
 ## Validate
@@ -37,7 +37,7 @@
 ```bash
 cargo test -p lps-frontend
 cargo test -p lps-filetests
-./scripts/glsl-filetests.sh matrix/
+./scripts/filetests.sh matrix/
 ```
 
 (Full matrix tree may stay red until phase 4 completes invoke for `mat3`/`mat4`.)

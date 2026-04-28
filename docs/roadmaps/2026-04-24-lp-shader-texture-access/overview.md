@@ -1,5 +1,9 @@
 # lp-shader Texture Access Roadmap
 
+**Status:** Milestones M1–M5 (texture binding, filetests, lowering, filtered
+sampling, height-one API) are implemented in-tree. M6 is documentation,
+validation, and cleanup — see `m6-integration-validation-cleanup/plan.md`.
+
 ## Motivation / rationale
 
 `lp-shader` can already render *to* textures through the synthesized
@@ -63,7 +67,7 @@ TextureBindingSpec map
 lps-frontend validates and lowers texture calls
         │
         ▼
-LPIR loads Texture2DUniform fields from uniforms
+LPIR loads LpsTexture2DDescriptor fields from uniforms
         │
         ▼
 format-specialized loads + conversion
@@ -76,7 +80,7 @@ The ABI descriptor is:
 
 ```rust
 #[repr(C)]
-struct Texture2DUniform {
+struct LpsTexture2DDescriptor {
     ptr: u32,
     width: u32,
     height: u32,
@@ -113,13 +117,15 @@ struct Texture2DUniform {
 
 ## Scope estimate
 
-Six milestones:
+Eight milestones:
 
 | # | Milestone | Strategy |
 |---|-----------|----------|
 | M1 | Texture interface foundation | Full plan |
 | M2 | Texture filetest fixtures and diagnostics | Full plan |
-| M3 | `texelFetch` lowering and backend validation | Full plan |
+| M3a | Texture-aware lowering contract | Full plan |
+| M3b | Core `texelFetch` codegen | Full plan |
+| M3c | Runtime validation and backend filetests | Full plan |
 | M4 | Filtered `texture()` sampling and wrap modes | Full plan |
 | M5 | Height-one palette lookup and lp-shader API integration | Small plan |
 | M6 | Integration validation and cleanup | Small plan |

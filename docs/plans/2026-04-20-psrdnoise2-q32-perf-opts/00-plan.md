@@ -133,11 +133,11 @@ Note: the existing Q32 hash silently saturates on `(hash * 51 + 2) * hash` (inte
 1. `cargo test -p lps-builtins` — existing unit tests in `psrdnoise2_q32.rs` should still pass (range checks + determinism).
 2. Snapshot file `psrdnoise2_q32.snap.txt` will fail; regenerate with `LP_UPDATE_SNAPSHOTS=1 cargo test -p lps-builtins --test lpfn_q32_snapshots`.
 3. Re-run cargo test for clean snapshot pass.
-4. Run filetests for psrdnoise: `scripts/glsl-filetests.sh --target jit.q32` then `--target rv32c.q32` (the existing [lp-shader/lps-filetests/filetests/lpfn/lp_psrdnoise.glsl](../../../lp-shader/lps-filetests/filetests/lpfn/lp_psrdnoise.glsl) checks tolerance-based behaviour, should still pass).
+4. Run filetests for psrdnoise: `scripts/filetests.sh --target jit.q32` then `--target rv32c.q32` (the existing [lp-shader/lps-filetests/filetests/lpfn/lp_psrdnoise.glsl](../../../lp-shader/lps-filetests/filetests/lpfn/lp_psrdnoise.glsl) checks tolerance-based behaviour, should still pass).
 5. Profile: `cargo run -p lp-cli --release -- profile examples/perf/fastmath --note p1-int-hash`.
 6. Commit message body must call out that snapshot deltas are expected and explain why (existing Q32 hash saturated; new path matches reference).
 
-**Validate:** `just check`, `cargo test -p lps-builtins`, `scripts/glsl-filetests.sh --target jit.q32`.
+**Validate:** `just check`, `cargo test -p lps-builtins`, `scripts/filetests.sh --target jit.q32`.
 
 ---
 
@@ -146,6 +146,7 @@ Note: the existing Q32 hash silently saturates on `(hash * 51 + 2) * hash` (inte
 Bundle the trivially safe micro-optimizations. Snapshots **must not** change here; if they do, that's a bug.
 
 Touched files:
+
 - [lp-shader/lps-q32/src/q32.rs](../../../lp-shader/lps-q32/src/q32.rs) — add `pub const fn half(self) -> Q32 { Q32(self.0 >> 1) }` (mathematically identical to `* HALF`).
 - [lp-shader/lps-builtins/src/builtins/lpfn/generative/psrdnoise/psrdnoise2_q32.rs](../../../lp-shader/lps-builtins/src/builtins/lpfn/generative/psrdnoise/psrdnoise2_q32.rs):
   - Replace every `* HALF` (lines 90, 118, 120, 122, 152–158) with `.half()`.
@@ -216,7 +217,7 @@ LUT size: 289 × 2 × 4 bytes = 2312 B in `rodata`. Document in module-level com
 3. Filetests `lp_psrdnoise.glsl` use 0.001/0.0001 tolerances on differences — verify they still pass; if any tolerance-based assertion newly fails, escalate to user (don't widen tolerances).
 4. Profile: `--note p4-trig-lut`. Commit.
 
-**Validate:** `just check`, `cargo test -p lps-builtins`, `scripts/glsl-filetests.sh --target jit.q32 --target rv32c.q32`.
+**Validate:** `just check`, `cargo test -p lps-builtins`, `scripts/filetests.sh --target jit.q32 --target rv32c.q32`.
 
 ---
 
@@ -225,6 +226,7 @@ LUT size: 289 × 2 × 4 bytes = 2312 B in `rodata`. Document in module-level com
 Add wrapping (non-saturating) Q32 helpers and use them where saturation provably cannot occur in psrdnoise2 (dot products on small `x_k`, `length_squared` of `x_k` whose components are bounded by simplex geometry, radial decay polynomial `w*w*w*w`, gradient combine).
 
 Files:
+
 - [lp-shader/lps-q32/src/q32.rs](../../../lp-shader/lps-q32/src/q32.rs): add `pub fn mul_wrapping(self, rhs: Q32) -> Q32` returning `Q32(((self.0 as i64 * rhs.0 as i64) >> 16) as i32)`. Optional `add_wrapping`/`sub_wrapping` if needed.
 - [lp-shader/lps-builtins/src/builtins/lpfn/generative/psrdnoise/psrdnoise2_q32.rs](../../../lp-shader/lps-builtins/src/builtins/lpfn/generative/psrdnoise/psrdnoise2_q32.rs): replace bounded multiplies in lines ~236–285 (dot products, w/w2/w3/w4, dn0/dn1/dn2 combine) with `.mul_wrapping()`.
 

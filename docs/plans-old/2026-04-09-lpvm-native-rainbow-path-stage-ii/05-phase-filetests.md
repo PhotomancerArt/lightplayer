@@ -15,7 +15,7 @@ Run filetests to verify control flow works end-to-end. Fix any issues found.
 ### 1. Run if-else filetests
 
 ```bash
-./scripts/glsl-filetests.sh --target rv32lp.q32 "control/if_else/basic.glsl" --concise
+./scripts/filetests.sh --target rv32lp.q32 "control/if_else/basic.glsl" --concise
 ```
 
 Expected: Tests should pass once lowering and emission are working.
@@ -23,19 +23,19 @@ Expected: Tests should pass once lowering and emission are working.
 ### 2. Run nested if-else
 
 ```bash
-./scripts/glsl-filetests.sh --target rv32lp.q32 "control/if_else/nested.glsl" --concise
+./scripts/filetests.sh --target rv32lp.q32 "control/if_else/nested.glsl" --concise
 ```
 
 ### 3. Run chained if-else
 
 ```bash
-./scripts/glsl-filetests.sh --target rv32lp.q32 "control/if_else/chained.glsl" --concise
+./scripts/filetests.sh --target rv32lp.q32 "control/if_else/chained.glsl" --concise
 ```
 
 ### 4. Check for regressions
 
 ```bash
-./scripts/glsl-filetests.sh --target rv32lp.q32 "scalar/int/" --concise
+./scripts/filetests.sh --target rv32lp.q32 "scalar/int/" --concise
 ```
 
 Expected: All previously passing tests still pass.
@@ -50,6 +50,7 @@ Expected: All previously passing tests still pass.
 ### 6. Debugging tips
 
 If a test fails:
+
 1. Run with `--debug` to see CLIF/disassembly
 2. Check the lowered VInsts (add debug print in `lower_ops`)
 3. Verify label positions and branch offsets in emitted code

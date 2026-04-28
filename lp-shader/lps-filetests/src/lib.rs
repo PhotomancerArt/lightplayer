@@ -15,6 +15,7 @@ pub mod runner;
 pub mod targets;
 pub mod test_compile;
 pub mod test_error;
+pub mod test_parse_error;
 pub mod test_run;
 pub mod test_transform;
 pub mod util;
@@ -179,6 +180,10 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
 
     // Try to read and count run directives
     if let Ok(contents) = std::fs::read_to_string(path) {
+        if contents.lines().any(|l| l.trim() == "// test parse-error") {
+            stats.total = 1;
+            return stats;
+        }
         for (line_num, line) in contents.lines().enumerate() {
             let line_number = line_num + 1;
 
@@ -220,6 +225,33 @@ pub fn run_filetest_with_line_filter(
     std::collections::BTreeMap<String, bool>,
     bool,
 )> {
+    if std::fs::read_to_string(path)
+        .map(|s| s.lines().any(|l| l.trim() == "// test parse-error"))
+        .unwrap_or(false)
+    {
+        let (result, stats, unexpected_pass_lines, failed_lines) =
+            test_parse_error::run_parse_error_test(path)?;
+        let mut up_map = BTreeMap::new();
+        let mut fl_map = BTreeMap::new();
+        for t in targets {
+            if !unexpected_pass_lines.is_empty() {
+                up_map.insert(t.name(), unexpected_pass_lines.clone());
+            }
+            if !failed_lines.is_empty() {
+                fl_map.insert(t.name(), failed_lines.clone());
+            }
+        }
+        return Ok((
+            result,
+            BTreeMap::new(),
+            stats,
+            up_map,
+            fl_map,
+            BTreeMap::new(),
+            false,
+        ));
+    }
+
     // Count test cases early, even if parsing fails later
     let early_stats = count_test_cases(path, line_filter);
 
@@ -1338,7 +1370,7 @@ pub fn run(
             };
             if colors::should_color() {
                 println!(
-                    "scripts/glsl-filetests.sh --target {} {}{}{}",
+                    "scripts/filetests.sh --target {} {}{}{}",
                     failed_test.target,
                     colors::DIM,
                     test_path,
@@ -1346,7 +1378,7 @@ pub fn run(
                 );
             } else {
                 println!(
-                    "scripts/glsl-filetests.sh --target {} {test_path}",
+                    "scripts/filetests.sh --target {} {test_path}",
                     failed_test.target
                 );
             }

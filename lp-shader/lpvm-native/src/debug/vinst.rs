@@ -448,6 +448,7 @@ fn parse_def_instruction(
                 // Textual VInst snapshot format does not encode sret; tests use defaults.
                 callee_uses_sret: false,
                 caller_passes_sret_ptr: false,
+                caller_sret_vm_abi_swap: false,
                 src_op: SRC_OP_NONE,
             })
         }
@@ -635,6 +636,7 @@ fn parse_nodef_instruction(
             rets: rets_slice,
             callee_uses_sret: false,
             caller_passes_sret_ptr: false,
+            caller_sret_vm_abi_swap: false,
             src_op: SRC_OP_NONE,
         });
     }

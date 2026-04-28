@@ -141,7 +141,7 @@ a logic bug.
 
 **Symptom:** Tests marked `@unimplemented(backend=wasm)` now pass on wasm.q32.
 
-**Fix:** Run `scripts/glsl-filetests.sh --fix` to strip markers.
+**Fix:** Run `scripts/filetests.sh --fix` to strip markers.
 
 **Priority:** P2 — no code change needed, just test maintenance.
 

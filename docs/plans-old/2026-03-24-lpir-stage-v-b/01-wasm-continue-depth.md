@@ -70,9 +70,9 @@ doesn't nest inside the loop body). The real validation is the filetests:
 
 ```bash
 cargo test -p lps-wasm -q
-scripts/glsl-filetests.sh control/for/continue_nested.glsl
-scripts/glsl-filetests.sh control/while/continue.glsl
-scripts/glsl-filetests.sh control/while/nested_for.glsl
+scripts/filetests.sh control/for/continue_nested.glsl
+scripts/filetests.sh control/while/continue.glsl
+scripts/filetests.sh control/while/nested_for.glsl
 ```
 
 All should pass on both `cranelift.q32` and `wasm.q32`.

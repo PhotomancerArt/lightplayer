@@ -143,7 +143,7 @@ Struct sites get `info.struct_members()` etc.
 - `lower_call::record_call_result_aggregate`'s manual array-shape
   extraction → replaced by `AggregateInfo::from_layout(layout, slot)`.
 - `LowerCtx::aggregate_info_for_subscript_root`'s `flatten_array_type_shape`
-  + `aggregate_size_and_align` → replaced by `aggregate_layout`.
+  - `aggregate_size_and_align` → replaced by `aggregate_layout`.
 - `naga_util::array_type_flat_components_for_value_coercions` and
   `array_ty_pointer_arg_ir_type` keep their existing roles; they're
   array-leaf utilities, not ABI deciders.
@@ -163,11 +163,11 @@ Point p = Point(1.0, 2.0);
 2. `LowerCtx::new`'s "init pass" sees `var.init = Some(compose_h)`,
    the local has an aggregate entry, so dispatches to
    `lower_aggregate_write::store_lps_value_into_slot(ctx, base=&slot,
-   offset=0, lps_ty=Struct{Point}, expr=compose_h)`.
+offset=0, lps_ty=Struct{Point}, expr=compose_h)`.
 3. The slot-write primitive sees `LpsType::Struct`, walks
    `Compose.components` in lockstep with `layout.members`, and for each
    member calls itself recursively with `(base, member.byte_offset,
-   member.lps_ty, component_h)`. Scalar leaves bottom out into
+member.lps_ty, component_h)`. Scalar leaves bottom out into
    `ensure_expr_vec` + typed `Store` per IR component.
 
 ### Lowering `p.x`
@@ -256,9 +256,9 @@ Two new things in the callee body for M2:
 
 - **`output = input;`** — whole-struct assignment via `out` pointer +
   by-value `in`. `lower_stmt::Statement::Store { pointer = output,
-  value = Load(input_slot) }` →
+value = Load(input_slot) }` →
   `store_lps_value_into_slot(ctx, base=output_param_ptr, offset=0,
-  lps_ty=Struct{Circle}, expr=Load(input))`. The slot-write primitive's
+lps_ty=Struct{Circle}, expr=Load(input))`. The slot-write primitive's
   "memcpy fast path" recognises that the source is an existing
   slot-backed struct of matching layout and emits a single
   `Memcpy { dst=output_param_ptr, src=&input_slot, size }`.
@@ -267,8 +267,8 @@ Two new things in the callee body for M2:
   `Statement::Store { pointer = AccessIndex(output, member_idx), value }`.
   Resolve `pointer_args.get(arg_i_for_output)` → `Handle<Type>` of the
   pointee struct. Look up `aggregate_layout(pointee).Struct.members[
-  member_idx]` for offset and IR types. Emit per-IR-component `Store
-  { base=output_param_ptr, offset=member.byte_offset + j*4, value }`.
+member_idx]` for offset and IR types. Emit per-IR-component `Store
+{ base=output_param_ptr, offset=member.byte_offset + j*4, value }`.
 
 ### Lowering uniform struct member access (already works — preserved)
 
@@ -279,24 +279,24 @@ called for uniforms — uniforms are read via VMContext, not `aggregate_map`).
 
 ## Module / file boundaries
 
-| File                                              | Change                                                                                               |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `lps-frontend/src/naga_util.rs`                   | + `naga_type_to_ir_types` Struct arm; + `aggregate_layout` (replaces 5 inline checks); + AccessIndex on struct value in `expr_type_inner`/`expr_scalar_kind`; rewrite `func_return_ir_types_with_sret` to use `aggregate_layout` |
-| `lps-frontend/src/lower_ctx.rs`                   | `AggregateInfo { layout }`; struct-arm in `LowerCtx::new` param loop (mirrors `PendingInArrayValueArg`); struct-arm in local loop (allocate slot from layout); `scan_param_argument_indices` guards struct value params; `aggregate_info_for_subscript_root` uses `aggregate_layout` |
-| `lps-frontend/src/lower_aggregate_write.rs` (NEW) | `store_lps_value_into_slot(ctx, base, offset, lps_ty, expr_h)` — single source of truth for "write LpsType into (base, offset)" with slot-source memcpy fast path. Used by array init (refactor) and struct compose / store. |
-| `lps-frontend/src/lower_struct.rs` (NEW)          | Thin layer: `load_struct_member_to_vregs(ctx, info, member_idx) -> VRegVec`, `materialise_struct_rvalue_to_temp_slot(ctx, expr_h) -> AggregateInfo` (for call args / nested compose with no destination slot). Whole-struct memcpy uses `LpirOp::Memcpy` directly. |
-| `lps-frontend/src/lower_array.rs`                 | `lower_array_initializer` rewritten on top of `store_lps_value_into_slot`; `zero_fill_array_slot` keeps existing shape (no expr); `aggregate_storage_base_vreg` unchanged. |
+| File                                              | Change                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lps-frontend/src/naga_util.rs`                   | + `naga_type_to_ir_types` Struct arm; + `aggregate_layout` (replaces 5 inline checks); + AccessIndex on struct value in `expr_type_inner`/`expr_scalar_kind`; rewrite `func_return_ir_types_with_sret` to use `aggregate_layout`                                                                                                                                        |
+| `lps-frontend/src/lower_ctx.rs`                   | `AggregateInfo { layout }`; struct-arm in `LowerCtx::new` param loop (mirrors `PendingInArrayValueArg`); struct-arm in local loop (allocate slot from layout); `scan_param_argument_indices` guards struct value params; `aggregate_info_for_subscript_root` uses `aggregate_layout`                                                                                    |
+| `lps-frontend/src/lower_aggregate_write.rs` (NEW) | `store_lps_value_into_slot(ctx, base, offset, lps_ty, expr_h)` — single source of truth for "write LpsType into (base, offset)" with slot-source memcpy fast path. Used by array init (refactor) and struct compose / store.                                                                                                                                            |
+| `lps-frontend/src/lower_struct.rs` (NEW)          | Thin layer: `load_struct_member_to_vregs(ctx, info, member_idx) -> VRegVec`, `materialise_struct_rvalue_to_temp_slot(ctx, expr_h) -> AggregateInfo` (for call args / nested compose with no destination slot). Whole-struct memcpy uses `LpirOp::Memcpy` directly.                                                                                                      |
+| `lps-frontend/src/lower_array.rs`                 | `lower_array_initializer` rewritten on top of `store_lps_value_into_slot`; `zero_fill_array_slot` keeps existing shape (no expr); `aggregate_storage_base_vreg` unchanged.                                                                                                                                                                                              |
 | `lps-frontend/src/lower_expr.rs`                  | `Expression::AccessIndex` arm for `LocalVariable(struct)` and `FunctionArgument(struct via Pointer)`; `Expression::Load` of a struct local → `UnsupportedExpression` (Q4) so callers must dispatch on `aggregate_map`; `Expression::Compose { ty: Struct }` writes into a destination slot (when caller supplies one) else allocates a temp slot and returns a pointer. |
-| `lps-frontend/src/lower_stmt.rs`                  | `Statement::Store` of a whole struct local / via `out` pointer of a struct → `store_lps_value_into_slot` (memcpy fast path picks up slot-source); `Statement::Store` of a struct member on a local → typed `Store` at member offset; `Statement::Return` with struct value → existing `write_aggregate_return_into_sret`, now layout-driven. |
-| `lps-frontend/src/lower_access.rs`                | New arm for member-store through `inout`/`out` struct pointer (uses `pointer_args` + `aggregate_layout`). |
-| `lps-frontend/src/lower_call.rs`                  | `record_call_result_aggregate` and `write_aggregate_return_into_sret` rewritten to use `aggregate_layout`; arg-loop "is aggregate" check replaces `matches!(callee_inner, TypeInner::Array { .. })` with `aggregate_layout(callee_arg.ty).is_some()`; struct rvalue arg handled by routing through `materialise_struct_rvalue_to_temp_slot`. |
-| `lps-frontend/src/lib.rs`                         | `mod lower_struct;`, `mod lower_aggregate_write;`. |
+| `lps-frontend/src/lower_stmt.rs`                  | `Statement::Store` of a whole struct local / via `out` pointer of a struct → `store_lps_value_into_slot` (memcpy fast path picks up slot-source); `Statement::Store` of a struct member on a local → typed `Store` at member offset; `Statement::Return` with struct value → existing `write_aggregate_return_into_sret`, now layout-driven.                            |
+| `lps-frontend/src/lower_access.rs`                | New arm for member-store through `inout`/`out` struct pointer (uses `pointer_args` + `aggregate_layout`).                                                                                                                                                                                                                                                               |
+| `lps-frontend/src/lower_call.rs`                  | `record_call_result_aggregate` and `write_aggregate_return_into_sret` rewritten to use `aggregate_layout`; arg-loop "is aggregate" check replaces `matches!(callee_inner, TypeInner::Array { .. })` with `aggregate_layout(callee_arg.ty).is_some()`; struct rvalue arg handled by routing through `materialise_struct_rvalue_to_temp_slot`.                            |
+| `lps-frontend/src/lib.rs`                         | `mod lower_struct;`, `mod lower_aggregate_write;`.                                                                                                                                                                                                                                                                                                                      |
 
 ## Filetest enablement (M2 acceptance)
 
 After the lowering work lands:
 
-1. From the workspace root, run `scripts/glsl-filetests.sh --fix` (or
+1. From the workspace root, run `scripts/filetests.sh --fix` (or
    `LP_FIX_XFAIL=1`) against the struct corpus — same runner as
    `just test-filetests`:
    - `lps-filetests/filetests/struct/*.glsl`
@@ -319,7 +319,7 @@ After the lowering work lands:
   ABI-decision sites that move to `aggregate_layout`.
 - **R-B. `Compose { ty: Vector }` inside `Compose { ty: Struct }`.**
   E.g. `Color(vec3(r,g,b), 1.0)`. `store_lps_value_into_slot` dispatches
-  on the *member's* `LpsType`, not on the component's expression shape;
+  on the _member's_ `LpsType`, not on the component's expression shape;
   vector members fall into the scalar-leaf path and emit per-component
   Stores at `member.byte_offset + j*4`. Confirmed safe.
 - **R-C. Struct rvalue at non-call sites we forgot.** Anywhere a struct
@@ -358,12 +358,12 @@ file beyond this design doc):
    `lower_expr` AccessIndex/Compose/Load on structs; `lower_stmt`
    whole-struct + member store; `lower_access` member-store through
    pointer. Print-IR sanity check on `constructor-nested.glsl`
-   (`scripts/glsl-filetests.sh --debug …`). Acceptance: struct corpus
+   (`scripts/filetests.sh --debug …`). Acceptance: struct corpus
    subset that does not require struct call ABI passes on default
    targets.
 4. **05 — Struct call ABI.** `lower_call` arg/result for structs;
    `func_return_ir_types_with_sret` struct path; struct rvalue temp-slot
    materialisation. Acceptance: `function/param-struct.glsl`,
    `function/return-struct.glsl` on default targets.
-5. **06 — Enable + sweep.** `scripts/glsl-filetests.sh --fix` on the
+5. **06 — Enable + sweep.** `scripts/filetests.sh --fix` on the
    struct corpus; resolve fallout; update roadmap + `summary.md`.

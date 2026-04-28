@@ -627,6 +627,12 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                     ))
                 })?;
 
+                if !info.vmctx_backed {
+                    return Err(LowerError::UnsupportedStatement(String::from(
+                        "cannot store to synthetic Naga sampler stub",
+                    )));
+                }
+
                 if info.is_uniform {
                     return Err(LowerError::UnsupportedStatement(String::from(
                         "cannot write to uniform variable",

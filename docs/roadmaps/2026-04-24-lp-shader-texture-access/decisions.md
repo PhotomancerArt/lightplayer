@@ -65,3 +65,13 @@
 - **Rejected alternatives:** Only add `lp-shader` API tests; rely on large image
   sidecars from the start.
 
+#### Filtered sampling format matrix (shipped)
+
+- **Decision:** `texelFetch` supports `R16Unorm`, `Rgb16Unorm`, and `Rgba16Unorm`;
+  filtered `texture()` supports `R16Unorm` and `Rgba16Unorm` only. `Rgb16Unorm`
+  filtered sampling is rejected at lowering until a dedicated path exists.
+- **Why:** Keeps filtered builtins aligned with implemented format lowering;
+  RGB16 texel fetch remains useful without committing to filtered RGB16 yet.
+- **Rejected alternatives:** Silently promote RGB16 to RGBA at sample time;
+  claim parity with a wgpu backend that does not exist yet.
+

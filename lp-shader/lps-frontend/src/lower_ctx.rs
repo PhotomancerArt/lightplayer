@@ -16,6 +16,7 @@ use smallvec::SmallVec;
 use crate::lower_error::LowerError;
 use crate::lower_expr;
 use crate::readonly_in_scan::in_aggregate_param_read_only;
+use lps_shared::TextureBindingSpec;
 
 /// See [`readonly_in_scan::local_for_in_aggregate_value_param_optional`].
 pub(crate) use crate::readonly_in_scan::local_for_in_aggregate_value_param_optional;
@@ -76,6 +77,9 @@ pub(crate) struct GlobalVarInfo {
     pub component_count: u32,
     /// Whether this is a uniform (read-only) variable.
     pub is_uniform: bool,
+    /// When false, no VMContext bytes are reserved; loads must not use [`Self::byte_offset`].
+    /// Parse-synthesized `__lp_samp_*` Naga sampler globals use this (see `parse.rs`).
+    pub vmctx_backed: bool,
 }
 
 /// Map from Naga GlobalVariable handle to its lowering info.
@@ -279,12 +283,16 @@ pub(crate) struct LowerCtx<'a> {
     pub return_types: Vec<IrType>,
     /// Present when the shader function returns an aggregate by sret (LPIR void return, memcpy to `addr`).
     pub sret: Option<SretCtx>,
-    /// Map from Naga GlobalVariable handle to (vmctx_byte_offset, component_count, is_uniform).
+    /// Map from Naga GlobalVariable handle to VMContext / lowering info.
     pub(crate) global_map: GlobalVarMap,
     /// [`Expression::index`] → deferred uniform array field / indexed element (see [`UniformVmctxDeferred`]).
     pub(crate) uniform_vmctx_deferred: BTreeMap<usize, UniformVmctxDeferred>,
     /// `uniform Block { } instance` locals → backing [`GlobalVariable`] (uniform).
     pub(crate) uniform_instance_locals: BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
+    /// Compile-time [`TextureBindingSpec`] keyed by sampler uniform name ([`crate::LowerOptions`]).
+    pub(crate) texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+    /// Mirrors [`crate::LowerOptions::texel_fetch_bounds`] for `texelFetch` lowering.
+    pub(crate) texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -296,6 +304,8 @@ impl<'a> LowerCtx<'a> {
         import_map: &BTreeMap<String, CalleeRef>,
         lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
         global_map: GlobalVarMap,
+        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+        texel_fetch_bounds: lpir::TexelFetchBoundsMode,
     ) -> Result<Self, LowerError> {
         let return_abi = crate::naga_util::func_return_ir_types_with_sret(
             module,
@@ -567,6 +577,8 @@ impl<'a> LowerCtx<'a> {
             global_map,
             uniform_vmctx_deferred: BTreeMap::new(),
             uniform_instance_locals,
+            texture_specs,
+            texel_fetch_bounds,
         };
 
         for (lv_handle, var) in func.local_variables.iter() {

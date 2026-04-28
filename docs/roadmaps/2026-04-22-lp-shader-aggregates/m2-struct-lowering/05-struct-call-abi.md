@@ -16,7 +16,7 @@ Land struct support across function-call boundaries:
   aggregates).
 - Struct rvalue (Compose / CallResult) appearing as a direct call arg →
   materialise into a temp slot via `lower_struct::
-  materialise_aggregate_rvalue_to_temp_slot`, pass that slot's pointer.
+materialise_aggregate_rvalue_to_temp_slot`, pass that slot's pointer.
 
 Acceptance: `function/param-struct.glsl` and `function/return-struct.glsl`
 pass on `wasm.q32`, `rv32c.q32`, `rv32n.q32`.
@@ -55,7 +55,7 @@ In `lp-shader/lps-frontend/src/lower_call.rs::lower_user_call`'s arg loop:
 The existing `TypeInner::Pointer { base, .. }` branch handles
 `call_arg_pointer_local` + `aggregate_map.get(&lv)` and pushes the
 slot's base address. Phase 04 added struct entries to `aggregate_map`,
-so this branch *should* now Just Work for struct `inout`/`out`. Verify
+so this branch _should_ now Just Work for struct `inout`/`out`. Verify
 by reading the branch and confirming nothing assumes the pointee is
 array-shaped. If it does (e.g. unconditionally calls a flatten or
 size-by-element-count helper), fix.
@@ -177,7 +177,7 @@ emits the Memcpy from the pointer arg. Verify by reading the IR for
 one struct param test:
 
 ```sh
-./scripts/glsl-filetests.sh --debug function/param-struct.glsl
+./scripts/filetests.sh --debug function/param-struct.glsl
 ```
 
 Expected: `circle_area(Circle c) { … }` callee starts with one
@@ -202,7 +202,7 @@ Walk through with the print-IR output:
 
 - Outer function: 1 sret arg, 2 struct slots (`red`, `blue`).
 - Inner call `blend_colors(red, blue, 0.5)`:
-  - Caller allocates *call result slot* for the inner call's sret dest.
+  - Caller allocates _call result slot_ for the inner call's sret dest.
   - Pushes `[vmctx, &call_result_slot, &red_slot, &blue_slot, factor]`.
 - `Statement::Return { value: Some(call_result_h) }`:
   - `write_aggregate_return_into_sret` sees `CallResult`, looks up
@@ -223,12 +223,12 @@ Then targeted:
 
 ```sh
 cargo test -p lps-frontend
-./scripts/glsl-filetests.sh struct/
-./scripts/glsl-filetests.sh function/param-struct.glsl
-./scripts/glsl-filetests.sh function/return-struct.glsl
-./scripts/glsl-filetests.sh function/return-array.glsl
-./scripts/glsl-filetests.sh function/param-array.glsl
-./scripts/glsl-filetests.sh array/
+./scripts/filetests.sh struct/
+./scripts/filetests.sh function/param-struct.glsl
+./scripts/filetests.sh function/return-struct.glsl
+./scripts/filetests.sh function/return-array.glsl
+./scripts/filetests.sh function/param-array.glsl
+./scripts/filetests.sh array/
 ```
 
 **Required:**
@@ -236,7 +236,7 @@ cargo test -p lps-frontend
 - All `function/param-struct.glsl`, `function/return-struct.glsl`, and
   `struct/*.glsl` tests pass on `wasm.q32`, `rv32c.q32`, `rv32n.q32`.
   Tests that previously had `// @unimplemented(wasm.q32 | rv32c.q32 |
-  rv32n.q32)` will now show "unexpected pass" — that's expected,
+rv32n.q32)` will now show "unexpected pass" — that's expected,
   phase 06 toggles the markers.
 - `rv32c.q32` and `rv32n.q32` must show identical pass/fail sets on the
   full struct corpus. Divergence = backend bug to fix in this phase.

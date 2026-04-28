@@ -122,15 +122,15 @@ fn lower_expr_vec_uncached(
             }
             Expression::GlobalVariable(gv_handle) => {
                 // Load from a global variable (uniform or private global).
-                let (byte_offset, ty) = {
-                    let Some(info) = ctx.global_map.get(gv_handle) else {
-                        return Err(LowerError::Internal(format!(
-                            "GlobalVariable {gv_handle:?} not found in global_map"
-                        )));
-                    };
-                    (info.byte_offset, info.ty.clone())
+                let Some(info) = ctx.global_map.get(gv_handle).cloned() else {
+                    return Err(LowerError::Internal(format!(
+                        "GlobalVariable {gv_handle:?} not found in global_map"
+                    )));
                 };
-                load_lps_value_from_vmctx(ctx, byte_offset, &ty)
+                if !info.vmctx_backed {
+                    return load_lp_synthetic_naga_sampler_stub(ctx, &info.ty);
+                }
+                load_lps_value_from_vmctx(ctx, info.byte_offset, &info.ty)
             }
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-local pointer",
@@ -1141,6 +1141,57 @@ fn lower_expr_vec_uncached(
         } => lower_math::lower_math_vec(ctx, *fun, *arg, *arg1, *arg2, *arg3),
         Expression::Relational { fun, argument } => lower_relational(ctx, *fun, *argument),
         Expression::ArrayLength(array_h) => crate::lower_array::lower_array_length(ctx, *array_h),
+        Expression::ImageLoad {
+            image,
+            coordinate,
+            array_index,
+            sample,
+            level,
+        } => {
+            if sample.is_some() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "texelFetch: multisampled image loads are not supported",
+                )));
+            }
+            if array_index.is_some() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "texelFetch: layered/arrayed image loads are not supported",
+                )));
+            }
+            let Some(level_expr) = level else {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "imageLoad(storage) not supported",
+                )));
+            };
+            crate::lower_texture::lower_image_load_texel_fetch(
+                ctx,
+                *image,
+                *coordinate,
+                *level_expr,
+            )
+        }
+        Expression::ImageSample {
+            image,
+            sampler,
+            gather,
+            coordinate,
+            array_index,
+            offset,
+            level,
+            depth_ref,
+            clamp_to_edge,
+        } => crate::lower_texture::lower_image_sample_texture(
+            ctx,
+            *image,
+            *sampler,
+            *gather,
+            *coordinate,
+            *array_index,
+            *offset,
+            *level,
+            *depth_ref,
+            *clamp_to_edge,
+        ),
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
         ))),
@@ -1733,6 +1784,24 @@ fn struct_member_start_offset_u32(
     )))
 }
 
+/// Stub value for parse-synthesized `__lp_samp_*` globals (no VMContext slot; lowering ignores it
+/// for `texture()` except when Naga still references the handle).
+fn load_lp_synthetic_naga_sampler_stub(
+    ctx: &mut LowerCtx<'_>,
+    ty: &LpsType,
+) -> Result<VRegVec, LowerError> {
+    match ty {
+        LpsType::UInt | LpsType::Int | LpsType::Bool => {
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 { dst, value: 0 });
+            Ok(smallvec::smallvec![dst])
+        }
+        _ => Err(LowerError::Internal(format!(
+            "synthetic Naga sampler global: unexpected LPS type {ty:?}"
+        ))),
+    }
+}
+
 /// Load a value of `ty` from VMContext at `base_byte_offset` using std430 member layout.
 fn load_lps_value_from_vmctx(
     ctx: &mut LowerCtx<'_>,
@@ -1799,6 +1868,19 @@ pub(crate) fn load_lps_value_from_vmctx_with_base(
             })? as u32;
             let mut out = VRegVec::new();
             for i in 0..n {
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Load {
+                    dst,
+                    base,
+                    offset: base_byte_offset.wrapping_add(i * 4),
+                });
+                out.push(dst);
+            }
+            Ok(out)
+        }
+        LpsType::Texture2D => {
+            let mut out = VRegVec::new();
+            for i in 0..4 {
                 let dst = ctx.fb.alloc_vreg(IrType::I32);
                 ctx.fb.push(LpirOp::Load {
                     dst,

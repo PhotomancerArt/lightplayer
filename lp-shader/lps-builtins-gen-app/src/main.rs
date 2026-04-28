@@ -60,6 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     builtins
         .extend(discover_builtins(&vm_dir, &builtins_dir).expect("Failed to discover vm builtins"));
 
+    let texture_dir = builtins_dir.join("texture");
+    builtins.extend(
+        discover_builtins(&texture_dir, &builtins_dir)
+            .expect("Failed to discover texture builtins"),
+    );
+
     let glsl_map_path = workspace_root
         .join("lps-builtin-ids")
         .join("src")
@@ -200,6 +206,7 @@ fn generate_glsl_builtin_mapping(
 //! - `glsl_q32_math_builtin_id`: `@glsl::*` scalar imports.
 //! - `lpir_q32_builtin_id`: `@lpir::*` library ops (e.g. `sqrt`).
 //! - `glsl_lpfn_q32_builtin_id`: `lpfn_*` overloads keyed by parameter types.
+//! - `texture_q32_builtin_id`: `@texture::*` sampler builtins (logical vec4 return via out-pointer).
 //!
 //! Regenerate: `cargo run -p lps-builtins-gen-app` or `scripts/build-builtins.sh`
 
@@ -290,6 +297,24 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
 
     out.push_str(
         "        _ => None,\n    }\n}\n\n\
+         /// Map `@texture::*` import base name + user-visible argument count to a Q32 builtin.\n\
+         /// Frontend may suffix the name with `_<naga id>` — strip that suffix before lookup.\n\
+         pub fn texture_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {\n\
+         match (name, arg_count) {\n",
+    );
+
+    for builtin in builtins {
+        if builtin.builtin_module != "texture" {
+            continue;
+        }
+        out.push_str(&format!(
+            "        (\"{}\", {}) => Some(BuiltinId::{}),\n",
+            builtin.builtin_fn_name, builtin.user_visible_param_count, builtin.enum_variant
+        ));
+    }
+
+    out.push_str(
+        "        _ => None,\n    }\n}\n\n\
          /// Map `lpfn_*` name + parameter type list to the Q32 `BuiltinId`.\n\
          pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {\n\
          match (name, params) {\n",
@@ -368,13 +393,19 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         .find(|b| b.builtin_module == "vm" && b.builtin_fn_name == "get_fuel")
         .map(|b| b.enum_variant.as_str())
         .expect("vm get_fuel builtin");
+    let texture_2d_v = builtins
+        .iter()
+        .find(|b| b.symbol_name == "__lp_texture2d_rgba16_unorm_q32")
+        .map(|b| b.enum_variant.as_str())
+        .expect("texture2d rgba16 unorm builtin");
 
     out.push_str(&format!(
-        "#[cfg(test)]\nmod glsl_builtin_mapping_tests {{\n    use crate::BuiltinId;\n    use super::{{glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, vm_q32_builtin_id, GlslParamKind}};\n\n    #[test]\n    fn q32_sin() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"sin\", 1),\n            Some(BuiltinId::{sin_v})\n        );\n    }}\n\n    #[test]\n    fn q32_atan_two_args_is_atan2_import() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"atan\", 2),\n            Some(BuiltinId::{atan2_v})\n        );\n    }}\n\n    #[test]\n    fn lpir_sqrt() {{\n        assert_eq!(lpir_q32_builtin_id(\"sqrt\", 1), Some(BuiltinId::{sqrt_v}));\n    }}\n\n    #[test]\n    fn vm_get_fuel() {{\n        assert_eq!(\n            vm_q32_builtin_id(\"__lp_get_fuel\", 0),\n            Some(BuiltinId::{get_fuel_v})\n        );\n    }}\n\n    #[test]\n    fn lpfn_fbm_vec2() {{\n        assert_eq!(\n            glsl_lpfn_q32_builtin_id(\n                \"lpfn_fbm\",\n                &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],\n            ),\n            Some(BuiltinId::{fbm_v})\n        );\n    }}\n}}\n",
+        "#[cfg(test)]\nmod glsl_builtin_mapping_tests {{\n    use crate::BuiltinId;\n    use super::{{glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id, GlslParamKind}};\n\n    #[test]\n    fn q32_sin() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"sin\", 1),\n            Some(BuiltinId::{sin_v})\n        );\n    }}\n\n    #[test]\n    fn q32_atan_two_args_is_atan2_import() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"atan\", 2),\n            Some(BuiltinId::{atan2_v})\n        );\n    }}\n\n    #[test]\n    fn lpir_sqrt() {{\n        assert_eq!(lpir_q32_builtin_id(\"sqrt\", 1), Some(BuiltinId::{sqrt_v}));\n    }}\n\n    #[test]\n    fn vm_get_fuel() {{\n        assert_eq!(\n            vm_q32_builtin_id(\"__lp_get_fuel\", 0),\n            Some(BuiltinId::{get_fuel_v})\n        );\n    }}\n\n    #[test]\n    fn texture_sampler_builtin_id_generation() {{\n        assert_eq!(\n            texture_q32_builtin_id(\"texture2d_rgba16_unorm\", 10),\n            Some(BuiltinId::{texture_2d_v})\n        );\n    }}\n\n    #[test]\n    fn lpfn_fbm_vec2() {{\n        assert_eq!(\n            glsl_lpfn_q32_builtin_id(\n                \"lpfn_fbm\",\n                &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],\n            ),\n            Some(BuiltinId::{fbm_v})\n        );\n    }}\n}}\n",
         sin_v = sin_v,
         atan2_v = atan2_v,
         sqrt_v = sqrt_v,
         get_fuel_v = get_fuel_v,
+        texture_2d_v = texture_2d_v,
         fbm_v = fbm_v
     ));
 
@@ -545,6 +576,8 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
             ("glsl", r)
         } else if let Some(r) = after_lp.strip_prefix("vm_") {
             ("vm", r)
+        } else if after_lp.starts_with("texture") {
+            ("texture", after_lp)
         } else {
             let r = after_lp.strip_prefix("lpfn_")?;
             ("lpfn", r)
@@ -579,6 +612,7 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
             "glsl" => "LpGlsl",
             "lpir" => "LpLpir",
             "vm" => "LpVm",
+            "texture" => "LpTex",
             "lpfn" => "LpLpfn",
             _ => return None,
         };
@@ -614,7 +648,11 @@ fn rust_signature_contains_vmcontext(rust_sig: &str) -> bool {
 fn format_rust_function_signature(func: &ItemFn) -> String {
     use quote::ToTokens;
 
-    let mut sig = String::from("extern \"C\" fn(");
+    let mut sig = if func.sig.unsafety.is_some() {
+        String::from("unsafe extern \"C\" fn(")
+    } else {
+        String::from("extern \"C\" fn(")
+    };
 
     // Format parameters
     let mut params = Vec::new();
@@ -831,6 +869,7 @@ pub enum BuiltinId {
                 "lpir" => "Module::Lpir",
                 "glsl" => "Module::Glsl",
                 "vm" => "Module::Vm",
+                "texture" => "Module::Texture",
                 "lpfn" => "Module::Lpfn",
                 other => panic!("unknown builtin_module: {other}"),
             };
@@ -901,6 +940,7 @@ pub enum BuiltinId {
     output.push_str("    Lpir,\n");
     output.push_str("    Glsl,\n");
     output.push_str("    Vm,\n");
+    output.push_str("    Texture,\n");
     output.push_str("    Lpfn,\n");
     output.push_str("}\n\n");
     output.push_str("/// Float ABI for mode-specific builtins.\n");
@@ -914,6 +954,7 @@ pub enum BuiltinId {
     output.push_str("pub use glsl_builtin_mapping::glsl_lpfn_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::glsl_q32_math_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::lpir_q32_builtin_id;\n");
+    output.push_str("pub use glsl_builtin_mapping::texture_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::vm_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::GlslParamKind;\n");
 
@@ -1037,6 +1078,7 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
     let mut glsl_files: BTreeSet<String> = BTreeSet::new();
     let mut lpir_files: BTreeSet<String> = BTreeSet::new();
     let mut vm_files: BTreeSet<String> = BTreeSet::new();
+    let mut texture_files: BTreeSet<String> = BTreeSet::new();
     let mut lpfn_roots: BTreeSet<String> = BTreeSet::new();
 
     for builtin in builtins {
@@ -1050,6 +1092,9 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
             }
             Some("vm") if components.len() >= 2 => {
                 vm_files.insert(components[1].to_string());
+            }
+            Some("texture") if components.len() >= 2 => {
+                texture_files.insert(components[1].to_string());
             }
             Some("lpfn") if components.len() >= 2 => {
                 lpfn_roots.insert(format!("lpfn::{}", components[1]));
@@ -1075,6 +1120,12 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
         import_parts.push(format!(
             "vm::{{{}}}",
             vm_files.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !texture_files.is_empty() {
+        import_parts.push(format!(
+            "texture::{{{}}}",
+            texture_files.into_iter().collect::<Vec<_>>().join(", ")
         ));
     }
     import_parts.extend(lpfn_roots);

@@ -8,8 +8,8 @@
 - **Host `Memory`:** Create `wasmtime::Memory` in the `Store` with sufficient min pages; pass the
   same memory into **both** module instantiations.
 - **Linker:** Instantiate `builtins.wasm` with `env` memory import; obtain `Extern` values for each
-  builtin export; define them on a `Linker` under `"builtins"` / `BuiltinId::name()`; instantiate *
-  *shader** module with `env.memory` + linked builtins.
+  builtin export; define them on a `Linker` under `"builtins"` / `BuiltinId::name()`; instantiate \*
+  \*shader\*\* module with `env.memory` + linked builtins.
 - **API:** `glsl_wasm` may need to return metadata about required imports, or the runner always
   provides the full builtins set — align with “register all exports from builtins instance”
   approach.
@@ -30,7 +30,7 @@
 
 ```bash
 cd lps && cargo test -p lps-filetests -- --ignored   # if filetests use ignored flag; else normal
-./scripts/glsl-filetests.sh --target wasm.q32 builtins/
+./scripts/filetests.sh --target wasm.q32 builtins/
 ```
 
 Smoke: `cargo test -p lps-wasm --test q32_builtin_link` (loads `lps_builtins_wasm.wasm`,

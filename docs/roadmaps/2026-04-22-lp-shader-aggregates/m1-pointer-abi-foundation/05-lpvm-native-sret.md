@@ -156,7 +156,7 @@ just test-glsl                 # lpvm-native is in this set
 ```
 
 Filetest-level rv32 behavioural failures (e.g.
-`scripts/glsl-filetests.sh --target rv32.q32c`) may exist before P9
+`scripts/filetests.sh --target rv32.q32c`) may exist before P9
 re-baselines. Report whether failures are codegen bugs or CHECK-line
 mismatches.
 

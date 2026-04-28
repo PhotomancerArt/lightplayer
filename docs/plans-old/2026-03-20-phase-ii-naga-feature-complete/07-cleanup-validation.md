@@ -42,7 +42,7 @@ For each failing test that uses out-of-scope features, add:
 Use the `--fix` flag to clean up any unexpected passes:
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 --fix
+scripts/filetests.sh --target wasm.q32 --fix
 ```
 
 ### 3. Fix warnings
@@ -64,7 +64,7 @@ cargo +nightly fmt
 ### 5. Verify no Cranelift regression
 
 ```bash
-scripts/glsl-filetests.sh --target cranelift.q32
+scripts/filetests.sh --target cranelift.q32
 ```
 
 All existing Cranelift tests must still pass.
@@ -72,7 +72,7 @@ All existing Cranelift tests must still pass.
 ### 6. Full wasm.q32 filetest run
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32
+scripts/filetests.sh --target wasm.q32
 ```
 
 Target: 0 unexpected failures. All failures annotated as
@@ -122,8 +122,8 @@ feat(glsl-wasm): Naga WASM backend feature complete (Phase II)
 cargo +nightly fmt
 cargo check
 cargo test
-scripts/glsl-filetests.sh --target wasm.q32
-scripts/glsl-filetests.sh --target cranelift.q32
+scripts/filetests.sh --target wasm.q32
+scripts/filetests.sh --target cranelift.q32
 just web-demo
 ```
 

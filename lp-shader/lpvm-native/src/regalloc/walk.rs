@@ -88,6 +88,7 @@ fn build_passthrough_set(
                 args,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 ..
             } => {
                 let call_args = args.vregs(vreg_pool);
@@ -98,9 +99,12 @@ fn build_passthrough_set(
                         continue;
                     }
                     let entry_reg = passthrough[idx].unwrap();
-                    let Some(target) =
-                        isa.lpir_call_arg_target_hw(*callee_uses_sret, *caller_passes_sret_ptr, i)
-                    else {
+                    let Some(target) = isa.lpir_call_arg_target_hw(
+                        *callee_uses_sret,
+                        *caller_passes_sret_ptr,
+                        *caller_sret_vm_abi_swap,
+                        i,
+                    ) else {
                         disqualified[idx] = true;
                         continue;
                     };
@@ -836,16 +840,24 @@ fn process_call(
     passthrough: &[Option<u8>],
 ) {
     let isa = func_abi.isa();
-    let (args_slice, rets_slice, callee_uses_sret, caller_passes_sret_ptr) = match inst {
-        VInst::Call {
-            args,
-            rets,
-            callee_uses_sret,
-            caller_passes_sret_ptr,
-            ..
-        } => (*args, *rets, *callee_uses_sret, *caller_passes_sret_ptr),
-        _ => unreachable!(),
-    };
+    let (args_slice, rets_slice, callee_uses_sret, caller_passes_sret_ptr, caller_sret_vm_abi_swap) =
+        match inst {
+            VInst::Call {
+                args,
+                rets,
+                callee_uses_sret,
+                caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
+                ..
+            } => (
+                *args,
+                *rets,
+                *callee_uses_sret,
+                *caller_passes_sret_ptr,
+                *caller_sret_vm_abi_swap,
+            ),
+            _ => unreachable!(),
+        };
 
     let args = args_slice.vregs(vreg_pool);
     let rets = rets_slice.vregs(vreg_pool);
@@ -997,7 +1009,12 @@ fn process_call(
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        let target_opt = isa.lpir_call_arg_target_hw(callee_uses_sret, caller_passes_sret_ptr, i);
+        let target_opt = isa.lpir_call_arg_target_hw(
+            callee_uses_sret,
+            caller_passes_sret_ptr,
+            caller_sret_vm_abi_swap,
+            i,
+        );
         let is_reg_pass = target_opt.is_some();
         let trace_target = target_opt.unwrap_or(0);
         if let Some(target) = target_opt {

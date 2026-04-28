@@ -7,12 +7,12 @@ array-of-struct field), enabling all tests, and filing deferred follow-ups.
 
 ## Files to modify
 
-| File | Changes |
-|------|---------|
-| `lp-shader/lps-frontend/src/lower_struct.rs` | Extend `peel_arrayofstruct_chain` to recognize array-of-struct fields inside outer slot-backed struct locals. |
-| `lp-shader/lps-filetests/filetests/struct/array-of-struct.glsl` | Flip `// test error` → `// test run`. Verify all 19 test cases pass. |
-| `lp-shader/lps-filetests/filetests/const/array-size/struct-field.glsl` | Remove `// @unimplemented(...)` markers for the three M3 targets. |
-| `lp-shader/lps-filetests/filetests/array/of-struct/` (new dir) | Add per-shape test files (see below). |
+| File                                                                   | Changes                                                                                                       |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `lp-shader/lps-frontend/src/lower_struct.rs`                           | Extend `peel_arrayofstruct_chain` to recognize array-of-struct fields inside outer slot-backed struct locals. |
+| `lp-shader/lps-filetests/filetests/struct/array-of-struct.glsl`        | Flip `// test error` → `// test run`. Verify all 19 test cases pass.                                          |
+| `lp-shader/lps-filetests/filetests/const/array-size/struct-field.glsl` | Remove `// @unimplemented(...)` markers for the three M3 targets.                                             |
+| `lp-shader/lps-filetests/filetests/array/of-struct/` (new dir)         | Add per-shape test files (see below).                                                                         |
 
 ## Extended peeler for outer-struct-field arrays
 
@@ -49,6 +49,7 @@ enum ArrayRoot {
 ```
 
 When the root is `StructField`:
+
 1. Get base address of `outer_local` via `aggregate_storage_base_vreg`
 2. Get member offset of `field_idx` from `outer_struct_info.layout`
 3. Add to get array base address
@@ -59,6 +60,7 @@ When the root is `StructField`:
 Create directory `lp-shader/lps-filetests/filetests/array/of-struct/` with:
 
 ### 1. `declare-init-list.glsl`
+
 ```glsl
 // test run
 // expected: 1 2 3 4
@@ -75,6 +77,7 @@ void main() {
 ```
 
 ### 2. `dynamic-index-rw.glsl`
+
 ```glsl
 // test run
 // expected: 5 6 7 8
@@ -98,6 +101,7 @@ void main() {
 ```
 
 ### 3. `inout-param.glsl`
+
 ```glsl
 // test run
 // expected: 10 20
@@ -120,6 +124,7 @@ void main() {
 ```
 
 ### 4. `out-param.glsl`
+
 ```glsl
 // test run
 // expected: 30 40
@@ -139,6 +144,7 @@ void main() {
 ```
 
 ### 5. `nested-field.glsl` (s.ps[i].x)
+
 ```glsl
 // test run
 // expected: 100 200
@@ -158,6 +164,7 @@ void main() {
 ```
 
 ### 6. `zero-init.glsl`
+
 ```glsl
 // test run
 // expected: 0 0
@@ -180,7 +187,7 @@ Current state: `// test error` (expecting compile failure).
 After Phase 2/3: should pass. Change to `// test run` and run:
 
 ```bash
-scripts/glsl-filetests.sh --file struct/array-of-struct.glsl
+scripts/filetests.sh --file struct/array-of-struct.glsl
 ```
 
 Fix any failures. The file has 19 test cases covering various patterns.
@@ -197,6 +204,7 @@ After Phase 3: remove these markers (or run with `LP_FIX_XFAIL=1` or `--fix`).
 - **Array-of-struct equality** (`ps == qs`): Add a test file
   `array/of-struct/eq.glsl` with `// @unimplemented(all)` and file bug N.
   The test:
+
   ```glsl
   // @unimplemented(all)
   // TODO(bug-NN): array-of-struct equality
@@ -222,17 +230,17 @@ After Phase 3: remove these markers (or run with `LP_FIX_XFAIL=1` or `--fix`).
 
 ```bash
 # Run all tests
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 
 # Run specific test
-scripts/glsl-filetests.sh --file struct/array-of-struct.glsl
+scripts/filetests.sh --file struct/array-of-struct.glsl
 
 # Fix xfail annotations
-scripts/glsl-filetests.sh --fix
-# Or: LP_FIX_XFAIL=1 scripts/glsl-filetests.sh
+scripts/filetests.sh --fix
+# Or: LP_FIX_XFAIL=1 scripts/filetests.sh
 
 # Run with specific target filter
-scripts/glsl-filetests.sh --target wasm.q32
+scripts/filetests.sh --target wasm.q32
 ```
 
 ## Post-M3 cleanup

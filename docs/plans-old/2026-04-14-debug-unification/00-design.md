@@ -92,7 +92,7 @@ lp-shader/lps-filetests/src/
 ┌─────────────────────────────────────────────────────────────────┐
 │                  Filetest Detail Mode                            │
 │                                                                  │
-│  scripts/glsl-filetests.sh --target rv32fa.q32 file.glsl        │
+│  scripts/filetests.sh --target rv32fa.q32 file.glsl        │
 │                                                                  │
 │  Uses same ModuleDebugInfo::render() output                     │
 │  Consistent format between shader-debug and filetests           │
@@ -120,7 +120,7 @@ pub struct ModuleDebugInfo {
 impl ModuleDebugInfo {
     /// Render all functions to a single string with clear section headers.
     pub fn render(&self, fn_filter: Option<&str>) -> String;
-    
+
     /// Get help text with copy-pasteable commands.
     pub fn help_text(&self, file_path: &str, target: &str) -> String;
 }
@@ -131,7 +131,7 @@ impl ModuleDebugInfo {
 ```rust
 pub trait LpvmModule {
     // ... existing methods ...
-    
+
     /// Compilation debug info. Returns None if not available for this backend.
     fn debug_info(&self) -> Option<&ModuleDebugInfo> {
         None
@@ -143,7 +143,7 @@ pub trait LpvmModule {
 
 The existing `compile_function` already produces debug info. Refactor to:
 
-1. Generate `interleaved` section using `render_interleaved()` 
+1. Generate `interleaved` section using `render_interleaved()`
 2. Generate `disasm` section from emitted code
 3. Generate optional `liveness` and `region` sections if requested
 4. Store in `FunctionDebugInfo` instead of raw `debug_asm` string
@@ -159,12 +159,14 @@ Use existing `compile_module_asm_text` / `disassemble_function` output:
 ### 5. CLI Command (`lp-cli shader-debug`)
 
 **Arguments:**
+
 - `--target, -t <backend>` (required): e.g., `rv32fa`, `rv32`, `rv32lp`
 - `--fn <name>` (optional): Filter to single function
 - `--float-mode` (optional): `q32` (default) or `f32`
 - `input` (required): Path to `.glsl` file
 
 **Behavior:**
+
 1. Parse GLSL, lower to LPIR
 2. Compile with specified backend
 3. Get `debug_info()` from module
@@ -172,6 +174,7 @@ Use existing `compile_module_asm_text` / `disassemble_function` output:
 5. Print help text at end with copy-pasteable examples
 
 **Output Format:**
+
 ```
 === Function: callee_identity ===
 
@@ -180,14 +183,14 @@ func @callee_identity(v1:i32) -> i32 {
     ; spill_slots: 0
     ; arg v1: a1
     ; ret: a0
-    
+
     v1 = copy v1
         ; move: a1 -> t4
         ; read: i1 <- t4
         Mov32 (unformatted)
         ; write: i2 -> t4
         ; trace: coalesce: v1 -> t29 (shared)
-        
+
     return v2
         ; read: i2 <- t4
         Ret i2
@@ -215,13 +218,14 @@ Available functions: callee_identity, test_no_preserve_across_call, ...
 ### Backward Compatibility
 
 The `shader-rv32fa` and `shader-rv32` commands will be **removed**. Users who need binary/text output should use:
+
 - Filetests for testing
 - Direct crate APIs for programmatic use
 
 ### Section Availability by Backend
 
 | Backend | interleaved | disasm | vinst | liveness | region |
-|---------|-------------|--------|-------|----------|--------|
+| ------- | ----------- | ------ | ----- | -------- | ------ |
 | rv32fa  | ✓           | ✓      | ✓     | ✓        | ✓      |
 | rv32lp  | ✗           | ✓      | ✗     | ✗        | ✗      |
 | rv32    | ✗           | ✓      | ✗     | ✗        | ✗      |
@@ -229,6 +233,7 @@ The `shader-rv32fa` and `shader-rv32` commands will be **removed**. Users who ne
 | wasm    | ✗           | ✗      | ✗     | ✗        | ✗      |
 
 Missing sections render as:
+
 ```
 --- interleaved ---
 (not available for rv32 backend - only disassembly available)
@@ -237,6 +242,7 @@ Missing sections render as:
 ### Rendering Strategy
 
 The `ModuleDebugInfo::render()` method:
+
 1. Iterates functions in module order
 2. For each function, prints name header
 3. For each section, prints subsection header with count

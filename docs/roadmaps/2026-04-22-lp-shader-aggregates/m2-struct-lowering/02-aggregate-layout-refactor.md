@@ -11,7 +11,7 @@ struct logic** — every code path that recognises `TypeInner::Array`
 today continues to recognise only arrays after this phase. All existing
 array filetests stay green.
 
-This phase exists so phase 03 (struct lowering) only adds *new* arms —
+This phase exists so phase 03 (struct lowering) only adds _new_ arms —
 it does not also have to refactor the array machinery.
 
 ### Out of scope
@@ -270,9 +270,9 @@ Then targeted filetests (from workspace root — same runner as
 `just test-filetests`):
 
 ```sh
-./scripts/glsl-filetests.sh array/
-./scripts/glsl-filetests.sh function/return-array.glsl
-./scripts/glsl-filetests.sh function/param-array.glsl
+./scripts/filetests.sh array/
+./scripts/filetests.sh function/return-array.glsl
+./scripts/filetests.sh function/param-array.glsl
 ```
 
 Equivalent from `lp-shader/`:

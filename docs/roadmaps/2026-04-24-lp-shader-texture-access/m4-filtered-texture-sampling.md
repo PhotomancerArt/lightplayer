@@ -63,8 +63,8 @@ Full plan: `00-notes.md`, `00-design.md`, numbered phase files.
 
 ## Dependencies
 
-- Depends on Milestone 3 for texture descriptor loading, format-specialized
-  fetches, and runtime validation.
+- Depends on Milestone 3c for texture descriptor loading, format-specialized
+  fetches, runtime validation, and backend filetest coverage.
 
 ## Execution strategy
 

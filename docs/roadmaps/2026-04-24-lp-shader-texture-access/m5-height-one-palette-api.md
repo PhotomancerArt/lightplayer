@@ -55,7 +55,8 @@ Small plan: `plan.md`.
 ## Dependencies
 
 - Depends on Milestone 4 for normalized `texture()` sampling and filter policy.
-- Depends on Milestone 3 for exact fetch machinery.
+- Depends on Milestone 3c for exact fetch machinery and runtime texture
+  validation.
 
 ## Execution strategy
 

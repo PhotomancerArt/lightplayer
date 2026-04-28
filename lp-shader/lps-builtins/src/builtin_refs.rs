@@ -120,6 +120,13 @@ use crate::builtins::lpir::unorm_conv_q32::{
     __lp_lpir_fto_unorm8_q32, __lp_lpir_fto_unorm16_q32, __lp_lpir_unorm8_to_f_q32,
     __lp_lpir_unorm16_to_f_q32,
 };
+use crate::builtins::texture::{
+    r16_unorm_q32::__lp_texture1d_r16_unorm_q32, r16_unorm_q32::__lp_texture2d_r16_unorm_q32,
+};
+use crate::builtins::texture::{
+    rgba16_unorm_q32::__lp_texture1d_rgba16_unorm_q32,
+    rgba16_unorm_q32::__lp_texture2d_rgba16_unorm_q32,
+};
 use crate::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
 
 /// Reference all builtin functions to prevent dead code elimination.
@@ -288,6 +295,48 @@ pub fn ensure_builtins_referenced() {
         let _lpfn_worley3_value_q32_fn: extern "C" fn(i32, i32, i32, u32) -> i32 =
             __lp_lpfn_worley3_value_q32;
         let _vm_get_fuel_q32_fn: extern "C" fn(i32) -> u32 = __lp_vm_get_fuel_q32;
+        let _texture1d_r16_unorm_q32_fn: unsafe extern "C" fn(
+            *mut i32,
+            u32,
+            u32,
+            u32,
+            i32,
+            u32,
+            u32,
+        ) -> () = __lp_texture1d_r16_unorm_q32;
+        let _texture1d_rgba16_unorm_q32_fn: unsafe extern "C" fn(
+            *mut i32,
+            u32,
+            u32,
+            u32,
+            i32,
+            u32,
+            u32,
+        ) -> () = __lp_texture1d_rgba16_unorm_q32;
+        let _texture2d_r16_unorm_q32_fn: unsafe extern "C" fn(
+            *mut i32,
+            u32,
+            u32,
+            u32,
+            u32,
+            i32,
+            i32,
+            u32,
+            u32,
+            u32,
+        ) -> () = __lp_texture2d_r16_unorm_q32;
+        let _texture2d_rgba16_unorm_q32_fn: unsafe extern "C" fn(
+            *mut i32,
+            u32,
+            u32,
+            u32,
+            u32,
+            i32,
+            i32,
+            u32,
+            u32,
+            u32,
+        ) -> () = __lp_texture2d_rgba16_unorm_q32;
 
         // Force these to be included by using them in a way that can't be optimized away
         // We'll use volatile reads to prevent optimization
@@ -403,5 +452,9 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&_lpfn_worley3_value_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_worley3_value_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_vm_get_fuel_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_texture1d_r16_unorm_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_texture1d_rgba16_unorm_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_texture2d_r16_unorm_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_texture2d_rgba16_unorm_q32_fn as *const _);
     }
 }

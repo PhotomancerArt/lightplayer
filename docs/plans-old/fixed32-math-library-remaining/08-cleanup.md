@@ -21,13 +21,13 @@ Clean up code, fix warnings, ensure all tests pass, and format code.
 ### 8.3 Verify All Tests Pass
 
 - Run all unit tests: `cargo test --package lps-builtins q32`
-- Run all filetests: `scripts/glsl-filetests.sh builtins/phases/`
+- Run all filetests: `scripts/filetests.sh builtins/phases/`
 - Verify acceptance criteria for all phases:
-    - Phase 3: `builtins/phases/02-basic-trig.glsl` passes
-    - Phase 4: `builtins/phases/03-inverse-trig.glsl` passes
-    - Phase 5: `builtins/phases/05-exponential.glsl` passes (exp, log, exp2, log2)
-    - Phase 6: `builtins/phases/04-hyperbolic-trig.glsl` passes
-    - Phase 7: `builtins/phases/05-exponential.glsl` passes (pow)
+  - Phase 3: `builtins/phases/02-basic-trig.glsl` passes
+  - Phase 4: `builtins/phases/03-inverse-trig.glsl` passes
+  - Phase 5: `builtins/phases/05-exponential.glsl` passes (exp, log, exp2, log2)
+  - Phase 6: `builtins/phases/04-hyperbolic-trig.glsl` passes
+  - Phase 7: `builtins/phases/05-exponential.glsl` passes (pow)
 
 ### 8.4 Code Review
 
@@ -53,4 +53,3 @@ Clean up code, fix warnings, ensure all tests pass, and format code.
 - All code is clean and readable
 - Code is properly formatted
 - Plan directory removed (after commit)
-

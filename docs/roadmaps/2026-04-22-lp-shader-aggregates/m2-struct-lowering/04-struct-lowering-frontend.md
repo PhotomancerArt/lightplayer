@@ -13,7 +13,7 @@ unsupported and will error out (phase 05 enables them).
 Acceptance proxy for this phase: every test in
 `lps-filetests/filetests/struct/` that does not cross a function
 boundary with a struct value passes on `wasm.q32`, `rv32c.q32`,
-`rv32n.q32`. Tests that *do* require struct calls (some of
+`rv32n.q32`. Tests that _do_ require struct calls (some of
 `constructor-nested.glsl` etc. internally just initialize-then-read,
 which works without calls) continue to pass; tests that need struct
 returns still fail. That's expected for phase 04.
@@ -217,8 +217,9 @@ pub(crate) fn materialise_aggregate_rvalue_to_temp_slot(
 ```
 
 `materialise_aggregate_rvalue_to_temp_slot`: `fb.alloc_slot(layout.total_size)`
-+ `SlotAddr` + dispatch into `store_lps_value_into_slot` with the slot
-base / `lps_ty`. Per Q5, no slot reuse — every call allocates fresh.
+
+- `SlotAddr` + dispatch into `store_lps_value_into_slot` with the slot
+  base / `lps_ty`. Per Q5, no slot reuse — every call allocates fresh.
 
 ### 4. `store_lps_value_into_slot` — enable Struct arm
 
@@ -291,7 +292,7 @@ a `Handle<Type>` whose `aggregate_layout(...)` is `Struct { .. }`:
 - Get the param-base `VReg` from `arg_vregs_for(i)[0]`.
 - Look up `members[index].byte_offset` and `ir_tys`.
 - Emit per-IR-component `Load { dst, base: param_base, offset:
-  member.byte_offset + j*4 }`.
+member.byte_offset + j*4 }`.
 
 #### 5c. `Expression::Load` — struct local
 
@@ -306,7 +307,7 @@ When the expression result is consumed at a known destination
 (`lower_array_initializer`-style call, or assigned-to local), the
 caller passes the destination to `store_lps_value_into_slot` and
 phase 04's struct arm handles it. When `Compose` is called via
-`ensure_expr_vec` *with no destination* (e.g. directly returned, or
+`ensure_expr_vec` _with no destination_ (e.g. directly returned, or
 passed to a function — those are phase 05), error explicitly:
 
 ```rust
@@ -349,7 +350,7 @@ matching layout (e.g. `output = input;`).
 - Compute `base = aggregate_storage_base_vreg(...)`.
 - Lower `value` with `ensure_expr_vec` + `coerce_assignment_vregs` for
   `member.lps_ty`; emit per-IR-component `Store { base, offset:
-  member.byte_offset + j*4, value }`.
+member.byte_offset + j*4, value }`.
 
 ### 7. `lower_access.rs` — member-store through pointer
 
@@ -375,7 +376,7 @@ Before declaring phase 04 done, dump LPIR for
 compilation succeeds:
 
 ```sh
-./scripts/glsl-filetests.sh --debug struct/constructor-nested.glsl
+./scripts/filetests.sh --debug struct/constructor-nested.glsl
 ```
 
 From `lp-shader/`:
@@ -410,10 +411,10 @@ Then:
 
 ```sh
 cargo test -p lps-frontend
-./scripts/glsl-filetests.sh array/
-./scripts/glsl-filetests.sh function/return-array.glsl
-./scripts/glsl-filetests.sh function/param-array.glsl
-./scripts/glsl-filetests.sh struct/
+./scripts/filetests.sh array/
+./scripts/filetests.sh function/return-array.glsl
+./scripts/filetests.sh function/param-array.glsl
+./scripts/filetests.sh struct/
 ```
 
 **Required:**
@@ -422,7 +423,7 @@ cargo test -p lps-frontend
   on every default target.
 - `struct/*.glsl` tests that don't cross a struct-value function
   boundary now pass on `wasm.q32`, `rv32c.q32`, `rv32n.q32`. Tests
-  that *do* cross such a boundary (struct return, struct value param)
+  that _do_ cross such a boundary (struct return, struct value param)
   may still fail — this is the phase 05 boundary.
 - `rv32c.q32` and `rv32n.q32` must show identical pass/fail sets.
   Divergence = backend bug to fix in this phase before declaring done.

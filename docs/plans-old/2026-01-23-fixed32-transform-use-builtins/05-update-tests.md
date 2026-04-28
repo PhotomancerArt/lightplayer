@@ -19,21 +19,21 @@ Execute tests for arithmetic converters:
 
 - `cargo test --package lps-compiler --lib backend::transform::q32::converters::arithmetic`
 - Verify all tests pass:
-    - `test_q32_fadd`
-    - `test_q32_fsub`
-    - `test_q32_fmul`
-    - `test_q32_fdiv` (now unignored)
+  - `test_q32_fadd`
+  - `test_q32_fsub`
+  - `test_q32_fmul`
+  - `test_q32_fdiv` (now unignored)
 
 ### 5.3 Run Filetests
 
 Execute filetests to verify correctness:
 
-- `scripts/glsl-filetests.sh scalar/float`
+- `scripts/filetests.sh scalar/float`
 - Verify all tests pass, especially:
-    - `scalar/float/op-add.glsl`
-    - `scalar/float/op-subtract.glsl`
-    - `scalar/float/op-divide.glsl`
-    - `scalar/float/op-multiply.glsl`
+  - `scalar/float/op-add.glsl`
+  - `scalar/float/op-subtract.glsl`
+  - `scalar/float/op-divide.glsl`
+  - `scalar/float/op-multiply.glsl`
 
 ### 5.4 Verify Transform Works
 

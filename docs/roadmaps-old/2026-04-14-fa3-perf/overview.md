@@ -13,6 +13,7 @@ call overhead dominates real shader code. Closing the gap here directly
 improves code density on the ESP32-C6 where flash and RAM are constrained.
 
 Both backends receive identical LPIR. The gap comes from two layers:
+
 1. **Register allocation** — the backward-walk allocator uses more callee-saved
    registers than necessary and has suboptimal call clobber handling.
 2. **Emit** — the emitter unconditionally generates frame pointer setup and
@@ -32,6 +33,7 @@ This roadmap targets the regalloc and emit stages. Lowering improvements
 (constant folding, immediate fusion) are captured as later milestones.
 
 Key files:
+
 - `lp-shader/lpvm-native/src/fa_alloc/pool.rs` — LRU register pool
 - `lp-shader/lpvm-native/src/fa_alloc/walk.rs` — backward walk + call handling
 - `lp-shader/lpvm-native/src/emit.rs` — prologue/epilogue + instruction emission
@@ -82,7 +84,7 @@ implemented in this cycle.
 
 ## Validation
 
-- **Macro**: `scripts/glsl-filetests.sh -t rv32,rv32fa` on the perf suite.
+- **Macro**: `scripts/filetests.sh -t rv32,rv32fa` on the perf suite.
   Baseline: `caller-save-pressure.glsl` — rv32 85 inst, rv32fa 140 inst (1.65x).
 - **Micro**: `shader-debug` CLI for per-function instruction count comparison.
 - **Correctness**: Existing filetests (`filetests/call/`, unit tests in

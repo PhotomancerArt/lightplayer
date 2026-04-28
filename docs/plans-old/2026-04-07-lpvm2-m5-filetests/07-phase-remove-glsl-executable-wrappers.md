@@ -28,7 +28,7 @@ Update **`mod.rs`** exports.
 cargo check -p lps-filetests
 rg "lps_exec|GlslExecutable" lp-shader/lps-filetests || true
 just test-filetests
-# or: ./scripts/glsl-filetests.sh
+# or: ./scripts/filetests.sh
 ```
 
 Per AGENTS.md / `.cursorrules` if shader stack touched:

@@ -41,13 +41,13 @@ cargo +nightly fmt -p lps-frontend
 
 ```bash
 # Phase 1: Foundation
-scripts/glsl-filetests.sh array/phase/1-foundation.glsl
+scripts/filetests.sh array/phase/1-foundation.glsl
 
-# Phase 2: Bounds Checking  
-scripts/glsl-filetests.sh array/phase/2-bounds-checking.glsl
+# Phase 2: Bounds Checking
+scripts/filetests.sh array/phase/2-bounds-checking.glsl
 
 # Phase 3: Initialization
-scripts/glsl-filetests.sh array/phase/3-initialization.glsl
+scripts/filetests.sh array/phase/3-initialization.glsl
 ```
 
 Each should show all tests passing.
@@ -83,22 +83,26 @@ Create `docs/plans/2026-03-30-lpir-parity-stage-iv/summary.md`:
 Implemented 1D scalar array support in LPIR for GLSL, covering Phases 1-3 of array test files.
 
 ### Phase 1: Declaration & Slot Allocation
+
 - Added `ArrayInfo` struct and `array_map` to track array metadata
 - Modified `LowerCtx::new()` to allocate LPIR slots for array-typed locals
 - Added array type utilities to `naga_util.rs`
 
-### Phase 2: Constant Indexing  
+### Phase 2: Constant Indexing
+
 - Implemented `AccessIndex` lowering for arrays
 - Added `Store` support for array element assignment
 - Uses constant offset computation: `offset = index * element_size`
 
 ### Phase 3: Dynamic Indexing with Bounds Clamping
+
 - Created `lower_array.rs` with array-specific lowering helpers
 - Implemented `clamp_index()` using select chains
 - Added `Access` lowering for dynamic array access
 - Added dynamic `Store` support with clamping
 
 ### Phase 4: Initialization
+
 - Implemented array initializer list lowering
 - Full initialization: store all elements
 - Partial initialization: store given elements + zero-fill remainder
@@ -109,7 +113,7 @@ Implemented 1D scalar array support in LPIR for GLSL, covering Phases 1-3 of arr
 - `lp-shader/lps-frontend/src/lower_ctx.rs` - Array metadata tracking
 - `lp-shader/lps-frontend/src/lower_expr.rs` - Array read access
 - `lp-shader/lps-frontend/src/lower_stmt.rs` - Array store
-- `lp-shader/lps-frontend/src/naga_util.rs` - Array type utilities  
+- `lp-shader/lps-frontend/src/naga_util.rs` - Array type utilities
 - `lp-shader/lps-frontend/src/lower_array.rs` - NEW: Array helpers
 - `lp-shader/lps-frontend/src/lib.rs` - Export new module
 - `lp-shader/lps-filetests/filetests/array/phase/2-bounds-checking.glsl` - Updated for clamping
@@ -117,7 +121,7 @@ Implemented 1D scalar array support in LPIR for GLSL, covering Phases 1-3 of arr
 ## Test Results
 
 - `array/phase/1-foundation.glsl`: 6/6 tests passing
-- `array/phase/2-bounds-checking.glsl`: 10/10 tests passing  
+- `array/phase/2-bounds-checking.glsl`: 10/10 tests passing
 - `array/phase/3-initialization.glsl`: 5/5 tests passing
 
 ## Design Decisions Applied

@@ -110,7 +110,7 @@ GLSL Filetests Runner
 Run GLSL filetests with flexible pattern matching support.
 
 USAGE:
-    glsl-filetests.sh [OPTIONS] [PATTERN]...
+    filetests.sh [OPTIONS] [PATTERN]...
 
 OPTIONS:
     -h, --help          Show this help message
@@ -143,31 +143,31 @@ PATTERNS:
 
 EXAMPLES:
     # Run all tests
-    glsl-filetests.sh
+    filetests.sh
 
     # Run specific test file (searched recursively)
-    glsl-filetests.sh postinc-scalar-int.glsl
+    filetests.sh postinc-scalar-int.glsl
 
     # Run tests in a directory
-    glsl-filetests.sh math/
+    filetests.sh math/
 
     # Run tests matching glob patterns
-    glsl-filetests.sh "*add*" "operators/*"
+    filetests.sh "*add*" "operators/*"
 
     # Run specific test case by line number
-    glsl-filetests.sh postinc-scalar-int.glsl:10
+    filetests.sh postinc-scalar-int.glsl:10
 
     # Run tests in math directory with specific pattern
-    glsl-filetests.sh "math/float*"
+    filetests.sh "math/float*"
 
     # Regenerate .gen.glsl file before running tests
-    glsl-filetests.sh vec/vec4/fn-equal.gen.glsl -g
+    filetests.sh vec/vec4/fn-equal.gen.glsl -g
 
     # Fix unexpected passes: remove @unimplemented from tests that now pass
-    glsl-filetests.sh --target wasm.q32 --fix
+    filetests.sh --target wasm.q32 --fix
 
     # Baseline: mark all current failures @unimplemented(backend=jit), then re-run to get exit 0
-    glsl-filetests.sh --target jit.q32 --mark-unimplemented --assume-yes
+    filetests.sh --target jit.q32 --mark-unimplemented --assume-yes
 
 PATTERN SYNTAX:
     *         Matches any sequence of characters
@@ -222,19 +222,19 @@ if [ "$SHOW_LIST" = true ]; then
   echo ""
   echo "To run tests:"
   echo "  # Run all tests"
-  echo "  ./scripts/glsl-filetests.sh"
+  echo "  ./scripts/filetests.sh"
   echo ""
   echo "  # Run specific test file (searched recursively)"
-  echo "  ./scripts/glsl-filetests.sh filename.glsl"
+  echo "  ./scripts/filetests.sh filename.glsl"
   echo ""
   echo "  # Run tests in a directory"
-  echo "  ./scripts/glsl-filetests.sh directory/"
+  echo "  ./scripts/filetests.sh directory/"
   echo ""
   echo "  # Run tests matching patterns (supports wildcards)"
-  echo "  ./scripts/glsl-filetests.sh \"*pattern*\" \"directory/*\""
+  echo "  ./scripts/filetests.sh \"*pattern*\" \"directory/*\""
   echo ""
   echo "  # Run specific test case by line number"
-  echo "  ./scripts/glsl-filetests.sh filename.glsl:10"
+  echo "  ./scripts/filetests.sh filename.glsl:10"
   echo ""
   echo "Wildcard patterns:"
   echo "  *         - Matches any sequence of characters"

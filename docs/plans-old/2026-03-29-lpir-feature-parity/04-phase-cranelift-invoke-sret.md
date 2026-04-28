@@ -25,9 +25,9 @@ CLIF already express multi-return.
    types.
 
 4. **Tests**
-    - `cargo test -p lpvm-cranelift`
-    - Filetests: `./scripts/glsl-filetests.sh function/return-matrix.glsl` and representative
-      `matrix/mat3/` / `matrix/mat4/` cases.
+   - `cargo test -p lpvm-cranelift`
+   - Filetests: `./scripts/filetests.sh function/return-matrix.glsl` and representative
+     `matrix/mat3/` / `matrix/mat4/` cases.
 
 5. **ESP32 / RV32 object path** — sanity-check that embedded compilation still builds; invoke.rs
    is host-oriented but must not break `no_std` object emission.
@@ -37,7 +37,7 @@ CLIF already express multi-return.
 ```bash
 cargo test -p lpvm-cranelift
 cargo test -p lpvm-cranelift --features riscv32-emu
-./scripts/glsl-filetests.sh matrix/ function/return-matrix.glsl
+./scripts/filetests.sh matrix/ function/return-matrix.glsl
 ```
 
 ```bash

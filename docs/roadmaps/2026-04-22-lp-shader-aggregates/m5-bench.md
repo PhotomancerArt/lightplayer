@@ -5,7 +5,7 @@
 
 ## Methodology
 
-- **Correctness:** `cargo clippy -p lps-frontend -- -D warnings` and `scripts/glsl-filetests.sh --concise` from the repo root (no filetest expectation changes for M5).
+- **Correctness:** `cargo clippy -p lps-frontend -- -D warnings` and `scripts/filetests.sh --concise` from the repo root (no filetest expectation changes for M5).
 - **Cycle / instruction deltas:** No dedicated micro-benchmark or stable “before” snapshot is checked in for this change. The optimisation is **semantics-preserving** relative to the memcpy path: read-only parameters still use the same parameter pointer as the old copy source; the expected win is **omitted** `alloc_slot`, `SlotAddr` for the copy destination, and the prologue **`Memcpy`** into that slot.
 
 ## Commands attempted
