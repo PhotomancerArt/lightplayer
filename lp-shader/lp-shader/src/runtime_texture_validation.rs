@@ -108,10 +108,7 @@ fn validate_layout(
     if rs % align != 0 {
         return Err(render_err(
             name,
-            format!(
-                "row_stride ({}) must be {}-byte aligned for {:?}",
-                rs, align, format
-            ),
+            format!("row_stride ({rs}) must be {align}-byte aligned for {format:?}",),
         ));
     }
 
