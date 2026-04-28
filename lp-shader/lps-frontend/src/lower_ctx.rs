@@ -286,6 +286,8 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) uniform_instance_locals: BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
     /// Compile-time [`TextureBindingSpec`] keyed by sampler uniform name ([`crate::LowerOptions`]).
     pub(crate) texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+    /// Mirrors [`crate::LowerOptions::texel_fetch_bounds`] for `texelFetch` lowering.
+    pub(crate) texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -298,6 +300,7 @@ impl<'a> LowerCtx<'a> {
         lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
         global_map: GlobalVarMap,
         texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+        texel_fetch_bounds: lpir::TexelFetchBoundsMode,
     ) -> Result<Self, LowerError> {
         let return_abi = crate::naga_util::func_return_ir_types_with_sret(
             module,
@@ -570,6 +573,7 @@ impl<'a> LowerCtx<'a> {
             uniform_vmctx_deferred: BTreeMap::new(),
             uniform_instance_locals,
             texture_specs,
+            texel_fetch_bounds,
         };
 
         for (lv_handle, var) in func.local_variables.iter() {

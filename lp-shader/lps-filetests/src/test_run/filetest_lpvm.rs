@@ -174,10 +174,12 @@ impl FiletestInstance {
 fn lower_glsl(
     source: &str,
     texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 ) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
     let naga = lps_frontend::compile(source).map_err(|e| anyhow::anyhow!("{e}"))?;
     let options = lps_frontend::LowerOptions {
         texture_specs: texture_specs.clone(),
+        texel_fetch_bounds,
     };
     lps_frontend::lower_with_options(&naga, &options).map_err(|e| anyhow::anyhow!("{e}"))
 }
@@ -190,7 +192,11 @@ impl CompiledShader {
         compiler_config: &CompilerConfig,
         texture_specs: &BTreeMap<String, TextureBindingSpec>,
     ) -> anyhow::Result<Self> {
-        let (ir, meta) = lower_glsl(source, texture_specs)?;
+        let (ir, meta) = lower_glsl(
+            source,
+            texture_specs,
+            compiler_config.texture.texel_fetch_bounds,
+        )?;
         lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let fm = match target.float_mode {

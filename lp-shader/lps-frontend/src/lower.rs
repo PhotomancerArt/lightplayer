@@ -24,12 +24,23 @@ use crate::lower_lpfn;
 use crate::naga_types::naga_type_handle_to_lps;
 
 /// Options for Naga → LPIR lowering (e.g. compile-time texture binding metadata).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LowerOptions {
     /// When non-empty, must match every `Texture2D` uniform (validated before lowering; see
     /// [`lps_shared::validate_texture_binding_specs_against_module`]). An empty map skips that check
     /// so `lower()` stays usable when specs are applied later.
     pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    /// Whether `texelFetch` lowering emits coordinate clamp ops (see [`lpir::TexelFetchBoundsMode`]).
+    pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+}
+
+impl Default for LowerOptions {
+    fn default() -> Self {
+        Self {
+            texture_specs: BTreeMap::new(),
+            texel_fetch_bounds: lpir::TexelFetchBoundsMode::default(),
+        }
+    }
 }
 
 /// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
@@ -85,6 +96,7 @@ pub fn lower_with_options(
             &lpfn_map,
             global_map.clone(),
             &options.texture_specs,
+            options.texel_fetch_bounds,
         )
         .map_err(|e| LowerError::InFunction {
             name: info.name.clone(),
@@ -439,6 +451,7 @@ fn lower_function(
     lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
     global_map: GlobalVarMap,
     texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
         module,
@@ -449,6 +462,7 @@ fn lower_function(
         lpfn_map,
         global_map,
         texture_specs,
+        texel_fetch_bounds,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

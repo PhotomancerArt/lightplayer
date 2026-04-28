@@ -109,6 +109,7 @@ fn collect_glsl_error_test_diagnostics(
 
     let lower_options = lps_frontend::LowerOptions {
         texture_specs: texture_specs.clone(),
+        ..Default::default()
     };
     let (ir, meta) = match lps_frontend::lower_with_options(&naga_module, &lower_options) {
         Ok(x) => x,

@@ -1085,7 +1085,7 @@ fn lower_expr_vec_uncached(
         Expression::ArrayLength(array_h) => crate::lower_array::lower_array_length(ctx, *array_h),
         Expression::ImageLoad {
             image,
-            coordinate: _,
+            coordinate,
             array_index,
             sample,
             level,
@@ -1105,7 +1105,12 @@ fn lower_expr_vec_uncached(
                     "imageLoad(storage) not supported",
                 )));
             };
-            crate::lower_texture::lower_image_load_texel_fetch(ctx, *image, *level_expr)
+            crate::lower_texture::lower_image_load_texel_fetch(
+                ctx,
+                *image,
+                *coordinate,
+                *level_expr,
+            )
         }
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
