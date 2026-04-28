@@ -1,6 +1,6 @@
 // test error
 
-// expected-error E0400: {{texelFetch: no texture binding spec for sampler uniform `inputColor`}}
+// expected-error E0400: {{texelFetch `inputColor`: no texture binding spec for sampler uniform `inputColor`}}
 
 uniform sampler2D inputColor;
 

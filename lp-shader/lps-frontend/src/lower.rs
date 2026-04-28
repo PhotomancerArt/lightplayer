@@ -61,7 +61,8 @@ pub fn lower_with_options(
     options: &LowerOptions,
 ) -> Result<(LpirModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
-    let import_map = register_math_imports(&mut mb);
+    let mut import_map = register_math_imports(&mut mb);
+    import_map.extend(register_texture_imports(&mut mb));
     let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
     for (i, (handle, _)) in naga_module.functions.iter().enumerate() {
@@ -127,6 +128,17 @@ pub fn lower_with_options(
     Ok((mb.finish(), glsl_meta))
 }
 
+/// Naga-only companion sampler from `parse.rs` (`uniform sampler __lp_samp_*`); not part of the
+/// runtime uniform ABI.
+fn is_lp_synthetic_naga_sampler(gv: &GlobalVariable, lps_ty: &LpsType) -> bool {
+    gv.space == AddressSpace::Handle
+        && matches!(lps_ty, LpsType::UInt)
+        && gv
+            .name
+            .as_deref()
+            .is_some_and(|n| n.starts_with("__lp_samp_"))
+}
+
 /// Compute layout for global variables (uniforms and private globals).
 /// Returns (global_map, uniforms_type, globals_type).
 fn compute_global_layout(
@@ -146,7 +158,13 @@ fn compute_global_layout(
             AddressSpace::Uniform => (true, true),
             AddressSpace::Private => (false, true),
             AddressSpace::Handle => {
-                if matches!(lps_ty, LpsType::Texture2D) {
+                let texture2d = matches!(lps_ty, LpsType::Texture2D);
+                let synth_sampler = matches!(lps_ty, LpsType::UInt)
+                    && gv
+                        .name
+                        .as_deref()
+                        .is_some_and(|n| n.starts_with("__lp_samp_"));
+                if texture2d || synth_sampler {
                     (true, true)
                 } else {
                     return Err(LowerError::UnsupportedExpression(format!(
@@ -167,6 +185,20 @@ fn compute_global_layout(
         // Determine component count for scalarization
         let component_count = lps_scalar_component_count(&lps_ty);
 
+        if is_lp_synthetic_naga_sampler(gv, &lps_ty) {
+            global_map.insert(
+                gv_handle,
+                GlobalVarInfo {
+                    byte_offset: 0,
+                    ty: lps_ty,
+                    component_count,
+                    is_uniform: true,
+                    vmctx_backed: false,
+                },
+            );
+            continue;
+        }
+
         let member = StructMember {
             name: gv.name.clone(),
             ty: lps_ty.clone(),
@@ -185,6 +217,7 @@ fn compute_global_layout(
                 ty: lps_ty,
                 component_count,
                 is_uniform,
+                vmctx_backed: true,
             },
         );
     }
@@ -211,6 +244,9 @@ fn compute_global_layout(
 
     for (gv_handle, _gv) in module.global_variables.iter() {
         if let Some(info) = global_map.get_mut(&gv_handle) {
+            if !info.vmctx_backed {
+                continue;
+            }
             let align = type_alignment(&info.ty, LayoutRules::Std430) as u32;
             if info.is_uniform {
                 uniforms_offset = round_up_u32(uniforms_offset, align);
@@ -308,6 +344,9 @@ fn synthesize_shader_init(module: &Module, global_map: &GlobalVarMap) -> Option<
     for (_gv_handle, info, init_expr) in globals_with_init {
         if info.is_uniform {
             // Uniforms shouldn't have initializers - skip or error
+            continue;
+        }
+        if !info.vmctx_backed {
             continue;
         }
 
@@ -439,6 +478,33 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
     reg("glsl", "ldexp", &[IrType::F32, IrType::I32], r1, false);
     reg("glsl", "round", f1, r1, false);
     reg("vm", "__lp_get_fuel", &[], u1, true);
+    m
+}
+
+/// `@texture::*` sampler builtins (result pointer ABI; [`ImportDecl::sret`]).
+fn register_texture_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> {
+    let mut m = BTreeMap::new();
+    let mut reg = |func_name: &str, user_param_count: usize| {
+        let mut param_types = Vec::with_capacity(user_param_count);
+        param_types.push(IrType::Pointer);
+        for _ in 1..user_param_count {
+            param_types.push(IrType::I32);
+        }
+        let r = mb.add_import(ImportDecl {
+            module_name: String::from("texture"),
+            func_name: String::from(func_name),
+            param_types,
+            return_types: Vec::new(),
+            lpfn_glsl_params: None,
+            needs_vmctx: false,
+            sret: true,
+        });
+        m.insert(format!("texture::{func_name}"), r);
+    };
+    reg("texture2d_rgba16_unorm", 10);
+    reg("texture1d_rgba16_unorm", 7);
+    reg("texture2d_r16_unorm", 10);
+    reg("texture1d_r16_unorm", 7);
     m
 }
 

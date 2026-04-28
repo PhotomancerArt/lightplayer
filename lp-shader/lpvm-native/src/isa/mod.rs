@@ -130,6 +130,7 @@ impl IsaTarget {
         self,
         callee_uses_sret: bool,
         caller_passes_sret_ptr: bool,
+        caller_sret_vm_abi_swap: bool,
         arg_index: usize,
     ) -> Option<u8> {
         match self {
@@ -138,13 +139,17 @@ impl IsaTarget {
                     arg_index
                 } else if !caller_passes_sret_ptr {
                     1usize.saturating_add(arg_index)
-                } else {
-                    // M1: LPIR order [vmctx, sret, …users] → hardware [a1, a0, a2, …].
+                } else if caller_sret_vm_abi_swap {
+                    // Shader / `needs_vmctx` path: [vmctx, sret, …] → [a1, a0, a2, …].
                     match arg_index {
                         0 => 1,
                         1 => 0,
                         i => i,
                     }
+                } else {
+                    // `@texture::*` imports: [`ImportDecl::needs_vmctx`] is false — first operand is the
+                    // callee sret destination; map linearly onto `a0`, `a1`, …
+                    arg_index
                 };
                 crate::isa::rv32::abi::ARG_REGS.get(slot).map(|p| p.hw)
             }

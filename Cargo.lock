@@ -3974,6 +3974,7 @@ dependencies = [
  "lpfn-impl-macro",
  "lps-builtin-ids",
  "lps-q32",
+ "lps-shared",
  "lpvm",
 ]
 

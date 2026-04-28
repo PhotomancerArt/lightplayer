@@ -63,12 +63,52 @@ pub enum TextureFilter {
     Linear,
 }
 
+impl TextureFilter {
+    /// ABI word passed to texture sampler builtins (`filter` argument).
+    pub const fn to_builtin_abi(self) -> u32 {
+        match self {
+            Self::Nearest => 0,
+            Self::Linear => 1,
+        }
+    }
+
+    /// Decode [`Self::to_builtin_abi`] for tests and runtime dispatch.
+    pub const fn from_builtin_abi(abi: u32) -> Option<Self> {
+        match abi {
+            0 => Some(Self::Nearest),
+            1 => Some(Self::Linear),
+            _ => None,
+        }
+    }
+}
+
 /// Edge sampling mode on one axis of a 2D texture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextureWrap {
     ClampToEdge,
     Repeat,
     MirrorRepeat,
+}
+
+impl TextureWrap {
+    /// ABI word passed to texture sampler builtins (`wrap_x` / `wrap_y` arguments).
+    pub const fn to_builtin_abi(self) -> u32 {
+        match self {
+            Self::ClampToEdge => 0,
+            Self::Repeat => 1,
+            Self::MirrorRepeat => 2,
+        }
+    }
+
+    /// Decode [`Self::to_builtin_abi`] for tests and runtime dispatch.
+    pub const fn from_builtin_abi(abi: u32) -> Option<Self> {
+        match abi {
+            0 => Some(Self::ClampToEdge),
+            1 => Some(Self::Repeat),
+            2 => Some(Self::MirrorRepeat),
+            _ => None,
+        }
+    }
 }
 
 /// Optional shape hint for validation or lowering (2D vs 1D-along-y strip).
@@ -266,5 +306,25 @@ mod tests {
             byte_len: 0,
         };
         assert_eq!(v.required_footprint_bytes(), None);
+    }
+
+    #[test]
+    fn texture_filter_builtin_abi_roundtrip() {
+        for f in [TextureFilter::Nearest, TextureFilter::Linear] {
+            assert_eq!(TextureFilter::from_builtin_abi(f.to_builtin_abi()), Some(f));
+        }
+        assert_eq!(TextureFilter::from_builtin_abi(2), None);
+    }
+
+    #[test]
+    fn texture_wrap_builtin_abi_roundtrip() {
+        for w in [
+            TextureWrap::ClampToEdge,
+            TextureWrap::Repeat,
+            TextureWrap::MirrorRepeat,
+        ] {
+            assert_eq!(TextureWrap::from_builtin_abi(w.to_builtin_abi()), Some(w));
+        }
+        assert_eq!(TextureWrap::from_builtin_abi(3), None);
     }
 }

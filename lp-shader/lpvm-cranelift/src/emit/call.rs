@@ -178,22 +178,28 @@ pub(crate) fn emit_call(
             }
 
             if let CalleeRef::Import(ImportId(i)) = *callee {
-                if ctx.ir.imports[i as usize].sret {
-                    // LPIR Call args order: [vmctx, sret, user…]. Cranelift signature order is
-                    // [sret, vmctx, user…] (matches RV32 / SysV `a0` for StructReturn).
+                let import_decl = &ctx.ir.imports[i as usize];
+                if import_decl.sret {
                     let lpir_args = func.pool_slice(*args);
-                    if lpir_args.len() < 2 {
-                        return Err(CompileError::cranelift(alloc::format!(
-                            "LPIR import sret call: expected at least [vmctx, sret], got {} args",
-                            lpir_args.len()
-                        )));
-                    }
-                    let mut arg_vals: Vec<_> = Vec::with_capacity(lpir_args.len());
-                    arg_vals.push(use_v(builder, vars, lpir_args[1])); // sret first
-                    arg_vals.push(use_v(builder, vars, lpir_args[0])); // then vmctx
-                    for v in &lpir_args[2..] {
-                        arg_vals.push(use_v(builder, vars, *v));
-                    }
+                    let arg_vals: Vec<_> = if import_decl.needs_vmctx {
+                        // Shader path: `[vmctx, sret, user…]` — Cranelift signature is `[sret, vmctx, …]`.
+                        if lpir_args.len() < 2 {
+                            return Err(CompileError::cranelift(alloc::format!(
+                                "LPIR import sret call: expected at least [vmctx, sret], got {} args",
+                                lpir_args.len()
+                            )));
+                        }
+                        let mut v = Vec::with_capacity(lpir_args.len());
+                        v.push(use_v(builder, vars, lpir_args[1])); // sret first
+                        v.push(use_v(builder, vars, lpir_args[0])); // vmctx
+                        for a in &lpir_args[2..] {
+                            v.push(use_v(builder, vars, *a));
+                        }
+                        v
+                    } else {
+                        // `@texture::*` imports: `[sret, user…]` matches the extern builtin order.
+                        lpir_args.iter().map(|v| use_v(builder, vars, *v)).collect()
+                    };
                     let call = builder.ins().call(func_ref, &arg_vals);
                     let result_regs = func.pool_slice(*results);
                     let result_vals: Vec<_> = builder.inst_results(call).to_vec();

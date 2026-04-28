@@ -77,6 +77,9 @@ pub(crate) struct GlobalVarInfo {
     pub component_count: u32,
     /// Whether this is a uniform (read-only) variable.
     pub is_uniform: bool,
+    /// When false, no VMContext bytes are reserved; loads must not use [`Self::byte_offset`].
+    /// Parse-synthesized `__lp_samp_*` Naga sampler globals use this (see `parse.rs`).
+    pub vmctx_backed: bool,
 }
 
 /// Map from Naga GlobalVariable handle to its lowering info.
@@ -278,7 +281,7 @@ pub(crate) struct LowerCtx<'a> {
     pub return_types: Vec<IrType>,
     /// Present when the shader function returns an aggregate by sret (LPIR void return, memcpy to `addr`).
     pub sret: Option<SretCtx>,
-    /// Map from Naga GlobalVariable handle to (vmctx_byte_offset, component_count, is_uniform).
+    /// Map from Naga GlobalVariable handle to VMContext / lowering info.
     pub(crate) global_map: GlobalVarMap,
     /// [`Expression::index`] → deferred uniform array field / indexed element (see [`UniformVmctxDeferred`]).
     pub(crate) uniform_vmctx_deferred: BTreeMap<usize, UniformVmctxDeferred>,

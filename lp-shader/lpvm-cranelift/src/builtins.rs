@@ -16,7 +16,7 @@ use lpir::FloatMode;
 use lpir::lpir_module::{ImportDecl, LpirModule};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, vm_q32_builtin_id,
+    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
 };
 
 use crate::error::CompileError;
@@ -75,7 +75,17 @@ pub(crate) fn resolve_import(
                 ))
             })
         }
-        ("glsl" | "lpir" | "lpfn" | "vm", FloatMode::F32) => {
+        ("texture", FloatMode::Q32) => {
+            let base = texture_strip_suffix(&decl.func_name)?;
+            let ac = decl.param_types.len();
+            texture_q32_builtin_id(base, ac).ok_or_else(|| {
+                CompileError::unsupported(format!(
+                    "unsupported texture import `{}` (arity {ac})",
+                    decl.func_name
+                ))
+            })
+        }
+        ("glsl" | "lpir" | "lpfn" | "vm" | "texture", FloatMode::F32) => {
             Err(CompileError::unsupported(format!(
                 "import `{}::{}` requires FloatMode::Q32",
                 decl.module_name, decl.func_name
@@ -193,13 +203,35 @@ fn parse_lpfn_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
 }
 
 fn lpfn_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
+    strip_trailing_numeric_import_suffix(func_name, "lpfn")
+}
+
+fn texture_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
+    strip_optional_numeric_import_suffix(func_name)
+}
+
+fn strip_trailing_numeric_import_suffix<'a>(
+    func_name: &'a str,
+    module: &str,
+) -> Result<&'a str, CompileError> {
     let (base, tail) = func_name.rsplit_once('_').ok_or_else(|| {
-        CompileError::unsupported(format!("malformed lpfn import name `{func_name}`"))
+        CompileError::unsupported(format!("malformed {module} import name `{func_name}`"))
     })?;
     tail.parse::<u32>().map_err(|_| {
-        CompileError::unsupported(format!("malformed lpfn import name `{func_name}`"))
+        CompileError::unsupported(format!("malformed {module} import name `{func_name}`"))
     })?;
     Ok(base)
+}
+
+fn strip_optional_numeric_import_suffix(func_name: &str) -> Result<&str, CompileError> {
+    let Some((base, tail)) = func_name.rsplit_once('_') else {
+        return Ok(func_name);
+    };
+    if tail.parse::<u32>().is_ok() {
+        Ok(base)
+    } else {
+        Ok(func_name)
+    }
 }
 
 /// Check if an import declaration refers to a builtin that uses the manual
@@ -210,20 +242,26 @@ fn lpfn_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
 /// The Cranelift signature is `fn(*mut T, args...) -> ()` but LPIR expects
 /// multiple return values that must be loaded from the result buffer.
 pub(crate) fn is_import_result_ptr_builtin(decl: &ImportDecl, pointer_type: types::Type) -> bool {
-    // Only LPFX module uses result-pointer pattern
-    if decl.module_name != "lpfn" {
+    if !matches!(decl.module_name.as_str(), "lpfn" | "texture") {
         return false;
     }
 
-    // Resolve to BuiltinId to check the actual Cranelift signature
-    let Ok(bid) = resolve_lpfn_builtin(decl) else {
-        return false;
+    let bid = if decl.module_name == "lpfn" {
+        let Some(bid) = resolve_lpfn_builtin(decl).ok() else {
+            return false;
+        };
+        bid
+    } else {
+        let Ok(base) = texture_strip_suffix(&decl.func_name) else {
+            return false;
+        };
+        let Some(bid) = texture_q32_builtin_id(base, decl.param_types.len()) else {
+            return false;
+        };
+        bid
     };
 
-    // Get the Cranelift signature for this builtin
     let sig = cranelift_sig_for_builtin(bid, pointer_type, CallConv::SystemV);
-
-    // Result-pointer pattern: Cranelift returns void (empty), but LPIR expects multiple returns
     sig.returns.is_empty() && !decl.return_types.is_empty()
 }
 

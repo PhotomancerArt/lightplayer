@@ -122,15 +122,15 @@ fn lower_expr_vec_uncached(
             }
             Expression::GlobalVariable(gv_handle) => {
                 // Load from a global variable (uniform or private global).
-                let (byte_offset, ty) = {
-                    let Some(info) = ctx.global_map.get(gv_handle) else {
-                        return Err(LowerError::Internal(format!(
-                            "GlobalVariable {gv_handle:?} not found in global_map"
-                        )));
-                    };
-                    (info.byte_offset, info.ty.clone())
+                let Some(info) = ctx.global_map.get(gv_handle).cloned() else {
+                    return Err(LowerError::Internal(format!(
+                        "GlobalVariable {gv_handle:?} not found in global_map"
+                    )));
                 };
-                load_lps_value_from_vmctx(ctx, byte_offset, &ty)
+                if !info.vmctx_backed {
+                    return load_lp_synthetic_naga_sampler_stub(ctx, &info.ty);
+                }
+                load_lps_value_from_vmctx(ctx, info.byte_offset, &info.ty)
             }
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-local pointer",
@@ -1112,6 +1112,28 @@ fn lower_expr_vec_uncached(
                 *level_expr,
             )
         }
+        Expression::ImageSample {
+            image,
+            sampler,
+            gather,
+            coordinate,
+            array_index,
+            offset,
+            level,
+            depth_ref,
+            clamp_to_edge,
+        } => crate::lower_texture::lower_image_sample_texture(
+            ctx,
+            *image,
+            *sampler,
+            *gather,
+            *coordinate,
+            *array_index,
+            *offset,
+            *level,
+            *depth_ref,
+            *clamp_to_edge,
+        ),
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
         ))),
@@ -1702,6 +1724,24 @@ fn struct_member_start_offset_u32(
     Err(LowerError::Internal(String::from(
         "struct_member_start_offset_u32: fallthrough",
     )))
+}
+
+/// Stub value for parse-synthesized `__lp_samp_*` globals (no VMContext slot; lowering ignores it
+/// for `texture()` except when Naga still references the handle).
+fn load_lp_synthetic_naga_sampler_stub(
+    ctx: &mut LowerCtx<'_>,
+    ty: &LpsType,
+) -> Result<VRegVec, LowerError> {
+    match ty {
+        LpsType::UInt | LpsType::Int | LpsType::Bool => {
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 { dst, value: 0 });
+            Ok(smallvec::smallvec![dst])
+        }
+        _ => Err(LowerError::Internal(format!(
+            "synthetic Naga sampler global: unexpected LPS type {ty:?}"
+        ))),
+    }
 }
 
 /// Load a value of `ty` from VMContext at `base_byte_offset` using std430 member layout.

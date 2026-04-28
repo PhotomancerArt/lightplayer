@@ -119,7 +119,11 @@ vec4 render(vec2 p) { return vec4(a) + vec4(0.0); }
         off = ((off + al - 1) / al) * al;
         off += type_size(&m.ty, LayoutRules::Std430) as u32;
     }
-    assert_eq!(off, 4 + 16, "float + texture2D std430 back-to-back");
+    assert_eq!(
+        off,
+        4 + 16,
+        "float + texture2D (synthetic Naga sampler is not in uniforms_type)"
+    );
 }
 
 /// GLSL-IN `sampler2D` constructor form: two-member struct (image + sampler) → [`LpsType::Texture2D`].
@@ -236,6 +240,44 @@ fn sample_texture_binding_spec() -> lps_shared::TextureBindingSpec {
         wrap_y: TextureWrap::ClampToEdge,
         shape_hint: TextureShapeHint::General2D,
     }
+}
+
+#[test]
+fn texture_sample_lowers_public_sig_has_only_user_texture_uniform() {
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texture(inputColor, pos);
+}
+"#;
+    let naga = compile(glsl).expect("compile");
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
+    let options = LowerOptions {
+        texture_specs,
+        ..Default::default()
+    };
+    let (ir, sig) = lower_with_options(&naga, &options).expect("lower");
+    let u = sig.uniforms_type.expect("uniforms_type");
+    let LpsType::Struct { members, .. } = u else {
+        panic!("expected struct uniforms");
+    };
+    assert_eq!(
+        members.len(),
+        1,
+        "expected only user texture uniform: {members:?}"
+    );
+    assert_eq!(members[0].name.as_deref(), Some("inputColor"));
+    assert_eq!(members[0].ty, LpsType::Texture2D);
+    let printed = lpir::print_module(&ir);
+    assert!(
+        printed.contains("call @texture::texture2d_rgba16_unorm"),
+        "expected texture builtin in:\n{printed}"
+    );
+    assert!(
+        !printed.contains("__lp_samp_"),
+        "internal sampler should not appear in LPIR:\n{printed}"
+    );
 }
 
 #[test]

@@ -606,7 +606,7 @@ pub(crate) fn expr_type_inner(
         Expression::Relational { fun, argument } => {
             relational_result_type_inner(module, func, *fun, *argument)
         }
-        Expression::ImageLoad { .. } => Ok(TypeInner::Vector {
+        Expression::ImageLoad { .. } | Expression::ImageSample { .. } => Ok(TypeInner::Vector {
             size: VectorSize::Quad,
             scalar: Scalar {
                 kind: ScalarKind::Float,
@@ -850,7 +850,7 @@ pub(crate) fn expr_scalar_kind(
             RelationalFunction::All | RelationalFunction::Any => Ok(ScalarKind::Bool),
             RelationalFunction::IsNan | RelationalFunction::IsInf => Ok(ScalarKind::Bool),
         },
-        Expression::ImageLoad { .. } => Ok(ScalarKind::Float),
+        Expression::ImageLoad { .. } | Expression::ImageSample { .. } => Ok(ScalarKind::Float),
         Expression::ArrayLength(_) => Ok(ScalarKind::Uint),
         _ => Err(LowerError::UnsupportedExpression(format!(
             "cannot infer scalar kind for {:?}",

@@ -236,9 +236,11 @@ pub(crate) fn naga_type_inner_to_glsl(
         TypeInner::Sampler { comparison: true } => Err(CompileError::UnsupportedType(
             String::from("comparison / shadow sampler (sampler2DShadow, etc.)"),
         )),
-        TypeInner::Sampler { comparison: false } => Err(CompileError::UnsupportedType(
-            String::from("standalone sampler type (use sampler2D or texture2D)"),
-        )),
+        TypeInner::Sampler { comparison: false } => {
+            // Naga `uniform sampler` companion to `texture2D` (see `parse.rs` rewrite for `texture()`).
+            // Guest std430 reserves one u32 lane; runtime does not interpret it.
+            Ok(LpsType::UInt)
+        }
         TypeInner::BindingArray { .. } => Err(CompileError::UnsupportedType(String::from(
             "binding_array of texture/sampler (texture arrays) not supported",
         ))),

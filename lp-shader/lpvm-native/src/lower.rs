@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 use lpir::{CalleeRef, FloatMode, IrFunction, LpirModule, LpirOp};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, vm_q32_builtin_id,
+    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
 };
 
 use crate::LowerOpts;
@@ -153,6 +153,7 @@ fn sym_call(
         rets: push_vregs_slice(pool, rets)?,
         callee_uses_sret: false,
         caller_passes_sret_ptr: false,
+        caller_sret_vm_abi_swap: false,
         src_op: pack_src_op(src_op),
     });
     Ok(())
@@ -1263,12 +1264,15 @@ pub fn lower_lpir_op(
             }
             let callee_uses_sret = callee_return_uses_sret(ir, abi, *callee);
             let caller_passes_sret_ptr = callee_sret_ptr_in_lpir_args(ir, *callee);
+            let caller_sret_vm_abi_swap =
+                caller_passes_sret_ptr && callee_sret_vm_abi_swap(ir, *callee);
             out.push(VInst::Call {
                 target: symbols.intern(name),
                 args: push_vregs_slice(vreg_pool, args_slice)?,
                 rets: push_vregs_slice(vreg_pool, results_slice)?,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 src_op: po,
             });
             Ok(())
@@ -1843,6 +1847,11 @@ fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<Bui
             let ac = decl.param_types.len();
             vm_q32_builtin_id(&decl.func_name, ac)
         }
+        "texture" => {
+            let base = texture_strip_suffix(&decl.func_name);
+            let ac = decl.param_types.len();
+            texture_q32_builtin_id(base, ac)
+        }
         _ => None,
     }
 }
@@ -1852,6 +1861,17 @@ fn lpfn_strip_suffix(func_name: &str) -> Option<&str> {
     let (base, tail) = func_name.rsplit_once('_')?;
     tail.parse::<u32>().ok()?;
     Some(base)
+}
+
+fn texture_strip_suffix(func_name: &str) -> &str {
+    let Some((base, tail)) = func_name.rsplit_once('_') else {
+        return func_name;
+    };
+    if tail.parse::<u32>().is_ok() {
+        base
+    } else {
+        func_name
+    }
 }
 
 /// Get GLSL parameter kinds from lpfn_glsl_params CSV or infer from IR types.
@@ -1930,6 +1950,19 @@ fn callee_sret_ptr_in_lpir_args(ir: &LpirModule, callee: CalleeRef) -> bool {
     } else {
         false
     }
+}
+
+/// When the caller passes an explicit sret pointer in [`LpirOp::Call`], RV32 can map it two ways.
+/// Returns true when LPIR passes `vmctx` before the output pointer (`ImportDecl::needs_vmctx`),
+/// and for user functions with `IrFunction::sret_arg`.
+/// `@texture::*` imports omit vmctx (`needs_vmctx == false`); the first arg is the sret destination
+/// and maps to `a0` without swapping.
+fn callee_sret_vm_abi_swap(ir: &LpirModule, callee: CalleeRef) -> bool {
+    if let Some(imp_idx) = ir.callee_as_import(callee) {
+        return ir.imports[imp_idx].needs_vmctx;
+    }
+    ir.callee_as_function(callee)
+        .is_some_and(|f| f.sret_arg.is_some())
 }
 
 #[cfg(test)]
@@ -2283,6 +2316,7 @@ mod tests {
                 rets,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_fadd_q32");
@@ -2290,6 +2324,7 @@ mod tests {
                 assert_eq!(rets.vregs(&pool), &[FaVReg(2)]);
                 assert!(!callee_uses_sret);
                 assert!(!caller_passes_sret_ptr);
+                assert!(!caller_sret_vm_abi_swap);
                 assert_eq!(unpack_src_op(*src_op), Some(3));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2315,6 +2350,7 @@ mod tests {
                 rets,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_fdiv_q32");
@@ -2322,6 +2358,7 @@ mod tests {
                 assert_eq!(rets.vregs(&pool), &[FaVReg(2)]);
                 assert!(!callee_uses_sret);
                 assert!(!caller_passes_sret_ptr);
+                assert!(!caller_sret_vm_abi_swap);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2904,6 +2941,7 @@ mod tests {
                 rets,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_itof_s_q32");
@@ -2911,6 +2949,7 @@ mod tests {
                 assert_eq!(rets.vregs(&pool), &[FaVReg(1)]);
                 assert!(!callee_uses_sret);
                 assert!(!caller_passes_sret_ptr);
+                assert!(!caller_sret_vm_abi_swap);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2935,6 +2974,7 @@ mod tests {
                 rets,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_itof_u_q32");
@@ -2942,6 +2982,7 @@ mod tests {
                 assert_eq!(rets.vregs(&pool), &[FaVReg(1)]);
                 assert!(!callee_uses_sret);
                 assert!(!caller_passes_sret_ptr);
+                assert!(!caller_sret_vm_abi_swap);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -2966,6 +3007,7 @@ mod tests {
                 rets,
                 callee_uses_sret,
                 caller_passes_sret_ptr,
+                caller_sret_vm_abi_swap,
                 src_op,
             } => {
                 assert_eq!(symbols.name(*target), "__lp_lpir_fsqrt_q32");
@@ -2973,6 +3015,7 @@ mod tests {
                 assert_eq!(rets.vregs(&pool), &[FaVReg(1)]);
                 assert!(!callee_uses_sret);
                 assert!(!caller_passes_sret_ptr);
+                assert!(!caller_sret_vm_abi_swap);
                 assert_eq!(unpack_src_op(*src_op), Some(0));
             }
             other => panic!("expected Call, got {other:?}"),

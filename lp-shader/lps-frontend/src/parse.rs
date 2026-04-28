@@ -2,6 +2,7 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use naga::{Module, ShaderStage};
 
@@ -25,6 +26,9 @@ const LPFX_PREFIX: &str = concat!(
 // **Not** rewritten here (must keep using `texture2D` + explicit `layout` or fix the grammar later):
 // - `usampler2D` / `isampler2D`, `sampler2DShadow`, arrays (`uniform sampler2D s[3];`), multiple
 //   declarators (`uniform sampler2D a, b;`), or precision/interpolation between `uniform` and the type.
+//
+// Naga needs a `(texture2D, sampler)` pair for `texture()`; we synthesize `uniform sampler __lp_samp_X`
+// and rewrite `texture(X,` → `texture(sampler2D(X, __lp_samp_X),` after emitting the two uniforms.
 
 fn rewrite_user_uniform_sampler2d_decls_for_naga(user_snippet: &str) -> String {
     if user_snippet.is_empty() {
@@ -32,28 +36,79 @@ fn rewrite_user_uniform_sampler2d_decls_for_naga(user_snippet: &str) -> String {
     }
     let mut out = String::new();
     let mut next_default_binding: u32 = 0;
+    let mut texture_idents: Vec<String> = Vec::new();
     for chunk in user_snippet.split_inclusive('\n') {
         let (line, nl) = if let Some(s) = chunk.strip_suffix('\n') {
             (s, "\n")
         } else {
             (chunk, "")
         };
-        if let Some(rew) =
+        if let Some((rew, id)) =
             try_rewrite_top_level_uniform_sampler2d_line(line, &mut next_default_binding)
         {
+            if let Some(id) = id {
+                texture_idents.push(id);
+            }
             out.push_str(&rew);
         } else {
             out.push_str(line);
         }
         out.push_str(nl);
     }
+    rewrite_texture_calls_to_use_sampler2d_ctor(&mut out, &texture_idents);
     out
+}
+
+fn rewrite_texture_calls_to_use_sampler2d_ctor(out: &mut String, texture_idents: &[String]) {
+    if texture_idents.is_empty() {
+        return;
+    }
+    let mut ids: Vec<&str> = texture_idents.iter().map(|s| s.as_str()).collect();
+    ids.sort_by_key(|s| usize::MAX - s.len());
+    for id in ids {
+        let from = format!("texture({id},");
+        let to = format!("texture(sampler2D({id}, __lp_samp_{id}),");
+        while let Some(i) = out.find(&from) {
+            out.replace_range(i..i + from.len(), &to);
+        }
+    }
+}
+
+/// Parse `layout(set=…, binding=…)` (allows spaces around `=`). Returns `(set, binding)`.
+fn parse_glsl_layout_set_binding(layout: &str) -> Option<(u32, u32)> {
+    let inner = layout.strip_prefix("layout(")?.strip_suffix(')')?.trim();
+    let mut set_v: Option<u32> = None;
+    let mut bind_v: Option<u32> = None;
+    for part in inner.split(',') {
+        let p = part.trim();
+        let (key, val) = p.split_once('=')?;
+        let key = key.trim();
+        let val = val.trim();
+        match key {
+            "set" => set_v = parse_ascii_u32(val),
+            "binding" => bind_v = parse_ascii_u32(val),
+            _ => {}
+        }
+    }
+    Some((set_v?, bind_v?))
+}
+
+fn parse_ascii_u32(s: &str) -> Option<u32> {
+    let end = s
+        .as_bytes()
+        .iter()
+        .position(|b| !b.is_ascii_digit())
+        .unwrap_or(s.len());
+    if end == 0 {
+        return None;
+    }
+    s.get(..end)?.parse().ok()
 }
 
 fn try_rewrite_top_level_uniform_sampler2d_line(
     line: &str,
     next_default_binding: &mut u32,
-) -> Option<String> {
+) -> Option<(String, Option<String>)> {
     // Ignore line comments for shape matching; comments are not preserved in rewritten line.
     let code = line.split_once("//").map(|(a, _)| a).unwrap_or(line);
     let lead_ws = &line[..line.len() - line.trim_start().len()];
@@ -128,12 +183,20 @@ fn try_rewrite_top_level_uniform_sampler2d_line(
         return None;
     }
 
+    let samp = format!("__lp_samp_{ident}");
     let new_core = if let Some(lay) = layout_str {
-        format!("{lay} uniform texture2D {ident};")
+        let (set, bind) = parse_glsl_layout_set_binding(lay)?;
+        let bind2 = bind.checked_add(1)?;
+        format!(
+            "{lay} uniform texture2D {ident};\n{lead_ws}layout(set={set}, binding={bind2}) uniform sampler {samp};"
+        )
     } else {
         let bind = *next_default_binding;
-        *next_default_binding = next_default_binding.saturating_add(1);
-        format!("layout(set=0, binding={bind}) uniform texture2D {ident};")
+        *next_default_binding = next_default_binding.saturating_add(2);
+        let bind2 = bind.checked_add(1)?;
+        format!(
+            "layout(set=0, binding={bind}) uniform texture2D {ident};\n{lead_ws}layout(set=0, binding={bind2}) uniform sampler {samp};"
+        )
     };
     let mut s = String::new();
     s.push_str(lead_ws);
@@ -143,7 +206,7 @@ fn try_rewrite_top_level_uniform_sampler2d_line(
         s.push_str("//");
         s.push_str(c);
     }
-    Some(s)
+    Some((s, Some(String::from(ident))))
 }
 
 /// `t` is trimmed line code without a line `//` comment.
@@ -247,22 +310,30 @@ mod uniform_sampler2d_compat_tests {
     fn injects_default_layout_and_texture2d() {
         let s = "uniform sampler2D foo;\n";
         let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
-        assert_eq!(o, "layout(set=0, binding=0) uniform texture2D foo;\n");
+        assert_eq!(
+            o,
+            "layout(set=0, binding=0) uniform texture2D foo;\nlayout(set=0, binding=1) uniform sampler __lp_samp_foo;\n"
+        );
     }
 
     #[test]
     fn preserves_existing_layout_replaces_type_only() {
         let s = "layout(set=0, binding=7) uniform sampler2D bar;\n";
         let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
-        assert_eq!(o, "layout(set=0, binding=7) uniform texture2D bar;\n");
+        assert_eq!(
+            o,
+            "layout(set=0, binding=7) uniform texture2D bar;\nlayout(set=0, binding=8) uniform sampler __lp_samp_bar;\n"
+        );
     }
 
     #[test]
     fn second_declaration_gets_next_binding() {
         let s = "uniform sampler2D a;\nuniform sampler2D b;\n";
         let o = rewrite_user_uniform_sampler2d_decls_for_naga(s);
-        assert!(o.contains("binding=0)"));
-        assert!(o.contains("binding=1)"));
+        assert!(o.contains("binding=0) uniform texture2D a"));
+        assert!(o.contains("binding=1) uniform sampler __lp_samp_a"));
+        assert!(o.contains("binding=2) uniform texture2D b"));
+        assert!(o.contains("binding=3) uniform sampler __lp_samp_b"));
     }
 
     #[test]
