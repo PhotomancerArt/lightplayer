@@ -28,7 +28,7 @@ Tier A builtins — **all three targets** (Cranelift JIT, WASM, RV32):
 ```bash
 cd lp2025
 for t in jit.q32 wasm.q32 rv32.q32; do
-  ./scripts/glsl-filetests.sh --target "$t" builtins/common-isnan.glsl builtins/common-isinf.glsl
+  ./scripts/filetests.sh --target "$t" builtins/common-isnan.glsl builtins/common-isinf.glsl
 done
 ```
 

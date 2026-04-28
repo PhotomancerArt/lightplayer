@@ -207,7 +207,7 @@ Run:
 just test-glsl-filetests
 ```
 
-Which runs `scripts/glsl-filetests.sh`, then again with
+Which runs `scripts/filetests.sh`, then again with
 `--target wasm.q32`, then `--target rv32.q32c`. Any per-target failure
 that the rewrite covered should now be green; any new per-target
 failure that points to a real codegen bug → **stop and report.**

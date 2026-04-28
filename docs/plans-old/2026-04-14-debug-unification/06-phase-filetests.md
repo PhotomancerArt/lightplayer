@@ -46,6 +46,7 @@ if output_mode.show_debug_sections() {
 ### 3. Ensure Consistent Output
 
 The filetest detail output and `shader-debug` command should produce identical debug sections. Verify:
+
 - Section ordering (interleaved, disasm, vinst, liveness, region)
 - Header format ("=== Function: name ===", "--- section ---")
 - Help text format with copy-pasteable commands
@@ -68,8 +69,9 @@ let rendered = if let Some(filter) = fn_filter {
 ```
 
 This would enable:
+
 ```bash
-scripts/glsl-filetests.sh --target rv32fa.q32 --fn test_foo file.glsl
+scripts/filetests.sh --target rv32fa.q32 --fn test_foo file.glsl
 ```
 
 ## Usage Examples
@@ -77,20 +79,23 @@ scripts/glsl-filetests.sh --target rv32fa.q32 --fn test_foo file.glsl
 After this phase, both commands show the same unified format:
 
 ### shader-debug
+
 ```bash
 lp-cli shader-debug -t rv32fa file.glsl
 ```
 
 ### filetests (with debug output)
+
 ```bash
 # Detail mode shows debug info
-scripts/glsl-filetests.sh --target rv32fa.q32 file.glsl
+scripts/filetests.sh --target rv32fa.q32 file.glsl
 
 # Debug mode (same sections as shader-debug)
-DEBUG=1 scripts/glsl-filetests.sh --target rv32fa.q32 file.glsl
+DEBUG=1 scripts/filetests.sh --target rv32fa.q32 file.glsl
 ```
 
 Both show:
+
 ```
 === Function: test_foo ===
 
@@ -110,12 +115,13 @@ To show a specific function:
 ## Tests
 
 Run filetests with debug output to verify:
+
 ```bash
 # Single file, detail mode
-scripts/glsl-filetests.sh --target rv32fa.q32 lpvm/native/perf/caller-save-pressure.glsl
+scripts/filetests.sh --target rv32fa.q32 lpvm/native/perf/caller-save-pressure.glsl
 
 # Check that debug sections appear
-scripts/glsl-filetests.sh --target rv32fa.q32,rv32.q32 lpvm/native/perf/caller-save-pressure.glsl 2>&1 | grep -A5 "=== Function:"
+scripts/filetests.sh --target rv32fa.q32,rv32.q32 lpvm/native/perf/caller-save-pressure.glsl 2>&1 | grep -A5 "=== Function:"
 ```
 
 ## Code Organization
@@ -127,6 +133,7 @@ scripts/glsl-filetests.sh --target rv32fa.q32,rv32.q32 lpvm/native/perf/caller-s
 ## Relationship to Other Phases
 
 This phase depends on:
+
 - Phase 2 (FA backend populating debug info)
 - Phase 3 (Cranelift backends populating debug info)
 - Phase 4 (CLI command using debug info)

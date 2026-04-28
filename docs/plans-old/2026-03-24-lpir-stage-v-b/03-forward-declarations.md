@@ -33,7 +33,7 @@ Run the failing test with debug output to see which functions are in
 `naga_module.functions`:
 
 ```bash
-DEBUG=1 scripts/glsl-filetests.sh function/declare-prototype.glsl
+DEBUG=1 scripts/filetests.sh function/declare-prototype.glsl
 ```
 
 Check whether the Naga module contains `add_two_floats` as a function handle
@@ -69,6 +69,6 @@ a prototype has no body, but its definition (later in source) does.
 
 ```bash
 cargo test -p lps-frontend -q
-scripts/glsl-filetests.sh function/declare-prototype.glsl
-scripts/glsl-filetests.sh function/recursive-static-error.glsl
+scripts/filetests.sh function/declare-prototype.glsl
+scripts/filetests.sh function/recursive-static-error.glsl
 ```

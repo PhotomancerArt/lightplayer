@@ -16,22 +16,22 @@ substantial, not yet committed.
 
 **50 failing files** break down by **root cause** (from running each file individually):
 
-| Root cause | Files | Error signature | Example |
-|-----------|-------|-----------------|---------|
-| **`Relational` in `expr_type_inner`** | 15 | `expr_type_inner unsupported Relational { fun: All\|Any }` | `vec/bvec2/fn-all.glsl` |
-| **Matrix `==`/`!=` (depends on Relational)** | 6 | same `Relational::All` through matrix comparison | `matrix/mat2/op-equal.glsl` |
-| **Matrix element store** | 8 | `store to non-local pointer` | `matrix/mat2/incdec-matrix-element.glsl` |
-| **Bvec `store to non-local pointer`** | 2 | same as matrix stores but on bvec index-assign | `vec/bvec2/assign-element.glsl` |
-| **Bvec `Load from non-local pointer`** (dynamic index) | 5 | `Load from non-local pointer` | `vec/bvec2/access-array.glsl` |
-| **Bvec cast / component mismatch** | 3 | `assignment component count 1 vs 2` | `vec/bvec2/to-float.glsl` |
-| **`mix(bvec)` — Naga ambiguous overload** | 3 | `Ambiguous best function for 'mix'` | `vec/bvec2/fn-mix.glsl` |
-| **`matrixCompMult` unknown function** | 1 | `Unknown function 'matrixCompMult'` (Naga parse) | `builtins/matrix-compmult.glsl` |
-| **`isnan` / `isinf` — Naga `Float literal is infinite`** | 2 | parse error on `1.0/0.0` etc. | `builtins/common-isnan.glsl` |
-| **Array types in LPIR** | 5 | `unsupported type for LPIR: Array { … }` | `array/declare-explicit.glsl` |
-| **Forward-declare / param-unnamed with array/matrix poison** | 3 | file references array/matrix types in other declarations | `function/forward-declare.glsl` |
-| **`while (bool j = expr)` — Naga parse** | 1 | `Expected LeftParen, found Identifier` | `control/while/variable-scope.glsl` |
-| **`const` — single-failure edge** | 1 | 2/3 pass; 1 case (`round(2.5)` Q32 tie) | `const/builtin/extended.glsl` |
-| **Struct types** | 2 | `unsupported type … Struct { … }` | `struct/define-simple.glsl` |
+| Root cause                                                   | Files | Error signature                                            | Example                                  |
+| ------------------------------------------------------------ | ----- | ---------------------------------------------------------- | ---------------------------------------- |
+| **`Relational` in `expr_type_inner`**                        | 15    | `expr_type_inner unsupported Relational { fun: All\|Any }` | `vec/bvec2/fn-all.glsl`                  |
+| **Matrix `==`/`!=` (depends on Relational)**                 | 6     | same `Relational::All` through matrix comparison           | `matrix/mat2/op-equal.glsl`              |
+| **Matrix element store**                                     | 8     | `store to non-local pointer`                               | `matrix/mat2/incdec-matrix-element.glsl` |
+| **Bvec `store to non-local pointer`**                        | 2     | same as matrix stores but on bvec index-assign             | `vec/bvec2/assign-element.glsl`          |
+| **Bvec `Load from non-local pointer`** (dynamic index)       | 5     | `Load from non-local pointer`                              | `vec/bvec2/access-array.glsl`            |
+| **Bvec cast / component mismatch**                           | 3     | `assignment component count 1 vs 2`                        | `vec/bvec2/to-float.glsl`                |
+| **`mix(bvec)` — Naga ambiguous overload**                    | 3     | `Ambiguous best function for 'mix'`                        | `vec/bvec2/fn-mix.glsl`                  |
+| **`matrixCompMult` unknown function**                        | 1     | `Unknown function 'matrixCompMult'` (Naga parse)           | `builtins/matrix-compmult.glsl`          |
+| **`isnan` / `isinf` — Naga `Float literal is infinite`**     | 2     | parse error on `1.0/0.0` etc.                              | `builtins/common-isnan.glsl`             |
+| **Array types in LPIR**                                      | 5     | `unsupported type for LPIR: Array { … }`                   | `array/declare-explicit.glsl`            |
+| **Forward-declare / param-unnamed with array/matrix poison** | 3     | file references array/matrix types in other declarations   | `function/forward-declare.glsl`          |
+| **`while (bool j = expr)` — Naga parse**                     | 1     | `Expected LeftParen, found Identifier`                     | `control/while/variable-scope.glsl`      |
+| **`const` — single-failure edge**                            | 1     | 2/3 pass; 1 case (`round(2.5)` Q32 tie)                    | `const/builtin/extended.glsl`            |
+| **Struct types**                                             | 2     | `unsupported type … Struct { … }`                          | `struct/define-simple.glsl`              |
 
 **Grouped by milestone-sized work:**
 
@@ -60,6 +60,7 @@ eventually, just not in this roadmap). This removes them from the "must fix" lis
 ### Q2 — Naga parse-level failures: fix in fork or work around?
 
 **Context:** 4 files fail due to **Naga's parser**:
+
 - `builtins/common-isnan.glsl` / `common-isinf.glsl`: `Float literal is infinite` (Naga rejects
   `1.0/0.0` as a literal).
 - `builtins/matrix-compmult.glsl`: `Unknown function 'matrixCompMult'` (Naga's GLSL frontend
@@ -68,6 +69,7 @@ eventually, just not in this roadmap). This removes them from the "must fix" lis
 - `control/while/variable-scope.glsl`: `Expected LeftParen` for `while (bool j = expr)`.
 
 Options:
+
 1. Fix in Naga fork (we already maintain one).
 2. Mark as `@unsupported` or `@unimplemented` with reason.
 3. Rewrite the `.glsl` test to avoid the syntax Naga can't parse.
@@ -108,7 +110,7 @@ the WASM/RV32 sweep milestone.
 Naga limitations) or `@unsupported` (Q32 edge semantics)." Concretely: **0 unexpected failures on
 `jit.q32`**; WASM/RV32 in a similar state modulo `@unimplemented(backend=wasm)` for known gaps.
 
-**Answer:** Agreed. Done bar = `./scripts/glsl-filetests.sh` exits 0 on jit.q32 (0 unexpected
+**Answer:** Agreed. Done bar = `./scripts/filetests.sh` exits 0 on jit.q32 (0 unexpected
 failures). Same for WASM/RV32 after the multi-backend milestone. Anything that can't pass is
 annotated `@unimplemented` or `@unsupported` with a reason.
 

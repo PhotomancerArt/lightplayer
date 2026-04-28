@@ -46,5 +46,4 @@ Implement q32 builtins for common functions: mod, round, roundeven.
 - Unit tests pass with appropriate tolerance (3% for complex functions)
 - Functions registered in builtin generator (auto-generated)
 - Code compiles without warnings
-- Tests pass: `scripts/glsl-filetests.sh builtins/common-mod.glsl`, etc.
-
+- Tests pass: `scripts/filetests.sh builtins/common-mod.glsl`, etc.

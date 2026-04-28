@@ -47,14 +47,14 @@ MATRIX="matrix/mat2/op-equal.glsl matrix/mat2/op-not-equal.glsl \
   matrix/mat3/op-equal.glsl matrix/mat3/op-not-equal.glsl \
   matrix/mat4/op-equal.glsl matrix/mat4/op-not-equal.glsl"
 for t in jit.q32 wasm.q32 rv32.q32; do
-  ./scripts/glsl-filetests.sh --target "$t" $MATRIX
+  ./scripts/filetests.sh --target "$t" $MATRIX
 done
 ```
 
 Tier B (after triage), same pattern per file or directory:
 
 ```bash
-./scripts/glsl-filetests.sh --target wasm.q32 vec/bvec2/
+./scripts/filetests.sh --target wasm.q32 vec/bvec2/
 # … etc.
 ```
 

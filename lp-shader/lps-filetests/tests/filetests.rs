@@ -16,7 +16,7 @@ fn file_declares_parse_error_test(path: &Path) -> bool {
 }
 
 // Ignored: we do not want filetests to run as part of `cargo test`.
-// They should be run separately using the `scripts/glsl-filetests.sh` script.
+// They should be run separately using the `scripts/filetests.sh` script.
 #[ignore]
 #[test]
 fn filetests() -> Result<()> {

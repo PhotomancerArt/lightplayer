@@ -15,14 +15,14 @@ changes; register-return.
 
 ### Resolved decisions (Q1–Q6)
 
-| Q | Decision |
-| - | -------- |
-| Q1 | Frontend-only M5; no new LPIR param metadata |
-| Q2 | New enum variant `AggregateSlot::ParamReadOnly(u32)` |
-| Q3 | Store to param’s aggregate `LocalVariable` (peel like lowering) ⇒ mutable |
-| Q4 | Call passes param local / `FunctionArgument(i)` as callee `inout`/`out` ⇒ mutable |
-| Q5 | `debug_assert!` on impossible Store into read-only classification |
-| Q6 | Add `m5-bench.md` with before/after cycles |
+| Q   | Decision                                                                          |
+| --- | --------------------------------------------------------------------------------- |
+| Q1  | Frontend-only M5; no new LPIR param metadata                                      |
+| Q2  | New enum variant `AggregateSlot::ParamReadOnly(u32)`                              |
+| Q3  | Store to param’s aggregate `LocalVariable` (peel like lowering) ⇒ mutable         |
+| Q4  | Call passes param local / `FunctionArgument(i)` as callee `inout`/`out` ⇒ mutable |
+| Q5  | `debug_assert!` on impossible Store into read-only classification                 |
+| Q6  | Add `m5-bench.md` with before/after cycles                                        |
 
 ### File structure
 
@@ -88,9 +88,9 @@ onward `inout`/`out` pass for that param index.
 
 - Add `readonly_in_scan.rs` with a public entry point, e.g.
   `pub(crate) fn in_aggregate_param_read_only(
-      module: &Module,
-      func: &Function,
-  ) -> Result<BTreeMap<u32, bool>, LowerError>`  
+    module: &Module,
+    func: &Function,
+) -> Result<BTreeMap<u32, bool>, LowerError>`  
   returning **true** = safe to elide copy (read-only). Keys are argument indices
   `i` where `func.arguments[i]` is `Array` or `Struct` (by-value `in`).
 - **Mutable** if:
@@ -147,7 +147,7 @@ benchmark file; debug asserts in Store paths (Phase 2).
 cargo build -p lps-frontend
 cargo clippy -p lps-frontend -- -D warnings
 cargo test -p lps-frontend
-scripts/glsl-filetests.sh --concise
+scripts/filetests.sh --concise
 ```
 
 ---
@@ -196,7 +196,7 @@ scripts/glsl-filetests.sh --concise
 
 ```bash
 cargo clippy -p lps-frontend -- -D warnings
-scripts/glsl-filetests.sh --concise
+scripts/filetests.sh --concise
 ```
 
 ---
@@ -221,14 +221,14 @@ Same as Phase 2; working tree clean.
 
 ### Historical: Q1–Q6 (answered — all agreed)
 
-| # | Question | Outcome |
-| - | -------- | ------- |
-| Q1 | Frontend-only | Yes |
-| Q2 | `ParamReadOnly` variant | Yes |
-| Q3 | Store to param local ⇒ mutable | Yes |
-| Q4 | Onward inout/out ⇒ mutable | Yes |
-| Q5 | debug_assert on violation | Yes |
-| Q6 | `m5-bench.md` | Yes |
+| #   | Question                       | Outcome |
+| --- | ------------------------------ | ------- |
+| Q1  | Frontend-only                  | Yes     |
+| Q2  | `ParamReadOnly` variant        | Yes     |
+| Q3  | Store to param local ⇒ mutable | Yes     |
+| Q4  | Onward inout/out ⇒ mutable     | Yes     |
+| Q5  | debug_assert on violation      | Yes     |
+| Q6  | `m5-bench.md`                  | Yes     |
 
 ### Decisions for future reference
 

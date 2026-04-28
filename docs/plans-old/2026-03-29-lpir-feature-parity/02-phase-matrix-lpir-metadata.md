@@ -30,10 +30,10 @@ includes:
    functions vs at module boundary.
 
 4. **Tests**
-    - Minimal unit test: compile a shader whose **only** exported function returns `mat2` and
-      call through the test harness if invoke already supports 4 words; otherwise defer execution
-      to phase 4.
-    - `cargo test -p lpir` if metadata is validated there.
+   - Minimal unit test: compile a shader whose **only** exported function returns `mat2` and
+     call through the test harness if invoke already supports 4 words; otherwise defer execution
+     to phase 4.
+   - `cargo test -p lpir` if metadata is validated there.
 
 5. **Out of scope for this phase:** matrix **element store** (phase 3); **invoke** beyond what
    already works (phase 4).
@@ -50,7 +50,7 @@ Targeted filetests once a matrix file compiles past the type error (may still fa
 3–4):
 
 ```bash
-./scripts/glsl-filetests.sh matrix/mat2/from-scalar.glsl
+./scripts/filetests.sh matrix/mat2/from-scalar.glsl
 ```
 
 ```bash

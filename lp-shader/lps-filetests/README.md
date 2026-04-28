@@ -12,14 +12,14 @@ From the workspace root (`lp2025`):
 
 ```bash
 # Default backend: jit.q32 only (fast local default)
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 
 # One backend
-scripts/glsl-filetests.sh --target wasm.q32
-scripts/glsl-filetests.sh --target rv32c.q32
+scripts/filetests.sh --target wasm.q32
+scripts/filetests.sh --target rv32c.q32
 
 # Override compiler options for the whole run (wins over per-file `// compile-opt(...)`)
-scripts/glsl-filetests.sh --force-opt q32.mul=wrapping --target wasm.q32
+scripts/filetests.sh --force-opt q32.mul=wrapping --target wasm.q32
 
 # Full matrix (same as `just test-filetests` / `just test`)
 just test-filetests
@@ -50,7 +50,7 @@ TEST_FILE=scalar/float/op-add.glsl cargo test -p lps-filetests --test filetests 
 ```
 
 For wasm/rv32c via the harness you would need separate tooling; prefer
-`scripts/glsl-filetests.sh --target …` for those.
+`scripts/filetests.sh --target …` for those.
 
 ### From the crate directory
 
@@ -72,7 +72,7 @@ Q32, or a path we do not intend to implement there). This is not an assertion fa
 - **`@unsupported(...)`** — permanent “not on this target” (skip; does not count as pass or fail).
 
 Failures are reported with expected vs actual values. Use
-`scripts/glsl-filetests.sh --target wasm.q32` (or `jit.q32` / `rv32c.q32`) to focus one backend.
+`scripts/filetests.sh --target wasm.q32` (or `jit.q32` / `rv32c.q32`) to focus one backend.
 
 ## Test file format
 
@@ -168,7 +168,7 @@ Tests live under `filetests/` (e.g. `math/`, `operators/`, `type_errors/`).
 
 1. Add a `.glsl` file under `filetests/`.
 2. Use `// test run`, optional `// target …`, and `// run:` lines.
-3. Run BLESS if needed, then run `scripts/glsl-filetests.sh` (and CI targets if you touch
+3. Run BLESS if needed, then run `scripts/filetests.sh` (and CI targets if you touch
    backend-specific behavior).
 
 ## Troubleshooting

@@ -42,6 +42,6 @@
 
 #### CI / tooling note
 
-- **Decision:** Treat `cargo test -p lps-filetests textures` as a filter over Rust tests only; real GLSL coverage uses `scripts/glsl-filetests.sh` (the integration harness is `#[ignore]`).
+- **Decision:** Treat `cargo test -p lps-filetests textures` as a filter over Rust tests only; real GLSL coverage uses `scripts/filetests.sh` (the integration harness is `#[ignore]`).
 - **Why:** Matches how the repo runs GLSL filetests (`just test-filetests`).
 - **Revisit when:** The ignored harness is wired into default `cargo test` (if ever).

@@ -72,7 +72,7 @@ we remove it. Manual or scripted.
 
 ## 6. Regression check
 
-**Command:** `scripts/glsl-filetests.sh` or equivalent, default target (cranelift.q32).
+**Command:** `scripts/filetests.sh` or equivalent, default target (cranelift.q32).
 
 **Expect:** Same pass count as before. No new failures.
 
@@ -80,12 +80,12 @@ we remove it. Manual or scripted.
 
 ## File change summary
 
-| File                                      | Changes                                                |
-|-------------------------------------------|--------------------------------------------------------|
-| rainbow.shader (if needed)                | Fix any source issues                                  |
+| File                                  | Changes                                                |
+| ------------------------------------- | ------------------------------------------------------ |
+| rainbow.shader (if needed)            | Fix any source issues                                  |
 | lps-wasm                              | Bug fixes for rainbow compilation                      |
 | lps-wasm/tests/rainbow_integration.rs | New integration test                                   |
-| filetests/*.glsl                          | Remove @unimplemented(backend=wasm) from passing tests |
+| filetests/\*.glsl                     | Remove @unimplemented(backend=wasm) from passing tests |
 
 ---
 

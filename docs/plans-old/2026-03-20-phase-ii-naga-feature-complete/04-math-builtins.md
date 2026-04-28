@@ -203,7 +203,7 @@ fn emit_math_vector(..., dim: u32, ...) -> Result<(), String> {
 
 Some functions are special:
 
-- `Dot(a, b)` → sum of a[i]*b[i] for i in 0..dim → **returns scalar**
+- `Dot(a, b)` → sum of a[i]\*b[i] for i in 0..dim → **returns scalar**
 - `Length(v)` → sqrt(dot(v,v)) → **returns scalar**
 - `Normalize(v)` → v / length(v) → **returns vector**
 - `Cross(a, b)` → only for vec3, returns vec3
@@ -259,9 +259,9 @@ RelationalFunction::All | RelationalFunction::Any => {
 ## Validate
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "builtins/"
-scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
-scripts/glsl-filetests.sh --target wasm.q32 "vec/"
+scripts/filetests.sh --target wasm.q32 "builtins/"
+scripts/filetests.sh --target wasm.q32 "scalar/"
+scripts/filetests.sh --target wasm.q32 "vec/"
 cargo check -p lps-wasm
 ```
 

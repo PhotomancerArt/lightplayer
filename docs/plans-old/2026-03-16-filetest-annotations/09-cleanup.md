@@ -65,13 +65,13 @@ cargo build
 cargo test
 
 # Run all filetests (both targets)
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 
 # Run cranelift only
-scripts/glsl-filetests.sh --target cranelift.q32
+scripts/filetests.sh --target cranelift.q32
 
 # Run wasm only
-scripts/glsl-filetests.sh --target wasm.q32
+scripts/filetests.sh --target wasm.q32
 
 # Format check
 cargo +nightly fmt -- --check

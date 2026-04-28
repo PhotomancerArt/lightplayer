@@ -9,6 +9,7 @@
 ## Scope
 
 ### In Scope
+
 - Minimal ELF emitter: `.text`, `.symtab`, `.strtab`, `.rel.text`
 - Complete `NativeEngine::compile()` implementation
 - Complete `NativeModule::instantiate()` implementation
@@ -18,6 +19,7 @@
 - Execute `op-add.glsl` in `lp-riscv-emu`
 
 ### Explicitly Out of Scope
+
 - No JIT buffer output (M4 or beyond)
 - No control flow tests (use only simple arithmetic test)
 - No spilling optimization (greedy is sufficient)
@@ -26,6 +28,7 @@
 ## Key Decisions
 
 ### ELF Structure
+
 Minimal but valid relocatable ELF:
 
 ```
@@ -72,6 +75,7 @@ impl LpvmInstance for NativeInstance {
 ```
 
 ### Filetest Integration
+
 Add to `lps-filetests/src/lib.rs`:
 
 ```rust
@@ -95,19 +99,20 @@ fn run_test(backend: TestBackend, test: &FileTest) -> TestResult {
 
 ## Deliverables
 
-| File | Contents |
-|------|----------|
-| `src/output/elf.rs` | ELF emitter: header, sections, relocations |
-| `src/output/link.rs` | Interface to `lp-riscv-elf` linking |
-| `src/lib.rs` updates | Complete `compile()` implementation |
-| `src/module.rs` updates | Complete `instantiate()`, metadata access |
-| `src/instance.rs` updates | Complete `call()`, argument marshalling |
-| `src/isa/rv32/call.rs` | Builtin call ABI: save ra, args in regs, jal, restore |
+| File                      | Contents                                              |
+| ------------------------- | ----------------------------------------------------- |
+| `src/output/elf.rs`       | ELF emitter: header, sections, relocations            |
+| `src/output/link.rs`      | Interface to `lp-riscv-elf` linking                   |
+| `src/lib.rs` updates      | Complete `compile()` implementation                   |
+| `src/module.rs` updates   | Complete `instantiate()`, metadata access             |
+| `src/instance.rs` updates | Complete `call()`, argument marshalling               |
+| `src/isa/rv32/call.rs`    | Builtin call ABI: save ra, args in regs, jal, restore |
 
 ### Filetest Changes
-| File | Change |
-|------|--------|
-| `lps-filetests/src/lib.rs` | Add `Rv32lpQ32` to `TestBackend` enum |
+
+| File                       | Change                                       |
+| -------------------------- | -------------------------------------------- |
+| `lps-filetests/src/lib.rs` | Add `Rv32lpQ32` to `TestBackend` enum        |
 | `lps-filetests/Cargo.toml` | Add `lpvm-native` dependency (feature-gated) |
 
 ## Dependencies
@@ -126,12 +131,14 @@ fn run_test(backend: TestBackend, test: &FileTest) -> TestResult {
 ## Validation
 
 **Unit test** (ELF roundtrip):
+
 ```bash
 # Generate ELF, verify with readelf
 riscv64-unknown-elf-readelf -a target/test_output.o
 ```
 
 **Integration test** (execution):
+
 ```bash
 # Single test
 cargo test -p lps-filetests --test scalar_int_op_add --features native-backend
@@ -139,8 +146,9 @@ cargo test -p lps-filetests --test scalar_int_op_add --features native-backend
 ```
 
 **Success criteria**:
+
 ```bash
-./scripts/glsl-filetests.sh scalar/int/op-add.glsl rv32lp.q32
+./scripts/filetests.sh scalar/int/op-add.glsl rv32lp.q32
 # Produces: PASS or numeric result matching expected
 ```
 

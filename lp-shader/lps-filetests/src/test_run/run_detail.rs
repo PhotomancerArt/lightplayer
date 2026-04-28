@@ -794,10 +794,10 @@ fn format_error(
                 "Rerun with debugging:".to_string()
             };
             format!(
-                "{rerun_title}\n  scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}"
+                "{rerun_title}\n  scripts/filetests.sh --target {target_name} {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/filetests.sh --target {target_name} {filename}:{line_number}"
             )
         } else {
-            format!("scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}")
+            format!("scripts/filetests.sh --target {target_name} {filename}:{line_number}")
         };
         parts.push(rerun_section);
     }

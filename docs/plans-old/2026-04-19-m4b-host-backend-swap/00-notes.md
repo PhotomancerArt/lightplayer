@@ -32,7 +32,7 @@ Touch points pulled in by the swap:
   `lp-server`, `lp-cli`, and `fw-emu`/`fw-esp32` "comparison" builds
   — needs renaming or pruning. Firmware (RV32 / ESP32) cannot run
   Wasmtime, so the firmware default (`native-jit`) is unaffected, but
-  the firmware-side `cranelift` *comparison* feature has nowhere to go.
+  the firmware-side `cranelift` _comparison_ feature has nowhere to go.
 - `LpGraphics::backend_name()` literal `"cranelift"` becomes
   `"wasmtime"`. Surfaced in logs and (potentially) `lp-cli`'s shader
   debug target tables.
@@ -40,7 +40,7 @@ Touch points pulled in by the swap:
 Out of scope (per roadmap):
 
 - Removing `lpvm-cranelift` from the workspace. It stays for `lp-cli
-  shader-debug` (object-file generation), the Phase 2
+shader-debug` (object-file generation), the Phase 2
   `render_texture_smoke.rs` regression, and as a regression backstop.
 - `gfx/native_jit.rs` (RV32 firmware path) — `lpvm-native` continues
   unchanged.
@@ -104,7 +104,7 @@ sync; Store/Memory are Send under wasmtime's thread model).
 > strategy.
 
 The concrete problem for M4b: `alloc()` records `LpvmBuffer { native:
-mem.data_mut(...).as_mut_ptr() + aligned, ... }`. If a *subsequent*
+mem.data_mut(...).as_mut_ptr() + aligned, ... }`. If a _subsequent_
 `alloc` triggers `Memory::grow`, the wasmtime memory may relocate and
 all previously-returned `native` pointers become stale. Reading those
 pointers from `LpsTextureBuf::data()` is then UB.
@@ -122,16 +122,16 @@ This needs to be addressed before the swap is safe.
 
 ### Cargo features and consumers
 
-| Crate                   | Feature(s)                                                                   | Wired to                                  |
-|-------------------------|------------------------------------------------------------------------------|-------------------------------------------|
-| `lp-engine`             | default = `["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]` | `dep:lpvm-cranelift` + sub-features       |
-| `lp-engine`             | `native-jit`                                                                  | `dep:lpvm-native`                         |
-| `lp-server`             | default = `["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]` | proxies into `lp-engine`                  |
-| `lp-server`             | `native-jit`                                                                  | proxies into `lp-engine`                  |
-| `lp-cli`                | (no features for this) — depends on `lpvm-cranelift` directly for object-file generation in `shader_debug` |
-| `fw-emu`                | default = `["native-jit"]`, optional `cranelift`                              | `lp-server/cranelift` (RV32 comparison)   |
-| `fw-esp32`              | default = `["esp32c6", "server", "native-jit"]`, optional `cranelift`         | `lp-server/cranelift` (ESP32 comparison)  |
-| `lpfx-cpu`              | default = `["cranelift"]`                                                     | direct `lpvm-cranelift` (M4c — out of scope) |
+| Crate       | Feature(s)                                                                                                 | Wired to                                     |
+| ----------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `lp-engine` | default = `["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]`                              | `dep:lpvm-cranelift` + sub-features          |
+| `lp-engine` | `native-jit`                                                                                               | `dep:lpvm-native`                            |
+| `lp-server` | default = `["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]`                              | proxies into `lp-engine`                     |
+| `lp-server` | `native-jit`                                                                                               | proxies into `lp-engine`                     |
+| `lp-cli`    | (no features for this) — depends on `lpvm-cranelift` directly for object-file generation in `shader_debug` |
+| `fw-emu`    | default = `["native-jit"]`, optional `cranelift`                                                           | `lp-server/cranelift` (RV32 comparison)      |
+| `fw-esp32`  | default = `["esp32c6", "server", "native-jit"]`, optional `cranelift`                                      | `lp-server/cranelift` (ESP32 comparison)     |
+| `lpfx-cpu`  | default = `["cranelift"]`                                                                                  | direct `lpvm-cranelift` (M4c — out of scope) |
 
 External callers of `CraneliftGraphics` / `lp_server::CraneliftGraphics`:
 
@@ -139,9 +139,9 @@ External callers of `CraneliftGraphics` / `lp_server::CraneliftGraphics`:
 - `lp-cli/tests/integration.rs` — integration test.
 - `lp-core/lp-server/tests/{server_tick,stop_all_projects,fs_version_tracking}.rs`.
 - `lp-core/lp-engine/src/nodes/shader/runtime.rs` — `#[cfg(all(test,
-  feature = "cranelift"))]` test.
+feature = "cranelift"))]` test.
 - `fw-emu/src/main.rs`, `fw-esp32/src/main.rs` — `#[cfg(feature =
-  "cranelift")]` runtime selection (compile-time mutually exclusive
+"cranelift")]` runtime selection (compile-time mutually exclusive
   with `native-jit`).
 - Doc-comment examples in `lp-server/src/server.rs`.
 
@@ -159,11 +159,11 @@ default impl that delegates to `compile()`. `CraneliftEngine` and
 `link_object_with_builtins`. This is **AOT object-file generation**,
 not JIT runtime — it's an authoring/debugging tool that emits
 inspectable artifacts. It is independent of `gfx/cranelift.rs`, lives
-on the `lpvm-cranelift` crate that *stays* per the roadmap, and
+on the `lpvm-cranelift` crate that _stays_ per the roadmap, and
 should not be touched by M4b.
 
 The roadmap mentioned a "target table" in `lp-cli shader-debug` and
-`scripts/glsl-filetests.sh`. Verify in the design phase whether either
+`scripts/filetests.sh`. Verify in the design phase whether either
 literally lists `cranelift` as a runtime backend selector that points
 at `lp-engine`'s host JIT (vs. the AOT object path). Most likely
 nothing in the table changes — the AOT cranelift entry stays, and
@@ -375,18 +375,18 @@ files and any CI scripts.
 **Options.**
 
 A. **Hard rename to `wasmtime`.** Update every `--features cranelift`
-   site in workspace + CI; drop the old name entirely. Cleanest end
-   state. Some short-term churn for anyone with a stale shell
-   history.
+site in workspace + CI; drop the old name entirely. Cleanest end
+state. Some short-term churn for anyone with a stale shell
+history.
 
 B. **Rename to `wasmtime`, keep `cranelift` as a deprecated alias for
-   one cycle.** `cranelift = ["wasmtime"]` in `lp-engine`/`lp-server`
-   so existing scripts still compile but produce a deprecation
-   warning. More forgiving; carries a stale name in the tree.
+one cycle.** `cranelift = ["wasmtime"]` in `lp-engine`/`lp-server`
+so existing scripts still compile but produce a deprecation
+warning. More forgiving; carries a stale name in the tree.
 
-C. **Keep the name `cranelift`** (since wasmtime *is* using
-   cranelift internally as its codegen). Internally points at
-   `lpvm-wasm`. Least churn; surfaces a misleading name forever.
+C. **Keep the name `cranelift`** (since wasmtime _is_ using
+cranelift internally as its codegen). Internally points at
+`lpvm-wasm`. Least churn; surfaces a misleading name forever.
 
 **Suggested answer.** **A (hard rename)**, mirroring the roadmap's
 explicit recommendation. The infrastructure is internal; no
@@ -418,19 +418,19 @@ host platform.
 So the feature literally cannot rename to `wasmtime`. Three options:
 
 A. **Delete the comparison feature** from `fw-emu` and `fw-esp32`
-   entirely. Native-jit becomes the only firmware backend. Anyone
-   who wants Cranelift-output inspection uses `lp-cli shader-debug`
-   (still works, AOT path stays).
+entirely. Native-jit becomes the only firmware backend. Anyone
+who wants Cranelift-output inspection uses `lp-cli shader-debug`
+(still works, AOT path stays).
 
 B. **Rename to `cranelift-jit`** to disambiguate from the host
-   `cranelift` feature (which is itself going away in Q2). Keeps the
-   firmware comparison capability; clear that it's the bare-metal
-   JIT path. Continues exercising `lpvm-cranelift` on the RV32
-   target — non-trivial regression backstop.
+`cranelift` feature (which is itself going away in Q2). Keeps the
+firmware comparison capability; clear that it's the bare-metal
+JIT path. Continues exercising `lpvm-cranelift` on the RV32
+target — non-trivial regression backstop.
 
 C. **Keep the name `cranelift`** on the firmware crates only (the
-   host `cranelift` feature is gone, so no clash). Confusing but
-   minimal churn.
+host `cranelift` feature is gone, so no clash). Confusing but
+minimal churn.
 
 **Suggested answer.** **B (rename to `cranelift-jit`)**. The
 firmware comparison build is a useful regression backstop for the
@@ -442,7 +442,7 @@ the host backend) and avoids confusion now that the host
 `cranelift` feature is gone.
 
 If real-world usage of the `--features cranelift` firmware build is
-*nil* and nobody on the team has reached for it in the last several
+_nil_ and nobody on the team has reached for it in the last several
 weeks, **A (delete)** is also defensible — less code to maintain.
 **Confirm with the user.**
 
@@ -487,7 +487,7 @@ the call sites in the same commit.
 
 If "this might swap again" is a real concern, `HostGraphics` is the
 safer long-term name. But that bet has a cost: every reader has to
-remember which "host" backend is wired in *today*. Concrete name
+remember which "host" backend is wired in _today_. Concrete name
 wins until we have evidence we'll swap again.
 
 **Answer.** **`HostGraphics` (backend-neutral name) — no
@@ -517,11 +517,11 @@ identifier; nothing is keyed off it.
 **Answer.** Use `"<crate>::<rt_module>"` form for grep-friendliness
 and parity with existing log strings:
 
-| Target | `backend_name()` |
-|---|---|
-| `cfg(target_arch = "riscv32")` | `"lpvm-native::rt_jit"` |
-| `cfg(target_arch = "wasm32")` | `"lpvm-wasm::rt_browser"` |
-| catchall (host) | `"lpvm-wasm::rt_wasmtime"` |
+| Target                         | `backend_name()`           |
+| ------------------------------ | -------------------------- |
+| `cfg(target_arch = "riscv32")` | `"lpvm-native::rt_jit"`    |
+| `cfg(target_arch = "wasm32")`  | `"lpvm-wasm::rt_browser"`  |
+| catchall (host)                | `"lpvm-wasm::rt_wasmtime"` |
 
 Cleanup phase verifies nothing programmatically keys off the old
 `"cranelift"` literal. `lp-cli shader-debug` uses its own separate
@@ -541,14 +541,14 @@ construction-time `WasmOptions.config`. The per-call
 **Options.**
 
 A. **Add an override on `WasmLpvmEngine` that merges the per-call
-   `CompilerConfig` into a `WasmOptions` clone before compiling.**
-   Mirror what `CraneliftEngine` and `NativeJitEngine` do.
+`CompilerConfig` into a `WasmOptions` clone before compiling.**
+Mirror what `CraneliftEngine` and `NativeJitEngine` do.
 
 B. **Punt — accept that `lp-engine`'s `q32_options` are ignored on
-   the wasmtime path until a follow-up.** Acceptable only if
-   `lp-engine` never sets non-default `q32_options` in production.
-   Not the case in lpfx-cpu downstream; `lp-engine` defaults today
-   but no guarantee for tomorrow.
+the wasmtime path until a follow-up.** Acceptable only if
+`lp-engine` never sets non-default `q32_options` in production.
+Not the case in lpfx-cpu downstream; `lp-engine` defaults today
+but no guarantee for tomorrow.
 
 **Suggested answer.** **A — add the override.** Trivial code
 (`opts.config = config.clone()`; `opts.float_mode` stays from the
@@ -582,12 +582,12 @@ internally.
 **Options.**
 
 A. **Drop `lpvm-cranelift` from `lp-engine`'s `Cargo.toml`.** Add
-   `lpvm-wasm` instead (gated on the new `wasmtime` feature). Clean
-   end state.
+`lpvm-wasm` instead (gated on the new `wasmtime` feature). Clean
+end state.
 
 B. **Keep `lpvm-cranelift` as an optional, off-by-default dep**
-   for nothing in particular — pure caution. Defer the cleanup.
-   Wastes build time.
+for nothing in particular — pure caution. Defer the cleanup.
+Wastes build time.
 
 **Suggested answer.** **A.** `lp-engine` adds `lpvm-wasm` (std-only,
 under `cfg(not(target_arch = "wasm32"))` since lpvm-wasm itself is
@@ -663,14 +663,14 @@ M2 baseline (~600 ms cold-start on hardware) was hand-measured.
 **Options.**
 
 A. **Hand-measured deltas captured in a new perf-report file** for
-   M4b: workspace `cargo check` time, fw-emu host-build size (the
-   roadmap's stated metric — though note Q3: fw-emu doesn't use
-   wasmtime, so this is really `lp-cli` or `lp-server`-host binary
-   size), single-shader host cold-start, multi-shader run with
-   the previously-flaky pattern.
+M4b: workspace `cargo check` time, fw-emu host-build size (the
+roadmap's stated metric — though note Q3: fw-emu doesn't use
+wasmtime, so this is really `lp-cli` or `lp-server`-host binary
+size), single-shader host cold-start, multi-shader run with
+the previously-flaky pattern.
 
 B. **Skip the perf report**, treat M4b as correctness-only, defer
-   perf to the planned tracing milestone.
+perf to the planned tracing milestone.
 
 **Suggested answer.** **A, but scope it down.** Capture a small
 report (one Markdown file under `docs/design/native/perf-report/`)

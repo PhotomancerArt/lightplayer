@@ -62,13 +62,13 @@ lp-shader/lps-filetests/filetests/global/type-struct.glsl
 
 ### 2. Run the corpus, expect "unexpected pass"
 
-The canonical runner is `scripts/glsl-filetests.sh` (same as
+The canonical runner is `scripts/filetests.sh` (same as
 `just test-filetests`). It wraps `cargo run -p lps-filetests-app`.
 From the workspace root, run the M2 corpus (patterns match paths under
 `lp-shader/lps-filetests/filetests/`):
 
 ```sh
-./scripts/glsl-filetests.sh \
+./scripts/filetests.sh \
   struct/ \
   function/param-struct.glsl \
   function/return-struct.glsl \
@@ -82,7 +82,7 @@ markers we want to toggle off.
 ### 3. Toggle markers via `--fix`
 
 ```sh
-./scripts/glsl-filetests.sh --fix --assume-yes \
+./scripts/filetests.sh --fix --assume-yes \
   struct/ \
   function/param-struct.glsl \
   function/return-struct.glsl \
@@ -138,7 +138,7 @@ just test
 ```
 
 (`just test` runs `test-rust` and `test-filetests` = full suite including
-`scripts/glsl-filetests.sh` with default targets.) All runs must be
+`scripts/filetests.sh` with default targets.) All runs must be
 green; any "unexpected pass" / "unexpected fail" outputs must be
 resolved.
 
@@ -200,6 +200,7 @@ Completed YYYY-MM-DD. All M2 struct filetests pass on `wasm.q32`,
 - (List any `// TODO(bug-N): …` re-marks left, or "none".)
 
 ## Plan
+
 - `00-notes.md`, `01-design.md`, `02-` … `06-` phase files.
 ```
 

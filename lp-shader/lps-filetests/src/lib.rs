@@ -1370,7 +1370,7 @@ pub fn run(
             };
             if colors::should_color() {
                 println!(
-                    "scripts/glsl-filetests.sh --target {} {}{}{}",
+                    "scripts/filetests.sh --target {} {}{}{}",
                     failed_test.target,
                     colors::DIM,
                     test_path,
@@ -1378,7 +1378,7 @@ pub fn run(
                 );
             } else {
                 println!(
-                    "scripts/glsl-filetests.sh --target {} {test_path}",
+                    "scripts/filetests.sh --target {} {test_path}",
                     failed_test.target
                 );
             }

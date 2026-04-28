@@ -84,7 +84,7 @@ Internal dispatch:
   logic. (Move that helper into this module, or keep it in
   `lower_array.rs` and re-export — your call.)
 - `LpsType::Struct { .. }` → `Err(LowerError::UnsupportedType(
-  String::from("store_lps_value_into_slot: struct path lands in M2 phase 04"))).`
+String::from("store_lps_value_into_slot: struct path lands in M2 phase 04"))).`
 
 #### Memcpy fast path
 
@@ -183,9 +183,9 @@ just check
 Then targeted filetests (from workspace root):
 
 ```sh
-./scripts/glsl-filetests.sh array/
-./scripts/glsl-filetests.sh function/return-array.glsl
-./scripts/glsl-filetests.sh function/param-array.glsl
+./scripts/filetests.sh array/
+./scripts/filetests.sh function/return-array.glsl
+./scripts/filetests.sh function/param-array.glsl
 ```
 
 All array-related filetests must remain in their pre-phase pass/fail
@@ -196,7 +196,7 @@ If practical, print IR for one multi-dim array test
 the store sequence is identical:
 
 ```sh
-./scripts/glsl-filetests.sh --debug array/declare-multidim.glsl
+./scripts/filetests.sh --debug array/declare-multidim.glsl
 ```
 
 (Diffing the printed `=== LPIR ===` section is the fastest way to catch

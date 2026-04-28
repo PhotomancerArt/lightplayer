@@ -44,12 +44,12 @@ cargo test -p lpvm-cranelift --no-fail-fast
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 
 # 4. Filetests - the main validation
-./scripts/glsl-filetests.sh --target jit.q32
+./scripts/filetests.sh --target jit.q32
 
 # 5. Check specific areas touched by this plan
-./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec2/" "vec/bvec3/" "vec/bvec4/"
-./scripts/glsl-filetests.sh --target jit.q32 "const/builtin/extended.glsl"
-./scripts/glsl-filetests.sh --target jit.q32 "builtins/common-round.glsl" "builtins/common-roundeven.glsl"
+./scripts/filetests.sh --target jit.q32 "vec/bvec2/" "vec/bvec3/" "vec/bvec4/"
+./scripts/filetests.sh --target jit.q32 "const/builtin/extended.glsl"
+./scripts/filetests.sh --target jit.q32 "builtins/common-round.glsl" "builtins/common-roundeven.glsl"
 ```
 
 ## Plan cleanup
@@ -113,5 +113,5 @@ EOF
 git status
 
 # Quick sanity test
-./scripts/glsl-filetests.sh --target jit.q32 | tail -5
+./scripts/filetests.sh --target jit.q32 | tail -5
 ```

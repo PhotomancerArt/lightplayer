@@ -80,5 +80,5 @@ This construction happens at the pipeline entry points (Phases 3-5).
 
 ```bash
 cargo check -p lps-compiler --features std
-scripts/glsl-filetests.sh
+scripts/filetests.sh
 ```

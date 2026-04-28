@@ -40,11 +40,11 @@ pub(crate) fn array_size_bytes(module: &Module, array_ty: Handle<Type>) -> Optio
     let TypeInner::Array { base, size } = inner else {
         return None;
     };
-    
+
     let elem_inner = &module.types[*base].inner;
     let elem_size = element_size_bytes(elem_inner)?;
     let count = size.nice_unwrap();
-    
+
     Some(elem_size * count)
 }
 
@@ -90,7 +90,7 @@ for (lv_handle, var) in func.local_variables.iter() {
     if param_aliases.contains_key(&lv_handle) || local_map.contains_key(&lv_handle) {
         continue; // Already handled
     }
-    
+
     let ty_inner = &module.types[var.ty].inner;
     if let TypeInner::Array { base, size } = ty_inner {
         let elem_inner = &module.types[*base].inner;
@@ -98,9 +98,9 @@ for (lv_handle, var) in func.local_variables.iter() {
             .ok_or_else(|| LowerError::UnsupportedType("array element type".into()))?;
         let count = size.nice_unwrap();
         let total_size = elem_size * count;
-        
+
         let slot = fb.alloc_slot(total_size);
-        
+
         array_map.insert(lv_handle, ArrayInfo {
             slot,
             element_ty: *base,
@@ -145,7 +145,7 @@ int test_type_stored() {
 ## Validation
 
 ```bash
-scripts/glsl-filetests.sh array/phase/1-foundation.glsl
+scripts/filetests.sh array/phase/1-foundation.glsl
 ```
 
 Expected: First 2 tests pass (declaration and type storage).

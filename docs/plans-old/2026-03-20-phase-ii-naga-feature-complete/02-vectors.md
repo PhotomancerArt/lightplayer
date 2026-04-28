@@ -192,7 +192,7 @@ for i in 0..dim {
 }
 ```
 
-This requires 2*N scratch locals. For vec4 that's 8.
+This requires 2\*N scratch locals. For vec4 that's 8.
 
 ### 8. Vector Store and Load
 
@@ -287,8 +287,8 @@ need to branch based on dimension.
 ## Validate
 
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 "vec/"
-scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
+scripts/filetests.sh --target wasm.q32 "vec/"
+scripts/filetests.sh --target wasm.q32 "scalar/"
 cargo check -p lps-wasm
 ```
 

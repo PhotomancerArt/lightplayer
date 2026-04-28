@@ -14,7 +14,7 @@ Replaced the target/expect-fail system with a typed annotation system.
 
 4. **Multi-Target Runner** — `test_run/compile.rs` for per-target compilation. Removed old `test_run/target.rs`. Runner iterates over targets; `run_summary`/`run_detail` use `directive_disposition`. `lib.rs`: `run_filetest_with_line_filter` takes `targets: &[&Target]`; `run()` takes `target_filter: Option<&'static Target>`.
 
-5. **CLI** — `--target cranelift.q32` and `--target wasm.q32` in `lps-filetests-app`. `scripts/glsl-filetests.sh` passes through `--target`.
+5. **CLI** — `--target cranelift.q32` and `--target wasm.q32` in `lps-filetests-app`. `scripts/filetests.sh` passes through `--target`.
 
 6. **Migration** — `scripts/migrate-filetest-annotations.py` migrated ~634 hand-written files: removed `// target`, converted `[expect-fail]` to `// @unimplemented()`, added file-level `// @unimplemented(backend=wasm)` where needed.
 
@@ -26,6 +26,6 @@ Replaced the target/expect-fail system with a typed annotation system.
 
 ### Validation
 
-- `scripts/glsl-filetests.sh --target cranelift.q32`: 3927/3927 tests passed, 633 files.
+- `scripts/filetests.sh --target cranelift.q32`: 3927/3927 tests passed, 633 files.
 - `cargo clippy -p lps-filetests -p lps-filetests-app -p lps-filetests-gen-app`: no warnings.
 - `cargo +nightly fmt` applied.
