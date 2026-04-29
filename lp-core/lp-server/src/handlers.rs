@@ -9,8 +9,9 @@ use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lp_engine::LpGraphics;
 use lp_model::{
-    AsLpPath, ClientMessage, LpPath, LpPathBuf, ServerMessage,
-    server::{AvailableProject, FsRequest, FsResponse, ServerMsgBody as ServerMessagePayload},
+    AsLpPath, ClientMessage, LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload,
+    LpPath, LpPathBuf,
+    server::{AvailableProject, FsRequest, FsResponse},
 };
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
@@ -40,7 +41,7 @@ pub fn handle_client_message(
     graphics: Arc<dyn LpGraphics>,
     client_msg: ClientMessage,
     theoretical_fps: Option<f32>,
-) -> Result<ServerMessage, ServerError> {
+) -> Result<LegacyServerMessage, ServerError> {
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
@@ -73,7 +74,7 @@ pub fn handle_client_message(
         }
     };
 
-    Ok(ServerMessage { id, msg: response })
+    Ok(LegacyServerMessage { id, msg: response })
 }
 
 /// Handle a filesystem request

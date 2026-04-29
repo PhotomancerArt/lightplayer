@@ -7,17 +7,22 @@ use crate::server::{FsRequest, ServerMsgBody as ServerMessagePayload};
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
+/// Placeholder type for future domain-specific protocol split (`lpc-model` / `lpl-model`).
+#[allow(unreachable_code, clippy::empty_enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NoDomain {}
+
 /// Top-level message envelope
 ///
 /// Messages are wrapped in this enum to distinguish between client and server messages.
 /// Note: Cannot derive Clone because ServerMessage contains non-cloneable types.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Message {
+pub enum Message<R> {
     /// Message from client to server
     Client(ClientMessage),
     /// Message from server to client
-    Server(ServerMessage),
+    Server(ServerMessage<R>),
 }
 
 /// Client message with request ID
@@ -38,11 +43,11 @@ pub struct ClientMessage {
 /// Note: Cannot derive Clone because ServerResponse contains non-cloneable types
 /// (specifically ProjectResponse which contains NodeDetail with trait objects).
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ServerMessage {
+pub struct ServerMessage<R> {
     /// Request ID matching the original client request
     pub id: u64,
     /// The response payload
-    pub msg: ServerMessagePayload,
+    pub msg: ServerMessagePayload<R>,
 }
 
 /// Client request types
@@ -72,6 +77,8 @@ pub enum ClientRequest {
 mod tests {
     use super::*;
     use crate::AsLpPathBuf;
+    use crate::LegacyMessage;
+    use crate::LegacyServerMessage;
     use crate::server::FsResponse;
     use alloc::string::ToString;
 
@@ -83,12 +90,12 @@ mod tests {
                 path: "/project.json".as_path_buf(),
             }),
         };
-        let message = Message::Client(client_msg);
+        let message = LegacyMessage::Client(client_msg);
         let json = crate::json::to_string(&message).unwrap();
         // Verify round-trip serialization
-        let deserialized: Message = crate::json::from_str(&json).unwrap();
+        let deserialized: LegacyMessage = crate::json::from_str(&json).unwrap();
         match deserialized {
-            Message::Client(ClientMessage { id, msg }) => {
+            LegacyMessage::Client(ClientMessage { id, msg }) => {
                 assert_eq!(id, 1);
                 match msg {
                     ClientRequest::Filesystem(FsRequest::Read { path }) => {
@@ -104,7 +111,7 @@ mod tests {
     #[test]
     fn test_server_message_serialization() {
         use crate::server::ServerMsgBody as ServerMessagePayload;
-        let server_msg = ServerMessage {
+        let server_msg = LegacyServerMessage {
             id: 1,
             msg: ServerMessagePayload::Filesystem(FsResponse::Read {
                 path: "/project.json".as_path_buf(),
@@ -112,12 +119,12 @@ mod tests {
                 error: None,
             }),
         };
-        let message = Message::Server(server_msg);
+        let message = LegacyMessage::Server(server_msg);
         let json = crate::json::to_string(&message).unwrap();
         // Verify round-trip serialization
-        let deserialized: Message = crate::json::from_str(&json).unwrap();
+        let deserialized: LegacyMessage = crate::json::from_str(&json).unwrap();
         match deserialized {
-            Message::Server(ServerMessage { id, msg }) => {
+            LegacyMessage::Server(LegacyServerMessage { id, msg }) => {
                 assert_eq!(id, 1);
                 match msg {
                     ServerMessagePayload::Filesystem(FsResponse::Read { path, data, error }) => {

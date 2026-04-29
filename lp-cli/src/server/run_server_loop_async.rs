@@ -1,4 +1,4 @@
-use lp_model::{Message, TransportError};
+use lp_model::{LegacyMessage, TransportError};
 use lp_server::LpServer;
 use lp_shared::transport::ServerTransport;
 use std::time::{Duration, Instant};
@@ -37,7 +37,7 @@ pub async fn run_server_loop_async<T: ServerTransport>(
             match transport.receive().await {
                 Ok(Some(client_msg)) => {
                     // Wrap in Message envelope
-                    incoming_messages.push(Message::Client(client_msg));
+                    incoming_messages.push(LegacyMessage::Client(client_msg));
                 }
                 Ok(None) => {
                     // No more messages available
@@ -72,7 +72,7 @@ pub async fn run_server_loop_async<T: ServerTransport>(
 
                 // Send responses back via transport
                 for response in responses {
-                    if let Message::Server(server_msg) = response {
+                    if let LegacyMessage::Server(server_msg) = response {
                         if let Err(e) = transport.send(server_msg).await {
                             eprintln!("Failed to send response: {e}");
                         }

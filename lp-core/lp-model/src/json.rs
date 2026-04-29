@@ -335,15 +335,16 @@ mod ser_write_json_tests {
 
     #[test]
     fn ser_write_json_server_message_round_trip() {
-        use crate::ServerMessage;
+        use crate::LegacyServerMessage;
 
-        let msg = ServerMessage {
+        let msg = LegacyServerMessage {
             id: 1,
             msg: ServerMsgBody::UnloadProject,
         };
 
         let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
-        let deserialized: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
+        let deserialized: LegacyServerMessage =
+            from_str(&json).expect("from_str(ser-write-json output)");
 
         assert_eq!(msg.id, deserialized.id);
         assert!(matches!(deserialized.msg, ServerMsgBody::UnloadProject));
@@ -383,10 +384,10 @@ mod ser_write_json_tests {
 
     #[test]
     fn ser_write_json_heartbeat_round_trip() {
-        use crate::ServerMessage;
+        use crate::LegacyServerMessage;
         use crate::server::{LoadedProject, MemoryStats, SampleStats};
 
-        let msg = ServerMessage {
+        let msg = LegacyServerMessage {
             id: 0,
             msg: ServerMsgBody::Heartbeat {
                 fps: SampleStats {
@@ -410,7 +411,8 @@ mod ser_write_json_tests {
         };
 
         let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
-        let deserialized: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
+        let deserialized: LegacyServerMessage =
+            from_str(&json).expect("from_str(ser-write-json output)");
 
         assert_eq!(msg.id, deserialized.id);
         if let (

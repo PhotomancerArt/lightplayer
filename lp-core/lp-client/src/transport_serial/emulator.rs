@@ -5,7 +5,7 @@
 
 use hashbrown::HashMap;
 use log;
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
 use std::sync::{Arc, Mutex};
@@ -32,7 +32,7 @@ fn emulator_thread_loop(
     emulator: Arc<Mutex<Riscv32Emulator>>,
     backtrace_info: Option<BacktraceInfo>,
     mut client_rx: mpsc::UnboundedReceiver<ClientMessage>,
-    server_tx: mpsc::UnboundedSender<ServerMessage>,
+    server_tx: mpsc::UnboundedSender<LegacyServerMessage>,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) {
     let mut read_buffer = Vec::new();
@@ -203,7 +203,7 @@ fn emulator_thread_loop(
 
             // Parse JSON message (strip M! prefix)
             let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
-            match lp_model::json::from_str::<ServerMessage>(json_str) {
+            match lp_model::json::from_str::<LegacyServerMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
                         "Emulator thread: Parsed server message id={} ({} bytes)",

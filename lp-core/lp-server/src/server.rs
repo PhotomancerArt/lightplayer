@@ -10,7 +10,7 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 use log;
 use lp_engine::LpGraphics;
-use lp_model::{LpPath, LpPathBuf, Message};
+use lp_model::{LegacyMessage, LegacyServerMessage, LpPath, LpPathBuf};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
 use lpfs::{FsChange, LpFs};
@@ -105,14 +105,14 @@ impl LpServer {
     ///
     /// # Returns
     ///
-    /// * `Ok(Vec<Message>)` - Vector of response messages (all `Message::Server` variants)
+    /// * `Ok(Vec<LegacyMessage>)` - Vector of response messages (all `LegacyMessage::Server` variants)
     /// * `Err(ServerError)` - If processing failed
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// extern crate alloc;
-    /// use lp_model::{AsLpPath, Message};
+    /// use lp_model::{AsLpPath, LegacyMessage};
     /// use lp_server::LpServer;
     /// use lpfs::LpFsMemory;
     /// use lp_shared::output::MemoryOutputProvider;
@@ -136,8 +136,8 @@ impl LpServer {
     pub fn tick(
         &mut self,
         delta_ms: u32,
-        incoming: Vec<Message>,
-    ) -> Result<Vec<Message>, ServerError> {
+        incoming: Vec<LegacyMessage>,
+    ) -> Result<Vec<LegacyMessage>, ServerError> {
         // Process filesystem changes for all loaded projects
         // Collect project info first to avoid borrowing issues
         let project_info: Vec<_> = self
@@ -264,7 +264,7 @@ impl LpServer {
         let mut responses = Vec::new();
         for message in incoming {
             match message {
-                Message::Client(client_msg) => {
+                LegacyMessage::Client(client_msg) => {
                     // Process client message and generate response
                     let theoretical_fps = self.theoretical_fps();
                     let msg_id = client_msg.id;
@@ -279,11 +279,11 @@ impl LpServer {
                         theoretical_fps,
                     ) {
                         Ok(response) => {
-                            responses.push(Message::Server(response));
+                            responses.push(LegacyMessage::Server(response));
                         }
                         Err(e) => {
                             // Send error response for this message
-                            responses.push(Message::Server(lp_model::ServerMessage {
+                            responses.push(LegacyMessage::Server(LegacyServerMessage {
                                 id: msg_id,
                                 msg: lp_model::server::ServerMsgBody::Error {
                                     error: format!("{e}"),
@@ -292,7 +292,7 @@ impl LpServer {
                         }
                     }
                 }
-                Message::Server(_) => {
+                LegacyMessage::Server(_) => {
                     // Server messages shouldn't be sent to the server
                     // Log or ignore
                     return Err(ServerError::Core(

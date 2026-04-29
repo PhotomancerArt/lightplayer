@@ -15,7 +15,7 @@ use core::str;
 use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
-use lp_model::{ClientMessage, ServerMessage, TransportError, json};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError, json};
 use lp_shared::transport::ServerTransport;
 
 /// Serial transport implementation
@@ -53,7 +53,7 @@ impl<Io: SerialIo> ser_write_json::SerWrite for SerialIoSerWrite<'_, Io> {
 }
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
-    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
 
         #[cfg(feature = "emu")]
@@ -65,7 +65,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             let mut writer = SerialIoSerWrite(&mut self.io);
             ser_write_json::ser::to_writer(&mut writer, &msg).map_err(|e| {
                 TransportError::Serialization(alloc::format!(
-                    "Failed to serialize ServerMessage: {e}"
+                    "Failed to serialize LegacyServerMessage: {e}"
                 ))
             })?;
             self.io
@@ -81,7 +81,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
         {
             // Buffered serialization (legacy path)
             let json = json::to_string(&msg).map_err(|e| {
-                TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
+                TransportError::Serialization(format!(
+                    "Failed to serialize LegacyServerMessage: {e}"
+                ))
             })?;
             let message = format!("M!{json}\n");
             let message_bytes = message.as_bytes();
@@ -309,7 +311,7 @@ mod tests {
         let mock_io = MockSerialIo::new();
         let mut transport = SerialTransport::new(mock_io);
 
-        let msg = ServerMessage {
+        let msg = LegacyServerMessage {
             id: 1,
             msg: lp_model::server::ServerMsgBody::UnloadProject,
         };

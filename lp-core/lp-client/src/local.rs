@@ -4,7 +4,7 @@
 //! running in the same process. Uses unbounded channels for simplicity.
 
 use crate::transport::ClientTransport;
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
 use tokio::sync::mpsc;
 
@@ -16,7 +16,7 @@ pub struct AsyncLocalClientTransport {
     /// Sender for client messages (client -> server)
     client_tx: Option<mpsc::UnboundedSender<ClientMessage>>,
     /// Receiver for server messages (server -> client)
-    client_rx: mpsc::UnboundedReceiver<ServerMessage>,
+    client_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
     /// Whether the transport is closed
     closed: bool,
 }
@@ -30,7 +30,7 @@ impl AsyncLocalClientTransport {
     /// * `client_rx` - Receiver for server messages
     pub fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
-        client_rx: mpsc::UnboundedReceiver<ServerMessage>,
+        client_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
     ) -> Self {
         Self {
             client_tx: Some(client_tx),
@@ -53,7 +53,7 @@ impl ClientTransport for AsyncLocalClientTransport {
         }
     }
 
-    async fn receive(&mut self) -> Result<ServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -82,7 +82,7 @@ impl ClientTransport for AsyncLocalClientTransport {
 /// Provides async receive via `receive()`.
 pub struct AsyncLocalServerTransport {
     /// Sender for server messages (server -> client)
-    server_tx: Option<mpsc::UnboundedSender<ServerMessage>>,
+    server_tx: Option<mpsc::UnboundedSender<LegacyServerMessage>>,
     /// Receiver for client messages (client -> server)
     server_rx: mpsc::UnboundedReceiver<ClientMessage>,
     /// Whether the transport is closed
@@ -97,7 +97,7 @@ impl AsyncLocalServerTransport {
     /// * `server_tx` - Sender for server messages
     /// * `server_rx` - Receiver for client messages
     pub fn new(
-        server_tx: mpsc::UnboundedSender<ServerMessage>,
+        server_tx: mpsc::UnboundedSender<LegacyServerMessage>,
         server_rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Self {
         Self {
@@ -109,7 +109,7 @@ impl AsyncLocalServerTransport {
 }
 
 impl ServerTransport for AsyncLocalServerTransport {
-    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -176,7 +176,7 @@ pub fn create_local_transport_pair() -> (AsyncLocalClientTransport, AsyncLocalSe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_model::{ClientRequest, ServerMessage};
+    use lp_model::{ClientRequest, LegacyServerMessage};
 
     #[tokio::test]
     async fn test_create_transport_pair() {
@@ -202,7 +202,7 @@ mod tests {
         assert_eq!(received_msg.id, 1);
 
         // Send response from server
-        let server_msg = ServerMessage {
+        let server_msg = LegacyServerMessage {
             id: 1,
             msg: lp_model::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
         };

@@ -10,7 +10,7 @@ use core::pin::pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use fw_core::transport::SerialTransport;
 use log;
-use lp_model::Message;
+use lp_model::LegacyMessage;
 use lp_riscv_emu_guest::sys_yield;
 use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
@@ -65,7 +65,7 @@ pub fn run_server_loop(
                         msg.id,
                         receive_calls
                     );
-                    incoming_messages.push(Message::Client(msg));
+                    incoming_messages.push(LegacyMessage::Client(msg));
                 }
                 Ok(None) => {
                     if receive_calls > 1 {
@@ -102,7 +102,7 @@ pub fn run_server_loop(
                 );
                 // Send responses
                 for response in responses {
-                    if let Message::Server(server_msg) = response {
+                    if let LegacyMessage::Server(server_msg) = response {
                         log::debug!(
                             "run_server_loop: Sending response message id={}",
                             server_msg.id

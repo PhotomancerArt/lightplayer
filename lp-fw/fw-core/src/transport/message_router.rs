@@ -1,20 +1,20 @@
 //! MessageRouter-based transport implementation
 //!
 //! Wraps `MessageRouter` and implements `ServerTransport` trait.
-//! Converts between `String` messages (router) and `ClientMessage`/`ServerMessage` (transport).
+//! Converts between `String` messages (router) and `ClientMessage`/`LegacyServerMessage` (transport).
 
 extern crate alloc;
 
 use alloc::format;
 
 use crate::message_router::MessageRouter;
-use lp_model::{ClientMessage, ServerMessage, TransportError, json};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError, json};
 use lp_shared::transport::ServerTransport;
 
 /// Transport implementation using MessageRouter
 ///
 /// Wraps a `MessageRouter` and implements `ServerTransport` by converting
-/// between `String` messages (used by router) and `ClientMessage`/`ServerMessage`
+/// between `String` messages (used by router) and `ClientMessage`/`LegacyServerMessage`
 /// (used by transport interface).
 pub struct MessageRouterTransport {
     /// Message router for task communication
@@ -29,9 +29,9 @@ impl MessageRouterTransport {
 }
 
 impl ServerTransport for MessageRouterTransport {
-    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
         let json = json::to_string(&msg).map_err(|e| {
-            TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
+            TransportError::Serialization(format!("Failed to serialize LegacyServerMessage: {e}"))
         })?;
         let message = alloc::format!("M!{json}\n");
         self.router.send(message).map_err(|_| {
@@ -123,7 +123,7 @@ mod tests {
         let (router, _, outgoing) = create_test_router();
         let mut transport = MessageRouterTransport::new(router);
 
-        let msg = ServerMessage {
+        let msg = LegacyServerMessage {
             id: 1,
             msg: lp_model::server::ServerMsgBody::UnloadProject,
         };

@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use hashbrown::HashMap;
 use log;
-use lp_model::{ClientMessage, ServerMessage, TransportError, json};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError, json};
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
 use std::sync::{Arc, Mutex};
@@ -50,7 +50,7 @@ impl SerialEmuClientTransport {
     /// Read a complete JSON message from serial output
     ///
     /// Messages are newline-terminated JSON.
-    fn read_message(&mut self) -> Result<Option<ServerMessage>, TransportError> {
+    fn read_message(&mut self) -> Result<Option<LegacyServerMessage>, TransportError> {
         // Drain serial output from emulator
         let output = {
             let mut emu = self
@@ -88,7 +88,7 @@ impl SerialEmuClientTransport {
                 message_bytes.len()
             );
 
-            match json::from_str::<ServerMessage>(json_str) {
+            match json::from_str::<LegacyServerMessage>(json_str) {
                 Ok(message) => {
                     log::debug!(
                         "SerialEmuClientTransport: Received message id={} ({} bytes): {}",
@@ -269,7 +269,7 @@ impl crate::transport::ClientTransport for SerialEmuClientTransport {
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<ServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
         log::debug!("SerialEmuClientTransport::receive: Waiting for message");
 
         // Check if we already have a message buffered

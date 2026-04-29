@@ -7,7 +7,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
 
 /// Fake transport that can simulate client messages
@@ -36,7 +36,7 @@ impl FakeTransport {
 }
 
 impl ServerTransport for FakeTransport {
-    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
         #[cfg(any(feature = "emu", feature = "esp32"))]
         log::debug!("FakeTransport: Would send message id={}", msg.id);
         #[cfg(not(any(feature = "emu", feature = "esp32")))]

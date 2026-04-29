@@ -4,7 +4,7 @@
 
 use anyhow::{Error, Result};
 use lp_model::{
-    ClientMessage, ClientRequest, LpPath, LpPathBuf, ServerMessage,
+    ClientMessage, ClientRequest, LegacyServerMessage, LpPath, LpPathBuf,
     project::{
         FrameId,
         api::{ApiNodeSpecifier, SerializableProjectResponse},
@@ -69,7 +69,7 @@ impl LpClient {
     /// Helper method that generates a request ID, sends the request, and waits for the response.
     /// Correlates messages by ID to handle heartbeats and other interstitial messages.
     /// If the server returns an Error response, converts it to an Err.
-    async fn send_request(&self, request: ClientRequest) -> Result<ServerMessage> {
+    async fn send_request(&self, request: ClientRequest) -> Result<LegacyServerMessage> {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let msg = ClientMessage { id, msg: request };
 
@@ -614,7 +614,7 @@ mod tests {
             let request_id = client_msg.unwrap().id;
 
             // Send heartbeat first (id: 0)
-            let heartbeat = ServerMessage {
+            let heartbeat = LegacyServerMessage {
                 id: 0,
                 msg: ServerMsgBody::Heartbeat {
                     fps: SampleStats {
@@ -632,7 +632,7 @@ mod tests {
             server_transport.send(heartbeat).await.unwrap();
 
             // Send actual response
-            let response = ServerMessage {
+            let response = LegacyServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
@@ -665,7 +665,7 @@ mod tests {
             // Send multiple heartbeats
             for i in 0..3 {
                 let fps_val = (60 + i) as f32;
-                let heartbeat = ServerMessage {
+                let heartbeat = LegacyServerMessage {
                     id: 0,
                     msg: ServerMsgBody::Heartbeat {
                         fps: SampleStats {
@@ -685,7 +685,7 @@ mod tests {
             }
 
             // Send actual response
-            let response = ServerMessage {
+            let response = LegacyServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
@@ -716,7 +716,7 @@ mod tests {
             let request_id = client_msg.unwrap().id;
 
             // Send heartbeat with projects
-            let heartbeat = ServerMessage {
+            let heartbeat = LegacyServerMessage {
                 id: 0,
                 msg: ServerMsgBody::Heartbeat {
                     fps: SampleStats {
@@ -737,7 +737,7 @@ mod tests {
             server_transport.send(heartbeat).await.unwrap();
 
             // Send actual response
-            let response = ServerMessage {
+            let response = LegacyServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
@@ -768,14 +768,14 @@ mod tests {
             let request_id = client_msg.unwrap().id;
 
             // Send response with wrong ID (shouldn't happen, but test handling)
-            let wrong_response = ServerMessage {
+            let wrong_response = LegacyServerMessage {
                 id: request_id + 100,
                 msg: ServerMsgBody::StopAllProjects,
             };
             server_transport.send(wrong_response).await.unwrap();
 
             // Send correct response
-            let response = ServerMessage {
+            let response = LegacyServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };

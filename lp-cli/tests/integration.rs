@@ -12,7 +12,7 @@ use core::cell::RefCell;
 // They need to be rewritten to use the new async LpClient API. Marked as #[ignore] for now.
 
 use lp_model::AsLpPath;
-use lp_model::Message;
+use lp_model::LegacyMessage;
 use lp_server::LpServer;
 use lp_shared::output::MemoryOutputProvider;
 use lpfs::{LpFs, LpFsMemory};
@@ -33,9 +33,12 @@ fn setup_server_and_client(
     todo!("Rewrite for async LpClient")
 }
 
-/// Extract ClientMessage from Message envelope and send via transport
+/// Extract ClientMessage from LegacyMessage envelope and send via transport
 #[allow(dead_code, unused_variables)]
-fn send_client_message(_transport: &mut LocalTransport, _msg: Message) -> Result<(), ClientError> {
+fn send_client_message(
+    _transport: &mut LocalTransport,
+    _msg: LegacyMessage,
+) -> Result<(), ClientError> {
     todo!("Rewrite for async LpClient")
 }
 

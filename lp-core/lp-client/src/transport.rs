@@ -3,7 +3,7 @@
 //! Defines the async interface for client-side transport implementations.
 //! Messages are consumed (moved) on send, and receive operations are async.
 
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 
 /// Trait for client-side transport implementations
 ///
@@ -17,7 +17,7 @@ use lp_model::{ClientMessage, ServerMessage, TransportError};
 ///
 /// ```rust,no_run
 /// use lp_client::ClientTransport;
-/// use lp_model::{ClientMessage, ServerMessage, TransportError};
+/// use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 ///
 /// struct MyTransport;
 ///
@@ -28,7 +28,7 @@ use lp_model::{ClientMessage, ServerMessage, TransportError};
 ///         Ok(())
 ///     }
 ///
-///     async fn receive(&mut self) -> Result<ServerMessage, TransportError> {
+///     async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
 ///         // Receive message (transport handles deserialization)
 ///         // This will wait until a message is available
 ///         # Err(TransportError::ConnectionLost)
@@ -65,10 +65,10 @@ pub trait ClientTransport: Send {
     ///
     /// # Returns
     ///
-    /// * `Ok(ServerMessage)` if a message was received
+    /// * `Ok(LegacyServerMessage)` if a message was received
     /// * `Err(TransportError::ConnectionLost)` if the transport is closed
     /// * `Err(TransportError)` for other receiving errors
-    async fn receive(&mut self) -> Result<ServerMessage, TransportError>;
+    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError>;
 
     /// Close the transport connection
     ///

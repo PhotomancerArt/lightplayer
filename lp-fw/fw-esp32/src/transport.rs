@@ -1,6 +1,6 @@
-//! Streaming transport: serializes ServerMessage in io_task, minimal buffering.
+//! Streaming transport: serializes LegacyServerMessage in io_task, minimal buffering.
 //!
-//! Sends ServerMessage to OUTGOING_SERVER_MSG (capacity 1). io_task receives
+//! Sends LegacyServerMessage to OUTGOING_SERVER_MSG (capacity 1). io_task receives
 //! and serializes with ser-write-json directly to serial. Never buffers full JSON.
 
 extern crate alloc;
@@ -8,18 +8,18 @@ extern crate alloc;
 use alloc::vec::Vec;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use lp_model::{ClientMessage, ServerMessage, TransportError, json};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError, json};
 use lp_shared::transport::ServerTransport;
 
 use crate::serial::io_task;
 
-/// Streaming transport that sends ServerMessage to io_task for serialization
+/// Streaming transport that sends LegacyServerMessage to io_task for serialization
 ///
-/// Uses Channel<ServerMessage, 1> - at most one message in flight.
+/// Uses Channel<LegacyServerMessage, 1> - at most one message in flight.
 /// transport.send(msg).await blocks until io_task receives (backpressure).
 pub struct StreamingMessageRouterTransport {
     incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-    server_msg_channel: &'static Channel<CriticalSectionRawMutex, ServerMessage, 1>,
+    server_msg_channel: &'static Channel<CriticalSectionRawMutex, LegacyServerMessage, 1>,
 }
 
 impl StreamingMessageRouterTransport {
@@ -35,7 +35,7 @@ impl StreamingMessageRouterTransport {
 }
 
 impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         self.server_msg_channel.sender().send(msg).await;
         log::debug!("StreamingMessageRouterTransport: Sent message id={id} via server_msg channel");

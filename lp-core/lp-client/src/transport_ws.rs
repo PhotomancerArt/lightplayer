@@ -4,7 +4,7 @@
 
 use crate::transport::ClientTransport;
 use futures_util::{SinkExt, StreamExt};
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
@@ -70,7 +70,7 @@ impl ClientTransport for WebSocketClientTransport {
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<ServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -84,18 +84,18 @@ impl ClientTransport for WebSocketClientTransport {
         loop {
             match stream.next().await {
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
-                    // Deserialize ServerMessage from JSON
+                    // Deserialize LegacyServerMessage from JSON
                     return lp_model::json::from_str(&text).map_err(|e| {
                         TransportError::Deserialization(format!(
-                            "Failed to deserialize ServerMessage: {e}"
+                            "Failed to deserialize LegacyServerMessage: {e}"
                         ))
                     });
                 }
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
-                    // Deserialize ServerMessage from binary JSON
+                    // Deserialize LegacyServerMessage from binary JSON
                     return lp_model::json::from_slice(&data).map_err(|e| {
                         TransportError::Deserialization(format!(
-                            "Failed to deserialize ServerMessage: {e}"
+                            "Failed to deserialize LegacyServerMessage: {e}"
                         ))
                     });
                 }

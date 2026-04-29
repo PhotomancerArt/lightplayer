@@ -147,7 +147,7 @@ impl ClientTransport for LocalServerTransport {
         }
     }
 
-    async fn receive(&mut self) -> Result<lp_model::ServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<lp_model::LegacyServerMessage, TransportError> {
         match &mut self.client_transport {
             Some(transport) => transport.receive().await,
             None => Err(TransportError::ConnectionLost),

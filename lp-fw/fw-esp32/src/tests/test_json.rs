@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::vec;
-use lp_model::ServerMessage;
+use lp_model::LegacyServerMessage;
 use lp_model::path::AsLpPathBuf;
 use lp_model::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
 
@@ -40,7 +40,7 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
     loop {
         let now = embassy_time::Instant::now();
         if now.duration_since(last_send).as_millis() >= 1000 {
-            let msg = ServerMessage {
+            let msg = LegacyServerMessage {
                 id: 0,
                 msg: ServerMsgBody::Heartbeat {
                     fps: SampleStats {

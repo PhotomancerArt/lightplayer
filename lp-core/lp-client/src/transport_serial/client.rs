@@ -4,7 +4,7 @@
 //! Works with both emulator and hardware serial (future) via factory functions.
 
 use crate::transport::ClientTransport;
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -20,7 +20,7 @@ pub struct AsyncSerialClientTransport {
     /// Sender for client messages (client -> backend thread)
     client_tx: Option<mpsc::UnboundedSender<ClientMessage>>,
     /// Receiver for server messages (backend thread -> client)
-    server_rx: mpsc::UnboundedReceiver<ServerMessage>,
+    server_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
     /// Shutdown signal sender (client -> backend thread)
     shutdown_tx: Option<oneshot::Sender<()>>,
     /// Handle to the backend thread
@@ -43,7 +43,7 @@ impl AsyncSerialClientTransport {
     /// * `thread_handle` - Handle to the backend thread
     pub(crate) fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
-        server_rx: mpsc::UnboundedReceiver<ServerMessage>,
+        server_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
         shutdown_tx: oneshot::Sender<()>,
         thread_handle: JoinHandle<()>,
     ) -> Self {
@@ -70,7 +70,7 @@ impl ClientTransport for AsyncSerialClientTransport {
         }
     }
 
-    async fn receive(&mut self) -> Result<ServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -161,7 +161,7 @@ mod tests {
     async fn test_transport_creation() {
         // Create dummy channels and thread handle
         let (client_tx, _client_rx) = mpsc::unbounded_channel::<ClientMessage>();
-        let (_server_tx, server_rx) = mpsc::unbounded_channel::<ServerMessage>();
+        let (_server_tx, server_rx) = mpsc::unbounded_channel::<LegacyServerMessage>();
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
 
         // Create a dummy thread that just exits immediately

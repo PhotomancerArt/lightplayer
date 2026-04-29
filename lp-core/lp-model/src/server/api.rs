@@ -1,5 +1,5 @@
 use crate::LpPathBuf;
-use crate::project::{ProjectHandle, ProjectRequest, api::SerializableProjectResponse};
+use crate::project::{ProjectHandle, ProjectRequest};
 use crate::server::fs_api::{FsRequest, FsResponse};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -27,7 +27,7 @@ pub enum ClientMsgBody {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ServerMsgBody {
+pub enum ServerMsgBody<R> {
     /// Filesystem operation response
     Filesystem(FsResponse),
     /// Response to LoadProject
@@ -37,11 +37,8 @@ pub enum ServerMsgBody {
     /// Response to UnloadProject
     UnloadProject,
     /// Response to ProjectRequest
-    ///
-    /// Uses SerializableProjectResponse which wraps NodeDetail in SerializableNodeDetail
-    /// to enable serialization of trait objects.
     ProjectRequest {
-        response: SerializableProjectResponse,
+        response: R,
     },
     /// Response to ListAvailableProjects
     ListAvailableProjects {
