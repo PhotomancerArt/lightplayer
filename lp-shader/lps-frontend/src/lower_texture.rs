@@ -963,6 +963,25 @@ vec4 render(vec2 pos) {
             "expected metadata to retain `u` wrapper and `x` field, got: {s}"
         );
     }
+
+    /// Anonymous uniform blocks (e.g., `uniform Decl { float time; };`) should pass
+    /// texture binding validation even though the outer member has no name.
+    #[test]
+    fn anonymous_uniform_block_passes_validation() {
+        use alloc::collections::BTreeMap;
+        let glsl = r#"
+layout(std430, binding = 0) uniform Decl {
+    float time;
+    int frame_count;
+};
+float f() { return time; }
+"#;
+        let naga = compile(glsl).expect("compile");
+        let (_ir, sig) = lower(&naga).expect("lower");
+        let specs = BTreeMap::new();
+        let result = lps_shared::validate_texture_binding_specs_against_module(&sig, &specs);
+        assert!(result.is_ok(), "Validation failed: {result:?}");
+    }
 }
 
 #[cfg(test)]

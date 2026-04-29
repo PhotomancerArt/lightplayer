@@ -58,31 +58,58 @@ fn collect_texture2d_paths_from_members(
     out: &mut BTreeSet<String>,
 ) -> Result<(), String> {
     for m in members {
-        let Some(name) = m.name.as_ref() else {
-            return Err(String::from("uniform struct member has no name"));
-        };
-        if name.is_empty() {
-            return Err(String::from("uniform struct member has no name"));
-        }
-        let mut path = prefix.to_vec();
-        path.push(name.clone());
         match &m.ty {
             LpsType::Texture2D => {
+                // Texture2D fields require a name to build the binding path
+                let name = m.name.as_ref().ok_or_else(|| {
+                    String::from("texture uniform has no name")
+                })?;
+                if name.is_empty() {
+                    return Err(String::from("texture uniform has no name"));
+                }
+                let mut path = prefix.to_vec();
+                path.push(name.clone());
                 let key = canonical_texture_binding_path(uniforms_root, &path)?;
                 out.insert(key);
             }
             LpsType::Struct { members: sub, .. } => {
-                collect_texture2d_paths_from_members(uniforms_root, sub, &path, out)?;
+                // Check if this is an anonymous struct member (e.g., anonymous uniform block)
+                // or a named instance (e.g., `uniform Params params { ... }`)
+                match m.name.as_ref() {
+                    Some(name) if !name.is_empty() => {
+                        // Named struct instance - add to path prefix
+                        let mut path = prefix.to_vec();
+                        path.push(name.clone());
+                        collect_texture2d_paths_from_members(uniforms_root, sub, &path, out)?;
+                    }
+                    _ => {
+                        // Anonymous struct member (e.g., `uniform Decl { ... };`)
+                        // Recurse into it without adding a path prefix
+                        collect_texture2d_paths_from_members(uniforms_root, sub, prefix, out)?;
+                    }
+                }
             }
             LpsType::Array { element, .. } => {
+                // Arrays containing textures require a name for error reporting
+                let name = m.name.as_ref().ok_or_else(|| {
+                    String::from("uniform array member has no name")
+                })?;
+                if name.is_empty() {
+                    return Err(String::from("uniform array member has no name"));
+                }
                 if type_contains_texture2d_leaf(element.as_ref()) {
+                    let mut path = prefix.to_vec();
+                    path.push(name.clone());
                     let p = dotted_path_join(&path);
                     return Err(format!(
                         "texture bindings in uniform arrays are not supported (near '{p}')"
                     ));
                 }
             }
-            _ => {}
+            _ => {
+                // Scalar and other non-texture fields: skip anonymous members
+                // (e.g., fields in unnamed uniform blocks like `uniform { float x; };`)
+            }
         }
     }
     Ok(())
@@ -496,5 +523,57 @@ mod tests {
         };
         let specs = BTreeMap::new();
         validate_texture_binding_specs_against_module(&meta, &specs).unwrap();
+    }
+
+    /// Test for anonymous uniform block members (like `uniform Decl { float time; }`)
+    /// where the struct type members don't have individual names.
+    /// This should pass validation since there are no textures.
+    #[test]
+    fn anonymous_uniform_block_scalar_members_no_textures() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: Some(String::from("__uniforms")),
+                members: vec![
+                    StructMember {
+                        name: Some(String::from("time")),
+                        ty: LpsType::Float,
+                    },
+                    StructMember {
+                        name: Some(String::from("frame_count")),
+                        ty: LpsType::Int,
+                    },
+                ],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        // No texture specs needed - should pass
+        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
+    }
+
+    /// Test for truly anonymous members (name: None) - should be skipped
+    #[test]
+    fn truly_anonymous_scalar_members_are_skipped() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: Some(String::from("__uniforms")),
+                members: vec![
+                    StructMember {
+                        name: None,  // Anonymous member
+                        ty: LpsType::Float,
+                    },
+                    StructMember {
+                        name: Some(String::from("named_field")),
+                        ty: LpsType::Int,
+                    },
+                ],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        // Should pass - anonymous scalar members are skipped
+        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
     }
 }
