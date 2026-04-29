@@ -20,8 +20,6 @@ use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
 use lp_client::LpClient;
 use lp_engine_client::ClientProjectView;
-use lpl_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
-use lpc_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -29,7 +27,9 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
+use lpc_model::{AsLpPath, FrameId};
 use lpfs::LpFsMemory;
+use lpl_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 
 /// UV-gradient shader: red varies with x, green varies with y.
 ///

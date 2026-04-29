@@ -2,8 +2,8 @@
 
 use crate::error::FsError;
 use crate::{LpFs, LpFsMemory, LpFsView};
-use lpc_model::path::LpPath;
 use lpc_model::ArtifactReadRoot;
+use lpc_model::path::LpPath;
 
 macro_rules! impl_artifact_read_root {
     ($t:ty) => {

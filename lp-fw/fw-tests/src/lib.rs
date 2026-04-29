@@ -36,8 +36,8 @@ pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
     use lp_engine_client::ClientProjectView;
-    use lpl_model::NodeKind;
-    use lpc_model::project::api::{NodeState, NodeStatus};
+    use lpc_model::project::api::NodeStatus;
+    use lpl_model::{NodeKind, NodeState};
 
     pub fn assert_shader_compiled_ok(view: &ClientProjectView, shader_path: &str) {
         let handle = view

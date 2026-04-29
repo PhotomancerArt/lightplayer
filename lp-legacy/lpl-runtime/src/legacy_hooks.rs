@@ -1,6 +1,12 @@
 //! Legacy `ProjectRuntime` integration (init, tick, fs sync, client protocol details).
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::too_many_lines)]
+#![allow(
+    clippy::missing_errors_doc,
+    reason = "legacy internal module, docs deferred"
+)]
+#![allow(
+    clippy::too_many_lines,
+    reason = "legacy runtime functions, refactor deferred"
+)]
 
 use crate::nodes::{FixtureRuntime, OutputRuntime, ShaderRuntime, TextureRuntime};
 use alloc::boxed::Box;

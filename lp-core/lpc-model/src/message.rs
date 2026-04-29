@@ -8,7 +8,11 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// Placeholder type for future domain-specific protocol split (`lpc-model` / `lpl-model`).
-#[allow(unreachable_code, clippy::empty_enum)]
+#[allow(
+    unreachable_code,
+    clippy::empty_enums,
+    reason = "NoDomain is intentionally uninhabited"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NoDomain {}
 
