@@ -25,7 +25,7 @@ The spine is two layers, three crates, four namespaces:
                  │  lpc-runtime — generic spine                    │
                  │                                                 │
                  │  ProjectRuntime<D: ProjectDomain>               │
-                 │      ├─ NodeTree (Uid <-> NodePath, parent      │
+                 │      ├─ NodeTree (NodeId <-> NodePath, parent   │
                  │      │            <-> children, sibling-unique) │
                  │      ├─ ArtifactManager<D::Artifact>            │
                  │      ├─ frame versioning + change events        │
@@ -48,12 +48,12 @@ The spine is two layers, three crates, four namespaces:
    └──────────────────────────────┘          └──────────────────────────────┘
 ```
 
-The four namespaces (per node):
+The four namespaces (per node — under iteration, see §4):
 
 ```
 Node {
    params:  named   slots, kind-typed, bus-bindable, can promote to children
-   inputs:  indexed slots, structural composition, child Uids
+   inputs:  indexed slots, structural composition, child NodeIds
    outputs: indexed slots, primary product (texture, channel buffer, ...)
    state:   named   slots, sidecar runtime state, edit-only via debug hooks
 }
@@ -87,6 +87,33 @@ Three M2 deviations from the move-map are resolved here:
   shrinking `lpc-runtime`'s loader to a domain-agnostic
   filesystem walker. See §11.
 
+### Identifier rename: `Uid` / `NodeHandle` → `NodeId`
+
+M2 left two equivalent runtime-id types in `lpc-model`:
+
+- `lpc_model::types::Uid(pub u32)` — from the lp-domain
+  foundation (absorbed by C3).
+- `lpc_model::nodes::handle::NodeHandle(pub i32)` — from the
+  legacy lp-engine side (absorbed by C1).
+
+Both encode "process-local runtime identifier for a node." The
+design throughout this document uses **`NodeId(u32)`** as the
+canonical name:
+
+- `NodeId` matches conventional Rust naming (`EntityId`, `WindowId`, …).
+- `u32` is the right width (no negative ids; matches `Uid` already; LE-
+  friendly hash; cheap copy).
+- "Handle" elsewhere in this codebase usually means a typed *resource
+  handle* (`OutputChannelHandle`, `TextureHandle`); freeing the noun
+  reduces overload.
+
+`NodeId` retires both `Uid` and `NodeHandle`. Workspace rename is a
+**small task scheduled before M4** (it touches every consumer:
+`lp-server`, `lp-cli`, `lp-engine-client`, `fw-tests`,
+`lpc_model::project::api`, `lpv-model` re-exports, etc.) and is the
+cheapest of the named-thing fixes to do early. M4 / M5 then design
+and implement against the unified name.
+
 ## §1 — `Node` trait
 
 The spine has two traits with distinct jobs:
@@ -105,33 +132,40 @@ depend only on `lpc-model`.
 
 ```rust
 pub trait Node: NodeProperties + Send + Sync {
-    /// Parent in the tree, or None for the root.
-    fn parent(&self) -> Option<Uid>;
-    /// Ordered children (structural + param-promoted, see §7).
-    fn children(&self) -> &[Uid];
-
     /// The four namespaces. All return read-only views; mutation
     /// goes through set_property + slot rebinds.
+    /// (See §4 for the namespace model — under iteration.)
     fn params(&self)  -> &dyn SlotView<Slot>;       // named
     fn inputs(&self)  -> &dyn SlotView<Slot>;       // indexed
     fn outputs(&self) -> &dyn SlotView<Slot>;       // indexed
     fn state(&self)   -> &dyn SidecarState;         // opaque blob
 
-    /// Lifecycle (carried from existing `NodeRuntime`).
+    /// Lifecycle (carried from existing `NodeRuntime`, evolved).
+    /// (See §1.X for the tick / event story — under iteration.)
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error>;
-    fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error>;
+    fn tick(&mut self, ctx: &mut dyn TickContext) -> Result<(), Error>;
     fn destroy(&mut self, ctx: &dyn DestroyContext) -> Result<(), Error>;
-    fn shed_optional_buffers(&mut self, ctx: &dyn ShedContext) -> Result<(), Error>;
     fn update_config(&mut self, cfg: &dyn NodeConfig, ctx: &dyn NodeInitContext)
         -> Result<(), Error>;
-    fn handle_fs_change(&mut self, change: &FsChange, ctx: &dyn NodeInitContext)
+    fn update_artifact(&mut self, art: &dyn ArtifactRefDyn, ctx: &dyn NodeInitContext)
         -> Result<(), Error>;
+    fn shed_optional_buffers(&mut self, ctx: &dyn ShedContext) -> Result<(), Error>;
 
     /// Erased downcast for the legacy bridge (M5) and editor probes.
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 ```
+
+The trait carries **no tree links**. `Node` impls do not know their
+own `NodeId`, parent, or children — those live on the `NodeEntry` /
+`NodeTree` (single source of truth, §2). Lifecycle hooks that need
+tree context get it via the `*Context` argument.
+
+`NodeProperties::uid()` and `NodeProperties::path()` remain
+informational accessors (useful for log lines, not for navigation).
+The impl typically caches them at construction and returns the cached
+copy; they're never the source of truth.
 
 ### Decisions
 
@@ -140,31 +174,37 @@ pub trait Node: NodeProperties + Send + Sync {
   that requires the engine. A `dyn Node` is a `dyn NodeProperties`
   via the supertrait bound, so editor code that only wants properties
   doesn't pay for the spine's deps.
-- **Lifecycle method names match the existing `NodeRuntime` trait.**
-  We're not bikeshedding `_ready` / `_enter_tree` etc. (Godot) just
-  to look more like Godot. The shape *is* Godot's bottom-up
-  ordering — that's enforced by the tree, not the names.
+- **No `parent()` / `children()` on `Node`.** The tree owns that
+  data exclusively (§2). Eliminates the risk of impl drift — nothing
+  to keep in sync. Editor / iteration code asks the tree
+  (`NodeTree::parent_of(id)`, `NodeTree::children_of(id)`).
+- **Lifecycle method names match the existing `NodeRuntime` trait
+  where possible.** `init` / `destroy` carry over verbatim. `render`
+  becomes `tick` (§1.X) — visual / non-visual unified. `handle_fs_change`
+  is removed entirely; replaced by `update_artifact` driven by
+  `ArtifactManager` events (§3). `update_config` stays.
 - **Bottom-up `init` ordering** per Godot's `_propagate_ready`
-  (prior-art §1). Implementation: `NodeTree::init_subtree(uid)`
+  (prior-art §1). Implementation: `NodeTree::init_subtree(id)`
   recurses children first, then calls the parent's `init`. A parent's
   `init` may assume all descendants are initialised.
 - **Top-down `destroy` ordering** (reverse). Children destroy first;
   parents observe a clean teardown.
-- **Per-frame hook is `render`, opt-in via slot output.** Per
-  prior-art §1 ("avoid universal per-tick callbacks"). Nodes with no
-  outputs are not visited by the render pass. The decision of "should
-  this node tick" is structural, not a flag.
-- **`shed_optional_buffers` stays.** lp-engine's existing semantic
-  (drop everything that can be rebuilt; rebuild on next `render` /
-  `init`) survives. Used before shader recompile on ESP32.
-- **Panic isolation around `init`, `render`, `update_config`,
-  `handle_fs_change`.** `destroy` and `shed_optional_buffers` are
+- **`tick` is opt-in via the tree's render schedule, not universal.**
+  Per prior-art §1 ("avoid universal per-tick callbacks"). Nodes that
+  produce something visible to the render path are visited; pure
+  passive nodes are not. The decision is structural (driven by the
+  tree's render schedule, §5), not a per-node flag.
+- **`shed_optional_buffers` stays for now**, but is a candidate for
+  conversion to a memory-pressure event as the event system (§1.Y)
+  matures.
+- **Panic isolation around `init`, `tick`, `update_config`,
+  `update_artifact`.** `destroy` and `shed_optional_buffers` are
   *not* wrapped — a panic during destroy is a real bug (no recovery
   path other than process exit). All hooks are called via
   `panic_node::catch_node_panic` (existing crate) when the
   `panic-recovery` feature is on.
 - **No async at this layer.** Embedded targets are single-thread; the
-  client/server async story lives in `lp-server` / `lp-client`.
+  client / server async story lives in `lp-server` / `lp-client`.
 
 ### `SlotView`
 
@@ -189,18 +229,18 @@ if usage proves it pays.
 
 ```rust
 pub struct NodeTree {
-    nodes:    Vec<Option<NodeEntry>>,                // indexed by Uid.0
-    next_uid: u32,
-    by_path:  HashMap<NodePath, Uid>,                // O(1) path lookup
-    by_sibling: HashMap<(Uid /* parent */, Name), Uid>, // sibling-uniqueness index
-    root:     Uid,
+    nodes:    Vec<Option<NodeEntry>>,                       // indexed by NodeId.0
+    next_id:  u32,
+    by_path:  HashMap<NodePath, NodeId>,                     // O(1) path lookup
+    by_sibling: HashMap<(NodeId /* parent */, Name), NodeId>, // sibling-uniqueness index
+    root:     NodeId,
 }
 
 pub struct NodeEntry {
-    pub uid:        Uid,
+    pub id:         NodeId,
     pub path:       NodePath,                       // canonical absolute
-    pub parent:     Option<Uid>,
-    pub children:   Vec<Uid>,                        // ordered
+    pub parent:     Option<NodeId>,
+    pub children:   Vec<NodeId>,                     // ordered
     pub child_kinds: Vec<ChildKind>,                 // see §7
 
     pub status:     NodeStatus,                       // Created | InitError | Ok | Warn | Error
@@ -216,19 +256,20 @@ pub struct NodeEntry {
 
 ### Decisions
 
-- **Flat `Vec<Option<NodeEntry>>` indexed by `Uid.0`** (per F-2, plus
-  prior-art §2 "O(1) HashMap for child-by-name lookup"). Tombstones
-  (`None` slots) on destroy; `next_uid` monotonic, no reuse. We don't
-  adopt generational indices — embedded scale doesn't justify the
-  4-byte / handle cost (prior-art §2 "Generational id is optional").
-- **`HashMap<NodePath, Uid>`** for path → uid resolution. Built and
-  maintained as nodes are added / moved / removed. Editor and sync
-  layer use this; render path uses `Uid` directly.
+- **Flat `Vec<Option<NodeEntry>>` indexed by `NodeId.0`** (per F-2,
+  plus prior-art §2 "O(1) HashMap for child-by-name lookup").
+  Tombstones (`None` slots) on destroy; `next_id` monotonic, no
+  reuse. We don't adopt generational indices — embedded scale doesn't
+  justify the 4-byte / handle cost (prior-art §2 "Generational id is
+  optional").
+- **`HashMap<NodePath, NodeId>`** for path → id resolution. Built
+  and maintained as nodes are added / moved / removed. Editor and
+  sync layer use this; render path uses `NodeId` directly.
 - **Sibling-name uniqueness enforced at add-child time** (prior-art
   §2 F-6). `add_child(parent, name, ...)` returns
   `Err(SiblingNameCollision)` if `(parent, name)` is already in
   `by_sibling`.
-- **Persistence: paths, not uids** (prior-art §2 "What to copy"). TOML
+- **Persistence: paths, not ids** (prior-art §2 "What to copy"). TOML
   references children by `NodePath`; runtime resolves on load.
 - **Status enum on the container, not on `Node`** (load-bearing F-1).
   `Node::init`'s `Result<(), Error>` is observed by the tree and
@@ -239,7 +280,7 @@ pub struct NodeEntry {
   thing is touched. Sync layer reads these for diffing.
 - **Tombstones over compaction.** Destroy sets the slot to `None`;
   the slot stays. Reconstruction (e.g., a Pattern reappears on disk)
-  *gets a new `Uid`* and re-resolves the path. No id reuse, no
+  *gets a new `NodeId`* and re-resolves the path. No id reuse, no
   generational handling — the path is the persistent identity.
 - **Tree iteration:**
   - Render: depth-first, children-first (post-order). Inputs feed
@@ -252,17 +293,18 @@ pub struct NodeEntry {
 
 ### What stays on `Node`, what goes on `NodeEntry`
 
-| Lives on `Node` (the impl)        | Lives on `NodeEntry` (the container) |
-|-----------------------------------|--------------------------------------|
-| identity (`uid`, `path`, `parent`) — accessor; tree owns the data | identity (`uid`, `path`, `parent`) — actual storage |
-| `children() -> &[Uid]` accessor   | `children: Vec<Uid>` storage         |
-| slot views                         | nothing (slots are owned by the impl) |
-| sidecar `state`                   | nothing                               |
-| lifecycle methods                 | `status`, `*_ver`                     |
-| panic-recovery wrap location      | panic-recovery dispatch + status update |
+| Lives on `Node` (the impl)         | Lives on `NodeEntry` (the container)                 |
+|------------------------------------|------------------------------------------------------|
+| `NodeProperties::uid()`/`path()` — informational accessors only (impl typically caches at construction) | identity (`id`, `path`, `parent`) — **source of truth** |
+| (no parent / children accessors)   | `parent`, `children: Vec<NodeId>` — exclusive owner   |
+| slot values                        | nothing (the impl owns its slot values)               |
+| sidecar `state`                    | nothing                                               |
+| lifecycle methods                  | `status`, `*_ver`                                     |
+| panic-recovery wrap location       | panic-recovery dispatch + status update               |
 
-The accessors on `Node` are convenience reads (the impl already needs
-to know its own `uid` for logging etc.). Source of truth is the tree.
+The tree is the **single source of truth** for parent / children /
+status / frame versions. Node impls never have to keep these in sync
+with anything; that responsibility is fully on the tree.
 
 ## §3 — `ArtifactManager`
 
@@ -513,7 +555,7 @@ index      := uint
 
 Both **structural** children (an `Effect` in a `Stack.effects[i]`)
 and **param-promoted** children (a `Pattern` filling a
-`Kind::Gradient` param) end up as ordered `Vec<Uid>` on the parent.
+`Kind::Gradient` param) end up as ordered `Vec<NodeId>` on the parent.
 
 ### Decisions
 
@@ -571,7 +613,7 @@ lp-engine's existing implementation, polishing the seams.
 - **Frame versioning per-entry** (§5) drives diffing: client sends
   `since_frame`, server walks `nodes` returning entries where any
   `*_ver > since`. No tree walk on every poll — the tree maintains
-  a `dirty_set: HashSet<Uid>` updated on each version bump,
+  a `dirty_set: HashSet<NodeId>` updated on each version bump,
   cleared after each `get_changes`.
 - **No protocol-level versioning beyond what's there today.**
   Future protocol bumps go through the existing `Message<R>`
@@ -608,7 +650,7 @@ without changing `Node`.
 | Renders into target textures                       | `inputs: [target_texture_refs]` (param-promoted? structural? — see below) |
 | Frame-time logging via `time_provider`             | Stays; lives on `ProjectRuntime`, not `Node`                              |
 
-**Edge case:** `target_textures` are Uid references to other
+**Edge case:** `target_textures` are NodeId references to other
 nodes. Today this is a path-string in the config, resolved at init.
 In the new shape: it's a **bus binding** (`Binding::Bus(channel)`)
 on a slot in `inputs`. The texture nodes publish to a channel; the
@@ -650,7 +692,7 @@ constraints they reveal (and are accommodated by the design):
 1. **Bus-binding stub** in M5 for `target_textures` /
    `output_ref` / `texture_ref`. Just a stub — full bus design is
    the lp-vis roadmap's job. Rate-limited to "channel name resolves
-   to a node Uid via a flat map."
+   to a node NodeId via a flat map."
 2. **Lazy render order** is per-domain (`D::tick`), not in the spine.
    Legacy domain implements lp-engine's `ensure_texture_rendered`
    walker against the new tree-based `NodeTree`.
@@ -672,17 +714,17 @@ that M4's `/plan` should own.
   `NodeProperties::get_property(state.<name>)` — the encoding is
   invisible to the wire.
 - **Bus `BindingResolver` shape.** The lp-vis roadmap designs the
-  full bus. M5 only stubs (flat `HashMap<ChannelName, Uid>`).
+  full bus. M5 only stubs (flat `HashMap<ChannelName, NodeId>`).
 - **`%unique-name` scope.** §6 reserves the syntax. Whether the
   scope is project-root or `Show`-relative is a lp-vis question.
 - **`Show` node introduction.** Today's lp-engine has implicit
   project root; the new spine carries the same. lp-vis introduces
   `Show` as a top-level wrapper; M5 leaves this decision open by
   not over-binding `NodePath`'s root semantics.
-- **Generational `Uid`.** §2 picks flat. If embedded ever shows
+- **Generational `NodeId`.** §2 picks flat. If embedded ever shows
   use-after-free symptoms (it shouldn't — single-thread, slot
   tombstones, immediate refcount-zero eviction), a generational
-  upgrade is API-compatible (the `Uid` newtype absorbs the second
+  upgrade is API-compatible (the `NodeId` newtype absorbs the second
   word).
 
 ## §11 — Resolution of M2 flags
