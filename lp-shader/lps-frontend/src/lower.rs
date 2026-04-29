@@ -98,6 +98,7 @@ pub fn lower_with_options(
             global_map.clone(),
             &options.texture_specs,
             options.texel_fetch_bounds,
+            glsl_meta.uniforms_type.as_ref(),
         )
         .map_err(|e| LowerError::InFunction {
             name: info.name.clone(),
@@ -320,20 +321,9 @@ fn compute_global_layout(
 
     let uniforms_type = if uniforms_members.is_empty() {
         None
-    } else if uniforms_members.len() == 1 {
-        // `uniform Block { ... } u;` → one global whose type is a struct. Hoist inner fields so
-        // `uniforms_type` matches GLSL scope (e.g. `time` not `u.time`) and filetest `set_uniform`.
-        match &uniforms_members[0].ty {
-            LpsType::Struct { name, members } => Some(LpsType::Struct {
-                name: name.clone().or(Some(String::from("__uniforms"))),
-                members: members.clone(),
-            }),
-            _ => Some(LpsType::Struct {
-                name: Some(String::from("__uniforms")),
-                members: uniforms_members,
-            }),
-        }
     } else {
+        // One struct entry per uniform global (including `uniform Params params`), so paths match
+        // GLSL and dotted texture keys (e.g. `params.gradient`) align with `LpsTypePathExt`.
         Some(LpsType::Struct {
             name: Some(String::from("__uniforms")),
             members: uniforms_members,
@@ -576,6 +566,7 @@ fn lower_function(
     global_map: GlobalVarMap,
     texture_specs: &BTreeMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+    uniforms_type: Option<&LpsType>,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
         module,
@@ -587,6 +578,7 @@ fn lower_function(
         global_map,
         texture_specs,
         texel_fetch_bounds,
+        uniforms_type,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

@@ -1,10 +1,11 @@
 //! Validate `TextureBindingSpec` maps against lowered module metadata (`Texture2D` uniforms).
 
+use crate::path::parse_path;
+use crate::path_resolve::LpsTypePathExt;
+use crate::{LpsModuleSig, LpsType, StructMember, TextureBindingSpec};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
-
-use crate::{LpsModuleSig, LpsType, TextureBindingSpec};
 
 /// Every [`LpsType::Texture2D`] uniform in [`LpsModuleSig::uniforms_type`] must have a matching
 /// spec entry; every spec key must name a declared sampler. Empty specs with no texture uniforms
@@ -16,7 +17,7 @@ pub fn validate_texture_binding_specs_against_module(
     meta: &LpsModuleSig,
     specs: &BTreeMap<String, TextureBindingSpec>,
 ) -> Result<(), String> {
-    let declared = declared_texture2d_names(meta)?;
+    let declared = declared_texture2d_paths(meta)?;
     for name in &declared {
         if !specs.contains_key(name) {
             return Err(format!(
@@ -34,7 +35,7 @@ pub fn validate_texture_binding_specs_against_module(
     Ok(())
 }
 
-fn declared_texture2d_names(meta: &LpsModuleSig) -> Result<BTreeSet<String>, String> {
+fn declared_texture2d_paths(meta: &LpsModuleSig) -> Result<BTreeSet<String>, String> {
     let Some(u) = meta.uniforms_type.as_ref() else {
         return Ok(BTreeSet::new());
     };
@@ -44,19 +45,115 @@ fn declared_texture2d_names(meta: &LpsModuleSig) -> Result<BTreeSet<String>, Str
         ));
     };
     let mut out = BTreeSet::new();
-    for m in members {
-        if m.ty != LpsType::Texture2D {
-            continue;
-        }
-        let Some(name) = m.name.as_ref() else {
-            return Err(String::from("texture uniform has no name"));
-        };
-        if name.is_empty() {
-            return Err(String::from("texture uniform has no name"));
-        }
-        out.insert(name.clone());
-    }
+    collect_texture2d_paths_from_members(u, members, &[], &mut out)?;
     Ok(out)
+}
+
+/// Recursively collect canonical dotted paths for every `Texture2D` leaf under a struct member
+/// list. `prefix` holds field names from the uniforms root (empty at top level).
+fn collect_texture2d_paths_from_members(
+    uniforms_root: &LpsType,
+    members: &[StructMember],
+    prefix: &[String],
+    out: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    for m in members {
+        match &m.ty {
+            LpsType::Texture2D => {
+                // Texture2D fields require a name to build the binding path
+                let name = m
+                    .name
+                    .as_ref()
+                    .ok_or_else(|| String::from("texture uniform has no name"))?;
+                if name.is_empty() {
+                    return Err(String::from("texture uniform has no name"));
+                }
+                let mut path = prefix.to_vec();
+                path.push(name.clone());
+                let key = canonical_texture_binding_path(uniforms_root, &path)?;
+                out.insert(key);
+            }
+            LpsType::Struct { members: sub, .. } => {
+                // Check if this is an anonymous struct member (e.g., anonymous uniform block)
+                // or a named instance (e.g., `uniform Params params { ... }`)
+                match m.name.as_ref() {
+                    Some(name) if !name.is_empty() => {
+                        // Named struct instance - add to path prefix
+                        let mut path = prefix.to_vec();
+                        path.push(name.clone());
+                        collect_texture2d_paths_from_members(uniforms_root, sub, &path, out)?;
+                    }
+                    _ => {
+                        // Anonymous struct member (e.g., `uniform Decl { ... };`)
+                        // Recurse into it without adding a path prefix
+                        collect_texture2d_paths_from_members(uniforms_root, sub, prefix, out)?;
+                    }
+                }
+            }
+            LpsType::Array { element, .. } => {
+                // Arrays containing textures require a name for error reporting
+                let name = m
+                    .name
+                    .as_ref()
+                    .ok_or_else(|| String::from("uniform array member has no name"))?;
+                if name.is_empty() {
+                    return Err(String::from("uniform array member has no name"));
+                }
+                if type_contains_texture2d_leaf(element.as_ref()) {
+                    let mut path = prefix.to_vec();
+                    path.push(name.clone());
+                    let p = dotted_path_join(&path);
+                    return Err(format!(
+                        "texture bindings in uniform arrays are not supported (near '{p}')"
+                    ));
+                }
+            }
+            _ => {
+                // Scalar and other non-texture fields: skip anonymous members
+                // (e.g., fields in unnamed uniform blocks like `uniform { float x; };`)
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `Texture2D` or any aggregate that contains it (used to reject sampler arrays).
+fn type_contains_texture2d_leaf(ty: &LpsType) -> bool {
+    match ty {
+        LpsType::Texture2D => true,
+        LpsType::Struct { members, .. } => {
+            members.iter().any(|m| type_contains_texture2d_leaf(&m.ty))
+        }
+        LpsType::Array { element, .. } => type_contains_texture2d_leaf(element.as_ref()),
+        _ => false,
+    }
+}
+
+fn dotted_path_join(parts: &[String]) -> String {
+    parts.join(".")
+}
+
+/// Build the public binding key string, [`parse_path`]-check it, and confirm [`LpsTypePathExt::type_at_path`].
+fn canonical_texture_binding_path(
+    uniforms_root: &LpsType,
+    parts: &[String],
+) -> Result<String, String> {
+    if parts.is_empty() {
+        return Err(String::from(
+            "internal error: empty texture uniform path segments",
+        ));
+    }
+    let key = dotted_path_join(parts);
+    parse_path(&key).map_err(|e| format!("invalid canonical texture binding path `{key}`: {e}"))?;
+    match uniforms_root.type_at_path(&key) {
+        Ok(LpsType::Texture2D) => Ok(key),
+        Ok(leaf) => Err(format!(
+            "uniform path `{key}` resolves to `{leaf:?}`, expected Texture2D"
+        )),
+        Err(e) => Err(format!(
+            "uniform path `{key}` is not reachable in uniforms metadata ({e})"
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -145,15 +242,190 @@ mod tests {
     }
 
     #[test]
-    fn no_textures_and_no_specs_ok() {
+    fn nested_params_gradient_matching_spec_succeeds() {
         let meta = LpsModuleSig {
             functions: vec![],
-            uniforms_type: None,
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![StructMember {
+                    name: Some(String::from("params")),
+                    ty: LpsType::Struct {
+                        name: Some(String::from("Params")),
+                        members: vec![
+                            StructMember {
+                                name: Some(String::from("amount")),
+                                ty: LpsType::Float,
+                            },
+                            StructMember {
+                                name: Some(String::from("gradient")),
+                                ty: LpsType::Texture2D,
+                            },
+                        ],
+                    },
+                }],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        let mut specs = BTreeMap::new();
+        specs.insert(
+            String::from("params.gradient"),
+            TextureBindingSpec {
+                format: crate::TextureStorageFormat::Rgba16Unorm,
+                filter: crate::TextureFilter::Nearest,
+                wrap_x: crate::TextureWrap::ClampToEdge,
+                wrap_y: crate::TextureWrap::ClampToEdge,
+                shape_hint: crate::TextureShapeHint::HeightOne,
+            },
+        );
+        validate_texture_binding_specs_against_module(&meta, &specs).unwrap();
+    }
+
+    #[test]
+    fn missing_nested_spec_errors_with_dotted_key() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![StructMember {
+                    name: Some(String::from("params")),
+                    ty: LpsType::Struct {
+                        name: None,
+                        members: vec![StructMember {
+                            name: Some(String::from("gradient")),
+                            ty: LpsType::Texture2D,
+                        }],
+                    },
+                }],
+            }),
             globals_type: None,
             ..Default::default()
         };
         let specs = BTreeMap::new();
+        let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
+        assert!(
+            err.contains("params.gradient") && err.contains("no texture binding spec"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn extra_nested_spec_errors_with_extra_key() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![StructMember {
+                    name: Some(String::from("params")),
+                    ty: LpsType::Struct {
+                        name: None,
+                        members: vec![StructMember {
+                            name: Some(String::from("gradient")),
+                            ty: LpsType::Texture2D,
+                        }],
+                    },
+                }],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        let mut specs = BTreeMap::new();
+        specs.insert(
+            String::from("params.gradient"),
+            TextureBindingSpec {
+                format: crate::TextureStorageFormat::Rgba16Unorm,
+                filter: crate::TextureFilter::Nearest,
+                wrap_x: crate::TextureWrap::ClampToEdge,
+                wrap_y: crate::TextureWrap::ClampToEdge,
+                shape_hint: crate::TextureShapeHint::General2D,
+            },
+        );
+        specs.insert(
+            String::from("params.other"),
+            TextureBindingSpec {
+                format: crate::TextureStorageFormat::Rgba16Unorm,
+                filter: crate::TextureFilter::Nearest,
+                wrap_x: crate::TextureWrap::ClampToEdge,
+                wrap_y: crate::TextureWrap::ClampToEdge,
+                shape_hint: crate::TextureShapeHint::General2D,
+            },
+        );
+        let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
+        assert!(
+            err.contains("params.other") && err.contains("does not match any shader sampler2D"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn top_level_texture_plus_nested_matching_spec_succeeds() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![
+                    StructMember {
+                        name: Some(String::from("inputColor")),
+                        ty: LpsType::Texture2D,
+                    },
+                    StructMember {
+                        name: Some(String::from("params")),
+                        ty: LpsType::Struct {
+                            name: None,
+                            members: vec![StructMember {
+                                name: Some(String::from("gradient")),
+                                ty: LpsType::Texture2D,
+                            }],
+                        },
+                    },
+                ],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        let mut specs = BTreeMap::new();
+        for path in ["inputColor", "params.gradient"] {
+            specs.insert(
+                String::from(path),
+                TextureBindingSpec {
+                    format: crate::TextureStorageFormat::Rgba16Unorm,
+                    filter: crate::TextureFilter::Nearest,
+                    wrap_x: crate::TextureWrap::ClampToEdge,
+                    wrap_y: crate::TextureWrap::ClampToEdge,
+                    shape_hint: crate::TextureShapeHint::General2D,
+                },
+            );
+        }
         validate_texture_binding_specs_against_module(&meta, &specs).unwrap();
+    }
+
+    #[test]
+    fn nested_struct_only_scalar_fields_requires_no_texture_specs() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![StructMember {
+                    name: Some(String::from("params")),
+                    ty: LpsType::Struct {
+                        name: None,
+                        members: vec![
+                            StructMember {
+                                name: Some(String::from("amount")),
+                                ty: LpsType::Float,
+                            },
+                            StructMember {
+                                name: Some(String::from("bias")),
+                                ty: LpsType::Vec2,
+                            },
+                        ],
+                    },
+                }],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
     }
 
     #[test]
@@ -173,5 +445,137 @@ mod tests {
         let specs = BTreeMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
         assert!(err.contains("no name"), "{err}");
+    }
+
+    #[test]
+    fn texture_uniform_array_errors() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![StructMember {
+                    name: Some(String::from("gradients")),
+                    ty: LpsType::Array {
+                        element: alloc::boxed::Box::new(LpsType::Texture2D),
+                        len: 2,
+                    },
+                }],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        let mut specs = BTreeMap::new();
+        specs.insert(
+            String::from("ignored"),
+            TextureBindingSpec {
+                format: crate::TextureStorageFormat::Rgba16Unorm,
+                filter: crate::TextureFilter::Nearest,
+                wrap_x: crate::TextureWrap::ClampToEdge,
+                wrap_y: crate::TextureWrap::ClampToEdge,
+                shape_hint: crate::TextureShapeHint::General2D,
+            },
+        );
+        let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
+        assert!(
+            err.contains("uniform arrays")
+                && err.contains("not supported")
+                && err.contains("gradients"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn texture_inside_struct_array_errors() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: None,
+                members: vec![StructMember {
+                    name: Some(String::from("layers")),
+                    ty: LpsType::Array {
+                        element: alloc::boxed::Box::new(LpsType::Struct {
+                            name: None,
+                            members: vec![StructMember {
+                                name: Some(String::from("tex")),
+                                ty: LpsType::Texture2D,
+                            }],
+                        }),
+                        len: 2,
+                    },
+                }],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        let specs = BTreeMap::new();
+        let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
+        assert!(
+            err.contains("uniform arrays") && err.contains("layers"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn no_textures_and_no_specs_ok() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: None,
+            globals_type: None,
+            ..Default::default()
+        };
+        let specs = BTreeMap::new();
+        validate_texture_binding_specs_against_module(&meta, &specs).unwrap();
+    }
+
+    /// Test for anonymous uniform block members (like `uniform Decl { float time; }`)
+    /// where the struct type members don't have individual names.
+    /// This should pass validation since there are no textures.
+    #[test]
+    fn anonymous_uniform_block_scalar_members_no_textures() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: Some(String::from("__uniforms")),
+                members: vec![
+                    StructMember {
+                        name: Some(String::from("time")),
+                        ty: LpsType::Float,
+                    },
+                    StructMember {
+                        name: Some(String::from("frame_count")),
+                        ty: LpsType::Int,
+                    },
+                ],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        // No texture specs needed - should pass
+        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
+    }
+
+    /// Test for truly anonymous members (name: None) - should be skipped
+    #[test]
+    fn truly_anonymous_scalar_members_are_skipped() {
+        let meta = LpsModuleSig {
+            functions: vec![],
+            uniforms_type: Some(LpsType::Struct {
+                name: Some(String::from("__uniforms")),
+                members: vec![
+                    StructMember {
+                        name: None, // Anonymous member
+                        ty: LpsType::Float,
+                    },
+                    StructMember {
+                        name: Some(String::from("named_field")),
+                        ty: LpsType::Int,
+                    },
+                ],
+            }),
+            globals_type: None,
+            ..Default::default()
+        };
+        // Should pass - anonymous scalar members are skipped
+        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
     }
 }

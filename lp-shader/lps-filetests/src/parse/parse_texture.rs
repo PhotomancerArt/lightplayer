@@ -8,6 +8,7 @@ use lps_shared::TextureFilter;
 use lps_shared::TextureShapeHint;
 use lps_shared::TextureStorageFormat;
 use lps_shared::TextureWrap;
+use lps_shared::path::parse_path;
 
 use super::test_type::TextureFixture;
 use super::test_type::TextureFixtureChannel;
@@ -81,6 +82,7 @@ pub fn parse_texture_spec_line(
     if name.is_empty() {
         anyhow::bail!("line {line_number}: `texture-spec:` empty name");
     }
+    validate_texture_directive_name(&name, line_number)?;
 
     let mut format: Option<TextureStorageFormat> = None;
     let mut filter: Option<TextureFilter> = None;
@@ -179,6 +181,7 @@ pub fn parse_texture_data_header(line: &str, line_number: usize) -> Result<Textu
         .next()
         .ok_or_else(|| anyhow::anyhow!("line {line_number}: `texture-data:` missing name"))?
         .to_string();
+    validate_texture_directive_name(&name, line_number)?;
     let wh = words.next().ok_or_else(|| {
         anyhow::anyhow!("line {line_number}: `texture-data:` missing `WxH` after name")
     })?;
@@ -450,6 +453,22 @@ fn parse_wrap_mode(s: &str, line_number: usize) -> Result<TextureWrap> {
     }
 }
 
+/// Reject malformed names; accept dotted field paths (e.g. `params.gradient`) using [`parse_path`].
+fn validate_texture_directive_name(name: &str, line_number: usize) -> anyhow::Result<()> {
+    use lps_shared::path::LpsPathSeg;
+    let segments = parse_path(name).map_err(|e| {
+        anyhow::anyhow!("line {line_number}: invalid texture binding name {name:?}: {e}")
+    })?;
+    for seg in &segments {
+        if matches!(seg, LpsPathSeg::Index(_)) {
+            anyhow::bail!(
+                "line {line_number}: texture binding name {name:?}: indexed paths are not supported in texture directives"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +482,42 @@ mod tests {
             std::env::temp_dir().join(format!("lps_ft_tex_{}_{}.glsl", suffix, std::process::id()));
         std::fs::write(&p, content).unwrap();
         p
+    }
+
+    #[test]
+    fn dotted_texture_spec_and_data_roundtrip_parse() {
+        let p = tmp_glsl(
+            "dotted",
+            r"// test run
+// texture-spec: params.gradient format=rgba16unorm filter=nearest wrap=clamp shape=2d
+// texture-data: params.gradient 1x1 rgba16unorm
+//   1.0,0.0,0.0,1.0
+float f() { return 1.0; }
+// run: f() ~= 1.0
+",
+        );
+        let tf = parse_test_file(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert!(tf.texture_specs.contains_key("params.gradient"));
+        assert!(tf.texture_fixtures.contains_key("params.gradient"));
+    }
+
+    #[test]
+    fn reject_invalid_texture_binding_path() {
+        let e = parse_texture_spec_line(
+            "// texture-spec: .bad format=rgba16unorm filter=nearest wrap=clamp shape=2d",
+            1,
+        );
+        assert!(e.is_err());
+    }
+
+    #[test]
+    fn reject_indexed_texture_directive_path() {
+        let e = parse_texture_spec_line(
+            "// texture-spec: u.tex[0] format=rgba16unorm filter=nearest wrap=clamp shape=2d",
+            1,
+        );
+        assert!(e.is_err());
     }
 
     #[test]
