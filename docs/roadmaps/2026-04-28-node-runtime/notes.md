@@ -547,3 +547,36 @@ Verification (all green): `cargo check` on `lp-model`,
 `lp-cli`, `fw-emu` (RV32 release-emu), `fw-esp32` (RV32
 release-esp32 with `esp32c6,server`). `cargo test -p lp-model`
 passes (round-trip serialization).
+
+## M2 C4 done (out of order, via cargo-rename + agent)
+
+Experiment: validate that an agent using `cargo rename` can
+do a real LightPlayer crate-rename safely. Outcome:
+**successful**, commit `f9a49014`. C4 executed first (out of
+the original C1→C5 order) because it's a pure rename — the
+ideal cargo-rename use case — with minimal external
+consumers (one test file).
+
+- `lp-domain` is renamed to `lpv-model` and lives at
+  `lp-vis/lpv-model/`.
+- The `lp-domain/` parent directory is deleted.
+- Workspace `Cargo.toml` `members` and `default-members`
+  updated automatically.
+- Two trivial manual fixes: empty parent dir cleanup, stale
+  doc-comment update in test file.
+- Verified across host + both RV32 targets.
+
+Implications for remaining checkpoints:
+
+- **C3** wording updated in `m2-crate-restructure/move-map.md`
+  to reflect that the source crate is now `lpv-model`, not
+  `lp-domain`.
+- **C1 / C2** (which involve splits, not just renames) are
+  the next test of the workflow. The plan is: agent uses
+  `cargo rename` for the rename portion (e.g.,
+  `lp-model` → `lpc-model`), then does mechanical file
+  moves for the split portion (extracting `lpl-model` from
+  `lpc-model`), then sweeps imports.
+- The cargo-rename + agent workflow is now the default
+  approach for M2; manual RustRover work is no longer
+  required.

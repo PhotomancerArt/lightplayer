@@ -611,10 +611,13 @@ into lpc-runtime or lpl-runtime — agent decides during cleanup),
 grep), but its `Cargo.toml` references `lp-engine` as a
 dev-dependency only.
 
-## C3 — move `lp-domain` foundation into `lpc-model`
+## C3 — move `lpv-model` foundation into `lpc-model`
 
-Already enumerated in `m2-crate-restructure.md`. Move these
-files from `lp-domain/lp-domain/src/` into
+(C4 was completed out of order — see "C4 (DONE)" section
+below. The crate is now `lpv-model` at `lp-vis/lpv-model/`.
+C3 below is updated to reflect that.)
+
+Move these files from `lp-vis/lpv-model/src/` into
 `lp-core/lpc-model/src/`:
 
 - `types.rs` (`Uid`, `Name`, `NodePath`, `PropPath`,
@@ -629,43 +632,38 @@ files from `lp-domain/lp-domain/src/` into
   `NodeProperties` while moving (frees `Node` for the new
   tree-aware trait in M5).
 
-The remainder of `lp-domain/lp-domain/src/` — `visual/` plus
-`lib.rs`, `schema_gen_smoke.rs`, `examples/` — stays in place
-until C4.
+The remainder of `lp-vis/lpv-model/src/` — `visual/` plus
+`lib.rs`, `schema_gen_smoke.rs`, `examples/` — stays in place.
 
-After moves, `lp-domain/lp-domain/src/lib.rs` becomes much
+After moves, `lp-vis/lpv-model/src/lib.rs` becomes much
 slimmer (no `pub mod artifact;`, etc.) and adds
 `use lpc_model::{Slot, Kind, ...}` wherever `visual/*` needs
 the foundation types. **No transitional re-export shell** —
 visual code imports from `lpc_model` directly.
 
-`lp-domain/lp-domain/Cargo.toml` adds `lpc-model = { path =
+`lp-vis/lpv-model/Cargo.toml` adds `lpc-model = { path =
 "../../lp-core/lpc-model", default-features = false }`.
 
-## C4 — rename `lp-domain` → `lpv-model` under `lp-vis/`
+## C4 — rename `lp-domain` → `lpv-model` under `lp-vis/` (DONE)
 
-### Move sequence
+**Status:** completed out of order via `cargo-rename`
+experiment, commit `f9a49014`. Single command:
 
-1. Create `lp-vis/` parent directory.
-2. Move `lp-domain/lp-domain/` → `lp-vis/lpv-model/`.
-3. Update `lp-vis/lpv-model/Cargo.toml`:
-   - `name = "lp-domain"` → `name = "lpv-model"`.
-   - Path-deps updated: `lpc-model = { path = "../../lp-core/lpc-model", ... }` (one extra `..`).
-4. Move `lp-domain/lp-domain/examples/` along with the crate;
-   update any path-relative paths in tests / TOML loaders.
-5. Delete the now-empty `lp-domain/` parent directory.
-6. Workspace `Cargo.toml`: `"lp-domain/lp-domain"` →
-   `"lp-vis/lpv-model"` in both `members` and `default-members`.
+```bash
+cargo rename lp-domain lpv-model --move lp-vis/lpv-model
+```
 
-### Consumers needing import updates after C4
+Manual fixes after: deleted empty `lp-domain/` parent
+directory, updated stale doc-comment references in
+`lp-vis/lpv-model/tests/round_trip.rs` (`cargo test -p
+lp-domain` → `... -p lpv-model`).
 
-- `use lp_domain::...` → `use lpv_model::...` everywhere.
-- `Cargo.toml` deps named `lp-domain` → `lpv-model`.
+Verified with `cargo check -p lpv-model`, `cargo test -p
+lpv-model` (host + `std,schema-gen` features), `cargo check
+-p fw-emu` and `-p fw-esp32` (RV32 release profiles).
 
-`rg "lp_domain::"` returns one file currently
-(`lp-domain/lp-domain/tests/round_trip.rs`), but `lpfx` and
-any in-progress work might add more — the agent's cleanup
-sweep finds them.
+Lessons applied to remaining checkpoints (see also "Workflow
+note" at the bottom of this file).
 
 ## C5 — workspace polish (after agent does C1-C4 cleanup)
 
@@ -711,3 +709,37 @@ Agent actions (final gate):
 If any check fails after a cleanup sweep, the failure mode is
 documented (which import wasn't found) before pinging the user
 to continue.
+
+## Workflow note: cargo-rename validated
+
+C4 was executed by an agent using `cargo rename` and verified
+end-to-end (commit `f9a49014`). The tool handled the rename
++ directory move atomically; manual fixes were limited to
+two trivial things (empty parent dir cleanup + stale doc
+comments in a test file). For the remaining checkpoints
+(C1, C2, C3), the workflow is:
+
+1. **Pure rename portion** — use `cargo rename <old> <new>
+   --move <new-path>`. Always dry-run first.
+2. **Split portion** (C1, C2 — extracting one crate into
+   two) — agent does mechanical file moves: create the new
+   crate skeleton, move per-kind subdirectories into it,
+   author its `Cargo.toml`, update workspace members, sweep
+   imports.
+3. **Verify** — `cargo check` across host + RV32 targets
+   per the cleanup-sweep checklist.
+4. **Format with `cargo +nightly fmt -p <crate>`** scoped
+   to affected crates rather than workspace-wide, to avoid
+   touching unrelated formatting.
+5. **Commit per-checkpoint** with conventional-commit
+   format and a heredoc message.
+
+Known cargo-rename limitations to grep for after every run:
+- Doc comments referencing the old crate name (cargo-rename
+  doesn't touch them — it only rewrites use/path/dep
+  references).
+- `include_str!` / `include_bytes!` paths.
+- Build scripts (`build.rs`).
+- Macro-expanded crate-name strings.
+- Generic identifiers in unrelated crates that happen to
+  share the old name (false positives — review dry-run).
