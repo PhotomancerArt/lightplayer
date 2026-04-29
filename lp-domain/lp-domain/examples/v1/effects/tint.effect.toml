@@ -7,14 +7,18 @@ author         = "yona"
 
 [shader]
 glsl = """
+struct Params {
+    vec3  color;
+    float amount;
+};
+
 uniform vec2  outputSize;
-uniform vec3  param_color;
-uniform float param_amount;
+uniform Params params;
 uniform sampler2D inputColor;
 
 vec4 render(vec2 pos) {
     vec4 src = texture(inputColor, pos / outputSize);
-    vec3 tinted = mix(src.rgb, src.rgb * param_color, param_amount);
+    vec3 tinted = mix(src.rgb, src.rgb * params.color, params.amount);
     return vec4(tinted, src.a);
 }
 """

@@ -8,15 +8,19 @@ author         = "yona"
 
 [shader]
 glsl = """
+struct Params {
+    float time;
+    float speed;
+    float saturation;
+};
+
 uniform vec2  outputSize;
-uniform float param_time;
-uniform float param_speed;
-uniform float param_saturation;
+uniform Params params;
 
 vec4 render(vec2 pos) {
   vec2 uv = pos / outputSize;
-  float h = fract(uv.x + param_time * param_speed);
-  return vec4(lpfn_hsv2rgb(vec3(h, param_saturation, 1.0)), 1.0);
+  float h = fract(uv.x + params.time * params.speed);
+  return vec4(lpfn_hsv2rgb(vec3(h, params.saturation, 1.0)), 1.0);
 }
 """
 

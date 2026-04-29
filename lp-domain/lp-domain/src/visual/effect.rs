@@ -8,8 +8,13 @@ use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef, visual_inp
 use alloc::string::String;
 
 /// An input-transforming Visual: input slot + shader + parameter
-/// surface. The shader reads the input via the `inputColor` uniform
-/// (convention; not enforced by this layer).
+/// surface. The shader reads the input via a sampler uniform
+/// (conventionally named `inputColor` in current examples;
+/// M4 Stack/Effect design should settle the final naming: `input`,
+/// `inputImage`, or `inputTex`).
+///
+/// Note: The input sampler is **not** part of authored `params`;
+/// it is a graph-fed resource supplied by Stack composition or bus binding.
 ///
 /// # Example
 ///

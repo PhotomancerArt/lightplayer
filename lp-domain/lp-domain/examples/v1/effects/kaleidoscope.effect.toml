@@ -7,14 +7,18 @@ author         = "yona"
 
 [shader]
 glsl = """
+struct Params {
+    int   slices;
+    float rotation;
+};
+
 uniform vec2  outputSize;
-uniform int   param_slices;
-uniform float param_rotation;
+uniform Params params;
 uniform sampler2D inputColor;
 
 vec4 render(vec2 pos) {
     vec2  uv = pos / outputSize;
-    return texture(inputColor, lpfn_kaleidoscope(uv, param_slices, param_rotation));
+    return texture(inputColor, lpfn_kaleidoscope(uv, params.slices, params.rotation));
 }
 """
 

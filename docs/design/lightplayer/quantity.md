@@ -192,8 +192,8 @@ others:
 | `Position2d`   | `LpsType::Vec2`                                                                                                  |
 | `Position3d`   | `LpsType::Vec3`                                                                                                  |
 | `Color`        | `Struct{ space: I32, coords: Vec3 }` (see `color.md`)                                                            |
-| `ColorPalette` | `Struct{ space: I32, count: I32, entries: Array(Vec3, 16) }`                                                     |
-| `Gradient`     | `Struct{ space: I32, method: I32, count: I32, stops: Array(Struct{at: F32, c: Vec3}, 16) }`                      |
+| `ColorPalette` | Authoring struct: `Struct{ space: I32, count: I32, entries: Array(Vec3, 16) }`; shader-visible runtime form is a generated height-one `Kind::Texture` resource |
+| `Gradient`     | Authoring struct: `Struct{ space: I32, method: I32, count: I32, stops: Array(Struct{at: F32, c: Vec3}, 16) }`; shader-visible runtime form is a generated height-one `Kind::Texture` resource |
 | `Texture`      | `Struct{ format: I32, width: I32, height: I32, handle: I32 }` — opaque handle, pixel data lives in `TextureBuffer` |
 
 When `Audio` etc. land:
@@ -211,6 +211,14 @@ Constants (`MAX_PALETTE_LEN`, `MAX_GRADIENT_STOPS`, `MAX_TOUCH_POINTS`,
 `AUDIO_FRAME_LEN`, `AUDIO_FFT_BINS`) live as `pub const` in
 `lp-domain` next to the Kinds that use them. v0 values are deliberately
 small for embedded targets; bumping them is a single-constant change.
+
+`ColorPalette` and `Gradient` are kept here as authoring/value
+recipes. The lpfx MVP materializes them into width-by-one textures
+before shader binding, then passes those textures through the same
+`sampler2D` / `TextureBindingSpec::HeightOne` path used for other
+shader image resources. Schema locking should revisit whether these
+remain first-class `Kind`s, become `TextureSpec` recipes under
+`Kind::Texture`, or split into separate authoring-only concepts.
 
 ## 4. `Dimension` and `Unit`
 
@@ -570,6 +578,10 @@ default = { space = "oklch", entries = [
   [0.6, 0.20,  60],
   [0.5, 0.25,  30],
 ]}
+
+# Runtime palette/gradient resources are generated textures. The
+# authoring value above is what TOML persists; lpfx bakes it into an
+# X-by-1 texture and binds it to shaders as a sampler2D.
 
 # Texture input — opaque handle, default = "black"
 [input.video]

@@ -21,8 +21,8 @@
 //! | `Count`, `Choice` | integer → [`LpsValue::I32`][`LpsValue`] |
 //! | `Bool` | bool |
 //! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`LpsType`](crate::LpsType) order: `space`, `coords`) |
-//! | `ColorPalette` | table `{ space, count?, entries = [[f,f,f],…] }` (member order: `space`, `count`, `entries`) |
-//! | `Gradient` | table `{ space, method, count?, stops = [{at,c},…] }` (member order: `space`, `method`, `count`, `stops`) |
+//! | `ColorPalette` | authoring table `{ space, count?, entries = [[f,f,f],…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
+//! | `Gradient` | authoring table `{ space, method, count?, stops = [{at,c},…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Position2d` / `Position3d` | 2- or 3-long array of numbers → `Vec2` / `Vec3` |
 //! | `AudioLevel` | table `{ low, mid, high }` |
 //! | `Texture` | string `"black"` (v0) → [`ValueSpec::Texture`] |
@@ -112,6 +112,9 @@ impl From<&LpsValue> for LpsValueWire {
             LpsValue::Mat2x2(x) => LpsValueWire::Mat2x2(*x),
             LpsValue::Mat3x3(x) => LpsValueWire::Mat3x3(*x),
             LpsValue::Mat4x4(x) => LpsValueWire::Mat4x4(*x),
+            LpsValue::Texture2D(_) => {
+                panic!("Texture2D is a runtime resource; serialize a ValueSpec::Texture recipe")
+            }
             LpsValue::Array(a) => LpsValueWire::Array(a.iter().map(LpsValueWire::from).collect()),
             LpsValue::Struct { name, fields } => LpsValueWire::Struct {
                 name: name.clone(),
@@ -226,6 +229,11 @@ impl PartialEq for ValueSpec {
 
 /// Recipe to build a default **texture** when author-time data is not a raw
 /// handle. M2 defines only a universal 1×1 black (`quantity.md` §7).
+///
+/// The lpfx render MVP is expected to extend this recipe space for generated
+/// image resources such as palette/gradient strips: TOML should preserve the
+/// authoring recipe, while the runtime bakes width-by-one textures for shader
+/// `sampler2D` uniforms.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -822,7 +830,9 @@ fn lps_value_color(v: &toml::Value) -> Result<LpsValue, FromTomlError> {
     }
 }
 
-fn lps_value_color_table(t: &toml::map::Map<String, toml::Value>) -> Result<LpsValue, FromTomlError> {
+fn lps_value_color_table(
+    t: &toml::map::Map<String, toml::Value>,
+) -> Result<LpsValue, FromTomlError> {
     let space = t
         .get("space")
         .and_then(toml::Value::as_str)

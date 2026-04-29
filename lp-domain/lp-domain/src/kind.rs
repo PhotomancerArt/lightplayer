@@ -134,8 +134,14 @@ pub enum Kind {
     /// Full color in an author-selected space; see `docs/design/color.md` and the struct recipe in `quantity.md` §3.
     Color,
     /// Fixed-max palette: [`MAX_PALETTE_LEN`], `count`, and `entries` (`quantity.md` §3, `color.md`).
+    ///
+    /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the palette
+    /// to a height-one texture and binds it as a shader field like `params.palette`.
     ColorPalette,
     /// Gradient with stops; [`MAX_GRADIENT_STOPS`] and [`InterpMethod`] (`quantity.md` §3).
+    ///
+    /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the gradient
+    /// to a height-one texture and binds it as a shader field like `params.gradient`.
     Gradient,
     /// 2D position as `LpsType::Vec2` (`quantity.md` §3).
     Position2d,
@@ -159,6 +165,9 @@ impl Kind {
     /// runtime agree on: the “storage recipe” for this [`Kind`]
     /// (`docs/design/lightplayer/quantity.md` §3, “Storage recipes”, and `impl`
     /// block in §3).
+    ///
+    /// For `ColorPalette` and `Gradient`, this is the **authoring** storage type.
+    /// The shader-visible runtime form is a baked texture field inside `params`.
     pub fn storage(self) -> LpsType {
         match self {
             Self::Amplitude

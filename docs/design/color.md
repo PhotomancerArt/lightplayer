@@ -128,7 +128,9 @@ Notes:
 ## 5. Color-family kinds
 
 Three Kinds in the color family. Each is a struct shape with the
-colorspace and color data inside the value.
+colorspace and color data inside the value. These structs are the
+authoring/storage model, not necessarily the shader ABI for every
+runtime path.
 
 | Kind           | Storage (`LpsType::Struct`)                                                           |
 | -------------- | ------------------------------------------------------------------------------------- |
@@ -168,6 +170,13 @@ Authored values _exceeding_ the maximum are a load error, not
 silently truncated. Larger collections are a one-constant bump in
 v1+, not a model change.
 
+For lpfx rendering, `ColorPalette` and `Gradient` values materialize
+to width-by-one texture resources before shader binding. Shaders
+sample those resources as `sampler2D` uniforms using the lp-shader
+`TextureShapeHint::HeightOne` contract. This keeps color authoring
+textual and structured while avoiding fixed-size palette/gradient
+uniform structs as the shader-facing ABI.
+
 ## 6. Gradient interpolation
 
 | Variant  | Notes                                                                           |
@@ -202,9 +211,9 @@ F32 LinearSrgb.
 | Conversion                                          | Where                                              |
 | --------------------------------------------------- | -------------------------------------------------- |
 | Authoring space → `LinearSrgb` (single color)       | At uniform-binding time. Once per param per frame. |
-| Authoring space → `LinearSrgb` (palette entries)    | At uniform-binding time. All entries in one pass.  |
-| Authoring space → `LinearSrgb` (gradient sample)    | At sample time, _after_ interpolating in the       |
-|                                                     | gradient's authoring space. Shader-side helper.    |
+| Authoring space → `LinearSrgb` (palette entries)    | At texture-bake time. All entries in one pass.     |
+| Authoring space → `LinearSrgb` (gradient sample)    | At texture-bake time, after interpolating in the   |
+|                                                     | gradient's authoring space.                        |
 | `LinearSrgb` F32 → Unorm16 linear                   | At texture-write boundary (shader output).         |
 | Unorm16 linear → F32                                | At texture sample (fixture / next stage).          |
 | `LinearSrgb` F32 → device format (e.g. sRGB Unorm8) | At the output device boundary, including any       |
