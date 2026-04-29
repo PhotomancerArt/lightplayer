@@ -11,8 +11,12 @@ use lps_builtins::builtins::lpfn::generative::gnoise::gnoise2_q32::__lp_lpfn_gno
 use lps_builtins::builtins::lpfn::generative::gnoise::gnoise3_q32::__lp_lpfn_gnoise3_q32;
 use lps_builtins::builtins::lpfn::generative::psrdnoise::psrdnoise2_q32::__lp_lpfn_psrdnoise2_q32;
 use lps_builtins::builtins::lpfn::generative::psrdnoise::psrdnoise3_q32::__lp_lpfn_psrdnoise3_q32;
+use lps_builtins::builtins::lpfn::generative::random::random2_q32::__lp_lpfn_random2_q32;
+use lps_builtins::builtins::lpfn::generative::random::random3_q32::__lp_lpfn_random3_q32;
 use lps_builtins::builtins::lpfn::generative::snoise::snoise2_q32::__lp_lpfn_snoise2_q32;
 use lps_builtins::builtins::lpfn::generative::snoise::snoise3_q32::__lp_lpfn_snoise3_q32;
+use lps_builtins::builtins::lpfn::generative::srandom::srandom2_q32::__lp_lpfn_srandom2_q32;
+use lps_builtins::builtins::lpfn::generative::srandom::srandom3_q32::__lp_lpfn_srandom3_q32;
 use lps_builtins::builtins::lpfn::generative::worley::worley2_q32::__lp_lpfn_worley2_q32;
 use lps_builtins::builtins::lpfn::generative::worley::worley2_value_q32::__lp_lpfn_worley2_value_q32;
 use lps_builtins::builtins::lpfn::generative::worley::worley3_q32::__lp_lpfn_worley3_q32;
@@ -449,6 +453,108 @@ fn render_rgb2hsv_q32() -> String {
     sort_join(lines)
 }
 
+fn render_random2_q32() -> String {
+    let mut lines = Vec::new();
+    let seeds = [0u32, 1, 42, 12345];
+    let coords: &[(f32, f32)] = &[
+        (0.0, 0.0),
+        (1.0, 2.0),
+        (-3.5, 4.25),
+        (12.125, -0.25),
+        (100.0, -100.0),
+        (0.1, 0.2),
+        (7.7, 8.8),
+        (3.14159, 2.71828),
+    ];
+    for &(x, y) in coords {
+        for &seed in &seeds {
+            let xi = float_to_fixed(x);
+            let yi = float_to_fixed(y);
+            let n = __lp_lpfn_random2_q32(xi, yi, seed);
+            lines.push(format!("random2_q32(x={xi},y={yi},seed={seed}) = {n}"));
+        }
+    }
+    sort_join(lines)
+}
+
+fn render_random3_q32() -> String {
+    let mut lines = Vec::new();
+    let seeds = [0u32, 3, 1001];
+    let coords: &[(f32, f32, f32)] = &[
+        (0.0, 0.0, 0.0),
+        (1.0, 2.0, 3.0),
+        (-1.0, 5.5, 0.125),
+        (9.0, -9.0, 9.0),
+        (33.0, 44.0, 55.0),
+        (0.5, 0.25, 0.125),
+        (6.0, 7.0, 8.0),
+        (12.0, 3.0, 1.0),
+    ];
+    for &(x, y, z) in coords {
+        for &seed in &seeds {
+            let xi = float_to_fixed(x);
+            let yi = float_to_fixed(y);
+            let zi = float_to_fixed(z);
+            let n = __lp_lpfn_random3_q32(xi, yi, zi, seed);
+            lines.push(format!(
+                "random3_q32(x={xi},y={yi},z={zi},seed={seed}) = {n}"
+            ));
+        }
+    }
+    sort_join(lines)
+}
+
+fn render_srandom2_q32() -> String {
+    let mut lines = Vec::new();
+    let seeds = [0u32, 1, 42, 12345];
+    let coords: &[(f32, f32)] = &[
+        (0.0, 0.0),
+        (1.0, 2.0),
+        (-3.5, 4.25),
+        (12.125, -0.25),
+        (100.0, -100.0),
+        (0.1, 0.2),
+        (7.7, 8.8),
+        (3.14159, 2.71828),
+    ];
+    for &(x, y) in coords {
+        for &seed in &seeds {
+            let xi = float_to_fixed(x);
+            let yi = float_to_fixed(y);
+            let n = __lp_lpfn_srandom2_q32(xi, yi, seed);
+            lines.push(format!("srandom2_q32(x={xi},y={yi},seed={seed}) = {n}"));
+        }
+    }
+    sort_join(lines)
+}
+
+fn render_srandom3_q32() -> String {
+    let mut lines = Vec::new();
+    let seeds = [0u32, 3, 1001];
+    let coords: &[(f32, f32, f32)] = &[
+        (0.0, 0.0, 0.0),
+        (1.0, 2.0, 3.0),
+        (-1.0, 5.5, 0.125),
+        (9.0, -9.0, 9.0),
+        (33.0, 44.0, 55.0),
+        (0.5, 0.25, 0.125),
+        (6.0, 7.0, 8.0),
+        (12.0, 3.0, 1.0),
+    ];
+    for &(x, y, z) in coords {
+        for &seed in &seeds {
+            let xi = float_to_fixed(x);
+            let yi = float_to_fixed(y);
+            let zi = float_to_fixed(z);
+            let n = __lp_lpfn_srandom3_q32(xi, yi, zi, seed);
+            lines.push(format!(
+                "srandom3_q32(x={xi},y={yi},z={zi},seed={seed}) = {n}"
+            ));
+        }
+    }
+    sort_join(lines)
+}
+
 #[test]
 fn lpfn_q32_snapshots() {
     assert_snapshot("psrdnoise2_q32", &render_psrdnoise2_q32());
@@ -466,5 +572,9 @@ fn lpfn_q32_snapshots() {
     assert_snapshot("hsv2rgb_q32", &render_hsv2rgb_q32());
     assert_snapshot("rgb2hsv_q32", &render_rgb2hsv_q32());
     assert_snapshot("sincos_q32", &render_sincos_q32());
+    assert_snapshot("random2_q32", &render_random2_q32());
+    assert_snapshot("random3_q32", &render_random3_q32());
+    assert_snapshot("srandom2_q32", &render_srandom2_q32());
+    assert_snapshot("srandom3_q32", &render_srandom3_q32());
     finish_snapshot_update_if_requested();
 }

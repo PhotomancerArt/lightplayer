@@ -2,8 +2,10 @@
 //!
 //! Uses srandom3_tile for seamless tiling and dot products for gradient noise.
 
+use crate::builtins::lpfn::generative::gnoise::gnoise3_q32::lpfn_gnoise3;
+use crate::builtins::lpfn::generative::gnoise::smooth_lut_q32::quintic_vec3_lut;
 use crate::builtins::lpfn::generative::srandom::srandom3_tile_q32::lpfn_srandom3_tile;
-use lps_q32::fns::{mix_q32, quintic_vec3};
+use lps_q32::fns::mix_q32;
 use lps_q32::q32::Q32;
 use lps_q32::vec3_q32::Vec3Q32;
 
@@ -18,12 +20,18 @@ use lps_q32::vec3_q32::Vec3Q32;
 /// Noise value in [0, 1] range as Q32 (normalized)
 #[inline(always)]
 pub fn lpfn_gnoise3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Q32 {
+    // Fast path: if tile_length is zero, delegate to non-tiled gnoise3
+    if tile_length == Q32::ZERO {
+        // Normalize gnoise3 output from [-1, 1] to [0, 1]
+        return lpfn_gnoise3(p, seed) * Q32::HALF + Q32::HALF;
+    }
+
     // i = floor(p), f = fract(p)
     let i = p.floor();
     let f = p.fract();
 
-    // Interpolate using quintic smoothing
-    let u = quintic_vec3(f);
+    // Interpolate using quintic smoothing (LUT-based for performance)
+    let u = quintic_vec3_lut(f);
 
     // Scale tile_length for srandom3_tile: tileLength * lacunarity * 0.5
     // lacunarity = 2.0, so: tileLength * 2.0 * 0.5 = tileLength

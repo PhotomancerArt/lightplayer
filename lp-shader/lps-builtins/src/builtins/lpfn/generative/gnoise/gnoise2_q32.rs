@@ -7,8 +7,9 @@
 //! literature. The core concept (random values at grid points + interpolation) is mathematical
 //! procedure, not copyrightable expression. This Rust/Q32 port is our own implementation.
 
+use crate::builtins::lpfn::generative::gnoise::smooth_lut_q32::cubic_vec2_lut;
 use crate::builtins::lpfn::generative::random::random2_q32::lpfn_random2;
-use lps_q32::fns::{cubic_vec2, mix_q32};
+use lps_q32::fns::mix_q32;
 use lps_q32::q32::Q32;
 use lps_q32::vec2_q32::Vec2Q32;
 
@@ -32,8 +33,8 @@ pub fn lpfn_gnoise2(p: Vec2Q32, seed: u32) -> Q32 {
     let c = lpfn_random2(i + Vec2Q32::new(Q32::ZERO, Q32::ONE), seed);
     let d = lpfn_random2(i + Vec2Q32::one(), seed);
 
-    // Interpolate using cubic smoothing
-    let u = cubic_vec2(f);
+    // Interpolate using cubic smoothing (LUT-based for performance)
+    let u = cubic_vec2_lut(f);
 
     // Bilinear interpolation with cross terms
     // mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y

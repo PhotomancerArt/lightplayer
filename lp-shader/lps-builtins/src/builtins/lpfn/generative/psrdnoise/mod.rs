@@ -1,3 +1,5 @@
+pub mod fibonacci_lut_q32;
+mod fibonacci_lut_q32_data;
 pub mod grad_lut_q32;
 mod grad_lut_q32_data;
 pub mod psrdnoise2_f32;
