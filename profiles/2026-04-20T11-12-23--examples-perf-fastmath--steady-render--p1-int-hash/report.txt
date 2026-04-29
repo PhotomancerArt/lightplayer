@@ -1,0 +1,54 @@
+=== CPU summary ===
+cycle_model=esp32c6
+total_attributed_cycles=7170356
+profiled_instructions=5560878
+
+Top 20 by self cycles:
+       2353751   32.8%  __lp_lpfn_psrdnoise2_q32
+       1176124   16.4%  FixtureRuntime::render
+        614400    8.6%  __lp_lpir_fdiv_recip_q32
+        400384    5.6%  [jit] render
+        356096    5.0%  __lps_sin_q32
+        288768    4.0%  Rgba16Sampler::sample_pixel
+        244736    3.4%  [jit] paletteRainbow
+        220484    3.1%  __lps_cos_q32
+        166164    2.3%  RenderContextImpl::get_output
+        165888    2.3%  [jit] prsd_demo
+        129024    1.8%  __lp_lpir_ffloor_q32
+        125436    1.7%  [jit] __render_texture_rgba16
+        123665    1.7%  __lps_atan2_q32
+        122880    1.7%  [jit] applyPalette
+        115712    1.6%  [jit] paletteHeatmap
+         92771    1.3%  int::specialized_div_rem::u64_div_rem
+         84448    1.2%  memcpy
+         43788    0.6%  __divdi3
+         41147    0.6%  <linked_list_allocator[fc5c8319a2cc5ee7]::Heap>::allocate_first_fit
+         39654    0.6%  <linked_list_allocator[fc5c8319a2cc5ee7]::hole::HoleList>::deallocate
+
+Top 20 by inclusive cycles:
+       7088328   98.9%  <lp_server[66f275835194d288]::server::LpServer>::tick
+       6966569   97.2%  FixtureRuntime::render
+       5395802   75.3%  fw_emu[1f6bf82e169e2f9f]::server_loop::run_server_loop
+       5257859   73.3%  <lp_engine[2b3058deb3e66d36]::project::runtime::RenderContextImpl>::ensure_texture_rendered
+       5237031   73.0%  RenderContextImpl::get_texture
+       5196063   72.5%  ShaderRuntime::render
+       5170599   72.1%  NativeJitShader::render
+       5111483   71.3%  [jit] __render_texture_rgba16
+       5110351   71.3%  BackendAdapter<lpvm_native[751c2f204eb699ad]::rt_jit::module::NativeJitModule>::call_render_texture
+       4988699   69.6%  [jit] render
+       3204123   44.7%  [jit] prsd_demo
+       2476663   34.5%  __lp_lpfn_psrdnoise2_q32
+        735232   10.3%  [jit] applyPalette
+        645120    9.0%  __lp_lpir_fdiv_recip_q32
+        491520    6.9%  [jit] paletteRainbow
+        383512    5.3%  core[6ef2f7b2eacddb78]::fmt::write
+        378112    5.3%  __lps_sin_q32
+        307200    4.3%  Rgba16Sampler::sample_pixel
+        266330    3.7%  __lps_atan2_q32
+        235562    3.3%  __lps_cos_q32
+
+
+=== Perf Events ===
+events written: 21
+path: events.jsonl
+

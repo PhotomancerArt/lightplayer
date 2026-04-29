@@ -22,6 +22,40 @@
 //! # Returns
 //!
 //! Euclidean squared distance to nearest feature point, approximately in range [-1, 1] (float)
+//!
+//! # Implementation Notes
+//!
+//! ## Range Analysis for Wrapping Math
+//!
+//! The Worley algorithm checks neighboring cells (27 cells in 3D) to find the nearest
+//! feature point. Key bounds:
+//!
+//! - Cell size: 1.0 (Q16.16: 65536)
+//! - Query point: within [cell_coord, cell_coord+1]
+//! - Feature point: within [cell_coord, cell_coord+1] of its cell
+//! - Maximum difference between query and feature point: ~[-2, 2] cells
+//!   (current cell boundary + neighbor cell boundary)
+//!
+//! Therefore:
+//! - `dx`, `dy`, `dz` are bounded by approximately [-2, 2]
+//! - `dx*dx`, `dy*dy`, `dz*dz` are bounded by approximately 4.0
+//! - `dist_sq = dx*dx + dy*dy + dz*dz` is bounded by approximately 12.0
+//! - Range calculations `(0.5 - frac)^2` are bounded by 0.25
+//!
+//! These bounds are safely within Q32's i32 representation range, so wrapping math
+//! can be used for distance calculations without overflow concerns.
+//!
+//! ## Wrapping Math Application
+//!
+//! Operations using wrapping math (`mul_wrapping`, `add_wrapping`):
+//! - Distance squared: `dx.mul_wrapping(dx)` etc. (bounded ~4.0)
+//! - Range calculations: `(HALF - frac_x).mul_wrapping(HALF - frac_x)` (bounded ~0.25)
+//! - Feature offset: `length.mul_wrapping(FRAC_1_SQRT_2)` (length bounded by 0.5)
+//!
+//! Operations keeping saturating math (correctness critical):
+//! - Min-distance comparisons: `test_distance < distance` (needs correct ordering)
+//! - Range comparisons: `range_x < distance` (needs correct ordering)
+//! - Final scaling: division and output range mapping
 
 use crate::builtins::lpfn::hash::lpfn_hash3;
 use lps_q32::q32::Q32;
@@ -105,18 +139,26 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
     let seed_point = get_point_3d(seed_index as usize, near_x_int, near_y_int, near_z_int);
 
     // Calculate initial distance (euclidean squared)
+    // Range analysis: dx, dy, dz bounded by ~[-2, 2], so squared terms bounded by ~4.0
+    // Using wrapping math as bounds are provably within safe range
     let dx = x - seed_point.0;
     let dy = y - seed_point.1;
     let dz = z - seed_point.2;
-    let mut distance = dx * dx + dy * dy + dz * dz;
+    let mut distance = dx
+        .mul_wrapping(dx)
+        .add_wrapping(dy.mul_wrapping(dy))
+        .add_wrapping(dz.mul_wrapping(dz));
 
     // Calculate range for optimization: (0.5 - frac)^2
-    let range_x = (HALF - frac_x) * (HALF - frac_x);
-    let range_y = (HALF - frac_y) * (HALF - frac_y);
-    let range_z = (HALF - frac_z) * (HALF - frac_z);
+    // Range analysis: (HALF - frac) bounded by ~[-0.5, 0.5], squared bounded by ~0.25
+    // Using wrapping math as bounds are provably within safe range
+    let range_x = (HALF - frac_x).mul_wrapping(HALF - frac_x);
+    let range_y = (HALF - frac_y).mul_wrapping(HALF - frac_y);
+    let range_z = (HALF - frac_z).mul_wrapping(HALF - frac_z);
 
     // Check adjacent cells only if within distance range
     // Single-axis checks
+    // Comparison uses saturating math - correctness critical for min tracking
     if range_x < distance {
         let test_x_int = far_x_int;
         let test_y_int = near_y_int;
@@ -128,10 +170,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -148,10 +195,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -168,10 +220,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -189,10 +246,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -209,10 +271,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -229,10 +296,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -250,10 +322,15 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
             seed,
         );
         let test_point = get_point_3d(test_index as usize, test_x_int, test_y_int, test_z_int);
+        // Range analysis: test_dx, test_dy, test_dz bounded by ~[-2, 2] (same as primary distance)
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_dz = z - test_point.2;
-        let test_distance = test_dx * test_dx + test_dy * test_dy + test_dz * test_dz;
+        let test_distance = test_dx
+            .mul_wrapping(test_dx)
+            .add_wrapping(test_dy.mul_wrapping(test_dy))
+            .add_wrapping(test_dz.mul_wrapping(test_dz));
+        // Comparison uses saturating math - correctness critical for min tracking
         if test_distance < distance {
             distance = test_distance;
         }
@@ -294,7 +371,9 @@ fn get_point_3d(index: usize, cell_x: i32, cell_y: i32, cell_z: i32) -> (Q32, Q3
     let length = Q32::from_i32(length_bits as i32) * HALF / Q32::from_i32(7);
 
     // Diagonal length
-    let diag = length * FRAC_1_SQRT_2;
+    // Range analysis: length bounded by [0, 0.5], FRAC_1_SQRT_2 ≈ 0.707
+    // Product bounded by ~0.353, safely within range for wrapping math
+    let diag = length.mul_wrapping(FRAC_1_SQRT_2);
 
     // Cell origin in Q32
     let cell_x_q32 = Q32::from_i32(cell_x);

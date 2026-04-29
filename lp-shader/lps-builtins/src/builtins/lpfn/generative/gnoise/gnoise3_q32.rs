@@ -2,8 +2,9 @@
 //!
 //! Uses random values at grid cell corners and interpolates between them using quintic smoothing.
 
+use crate::builtins::lpfn::generative::gnoise::smooth_lut_q32::quintic_vec3_lut;
 use crate::builtins::lpfn::generative::random::random3_q32::lpfn_random3;
-use lps_q32::fns::{mix_q32, quintic_vec3};
+use lps_q32::fns::mix_q32;
 use lps_q32::q32::Q32;
 use lps_q32::vec3_q32::Vec3Q32;
 
@@ -21,8 +22,8 @@ pub fn lpfn_gnoise3(p: Vec3Q32, seed: u32) -> Q32 {
     let i = p.floor();
     let f = p.fract();
 
-    // Interpolate using quintic smoothing
-    let u = quintic_vec3(f);
+    // Interpolate using quintic smoothing (LUT-based for performance)
+    let u = quintic_vec3_lut(f);
 
     // Sample all 8 corners
     let c000 = lpfn_random3(i + Vec3Q32::zero(), seed);

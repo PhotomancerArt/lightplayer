@@ -42,8 +42,10 @@
 //!
 //! Noise value approximately in range [-1, 1] (float)
 
-use crate::builtins::glsl::mod_q32::__lps_mod_q32;
-use lps_q32::fns;
+use crate::builtins::glsl::sincos_q32::lps_sincos_q32_pair;
+use crate::builtins::lpfn::generative::psrdnoise::fibonacci_lut_q32::{
+    grad_base_and_orthogonal, rotate_by_alpha,
+};
 use lps_q32::q32::Q32;
 use lps_q32::vec3_q32::Vec3Q32;
 use lps_q32::vec4_q32::Vec4Q32;
@@ -51,10 +53,6 @@ use lps_q32::vec4_q32::Vec4Q32;
 /// Fixed-point constants
 const HALF: Q32 = Q32(0x00008000); // 0.5 in Q16.16
 const SIX: Q32 = Q32(0x00060000); // 6.0 in Q16.16
-
-/// Period constant for hash: 289.0
-/// In Q16.16: 289.0 * 65536 = 18939904
-const PERIOD_289: Q32 = Q32(18939904);
 
 /// Radial decay constant: 0.5
 /// In Q16.16: 0.5 * 65536 = 32768
@@ -64,60 +62,271 @@ const RADIAL_DECAY_0_5: Q32 = Q32(32768);
 /// In Q16.16: 39.5 * 65536 ≈ 2588672
 const SCALE_39_5: Q32 = Q32(2588672);
 
-/// Hash computation constants
-const HASH_CONST_34: Q32 = Q32(34 << 16); // 34.0
-
-/// Fibonacci spiral constants
-/// 2*pi/golden ratio ≈ 3.883222077
-const THETA_MULT: Q32 = Q32(254545); // 3.883222077 * 65536
-/// -0.006920415
-const SZ_MULT: Q32 = Q32(-454); // -0.006920415 * 65536
-/// 0.996539792
-const SZ_ADD: Q32 = Q32(65296); // 0.996539792 * 65536
-/// 10*pi/289 ≈ 0.108705628
-const PSI_MULT: Q32 = Q32(7124); // 0.108705628 * 65536
 /// 1/3 ≈ 0.33333333
 const ONE_THIRD: Q32 = Q32(21845); // 0.33333333 * 65536
 /// 1/6 ≈ 0.16666667
 const ONE_SIXTH: Q32 = Q32(10923); // 0.16666667 * 65536
 
-/// Helper: mod289(x) = mod(x, 289.0)
+/// Integer hash for one simplex corner using i32 rem_euclid(289).
+/// 3D permutation: permute(permute(permute(iw) + iv) + iu)
 #[inline(always)]
-fn mod289_q32(x: i32) -> i32 {
-    __lps_mod_q32(x, PERIOD_289.to_fixed())
+fn hash_corner(iu: i32, iv: i32, iw: i32) -> i32 {
+    let h = iw.rem_euclid(289);
+    let h = ((h * 34 + 1) * h).rem_euclid(289);
+    let h = ((h + iv).rem_euclid(289) * 34 + 1) * h;
+    let h = (h + iu).rem_euclid(289);
+    ((h * 34 + 10) * h).rem_euclid(289)
 }
 
-/// Helper: permute(v) = mod289(((v * 34.0) + 1.0) * v)
-#[inline(always)]
-fn permute_q32(v: i32) -> i32 {
-    let v_q32 = Q32::from_fixed(v);
-    let temp = v_q32 * HASH_CONST_34 + Q32::ONE;
-    mod289_q32((temp * v_q32).to_fixed())
+/// Corner indices for the four simplex corners.
+struct CornerIndices3D {
+    i0_x: i32,
+    i0_y: i32,
+    i0_z: i32,
+    i1_x: i32,
+    i1_y: i32,
+    i1_z: i32,
+    i2_x: i32,
+    i2_y: i32,
+    i2_z: i32,
+    i3_x: i32,
+    i3_y: i32,
+    i3_z: i32,
 }
 
-/// 3D Periodic Simplex Rotational Domain noise function.
-///
-/// # Arguments
-/// * `x` - Input coordinates as Vec3Q32
-/// * `period` - Tiling period as Vec3Q32 (zero = no tiling)
-/// * `alpha` - Rotation angle in radians as Q32
-/// * `seed` - Seed value for randomization (unused in psrdnoise, kept for consistency)
-///
-/// # Returns
-/// Tuple of (noise_value, gradient_x, gradient_y, gradient_z) in Q32 fixed-point format
-pub fn lpfn_psrdnoise3(
-    x: Vec3Q32,
-    period: Vec3Q32,
-    alpha: Q32,
-    _seed: u32,
+/// Gradient vectors and entry data for all four corners.
+struct CornerGradients {
+    g0: Vec3Q32,
+    g1: Vec3Q32,
+    g2: Vec3Q32,
+    g3: Vec3Q32,
+}
+
+/// Compute gradients for all four corners using LUT + alpha rotation.
+#[inline(always)]
+fn compute_gradients(idx: &CornerIndices3D, sin_alpha: i32, cos_alpha: i32) -> CornerGradients {
+    // Hash all four corners
+    let hash_0 = hash_corner(idx.i0_x, idx.i0_y, idx.i0_z);
+    let hash_1 = hash_corner(idx.i1_x, idx.i1_y, idx.i1_z);
+    let hash_2 = hash_corner(idx.i2_x, idx.i2_y, idx.i2_z);
+    let hash_3 = hash_corner(idx.i3_x, idx.i3_y, idx.i3_z);
+
+    // LUT lookup + rotation for each corner
+    let entry_0 = grad_base_and_orthogonal(hash_0);
+    let (gx_0, gy_0, gz_0) = rotate_by_alpha(&entry_0, sin_alpha, cos_alpha);
+
+    let entry_1 = grad_base_and_orthogonal(hash_1);
+    let (gx_1, gy_1, gz_1) = rotate_by_alpha(&entry_1, sin_alpha, cos_alpha);
+
+    let entry_2 = grad_base_and_orthogonal(hash_2);
+    let (gx_2, gy_2, gz_2) = rotate_by_alpha(&entry_2, sin_alpha, cos_alpha);
+
+    let entry_3 = grad_base_and_orthogonal(hash_3);
+    let (gx_3, gy_3, gz_3) = rotate_by_alpha(&entry_3, sin_alpha, cos_alpha);
+
+    CornerGradients {
+        g0: Vec3Q32::new(
+            Q32::from_fixed(gx_0),
+            Q32::from_fixed(gy_0),
+            Q32::from_fixed(gz_0),
+        ),
+        g1: Vec3Q32::new(
+            Q32::from_fixed(gx_1),
+            Q32::from_fixed(gy_1),
+            Q32::from_fixed(gz_1),
+        ),
+        g2: Vec3Q32::new(
+            Q32::from_fixed(gx_2),
+            Q32::from_fixed(gy_2),
+            Q32::from_fixed(gz_2),
+        ),
+        g3: Vec3Q32::new(
+            Q32::from_fixed(gx_3),
+            Q32::from_fixed(gy_3),
+            Q32::from_fixed(gz_3),
+        ),
+    }
+}
+
+/// Noise computation tail: gradients, radial decay, final noise value.
+/// Shared between periodic and non-periodic paths (corner indices and x vectors already computed).
+#[inline(always)]
+fn psrdnoise3_tail(
+    x0: Vec3Q32,
+    x1: Vec3Q32,
+    x2: Vec3Q32,
+    x3: Vec3Q32,
+    corner_indices: &CornerIndices3D,
+    sin_alpha: i32,
+    cos_alpha: i32,
 ) -> (Q32, Q32, Q32, Q32) {
+    // Compute gradients using LUT + alpha rotation
+    let grads = compute_gradients(corner_indices, sin_alpha, cos_alpha);
+
+    // Radial decay with distance from each simplex corner
+    // w = 0.5 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3))
+    //
+    // Range analysis for wrapping math:
+    // - x_k components bounded by simplex geometry (~[-1, 1] in skewed space)
+    // - dot(x_k, x_k) = x_k.x^2 + x_k.y^2 + x_k.z^2 bounded by ~3.0
+    // - RADIAL_DECAY_0_5 - dot is bounded and safe for wrapping
+    let dot0 = x0.dot_wrapping(x0);
+    let dot1 = x1.dot_wrapping(x1);
+    let dot2 = x2.dot_wrapping(x2);
+    let dot3 = x3.dot_wrapping(x3);
+
+    let mut w = Vec4Q32::new(
+        RADIAL_DECAY_0_5.sub_wrapping(dot0),
+        RADIAL_DECAY_0_5.sub_wrapping(dot1),
+        RADIAL_DECAY_0_5.sub_wrapping(dot2),
+        RADIAL_DECAY_0_5.sub_wrapping(dot3),
+    );
+
+    // w = max(w, 0.0)
+    w = w.max(Vec4Q32::zero());
+
+    // w2 = w * w, w3 = w2 * w
+    // Range analysis: w is in [0, 1] after max(), so w*w and w*w*w are bounded
+    // Safe for wrapping arithmetic (result stays in [0, 1])
+    let w2 = Vec4Q32::new(
+        w.x.mul_wrapping(w.x),
+        w.y.mul_wrapping(w.y),
+        w.z.mul_wrapping(w.z),
+        w.w.mul_wrapping(w.w),
+    );
+    let w3 = Vec4Q32::new(
+        w2.x.mul_wrapping(w.x),
+        w2.y.mul_wrapping(w.y),
+        w2.z.mul_wrapping(w.z),
+        w2.w.mul_wrapping(w.w),
+    );
+
+    // The value of the linear ramp from each of the corners
+    // gdotx = vec4(dot(g0,x0), dot(g1,x1), dot(g2,x2), dot(g3,x3))
+    //
+    // Range analysis for dot_wrapping:
+    // - x_k components bounded by simplex geometry (~[-1, 1] in skewed space)
+    // - grad_k components are normalized (sin/cos outputs from LUT, sphere points)
+    // - Dot product bounded by ~3.0 max (unit vectors in 3D)
+    // - Safe for Q16.16 wrapping arithmetic
+    let gdotx = Vec4Q32::new(
+        grads.g0.dot_wrapping(x0),
+        grads.g1.dot_wrapping(x1),
+        grads.g2.dot_wrapping(x2),
+        grads.g3.dot_wrapping(x3),
+    );
+
+    // Multiply by the radial decay and sum up the noise value
+    // n = dot(w3, gdotx)
+    //
+    // Range analysis:
+    // - w3 components are in [0, 1] (w in [0,1], w3 = w^3)
+    // - gdotx components bounded by ~3.0
+    // - Product bounded by ~3.0, sum of 4 terms bounded by ~12.0
+    // - Safe for wrapping: 12.0 << 2^15 (Q16.16 overflow limit)
+    let n =
+        w3.x.mul_wrapping(gdotx.x)
+            .add_wrapping(w3.y.mul_wrapping(gdotx.y))
+            .add_wrapping(w3.z.mul_wrapping(gdotx.z))
+            .add_wrapping(w3.w.mul_wrapping(gdotx.w));
+
+    // Compute the first order partial derivatives
+    // dw = -6.0 * w2 * gdotx
+    //
+    // Range analysis:
+    // - w2 in [0, 1], gdotx bounded by ~3.0
+    // - Product bounded by ~3.0, scaled by 6.0 -> ~18.0
+    // - Safe for wrapping arithmetic
+    let neg_six = Q32(-SIX.0); // -6.0 in Q16.16
+    let dw_x = w2.x.mul_wrapping(gdotx.x).mul_wrapping(neg_six);
+    let dw_y = w2.y.mul_wrapping(gdotx.y).mul_wrapping(neg_six);
+    let dw_z = w2.z.mul_wrapping(gdotx.z).mul_wrapping(neg_six);
+    let dw_w = w2.w.mul_wrapping(gdotx.w).mul_wrapping(neg_six);
+
+    // dn0 = w3.x * g0 + dw.x * x0, etc.
+    //
+    // Range analysis for gradient accumulation:
+    // - w3.x in [0, 1], g0 components are normalized (~[-1, 1])
+    // - dw.x bounded by ~18.0, x0 bounded by ~[-1, 1]
+    // - Product: w3.x * g0 bounded by ~1.0, dw.x * x0 bounded by ~18.0
+    // - Sum bounded by ~19.0 per component, well within Q16.16 range
+    let dn0 = Vec3Q32::new(
+        w3.x.mul_wrapping(grads.g0.x)
+            .add_wrapping(dw_x.mul_wrapping(x0.x)),
+        w3.x.mul_wrapping(grads.g0.y)
+            .add_wrapping(dw_x.mul_wrapping(x0.y)),
+        w3.x.mul_wrapping(grads.g0.z)
+            .add_wrapping(dw_x.mul_wrapping(x0.z)),
+    );
+    let dn1 = Vec3Q32::new(
+        w3.y.mul_wrapping(grads.g1.x)
+            .add_wrapping(dw_y.mul_wrapping(x1.x)),
+        w3.y.mul_wrapping(grads.g1.y)
+            .add_wrapping(dw_y.mul_wrapping(x1.y)),
+        w3.y.mul_wrapping(grads.g1.z)
+            .add_wrapping(dw_y.mul_wrapping(x1.z)),
+    );
+    let dn2 = Vec3Q32::new(
+        w3.z.mul_wrapping(grads.g2.x)
+            .add_wrapping(dw_z.mul_wrapping(x2.x)),
+        w3.z.mul_wrapping(grads.g2.y)
+            .add_wrapping(dw_z.mul_wrapping(x2.y)),
+        w3.z.mul_wrapping(grads.g2.z)
+            .add_wrapping(dw_z.mul_wrapping(x2.z)),
+    );
+    let dn3 = Vec3Q32::new(
+        w3.w.mul_wrapping(grads.g3.x)
+            .add_wrapping(dw_w.mul_wrapping(x3.x)),
+        w3.w.mul_wrapping(grads.g3.y)
+            .add_wrapping(dw_w.mul_wrapping(x3.y)),
+        w3.w.mul_wrapping(grads.g3.z)
+            .add_wrapping(dw_w.mul_wrapping(x3.z)),
+    );
+
+    // gradient = 39.5 * (dn0 + dn1 + dn2 + dn3)
+    //
+    // Range analysis:
+    // - Each dn_k component bounded by ~19.0
+    // - Sum of 4 terms bounded by ~76.0
+    // - Scaled by 39.5 -> ~3002.0, still well within Q16.16 range (~32767 max)
+    let grad_sum_x = dn0
+        .x
+        .add_wrapping(dn1.x)
+        .add_wrapping(dn2.x)
+        .add_wrapping(dn3.x);
+    let grad_sum_y = dn0
+        .y
+        .add_wrapping(dn1.y)
+        .add_wrapping(dn2.y)
+        .add_wrapping(dn3.y);
+    let grad_sum_z = dn0
+        .z
+        .add_wrapping(dn1.z)
+        .add_wrapping(dn2.z)
+        .add_wrapping(dn3.z);
+
+    let gradient_x = grad_sum_x.mul_wrapping(SCALE_39_5);
+    let gradient_y = grad_sum_y.mul_wrapping(SCALE_39_5);
+    let gradient_z = grad_sum_z.mul_wrapping(SCALE_39_5);
+
+    // Scale the return value to fit nicely into the range [-1,1]
+    // n is bounded by ~12.0, scaled by 39.5 -> ~474.0, well within range
+    let noise_value = n.mul_wrapping(SCALE_39_5);
+
+    (noise_value, gradient_x, gradient_y, gradient_z)
+}
+
+/// Non-periodic fast path (no period wrapping); kept separate so call sites with `period == 0` can fold.
+#[inline(always)]
+fn psrdnoise3_noperiod(x: Vec3Q32, sin_alpha: i32, cos_alpha: i32) -> (Q32, Q32, Q32, Q32) {
     // Transform to simplex space (tetrahedral grid)
     // Using optimized transformation: uvw = x + dot(x, vec3(1.0/3.0))
-    let dot_sum = x.x + x.y + x.z;
-    let uvw = x + Vec3Q32::new(
-        dot_sum * ONE_THIRD,
-        dot_sum * ONE_THIRD,
-        dot_sum * ONE_THIRD,
+    let dot_sum = x.x.add_wrapping(x.y).add_wrapping(x.z);
+    let uvw_offset = dot_sum.mul_wrapping(ONE_THIRD);
+    let uvw = Vec3Q32::new(
+        x.x.add_wrapping(uvw_offset),
+        x.y.add_wrapping(uvw_offset),
+        x.z.add_wrapping(uvw_offset),
     );
 
     // Determine which simplex we're in, i0 is the "base corner"
@@ -149,15 +358,135 @@ pub fn lpfn_psrdnoise3(
     let i1 = i0 + o1;
     let i2 = i0 + o2;
     let i3 = i0 + Vec3Q32::one();
-    let i1_x_int = i1.x.to_i32();
-    let i1_y_int = i1.y.to_i32();
-    let i1_z_int = i1.z.to_i32();
-    let i2_x_int = i2.x.to_i32();
-    let i2_y_int = i2.y.to_i32();
-    let i2_z_int = i2.z.to_i32();
-    let i3_x_int = i3.x.to_i32();
-    let i3_y_int = i3.y.to_i32();
-    let i3_z_int = i3.z.to_i32();
+
+    // Transform the corners back to texture space
+    // Using optimized transformation: v = i - dot(i, vec3(1.0/6.0))
+    let dot_i0 = i0.dot(Vec3Q32::one()).mul_wrapping(ONE_SIXTH);
+    let dot_i1 = i1.dot(Vec3Q32::one()).mul_wrapping(ONE_SIXTH);
+    let dot_i2 = i2.dot(Vec3Q32::one()).mul_wrapping(ONE_SIXTH);
+    let dot_i3 = i3.dot(Vec3Q32::one()).mul_wrapping(ONE_SIXTH);
+
+    let v0 = Vec3Q32::new(
+        i0.x.sub_wrapping(dot_i0),
+        i0.y.sub_wrapping(dot_i0),
+        i0.z.sub_wrapping(dot_i0),
+    );
+    let v1 = Vec3Q32::new(
+        i1.x.sub_wrapping(dot_i1),
+        i1.y.sub_wrapping(dot_i1),
+        i1.z.sub_wrapping(dot_i1),
+    );
+    let v2 = Vec3Q32::new(
+        i2.x.sub_wrapping(dot_i2),
+        i2.y.sub_wrapping(dot_i2),
+        i2.z.sub_wrapping(dot_i2),
+    );
+    let v3 = Vec3Q32::new(
+        i3.x.sub_wrapping(dot_i3),
+        i3.y.sub_wrapping(dot_i3),
+        i3.z.sub_wrapping(dot_i3),
+    );
+
+    // Compute vectors to each of the simplex corners
+    let x0 = Vec3Q32::new(
+        x.x.sub_wrapping(v0.x),
+        x.y.sub_wrapping(v0.y),
+        x.z.sub_wrapping(v0.z),
+    );
+    let x1 = Vec3Q32::new(
+        x.x.sub_wrapping(v1.x),
+        x.y.sub_wrapping(v1.y),
+        x.z.sub_wrapping(v1.z),
+    );
+    let x2 = Vec3Q32::new(
+        x.x.sub_wrapping(v2.x),
+        x.y.sub_wrapping(v2.y),
+        x.z.sub_wrapping(v2.z),
+    );
+    let x3 = Vec3Q32::new(
+        x.x.sub_wrapping(v3.x),
+        x.y.sub_wrapping(v3.y),
+        x.z.sub_wrapping(v3.z),
+    );
+
+    let corner_indices = CornerIndices3D {
+        i0_x: i0_x_int,
+        i0_y: i0_y_int,
+        i0_z: i0_z_int,
+        i1_x: i1.x.to_i32(),
+        i1_y: i1.y.to_i32(),
+        i1_z: i1.z.to_i32(),
+        i2_x: i2.x.to_i32(),
+        i2_y: i2.y.to_i32(),
+        i2_z: i2.z.to_i32(),
+        i3_x: i3.x.to_i32(),
+        i3_y: i3.y.to_i32(),
+        i3_z: i3.z.to_i32(),
+    };
+
+    psrdnoise3_tail(x0, x1, x2, x3, &corner_indices, sin_alpha, cos_alpha)
+}
+
+/// 3D Periodic Simplex Rotational Domain noise function.
+///
+/// # Arguments
+/// * `x` - Input coordinates as Vec3Q32
+/// * `period` - Tiling period as Vec3Q32 (zero = no tiling)
+/// * `alpha` - Rotation angle in radians as Q32
+/// * `seed` - Seed value for randomization (unused in psrdnoise, kept for consistency)
+///
+/// # Returns
+/// Tuple of (noise_value, gradient_x, gradient_y, gradient_z) in Q32 fixed-point format
+pub fn lpfn_psrdnoise3(
+    x: Vec3Q32,
+    period: Vec3Q32,
+    alpha: Q32,
+    _seed: u32,
+) -> (Q32, Q32, Q32, Q32) {
+    // Compute sin(alpha) and cos(alpha) once
+    let (sin_alpha, cos_alpha) = lps_sincos_q32_pair(alpha.to_fixed());
+
+    // Fast path: no period wrapping needed
+    if period.x.is_zero() && period.y.is_zero() && period.z.is_zero() {
+        return psrdnoise3_noperiod(x, sin_alpha, cos_alpha);
+    }
+
+    // Transform to simplex space (tetrahedral grid)
+    // Using optimized transformation: uvw = x + dot(x, vec3(1.0/3.0))
+    let dot_sum = x.x + x.y + x.z;
+    let uvw = x + Vec3Q32::new(
+        dot_sum * ONE_THIRD,
+        dot_sum * ONE_THIRD,
+        dot_sum * ONE_THIRD,
+    );
+
+    // Determine which simplex we're in, i0 is the "base corner"
+    // i0 = floor(uvw)
+    let i0 = uvw.floor();
+    // Note: i0_int values unused here - recomputed after wrapping in periodic path
+
+    // f0 = fract(uvw)
+    let f0 = uvw.fract();
+
+    // To determine which simplex corners are closest, rank order the
+    // magnitudes of u,v,w, resolving ties in priority order u,v,w
+    // g_ = step(f0.xyx, f0.yzz) -> 1.0 if f0.xyx <= f0.yzz, else 0.0
+    let g_ = f0.xyx().step(f0.yzz());
+    // l_ = 1.0 - g_
+    let l_ = Vec3Q32::one() - g_;
+    // g = vec3(l_.z, g_.xy)
+    let g = Vec3Q32::new(l_.z, g_.x, g_.y);
+    // l = vec3(l_.xy, g_.z)
+    let l = Vec3Q32::new(l_.x, l_.y, g_.z);
+    // o1 = min(g, l), o2 = max(g, l)
+    let o1 = g.min(l);
+    let o2 = g.max(l);
+
+    // Enumerate the remaining simplex corners
+    // i1 = i0 + o1, i2 = i0 + o2, i3 = i0 + vec3(1.0)
+    let i1 = i0 + o1;
+    let i2 = i0 + o2;
+    let i3 = i0 + Vec3Q32::one();
 
     // Transform the corners back to texture space
     // Using optimized transformation: v = i - dot(i, vec3(1.0/6.0))
@@ -171,219 +500,77 @@ pub fn lpfn_psrdnoise3(
     let v2 = i2 - Vec3Q32::new(dot2, dot2, dot2);
     let v3 = i3 - Vec3Q32::new(dot3, dot3, dot3);
 
-    // Compute vectors to each of the simplex corners
-    let x0 = x - v0;
-    let x1 = x - v1;
-    let x2 = x - v2;
-    let x3 = x - v3;
+    // Handle periodic tiling (period was already checked, so at least one is non-zero)
+    let mut vx = Vec4Q32::new(v0.x, v1.x, v2.x, v3.x);
+    let mut vy = Vec4Q32::new(v0.y, v1.y, v2.y, v3.y);
+    let mut vz = Vec4Q32::new(v0.z, v1.z, v2.z, v3.z);
 
-    // Wrap to periods, if desired
-    let (
-        i0_x_final,
-        i0_y_final,
-        i0_z_final,
-        i1_x_final,
-        i1_y_final,
-        i1_z_final,
-        i2_x_final,
-        i2_y_final,
-        i2_z_final,
-        i3_x_final,
-        i3_y_final,
-        i3_z_final,
-    ) = if period.x > Q32::ZERO || period.y > Q32::ZERO || period.z > Q32::ZERO {
-        let mut vx = Vec4Q32::new(v0.x, v1.x, v2.x, v3.x);
-        let mut vy = Vec4Q32::new(v0.y, v1.y, v2.y, v3.y);
-        let mut vz = Vec4Q32::new(v0.z, v1.z, v2.z, v3.z);
+    // Wrap to periods where specified
+    if period.x > Q32::ZERO {
+        vx = vx.modulo_scalar(period.x);
+    }
+    if period.y > Q32::ZERO {
+        vy = vy.modulo_scalar(period.y);
+    }
+    if period.z > Q32::ZERO {
+        vz = vz.modulo_scalar(period.z);
+    }
 
-        // Wrap to periods where specified
-        if period.x > Q32::ZERO {
-            vx = vx.modulo_scalar(period.x);
-        }
-        if period.y > Q32::ZERO {
-            vy = vy.modulo_scalar(period.y);
-        }
-        if period.z > Q32::ZERO {
-            vz = vz.modulo_scalar(period.z);
-        }
+    // Transform wrapped coordinates back to uvw
+    // i = v + dot(v, vec3(1.0/3.0))
+    let dot_v0 = (vx.x + vy.x + vz.x) * ONE_THIRD;
+    let dot_v1 = (vx.y + vy.y + vz.y) * ONE_THIRD;
+    let dot_v2 = (vx.z + vy.z + vz.z) * ONE_THIRD;
+    let dot_v3 = (vx.w + vy.w + vz.w) * ONE_THIRD;
 
-        // Transform wrapped coordinates back to uvw
-        // i = v + dot(v, vec3(1.0/3.0))
-        let dot_v0 = (vx.x + vy.x + vz.x) * ONE_THIRD;
-        let dot_v1 = (vx.y + vy.y + vz.y) * ONE_THIRD;
-        let dot_v2 = (vx.z + vy.z + vz.z) * ONE_THIRD;
-        let dot_v3 = (vx.w + vy.w + vz.w) * ONE_THIRD;
+    let v0_wrapped = Vec3Q32::new(vx.x, vy.x, vz.x);
+    let v1_wrapped = Vec3Q32::new(vx.y, vy.y, vz.y);
+    let v2_wrapped = Vec3Q32::new(vx.z, vy.z, vz.z);
+    let v3_wrapped = Vec3Q32::new(vx.w, vy.w, vz.w);
 
-        let v0_wrapped = Vec3Q32::new(vx.x, vy.x, vz.x);
-        let v1_wrapped = Vec3Q32::new(vx.y, vy.y, vz.y);
-        let v2_wrapped = Vec3Q32::new(vx.z, vy.z, vz.z);
-        let v3_wrapped = Vec3Q32::new(vx.w, vy.w, vz.w);
+    let i0_wrapped =
+        (v0_wrapped + Vec3Q32::new(dot_v0, dot_v0, dot_v0) + Vec3Q32::new(HALF, HALF, HALF))
+            .floor();
+    let i1_wrapped =
+        (v1_wrapped + Vec3Q32::new(dot_v1, dot_v1, dot_v1) + Vec3Q32::new(HALF, HALF, HALF))
+            .floor();
+    let i2_wrapped =
+        (v2_wrapped + Vec3Q32::new(dot_v2, dot_v2, dot_v2) + Vec3Q32::new(HALF, HALF, HALF))
+            .floor();
+    let i3_wrapped =
+        (v3_wrapped + Vec3Q32::new(dot_v3, dot_v3, dot_v3) + Vec3Q32::new(HALF, HALF, HALF))
+            .floor();
 
-        let i0_wrapped =
-            (v0_wrapped + Vec3Q32::new(dot_v0, dot_v0, dot_v0) + Vec3Q32::new(HALF, HALF, HALF))
-                .floor();
-        let i1_wrapped =
-            (v1_wrapped + Vec3Q32::new(dot_v1, dot_v1, dot_v1) + Vec3Q32::new(HALF, HALF, HALF))
-                .floor();
-        let i2_wrapped =
-            (v2_wrapped + Vec3Q32::new(dot_v2, dot_v2, dot_v2) + Vec3Q32::new(HALF, HALF, HALF))
-                .floor();
-        let i3_wrapped =
-            (v3_wrapped + Vec3Q32::new(dot_v3, dot_v3, dot_v3) + Vec3Q32::new(HALF, HALF, HALF))
-                .floor();
+    // Recompute x vectors from wrapped v
+    let x0_w = x - v0_wrapped;
+    let x1_w = x - v1_wrapped;
+    let x2_w = x - v2_wrapped;
+    let x3_w = x - v3_wrapped;
 
-        (
-            i0_wrapped.x.to_i32(),
-            i0_wrapped.y.to_i32(),
-            i0_wrapped.z.to_i32(),
-            i1_wrapped.x.to_i32(),
-            i1_wrapped.y.to_i32(),
-            i1_wrapped.z.to_i32(),
-            i2_wrapped.x.to_i32(),
-            i2_wrapped.y.to_i32(),
-            i2_wrapped.z.to_i32(),
-            i3_wrapped.x.to_i32(),
-            i3_wrapped.y.to_i32(),
-            i3_wrapped.z.to_i32(),
-        )
-    } else {
-        (
-            i0_x_int, i0_y_int, i0_z_int, i1_x_int, i1_y_int, i1_z_int, i2_x_int, i2_y_int,
-            i2_z_int, i3_x_int, i3_y_int, i3_z_int,
-        )
+    let corner_indices = CornerIndices3D {
+        i0_x: i0_wrapped.x.to_i32(),
+        i0_y: i0_wrapped.y.to_i32(),
+        i0_z: i0_wrapped.z.to_i32(),
+        i1_x: i1_wrapped.x.to_i32(),
+        i1_y: i1_wrapped.y.to_i32(),
+        i1_z: i1_wrapped.z.to_i32(),
+        i2_x: i2_wrapped.x.to_i32(),
+        i2_y: i2_wrapped.y.to_i32(),
+        i2_z: i2_wrapped.z.to_i32(),
+        i3_x: i3_wrapped.x.to_i32(),
+        i3_y: i3_wrapped.y.to_i32(),
+        i3_z: i3_wrapped.z.to_i32(),
     };
 
-    // Avoid truncation effects in permutation
-    // i0 = mod289(i0), etc.
-    let i0_x_mod = mod289_q32(i0_x_final << 16) >> 16;
-    let i0_y_mod = mod289_q32(i0_y_final << 16) >> 16;
-    let i0_z_mod = mod289_q32(i0_z_final << 16) >> 16;
-    let i1_x_mod = mod289_q32(i1_x_final << 16) >> 16;
-    let i1_y_mod = mod289_q32(i1_y_final << 16) >> 16;
-    let i1_z_mod = mod289_q32(i1_z_final << 16) >> 16;
-    let i2_x_mod = mod289_q32(i2_x_final << 16) >> 16;
-    let i2_y_mod = mod289_q32(i2_y_final << 16) >> 16;
-    let i2_z_mod = mod289_q32(i2_z_final << 16) >> 16;
-    let i3_x_mod = mod289_q32(i3_x_final << 16) >> 16;
-    let i3_y_mod = mod289_q32(i3_y_final << 16) >> 16;
-    let i3_z_mod = mod289_q32(i3_z_final << 16) >> 16;
-
-    // Compute one pseudo-random hash value for each corner
-    // hash = permute(permute(permute(vec4(i0.z, i1.z, i2.z, i3.z)) + vec4(i0.y, i1.y, i2.y, i3.y)) + vec4(i0.x, i1.x, i2.x, i3.x))
-    let hash_z0 = permute_q32(i0_z_mod << 16);
-    let hash_z1 = permute_q32(i1_z_mod << 16);
-    let hash_z2 = permute_q32(i2_z_mod << 16);
-    let hash_z3 = permute_q32(i3_z_mod << 16);
-
-    let hash_y0 = permute_q32((hash_z0 >> 16) + (i0_y_mod << 16));
-    let hash_y1 = permute_q32((hash_z1 >> 16) + (i1_y_mod << 16));
-    let hash_y2 = permute_q32((hash_z2 >> 16) + (i2_y_mod << 16));
-    let hash_y3 = permute_q32((hash_z3 >> 16) + (i3_y_mod << 16));
-
-    let hash_x0 = permute_q32((hash_y0 >> 16) + (i0_x_mod << 16));
-    let hash_x1 = permute_q32((hash_y1 >> 16) + (i1_x_mod << 16));
-    let hash_x2 = permute_q32((hash_y2 >> 16) + (i2_x_mod << 16));
-    let hash_x3 = permute_q32((hash_y3 >> 16) + (i3_x_mod << 16));
-
-    // Compute generating gradients from a Fibonacci spiral on the unit sphere
-    // theta = hash * 3.883222077 (2*pi/golden ratio)
-    let hash = Vec4Q32::new(
-        Q32::from_fixed(hash_x0),
-        Q32::from_fixed(hash_x1),
-        Q32::from_fixed(hash_x2),
-        Q32::from_fixed(hash_x3),
-    );
-    let theta = hash * THETA_MULT;
-
-    // sz = hash * -0.006920415 + 0.996539792 (1-(hash+0.5)*2/289)
-    let sz = hash * SZ_MULT + Vec4Q32::new(SZ_ADD, SZ_ADD, SZ_ADD, SZ_ADD);
-
-    // psi = hash * 0.108705628 (10*pi/289)
-    let psi = hash * PSI_MULT;
-
-    // Ct = cos(theta), St = sin(theta)
-    let ct = fns::cos_vec4(theta);
-    let st = fns::sin_vec4(theta);
-
-    // sz_prime = sqrt(1.0 - sz*sz)
-    let sz_prime = fns::sqrt_vec4(Vec4Q32::one() - sz.mul_comp(sz));
-
-    // Rotate gradients by angle alpha around a pseudo-random orthogonal axis
-    // Using fast rotation algorithm (PSRDNOISE_FAST_ROTATION)
-    // qx = St, qy = -Ct, qz = 0.0
-    let qx = st;
-    let qy = -ct;
-    let qz = Vec4Q32::zero();
-
-    // px = sz * qy, py = -sz * qx, pz = sz_prime
-    let px = sz.mul_comp(qy);
-    let py = -sz.mul_comp(qx);
-    let pz = sz_prime;
-
-    // psi += alpha (psi and alpha in the same plane)
-    let psi_final = psi + Vec4Q32::new(alpha, alpha, alpha, alpha);
-
-    // Sa = sin(psi), Ca = cos(psi)
-    let sa = fns::sin_vec4(psi_final);
-    let ca = fns::cos_vec4(psi_final);
-
-    // gx = Ca * px + Sa * qx, gy = Ca * py + Sa * qy, gz = Ca * pz + Sa * qz
-    let gx = ca.mul_comp(px) + sa.mul_comp(qx);
-    let gy = ca.mul_comp(py) + sa.mul_comp(qy);
-    let gz = ca.mul_comp(pz) + sa.mul_comp(qz);
-
-    // Reorganize for dot products below
-    let g0 = Vec3Q32::new(gx.x, gy.x, gz.x);
-    let g1 = Vec3Q32::new(gx.y, gy.y, gz.y);
-    let g2 = Vec3Q32::new(gx.z, gy.z, gz.z);
-    let g3 = Vec3Q32::new(gx.w, gy.w, gz.w);
-
-    // Radial decay with distance from each simplex corner
-    // w = 0.5 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3))
-    let dot0 = x0.length_squared();
-    let dot1 = x1.length_squared();
-    let dot2 = x2.length_squared();
-    let dot3 = x3.length_squared();
-    let mut w = Vec4Q32::new(
-        RADIAL_DECAY_0_5 - dot0,
-        RADIAL_DECAY_0_5 - dot1,
-        RADIAL_DECAY_0_5 - dot2,
-        RADIAL_DECAY_0_5 - dot3,
-    );
-
-    // w = max(w, 0.0)
-    w = w.max(Vec4Q32::zero());
-
-    // w2 = w * w, w3 = w2 * w
-    let w2 = w.mul_comp(w);
-    let w3 = w2.mul_comp(w);
-
-    // The value of the linear ramp from each of the corners
-    // gdotx = vec4(dot(g0,x0), dot(g1,x1), dot(g2,x2), dot(g3,x3))
-    let gdotx = Vec4Q32::new(g0.dot(x0), g1.dot(x1), g2.dot(x2), g3.dot(x3));
-
-    // Multiply by the radial decay and sum up the noise value
-    // n = dot(w3, gdotx)
-    let n = w3.dot(gdotx);
-
-    // Compute the first order partial derivatives
-    // dw = -6.0 * w2 * gdotx
-    let dw = w2.mul_comp(gdotx) * -SIX;
-    // dn0 = w3.x * g0 + dw.x * x0, etc.
-    let dn0 = g0 * w3.x + x0 * dw.x;
-    let dn1 = g1 * w3.y + x1 * dw.y;
-    let dn2 = g2 * w3.z + x2 * dw.z;
-    let dn3 = g3 * w3.w + x3 * dw.w;
-    // gradient = 39.5 * (dn0 + dn1 + dn2 + dn3)
-    let gradient = (dn0 + dn1 + dn2 + dn3) * SCALE_39_5;
-    let gradient_x = gradient.x;
-    let gradient_y = gradient.y;
-    let gradient_z = gradient.z;
-
-    // Scale the return value to fit nicely into the range [-1,1]
-    let noise_value = SCALE_39_5 * n;
-
-    (noise_value, gradient_x, gradient_y, gradient_z)
+    psrdnoise3_tail(
+        x0_w,
+        x1_w,
+        x2_w,
+        x3_w,
+        &corner_indices,
+        sin_alpha,
+        cos_alpha,
+    )
 }
 
 /// 3D Periodic Simplex Rotational Domain noise function (extern C wrapper for compiler).
@@ -419,15 +606,21 @@ pub extern "C" fn __lp_lpfn_psrdnoise3_q32(
     seed: u32,
 ) -> i32 {
     let x_vec = Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z));
-    let period_vec = Vec3Q32::new(
-        Q32::from_fixed(period_x),
-        Q32::from_fixed(period_y),
-        Q32::from_fixed(period_z),
-    );
     let alpha_q32 = Q32::from_fixed(alpha);
 
+    // Fast path: no period wrapping needed (using raw i32 comparison)
     let (noise_value, gradient_x, gradient_y, gradient_z) =
-        lpfn_psrdnoise3(x_vec, period_vec, alpha_q32, seed);
+        if period_x == 0 && period_y == 0 && period_z == 0 {
+            let (sin_alpha, cos_alpha) = lps_sincos_q32_pair(alpha);
+            psrdnoise3_noperiod(x_vec, sin_alpha, cos_alpha)
+        } else {
+            let period_vec = Vec3Q32::new(
+                Q32::from_fixed(period_x),
+                Q32::from_fixed(period_y),
+                Q32::from_fixed(period_z),
+            );
+            lpfn_psrdnoise3(x_vec, period_vec, alpha_q32, seed)
+        };
 
     // Write gradient to output pointer
     unsafe {

@@ -30,10 +30,11 @@ fn guest_pointer_out_plan(fn_name: &str) -> Option<Vec<(usize, usize, &'static s
         "__lp_lpfn_psrdnoise2_q32" => Some(vec![(5, 2, "i32")]),
         "__lp_lpfn_psrdnoise3_f32" => Some(vec![(7, 3, "f32")]),
         "__lp_lpfn_psrdnoise3_q32" => Some(vec![(7, 3, "i32")]),
-        "__lp_texture2d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lp_texture1d_r16_unorm_q32" => Some(vec![(0, 4, "i32")]),
         "__lp_texture1d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
         "__lp_texture2d_r16_unorm_q32" => Some(vec![(0, 4, "i32")]),
-        "__lp_texture1d_r16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lp_texture2d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lps_sincos_q32" => Some(vec![(1, 1, "i32"), (2, 1, "i32")]),
         _ => None,
     }
 }
