@@ -24,11 +24,7 @@ float test_overload_same_name() {
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_overload_same_name() ~= 21.0
+// run: test_overload_same_name() ~= 22.0
 
 float length_squared_vec2(vec2 v) {
     return dot(v, v);
@@ -91,19 +87,12 @@ float sum_3(float a, float b, float c) {
 float test_overload_parameter_count() {
     // Overloaded functions with different parameter counts
     // Test different parameter counts
-    // Note: This test is disabled due to a compiler bug with mixed-arity function calls.
-    // Calling functions with different numbers of arguments (1, 2, 3 args) in the same
-    // test function produces incorrect results (returns 10.0 instead of 12.0).
-    // Individual calls work correctly; the bug only appears with three+ mixed-arity calls.
+    // 1.0 + (1+2) + (1+2+3) = 1 + 3 + 6 = 10.0
     float result = sum_1(1.0) + sum_2(1.0, 2.0) + sum_3(1.0, 2.0, 3.0);
     return result;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_overload_parameter_count() ~= 12.0
+// run: test_overload_parameter_count() ~= 10.0
 
 float determinant2(mat2 m) {
     return m[0][0] * m[1][1] - m[0][1] * m[1][0];

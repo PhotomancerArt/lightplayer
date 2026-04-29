@@ -21,11 +21,7 @@ mat2 test_inverse_mat2_simple() {
     return inverse(m);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_inverse_mat2_simple() ~= mat2(-2.0, 1.0, -1.5, 0.5)
+// run: test_inverse_mat2_simple() ~= mat2(-2.0, 1.0, 1.5, -0.5)
 
 mat3 test_inverse_mat3_identity() {
     // inverse of 3x3 identity matrix
@@ -56,22 +52,14 @@ mat3 test_inverse_mat3_scaling() {
     return inverse(m);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_inverse_mat3_scaling() ~= mat3(0.5, 0.0, 0.0, 0.0, 0.3333333333333333, 0.0, 0.0, 0.0, 0.25)
+// run: test_inverse_mat3_scaling() ~= mat3(0.5, 0.0, 0.0, 0.0, 0.3333333333333333, 0.0, 0.0, 0.0, 0.25) (tolerance: 0.002)
 
 mat4 test_inverse_mat4_scaling() {
     mat4 m = mat4(2.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 5.0);
     return inverse(m);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_inverse_mat4_scaling() ~= mat4(0.5, 0.0, 0.0, 0.0, 0.0, 0.3333333333333333, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.2)
+// run: test_inverse_mat4_scaling() ~= mat4(0.5, 0.0, 0.0, 0.0, 0.0, 0.3333333333333333, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.2) (tolerance: 0.002)
 
 mat2 test_inverse_mat2_rotation() {
     // inverse of rotation matrix [0,1; -1,0] should be [0,-1; 1,0]

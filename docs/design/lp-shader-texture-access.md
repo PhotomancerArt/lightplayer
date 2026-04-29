@@ -74,14 +74,16 @@ uniform sampler2D inputB;
 ```
 
 Uniform naming and routing are not enforced inside `lp-shader`; it needs only a
-strict `TextureBindingSpec` entry per `sampler2D` uniform that appears in GLSL.
+strict `TextureBindingSpec` entry per `sampler2D` uniform leaf that appears in
+GLSL—including nested fields inside uniform structs (see below).
 
 ## Design
 
 ### Source Surface
 
 GLSL remains the v0 source language. Shaders declare texture inputs as
-`sampler2D` uniforms and use standard read functions:
+`sampler2D` uniforms or as `sampler2D` fields inside uniform structs, and use
+standard read functions:
 
 ```glsl
 uniform sampler2D inputColor;
@@ -95,6 +97,27 @@ vec4 read_uv(vec2 uv) {
 }
 ```
 
+Uniform structs may carry scalars alongside textures in one bundle:
+
+```glsl
+struct Params {
+    float amount;
+    sampler2D gradient;
+};
+
+uniform Params params;
+
+vec4 sample_gradient(vec2 uv) {
+    return texture(params.gradient, uv) * params.amount;
+}
+```
+
+For nested fields, **`TextureBindingSpec` keys use the same canonical dotted path
+/string** as runtime uniform paths and tooling: root field name joined with `.`,
+e.g. `params.gradient`. Top-level samplers remain single identifiers, e.g.
+`inputColor`. Arrays of textures or indexed paths such as
+`params.gradients[0]` are not supported in this contract.
+
 Filter and wrap policy are not encoded in GLSL layout qualifiers or in a large
 family of LP-specific function names. They are supplied by binding metadata
 outside the shader source. This matches the eventual WGSL/wgpu model, where
@@ -102,9 +125,11 @@ texture resource and sampler policy are separate binding concepts.
 
 ### Compile-Time Binding Contract
 
-Compilation receives a map keyed by sampler uniform name (`String` →
-`TextureBindingSpec`). Shared vocabulary lives in `lps-shared` next to
-`TextureStorageFormat`.
+Compilation receives a map keyed by **canonical texture path** (`String` →
+`TextureBindingSpec`): either a top-level uniform name (`inputColor`) or a dotted
+path for a nested `sampler2D` field (`params.gradient`). The key must match
+the uniform leaf’s path in the module layout. Shared vocabulary lives in
+`lps-shared` next to `TextureStorageFormat`.
 
 ```rust
 pub struct TextureBindingSpec {
@@ -155,6 +180,14 @@ let desc = CompilePxDesc::new(glsl, TextureStorageFormat::Rgba16Unorm, compiler_
             TextureStorageFormat::Rgba16Unorm,
             TextureFilter::Nearest,
             TextureWrap::ClampToEdge,
+            TextureWrap::ClampToEdge,
+        ),
+    )
+    .with_texture_spec(
+        "params.gradient",
+        texture_binding::height_one(
+            TextureStorageFormat::Rgba16Unorm,
+            TextureFilter::Nearest,
             TextureWrap::ClampToEdge,
         ),
     );
@@ -296,8 +329,10 @@ wgpu backend is real enough to validate the source and runtime mapping.
 
 Canonical texture GLSL tests live under
 `lp-shader/lps-filetests/filetests/texture/`. They extend the usual `.glsl`
-comment-directive style: each sampler needs a matching compile-time
+comment-directive style: each sampler **leaf path** needs a matching compile-time
 `// texture-spec:` and runtime `// texture-data:` block before shader source.
+Use the dotted name for nested uniforms (same string as compile-time specs),
+e.g. `params.gradient`.
 
 Run the texture corpus with the repo script (not Rust unit tests alone), for example:
 
@@ -321,16 +356,40 @@ vec4 sample_red() {
 // run: sample_red() ~= vec4(1.0, 0.0, 0.0, 1.0)
 ```
 
+Nested sampler in a uniform struct:
+
+```glsl
+// texture-spec: params.gradient format=rgba16unorm filter=nearest wrap=clamp shape=height-one
+// texture-data: params.gradient 2x1 rgba16unorm
+//   1.0,0.0,0.0,1.0 0.0,1.0,0.0,1.0
+
+struct Params {
+    float amount;
+    sampler2D gradient;
+};
+
+uniform Params params;
+
+vec4 palette_sample() {
+    return texture(params.gradient, vec2(0.75, 0.0)) * params.amount;
+}
+```
+
+Integration tests under `filetests/texture/` add `// run:` expectations against the fixture.
+
 Texture directives (see `lp-shader/lps-filetests/README.md`):
 
-- `// texture-spec: <name> format=<...> filter=<...> shape=<...>` plus either
+- `// texture-spec: <path> format=<...> filter=<...> shape=<...>` plus either
   `wrap=<both axes>` or both `wrap_x=` and `wrap_y=`.
+  `<path>` is a single token: a simple name (`inputColor`) or a dotted path
+  (`params.gradient`). Indexed segments (`foo[0]`) are not supported in
+  directives.
   - Formats: `r16unorm`, `rgb16unorm`, `rgba16unorm`.
   - Filters: `nearest`, `linear`.
   - Wraps: `clamp` (or `clamp-to-edge`), `repeat`, `mirror-repeat` (underscore
     variants accepted).
   - Shapes: `2d` (`General2D`), `height-one` or `height_one` (`HeightOne`).
-- `// texture-data: <name> <W>x<H> <format>` followed by comment lines listing
+- `// texture-data: <path> <W>x<H> <format>` followed by comment lines listing
   pixels in row-major order.
 
 Fixture data uses pixel-grouped channel values, not raw bytes:
@@ -416,6 +475,9 @@ is not part of the shipped validation story yet.
 
 ## Changelog
 
+- 2026-04-28 (afternoon): Document nested `sampler2D` in uniform structs; dotted
+  `TextureBindingSpec` / filetest keys (`params.gradient`); disallow indexed
+  texture directive names.
 - 2026-04-28: Document M1–M5 shipped behavior (APIs, formats, filetests, validation
   split between guest descriptor and host `LpsTexture2DValue` metadata).
 - 2026-04-24: Initial design captured from the texture access design-small

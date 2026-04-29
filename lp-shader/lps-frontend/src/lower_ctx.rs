@@ -16,7 +16,7 @@ use smallvec::SmallVec;
 use crate::lower_error::LowerError;
 use crate::lower_expr;
 use crate::readonly_in_scan::in_aggregate_param_read_only;
-use lps_shared::TextureBindingSpec;
+use lps_shared::{LpsType, TextureBindingSpec};
 
 /// See [`readonly_in_scan::local_for_in_aggregate_value_param_optional`].
 pub(crate) use crate::readonly_in_scan::local_for_in_aggregate_value_param_optional;
@@ -161,6 +161,8 @@ pub(crate) enum AggregateSlot {
     /// By-value `in` aggregate that the M5 scan proved read-only: no stack copy; base is the same
     /// pointer as [`LowerCtx::arg_vregs`]\[`arg_i`]\[0\] (like [`AggregateSlot::Param`] for addressing).
     ParamReadOnly(u32),
+    /// Array-typed private global: base address is `VMContext +` [`GlobalVarInfo::byte_offset`].
+    Global(Handle<GlobalVariable>),
 }
 
 /// Stack [`SlotId`] and layout metadata for one aggregate-typed value (M1: arrays only).
@@ -291,6 +293,8 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
     /// Mirrors [`crate::LowerOptions::texel_fetch_bounds`] for `texelFetch` lowering.
     pub(crate) texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+    /// Uniform block metadata for canonical paths and std430 offsets (same as [`LpsModuleSig::uniforms_type`]).
+    pub(crate) uniforms_type: Option<&'a LpsType>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -304,6 +308,7 @@ impl<'a> LowerCtx<'a> {
         global_map: GlobalVarMap,
         texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
         texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+        uniforms_type: Option<&'a LpsType>,
     ) -> Result<Self, LowerError> {
         let return_abi = crate::naga_util::func_return_ir_types_with_sret(
             module,
@@ -577,6 +582,7 @@ impl<'a> LowerCtx<'a> {
             uniform_instance_locals,
             texture_specs,
             texel_fetch_bounds,
+            uniforms_type,
         };
 
         for (lv_handle, var) in func.local_variables.iter() {
@@ -703,6 +709,21 @@ impl<'a> LowerCtx<'a> {
             }
             ArraySubscriptRoot::CallResult(expr) => {
                 Ok(self.call_result_aggregates.get(&expr).cloned())
+            }
+            ArraySubscriptRoot::Global(gv) => {
+                let mut naga_ty = self.module.global_variables[gv].ty;
+                if let TypeInner::Pointer { base, .. } = &self.module.types[naga_ty].inner {
+                    naga_ty = *base;
+                }
+                Ok(
+                    crate::naga_util::aggregate_layout(self.module, naga_ty)?.map(|layout| {
+                        AggregateInfo {
+                            slot: AggregateSlot::Global(gv),
+                            layout,
+                            naga_ty,
+                        }
+                    }),
+                )
             }
         }
     }

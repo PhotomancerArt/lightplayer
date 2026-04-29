@@ -50,6 +50,20 @@ const SKEW_FACTOR_2D: Q32 = Q32(23967);
 /// In Q16.16: 0.21132486541 * 65536 ≈ 13853
 const UNSKEW_FACTOR_2D: Q32 = Q32(13853);
 
+/// Gradient LUT for 2D simplex noise (8 gradients).
+/// Matches original grad2() ordering: 4 axis-aligned + 4 diagonal (normalized).
+/// DIAG = 1/sqrt(2) ≈ 0.70710678118 in Q16.16 = 0xB505 = 46341
+const GRAD_LUT_2D: [(i32, i32); 8] = [
+    (65536, 0),       // (1, 0)           - index 0
+    (-65536, 0),      // (-1, 0)          - index 1
+    (0, 65536),       // (0, 1)           - index 2
+    (0, -65536),      // (0, -1)          - index 3
+    (46341, 46341),   // (1/sqrt(2), ...) - index 4
+    (-46341, 46341),  // (-1/sqrt(2), ...) - index 5
+    (46341, -46341),  // (1/sqrt(2), ...) - index 6
+    (-46341, -46341), // (-1/sqrt(2), ...) - index 7
+];
+
 /// 2D Simplex noise function.
 ///
 /// # Arguments
@@ -88,14 +102,12 @@ pub fn lpfn_snoise2(p: Vec2Q32, seed: u32) -> Q32 {
     let offset1_y = y - unskewed_y;
 
     // For the 2D case, the simplex shape is an equilateral triangle.
-    // Determine which simplex we are in.
-    let (order_x, order_y) = if offset1_x > offset1_y {
-        // Lower triangle, XY order: (0,0)->(1,0)->(1,1)
-        (Q32::ONE, Q32::ZERO)
-    } else {
-        // Upper triangle, YX order: (0,0)->(0,1)->(1,1)
-        (Q32::ZERO, Q32::ONE)
-    };
+    // Determine which simplex we are in using branchless step.
+    // Branchless comparison: offset1_x > offset1_y ? 1 : 0
+    // Uses bit arithmetic to avoid branch misprediction penalty.
+    let cmp_raw = (((offset1_x.0 - offset1_y.0) >> 31).wrapping_add(1)) & 1;
+    let order_x = Q32(cmp_raw << 16); // 0x10000 or 0
+    let order_y = Q32((1 - cmp_raw) << 16); // opposite
 
     // Offsets for middle corner in (x,y) unskewed coords
     let offset2_x = offset1_x - order_x + UNSKEW_FACTOR_2D;
@@ -140,58 +152,50 @@ pub extern "C" fn __lp_lpfn_snoise2_q32(x: i32, y: i32, seed: u32) -> i32 {
     lpfn_snoise2(p, seed).to_fixed()
 }
 
-/// Compute magnitude squared of a 2D vector
+/// Get 2D gradient vector from gradient index using const LUT.
+/// Returns (gx, gy) in Q32 fixed-point format.
+///
+/// Range: gradients are in [-1, 1] for each component.
 #[inline(always)]
-fn magnitude_squared_2d(x: Q32, y: Q32) -> Q32 {
-    x * x + y * y
-}
-
-/// Compute dot product of two 2D vectors
-#[inline(always)]
-fn dot_2d(x1: Q32, y1: Q32, x2: Q32, y2: Q32) -> Q32 {
-    x1 * x2 + y1 * y2
-}
-
-/// Get 2D gradient vector from gradient index
-/// Returns (gx, gy) in Q32 fixed-point format
 fn grad2(index: usize) -> (Q32, Q32) {
-    // Gradients are combinations of -1, 0, and 1, normalized
-    // For 2D, we use 8 gradients
-    const DIAG: Q32 = Q32(0xB505); // 1/sqrt(2) ≈ 0.70710678118 in Q16.16
-
-    match index % 8 {
-        0 => (Q32::ONE, Q32::ZERO),  // (1, 0)
-        1 => (-Q32::ONE, Q32::ZERO), // (-1, 0)
-        2 => (Q32::ZERO, Q32::ONE),  // (0, 1)
-        3 => (Q32::ZERO, -Q32::ONE), // (0, -1)
-        4 => (DIAG, DIAG),           // (1/sqrt(2), 1/sqrt(2))
-        5 => (-DIAG, DIAG),          // (-1/sqrt(2), 1/sqrt(2))
-        6 => (DIAG, -DIAG),          // (1/sqrt(2), -1/sqrt(2))
-        7 => (-DIAG, -DIAG),         // (-1/sqrt(2), -1/sqrt(2))
-        _ => (Q32::ONE, Q32::ZERO),  // Should never happen
-    }
+    let (gx, gy) = GRAD_LUT_2D[index & 7]; // 8 gradients in 2D simplex
+    (Q32::from_fixed(gx), Q32::from_fixed(gy))
 }
 
-/// Compute surflet contribution for a corner
+/// Compute surflet contribution for a corner using wrapping math where safe.
+///
+/// # Range Analysis for Wrapping Operations
+///
+/// - x, y are offset distances from simplex corners, bounded by simplex geometry (~[-1, 1]).
+/// - x*x, y*y are bounded by ~1.0, so mul_wrapping is safe (result < 1.0).
+/// - dist^2 = x^2 + y^2 is bounded by ~2.0, dist^2 * 2 is bounded by ~4.0.
+/// - t = 1.0 - dist^2 * 2 is bounded but subtraction uses saturating for safety.
+/// - t^2, t^4: t is bounded, so mul_wrapping is safe.
+/// - Gradient components are in [-1, 1], dot product is bounded.
 fn surflet_2d(gradient_index: usize, x: Q32, y: Q32) -> Q32 {
     // t = 1.0 - dist^2 * 2.0
-    let dist_sq = magnitude_squared_2d(x, y);
-    let dist_sq_times_2 = dist_sq * TWO;
-    let t = Q32::ONE - dist_sq_times_2;
+    // x^2 and y^2 are bounded (~[-1,1] squared), so mul_wrapping is safe.
+    let x2 = x.mul_wrapping(x);
+    let y2 = y.mul_wrapping(y);
+    let dist_sq = x2.add_wrapping(y2);
+    let dist_sq_times_2 = dist_sq.mul_wrapping(TWO);
+    let t = Q32::ONE - dist_sq_times_2; // saturating for the 1.0 - x operation
 
     if t > Q32::ZERO {
-        // Get gradient
+        // Get gradient from LUT
         let (gx, gy) = grad2(gradient_index);
 
         // Compute dot product: gradient · offset
-        let dot = dot_2d(gx, gy, x, y);
+        // Both gradient and offset are bounded, so mul_wrapping is safe.
+        let dot = gx.mul_wrapping(x).add_wrapping(gy.mul_wrapping(y));
 
         // Apply falloff: (2.0 * t^2 + t^4) * dot
-        let t2 = t * t;
-        let t4 = t2 * t2;
-        let falloff = TWO * t2 + t4;
+        // t is bounded, so mul_wrapping is safe.
+        let t2 = t.mul_wrapping(t);
+        let t4 = t2.mul_wrapping(t2);
+        let falloff = t2.add_wrapping(t2).add_wrapping(t4); // 2*t^2 + t^4 using wrapping
 
-        dot * falloff
+        dot.mul_wrapping(falloff)
     } else {
         Q32::ZERO
     }

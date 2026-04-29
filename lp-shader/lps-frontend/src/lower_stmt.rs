@@ -274,6 +274,81 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                             ))),
                         }
                     }
+                    Expression::GlobalVariable(gv) => {
+                        lower_access::uniform_global_must_not_write(ctx, *gv)?;
+                        let root_inner =
+                            lower_access::gv_root_value_inner_after_ptr(ctx.module, *gv);
+                        match &root_inner {
+                            TypeInner::Vector { scalar, size } => {
+                                let comp = *index as usize;
+                                let n = crate::lower_ctx::vector_size_usize(*size);
+                                if comp >= n {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "global vector AccessIndex {comp} out of range (len {n})"
+                                    )));
+                                }
+                                let base_off = lower_access::gv_vmctx_byte_offset(ctx, *gv)?;
+                                let scalar_inner = TypeInner::Scalar(*scalar);
+                                let raw = ctx.ensure_expr_vec(*value)?;
+                                let srcs =
+                                    coerce_assignment_vregs(ctx, None, &scalar_inner, *value, raw)?;
+                                if srcs.len() != 1 {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "component store expects one scalar, got {} values",
+                                        srcs.len()
+                                    )));
+                                }
+                                ctx.fb.push(LpirOp::Store {
+                                    base: VMCTX_VREG,
+                                    offset: base_off
+                                        .saturating_add((comp as u32).saturating_mul(4)),
+                                    value: srcs[0],
+                                });
+                                Ok(())
+                            }
+                            TypeInner::Matrix {
+                                columns,
+                                rows,
+                                scalar,
+                            } => {
+                                let ncols = crate::lower_ctx::vector_size_usize(*columns);
+                                let nrows = crate::lower_ctx::vector_size_usize(*rows);
+                                let col = *index as usize;
+                                if col >= ncols {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "global matrix column AccessIndex {col} out of range (cols {ncols})"
+                                    )));
+                                }
+                                let col_ty = TypeInner::Vector {
+                                    size: *rows,
+                                    scalar: *scalar,
+                                };
+                                let raw = ctx.ensure_expr_vec(*value)?;
+                                let srcs =
+                                    coerce_assignment_vregs(ctx, None, &col_ty, *value, raw)?;
+                                if srcs.len() != nrows {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "matrix column store expects {nrows} values, got {}",
+                                        srcs.len()
+                                    )));
+                                }
+                                let base_off = lower_access::gv_vmctx_byte_offset(ctx, *gv)?;
+                                for r in 0..nrows {
+                                    ctx.fb.push(LpirOp::Store {
+                                        base: VMCTX_VREG,
+                                        offset: base_off.saturating_add(
+                                            ((col * nrows + r) as u32).saturating_mul(4),
+                                        ),
+                                        value: srcs[r],
+                                    });
+                                }
+                                Ok(())
+                            }
+                            _ => Err(LowerError::UnsupportedStatement(String::from(
+                                "AccessIndex store on non-vector non-matrix global",
+                            ))),
+                        }
+                    }
                     Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
                         let pointee = ctx.pointer_args[arg_i];
                         if let TypeInner::Struct { .. } = &ctx.module.types[pointee].inner {
@@ -451,6 +526,19 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                 size: dst_info.total_size(),
                             });
                             return Ok(());
+                        }
+                        Expression::CallResult(_) => {
+                            let src_info =
+                                ctx.call_result_aggregates.get(value).cloned().ok_or_else(
+                                    || {
+                                        LowerError::UnsupportedStatement(String::from(
+                                            "array assignment: rhs call result missing aggregate metadata",
+                                        ))
+                                    },
+                                )?;
+                            return crate::lower_array::copy_stack_array_slots(
+                                ctx, &dst_info, &src_info,
+                            );
                         }
                         _ => {
                             let src_lv = crate::lower_array::peel_array_local_value(

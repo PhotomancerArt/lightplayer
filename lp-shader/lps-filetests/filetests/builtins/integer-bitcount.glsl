@@ -39,10 +39,7 @@ uint test_bitcount_uint_zero() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_bitcount_uint_zero() == 0
+// run: test_bitcount_uint_zero() == 0u
 
 uint test_bitcount_uint_one() {
     // bitCount(uint(1)) should be 1
@@ -50,10 +47,7 @@ uint test_bitcount_uint_one() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_bitcount_uint_one() == 1
+// run: test_bitcount_uint_one() == 1u
 
 uint test_bitcount_uint_full() {
     // bitCount(uint max) should be 32
@@ -61,10 +55,7 @@ uint test_bitcount_uint_full() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_bitcount_uint_full() == 32
+// run: test_bitcount_uint_full() == 32u
 
 uint test_bitcount_uint_pattern() {
     // bitCount(uint(170)) should be 4
@@ -72,10 +63,7 @@ uint test_bitcount_uint_pattern() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_bitcount_uint_pattern() == 4
+// run: test_bitcount_uint_pattern() == 4u
 
 ivec2 test_bitcount_ivec2() {
     // bitCount with ivec2

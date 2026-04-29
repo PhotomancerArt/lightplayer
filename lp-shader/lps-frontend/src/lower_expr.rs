@@ -208,6 +208,22 @@ fn lower_expr_vec_uncached(
                     }
                 }
             }
+            if let Some((arg_i, chain)) =
+                crate::lower_struct::peel_struct_access_index_chain_to_param(ctx.func, expr)
+            {
+                if let Some(info) = ctx.aggregate_info_for_subscript_root(
+                    crate::lower_array_multidim::ArraySubscriptRoot::Param(arg_i),
+                )? {
+                    if matches!(
+                        &info.layout.kind,
+                        crate::naga_util::AggregateKind::Struct { .. }
+                    ) {
+                        return crate::lower_struct::load_struct_path_from_local(
+                            ctx, &info, &chain,
+                        );
+                    }
+                }
+            }
             if let Some((gv, chain)) =
                 crate::lower_struct::peel_struct_access_index_chain_to_global(ctx.func, expr)
             {
@@ -568,17 +584,51 @@ fn lower_expr_vec_uncached(
                                 "AccessIndex: pointer to vector must be local or parameter",
                             ))),
                         },
-                        TypeInner::Matrix { rows, .. } => {
-                            let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
-                                return Err(LowerError::UnsupportedExpression(String::from(
-                                    "AccessIndex: matrix pointer base must be LocalVariable",
-                                )));
-                            };
-                            let m = ctx.resolve_local(*lv)?;
-                            let n = vector_size_usize(*rows);
-                            let start = (*index as usize) * n;
-                            Ok(m[start..start + n].into())
-                        }
+                        TypeInner::Matrix {
+                            columns,
+                            rows,
+                            scalar,
+                        } => match &ctx.func.expressions[*base] {
+                            Expression::LocalVariable(lv) => {
+                                let m = ctx.resolve_local(*lv)?;
+                                let n = vector_size_usize(*rows);
+                                let start = (*index as usize) * n;
+                                Ok(m[start..start + n].into())
+                            }
+                            Expression::GlobalVariable(gv) => {
+                                let col = *index as usize;
+                                let ncols = vector_size_usize(*columns);
+                                let nrows = vector_size_usize(*rows);
+                                if col >= ncols {
+                                    return Err(LowerError::UnsupportedExpression(format!(
+                                        "AccessIndex: matrix column {col} out of range ({ncols} cols)"
+                                    )));
+                                }
+                                let base_off = crate::lower_access::gv_vmctx_byte_offset(ctx, *gv)?
+                                    .saturating_add(((col * nrows) as u32).saturating_mul(4));
+                                let col_ty = TypeInner::Vector {
+                                    size: *rows,
+                                    scalar: *scalar,
+                                };
+                                let ir_tys =
+                                    crate::lower_ctx::naga_type_to_ir_types(ctx.module, &col_ty)?;
+                                let mut out = VRegVec::new();
+                                for (j, ty) in ir_tys.iter().enumerate() {
+                                    let dst = ctx.fb.alloc_vreg(*ty);
+                                    ctx.fb.push(LpirOp::Load {
+                                        dst,
+                                        base: VMCTX_VREG,
+                                        offset: base_off
+                                            .saturating_add((j as u32).saturating_mul(4)),
+                                    });
+                                    out.push(dst);
+                                }
+                                Ok(out)
+                            }
+                            _ => Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: matrix pointer base must be LocalVariable or GlobalVariable",
+                            ))),
+                        },
                         TypeInner::Array {
                             base: _elem_ty_h,
                             size,
@@ -877,7 +927,15 @@ fn lower_expr_vec_uncached(
                 if let Some((root, _)) =
                     crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
                 {
-                    if ctx.aggregate_info_for_subscript_root(root)?.is_some() {
+                    if ctx
+                        .aggregate_info_for_subscript_root(root)?
+                        .is_some_and(|info| {
+                            matches!(
+                                &info.layout.kind,
+                                crate::naga_util::AggregateKind::Array { .. }
+                            )
+                        })
+                    {
                         return crate::lower_access::lower_access_expr_vec(ctx, expr);
                     }
                 }

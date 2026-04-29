@@ -58,6 +58,5 @@ float test_float_from_uint_large() {
     return float(u);
 }
 
-// @unimplemented(wasm.q32)
 // run: test_float_from_uint_large() ~= 32767.0
 

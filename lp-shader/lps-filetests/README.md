@@ -70,10 +70,14 @@ scripts/filetests.sh --target wasm.q32,rv32n.q32,rv32c.q32 texture/
 
 ### `// texture-spec:`
 
-One line per sampler uniform name:
+One line per sampler **binding path**. For a top-level `uniform sampler2D foo;`,
+`<path>` is `foo`. For a nested field such as `uniform Params params` with
+`params.gradient`, use the same dotted path string as compile-time specs and
+`CompilePxDesc::with_texture_spec` (`params.gradient`). Indexed paths
+(`things[0]`) are rejected.
 
 ```text
-// texture-spec: <name> format=<fmt> filter=<flt> shape=<shape> <wrap fields>
+// texture-spec: <path> format=<fmt> filter=<flt> shape=<shape> <wrap fields>
 ```
 
 Required keys: `format`, `filter`, `shape`, and either `wrap=<mode>` (both axes)
@@ -89,10 +93,10 @@ override one axis (see `texture_mixed_axis_wrap.glsl`).
 
 ### `// texture-data:`
 
-Header:
+Header (same `<path>` token as `texture-spec`):
 
 ```text
-// texture-data: <name> <W>x<H> <format>
+// texture-data: <path> <W>x<H> <format>
 ```
 
 Same `<format>` spelling as `texture-spec`. Following lines are `//` comments
@@ -100,8 +104,23 @@ whose bodies list pixels in row-major order; whitespace separates pixels, commas
 separate channels inside a pixel. Channels may be normalized floats or four-digit
 hex values per channel.
 
-Every `texture-spec` name must have a matching `texture-data` block and vice
-versa. See `src/parse/parse_texture.rs` for parsing rules.
+Every `texture-spec` path must have a matching `texture-data` block and vice
+versa. See `src/parse/parse_texture.rs` for parsing rules (including dotted
+names).
+
+**Nested sampler example:**
+
+```glsl
+// texture-spec: params.gradient format=rgba16unorm filter=nearest wrap=clamp shape=height-one
+// texture-data: params.gradient 2x1 rgba16unorm
+//   1.0,0.0,0.0,1.0 0.0,1.0,0.0,1.0
+
+struct Params {
+    float amount;
+    sampler2D gradient;
+};
+uniform Params params;
+```
 
 Semantics and supported `texture()` / `texelFetch` formats:
 [`docs/design/lp-shader-texture-access.md`](../../docs/design/lp-shader-texture-access.md).

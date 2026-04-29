@@ -53,6 +53,23 @@ impl Vec3Q32 {
         (self.x * rhs.x) + (self.y * rhs.y) + (self.z * rhs.z)
     }
 
+    /// Dot product using wrapping arithmetic (no saturation).
+    ///
+    /// # Safety / Preconditions
+    /// Only safe when inputs are provably bounded such that the dot product
+    /// result fits in Q16.16 without overflow. For noise functions, this applies
+    /// when:
+    /// - Input vectors are bounded by simplex geometry (~[-1, 1])
+    /// - Gradient vectors are normalized (sin/cos outputs, sphere points)
+    /// - Maximum dot product magnitude is bounded (~4.0 max for typical cases)
+    #[inline(always)]
+    pub fn dot_wrapping(self, rhs: Self) -> Q32 {
+        self.x
+            .mul_wrapping(rhs.x)
+            .add_wrapping(self.y.mul_wrapping(rhs.y))
+            .add_wrapping(self.z.mul_wrapping(rhs.z))
+    }
+
     /// Cross product
     #[inline(always)]
     pub fn cross(self, rhs: Self) -> Self {

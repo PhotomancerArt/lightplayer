@@ -1,15 +1,23 @@
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use lps_shared::{
-    LpsFnKind, LpsValueF32, TextureBindingSpec, TextureBuffer, TextureFilter, TextureShapeHint,
-    TextureStorageFormat, TextureWrap,
+    FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, ParamQualifier, StructMember,
+    TextureBindingSpec, TextureBuffer, TextureFilter, TextureShapeHint, TextureStorageFormat,
+    TextureWrap,
 };
 use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 use crate::{
-    CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor, texture_binding,
+    CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor,
+    px_shader::{RecordingUniformBackend, px_shader_from_parts_for_test},
+    texture_binding,
 };
 
 fn test_engine() -> LpsEngine<WasmLpvmEngine> {
@@ -722,6 +730,358 @@ vec4 render(vec2 pos) {
 
     for chunk in out_tex.data().chunks_exact(8) {
         assert_eq!(chunk, &pixel[..]);
+    }
+}
+
+/// Two top-level uniforms (`pad` + `u`) keep a nested struct member; `u.x` uses a dotted path.
+#[test]
+fn render_frame_nested_scalar_field_compiles_and_renders() {
+    let engine = test_engine();
+    let glsl = r#"
+layout(set = 0, binding = 0) uniform float pad;
+struct Inner {
+    float x;
+};
+layout(set = 0, binding = 1) uniform Inner u;
+vec4 render(vec2 pos) {
+    return vec4(pad + u.x, 0.0, 0.0, 1.0);
+}
+"#;
+    let shader = engine
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
+        .expect("compile_px");
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![
+            (String::from("pad"), LpsValueF32::F32(0.25)),
+            (
+                String::from("u"),
+                LpsValueF32::Struct {
+                    name: None,
+                    fields: vec![(String::from("x"), LpsValueF32::F32(0.5))],
+                },
+            ),
+        ],
+    };
+
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    shader
+        .render_frame(&uniforms, &mut out_tex)
+        .expect("render_frame");
+
+    let pixel = rgba16_unorm_pixel_bytes(0.75, 0.0, 0.0, 1.0);
+    assert_eq!(out_tex.data(), pixel);
+}
+
+#[test]
+fn render_frame_nested_scalar_missing_inner_field_reports_dotted_path() {
+    let engine = test_engine();
+    let glsl = r#"
+layout(set = 0, binding = 0) uniform float pad;
+struct Inner {
+    float x;
+};
+layout(set = 0, binding = 1) uniform Inner u;
+vec4 render(vec2 pos) {
+    return vec4(pad + u.x, 0.0, 0.0, 1.0);
+}
+"#;
+    let shader = engine
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
+        .expect("compile_px");
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![
+            (String::from("pad"), LpsValueF32::F32(0.0)),
+            (
+                String::from("u"),
+                LpsValueF32::Struct {
+                    name: None,
+                    fields: vec![],
+                },
+            ),
+        ],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => assert!(msg.contains("u.x"), "{msg}"),
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+fn test_meta_params_gradient_rgba16() -> LpsModuleSig {
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(
+        String::from("params.gradient"),
+        test_default_texture_binding_spec(),
+    );
+    LpsModuleSig {
+        functions: vec![
+            LpsFnSig {
+                name: String::from("render"),
+                return_type: LpsType::Vec4,
+                parameters: vec![FnParam {
+                    name: String::from("pos"),
+                    ty: LpsType::Vec2,
+                    qualifier: ParamQualifier::In,
+                }],
+                kind: LpsFnKind::UserDefined,
+            },
+            LpsFnSig {
+                name: String::from("__render_texture_rgba16"),
+                return_type: LpsType::Void,
+                parameters: vec![
+                    FnParam {
+                        name: String::from("__tex_ptr"),
+                        ty: LpsType::UInt,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("__width"),
+                        ty: LpsType::Int,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("__height"),
+                        ty: LpsType::Int,
+                        qualifier: ParamQualifier::In,
+                    },
+                ],
+                kind: LpsFnKind::Synthetic,
+            },
+        ],
+        uniforms_type: Some(LpsType::Struct {
+            name: None,
+            members: vec![StructMember {
+                name: Some(String::from("params")),
+                ty: LpsType::Struct {
+                    name: Some(String::from("Params")),
+                    members: vec![
+                        StructMember {
+                            name: Some(String::from("amount")),
+                            ty: LpsType::Float,
+                        },
+                        StructMember {
+                            name: Some(String::from("gradient")),
+                            ty: LpsType::Texture2D,
+                        },
+                    ],
+                },
+            }],
+        }),
+        globals_type: None,
+        texture_specs,
+        ..Default::default()
+    }
+}
+
+/// Naga GLSl-in cannot place combined samplers in UBO struct fields yet; use synthetic [`LpsModuleSig`]
+/// matching Phase 1 dotted binding keys and the smallest [`LpsPxShader`] test assembly path.
+#[test]
+fn render_frame_nested_params_gradient_records_dotted_set_uniform_paths() {
+    let engine = test_engine();
+    let paths = Rc::new(RefCell::new(Vec::<String>::new()));
+    let backend: Box<dyn crate::px_shader::PxShaderBackend> =
+        Box::new(RecordingUniformBackend::new(Rc::clone(&paths)));
+    let shader = px_shader_from_parts_for_test(
+        backend,
+        test_meta_params_gradient_rgba16(),
+        TextureStorageFormat::Rgba16Unorm,
+        String::from("__render_texture_rgba16"),
+        0,
+    );
+
+    let grad_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("params"),
+            LpsValueF32::Struct {
+                name: None,
+                fields: vec![
+                    (String::from("amount"), LpsValueF32::F32(1.0)),
+                    (
+                        String::from("gradient"),
+                        LpsValueF32::Texture2D(grad_tex.to_texture2d_value()),
+                    ),
+                ],
+            },
+        )],
+    };
+
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("out");
+    shader
+        .render_frame(&uniforms, &mut out_tex)
+        .expect("render_frame");
+
+    assert_eq!(
+        &*paths.borrow(),
+        &[
+            String::from("params.amount"),
+            String::from("params.gradient"),
+        ]
+    );
+}
+
+#[test]
+fn render_frame_nested_params_gradient_missing_inner_field_reports_dotted_path() {
+    let engine = test_engine();
+    let paths = Rc::new(RefCell::new(Vec::<String>::new()));
+    let backend: Box<dyn crate::px_shader::PxShaderBackend> =
+        Box::new(RecordingUniformBackend::new(Rc::clone(&paths)));
+    let shader = px_shader_from_parts_for_test(
+        backend,
+        test_meta_params_gradient_rgba16(),
+        TextureStorageFormat::Rgba16Unorm,
+        String::from("__render_texture_rgba16"),
+        0,
+    );
+
+    let grad_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("params"),
+            LpsValueF32::Struct {
+                name: None,
+                fields: vec![(
+                    String::from("gradient"),
+                    LpsValueF32::Texture2D(grad_tex.to_texture2d_value()),
+                )],
+            },
+        )],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("out");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => assert!(msg.contains("params.amount"), "{msg}"),
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_nested_params_gradient_wrong_texture_value_type_reports_dotted_path() {
+    let engine = test_engine();
+    let paths = Rc::new(RefCell::new(Vec::<String>::new()));
+    let backend: Box<dyn crate::px_shader::PxShaderBackend> =
+        Box::new(RecordingUniformBackend::new(Rc::clone(&paths)));
+    let shader = px_shader_from_parts_for_test(
+        backend,
+        test_meta_params_gradient_rgba16(),
+        TextureStorageFormat::Rgba16Unorm,
+        String::from("__render_texture_rgba16"),
+        0,
+    );
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("params"),
+            LpsValueF32::Struct {
+                name: None,
+                fields: vec![
+                    (String::from("amount"), LpsValueF32::F32(0.0)),
+                    (String::from("gradient"), LpsValueF32::F32(0.0)),
+                ],
+            },
+        )],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("out");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("params.gradient") && msg.contains("Texture2D"),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
+    }
+}
+
+#[test]
+fn render_frame_nested_params_gradient_height_one_mismatch_reports_dotted_path() {
+    let engine = test_engine();
+    let mut texture_specs = BTreeMap::new();
+    texture_specs.insert(
+        String::from("params.gradient"),
+        texture_binding::height_one(
+            TextureStorageFormat::Rgba16Unorm,
+            TextureFilter::Nearest,
+            TextureWrap::ClampToEdge,
+        ),
+    );
+    let mut meta = test_meta_params_gradient_rgba16();
+    meta.texture_specs = texture_specs;
+
+    let paths = Rc::new(RefCell::new(Vec::<String>::new()));
+    let backend: Box<dyn crate::px_shader::PxShaderBackend> =
+        Box::new(RecordingUniformBackend::new(Rc::clone(&paths)));
+    let shader = px_shader_from_parts_for_test(
+        backend,
+        meta,
+        TextureStorageFormat::Rgba16Unorm,
+        String::from("__render_texture_rgba16"),
+        0,
+    );
+
+    let grad_tex = engine
+        .alloc_texture(2, 2, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("params"),
+            LpsValueF32::Struct {
+                name: None,
+                fields: vec![
+                    (String::from("amount"), LpsValueF32::F32(0.0)),
+                    (
+                        String::from("gradient"),
+                        LpsValueF32::Texture2D(grad_tex.to_texture2d_value()),
+                    ),
+                ],
+            },
+        )],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("out");
+    match shader.render_frame(&uniforms, &mut out_tex) {
+        Err(LpsError::Render(msg)) => {
+            assert!(
+                msg.contains("params.gradient")
+                    && (msg.contains("height-one") || msg.contains("height 1")),
+                "{msg}"
+            );
+        }
+        Err(other) => panic!("expected Render error, got {other:?}"),
+        Ok(()) => panic!("expected render error"),
     }
 }
 

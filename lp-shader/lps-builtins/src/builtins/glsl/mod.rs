@@ -28,6 +28,7 @@ pub mod mod_q32;
 pub mod pow_q32;
 pub mod round_q32;
 pub mod sin_q32;
+pub mod sincos_q32;
 pub mod sinh_q32;
 pub mod tan_q32;
 pub mod tanh_q32;

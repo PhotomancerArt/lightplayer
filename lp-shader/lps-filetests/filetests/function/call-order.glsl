@@ -27,8 +27,8 @@ float test_call_order_left_to_right() {
     return add_three(get_next(), get_next(), get_next());
 }
 
+// @broken(rv32n.q32)
 // @unimplemented(jit.q32)
-// @unimplemented(rv32n.q32)
 // run: test_call_order_left_to_right() ~= 6.0
 
 float increment_counter() {

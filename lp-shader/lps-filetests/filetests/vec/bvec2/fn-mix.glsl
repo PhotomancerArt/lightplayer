@@ -3,6 +3,8 @@
 // ============================================================================
 // Mix: mix(bvec2, bvec2, bvec2) -> bvec2 (component-wise selection)
 // ============================================================================
+// Naga / resolver: ambiguous overload for mix(bvecN, bvecN, bvecN) vs lerp branch;
+// skipped on q32 until disambiguation (see filetest triage).
 
 bvec2 test_bvec2_mix_all_false_selector() {
     bvec2 a = bvec2(true, false);
@@ -13,10 +15,10 @@ bvec2 test_bvec2_mix_all_false_selector() {
     return mix(a, b, selector);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_bvec2_mix_all_false_selector() == bvec2(true, false)
 
 bvec2 test_bvec2_mix_all_true_selector() {
@@ -26,9 +28,10 @@ bvec2 test_bvec2_mix_all_true_selector() {
     return mix(a, b, selector);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_bvec2_mix_all_true_selector() == bvec2(false, true)
 
 bvec2 test_bvec2_mix_mixed_selector() {
@@ -38,9 +41,10 @@ bvec2 test_bvec2_mix_mixed_selector() {
     return mix(a, b, selector);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_bvec2_mix_mixed_selector() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_other_mixed_selector() {
@@ -50,9 +54,10 @@ bvec2 test_bvec2_mix_other_mixed_selector() {
     return mix(a, b, selector);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_bvec2_mix_other_mixed_selector() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_same_vectors() {
@@ -61,9 +66,10 @@ bvec2 test_bvec2_mix_same_vectors() {
     return mix(a, a, selector);
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_bvec2_mix_same_vectors() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_in_expression() {
@@ -76,7 +82,8 @@ bvec2 test_bvec2_mix_in_expression() {
     // not((false, false)) = (true, true)
 }
 
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_bvec2_mix_in_expression() == bvec2(true, true)

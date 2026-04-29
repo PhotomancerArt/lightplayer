@@ -63,8 +63,5 @@ float test_shared_globals_combined() {
     return shared_time + transformed_color.x + lighting_factor + float(shared_render_mode);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_shared_globals_combined() ~= 1.0
+// All uniforms zero by default: 0 + 0 + 0 + 0
+// run: test_shared_globals_combined() ~= 0.0

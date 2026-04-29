@@ -13,10 +13,10 @@ vec2 test_frexp_one() {
     return vec2(mant, float(exp));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_frexp_one() ~= vec2(0.5, 1.0)
 
 vec2 test_frexp_two() {
@@ -26,10 +26,10 @@ vec2 test_frexp_two() {
     return vec2(mant, float(exp));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_frexp_two() ~= vec2(0.5, 2.0)
 
 vec2 test_frexp_half() {
@@ -39,10 +39,10 @@ vec2 test_frexp_half() {
     return vec2(mant, float(exp));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_frexp_half() ~= vec2(0.5, 0.0)
 
 vec2 test_frexp_four() {
@@ -52,10 +52,10 @@ vec2 test_frexp_four() {
     return vec2(mant, float(exp));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_frexp_four() ~= vec2(0.5, 3.0)
 
 vec2 test_frexp_eight() {
@@ -65,10 +65,10 @@ vec2 test_frexp_eight() {
     return vec2(mant, float(exp));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_frexp_eight() ~= vec2(0.5, 4.0)
 
 vec4 test_frexp_vec2() {
@@ -78,10 +78,10 @@ vec4 test_frexp_vec2() {
     return vec4(mant.x, mant.y, float(exp.x), float(exp.y));
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
+// @unsupported(wasm.q32)
+// @unsupported(rv32c.q32)
+// @unsupported(rv32n.q32)
+// @unsupported(jit.q32)
 // run: test_frexp_vec2() ~= vec4(0.5, 0.5, 1.0, 2.0)
 
 

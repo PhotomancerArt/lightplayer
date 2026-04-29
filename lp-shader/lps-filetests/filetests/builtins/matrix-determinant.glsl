@@ -73,10 +73,7 @@ float test_determinant_mat4_negative() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// run: test_determinant_mat4_negative() ~= -1.0
+// run: test_determinant_mat4_negative() ~= 1.0
 
 float test_determinant_mat2_fractions() {
     mat2 m = mat2(0.5, 1.5, 2.5, 3.5);

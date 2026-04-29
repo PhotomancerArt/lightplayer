@@ -98,6 +98,7 @@ pub fn lower_with_options(
             global_map.clone(),
             &options.texture_specs,
             options.texel_fetch_bounds,
+            glsl_meta.uniforms_type.as_ref(),
         )
         .map_err(|e| LowerError::InFunction {
             name: info.name.clone(),
@@ -141,14 +142,52 @@ fn is_lp_synthetic_naga_sampler(gv: &GlobalVariable, lps_ty: &LpsType) -> bool {
 
 /// Compute layout for global variables (uniforms and private globals).
 /// Returns (global_map, uniforms_type, globals_type).
+///
+/// Naga's GLSL frontend may emit **multiple** [`GlobalVariable`] handles for the same logical
+/// global (forward declaration plus a later redeclaration with an initializer). They share the
+/// same name and address space and must alias to **one** VMContext region; otherwise loads can
+/// target an uninitialized duplicate while [`synthesize_shader_init`] initializes another.
 fn compute_global_layout(
     module: &Module,
 ) -> Result<(GlobalVarMap, Option<LpsType>, Option<LpsType>), LowerError> {
+    type GlobalKey = (Option<String>, AddressSpace);
+
+    let mut groups: BTreeMap<GlobalKey, Vec<Handle<GlobalVariable>>> = BTreeMap::new();
+    let mut key_order: Vec<GlobalKey> = Vec::new();
+    let mut seen_key: BTreeMap<GlobalKey, ()> = BTreeMap::new();
+
+    for (h, gv) in module.global_variables.iter() {
+        let key = (gv.name.clone(), gv.space);
+        groups.entry(key.clone()).or_default().push(h);
+        if seen_key.insert(key.clone(), ()).is_none() {
+            key_order.push(key);
+        }
+    }
+
     let mut global_map: GlobalVarMap = BTreeMap::new();
     let mut uniforms_members: Vec<StructMember> = Vec::new();
     let mut globals_members: Vec<StructMember> = Vec::new();
 
-    for (gv_handle, gv) in module.global_variables.iter() {
+    for key in &key_order {
+        let handles = groups.get(key).ok_or_else(|| {
+            LowerError::Internal(String::from("compute_global_layout: missing group"))
+        })?;
+        let ty0 = module.global_variables[handles[0]].ty;
+        for &h in handles.iter().skip(1) {
+            if module.global_variables[h].ty != ty0 {
+                return Err(LowerError::UnsupportedExpression(format!(
+                    "conflicting types for global {:?}",
+                    key.0
+                )));
+            }
+        }
+        let canonical = handles
+            .iter()
+            .copied()
+            .find(|h| module.global_variables[*h].init.is_some())
+            .unwrap_or(handles[0]);
+        let gv = &module.global_variables[canonical];
+
         // Map Naga type to LpsType first (needed for Handle / texture resources).
         let lps_ty = naga_type_handle_to_lps(module, gv.ty)
             .map_err(|e| LowerError::UnsupportedType(format!("{e:?}")))?;
@@ -186,16 +225,18 @@ fn compute_global_layout(
         let component_count = lps_scalar_component_count(&lps_ty);
 
         if is_lp_synthetic_naga_sampler(gv, &lps_ty) {
-            global_map.insert(
-                gv_handle,
-                GlobalVarInfo {
-                    byte_offset: 0,
-                    ty: lps_ty,
-                    component_count,
-                    is_uniform: true,
-                    vmctx_backed: false,
-                },
-            );
+            for &h in handles {
+                global_map.insert(
+                    h,
+                    GlobalVarInfo {
+                        byte_offset: 0,
+                        ty: lps_ty.clone(),
+                        component_count,
+                        is_uniform: true,
+                        vmctx_backed: false,
+                    },
+                );
+            }
             continue;
         }
 
@@ -210,16 +251,16 @@ fn compute_global_layout(
             globals_members.push(member);
         }
 
-        global_map.insert(
-            gv_handle,
-            GlobalVarInfo {
-                byte_offset: 0, // Will be computed below
-                ty: lps_ty,
-                component_count,
-                is_uniform,
-                vmctx_backed: true,
-            },
-        );
+        let info = GlobalVarInfo {
+            byte_offset: 0,
+            ty: lps_ty,
+            component_count,
+            is_uniform,
+            vmctx_backed: true,
+        };
+        for &h in handles {
+            global_map.insert(h, info.clone());
+        }
     }
 
     // Compute byte offsets using std430 layout
@@ -238,44 +279,51 @@ fn compute_global_layout(
         globals_offset += type_size(&member.ty, LayoutRules::Std430) as u32;
     }
 
-    // Now update the global_map with actual byte offsets
+    // Assign the same byte offset to every Naga handle in a merged logical global group.
     let mut uniforms_offset = VMCTX_HEADER_SIZE as u32;
     let mut globals_offset = VMCTX_HEADER_SIZE as u32 + uniforms_size;
 
-    for (gv_handle, _gv) in module.global_variables.iter() {
-        if let Some(info) = global_map.get_mut(&gv_handle) {
-            if !info.vmctx_backed {
-                continue;
-            }
-            let align = type_alignment(&info.ty, LayoutRules::Std430) as u32;
-            if info.is_uniform {
-                uniforms_offset = round_up_u32(uniforms_offset, align);
-                info.byte_offset = uniforms_offset;
-                uniforms_offset += type_size(&info.ty, LayoutRules::Std430) as u32;
-            } else {
-                globals_offset = round_up_u32(globals_offset, align);
-                info.byte_offset = globals_offset;
-                globals_offset += type_size(&info.ty, LayoutRules::Std430) as u32;
-            }
+    for key in &key_order {
+        let handles = groups.get(key).ok_or_else(|| {
+            LowerError::Internal(String::from(
+                "compute_global_layout: missing group (offsets)",
+            ))
+        })?;
+        let h0 = handles[0];
+        let info = global_map.get(&h0).ok_or_else(|| {
+            LowerError::Internal(String::from("compute_global_layout: missing GlobalVarInfo"))
+        })?;
+        if !info.vmctx_backed {
+            continue;
+        }
+        let align = type_alignment(&info.ty, LayoutRules::Std430) as u32;
+        let size = type_size(&info.ty, LayoutRules::Std430) as u32;
+        let off = if info.is_uniform {
+            uniforms_offset = round_up_u32(uniforms_offset, align);
+            let o = uniforms_offset;
+            uniforms_offset += size;
+            o
+        } else {
+            globals_offset = round_up_u32(globals_offset, align);
+            let o = globals_offset;
+            globals_offset += size;
+            o
+        };
+        for &h in handles {
+            global_map
+                .get_mut(&h)
+                .ok_or_else(|| {
+                    LowerError::Internal(String::from("compute_global_layout: stale handle"))
+                })?
+                .byte_offset = off;
         }
     }
 
     let uniforms_type = if uniforms_members.is_empty() {
         None
-    } else if uniforms_members.len() == 1 {
-        // `uniform Block { ... } u;` → one global whose type is a struct. Hoist inner fields so
-        // `uniforms_type` matches GLSL scope (e.g. `time` not `u.time`) and filetest `set_uniform`.
-        match &uniforms_members[0].ty {
-            LpsType::Struct { name, members } => Some(LpsType::Struct {
-                name: name.clone().or(Some(String::from("__uniforms"))),
-                members: members.clone(),
-            }),
-            _ => Some(LpsType::Struct {
-                name: Some(String::from("__uniforms")),
-                members: uniforms_members,
-            }),
-        }
     } else {
+        // One struct entry per uniform global (including `uniform Params params`), so paths match
+        // GLSL and dotted texture keys (e.g. `params.gradient`) align with `LpsTypePathExt`.
         Some(LpsType::Struct {
             name: Some(String::from("__uniforms")),
             members: uniforms_members,
@@ -518,6 +566,7 @@ fn lower_function(
     global_map: GlobalVarMap,
     texture_specs: &BTreeMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+    uniforms_type: Option<&LpsType>,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(
         module,
@@ -529,6 +578,7 @@ fn lower_function(
         global_map,
         texture_specs,
         texel_fetch_bounds,
+        uniforms_type,
     )?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {

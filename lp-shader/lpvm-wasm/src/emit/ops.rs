@@ -740,10 +740,7 @@ pub(crate) fn emit_op(
         },
         LpirOp::FtoiSatS { dst, src } => match fm {
             FloatMode::Q32 => {
-                sink.local_get(src.0)
-                    .i32_const(16)
-                    .i32_shr_s()
-                    .local_set(dst.0);
+                q32::emit_q32_ftoi_sat_s(sink, src.0, dst.0);
             }
             FloatMode::F32 => {
                 sink.local_get(src.0).i32_trunc_sat_f32_s().local_set(dst.0);
@@ -751,10 +748,7 @@ pub(crate) fn emit_op(
         },
         LpirOp::FtoiSatU { dst, src } => match fm {
             FloatMode::Q32 => {
-                sink.local_get(src.0)
-                    .i32_const(16)
-                    .i32_shr_u()
-                    .local_set(dst.0);
+                q32::emit_q32_ftoi_sat_u(sink, src.0, dst.0);
             }
             FloatMode::F32 => {
                 sink.local_get(src.0).i32_trunc_sat_f32_u().local_set(dst.0);

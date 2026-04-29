@@ -6,7 +6,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{IrType, LpirOp, TexelFetchBoundsMode, VMCTX_VREG, VReg};
-use lps_shared::{LpsType, TextureShapeHint, TextureStorageFormat};
+use lps_shared::{
+    LayoutRules, LpsType, TextureShapeHint, TextureStorageFormat, VMCTX_HEADER_SIZE,
+    path_resolve::LpsTypePathExt,
+};
 use naga::{
     AddressSpace, Expression, Function, GlobalVariable, Handle, Literal, Module, SampleLevel,
     ScalarKind, SwizzleComponent, TypeInner, VectorSize,
@@ -37,6 +40,11 @@ struct TexelFetchCoords {
     y: VReg,
 }
 
+struct TextureOperand {
+    path: String,
+    descriptor_base_byte_offset: u32,
+}
+
 /// Lower Naga `ImageLoad` emitted from GLSL `texelFetch` (sampled image, explicit LOD).
 pub(crate) fn lower_image_load_texel_fetch(
     ctx: &mut LowerCtx<'_>,
@@ -44,20 +52,12 @@ pub(crate) fn lower_image_load_texel_fetch(
     coordinate_expr: Handle<Expression>,
     level_expr: Handle<Expression>,
 ) -> Result<VRegVec, LowerError> {
-    let (gv, name) = resolve_direct_texture2d_uniform(ctx, image_expr, "texelFetch")?;
-    if !matches!(
-        ctx.module.global_variables[gv].space,
-        AddressSpace::Uniform | AddressSpace::Handle
-    ) {
-        return Err(LowerError::UnsupportedExpression(format!(
-            "texelFetch: `{name}` must be uniform or handle-backed"
-        )));
-    }
-    validate_texture_binding_spec_exists(ctx, &name, "texelFetch")?;
+    let op = resolve_texture2d_uniform_operand(ctx, image_expr, "texelFetch")?;
+    validate_texture_binding_spec_exists(ctx, &op.path, "texelFetch")?;
 
-    classify_lod(ctx, level_expr, &name)?;
+    classify_lod(ctx, level_expr, &op.path)?;
 
-    let spec = ctx.texture_specs.get(name.as_str()).ok_or_else(|| {
+    let spec = ctx.texture_specs.get(op.path.as_str()).ok_or_else(|| {
         LowerError::Internal(String::from(
             "texelFetch: texture spec missing after validation",
         ))
@@ -66,7 +66,7 @@ pub(crate) fn lower_image_load_texel_fetch(
         LowerError::Internal(String::from("texelFetch: bytes_per_pixel does not fit i32"))
     })?;
 
-    let desc = load_texture_descriptor_vregs(ctx, gv)?;
+    let desc = load_texture_descriptor_vregs(ctx, op.descriptor_base_byte_offset)?;
     let coords = lower_texel_fetch_coords(ctx, coordinate_expr)?;
     let coords = emit_clamp_texel_coords(
         &mut ctx.fb,
@@ -126,25 +126,18 @@ pub(crate) fn lower_image_sample_texture(
         )));
     }
 
-    let (gv, name) = resolve_direct_texture2d_uniform(ctx, image, "texture")?;
-    if !matches!(
-        ctx.module.global_variables[gv].space,
-        AddressSpace::Uniform | AddressSpace::Handle
-    ) {
-        return Err(LowerError::UnsupportedExpression(format!(
-            "texture `{name}`: sampler uniform must be uniform or handle-backed"
-        )));
-    }
-    validate_texture_binding_spec_exists(ctx, &name, "texture")?;
+    let op = resolve_texture2d_uniform_operand(ctx, image, "texture")?;
+    validate_texture_binding_spec_exists(ctx, &op.path, "texture")?;
 
     if array_index.is_some() {
         return Err(LowerError::UnsupportedExpression(format!(
-            "texture `{name}`: arrayed / layered sampling is not supported"
+            "texture `{}`: arrayed / layered sampling is not supported",
+            op.path
         )));
     }
-    validate_image_sample_level(ctx, level, &name)?;
+    validate_image_sample_level(ctx, level, &op.path)?;
 
-    let spec = ctx.texture_specs.get(name.as_str()).ok_or_else(|| {
+    let spec = ctx.texture_specs.get(op.path.as_str()).ok_or_else(|| {
         LowerError::Internal(String::from(
             "texture: texture spec missing after validation",
         ))
@@ -161,20 +154,21 @@ pub(crate) fn lower_image_sample_texture(
         (TextureStorageFormat::R16Unorm, TextureShapeHint::HeightOne) => "texture1d_r16_unorm",
         (TextureStorageFormat::Rgb16Unorm, _) => {
             return Err(LowerError::UnsupportedExpression(format!(
-                "texture `{name}`: unsupported format Rgb16Unorm for filtered sampling"
+                "texture `{}`: unsupported format Rgb16Unorm for filtered sampling",
+                op.path
             )));
         }
     };
     let key = format!("texture::{import_name}");
     let callee = *ctx.import_map.get(&key).ok_or_else(|| {
         LowerError::UnsupportedExpression(format!(
-            "texture `{name}`: no builtin import `{key}` registered (format {:?}, shape {:?})",
-            spec.format, spec.shape_hint
+            "texture `{}`: no builtin import `{key}` registered (format {:?}, shape {:?})",
+            op.path, spec.format, spec.shape_hint
         ))
     })?;
 
-    let desc = load_texture_descriptor_vregs(ctx, gv)?;
-    let uv = lower_texture_vec2_coords(ctx, coordinate, &name)?;
+    let desc = load_texture_descriptor_vregs(ctx, op.descriptor_base_byte_offset)?;
+    let uv = lower_texture_vec2_coords(ctx, coordinate, &op.path)?;
 
     let u_q32 = spill_f32_q32_lane_as_i32_vreg(ctx, uv.x)?;
 
@@ -321,14 +315,9 @@ fn iconst(ctx: &mut LowerCtx<'_>, value: i32) -> Result<VReg, LowerError> {
 
 fn load_texture_descriptor_vregs(
     ctx: &mut LowerCtx<'_>,
-    gv: Handle<GlobalVariable>,
+    descriptor_base_byte_offset: u32,
 ) -> Result<TextureDescriptorVRegs, LowerError> {
-    let info = ctx.global_map.get(&gv).ok_or_else(|| {
-        LowerError::Internal(format!(
-            "texelFetch: GlobalVariable {gv:?} not in global_map (descriptor load)"
-        ))
-    })?;
-    let base = info.byte_offset;
+    let base = descriptor_base_byte_offset;
     let mut load_lane = |offset: u32| -> Result<VReg, LowerError> {
         let dst = ctx.fb.alloc_vreg(IrType::I32);
         ctx.fb.push(LpirOp::Load {
@@ -444,34 +433,134 @@ fn emit_texel_byte_address(
     Ok(addr)
 }
 
-fn resolve_direct_texture2d_uniform(
+fn resolve_texture2d_uniform_operand(
     ctx: &LowerCtx<'_>,
     image_expr: Handle<Expression>,
     fn_name: &str,
-) -> Result<(Handle<GlobalVariable>, String), LowerError> {
-    let root = peel_load_chain(ctx.func, image_expr);
-    let Expression::GlobalVariable(gv) = &ctx.func.expressions[root] else {
+) -> Result<TextureOperand, LowerError> {
+    let Some(uniforms_root) = ctx.uniforms_type else {
         return Err(LowerError::UnsupportedExpression(format!(
-            "{fn_name}: sampled image must refer to a direct sampler2D uniform (not a function parameter or indirect value)"
+            "{fn_name}: shader has no uniform metadata for texture operand"
         )));
     };
-    let Some(info) = ctx.global_map.get(gv) else {
-        return Err(LowerError::Internal(format!(
-            "{fn_name}: GlobalVariable {gv:?} not in global_map"
-        )));
-    };
-    if !matches!(info.ty, LpsType::Texture2D) {
+    let mut segments_rev: Vec<String> = Vec::new();
+    let mut cur = peel_load_chain(ctx.func, image_expr);
+    loop {
+        match &ctx.func.expressions[cur] {
+            Expression::AccessIndex { base, index } => {
+                let base_ty_inner = crate::naga_util::expr_type_inner(ctx.module, ctx.func, *base)?;
+                match base_ty_inner {
+                    TypeInner::Struct { ref members, .. } => {
+                        let idx = *index as usize;
+                        let Some(m) = members.get(idx) else {
+                            return Err(LowerError::UnsupportedExpression(format!(
+                                "{fn_name}: struct field index {index} out of range"
+                            )));
+                        };
+                        let Some(field_name) = m.name.as_ref().map(|n| String::from(n.as_str()))
+                        else {
+                            return Err(LowerError::UnsupportedExpression(format!(
+                                "{fn_name}: anonymous struct field in texture access (index {index})"
+                            )));
+                        };
+                        segments_rev.push(field_name);
+                        cur = peel_load_chain(ctx.func, *base);
+                    }
+                    TypeInner::Array { .. } => {
+                        return Err(LowerError::UnsupportedExpression(format!(
+                            "{fn_name}: texture access via uniform array is not supported"
+                        )));
+                    }
+                    _ => {
+                        return Err(LowerError::UnsupportedExpression(format!(
+                            "{fn_name}: unexpected AccessIndex base for texture operand"
+                        )));
+                    }
+                }
+            }
+            Expression::GlobalVariable(gv) => {
+                let gv = *gv;
+                let gv_rec = &ctx.module.global_variables[gv];
+                let Some(root_seg) = gv_rec.name.as_ref().filter(|n| !n.is_empty()) else {
+                    return Err(LowerError::UnsupportedExpression(format!(
+                        "{fn_name}: uniform global has no name"
+                    )));
+                };
+                segments_rev.push(String::from(root_seg.as_str()));
+                ensure_texture_root_uniform_space(ctx, gv, fn_name, root_seg.as_str())?;
+                break;
+            }
+            Expression::LocalVariable(lv) => {
+                let Some(&gv) = ctx.uniform_instance_locals.get(lv) else {
+                    return Err(LowerError::UnsupportedExpression(format!(
+                        "{fn_name}: sampled image must refer to a uniform (direct global or struct field chain)"
+                    )));
+                };
+                let gv_rec = &ctx.module.global_variables[gv];
+                let Some(root_seg) = gv_rec.name.as_ref().filter(|n| !n.is_empty()) else {
+                    return Err(LowerError::UnsupportedExpression(format!(
+                        "{fn_name}: uniform global has no name"
+                    )));
+                };
+                segments_rev.push(String::from(root_seg.as_str()));
+                ensure_texture_root_uniform_space(ctx, gv, fn_name, root_seg.as_str())?;
+                break;
+            }
+            Expression::Access { .. } => {
+                return Err(LowerError::UnsupportedExpression(format!(
+                    "{fn_name}: dynamic index in texture access chain is not supported"
+                )));
+            }
+            _ => {
+                return Err(LowerError::UnsupportedExpression(format!(
+                    "{fn_name}: sampled image must be a sampler2D / texture2D uniform (or struct field)"
+                )));
+            }
+        }
+    }
+    segments_rev.reverse();
+    let path = segments_rev.join(".");
+    match uniforms_root.type_at_path(&path) {
+        Ok(LpsType::Texture2D) => {}
+        Ok(leaf) => {
+            return Err(LowerError::UnsupportedExpression(format!(
+                "{fn_name} `{path}`: uniform path resolves to `{leaf:?}`, expected Texture2D"
+            )));
+        }
+        Err(e) => {
+            return Err(LowerError::UnsupportedExpression(format!(
+                "{fn_name} `{path}`: invalid uniform path ({e})"
+            )));
+        }
+    }
+    let descriptor_base_byte_offset = uniforms_root
+        .offset_for_path(&path, LayoutRules::Std430, VMCTX_HEADER_SIZE)
+        .map_err(|e| {
+            LowerError::UnsupportedExpression(format!(
+                "{fn_name} `{path}`: could not compute descriptor offset ({e})"
+            ))
+        })? as u32;
+    Ok(TextureOperand {
+        path,
+        descriptor_base_byte_offset,
+    })
+}
+
+fn ensure_texture_root_uniform_space(
+    ctx: &LowerCtx<'_>,
+    gv: Handle<GlobalVariable>,
+    fn_name: &str,
+    name_hint: &str,
+) -> Result<(), LowerError> {
+    if !matches!(
+        ctx.module.global_variables[gv].space,
+        AddressSpace::Uniform | AddressSpace::Handle
+    ) {
         return Err(LowerError::UnsupportedExpression(format!(
-            "{fn_name}: operand is not a Texture2D uniform"
+            "{fn_name}: `{name_hint}` must be uniform or handle-backed"
         )));
     }
-    let gv_rec = &ctx.module.global_variables[*gv];
-    let Some(name) = gv_rec.name.as_ref().filter(|n| !n.is_empty()) else {
-        return Err(LowerError::UnsupportedExpression(format!(
-            "{fn_name}: sampler uniform has no name"
-        )));
-    };
-    Ok((*gv, String::from(name.as_str())))
+    Ok(())
 }
 
 fn classify_lod(
@@ -842,6 +931,56 @@ vec4 render(vec2 pos) {
             msg.contains("texture `tex`") && msg.contains("Rgb16Unorm"),
             "expected rgb16 diagnostic, got: {msg}"
         );
+    }
+}
+
+#[cfg(test)]
+mod nested_uniform_texture_path_tests {
+    use alloc::format;
+
+    use crate::compile;
+    use crate::lower;
+
+    /// `uniforms_type` must keep the uniform instance name (e.g. `u`) so dotted paths like
+    /// `params.gradient` match [`LpsTypePathExt`] and texture binding specs (Phase 1–3).
+    #[test]
+    fn single_struct_uniform_preserves_instance_name_in_uniforms_type() {
+        let glsl = r#"
+struct Inner {
+    float x;
+};
+layout(set = 0, binding = 0) uniform Inner u;
+vec4 render(vec2 pos) {
+    return vec4(u.x, 0.0, 0.0, 1.0);
+}
+"#;
+        let naga = compile(glsl).expect("compile");
+        let (_ir, sig) = lower(&naga).expect("lower");
+        let u_ty = sig.uniforms_type.expect("uniforms_type");
+        let s = format!("{u_ty:?}");
+        assert!(
+            s.contains("u") && s.contains("x"),
+            "expected metadata to retain `u` wrapper and `x` field, got: {s}"
+        );
+    }
+
+    /// Anonymous uniform blocks (e.g., `uniform Decl { float time; };`) should pass
+    /// texture binding validation even though the outer member has no name.
+    #[test]
+    fn anonymous_uniform_block_passes_validation() {
+        use alloc::collections::BTreeMap;
+        let glsl = r#"
+layout(std430, binding = 0) uniform Decl {
+    float time;
+    int frame_count;
+};
+float f() { return time; }
+"#;
+        let naga = compile(glsl).expect("compile");
+        let (_ir, sig) = lower(&naga).expect("lower");
+        let specs = BTreeMap::new();
+        let result = lps_shared::validate_texture_binding_specs_against_module(&sig, &specs);
+        assert!(result.is_ok(), "Validation failed: {result:?}");
     }
 }
 

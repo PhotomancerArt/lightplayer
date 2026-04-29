@@ -5,7 +5,9 @@ use alloc::string::String;
 
 use alloc::vec::Vec;
 
-use naga::{ArraySize, Expression, Function, Handle, LocalVariable, Module, Type, TypeInner};
+use naga::{
+    ArraySize, Expression, Function, GlobalVariable, Handle, LocalVariable, Module, Type, TypeInner,
+};
 use smallvec::SmallVec;
 
 use crate::lower_aggregate_layout::array_element_stride;
@@ -75,6 +77,8 @@ pub(crate) enum ArraySubscriptRoot {
     Param(u32),
     /// [`Expression::CallResult`] from a callee with aggregate return (slot in [`LowerCtx::call_result_aggregates`](crate::lower_ctx::LowerCtx::call_result_aggregates)).
     CallResult(Handle<Expression>),
+    /// Private/uniform `[` `]` roots on globals (VMContext); writable actuals reject uniforms elsewhere.
+    Global(Handle<GlobalVariable>),
 }
 
 /// Mixed `Access` / `AccessIndex` chain ending at [`LocalVariable`] or array pointer [`Expression::FunctionArgument`] (outer index first in vector).
@@ -103,6 +107,10 @@ pub(crate) fn peel_array_subscript_chain(
                 // left-to-right order, which must align with `dimensions` (outermost first).
                 ops.reverse();
                 return Some((ArraySubscriptRoot::Local(*lv), ops));
+            }
+            Expression::GlobalVariable(gv) => {
+                ops.reverse();
+                return Some((ArraySubscriptRoot::Global(*gv), ops));
             }
             Expression::FunctionArgument(arg_i) => {
                 ops.reverse();

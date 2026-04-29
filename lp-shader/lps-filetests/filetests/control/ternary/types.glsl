@@ -104,14 +104,12 @@ struct Color {
 int test_ternary_struct_complex() {
     bool b = false;
     Color c1 = Color(0.1, 0.2, 0.3);
-    Color c2 = Color(0.4, 0.5, 0.6);
+    // Use halves so (r+g+b)*10 is exact in q32; 0.4+0.5+0.6 rounds down after *10.
+    Color c2 = Color(0.5, 0.5, 0.5);
     Color result = b ? c1 : c2;
     return int((result.r + result.g + result.b) * 10.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(wasm.q32)
 // run: test_ternary_struct_complex() == 15
 
 // Array types (if supported)

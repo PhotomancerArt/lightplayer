@@ -49,6 +49,52 @@ const SKEW_FACTOR_3D: Q32 = Q32(21845);
 /// In Q16.16: 0.166666 * 65536 ≈ 10923
 const UNSKEW_FACTOR_3D: Q32 = Q32(10923);
 
+/// 3D Simplex gradient LUT (32 gradients: 12 edge + 8 corner + duplicates).
+///
+/// Standard 3D simplex noise uses gradients from edge midpoints and corners of a cube.
+/// - 12 edge gradients: combinations of (±1/sqrt(2), ±1/sqrt(2), 0)
+/// - 8 corner gradients: combinations of (±1/sqrt(3), ±1/sqrt(3), ±1/sqrt(3))
+///
+/// DIAG = 1/sqrt(2) ≈ 0.70710678118 in Q16.16 = 0xB505 = 46341
+/// DIAG2 = 1/sqrt(3) ≈ 0.57735026919 in Q16.16 = 0x93CD = 37709
+const GRAD_LUT_3D: [(i32, i32, i32); 32] = [
+    // 12 edge gradients (indices 0-11, duplicated at 12-23)
+    (46341, 46341, 0),   // (1/sqrt(2), 1/sqrt(2), 0)
+    (-46341, 46341, 0),  // (-1/sqrt(2), 1/sqrt(2), 0)
+    (46341, -46341, 0),  // (1/sqrt(2), -1/sqrt(2), 0)
+    (-46341, -46341, 0), // (-1/sqrt(2), -1/sqrt(2), 0)
+    (46341, 0, 46341),   // (1/sqrt(2), 0, 1/sqrt(2))
+    (-46341, 0, 46341),  // (-1/sqrt(2), 0, 1/sqrt(2))
+    (46341, 0, -46341),  // (1/sqrt(2), 0, -1/sqrt(2))
+    (-46341, 0, -46341), // (-1/sqrt(2), 0, -1/sqrt(2))
+    (0, 46341, 46341),   // (0, 1/sqrt(2), 1/sqrt(2))
+    (0, -46341, 46341),  // (0, -1/sqrt(2), 1/sqrt(2))
+    (0, 46341, -46341),  // (0, 1/sqrt(2), -1/sqrt(2))
+    (0, -46341, -46341), // (0, -1/sqrt(2), -1/sqrt(2))
+    // Duplicates of edge gradients (indices 12-23)
+    (46341, 46341, 0),
+    (-46341, 46341, 0),
+    (46341, -46341, 0),
+    (-46341, -46341, 0),
+    (46341, 0, 46341),
+    (-46341, 0, 46341),
+    (46341, 0, -46341),
+    (-46341, 0, -46341),
+    (0, 46341, 46341),
+    (0, -46341, 46341),
+    (0, 46341, -46341),
+    (0, -46341, -46341),
+    // 8 corner gradients (indices 24-31)
+    (37709, 37709, 37709),    // (1/sqrt(3), 1/sqrt(3), 1/sqrt(3))
+    (-37709, 37709, 37709),   // (-1/sqrt(3), 1/sqrt(3), 1/sqrt(3))
+    (37709, -37709, 37709),   // (1/sqrt(3), -1/sqrt(3), 1/sqrt(3))
+    (-37709, -37709, 37709),  // (-1/sqrt(3), -1/sqrt(3), 1/sqrt(3))
+    (37709, 37709, -37709),   // (1/sqrt(3), 1/sqrt(3), -1/sqrt(3))
+    (-37709, 37709, -37709),  // (-1/sqrt(3), 1/sqrt(3), -1/sqrt(3))
+    (37709, -37709, -37709),  // (1/sqrt(3), -1/sqrt(3), -1/sqrt(3))
+    (-37709, -37709, -37709), // (-1/sqrt(3), -1/sqrt(3), -1/sqrt(3))
+];
+
 /// 3D Simplex noise function.
 ///
 /// # Arguments
@@ -228,71 +274,60 @@ pub extern "C" fn __lp_lpfn_snoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i3
     lpfn_snoise3(p, seed).to_fixed()
 }
 
-/// Compute magnitude squared of a 3D vector
+/// Get 3D gradient vector from gradient index using const LUT.
+/// Returns (gx, gy, gz) in Q32 fixed-point format.
+///
+/// Range: gradients are in [-1/sqrt(2), 1/sqrt(2)] ≈ [-0.707, 0.707] for edge gradients
+/// and [-1/sqrt(3), 1/sqrt(3)] ≈ [-0.577, 0.577] for corner gradients.
 #[inline(always)]
-fn magnitude_squared_3d(x: Q32, y: Q32, z: Q32) -> Q32 {
-    x * x + y * y + z * z
-}
-
-/// Compute dot product of two 3D vectors
-#[inline(always)]
-fn dot_3d(x1: Q32, y1: Q32, z1: Q32, x2: Q32, y2: Q32, z2: Q32) -> Q32 {
-    x1 * x2 + y1 * y2 + z1 * z2
-}
-
-/// Get 3D gradient vector from gradient index
-/// Returns (gx, gy, gz) in Q32 fixed-point format
 fn grad3(index: usize) -> (Q32, Q32, Q32) {
-    // Gradients are combinations of -1, 0, and 1, normalized
-    // For 3D, we use 12 edge gradients + 8 corner gradients (32 total)
-    const DIAG: Q32 = Q32(0xB505); // 1/sqrt(2) ≈ 0.70710678118 in Q16.16
-    const DIAG2: Q32 = Q32(0x93CD); // 1/sqrt(3) ≈ 0.57735026919 in Q16.16
-
-    match index % 32 {
-        0 | 12 => (DIAG, DIAG, Q32::ZERO),    // (1/sqrt(2), 1/sqrt(2), 0)
-        1 | 13 => (-DIAG, DIAG, Q32::ZERO),   // (-1/sqrt(2), 1/sqrt(2), 0)
-        2 | 14 => (DIAG, -DIAG, Q32::ZERO),   // (1/sqrt(2), -1/sqrt(2), 0)
-        3 | 15 => (-DIAG, -DIAG, Q32::ZERO),  // (-1/sqrt(2), -1/sqrt(2), 0)
-        4 | 16 => (DIAG, Q32::ZERO, DIAG),    // (1/sqrt(2), 0, 1/sqrt(2))
-        5 | 17 => (-DIAG, Q32::ZERO, DIAG),   // (-1/sqrt(2), 0, 1/sqrt(2))
-        6 | 18 => (DIAG, Q32::ZERO, -DIAG),   // (1/sqrt(2), 0, -1/sqrt(2))
-        7 | 19 => (-DIAG, Q32::ZERO, -DIAG),  // (-1/sqrt(2), 0, -1/sqrt(2))
-        8 | 20 => (Q32::ZERO, DIAG, DIAG),    // (0, 1/sqrt(2), 1/sqrt(2))
-        9 | 21 => (Q32::ZERO, -DIAG, DIAG),   // (0, -1/sqrt(2), 1/sqrt(2))
-        10 | 22 => (Q32::ZERO, DIAG, -DIAG),  // (0, 1/sqrt(2), -1/sqrt(2))
-        11 | 23 => (Q32::ZERO, -DIAG, -DIAG), // (0, -1/sqrt(2), -1/sqrt(2))
-        24 => (DIAG2, DIAG2, DIAG2),          // (1/sqrt(3), 1/sqrt(3), 1/sqrt(3))
-        25 => (-DIAG2, DIAG2, DIAG2),         // (-1/sqrt(3), 1/sqrt(3), 1/sqrt(3))
-        26 => (DIAG2, -DIAG2, DIAG2),         // (1/sqrt(3), -1/sqrt(3), 1/sqrt(3))
-        27 => (-DIAG2, -DIAG2, DIAG2),        // (-1/sqrt(3), -1/sqrt(3), 1/sqrt(3))
-        28 => (DIAG2, DIAG2, -DIAG2),         // (1/sqrt(3), 1/sqrt(3), -1/sqrt(3))
-        29 => (-DIAG2, DIAG2, -DIAG2),        // (-1/sqrt(3), 1/sqrt(3), -1/sqrt(3))
-        30 => (DIAG2, -DIAG2, -DIAG2),        // (1/sqrt(3), -1/sqrt(3), -1/sqrt(3))
-        31 => (-DIAG2, -DIAG2, -DIAG2),       // (-1/sqrt(3), -1/sqrt(3), -1/sqrt(3))
-        _ => (DIAG, DIAG, Q32::ZERO),         // Should never happen
-    }
+    let (gx, gy, gz) = GRAD_LUT_3D[index % 32]; // 32 gradients in 3D simplex (12 edge + 8 corner + duplicates)
+    (
+        Q32::from_fixed(gx),
+        Q32::from_fixed(gy),
+        Q32::from_fixed(gz),
+    )
 }
 
-/// Compute surflet contribution for a corner
+/// Compute surflet contribution for a corner using wrapping math where safe.
+///
+/// # Range Analysis for Wrapping Operations
+///
+/// - x, y, z are offset distances from simplex corners, bounded by simplex geometry (~[-1, 1]).
+/// - x*x, y*y, z*z are bounded by ~1.0, so mul_wrapping is safe (result < 1.0).
+/// - dist^2 = x^2 + y^2 + z^2 is bounded by ~3.0, dist^2 * 2 is bounded by ~6.0.
+/// - t = 1.0 - dist^2 * 2 is bounded but subtraction uses saturating for safety.
+/// - t^2, t^4: t is bounded, so mul_wrapping is safe.
+/// - Gradient components are in [-1/sqrt(2), 1/sqrt(2)] ≈ [-0.707, 0.707],
+///   dot product with offsets ~[-1, 1] is bounded by ~0.707.
 fn surflet_3d(gradient_index: usize, x: Q32, y: Q32, z: Q32) -> Q32 {
     // t = 1.0 - dist^2 * 2.0
-    let dist_sq = magnitude_squared_3d(x, y, z);
-    let dist_sq_times_2 = dist_sq * TWO;
-    let t = Q32::ONE - dist_sq_times_2;
+    // x^2, y^2, z^2 are bounded (~[-1,1] squared), so mul_wrapping is safe.
+    let x2 = x.mul_wrapping(x);
+    let y2 = y.mul_wrapping(y);
+    let z2 = z.mul_wrapping(z);
+    let dist_sq = x2.add_wrapping(y2).add_wrapping(z2);
+    let dist_sq_times_2 = dist_sq.mul_wrapping(TWO);
+    let t = Q32::ONE - dist_sq_times_2; // saturating for the 1.0 - x operation
 
     if t > Q32::ZERO {
-        // Get gradient
+        // Get gradient from LUT
         let (gx, gy, gz) = grad3(gradient_index);
 
         // Compute dot product: gradient · offset
-        let dot = dot_3d(gx, gy, gz, x, y, z);
+        // Both gradient and offset are bounded, so mul_wrapping is safe.
+        let dot = gx
+            .mul_wrapping(x)
+            .add_wrapping(gy.mul_wrapping(y))
+            .add_wrapping(gz.mul_wrapping(z));
 
         // Apply falloff: (2.0 * t^2 + t^4) * dot
-        let t2 = t * t;
-        let t4 = t2 * t2;
-        let falloff = TWO * t2 + t4;
+        // t is bounded, so mul_wrapping is safe.
+        let t2 = t.mul_wrapping(t);
+        let t4 = t2.mul_wrapping(t2);
+        let falloff = t2.add_wrapping(t2).add_wrapping(t4); // 2*t^2 + t^4 using wrapping
 
-        dot * falloff
+        dot.mul_wrapping(falloff)
     } else {
         Q32::ZERO
     }
