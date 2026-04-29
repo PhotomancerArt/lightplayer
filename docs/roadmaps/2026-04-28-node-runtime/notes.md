@@ -444,3 +444,106 @@ to be torn between locations. M2 finishes the rename in C4
 - **Roadmap ends with `summary.md`** capturing what shipped and
   pointing at the next roadmap (which will rework
   `docs/roadmaps/2026-04-23-lp-render-mvp/` for lpfx + lp-vis).
+
+## M1 outcomes (prior-art investigation)
+
+Survey covered five references (Godot 4, Bevy, VCV Rack, LX
+Studio, Three.js) on 10 design surfaces. Single research pass
+produced enough coverage; Pass 2 was not needed.
+
+- Per-reference raw answers:
+  `m1-prior-art/pass1/answers-{godot,bevy,vcv,lx,threejs}.md`
+- Cross-comparison observations:
+  `m1-prior-art/pass1/notes.md`
+- Distilled judgement (what to copy / what to avoid, per
+  surface), with citations: **`prior-art.md`** at the
+  roadmap root.
+
+### Headline findings carried forward to M3
+
+Detail and citations in `prior-art.md`.
+
+- **F-1 — Three Lightplayer features are novel** (no prior
+  art across all 5 references): client / server architecture
+  + frame-versioned wire sync, per-node panic-recovery
+  isolation, unified `NodeStatus` enum on the container.
+  M3 designs these from lp-engine's existing implementation,
+  not from external prior art.
+- **F-2 — Param-promoted-to-child has no prior art *and* is
+  under-designed in the strawman.** Closest analog: Godot's
+  internal-mode children. M3 must sketch this in `design.md`.
+- **F-3 — `Handle<T>` + `Asset<T>` (Bevy) is directly
+  portable** for `ArtifactRef<T>` + `Artifact<T>`, with one
+  adaptation: drop semantics. Use Godot's `Ref<T>`
+  synchronous decrement-and-evict instead of Bevy's
+  channel-based drop.
+- **F-4 — LX = closest *domain* analog; Godot = closest
+  *engine* analog.** Use them in those roles.
+- **F-5 — Tree composition + bus modulation is the validated
+  model.** Don't introduce graph / DAG.
+- **F-6 — Path grammar:** Godot's `NodePath` shape (`/`,
+  `..`, `%Name`) plus *strict* sibling-name uniqueness.
+- **F-7 — Schema versioning:** LX's `addLegacyParameter`
+  pattern adapted to per-type
+  `migrate(toml, from_version) -> toml` chained through
+  versions.
+
+### Specific design calls now resolved (move to decisions.md
+after M3 ratifies)
+
+- `Uid(u32)` stays flat (no generational indexing).
+- Sibling-name uniqueness enforced at add-child time.
+- Hot reload preserves handles, replaces content.
+- LX `Placeholder` pattern for missing artifacts with
+  full-JSON round-trip (verified in code).
+- Bus-binding cycles: detect-and-error at bind-time.
+- Per-frame hook is opt-in (not all-nodes-tick).
+
+### Pass 2 was not needed
+
+Three spot-checks during synthesis confirmed the answer
+files: LX `Placeholder` does preserve full JSON; Bevy
+`StrongHandle::drop` is channel-based (confirming the F-3
+adaptation note); Godot `_propagate_ready` is bottom-up
+(children before parent).
+
+## Pre-M2 protocol unbake (completed)
+
+Before the mechanical crate split, line-by-line analysis of
+`message.rs` / `server/api.rs` / `project/api.rs` revealed
+that the protocol envelope was already mostly generic — the
+*only* legacy-aware tie point was
+`ServerMsgBody::ProjectRequest::response: SerializableProjectResponse`.
+A pre-M2 refactor pass parameterized on that response shape
+and now the entire envelope (including `Message`,
+`ClientRequest`, `ClientMsgBody`, `ServerMsgBody`,
+`ProjectRequest`, `ApiNodeSpecifier`, `NodeStatus`, etc.) is
+slated for `lpc-model`; `lpl-model` only holds the
+legacy-aware payload (`NodeDetail`, `NodeState`,
+`SerializableNodeDetail`, `SerializableProjectResponse`,
+`ProjectResponse`, `NodeChange`) plus the `LegacyMessage` /
+`LegacyServerMessage` / `LegacyServerMsgBody` aliases.
+
+Specific changes that landed:
+
+- `Message<R>`, `ServerMessage<R>`, `ServerMsgBody<R>` are now
+  generic. Call-sites use the legacy aliases for type
+  positions; constructor and pattern uses go through the bare
+  names where inference is simple.
+- `pub enum NoDomain {}` (uninhabited) added in `message.rs`,
+  re-exported from `lp-model/lib.rs`.
+- All consumers (lp-server, lp-client, lp-cli, lp-shared,
+  fw-core, fw-emu, fw-esp32, lp-engine-client) updated.
+- One incidental fix: `lp-engine/src/project/mod.rs` was
+  re-exporting from a deleted `runtime` module on this
+  branch; redirected to `project_runtime`. Unrelated to the
+  protocol unbake but needed for `cargo check -p lp-engine`.
+  Can be split into a separate commit when packaging.
+- `m2-crate-restructure/move-map.md` updated to reflect the
+  cleaner post-unbake C1 split.
+
+Verification (all green): `cargo check` on `lp-model`,
+`lp-engine`, `lp-engine-client`, `lp-client`, `lp-server`,
+`lp-cli`, `fw-emu` (RV32 release-emu), `fw-esp32` (RV32
+release-esp32 with `esp32c6,server`). `cargo test -p lp-model`
+passes (round-trip serialization).
