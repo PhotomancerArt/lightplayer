@@ -61,9 +61,10 @@ fn collect_texture2d_paths_from_members(
         match &m.ty {
             LpsType::Texture2D => {
                 // Texture2D fields require a name to build the binding path
-                let name = m.name.as_ref().ok_or_else(|| {
-                    String::from("texture uniform has no name")
-                })?;
+                let name = m
+                    .name
+                    .as_ref()
+                    .ok_or_else(|| String::from("texture uniform has no name"))?;
                 if name.is_empty() {
                     return Err(String::from("texture uniform has no name"));
                 }
@@ -91,9 +92,10 @@ fn collect_texture2d_paths_from_members(
             }
             LpsType::Array { element, .. } => {
                 // Arrays containing textures require a name for error reporting
-                let name = m.name.as_ref().ok_or_else(|| {
-                    String::from("uniform array member has no name")
-                })?;
+                let name = m
+                    .name
+                    .as_ref()
+                    .ok_or_else(|| String::from("uniform array member has no name"))?;
                 if name.is_empty() {
                     return Err(String::from("uniform array member has no name"));
                 }
@@ -561,7 +563,7 @@ mod tests {
                 name: Some(String::from("__uniforms")),
                 members: vec![
                     StructMember {
-                        name: None,  // Anonymous member
+                        name: None, // Anonymous member
                         ty: LpsType::Float,
                     },
                     StructMember {
