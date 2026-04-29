@@ -4,7 +4,8 @@
 //! The serial I/O runs on a separate thread that loops continuously.
 
 use log;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
+use lpc_model::{ClientMessage, TransportError};
+use lpl_model::LegacyServerMessage;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -48,7 +49,7 @@ fn serial_thread_loop(
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
             // Serialize message to JSON
-            let json = match lp_model::json::to_string(&msg) {
+            let json = match lpc_model::json::to_string(&msg) {
                 Ok(j) => j,
                 Err(e) => {
                     log::warn!("Serial thread: Failed to serialize client message: {e}");
@@ -118,7 +119,7 @@ fn serial_thread_loop(
             // Check for M! prefix
             if let Some(json_str) = line_str.strip_prefix("M!") {
                 // Parse JSON message (strip M! prefix)
-                match lp_model::json::from_str::<LegacyServerMessage>(json_str) {
+                match lpc_model::json::from_str::<LegacyServerMessage>(json_str) {
                     Ok(msg) => {
                         log::debug!(
                             "Serial thread: Parsed server message id={} ({} bytes)",

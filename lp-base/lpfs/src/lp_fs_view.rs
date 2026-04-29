@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 use core::cell::RefCell;
-use lp_model::path::{LpPath, LpPathBuf};
+use lpc_model::path::{LpPath, LpPathBuf};
 
 /// A filesystem view that translates paths relative to a prefix
 ///
@@ -272,7 +272,7 @@ impl LpFs for LpFsView {
 mod tests {
     use super::*;
     use crate::LpFsMemory;
-    use lp_model::AsLpPath;
+    use lpc_model::AsLpPath;
 
     #[test]
     fn test_lp_fs_view_basic() {

@@ -22,7 +22,7 @@
 use crate::error::DomainError;
 use crate::schema::Artifact;
 use crate::value_spec::LoadCtx;
-use lp_model::path::LpPath;
+use lpc_model::path::LpPath;
 use lpfs::{LpFs, error::FsError};
 
 /// Errors the loader can return.
@@ -105,7 +105,7 @@ fn walk_and_materialize<T: Artifact>(artifact: &T, ctx: &mut LoadCtx) {
 mod tests {
     use super::*;
     use crate::visual::Pattern;
-    use lp_model::path::LpPathBuf;
+    use lpc_model::path::LpPathBuf;
     use lpfs::LpFsMemory;
 
     fn fs_with(file: &str, body: &str) -> LpFsMemory {

@@ -1,7 +1,7 @@
 //! Project validation utilities shared by dev and upload commands.
 
 use anyhow::{Context, Result};
-use lp_model::{AsLpPath, project::ProjectConfig};
+use lpc_model::{AsLpPath, project::ProjectConfig};
 use lpfs::{LpFs, LpFsStd};
 use std::path::PathBuf;
 

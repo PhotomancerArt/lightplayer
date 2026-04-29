@@ -20,8 +20,8 @@ use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
 use lp_client::LpClient;
 use lp_engine_client::ClientProjectView;
-use lp_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
-use lp_model::{AsLpPath, FrameId};
+use lpl_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+use lpc_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,

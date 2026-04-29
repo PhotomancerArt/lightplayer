@@ -4,7 +4,7 @@ use crate::client::{LpClient, serializable_response_to_project_response};
 use crate::debug_ui::panels;
 use eframe::egui;
 use lp_engine_client::project::ClientProjectView;
-use lp_model::{NodeHandle, project::FrameId, project::handle::ProjectHandle};
+use lpc_model::{NodeHandle, project::FrameId, project::handle::ProjectHandle};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -26,11 +26,8 @@ pub struct DebugUiState {
     sync_in_progress: bool,
     /// Pending sync result receiver (if sync is in progress)
     /// Contains SerializableProjectResponse which can be sent across threads
-    pending_sync: Option<
-        oneshot::Receiver<
-            Result<lp_model::project::api::SerializableProjectResponse, anyhow::Error>,
-        >,
-    >,
+    pending_sync:
+        Option<oneshot::Receiver<Result<lpl_model::SerializableProjectResponse, anyhow::Error>>>,
     /// Track if tracked_nodes changed since last sync (to trigger immediate sync)
     tracked_nodes_changed: bool,
     /// Tokio runtime handle for spawning async tasks
@@ -94,9 +91,8 @@ impl DebugUiState {
             match receiver.try_recv() {
                 Ok(Ok(serializable_response)) => {
                     // Extract theoretical FPS from response before converting
-                    let lp_model::project::api::SerializableProjectResponse::GetChanges {
-                        theoretical_fps,
-                        ..
+                    let lpl_model::SerializableProjectResponse::GetChanges {
+                        theoretical_fps, ..
                     } = &serializable_response;
                     self.theoretical_fps = *theoretical_fps;
 
@@ -110,8 +106,8 @@ impl DebugUiState {
                                     for change in &status_changes {
                                         match (&change.old_status, &change.new_status) {
                                             (
-                                                lp_model::project::api::NodeStatus::Ok,
-                                                lp_model::project::api::NodeStatus::Error(msg),
+                                                lpc_model::project::api::NodeStatus::Ok,
+                                                lpc_model::project::api::NodeStatus::Error(msg),
                                             ) => {
                                                 println!(
                                                     "[{}] Status changed: Ok -> Error(\"{}\")",
@@ -120,8 +116,8 @@ impl DebugUiState {
                                                 );
                                             }
                                             (
-                                                lp_model::project::api::NodeStatus::Error(old_msg),
-                                                lp_model::project::api::NodeStatus::Ok,
+                                                lpc_model::project::api::NodeStatus::Error(old_msg),
+                                                lpc_model::project::api::NodeStatus::Ok,
                                             ) => {
                                                 println!(
                                                     "[{}] Status changed: Error(\"{}\") -> Ok",
@@ -205,7 +201,7 @@ impl DebugUiState {
                 // For initial sync (empty view), request all nodes to populate the list
                 // Otherwise use normal detail_specifier
                 let detail_specifier = if is_initial_sync {
-                    lp_model::project::api::ApiNodeSpecifier::All
+                    lpc_model::project::api::ApiNodeSpecifier::All
                 } else {
                     view.detail_specifier()
                 };

@@ -7,7 +7,7 @@ use alloc::{format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
 
-use lp_model::path::{LpPath, LpPathBuf};
+use lpc_model::path::{LpPath, LpPathBuf};
 use lpfs::{ChangeType, FsChange, FsError, FsVersion, LpFs, LpFsMemory, LpFsView};
 
 use crate::flash_storage::{LpFlashStorage, lpfs_config};

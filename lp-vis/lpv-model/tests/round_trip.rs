@@ -9,7 +9,7 @@
 //! - `cargo test -p lpv-model --features std --test round_trip`
 //! - `cargo test -p lpv-model --features std,schema-gen --test round_trip`
 
-use lp_model::path::LpPathBuf;
+use lpc_model::path::LpPathBuf;
 use lpfs::lp_fs_std::LpFsStd;
 use lpv_model::load_artifact;
 #[cfg(feature = "schema-gen")]

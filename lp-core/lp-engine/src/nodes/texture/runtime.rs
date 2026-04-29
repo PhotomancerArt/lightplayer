@@ -3,12 +3,9 @@ use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::{boxed::Box, format, string::ToString};
-use lp_model::{
-    NodeHandle,
-    nodes::texture::{TextureConfig, TextureFormat, TextureState},
-    project::FrameId,
-};
+use lpc_model::{NodeHandle, project::FrameId};
 use lpfs::FsChange;
+use lpl_model::nodes::texture::{TextureConfig, TextureFormat, TextureState};
 
 /// Texture node runtime
 pub struct TextureRuntime {
@@ -121,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_texture_runtime_creation() {
-        use lp_model::NodeHandle;
+        use lpc_model::NodeHandle;
         let handle = NodeHandle::new(0);
         let runtime = TextureRuntime::new(handle);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);

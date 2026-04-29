@@ -2757,9 +2757,10 @@ dependencies = [
  "critical-section",
  "embassy-sync 0.7.2",
  "log",
- "lp-model",
  "lp-server",
  "lp-shared",
+ "lpc-model",
+ "lpl-model",
  "pollster",
  "ser-write-json",
  "serde",
@@ -2774,14 +2775,15 @@ dependencies = [
  "log",
  "lp-client",
  "lp-engine-client",
- "lp-model",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
  "lp-server",
  "lp-shared",
+ "lpc-model",
  "lpfs",
+ "lpl-model",
  "lps-builtins",
  "serde_json",
  "tokio",
@@ -2810,11 +2812,12 @@ dependencies = [
  "libm",
  "littlefs-rust",
  "log",
- "lp-model",
  "lp-perf",
  "lp-server",
  "lp-shared",
+ "lpc-model",
  "lpfs",
+ "lpl-model",
  "lps-q32",
  "ser-write-json",
  "serde",
@@ -2833,12 +2836,13 @@ dependencies = [
  "lp-cli",
  "lp-client",
  "lp-engine-client",
- "lp-model",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shared",
+ "lpc-model",
  "lpfs",
+ "lpl-model",
  "serde_json",
  "serial_test",
  "serialport",
@@ -3941,7 +3945,6 @@ dependencies = [
  "log",
  "lp-client",
  "lp-engine-client",
- "lp-model",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -3949,8 +3952,10 @@ dependencies = [
  "lp-server",
  "lp-shader",
  "lp-shared",
+ "lpc-model",
  "lpfs",
  "lpir",
+ "lpl-model",
  "lps-frontend",
  "lps-shared",
  "lpvm-cranelift",
@@ -3977,12 +3982,13 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-engine-client",
- "lp-model",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shared",
+ "lpc-model",
  "lpfs",
+ "lpl-model",
  "serde",
  "serialport",
  "test-log",
@@ -4007,12 +4013,13 @@ dependencies = [
  "libm",
  "log",
  "lp-engine-client",
- "lp-model",
  "lp-perf",
  "lp-shader",
  "lp-shared",
+ "lpc-model",
  "lpfs",
  "lpir",
+ "lpl-model",
  "lps-builtins",
  "lps-frontend",
  "lps-q32",
@@ -4029,19 +4036,8 @@ name = "lp-engine-client"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
- "lp-model",
-]
-
-[[package]]
-name = "lp-model"
-version = "40.0.0"
-dependencies = [
- "base64",
- "hashbrown 0.15.5",
- "ser-write-json",
- "serde",
- "serde-json-core",
- "tempfile",
+ "lpc-model",
+ "lpl-model",
 ]
 
 [[package]]
@@ -4130,9 +4126,10 @@ dependencies = [
  "log",
  "lp-engine",
  "lp-engine-client",
- "lp-model",
  "lp-shared",
+ "lpc-model",
  "lpfs",
+ "lpl-model",
 ]
 
 [[package]]
@@ -4152,10 +4149,23 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "log",
- "lp-model",
+ "lpc-model",
  "lpfs",
+ "lpl-model",
  "lps-shared",
  "serde",
+]
+
+[[package]]
+name = "lpc-model"
+version = "40.0.0"
+dependencies = [
+ "base64",
+ "hashbrown 0.15.5",
+ "ser-write-json",
+ "serde",
+ "serde-json-core",
+ "tempfile",
 ]
 
 [[package]]
@@ -4173,7 +4183,7 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
- "lp-model",
+ "lpc-model",
  "serde",
  "tempfile",
 ]
@@ -4207,6 +4217,18 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lps-q32",
+]
+
+[[package]]
+name = "lpl-model"
+version = "40.0.0"
+dependencies = [
+ "base64",
+ "hashbrown 0.15.5",
+ "lpc-model",
+ "serde",
+ "serde-json-core",
+ "tempfile",
 ]
 
 [[package]]
@@ -4328,7 +4350,7 @@ name = "lpv-model"
 version = "40.0.0"
 dependencies = [
  "jsonschema",
- "lp-model",
+ "lpc-model",
  "lpfs",
  "lps-shared",
  "schemars",

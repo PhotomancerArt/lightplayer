@@ -2,7 +2,7 @@
 
 use super::entry::PixelMappingEntry;
 use alloc::vec::Vec;
-use lp_model::FrameId;
+use lpc_model::FrameId;
 
 /// Pre-computed texture-to-fixture mapping
 ///

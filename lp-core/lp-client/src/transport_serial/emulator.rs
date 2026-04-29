@@ -5,9 +5,10 @@
 
 use hashbrown::HashMap;
 use log;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
+use lpc_model::{ClientMessage, TransportError};
+use lpl_model::LegacyServerMessage;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
@@ -47,7 +48,7 @@ fn emulator_thread_loop(
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
             // Serialize message to JSON
-            let json = match lp_model::json::to_string(&msg) {
+            let json = match lpc_model::json::to_string(&msg) {
                 Ok(j) => j,
                 Err(e) => {
                     log::warn!("Emulator thread: Failed to serialize client message: {e}");
@@ -203,7 +204,7 @@ fn emulator_thread_loop(
 
             // Parse JSON message (strip M! prefix)
             let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
-            match lp_model::json::from_str::<LegacyServerMessage>(json_str) {
+            match lpc_model::json::from_str::<LegacyServerMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
                         "Emulator thread: Parsed server message id={} ({} bytes)",

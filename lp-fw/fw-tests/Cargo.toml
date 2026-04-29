@@ -13,7 +13,8 @@ test_usb = []
 hashbrown = { workspace = true }
 lp-client = { path = "../../lp-core/lp-client", features = ["serial", "emu"] }
 lp-engine-client = { path = "../../lp-core/lp-engine-client" }
-lp-model = { path = "../../lp-core/lp-model" }
+lpc-model = { path = "../../lp-core/lpc-model" }
+lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }

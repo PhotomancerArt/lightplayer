@@ -2,7 +2,7 @@
 
 use lp_client::{LpClient, serializable_response_to_project_response};
 use lp_engine_client::ClientProjectView;
-use lp_model::project::handle::ProjectHandle;
+use lpc_model::project::handle::ProjectHandle;
 
 pub mod transport_emu_serial {
     pub use lp_client::transport_emu_serial::SerialEmuClientTransport;
@@ -16,7 +16,7 @@ pub async fn sync_emu_project_view(
 ) {
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lp_model::project::api::ApiNodeSpecifier::All
+        lpc_model::project::api::ApiNodeSpecifier::All
     } else {
         view.detail_specifier()
     };
@@ -36,8 +36,8 @@ pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
     use lp_engine_client::ClientProjectView;
-    use lp_model::NodeKind;
-    use lp_model::project::api::{NodeState, NodeStatus};
+    use lpl_model::NodeKind;
+    use lpc_model::project::api::{NodeState, NodeStatus};
 
     pub fn assert_shader_compiled_ok(view: &ClientProjectView, shader_path: &str) {
         let handle = view

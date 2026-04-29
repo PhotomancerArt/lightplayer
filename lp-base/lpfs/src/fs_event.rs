@@ -1,6 +1,6 @@
 //! File change tracking types
 
-use lp_model::LpPathBuf;
+use lpc_model::LpPathBuf;
 
 /// Filesystem version identifier - increments on each filesystem change
 #[derive(

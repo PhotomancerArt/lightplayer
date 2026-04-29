@@ -83,7 +83,7 @@ pub fn initialize_channel_accumulators(entries: &[PixelMappingEntry]) -> Channel
 pub fn accumulate_from_mapping(
     entries: &[PixelMappingEntry],
     texture_data: &[u8],
-    texture_format: lp_model::nodes::texture::TextureFormat,
+    texture_format: lpl_model::nodes::texture::TextureFormat,
     texture_width: u32,
     texture_height: u32,
 ) -> ChannelAccumulators {

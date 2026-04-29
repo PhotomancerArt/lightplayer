@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::output::OutputProvider;
-use lp_model::{FrameId, NodeHandle, NodeSpecifier};
+use lpc_model::{FrameId, NodeHandle, NodeSpecifier};
 use lpfs::LpFs;
 
 /// Handle for resolved texture nodes
@@ -57,7 +57,7 @@ pub trait NodeInitContext {
     fn get_texture_config(
         &self,
         handle: TextureHandle,
-    ) -> Result<lp_model::nodes::texture::TextureConfig, Error>;
+    ) -> Result<lpl_model::nodes::texture::TextureConfig, Error>;
 
     /// Node handle of the shader that owns the shared CPU output buffer for this texture target.
     ///

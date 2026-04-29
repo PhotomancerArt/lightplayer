@@ -4,7 +4,7 @@
 
 use fw_tests::test_output::{print_step, print_test_header};
 use fw_tests::test_usb_helpers::*;
-use lp_model::DEFAULT_SERIAL_BAUD_RATE;
+use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use serial_test::serial;
 use std::time::Duration;
 

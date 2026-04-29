@@ -6,9 +6,10 @@
 use async_trait::async_trait;
 use hashbrown::HashMap;
 use log;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError, json};
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
+use lpc_model::{ClientMessage, TransportError, json};
+use lpl_model::LegacyServerMessage;
 use std::sync::{Arc, Mutex};
 
 /// Serial ClientTransport that communicates with firmware running in emulator

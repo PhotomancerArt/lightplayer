@@ -2,18 +2,17 @@
 
 use alloc::{format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
-use lp_model::nodes::fixture::ColorOrder;
-use lp_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
-use lp_model::nodes::{
-    NodeSpecifier,
-    fixture::FixtureConfig,
+use lpc_model::nodes::NodeSpecifier;
+use lpc_model::path::LpPathBuf;
+use lpc_model::{AsLpPath, AsLpPathBuf};
+use lpfs::LpFs;
+use lpl_model::glsl_opts::GlslOpts;
+use lpl_model::nodes::{
+    fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder},
     output::{OutputConfig, OutputDriverOptionsConfig},
     shader::ShaderConfig,
     texture::TextureConfig,
 };
-use lp_model::path::LpPathBuf;
-use lp_model::{AsLpPath, AsLpPathBuf, glsl_opts::GlslOpts};
-use lpfs::LpFs;
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {
@@ -191,12 +190,12 @@ impl ProjectBuilder {
     /// Build completes - writes project.json and all node files
     pub fn build(self) {
         // Write project.json using proper JSON serialization
-        let config = lp_model::ProjectConfig {
+        let config = lpc_model::ProjectConfig {
             uid: self.uid.clone(),
             name: self.name.clone(),
         };
         let project_json =
-            lp_model::json::to_string(&config).expect("Failed to serialize project config");
+            lpc_model::json::to_string(&config).expect("Failed to serialize project config");
         self.write_file_helper("/project.json", project_json.as_bytes())
             .expect("Failed to write project.json");
         // Node files are already written by their respective add() methods
@@ -217,7 +216,7 @@ impl TextureBuilder {
             height: self.height,
         };
 
-        let json = lp_model::json::to_string(&config).expect("Failed to serialize texture config");
+        let json = lpc_model::json::to_string(&config).expect("Failed to serialize texture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -256,7 +255,7 @@ impl ShaderBuilder {
             glsl_opts: GlslOpts::default(),
         };
 
-        let json = lp_model::json::to_string(&config).expect("Failed to serialize shader config");
+        let json = lpc_model::json::to_string(&config).expect("Failed to serialize shader config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -290,7 +289,7 @@ impl OutputBuilder {
             options: Some(self.options),
         };
 
-        let json = lp_model::json::to_string(&config).expect("Failed to serialize output config");
+        let json = lpc_model::json::to_string(&config).expect("Failed to serialize output config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -349,7 +348,7 @@ impl FixtureBuilder {
             gamma_correction: self.gamma_correction,
         };
 
-        let json = lp_model::json::to_string(&config).expect("Failed to serialize fixture config");
+        let json = lpc_model::json::to_string(&config).expect("Failed to serialize fixture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -362,7 +361,7 @@ impl FixtureBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_model::json;
+    use lpc_model::json;
     use lpfs::LpFsMemory;
 
     #[test]
@@ -377,7 +376,7 @@ mod tests {
         let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
 
         // Verify it can be parsed
-        let config: lp_model::ProjectConfig = json::from_str(project_json_str).unwrap();
+        let config: lpc_model::ProjectConfig = json::from_str(project_json_str).unwrap();
         assert_eq!(config.uid, "test");
         assert_eq!(config.name, "Test Project");
     }

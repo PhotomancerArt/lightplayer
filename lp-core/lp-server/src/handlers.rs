@@ -8,14 +8,14 @@ use crate::server::MemoryStatsFn;
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lp_engine::LpGraphics;
-use lp_model::{
-    AsLpPath, ClientMessage, LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload,
-    LpPath, LpPathBuf,
-    server::{AvailableProject, FsRequest, FsResponse},
-};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpc_model::{
+    AsLpPath, ClientMessage, LpPath, LpPathBuf,
+    server::{AvailableProject, FsRequest, FsResponse},
+};
 use lpfs::LpFs;
+use lpl_model::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 
 /// Log memory stats if callback is provided and returns values
 fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
@@ -45,10 +45,10 @@ pub fn handle_client_message(
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
-        lp_model::ClientRequest::Filesystem(fs_request) => {
+        lpc_model::ClientRequest::Filesystem(fs_request) => {
             ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
         }
-        lp_model::ClientRequest::LoadProject { path } => handle_load_project(
+        lpc_model::ClientRequest::LoadProject { path } => handle_load_project(
             project_manager,
             base_fs,
             output_provider,
@@ -57,19 +57,19 @@ pub fn handle_client_message(
             graphics,
             path.as_path(),
         )?,
-        lp_model::ClientRequest::UnloadProject { handle } => {
+        lpc_model::ClientRequest::UnloadProject { handle } => {
             handle_unload_project(project_manager, memory_stats, handle)?
         }
-        lp_model::ClientRequest::ProjectRequest { handle, request } => {
+        lpc_model::ClientRequest::ProjectRequest { handle, request } => {
             handle_project_request(project_manager, handle, request, theoretical_fps)?
         }
-        lp_model::ClientRequest::ListAvailableProjects => {
+        lpc_model::ClientRequest::ListAvailableProjects => {
             handle_list_available_projects(project_manager, base_fs)?
         }
-        lp_model::ClientRequest::ListLoadedProjects => {
+        lpc_model::ClientRequest::ListLoadedProjects => {
             handle_list_loaded_projects(project_manager)?
         }
-        lp_model::ClientRequest::StopAllProjects => {
+        lpc_model::ClientRequest::StopAllProjects => {
             handle_stop_all_projects(project_manager, memory_stats)?
         }
     };
@@ -156,7 +156,7 @@ fn handle_load_project(
 fn handle_unload_project(
     project_manager: &mut ProjectManager,
     _memory_stats: Option<&MemoryStatsFn>,
-    handle: lp_model::project::ProjectHandle,
+    handle: lpc_model::project::ProjectHandle,
 ) -> Result<ServerMessagePayload, ServerError> {
     log::info!("Unloading project handle {}", handle.id());
     project_manager.unload_project(handle)?;
@@ -166,8 +166,8 @@ fn handle_unload_project(
 /// Handle a ProjectRequest (project-specific request)
 fn handle_project_request(
     project_manager: &mut ProjectManager,
-    handle: lp_model::project::ProjectHandle,
-    request: lp_model::project::api::ProjectRequest,
+    handle: lpc_model::project::ProjectHandle,
+    request: lpc_model::project::api::ProjectRequest,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
     let project = project_manager
@@ -175,7 +175,7 @@ fn handle_project_request(
         .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
 
     match request {
-        lp_model::project::api::ProjectRequest::GetChanges {
+        lpc_model::project::api::ProjectRequest::GetChanges {
             since_frame,
             detail_specifier,
         } => {
@@ -191,9 +191,7 @@ fn handle_project_request(
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
 
             let response_frame = match &response {
-                lp_model::project::api::ProjectResponse::GetChanges { current_frame, .. } => {
-                    *current_frame
-                }
+                lpl_model::ProjectResponse::GetChanges { current_frame, .. } => *current_frame,
             };
             log::debug!(
                 "handle_project_request: GetChanges response (current_frame: {})",

@@ -77,67 +77,7 @@ pub enum ClientRequest {
 mod tests {
     use super::*;
     use crate::AsLpPathBuf;
-    use crate::LegacyMessage;
-    use crate::LegacyServerMessage;
-    use crate::server::FsResponse;
     use alloc::string::ToString;
-
-    #[test]
-    fn test_message_serialization() {
-        let client_msg = ClientMessage {
-            id: 1,
-            msg: ClientRequest::Filesystem(FsRequest::Read {
-                path: "/project.json".as_path_buf(),
-            }),
-        };
-        let message = LegacyMessage::Client(client_msg);
-        let json = crate::json::to_string(&message).unwrap();
-        // Verify round-trip serialization
-        let deserialized: LegacyMessage = crate::json::from_str(&json).unwrap();
-        match deserialized {
-            LegacyMessage::Client(ClientMessage { id, msg }) => {
-                assert_eq!(id, 1);
-                match msg {
-                    ClientRequest::Filesystem(FsRequest::Read { path }) => {
-                        assert_eq!(path.as_str(), "/project.json");
-                    }
-                    _ => panic!("Wrong request type"),
-                }
-            }
-            _ => panic!("Wrong message direction"),
-        }
-    }
-
-    #[test]
-    fn test_server_message_serialization() {
-        use crate::server::ServerMsgBody as ServerMessagePayload;
-        let server_msg = LegacyServerMessage {
-            id: 1,
-            msg: ServerMessagePayload::Filesystem(FsResponse::Read {
-                path: "/project.json".as_path_buf(),
-                data: Some(b"{}".to_vec()),
-                error: None,
-            }),
-        };
-        let message = LegacyMessage::Server(server_msg);
-        let json = crate::json::to_string(&message).unwrap();
-        // Verify round-trip serialization
-        let deserialized: LegacyMessage = crate::json::from_str(&json).unwrap();
-        match deserialized {
-            LegacyMessage::Server(LegacyServerMessage { id, msg }) => {
-                assert_eq!(id, 1);
-                match msg {
-                    ServerMessagePayload::Filesystem(FsResponse::Read { path, data, error }) => {
-                        assert_eq!(path.as_str(), "/project.json");
-                        assert_eq!(data, Some(b"{}".to_vec()));
-                        assert_eq!(error, None);
-                    }
-                    _ => panic!("Wrong response type"),
-                }
-            }
-            _ => panic!("Wrong message direction"),
-        }
-    }
 
     #[test]
     fn test_nested_filesystem_request() {

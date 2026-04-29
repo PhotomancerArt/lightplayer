@@ -19,7 +19,8 @@ std = [
 
 [dependencies]
 lp-engine = { path = "../lp-engine", default-features = false }
-lp-model = { path = "../lp-model", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 hashbrown = { workspace = true }

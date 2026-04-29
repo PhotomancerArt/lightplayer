@@ -15,7 +15,7 @@ use log;
 use lp_cli::commands::profile::symbolize::symbolizer_from_meta_json_str;
 use lp_client::LpClient;
 use lp_engine_client::ClientProjectView;
-use lp_model::AsLpPath;
+use lpc_model::AsLpPath;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,

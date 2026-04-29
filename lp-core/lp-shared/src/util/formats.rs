@@ -1,7 +1,7 @@
 //! Texture format constants and utilities
 
-// Re-export TextureFormat from lp-model
-pub use lp_model::nodes::texture::TextureFormat;
+// Re-export TextureFormat from lpl-model
+pub use lpl_model::nodes::texture::TextureFormat;
 
 // Backward compatibility: Keep constants for migration period
 /// RGB8 format constant (deprecated: use TextureFormat::Rgb8)

@@ -3,15 +3,16 @@
 //! Provides async methods for filesystem and project operations.
 
 use anyhow::{Error, Result};
-use lp_model::{
-    ClientMessage, ClientRequest, LegacyServerMessage, LpPath, LpPathBuf,
+use lpc_model::{
+    ClientMessage, ClientRequest, LpPath, LpPathBuf,
     project::{
         FrameId,
-        api::{ApiNodeSpecifier, SerializableProjectResponse},
+        api::{ApiNodeSpecifier, ProjectRequest},
         handle::ProjectHandle,
     },
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
+use lpl_model::{LegacyServerMessage, SerializableProjectResponse};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -111,7 +112,7 @@ impl LpClient {
                         Self::display_heartbeat(
                             fps,
                             *frame_count,
-                            loaded_projects,
+                            loaded_projects.as_slice(),
                             *uptime_ms,
                             memory,
                         );
@@ -138,11 +139,11 @@ impl LpClient {
 
     /// Display heartbeat with colors and memory bar chart
     fn display_heartbeat(
-        fps: &lp_model::server::SampleStats,
+        fps: &lpc_model::server::SampleStats,
         _frame_count: u64,
-        loaded_projects: &[lp_model::server::LoadedProject],
+        loaded_projects: &[lpc_model::server::LoadedProject],
         uptime_ms: u64,
-        memory: &Option<lp_model::server::MemoryStats>,
+        memory: &Option<lpc_model::server::MemoryStats>,
     ) {
         const BOLD: &str = "\x1b[1m";
         const DIM: &str = "\x1b[90m";
@@ -239,7 +240,7 @@ impl LpClient {
     /// * `Ok(Vec<u8>)` if the file was read successfully
     /// * `Err` if reading failed or transport error occurred
     pub async fn fs_read(&self, path: &LpPath) -> Result<Vec<u8>> {
-        let request = ClientRequest::Filesystem(lp_model::server::FsRequest::Read {
+        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::Read {
             path: path.to_path_buf(),
         });
 
@@ -271,7 +272,7 @@ impl LpClient {
     /// * `Ok(())` if the file was written successfully
     /// * `Err` if writing failed or transport error occurred
     pub async fn fs_write(&self, path: &LpPath, data: Vec<u8>) -> Result<()> {
-        let request = ClientRequest::Filesystem(lp_model::server::FsRequest::Write {
+        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::Write {
             path: path.to_path_buf(),
             data,
         });
@@ -303,7 +304,7 @@ impl LpClient {
     /// * `Ok(())` if the file was deleted successfully
     /// * `Err` if deletion failed or transport error occurred
     pub async fn fs_delete_file(&self, path: &LpPath) -> Result<()> {
-        let request = ClientRequest::Filesystem(lp_model::server::FsRequest::DeleteFile {
+        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::DeleteFile {
             path: path.to_path_buf(),
         });
 
@@ -335,7 +336,7 @@ impl LpClient {
     /// * `Ok(Vec<LpPathBuf>)` - List of file/directory paths
     /// * `Err` if listing failed or transport error occurred
     pub async fn fs_list_dir(&self, path: &LpPath, recursive: bool) -> Result<Vec<LpPathBuf>> {
-        let request = ClientRequest::Filesystem(lp_model::server::FsRequest::ListDir {
+        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::ListDir {
             path: path.to_path_buf(),
             recursive,
         });
@@ -430,7 +431,7 @@ impl LpClient {
 
         let request = ClientRequest::ProjectRequest {
             handle,
-            request: lp_model::project::api::ProjectRequest::GetChanges {
+            request: ProjectRequest::GetChanges {
                 since_frame,
                 detail_specifier,
             },
@@ -516,7 +517,7 @@ impl LpClient {
 /// to the engine client's ProjectResponse type.
 pub fn serializable_response_to_project_response(
     response: SerializableProjectResponse,
-) -> Result<lp_model::project::api::ProjectResponse, Error> {
+) -> Result<lpl_model::ProjectResponse, Error> {
     match response {
         SerializableProjectResponse::GetChanges {
             current_frame,
@@ -526,14 +527,14 @@ pub fn serializable_response_to_project_response(
             node_details,
             theoretical_fps,
         } => {
-            use lp_model::project::api::{NodeDetail, ProjectResponse};
+            use lpl_model::{NodeDetail, ProjectResponse};
             use std::collections::BTreeMap;
 
             // Convert Vec<(NodeHandle, SerializableNodeDetail)> to BTreeMap<NodeHandle, NodeDetail>
             let mut node_details_map = BTreeMap::new();
             for (handle, serializable_detail) in node_details {
                 let detail = match serializable_detail {
-                    lp_model::project::api::SerializableNodeDetail::Texture {
+                    lpl_model::SerializableNodeDetail::Texture {
                         path,
                         config,
                         state,
@@ -542,7 +543,7 @@ pub fn serializable_response_to_project_response(
                         config: Box::new(config),
                         state,
                     },
-                    lp_model::project::api::SerializableNodeDetail::Shader {
+                    lpl_model::SerializableNodeDetail::Shader {
                         path,
                         config,
                         state,
@@ -551,7 +552,7 @@ pub fn serializable_response_to_project_response(
                         config: Box::new(config),
                         state,
                     },
-                    lp_model::project::api::SerializableNodeDetail::Output {
+                    lpl_model::SerializableNodeDetail::Output {
                         path,
                         config,
                         state,
@@ -560,7 +561,7 @@ pub fn serializable_response_to_project_response(
                         config: Box::new(config),
                         state,
                     },
-                    lp_model::project::api::SerializableNodeDetail::Fixture {
+                    lpl_model::SerializableNodeDetail::Fixture {
                         path,
                         config,
                         state,
@@ -589,12 +590,12 @@ pub fn serializable_response_to_project_response(
 mod tests {
     use super::*;
     use crate::local::create_local_transport_pair;
-    use lp_model::{
+    use lp_shared::transport::ServerTransport;
+    use lpc_model::{
         LpPathBuf,
         project::handle::ProjectHandle,
         server::{LoadedProject, SampleStats, ServerMsgBody},
     };
-    use lp_shared::transport::ServerTransport;
     use tokio::task;
 
     #[tokio::test]

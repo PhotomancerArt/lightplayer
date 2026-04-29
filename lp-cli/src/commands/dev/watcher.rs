@@ -95,7 +95,7 @@ impl FileWatcher {
 
                             // Create FsChange and send to channel (non-blocking)
                             let change = FsChange {
-                                path: lp_model::LpPathBuf::from(normalized_path),
+                                path: lpc_model::LpPathBuf::from(normalized_path),
                                 change_type,
                             };
 

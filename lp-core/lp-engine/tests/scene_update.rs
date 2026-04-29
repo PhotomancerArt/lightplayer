@@ -4,8 +4,8 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
-use lp_model::AsLpPath;
 use lp_shared::ProjectBuilder;
+use lpc_model::AsLpPath;
 use lpfs::LpFsMemory;
 
 #[test]
@@ -63,23 +63,22 @@ fn test_node_json_modification() {
 
     // Verify the change was applied by checking the node's config_ver was updated
     // Get the frame ID before the change (2 frames ago)
-    let before_frame = lp_model::FrameId::new((runtime.frame_id.as_i64() - 2).max(0));
+    let before_frame = lpc_model::FrameId::new((runtime.frame_id.as_i64() - 2).max(0));
     let response = runtime
         .get_changes(
             before_frame,
-            &lp_model::project::api::ApiNodeSpecifier::ByHandles(vec![shader_handle]),
+            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![shader_handle]),
             None,
         )
         .unwrap();
 
     match response {
-        lp_model::project::api::ProjectResponse::GetChanges { node_changes, .. } => {
+        lpl_model::ProjectResponse::GetChanges { node_changes, .. } => {
             // Should have a ConfigUpdated change
             assert!(
-                node_changes.iter().any(|change| matches!(
-                    change,
-                    lp_model::project::api::NodeChange::ConfigUpdated { .. }
-                )),
+                node_changes
+                    .iter()
+                    .any(|change| matches!(change, lpl_model::NodeChange::ConfigUpdated { .. })),
                 "Expected ConfigUpdated change after node.json modification"
             );
         }

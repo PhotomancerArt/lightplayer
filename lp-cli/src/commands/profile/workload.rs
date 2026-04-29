@@ -3,8 +3,8 @@
 
 use anyhow::{Context, Result};
 use lp_client::LpClient;
-use lp_model::AsLpPath;
 use lp_riscv_emu::{FrameOutcome, Riscv32Emulator, profile::HaltReason};
+use lpc_model::AsLpPath;
 use lpfs::{LpFs, LpFsStd};
 use std::sync::{Arc, Mutex};
 

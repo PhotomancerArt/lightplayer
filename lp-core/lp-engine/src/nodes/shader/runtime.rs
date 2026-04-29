@@ -12,21 +12,20 @@ use alloc::{
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
 use log;
-use lp_model::glsl_opts::{AddSubMode, DivMode, MulMode};
-use lp_model::{
-    LpPathBuf, NodeHandle,
-    nodes::shader::{ShaderConfig, ShaderState},
-    project::FrameId,
-};
 use lp_perf::EVENT_SHADER_COMPILE;
+use lpc_model::{LpPathBuf, NodeHandle, project::FrameId};
 use lpfs::{ChangeType, FsChange};
+use lpl_model::glsl_opts::{AddSubMode, DivMode, MulMode};
+use lpl_model::nodes::shader::{ShaderConfig, ShaderState};
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-fn map_model_q32_options(opts: &lp_model::glsl_opts::GlslOpts) -> lps_q32::q32_options::Q32Options {
+fn map_model_q32_options(
+    opts: &lpl_model::glsl_opts::GlslOpts,
+) -> lps_q32::q32_options::Q32Options {
     lps_q32::q32_options::Q32Options {
         add_sub: match opts.add_sub {
             AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
@@ -454,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_shader_runtime_creation() {
-        let handle = lp_model::NodeHandle::new(0);
+        let handle = lpc_model::NodeHandle::new(0);
         let graphics: Arc<dyn LpGraphics> = Arc::new(crate::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);

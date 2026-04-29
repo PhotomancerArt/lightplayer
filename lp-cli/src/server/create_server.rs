@@ -1,7 +1,7 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
-use lp_model::AsLpPath;
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::output::MemoryOutputProvider;
+use lpc_model::AsLpPath;
 use lpfs::LpFs;
 use std::cell::RefCell;
 use std::path::Path;
@@ -69,7 +69,7 @@ pub fn create_server(
 #[cfg(test)]
 mod tests {
     use crate::server::create_server;
-    use lp_model::AsLpPath;
+    use lpc_model::AsLpPath;
     use tempfile::TempDir;
 
     #[test]

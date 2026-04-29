@@ -4,7 +4,7 @@ pub mod windowed;
 
 pub use windowed::WindowedStatsCollector;
 
-use lp_model::server::SampleStats;
+use lpc_model::server::SampleStats;
 
 /// Compute SampleStats (avg, population sdev, min, max) from values.
 ///

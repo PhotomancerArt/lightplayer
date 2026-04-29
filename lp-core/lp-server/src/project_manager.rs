@@ -15,10 +15,10 @@ use alloc::{
 use core::cell::RefCell;
 use hashbrown::HashMap;
 use lp_engine::{LpGraphics, MemoryStatsFn};
-use lp_model::project::ProjectHandle;
-use lp_model::{LpPath, LpPathBuf};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpc_model::project::ProjectHandle;
+use lpc_model::{LpPath, LpPathBuf};
 use lpfs::LpFs;
 
 /// Manages multiple project instances
@@ -149,7 +149,7 @@ impl ProjectManager {
         }
 
         // Extract last component using LpPath::file_name()
-        let project_path = lp_model::LpPathBuf::from(normalized_path);
+        let project_path = lpc_model::LpPathBuf::from(normalized_path);
         let name = project_path.file_name().ok_or_else(|| {
             ServerError::Core(format!(
                 "Invalid project path: cannot extract name from '{path}'"
@@ -219,10 +219,10 @@ impl ProjectManager {
     /// List all loaded projects
     ///
     /// Returns a list of loaded projects with their handles and paths.
-    pub fn list_loaded_projects(&self) -> Vec<lp_model::server::LoadedProject> {
+    pub fn list_loaded_projects(&self) -> Vec<lpc_model::server::LoadedProject> {
         self.projects
             .iter()
-            .map(|(handle, project)| lp_model::server::LoadedProject {
+            .map(|(handle, project)| lpc_model::server::LoadedProject {
                 handle: *handle,
                 path: project.path().to_path_buf(),
             })

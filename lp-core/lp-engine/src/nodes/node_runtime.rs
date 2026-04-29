@@ -4,8 +4,8 @@ use core::any::Any;
 use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
-use lp_model::NodeConfig;
 use lpfs::FsChange;
+use lpl_model::NodeConfig;
 
 /// Node runtime trait - all node runtimes implement this
 pub trait NodeRuntime: Send + Sync {

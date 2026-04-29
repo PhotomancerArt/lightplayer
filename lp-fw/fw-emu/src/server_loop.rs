@@ -10,11 +10,11 @@ use core::pin::pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use fw_core::transport::SerialTransport;
 use log;
-use lp_model::LegacyMessage;
 use lp_riscv_emu_guest::sys_yield;
 use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
+use lpl_model::LegacyMessage;
 
 /// Block on a future until completion. Uses sys_yield when pending.
 fn block_on<F: Future>(future: F) -> F::Output {

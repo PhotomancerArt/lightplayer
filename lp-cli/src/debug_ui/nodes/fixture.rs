@@ -2,8 +2,8 @@ use crate::debug_ui::nodes::texture;
 use eframe::epaint::Color32;
 use egui::Painter;
 use lp_engine_client::{ClientNodeEntry, ClientProjectView};
-use lp_model::NodeKind;
-use lp_model::nodes::fixture::{FixtureState, MappingCell};
+use lpl_model::NodeKind;
+use lpl_model::nodes::fixture::{FixtureState, MappingCell};
 
 /// Render fixture panel
 pub fn render_fixture_panel(
@@ -42,9 +42,7 @@ pub fn render_fixture_panel(
         .filter(|e| matches!(e.kind, NodeKind::Texture));
 
     if let Some(texture_entry) = texture_entry {
-        if let Some(lp_model::project::api::NodeState::Texture(texture_state)) =
-            &texture_entry.state
-        {
+        if let Some(lpl_model::NodeState::Texture(texture_state)) = &texture_entry.state {
             // Display texture with mapping overlay
             if !texture_state.texture_data.value().is_empty()
                 && *texture_state.width.value() > 0

@@ -4,8 +4,9 @@
 //! running in the same process. Uses unbounded channels for simplicity.
 
 use crate::transport::ClientTransport;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
+use lpc_model::{ClientMessage, TransportError};
+use lpl_model::LegacyServerMessage;
 use tokio::sync::mpsc;
 
 /// Async local client transport
@@ -176,7 +177,8 @@ pub fn create_local_transport_pair() -> (AsyncLocalClientTransport, AsyncLocalSe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_model::{ClientRequest, LegacyServerMessage};
+    use lpc_model::ClientRequest;
+    use lpl_model::LegacyServerMessage;
 
     #[tokio::test]
     async fn test_create_transport_pair() {
@@ -204,7 +206,7 @@ mod tests {
         // Send response from server
         let server_msg = LegacyServerMessage {
             id: 1,
-            msg: lp_model::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
+            msg: lpc_model::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
         };
         server_transport.send(server_msg).await.unwrap();
 

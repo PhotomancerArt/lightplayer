@@ -26,12 +26,12 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lp_model::LegacyMessage;
 use lp_server::LpServer;
 use lp_shared::fps::FpsTracker;
 use lp_shared::stats::WindowedStatsCollector;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
+use lpl_model::LegacyMessage;
 
 use crate::time::Esp32TimeProvider;
 
@@ -145,16 +145,16 @@ pub async fn run_server_loop<T: ServerTransport>(
             // Query heap memory from esp_alloc
             let used_bytes = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
             let free_bytes = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-            let memory = Some(lp_model::server::MemoryStats {
+            let memory = Some(lpc_model::server::MemoryStats {
                 free_bytes,
                 used_bytes,
                 total_bytes: used_bytes.saturating_add(free_bytes),
             });
 
             // Create heartbeat message
-            let heartbeat_msg = lp_model::LegacyServerMessage {
+            let heartbeat_msg = lpl_model::LegacyServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
-                msg: lp_model::server::ServerMsgBody::Heartbeat {
+                msg: lpc_model::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,
                     frame_count: frame_count as u64,
                     loaded_projects,

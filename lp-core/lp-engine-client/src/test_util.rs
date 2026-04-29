@@ -1,5 +1,5 @@
 use crate::ClientProjectView;
-use lp_model::NodeHandle;
+use lpc_model::NodeHandle;
 
 /// Assert first output channel RGB values
 ///

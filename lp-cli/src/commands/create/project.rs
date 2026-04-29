@@ -5,14 +5,16 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use lp_model::nodes::fixture::{ColorOrder, MappingConfig};
-use lp_model::nodes::{
-    NodeSpecifier, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
+use lpc_model::nodes::NodeSpecifier;
+use lpc_model::project::config::ProjectConfig;
+use lpc_model::{AsLpPath, AsLpPathBuf};
+use lpfs::LpFs;
+use lpl_model::nodes::{
+    fixture::{ColorOrder, FixtureConfig, MappingConfig},
+    output::OutputConfig,
+    shader::ShaderConfig,
     texture::TextureConfig,
 };
-use lp_model::project::config::ProjectConfig;
-use lp_model::{AsLpPath, AsLpPathBuf};
-use lpfs::LpFs;
 
 use crate::messages;
 
@@ -157,7 +159,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         glsl_path: "main.glsl".as_path_buf(),
         texture_spec: NodeSpecifier::from("/src/main.texture"),
         render_order: 0,
-        glsl_opts: lp_model::glsl_opts::GlslOpts::default(),
+        glsl_opts: lpl_model::glsl_opts::GlslOpts::default(),
     };
     let shader_json = serde_json::to_string_pretty(&shader_config)
         .context("Failed to serialize shader config")?;
@@ -444,7 +446,7 @@ mod tests {
             glsl_path: "main.glsl".as_path_buf(),
             texture_spec: NodeSpecifier::from("/src/main.texture"),
             render_order: 0,
-            glsl_opts: lp_model::glsl_opts::GlslOpts::default(),
+            glsl_opts: lpl_model::glsl_opts::GlslOpts::default(),
         };
         let shader_json = serde_json::to_string_pretty(&shader_config)
             .context("Failed to serialize shader config")?;

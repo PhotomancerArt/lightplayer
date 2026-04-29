@@ -10,5 +10,5 @@ pub use output::OutputRuntime;
 pub use shader::ShaderRuntime;
 pub use texture::TextureRuntime;
 
-// Re-export NodeConfig from lp-model
-pub use lp_model::NodeConfig;
+// Re-export NodeConfig from lpl-model
+pub use lpl_model::NodeConfig;

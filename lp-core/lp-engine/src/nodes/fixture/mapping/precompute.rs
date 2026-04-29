@@ -2,8 +2,8 @@
 
 use alloc::vec::Vec;
 use libm;
-use lp_model::FrameId;
-use lp_model::nodes::fixture::mapping::MappingConfig;
+use lpc_model::FrameId;
+use lpl_model::nodes::fixture::mapping::MappingConfig;
 use lps_q32::q32::Q32;
 
 use super::entry::PixelMappingEntry;

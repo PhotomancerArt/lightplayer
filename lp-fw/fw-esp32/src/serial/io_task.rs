@@ -29,7 +29,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// When StreamingMessageRouterTransport is used, server loop sends ServerMessage here.
 /// io_task receives, serializes with ser-write-json directly to serial, never buffers full JSON.
 #[cfg(feature = "server")]
-static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lp_model::LegacyServerMessage, 1> =
+static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpl_model::LegacyServerMessage, 1> =
     Channel::new();
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
@@ -226,7 +226,7 @@ pub fn get_message_channels() -> (
 /// Get reference to OUTGOING_SERVER_MSG channel for StreamingMessageRouterTransport
 #[cfg(feature = "server")]
 pub fn get_server_msg_channel()
--> &'static Channel<CriticalSectionRawMutex, lp_model::LegacyServerMessage, 1> {
+-> &'static Channel<CriticalSectionRawMutex, lpl_model::LegacyServerMessage, 1> {
     &OUTGOING_SERVER_MSG
 }
 

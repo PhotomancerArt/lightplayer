@@ -4,7 +4,7 @@
 //! the appropriate port for ESP32 communication.
 
 use anyhow::{Context, Result, bail};
-use lp_model::DEFAULT_SERIAL_BAUD_RATE;
+use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 /// Serial port configuration
 #[derive(Debug, Clone)]

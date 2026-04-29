@@ -15,7 +15,8 @@ members = [
     "lp-fw/fw-esp32",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
-    "lp-core/lp-model",
+    "lp-core/lpc-model",
+    "lp-legacy/lpl-model",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -64,7 +65,8 @@ default-members = [
     "lp-fw/fw-core",
     "lp-fw/fw-tests",
     "lp-cli",
-    "lp-core/lp-model",
+    "lp-core/lpc-model",
+    "lp-legacy/lpl-model",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",

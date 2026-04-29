@@ -11,7 +11,7 @@ use core::str::FromStr;
 
 /// Per-shader Q32 arithmetic options controlling builtin selection.
 ///
-/// These are compiler-internal types. `lp-engine` maps `lp_model::GlslOpts`
+/// These are compiler-internal types. `lp-engine` maps `lpc_model::GlslOpts`
 /// to these at the call site (Stage VI-B).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Q32Options {

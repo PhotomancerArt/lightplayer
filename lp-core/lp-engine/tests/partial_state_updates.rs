@@ -4,11 +4,11 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
-use lp_model::AsLpPath;
-use lp_model::nodes::NodeSpecifier;
-use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
 use lp_shared::ProjectBuilder;
+use lpc_model::AsLpPath;
+use lpc_model::nodes::NodeSpecifier;
 use lpfs::LpFsMemory;
+use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
 
 /// Integration test for partial state updates
 ///
@@ -75,19 +75,19 @@ fn test_partial_state_updates() {
     // Get initial sync (all fields should be present)
     let initial_response = runtime
         .get_changes(
-            lp_model::FrameId::default(),
-            &lp_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            lpc_model::FrameId::default(),
+            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
 
     let (initial_lamp_colors, initial_mapping_cells) = match initial_response {
-        lp_model::project::api::ProjectResponse::GetChanges { node_details, .. } => {
+        lpl_model::ProjectResponse::GetChanges { node_details, .. } => {
             let detail = node_details
                 .get(&fixture_handle)
                 .expect("Fixture detail should be present");
             match &detail.state {
-                lp_model::project::api::NodeState::Fixture(state) => {
+                lpl_model::NodeState::Fixture(state) => {
                     // Verify initial state has both fields
                     assert!(
                         !state.lamp_colors.value().is_empty(),
@@ -115,7 +115,7 @@ fn test_partial_state_updates() {
     let lamp_colors_response = runtime
         .get_changes(
             initial_frame,
-            &lp_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
@@ -131,12 +131,12 @@ fn test_partial_state_updates() {
 
     // Get the state from the response
     let (lamp_colors_after, mapping_cells_after) = match lamp_colors_response {
-        lp_model::project::api::ProjectResponse::GetChanges { node_details, .. } => {
+        lpl_model::ProjectResponse::GetChanges { node_details, .. } => {
             let detail = node_details
                 .get(&fixture_handle)
                 .expect("Fixture detail should be present");
             match &detail.state {
-                lp_model::project::api::NodeState::Fixture(state) => (
+                lpl_model::NodeState::Fixture(state) => (
                     state.lamp_colors.value().clone(),
                     state.mapping_cells.value().clone(),
                 ),
@@ -185,7 +185,7 @@ fn test_partial_state_updates() {
         gamma_correction: None,
     };
     let config_json =
-        lp_model::json::to_string(&new_config).expect("Failed to serialize fixture config");
+        lpc_model::json::to_string(&new_config).expect("Failed to serialize fixture config");
     fs.borrow_mut()
         .write_file_mut(fixture_config_path.as_path(), config_json.as_bytes())
         .unwrap();
@@ -202,20 +202,18 @@ fn test_partial_state_updates() {
     let mapping_response = runtime
         .get_changes(
             after_lamp_colors_frame,
-            &lp_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
 
     let new_mapping_cells = match mapping_response {
-        lp_model::project::api::ProjectResponse::GetChanges { node_details, .. } => {
+        lpl_model::ProjectResponse::GetChanges { node_details, .. } => {
             let detail = node_details
                 .get(&fixture_handle)
                 .expect("Fixture detail should be present");
             match &detail.state {
-                lp_model::project::api::NodeState::Fixture(state) => {
-                    state.mapping_cells.value().clone()
-                }
+                lpl_model::NodeState::Fixture(state) => state.mapping_cells.value().clone(),
                 _ => panic!("Expected Fixture state"),
             }
         }

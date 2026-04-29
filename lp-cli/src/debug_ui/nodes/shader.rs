@@ -1,5 +1,5 @@
 use lp_engine_client::ClientNodeEntry;
-use lp_model::nodes::shader::ShaderState;
+use lpl_model::nodes::shader::ShaderState;
 
 /// Render shader panel
 pub fn render_shader_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &ShaderState) {

@@ -54,7 +54,7 @@ pub fn create_filesystem(dir: Option<&Path>, memory: bool) -> Result<Box<dyn LpF
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_model::AsLpPath;
+    use lpc_model::AsLpPath;
     use tempfile::TempDir;
 
     #[test]

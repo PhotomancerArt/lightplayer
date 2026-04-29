@@ -6,7 +6,7 @@ pub mod rgba16;
 pub mod rgba8;
 
 use alloc::{boxed::Box, vec::Vec};
-use lp_model::nodes::texture::TextureFormat;
+use lpl_model::nodes::texture::TextureFormat;
 
 /// Trait for format-specific texture sampling
 pub trait TextureSampler {

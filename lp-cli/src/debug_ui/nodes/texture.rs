@@ -1,7 +1,7 @@
 use eframe::epaint::{Color32, ColorImage, TextureHandle};
 use egui::Image;
 use lp_engine_client::ClientNodeEntry;
-use lp_model::nodes::texture::{TextureFormat, TextureState};
+use lpl_model::nodes::texture::{TextureFormat, TextureState};
 
 /// Render texture panel
 pub fn render_texture_panel(

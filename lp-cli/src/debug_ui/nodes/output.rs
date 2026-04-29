@@ -1,7 +1,7 @@
 use eframe::epaint::Color32;
 use egui::Vec2;
 use lp_engine_client::ClientNodeEntry;
-use lp_model::nodes::output::OutputState;
+use lpl_model::nodes::output::OutputState;
 
 /// Render output panel
 pub fn render_output_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &OutputState) {

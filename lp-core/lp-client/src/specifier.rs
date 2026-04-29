@@ -4,7 +4,7 @@
 //! Supports websocket (`ws://`, `wss://`) and serial (`serial:`) formats.
 
 use anyhow::{Result, bail};
-use lp_model::DEFAULT_SERIAL_BAUD_RATE;
+use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use std::fmt;
 
 /// Host specifier indicating transport type and connection details

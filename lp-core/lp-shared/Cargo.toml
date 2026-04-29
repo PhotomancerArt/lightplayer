@@ -13,7 +13,8 @@ std = ["lpfs/std"]
 [dependencies]
 libm = "0.2"
 log = { workspace = true, default-features = false }
-lp-model = { path = "../lp-model", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 serde = { workspace = true, features = ["derive"] }

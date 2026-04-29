@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use libm;
-use lp_model::nodes::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
+use lpl_model::nodes::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
 
 /// Mapping point representing a single LED sampling location
 #[derive(Debug, Clone)]

@@ -11,11 +11,11 @@ use core::cell::RefCell;
 // NOTE: These integration tests use the old synchronous lp-client API which no longer exists.
 // They need to be rewritten to use the new async LpClient API. Marked as #[ignore] for now.
 
-use lp_model::AsLpPath;
-use lp_model::LegacyMessage;
 use lp_server::LpServer;
 use lp_shared::output::MemoryOutputProvider;
+use lpc_model::AsLpPath;
 use lpfs::{LpFs, LpFsMemory};
+use lpl_model::LegacyMessage;
 
 // Placeholder types for compilation - these tests are ignored
 type LpClient = ();
@@ -132,7 +132,7 @@ fn test_create_command_structure() {
 
     // Verify project.json exists and is valid
     let content = fs.read_file("/project.json".as_path()).unwrap();
-    let config: lp_model::project::config::ProjectConfig =
+    let config: lpc_model::project::config::ProjectConfig =
         serde_json::from_slice(&content).unwrap();
     assert_eq!(config.uid, project_uid);
     assert_eq!(config.name, project_name);

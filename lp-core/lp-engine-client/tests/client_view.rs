@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use lp_engine_client::ClientProjectView;
-use lp_model::{FrameId, NodeHandle, project::api::ProjectResponse};
+use lpc_model::{FrameId, NodeHandle, project::api::ProjectResponse};
 
 #[test]
 fn test_client_view_creation() {
@@ -23,7 +23,7 @@ fn test_request_detail() {
     // Generate specifier
     let spec = view.detail_specifier();
     match spec {
-        lp_model::project::api::ApiNodeSpecifier::ByHandles(handles) => {
+        lpc_model::project::api::ApiNodeSpecifier::ByHandles(handles) => {
             assert_eq!(handles.len(), 1);
             assert_eq!(handles[0], handle);
         }
@@ -45,7 +45,7 @@ fn test_stop_detail() {
     // Generate specifier should be None
     let spec = view.detail_specifier();
     match spec {
-        lp_model::project::api::ApiNodeSpecifier::None => {}
+        lpc_model::project::api::ApiNodeSpecifier::None => {}
         _ => panic!("Expected None"),
     }
 }
@@ -60,10 +60,10 @@ fn test_sync_with_changes() {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lp_model::project::api::NodeChange::Created {
+        node_changes: vec![lpl_model::NodeChange::Created {
             handle,
-            path: lp_model::LpPathBuf::from("/src/test.texture"),
-            kind: lp_model::NodeKind::Texture,
+            path: lpc_model::LpPathBuf::from("/src/test.texture"),
+            kind: lpl_model::NodeKind::Texture,
         }],
         node_details: BTreeMap::new(),
         theoretical_fps: None,
@@ -81,12 +81,13 @@ fn test_sync_with_changes() {
 #[test]
 fn test_detail_only_entry_uses_pending_status_changed() {
     use alloc::boxed::Box;
-    use lp_model::nodes::shader::ShaderState;
-    use lp_model::project::api::{NodeChange, NodeDetail, NodeState, NodeStatus};
+    use lpc_model::project::api::NodeStatus;
+    use lpl_model::nodes::shader::ShaderState;
+    use lpl_model::{NodeChange, NodeDetail, NodeState};
 
     let mut view = ClientProjectView::new();
     let handle = NodeHandle::new(1);
-    let path = lp_model::LpPathBuf::from("/src/s.shader");
+    let path = lpc_model::LpPathBuf::from("/src/s.shader");
     let frame = FrameId::new(1);
 
     let mut details = BTreeMap::new();
@@ -94,7 +95,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
         handle,
         NodeDetail {
             path: path.clone(),
-            config: Box::new(lp_model::nodes::shader::ShaderConfig::default()),
+            config: Box::new(lpl_model::nodes::shader::ShaderConfig::default()),
             state: NodeState::Shader(ShaderState::new(frame)),
         },
     );
@@ -119,8 +120,8 @@ fn test_detail_only_entry_uses_pending_status_changed() {
 #[test]
 fn test_partial_state_merge_texture() {
     use alloc::boxed::Box;
-    use lp_model::nodes::texture::{TextureConfig, TextureState};
-    use lp_model::project::api::NodeState;
+    use lpl_model::NodeState;
+    use lpl_model::nodes::texture::{TextureConfig, TextureState};
 
     let mut view = ClientProjectView::new();
     let handle = NodeHandle::new(1);
@@ -134,24 +135,24 @@ fn test_partial_state_merge_texture() {
     initial_state.height.set(FrameId::new(1), 200);
     initial_state.format.set(
         FrameId::new(1),
-        lp_model::nodes::texture::TextureFormat::Rgb8,
+        lpl_model::nodes::texture::TextureFormat::Rgb8,
     );
 
     let initial_response = ProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lp_model::project::api::NodeChange::Created {
+        node_changes: vec![lpl_model::NodeChange::Created {
             handle,
-            path: lp_model::LpPathBuf::from("/src/test.texture"),
-            kind: lp_model::NodeKind::Texture,
+            path: lpc_model::LpPathBuf::from("/src/test.texture"),
+            kind: lpl_model::NodeKind::Texture,
         }],
         node_details: {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lp_model::project::api::NodeDetail {
-                    path: lp_model::LpPathBuf::from("/src/test.texture"),
+                lpl_model::NodeDetail {
+                    path: lpc_model::LpPathBuf::from("/src/test.texture"),
                     config: Box::new(TextureConfig {
                         width: 100,
                         height: 200,
@@ -176,7 +177,7 @@ fn test_partial_state_merge_texture() {
             assert_eq!(state.height.value(), &200);
             assert_eq!(
                 state.format.value(),
-                &lp_model::nodes::texture::TextureFormat::Rgb8
+                &lpl_model::nodes::texture::TextureFormat::Rgb8
             );
         }
         _ => panic!("Expected Texture state"),
@@ -192,7 +193,7 @@ fn test_partial_state_merge_texture() {
         current_frame: FrameId::new(2),
         since_frame: FrameId::new(1),
         node_handles: vec![handle],
-        node_changes: vec![lp_model::project::api::NodeChange::StateUpdated {
+        node_changes: vec![lpl_model::NodeChange::StateUpdated {
             handle,
             state_ver: FrameId::new(2),
         }],
@@ -200,8 +201,8 @@ fn test_partial_state_merge_texture() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lp_model::project::api::NodeDetail {
-                    path: lp_model::LpPathBuf::from("/src/test.texture"),
+                lpl_model::NodeDetail {
+                    path: lpc_model::LpPathBuf::from("/src/test.texture"),
                     config: Box::new(TextureConfig {
                         width: 150,
                         height: 250,
@@ -231,7 +232,7 @@ fn test_partial_state_merge_texture() {
             );
             assert_eq!(
                 state.format.value(),
-                &lp_model::nodes::texture::TextureFormat::Rgb8,
+                &lpl_model::nodes::texture::TextureFormat::Rgb8,
                 "format should be preserved"
             );
         }
@@ -242,8 +243,8 @@ fn test_partial_state_merge_texture() {
 #[test]
 fn test_partial_state_merge_output() {
     use alloc::boxed::Box;
-    use lp_model::nodes::output::{OutputConfig, OutputState};
-    use lp_model::project::api::NodeState;
+    use lpl_model::NodeState;
+    use lpl_model::nodes::output::{OutputConfig, OutputState};
 
     let mut view = ClientProjectView::new();
     let handle = NodeHandle::new(1);
@@ -258,17 +259,17 @@ fn test_partial_state_merge_output() {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lp_model::project::api::NodeChange::Created {
+        node_changes: vec![lpl_model::NodeChange::Created {
             handle,
-            path: lp_model::LpPathBuf::from("/src/test.output"),
-            kind: lp_model::NodeKind::Output,
+            path: lpc_model::LpPathBuf::from("/src/test.output"),
+            kind: lpl_model::NodeKind::Output,
         }],
         node_details: {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lp_model::project::api::NodeDetail {
-                    path: lp_model::LpPathBuf::from("/src/test.output"),
+                lpl_model::NodeDetail {
+                    path: lpc_model::LpPathBuf::from("/src/test.output"),
                     config: Box::new(OutputConfig::GpioStrip {
                         pin: 0,
                         options: None,
@@ -306,8 +307,8 @@ fn test_partial_state_merge_output() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lp_model::project::api::NodeDetail {
-                    path: lp_model::LpPathBuf::from("/src/test.output"),
+                lpl_model::NodeDetail {
+                    path: lpc_model::LpPathBuf::from("/src/test.output"),
                     config: Box::new(OutputConfig::GpioStrip {
                         pin: 0,
                         options: None,

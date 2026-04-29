@@ -5,9 +5,9 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
 use lp_engine_client::ClientProjectView;
-use lp_model::{AsLpPath, AsLpPathBuf};
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::ProjectBuilder;
+use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]
@@ -141,7 +141,7 @@ fn test_server_tick_propagates_to_projects() {
         .runtime()
         .nodes
         .iter()
-        .find(|(_, entry)| entry.kind == lp_model::NodeKind::Output)
+        .find(|(_, entry)| entry.kind == lpl_model::NodeKind::Output)
         .map(|(handle, _)| *handle)
         .expect("Output node should exist");
 
@@ -213,7 +213,7 @@ fn test_server_tick_propagates_to_projects() {
 /// Sync the client view with the server project
 fn sync_client_view_from_server(
     server: &LpServer,
-    project_handle: lp_model::project::handle::ProjectHandle,
+    project_handle: lpc_model::project::handle::ProjectHandle,
     client_view: &mut ClientProjectView,
 ) {
     let project = server

@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
+use lpc_model::{ClientMessage, TransportError};
+use lpl_model::LegacyServerMessage;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 

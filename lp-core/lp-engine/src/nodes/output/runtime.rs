@@ -5,12 +5,10 @@ use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lp_model::{
-    nodes::output::{OutputConfig, OutputDriverOptionsConfig, OutputState},
-    project::FrameId,
-};
 use lp_shared::DisplayPipelineOptions;
+use lpc_model::project::FrameId;
 use lpfs::FsChange;
+use lpl_model::nodes::output::{OutputConfig, OutputDriverOptionsConfig, OutputState};
 
 /// Output node runtime
 pub struct OutputRuntime {

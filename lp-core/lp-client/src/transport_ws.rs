@@ -4,7 +4,8 @@
 
 use crate::transport::ClientTransport;
 use futures_util::{SinkExt, StreamExt};
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
+use lpc_model::{ClientMessage, TransportError};
+use lpl_model::LegacyServerMessage;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
@@ -57,7 +58,7 @@ impl ClientTransport for WebSocketClientTransport {
         };
 
         // Serialize ClientMessage to JSON
-        let json = lp_model::json::to_string(&msg).map_err(|e| {
+        let json = lpc_model::json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ClientMessage: {e}"))
         })?;
 
@@ -85,7 +86,7 @@ impl ClientTransport for WebSocketClientTransport {
             match stream.next().await {
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
                     // Deserialize LegacyServerMessage from JSON
-                    return lp_model::json::from_str(&text).map_err(|e| {
+                    return lpc_model::json::from_str(&text).map_err(|e| {
                         TransportError::Deserialization(format!(
                             "Failed to deserialize LegacyServerMessage: {e}"
                         ))
@@ -93,7 +94,7 @@ impl ClientTransport for WebSocketClientTransport {
                 }
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
                     // Deserialize LegacyServerMessage from binary JSON
-                    return lp_model::json::from_slice(&data).map_err(|e| {
+                    return lpc_model::json::from_slice(&data).map_err(|e| {
                         TransportError::Deserialization(format!(
                             "Failed to deserialize LegacyServerMessage: {e}"
                         ))
@@ -150,20 +151,20 @@ impl ClientTransport for WebSocketClientTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_model::{AsLpPathBuf, server::FsRequest};
+    use lpc_model::{AsLpPathBuf, server::FsRequest};
 
     #[test]
     fn test_serialization_format() {
         // Test that we serialize/deserialize correctly
         let msg = ClientMessage {
             id: 1,
-            msg: lp_model::ClientRequest::Filesystem(FsRequest::Read {
+            msg: lpc_model::ClientRequest::Filesystem(FsRequest::Read {
                 path: "/test".as_path_buf(),
             }),
         };
 
-        let json = lp_model::json::to_string(&msg).unwrap();
-        let deserialized: ClientMessage = lp_model::json::from_str(&json).unwrap();
+        let json = lpc_model::json::to_string(&msg).unwrap();
+        let deserialized: ClientMessage = lpc_model::json::from_str(&json).unwrap();
         assert_eq!(deserialized.id, msg.id);
     }
 }

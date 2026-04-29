@@ -10,10 +10,11 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 use log;
 use lp_engine::LpGraphics;
-use lp_model::{LegacyMessage, LegacyServerMessage, LpPath, LpPathBuf};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
+use lpc_model::{LpPath, LpPathBuf};
 use lpfs::{FsChange, LpFs};
+use lpl_model::{LegacyMessage, LegacyServerMessage};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
@@ -54,7 +55,7 @@ impl LpServer {
     ///
     /// ```rust,no_run
     /// extern crate alloc;
-    /// use lp_model::AsLpPath;
+    /// use lpc_model::AsLpPath;
     /// use lp_server::LpServer;
     /// use lpfs::LpFsStd;
     /// use lp_shared::output::MemoryOutputProvider;
@@ -112,7 +113,8 @@ impl LpServer {
     ///
     /// ```rust,no_run
     /// extern crate alloc;
-    /// use lp_model::{AsLpPath, LegacyMessage};
+    /// use lpc_model::AsLpPath;
+    /// use lpl_model::LegacyMessage;
     /// use lp_server::LpServer;
     /// use lpfs::LpFsMemory;
     /// use lp_shared::output::MemoryOutputProvider;
@@ -285,7 +287,7 @@ impl LpServer {
                             // Send error response for this message
                             responses.push(LegacyMessage::Server(LegacyServerMessage {
                                 id: msg_id,
-                                msg: lp_model::server::ServerMsgBody::Error {
+                                msg: lpc_model::server::ServerMsgBody::Error {
                                     error: format!("{e}"),
                                 },
                             }));
@@ -343,8 +345,8 @@ impl LpServer {
     /// Avoids multiple borrows when caller needs to pass base_fs, output_provider, etc.
     pub fn load_project(
         &mut self,
-        path: &lp_model::path::LpPath,
-    ) -> Result<lp_model::project::ProjectHandle, ServerError> {
+        path: &lpc_model::path::LpPath,
+    ) -> Result<lpc_model::project::ProjectHandle, ServerError> {
         self.project_manager.load_project(
             path,
             &mut *self.base_fs,

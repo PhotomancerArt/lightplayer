@@ -13,7 +13,7 @@ use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
 use lp_client::LpClient;
 use lp_engine_client::ClientProjectView;
-use lp_model::{AsLpPath, FrameId};
+use lpc_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -214,7 +214,7 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
 }
 
 /// Assert that the output channel has the expected red value
-fn assert_output_red(view: &ClientProjectView, handle: lp_model::NodeHandle, expected_r: u8) {
+fn assert_output_red(view: &ClientProjectView, handle: lpc_model::NodeHandle, expected_r: u8) {
     let data = view
         .get_output_data(handle)
         .expect("Failed to get output data");

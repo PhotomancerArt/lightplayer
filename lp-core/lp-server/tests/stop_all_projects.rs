@@ -4,9 +4,9 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine::MemoryOutputProvider;
-use lp_model::{AsLpPath, AsLpPathBuf, ClientMessage, ClientRequest};
 use lp_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
 use lp_shared::ProjectBuilder;
+use lpc_model::{AsLpPath, AsLpPathBuf, ClientMessage, ClientRequest};
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]
@@ -141,7 +141,7 @@ fn test_stop_all_projects() {
 
     // Verify response is StopAllProjects
     match response.msg {
-        lp_model::server::ServerMsgBody::StopAllProjects => {}
+        lpc_model::server::ServerMsgBody::StopAllProjects => {}
         _ => panic!("Expected StopAllProjects response"),
     }
 

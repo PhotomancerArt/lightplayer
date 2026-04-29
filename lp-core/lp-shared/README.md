@@ -7,4 +7,4 @@ Lightplayer.
 
 Contains shared code for the various lightplayer modules, like logging, file IO, etc.
 
-Does _not_ include the application model (config, state) which is in `lp-model`
+Does _not_ include the application model (config, state) which is in `lpc-model`

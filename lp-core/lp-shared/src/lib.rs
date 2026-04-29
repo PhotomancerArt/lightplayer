@@ -28,7 +28,7 @@ pub mod transport;
 pub use display_pipeline::{DisplayPipeline, DisplayPipelineOptions};
 pub use error::{DisplayPipelineError, OutputError, TextureError};
 // Re-export TransportError from lp-model for convenience
-pub use lp_model::TransportError;
+pub use lpc_model::TransportError;
 pub use project::ProjectBuilder;
 #[allow(
     deprecated,

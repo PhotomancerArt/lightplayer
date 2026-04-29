@@ -1,4 +1,4 @@
-# lp-model
+# lpc-model
 
 Application model for lightplayer. Includes configs, shared state, messages and other data-related
 code that is shared across the client and server.

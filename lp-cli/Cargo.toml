@@ -21,7 +21,8 @@ futures-util = "0.3"
 egui = "0.30"
 eframe = "0.30"
 notify = "6"
-lp-model = { path = "../lp-core/lp-model" }
+lpc-model = { path = "../lp-core/lpc-model" }
+lpl-model = { path = "../lp-legacy/lpl-model", default-features = false }
 lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
@@ -49,7 +50,7 @@ tempfile = "3"
 lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
-lp-model = { path = "../lp-core/lp-model" }
+lpc-model = { path = "../lp-core/lpc-model" }
 serde_json = "1"
 
 [features]

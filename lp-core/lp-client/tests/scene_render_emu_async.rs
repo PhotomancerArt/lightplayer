@@ -14,7 +14,6 @@ use lp_client::{
     transport_serial::{BacktraceInfo, create_emulator_serial_transport_pair},
 };
 use lp_engine_client::ClientProjectView;
-use lp_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -22,6 +21,7 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
+use lpc_model::{AsLpPath, FrameId};
 use lpfs::LpFsMemory;
 use tokio::time::sleep;
 
@@ -222,14 +222,14 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
 /// Sync client view with server
 async fn sync_client_view(
     client: &LpClient,
-    handle: lp_model::project::handle::ProjectHandle,
+    handle: lpc_model::project::handle::ProjectHandle,
     view: &mut ClientProjectView,
 ) {
     // For initial sync (empty view), request all nodes to populate the list
     // Otherwise use normal detail_specifier
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lp_model::project::api::ApiNodeSpecifier::All
+        lpc_model::project::api::ApiNodeSpecifier::All
     } else {
         view.detail_specifier()
     };

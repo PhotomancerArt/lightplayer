@@ -12,16 +12,14 @@ use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use log;
-use lp_model::{
-    AsLpPath, FrameId, LpPath, LpPathBuf, NodeConfig, NodeHandle, NodeKind,
-    project::api::{
-        ApiNodeSpecifier, NodeChange, NodeDetail, NodeState, NodeStatus as ApiNodeStatus,
-        ProjectResponse,
-    },
-};
 use lp_perf::{EVENT_FRAME, EVENT_PROJECT_LOAD};
 use lp_shared::time::TimeProvider;
+use lpc_model::{
+    AsLpPath, FrameId, LpPath, LpPathBuf, NodeHandle,
+    project::api::{ApiNodeSpecifier, NodeStatus as ApiNodeStatus},
+};
 use lpfs::{FsChange, LpFs};
+use lpl_model::{NodeChange, NodeConfig, NodeDetail, NodeKind, NodeState, ProjectResponse};
 
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
@@ -171,27 +169,27 @@ impl ProjectRuntime {
                     // Create a dummy config based on kind
                     // This is a temporary solution until we have a better way
                     let config: Box<dyn NodeConfig> = match kind {
-                        NodeKind::Texture => Box::new(lp_model::nodes::texture::TextureConfig {
+                        NodeKind::Texture => Box::new(lpl_model::nodes::texture::TextureConfig {
                             width: 0,
                             height: 0,
                         }),
                         NodeKind::Shader => {
-                            Box::new(lp_model::nodes::shader::ShaderConfig::default())
+                            Box::new(lpl_model::nodes::shader::ShaderConfig::default())
                         }
                         NodeKind::Output => {
-                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                            Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
                                 pin: 0,
                                 options: None,
                             })
                         }
-                        NodeKind::Fixture => Box::new(lp_model::nodes::fixture::FixtureConfig {
-                            output_spec: lp_model::NodeSpecifier::from(""),
-                            texture_spec: lp_model::NodeSpecifier::from(""),
-                            mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                        NodeKind::Fixture => Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                            output_spec: lpc_model::NodeSpecifier::from(""),
+                            texture_spec: lpc_model::NodeSpecifier::from(""),
+                            mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                 paths: vec![],
                                 sample_diameter: 2.0,
                             },
-                            color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
+                            color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
                             transform: [[0.0; 4]; 4],
                             brightness: None,
                             gamma_correction: None,
@@ -261,7 +259,7 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        lp_model::json::from_slice::<lp_model::nodes::texture::TextureConfig>(
+                        lpc_model::json::from_slice::<lpl_model::nodes::texture::TextureConfig>(
                             &data,
                         )
                         .map_err(|e| Error::Parse {
@@ -288,7 +286,7 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        lp_model::json::from_slice::<lp_model::nodes::fixture::FixtureConfig>(
+                        lpc_model::json::from_slice::<lpl_model::nodes::fixture::FixtureConfig>(
                             &data,
                         )
                         .map_err(|e| Error::Parse {
@@ -315,11 +313,13 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        lp_model::json::from_slice::<lp_model::nodes::shader::ShaderConfig>(&data)
-                            .map_err(|e| Error::Parse {
-                                file: node_json_path.as_str().to_string(),
-                                error: format!("Failed to parse shader config: {e}"),
-                            })?,
+                        lpc_model::json::from_slice::<lpl_model::nodes::shader::ShaderConfig>(
+                            &data,
+                        )
+                        .map_err(|e| Error::Parse {
+                            file: node_json_path.as_str().to_string(),
+                            error: format!("Failed to parse shader config: {e}"),
+                        })?,
                     )
                 } else {
                     None
@@ -340,11 +340,13 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        lp_model::json::from_slice::<lp_model::nodes::output::OutputConfig>(&data)
-                            .map_err(|e| Error::Parse {
-                                file: node_json_path.as_str().to_string(),
-                                error: format!("Failed to parse output config: {e}"),
-                            })?,
+                        lpc_model::json::from_slice::<lpl_model::nodes::output::OutputConfig>(
+                            &data,
+                        )
+                        .map_err(|e| Error::Parse {
+                            file: node_json_path.as_str().to_string(),
+                            error: format!("Failed to parse output config: {e}"),
+                        })?,
                     )
                 } else {
                     None
@@ -897,7 +899,7 @@ impl ProjectRuntime {
     ///
     /// Returns the handle for the node at the given path, or an error if not found.
     pub fn handle_for_path(&self, path: &LpPath) -> Result<NodeHandle, Error> {
-        let node_path = lp_model::LpPathBuf::from(path);
+        let node_path = lpc_model::LpPathBuf::from(path);
 
         // Look up node by path
         for (handle, entry) in &self.nodes {
@@ -1002,12 +1004,12 @@ impl ProjectRuntime {
                                 NodeState::Texture(state)
                             } else {
                                 // Fallback to empty state
-                                NodeState::Texture(lp_model::nodes::texture::TextureState::new(
+                                NodeState::Texture(lpl_model::nodes::texture::TextureState::new(
                                     self.frame_id,
                                 ))
                             }
                         } else {
-                            NodeState::Texture(lp_model::nodes::texture::TextureState::new(
+                            NodeState::Texture(lpl_model::nodes::texture::TextureState::new(
                                 self.frame_id,
                             ))
                         }
@@ -1021,12 +1023,12 @@ impl ProjectRuntime {
                                 NodeState::Shader(shader_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Shader(lp_model::nodes::shader::ShaderState::new(
+                                NodeState::Shader(lpl_model::nodes::shader::ShaderState::new(
                                     self.frame_id,
                                 ))
                             }
                         } else {
-                            NodeState::Shader(lp_model::nodes::shader::ShaderState::new(
+                            NodeState::Shader(lpl_model::nodes::shader::ShaderState::new(
                                 self.frame_id,
                             ))
                         }
@@ -1046,12 +1048,12 @@ impl ProjectRuntime {
                                     .set(self.frame_id, output_runtime.get_channel_data());
                                 NodeState::Output(state)
                             } else {
-                                NodeState::Output(lp_model::nodes::output::OutputState::new(
+                                NodeState::Output(lpl_model::nodes::output::OutputState::new(
                                     self.frame_id,
                                 ))
                             }
                         } else {
-                            NodeState::Output(lp_model::nodes::output::OutputState::new(
+                            NodeState::Output(lpl_model::nodes::output::OutputState::new(
                                 self.frame_id,
                             ))
                         }
@@ -1065,12 +1067,12 @@ impl ProjectRuntime {
                                 NodeState::Fixture(fixture_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState::new(
+                                NodeState::Fixture(lpl_model::nodes::fixture::FixtureState::new(
                                     self.frame_id,
                                 ))
                             }
                         } else {
-                            NodeState::Fixture(lp_model::nodes::fixture::FixtureState::new(
+                            NodeState::Fixture(lpl_model::nodes::fixture::FixtureState::new(
                                 self.frame_id,
                             ))
                         }
@@ -1087,19 +1089,19 @@ impl ProjectRuntime {
                                 if let Some(tex_config) = tex_runtime.get_config() {
                                     Box::new(tex_config.clone())
                                 } else {
-                                    Box::new(lp_model::nodes::texture::TextureConfig {
+                                    Box::new(lpl_model::nodes::texture::TextureConfig {
                                         width: 0,
                                         height: 0,
                                     })
                                 }
                             } else {
-                                Box::new(lp_model::nodes::texture::TextureConfig {
+                                Box::new(lpl_model::nodes::texture::TextureConfig {
                                     width: 0,
                                     height: 0,
                                 })
                             }
                         } else {
-                            Box::new(lp_model::nodes::texture::TextureConfig {
+                            Box::new(lpl_model::nodes::texture::TextureConfig {
                                 width: 0,
                                 height: 0,
                             })
@@ -1113,13 +1115,13 @@ impl ProjectRuntime {
                                 if let Some(shader_config) = shader_runtime.get_config() {
                                     Box::new(shader_config.clone())
                                 } else {
-                                    Box::new(lp_model::nodes::shader::ShaderConfig::default())
+                                    Box::new(lpl_model::nodes::shader::ShaderConfig::default())
                                 }
                             } else {
-                                Box::new(lp_model::nodes::shader::ShaderConfig::default())
+                                Box::new(lpl_model::nodes::shader::ShaderConfig::default())
                             }
                         } else {
-                            Box::new(lp_model::nodes::shader::ShaderConfig::default())
+                            Box::new(lpl_model::nodes::shader::ShaderConfig::default())
                         }
                     }
                     NodeKind::Output => {
@@ -1130,19 +1132,19 @@ impl ProjectRuntime {
                                 if let Some(output_config) = output_runtime.get_config() {
                                     Box::new(output_config.clone())
                                 } else {
-                                    Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                                    Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
                                         pin: 0,
                                         options: None,
                                     })
                                 }
                             } else {
-                                Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                                Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
                                     options: None,
                                 })
                             }
                         } else {
-                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                            Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
                                 pin: 0,
                                 options: None,
                             })
@@ -1156,43 +1158,43 @@ impl ProjectRuntime {
                                 if let Some(fixture_config) = fixture_runtime.get_config() {
                                     Box::new(fixture_config.clone())
                                 } else {
-                                    Box::new(lp_model::nodes::fixture::FixtureConfig {
-                                        output_spec: lp_model::NodeSpecifier::from(""),
-                                        texture_spec: lp_model::NodeSpecifier::from(""),
+                                    Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                                        output_spec: lpc_model::NodeSpecifier::from(""),
+                                        texture_spec: lpc_model::NodeSpecifier::from(""),
                                         mapping:
-                                            lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                            lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                                 paths: vec![],
                                                 sample_diameter: 2.0,
                                             },
-                                        color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
+                                        color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
                                         brightness: None,
                                         gamma_correction: None,
                                     })
                                 }
                             } else {
-                                Box::new(lp_model::nodes::fixture::FixtureConfig {
-                                    output_spec: lp_model::NodeSpecifier::from(""),
-                                    texture_spec: lp_model::NodeSpecifier::from(""),
-                                    mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                                    output_spec: lpc_model::NodeSpecifier::from(""),
+                                    texture_spec: lpc_model::NodeSpecifier::from(""),
+                                    mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
                                     },
-                                    color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
+                                    color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                     brightness: None,
                                     gamma_correction: None,
                                 })
                             }
                         } else {
-                            Box::new(lp_model::nodes::fixture::FixtureConfig {
-                                output_spec: lp_model::NodeSpecifier::from(""),
-                                texture_spec: lp_model::NodeSpecifier::from(""),
-                                mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                            Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                                output_spec: lpc_model::NodeSpecifier::from(""),
+                                texture_spec: lpc_model::NodeSpecifier::from(""),
+                                mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                     paths: vec![],
                                     sample_diameter: 2.0,
                                 },
-                                color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
+                                color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
                                 transform: [[0.0; 4]; 4],
                                 brightness: None,
                                 gamma_correction: None,
@@ -1255,11 +1257,14 @@ impl<'a> InitContext<'a> {
 }
 
 impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
-    fn resolve_node(&self, spec: &lp_model::NodeSpecifier) -> Result<lp_model::NodeHandle, Error> {
+    fn resolve_node(
+        &self,
+        spec: &lpc_model::NodeSpecifier,
+    ) -> Result<lpc_model::NodeHandle, Error> {
         let spec_path = spec.as_str();
         let node_path = if spec_path.starts_with('/') {
             // Absolute path
-            lp_model::LpPathBuf::from(spec_path)
+            lpc_model::LpPathBuf::from(spec_path)
         } else {
             // Relative path - resolve from current node's directory
             // Current node path is self.node_path (e.g., "/src/texture.texture")
@@ -1270,7 +1275,7 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| {
                     // No parent, use root
-                    lp_model::LpPathBuf::from("/")
+                    lpc_model::LpPathBuf::from("/")
                 });
 
             // Resolve relative path using join_relative
@@ -1296,7 +1301,7 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
 
     fn resolve_output(
         &self,
-        spec: &lp_model::NodeSpecifier,
+        spec: &lpc_model::NodeSpecifier,
     ) -> Result<crate::runtime::contexts::OutputHandle, Error> {
         let handle = self.resolve_node(spec)?;
         let entry = self
@@ -1307,10 +1312,10 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
                 path: spec.as_str().to_string(),
             })?;
 
-        if entry.kind != lp_model::NodeKind::Output {
+        if entry.kind != lpl_model::NodeKind::Output {
             return Err(Error::WrongNodeKind {
                 specifier: spec.as_str().to_string(),
-                expected: lp_model::NodeKind::Output,
+                expected: lpl_model::NodeKind::Output,
                 actual: entry.kind,
             });
         }
@@ -1320,7 +1325,7 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
 
     fn resolve_texture(
         &self,
-        spec: &lp_model::NodeSpecifier,
+        spec: &lpc_model::NodeSpecifier,
     ) -> Result<crate::runtime::contexts::TextureHandle, Error> {
         let handle = self.resolve_node(spec)?;
         let entry = self
@@ -1331,10 +1336,10 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
                 path: spec.as_str().to_string(),
             })?;
 
-        if entry.kind != lp_model::NodeKind::Texture {
+        if entry.kind != lpl_model::NodeKind::Texture {
             return Err(Error::WrongNodeKind {
                 specifier: spec.as_str().to_string(),
-                expected: lp_model::NodeKind::Texture,
+                expected: lpl_model::NodeKind::Texture,
                 actual: entry.kind,
             });
         }
@@ -1363,7 +1368,7 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
     fn get_texture_config(
         &self,
         handle: crate::runtime::contexts::TextureHandle,
-    ) -> Result<lp_model::nodes::texture::TextureConfig, Error> {
+    ) -> Result<lpl_model::nodes::texture::TextureConfig, Error> {
         let node_handle = handle.as_node_handle();
         let entry = self
             .runtime

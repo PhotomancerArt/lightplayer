@@ -1,6 +1,7 @@
-use lp_model::{LegacyMessage, TransportError};
 use lp_server::LpServer;
 use lp_shared::transport::ServerTransport;
+use lpc_model::TransportError;
+use lpl_model::LegacyMessage;
 use std::time::{Duration, Instant};
 
 /// Target frame time for 60 FPS (16.67ms per frame)

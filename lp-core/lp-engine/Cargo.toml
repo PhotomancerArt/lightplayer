@@ -28,7 +28,8 @@ lps-frontend = { path = "../../lp-shader/lps-frontend", default-features = false
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
-lp-model = { path = "../lp-model", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }

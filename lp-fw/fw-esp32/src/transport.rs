@@ -8,8 +8,9 @@ extern crate alloc;
 use alloc::vec::Vec;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError, json};
 use lp_shared::transport::ServerTransport;
+use lpc_model::{ClientMessage, TransportError, json};
+use lpl_model::LegacyServerMessage;
 
 use crate::serial::io_task;
 

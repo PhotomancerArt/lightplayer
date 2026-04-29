@@ -8,7 +8,8 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
+use lpc_model::{ClientMessage, TransportError};
+use lpl_model::LegacyServerMessage;
 
 /// Trait for server-side transport implementations
 ///
@@ -26,7 +27,8 @@ use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
 ///
 /// ```rust,no_run
 /// use lp_shared::transport::ServerTransport;
-/// use lp_model::{ClientMessage, LegacyServerMessage, TransportError};
+/// use lpc_model::{ClientMessage, TransportError};
+/// use lpl_model::LegacyServerMessage;
 ///
 /// struct MyTransport;
 ///

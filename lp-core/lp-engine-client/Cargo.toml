@@ -10,7 +10,8 @@ default = ["std"]
 std = []
 
 [dependencies]
-lp-model = { path = "../lp-model", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 hashbrown = { workspace = true }
 
 [lints]

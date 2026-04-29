@@ -1,4 +1,5 @@
-use lp_model::project::api::{ProjectRequest, ProjectResponse};
+use lpc_model::project::api::ProjectRequest;
+use lpl_model::ProjectResponse;
 
 /// Client API trait - implemented by server connection
 pub trait ClientApi {
