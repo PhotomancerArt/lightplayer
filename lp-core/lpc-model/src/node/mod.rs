@@ -1,8 +1,8 @@
 //! **Runtime** graph nodes: the live counterpart to authored path and spec
 //! types in [`crate::types`].
 //!
-//! A [`Node`] is an **object-safe** interface implemented by every concrete
-//! on-graph object (see tests holding `Box<dyn Node>`). It combines a cheap
+//! A [`NodeProperties`] is an **object-safe** interface implemented by every concrete
+//! on-graph object (see tests holding `Box<dyn NodeProperties>`). It combines a cheap
 //! [`Uid`] with a stable [`NodePath`] and [`PropPath`]-keyed property access
 //! over [`LpsValue`][`crate::LpsValue`] (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md` trait surface, `00-design` Node sketch).
 
@@ -11,7 +11,7 @@ use crate::error::DomainError;
 use crate::types::{NodePath, PropPath, Uid};
 
 /// A **node instance** in the runtime graph: addressable, property-get/set.
-pub trait Node {
+pub trait NodeProperties {
     /// The process-local [`Uid`]; not the same as a [`NodePath`].
     fn uid(&self) -> Uid;
     /// Slash-joined path of `name.type` segments (see [`NodePath`]). Stable across sessions for authored content.
@@ -36,7 +36,7 @@ mod tests {
         speed: f32,
     }
 
-    impl Node for DummyNode {
+    impl NodeProperties for DummyNode {
         fn uid(&self) -> Uid {
             self.uid
         }
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn node_is_object_safe() {
-        let node: alloc::boxed::Box<dyn Node> = alloc::boxed::Box::new(DummyNode {
+        let node: alloc::boxed::Box<dyn NodeProperties> = alloc::boxed::Box::new(DummyNode {
             uid: Uid(1),
             path: NodePath::parse("/main.show").unwrap(),
             speed: 1.0,

@@ -1,13 +1,13 @@
 //! Unifying error type for **domain-level** operations that are not yet split
-//! into per-artifact `thiserror` enums. Used today by the [`Node`](crate::node::Node)
+//! into per-artifact `thiserror` enums. Used today by the [`NodeProperties`](crate::node::NodeProperties)
 //! trait; more variants appear as load and validation grow (M3+,
 //! `docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md`).
 
 use alloc::string::String;
 use core::fmt;
 
-/// Failure from [`Node::get_property`](crate::node::Node::get_property) or
-/// [`Node::set_property`](crate::node::Node::set_property), and other cross-cutting domain checks.
+/// Failure from [`NodeProperties::get_property`](crate::node::NodeProperties::get_property) or
+/// [`NodeProperties::set_property`](crate::node::NodeProperties::set_property), and other cross-cutting domain checks.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DomainError {
     /// No property at the given [`crate::types::PropPath`].

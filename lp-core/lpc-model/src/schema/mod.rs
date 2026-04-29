@@ -25,7 +25,7 @@ pub trait Artifact {
 
     /// Visit every top-level [`Slot`] this artifact owns for load-time default materialization.
     ///
-    /// Visuals with a `[params]` table walk the inner [`ParamsTable`](crate::visual::ParamsTable) root slot;
+    /// Visuals with a `[params]` table walk the inner params-table root [`Slot`];
     /// nested fields are reached via [`Slot::default_value`](crate::shape::Slot::default_value).
     fn walk_slots<F: FnMut(&Slot)>(&self, _f: F) {}
 }

@@ -13,6 +13,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+mod lpc_model_artifact;
+
 pub mod error;
 pub mod fs_event;
 pub mod lp_fs;

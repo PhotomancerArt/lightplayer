@@ -1,6 +1,6 @@
 //! TOML artifact loader.
 //!
-//! Reads a `.toml` file via [`LpFs`], deserializes it into a typed [`Artifact`]
+//! Reads a `.toml` file via [`ArtifactReadRoot`], deserializes it into a typed [`Artifact`]
 //! struct, validates `schema_version`, and walks the loaded artifact to
 //! materialize its [`ValueSpec`](crate::value_spec::ValueSpec) defaults at load
 //! time (per `docs/design/lightplayer/quantity.md` §7 and non-negotiable §6).
@@ -10,7 +10,7 @@
 //!
 //! # Errors
 //!
-//! - [`LoadError::Io`] — `LpFs::read_file` failed.
+//! - [`LoadError::Io`] — `read_file` failed (`ArtifactReadRoot::Err`).
 //! - [`LoadError::Utf8`] — file bytes are not UTF-8.
 //! - [`LoadError::Parse`] — TOML does not match `T`’s serde shape.
 //! - [`LoadError::SchemaVersion`] — on-disk `schema_version` ≠ `T::CURRENT_VERSION`.
@@ -20,16 +20,27 @@
 //! per call.
 
 use crate::error::DomainError;
+use crate::path::LpPath;
 use crate::schema::Artifact;
 use crate::value_spec::LoadCtx;
-use lpc_model::path::LpPath;
-use lpfs::{LpFs, error::FsError};
+
+/// Narrow filesystem surface for [`load_artifact`].
+///
+/// Implemented for [`lpfs::LpFs`] implementations in the `lpfs` crate so `lpc-model`
+/// does not depend on `lpfs` (avoids `lpc-model` ↔ `lpfs` cycles).
+pub trait ArtifactReadRoot {
+    /// Low-level error returned when reading bytes fails.
+    type Err;
+
+    /// Read full file contents at `path`.
+    fn read_file(&self, path: &LpPath) -> Result<alloc::vec::Vec<u8>, Self::Err>;
+}
 
 /// Errors the loader can return.
 #[derive(Debug)]
-pub enum LoadError {
-    /// Underlying [`LpFs::read_file`] failure.
-    Io(FsError),
+pub enum LoadError<E> {
+    /// Underlying [`ArtifactReadRoot::read_file`] failure.
+    Io(E),
     /// File content was not valid UTF-8.
     Utf8(core::str::Utf8Error),
     /// TOML parse failure.
@@ -44,39 +55,33 @@ pub enum LoadError {
     Domain(DomainError),
 }
 
-impl From<FsError> for LoadError {
-    fn from(e: FsError) -> Self {
-        LoadError::Io(e)
-    }
-}
-
-impl From<core::str::Utf8Error> for LoadError {
+impl<E> From<core::str::Utf8Error> for LoadError<E> {
     fn from(e: core::str::Utf8Error) -> Self {
         LoadError::Utf8(e)
     }
 }
 
-impl From<toml::de::Error> for LoadError {
+impl<E> From<toml::de::Error> for LoadError<E> {
     fn from(e: toml::de::Error) -> Self {
         LoadError::Parse(e)
     }
 }
 
-impl From<DomainError> for LoadError {
+impl<E> From<DomainError> for LoadError<E> {
     fn from(e: DomainError) -> Self {
         LoadError::Domain(e)
     }
 }
 
-/// Load a TOML artifact through [`LpFs`] and validate its `schema_version`
+/// Load a TOML artifact through [`ArtifactReadRoot`] and validate its `schema_version`
 /// against `T::CURRENT_VERSION`. Materializes embedded default values via a
 /// throwaway [`LoadCtx`].
-pub fn load_artifact<T, F>(fs: &F, path: &LpPath) -> Result<T, LoadError>
+pub fn load_artifact<T, R>(fs: &R, path: &LpPath) -> Result<T, LoadError<R::Err>>
 where
     T: Artifact + serde::de::DeserializeOwned,
-    F: LpFs,
+    R: ArtifactReadRoot,
 {
-    let bytes = fs.read_file(path)?;
+    let bytes = fs.read_file(path).map_err(LoadError::Io)?;
     let text = core::str::from_utf8(&bytes)?;
     let loaded: T = toml::from_str(text)?;
 
@@ -104,20 +109,62 @@ fn walk_and_materialize<T: Artifact>(artifact: &T, ctx: &mut LoadCtx) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::visual::Pattern;
-    use lpc_model::path::LpPathBuf;
-    use lpfs::LpFsMemory;
+    use crate::path::LpPathBuf;
 
-    fn fs_with(file: &str, body: &str) -> LpFsMemory {
-        let fs = LpFsMemory::new();
-        fs.write_file(LpPathBuf::from(file).as_path(), body.as_bytes())
-            .unwrap();
-        fs
+    /// Minimal deserialize target for loader tests (visual `Pattern` lives in `lpv-model`).
+    #[derive(Debug, serde::Deserialize)]
+    struct LoadTestArtifact {
+        schema_version: u32,
+        title: String,
     }
 
+    impl Artifact for LoadTestArtifact {
+        const KIND: &'static str = "pattern";
+        const CURRENT_VERSION: u32 = 1;
+
+        fn schema_version(&self) -> u32 {
+            self.schema_version
+        }
+    }
+
+    struct MockFs {
+        files: alloc::vec::Vec<(alloc::string::String, alloc::vec::Vec<u8>)>,
+    }
+
+    impl MockFs {
+        fn with_file(path: &str, body: &str) -> Self {
+            let key = LpPathBuf::from(path).as_str().to_string();
+            MockFs {
+                files: alloc::vec![(key, body.as_bytes().to_vec())],
+            }
+        }
+
+        fn empty() -> Self {
+            MockFs {
+                files: alloc::vec::Vec::new(),
+            }
+        }
+    }
+
+    impl ArtifactReadRoot for MockFs {
+        type Err = MockFsErr;
+
+        fn read_file(&self, path: &LpPath) -> Result<alloc::vec::Vec<u8>, MockFsErr> {
+            let s = path.as_str();
+            self.files
+                .iter()
+                .find(|(p, _)| p == s)
+                .map(|(_, b)| b.clone())
+                .ok_or(MockFsErr)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MockFsErr;
+
     #[test]
-    fn loads_minimal_pattern() {
-        let fs = fs_with(
+    fn loads_minimal_pattern_shaped_toml() {
+        let fs = MockFs::with_file(
             "/test.pattern.toml",
             r#"
             schema_version = 1
@@ -126,30 +173,30 @@ mod tests {
             glsl = "void main() {}"
         "#,
         );
-        let p: Pattern =
+        let p: LoadTestArtifact =
             load_artifact(&fs, LpPathBuf::from("/test.pattern.toml").as_path()).unwrap();
         assert_eq!(p.title, "Tiny");
     }
 
     #[test]
     fn missing_file_returns_io_error() {
-        let fs = LpFsMemory::new();
-        let res: Result<Pattern, _> =
+        let fs = MockFs::empty();
+        let res: Result<LoadTestArtifact, _> =
             load_artifact(&fs, LpPathBuf::from("/missing.toml").as_path());
-        assert!(matches!(res, Err(LoadError::Io(_))));
+        assert!(matches!(res, Err(LoadError::Io(MockFsErr))));
     }
 
     #[test]
     fn invalid_toml_returns_parse_error() {
-        let fs = fs_with("/bad.pattern.toml", "not = valid\nrandom = ");
-        let res: Result<Pattern, _> =
+        let fs = MockFs::with_file("/bad.pattern.toml", "not = valid\nrandom = ");
+        let res: Result<LoadTestArtifact, _> =
             load_artifact(&fs, LpPathBuf::from("/bad.pattern.toml").as_path());
         assert!(matches!(res, Err(LoadError::Parse(_))));
     }
 
     #[test]
     fn schema_version_mismatch_is_caught() {
-        let fs = fs_with(
+        let fs = MockFs::with_file(
             "/test.pattern.toml",
             r#"
             schema_version = 999
@@ -158,7 +205,7 @@ mod tests {
             glsl = "void main() {}"
         "#,
         );
-        let res: Result<Pattern, _> =
+        let res: Result<LoadTestArtifact, _> =
             load_artifact(&fs, LpPathBuf::from("/test.pattern.toml").as_path());
         match res {
             Err(LoadError::SchemaVersion {
@@ -168,26 +215,5 @@ mod tests {
             }) => {}
             other => panic!("expected SchemaVersion mismatch, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn materializes_default_values_without_panic() {
-        let fs = fs_with(
-            "/full.pattern.toml",
-            r#"
-            schema_version = 1
-            title = "Full"
-            [shader]
-            glsl = "void main() {}"
-            [params.speed]
-            kind    = "amplitude"
-            default = 0.5
-            [params.tint]
-            kind    = "color"
-            default = { space = "oklch", coords = [0.7, 0.15, 90] }
-        "#,
-        );
-        let _: Pattern =
-            load_artifact(&fs, LpPathBuf::from("/full.pattern.toml").as_path()).unwrap();
     }
 }
