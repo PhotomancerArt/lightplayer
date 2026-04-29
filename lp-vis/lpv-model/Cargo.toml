@@ -1,5 +1,5 @@
 [package]
-name = "lp-domain"
+name = "lpv-model"
 description = "LightPlayer domain model: identity, addressing, and the Quantity model"
 version.workspace = true
 authors.workspace = true

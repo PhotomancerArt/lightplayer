@@ -6,15 +6,15 @@
 //! std-only. Schema-drift subtests are additionally gated on
 //! **`--features schema-gen`** (needs `schemars` and generated `JsonSchema`
 //! for Visual types). Run:
-//! - `cargo test -p lp-domain --features std --test round_trip`
-//! - `cargo test -p lp-domain --features std,schema-gen --test round_trip`
+//! - `cargo test -p lpv-model --features std --test round_trip`
+//! - `cargo test -p lpv-model --features std,schema-gen --test round_trip`
 
-use lp_domain::load_artifact;
-#[cfg(feature = "schema-gen")]
-use lp_domain::schema::Artifact;
-use lp_domain::visual::{Effect, Live, Pattern, Playlist, Stack, Transition};
 use lp_model::path::LpPathBuf;
 use lpfs::lp_fs_std::LpFsStd;
+use lpv_model::load_artifact;
+#[cfg(feature = "schema-gen")]
+use lpv_model::schema::Artifact;
+use lpv_model::visual::{Effect, Live, Pattern, Playlist, Stack, Transition};
 use std::path::PathBuf;
 
 const EXAMPLES_ROOT: &str = "examples/v1";
@@ -168,7 +168,7 @@ fn playlist_corpus_validates_against_schema() {
 #[cfg(feature = "schema-gen")]
 #[test]
 fn slot_wire_json_schema_rejects_malformed_slot_tables() {
-    use lp_domain::shape::Slot;
+    use lpv_model::shape::Slot;
 
     let root = schemars::schema_for!(Slot);
     let schema_json = serde_json::to_value(&root).expect("schema→json");

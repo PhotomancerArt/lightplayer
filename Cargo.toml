@@ -3,7 +3,7 @@ members = [
     # lp-base workspace members
     "lp-base/lp-perf",
     "lp-base/lpfs",
-    "lp-domain/lp-domain",
+    "lp-vis/lpv-model",
     # lp-app workspace members
     "lp-core/lp-engine",
     "lp-core/lp-engine-client",
@@ -54,7 +54,7 @@ resolver = "2"
 default-members = [
     # lp-base workspace members
     "lp-base/lpfs",
-    "lp-domain/lp-domain",
+    "lp-vis/lpv-model",
     # lp-app workspace members
     "lp-core/lp-engine",
     "lp-core/lp-engine-client",
