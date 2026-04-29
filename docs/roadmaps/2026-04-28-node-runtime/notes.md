@@ -548,6 +548,91 @@ Verification (all green): `cargo check` on `lp-model`,
 release-esp32 with `esp32c6,server`). `cargo test -p lp-model`
 passes (round-trip serialization).
 
+## M2 outcomes (complete)
+
+All five checkpoints landed. End-state crate map matches the post-roadmap
+target in this file's earlier section:
+
+- `lp-core/lpc-model/`, `lp-core/lpc-runtime/`,
+- `lp-legacy/lpl-model/`, `lp-legacy/lpl-runtime/`,
+- `lp-vis/lpv-model/`.
+
+`lp-domain/`, `lp-core/lp-model/`, `lp-core/lp-engine/` no longer exist.
+No transitional shells.
+
+Verification (all green):
+
+- `just check` (fmt + clippy host + clippy RV32 release-esp32 + clippy
+  release-emu).
+- `just test` (`cargo test` host + filetests; 15410/15410 filetest
+  pass, all rust tests pass; ~2m25s).
+- `cargo check -p fw-emu --target riscv32imac-... --profile release-emu`.
+- `cargo check -p fw-esp32 --target riscv32imac-... --profile
+  release-esp32 --features esp32c6,server`.
+
+Commits (in order):
+
+```
+f9a49014 refactor(lp-vis): rename lp-domain to lpv-model and move to lp-vis/lpv-model
+116f7f04 refactor(lpc-model/lpl-model): split lp-model into foundation + legacy crates
+cf442ab0 refactor(lpc-model/lpv-model): move foundation types from lpv-model to lpc-model
+da2f0a51 refactor(lpc-runtime/lpl-runtime): split lp-engine into spine + legacy runtimes
+21cdc288 fix(style): address clippy lints and formatting from M2 C1-C4
+0214948a fix(test): correct imports in lp-engine-client tests after C1 split
+f6b73e29 docs(roadmap): update M2 progress in move-map and notes
+```
+
+### Flags carried into M3 (deviations from the move-map design intent)
+
+The M2 split is mechanical and the crates compile, but three layering
+invariants the move-map promised are not actually delivered. These are
+**not bugs to fix before M3** — they're exactly the kind of thing M3's
+"reconcile design with M2's reality" deliverable is for. Flagging them
+here so M3 picks them up explicitly:
+
+- **F-M2-1: `lpc-runtime` depends on `lpl-model`.** Per `cargo tree`,
+  the dep is a regular runtime dep (not dev-only). The leaks:
+  - `lpc-runtime/src/project/loader.rs` imports `lpl_model::{NodeConfig,
+    NodeKind}` and hardcodes the four legacy suffixes (`texture`,
+    `shader`, `output`, `fixture`) in `node_kind_from_path` /
+    `is_node_directory`.
+  - `lpc-runtime/src/project/hooks.rs::ProjectHooks::get_changes`
+    returns `lpl_model::ProjectResponse`.
+  Any future `lpc-runtime` consumer (e.g. an `lpv-runtime`) transitively
+  inherits `lpl-model`. The "lpc is domain-agnostic spine" property is
+  not actually delivered. M3 must decide between (a) accepting this and
+  documenting it, or (b) abstracting it (probably a generic
+  `ProjectRuntime<H>` + associated `Response` type, or trait-objected
+  response).
+- **F-M2-2: `ProjectHooks` is process-wide global state.** To break
+  the otherwise-cyclic `lpc-runtime ↔ lpl-runtime` dep,
+  `lpc-runtime/src/project/hooks.rs` introduces a singleton
+  `static HOOKS: Mutex<Option<Arc<dyn ProjectHooks>>>`. Consumers must
+  call `lpl_runtime::install()` before using `ProjectRuntime` or get a
+  runtime error. This is the M5 cutover idea ("ProjectRuntime is
+  generic; legacy nodes plug in") landing in M2 as a stopgap. It works
+  (lp-server + lpc-runtime tests use it correctly) but it's a new
+  piece of design surface that wasn't in the M2 plan. M3 decides
+  whether this is the long-term shape or a transitional bridge.
+- **F-M2-3: Hardcoded legacy kind list in `loader.rs`.** Even after M3
+  decides on the artifact spine (M4), `node_kind_from_path` matches
+  literal suffix strings. The artifact-spec story should subsume this:
+  the class side answers "is this a node?" — the loader shouldn't
+  enumerate four hardcoded suffixes.
+
+### Note on the "108GB lp-cli" observation during M2 verification
+
+During a backgrounded `just test` run mid-C5, Activity Monitor showed
+an `lp-cli` process at 108GB resident memory. After fixing two
+lingering import bugs from the C1 split (`ProjectResponse` and
+`NodeState` paths in `lp-engine-client/tests/client_view.rs` and
+`lp-fw/fw-tests/src/lib.rs`), `just test` is reproducibly green and
+the spike does not recur. Most likely explanation is parallel-build
+pressure (cargo + filetests racing on disk + multiple linker
+instances) hitting macOS-reported memory accounting weirdly on a test
+binary linked against `lp-cli`. **No reproducer** as of the M2 close;
+flagged here to keep an eye on during M3 verification.
+
 ## M2 C4 done (out of order, via cargo-rename + agent)
 
 Experiment: validate that an agent using `cargo rename` can
