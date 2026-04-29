@@ -225,6 +225,156 @@ namespaces (`inputs`, `outputs`) return `None` from `get_named`. M4
 may add a marker-trait split (`NamedNamespace` / `IndexedNamespace`)
 if usage proves it pays.
 
+### §1.X — `tick` and time
+
+`tick` replaces `render` from the legacy `NodeRuntime` trait. The
+rename is not cosmetic: it reflects two design positions.
+
+**Position 1 — visual / non-visual is unified.** `render` carries a
+"draws pixels" connotation that doesn't fit half the planned node
+catalogue (Bus, Modulator, Fixture, Output, MIDI). `tick` is the
+neutral name for "advance this node by one engine step."
+
+**Position 2 — Lightplayer is not a real-time engine, and time is
+not a fundamental concept of the spine.**
+
+This is the load-bearing shift. Mainstream engines (Godot, Unity,
+Bevy) take `delta` because they assume game-loop semantics: a
+wall-clock-driven tick where each node integrates real elapsed time
+into its state. Lightplayer is closer to a modular synthesiser: a
+graph evaluated *per output frame*, where "time" is one signal among
+many on the bus, not a property of the engine.
+
+Concretely:
+
+- **`tick` takes no time argument.** Signature is
+  `fn tick(&mut self, ctx: &mut dyn TickContext) -> Result<(), Error>;`.
+- **Time is a bus signal**, not a tick parameter. The engine
+  publishes a `time` channel on the bus (e.g.
+  `engine/time_secs: f64`, `engine/delta_secs: f32`) — **a
+  default convention, not a hardcoded contract**. A node that needs
+  it (fluid sim, integrators, time-dependent oscillators) takes a
+  param bound to `engine/delta_secs` (or any other channel — LFO,
+  user-driven scrubber, frozen constant).
+- **This makes time composable.** Bind `delta_secs` to an LFO and
+  the fluid sim slows down. Bind it to zero and it freezes. Bind
+  it to a recorded automation track and you get scrubbing for free.
+  None of this requires special engine support — it's the bus doing
+  what it already does.
+- **Per-node time is a node-level decision.** Most nodes (Pattern,
+  Stack, Effect, Texture) don't need time — they're stateless or
+  state-from-inputs. The few that do (Fluid, Integrator, certain
+  oscillators) declare a `delta_secs: f32` param and bind it.
+- **Real-time scheduling lives outside the spine.** "Render at 60
+  FPS" is a `lp-server` policy: it advances the engine's `time`
+  channel and triggers a tick pass. Filetests advance time
+  manually. The spine doesn't know what time means.
+
+What `TickContext` *does* provide:
+
+- The `NodeTree` (read-only — the tick pass doesn't restructure).
+- The `Bus` (read inputs, publish outputs).
+- The `ArtifactManager` (rare — most nodes never need it during tick).
+- Output buffers / writeable slot views for this node.
+- The current `FrameId` (so a node can record "I last ticked at
+  frame N" for its own caching, *not* for "how much time has
+  passed").
+
+What `TickContext` does **not** provide:
+
+- `delta_ms` / `delta_secs`. If you want it, take a param.
+- `Instant::now()`. The engine's notion of time goes through the
+  bus.
+
+**Open question — escape hatch for tightly-coupled timing.** If a
+future node genuinely cannot tolerate going through the bus for
+delta (e.g., per-sample audio at 48kHz where round-tripping every
+sample through a `param` lookup is too slow), we'll add a typed
+`TickContext::engine_delta_secs()` accessor reading from the
+canonical channel without the `param` indirection. Not adding it
+now — premature optimisation, and the bus access cost should be
+near-zero for hot params.
+
+### §1.Y — Events
+
+Several spine concerns are clearly *event-shaped* — discrete things
+that happen between ticks and need to fan out to interested nodes:
+
+- **Artifact events** (§3): a `.glsl` / `.toml` got rewritten;
+  consumers need to re-parse + re-init.
+- **Memory pressure** (current `shed_optional_buffers`): the
+  allocator is starving; sheddable nodes should free what they can.
+- **Tree-structural events**: a child was added / removed /
+  re-parented (mainly internal — drives the sync layer).
+- **Frame boundaries**: post-tick / pre-tick hooks for nodes that
+  need them (rare; deferred until proven needed).
+
+This roadmap **introduces events as a first-class spine concept but
+keeps the catalogue minimal**:
+
+```rust
+pub enum NodeEvent<'a, A: Artifact> {
+    /// Artifact contents changed; node should re-derive whatever it
+    /// computed from the artifact (e.g., re-compile shader).
+    ArtifactReloaded { spec: &'a ArtifactSpec, art: &'a A },
+
+    /// Artifact disappeared from disk (placeholder mode).
+    ArtifactMissing  { spec: &'a ArtifactSpec },
+
+    /// Memory is tight; drop everything reconstructable. Node remains
+    /// alive; next tick reconstructs as needed. Eventually triggered
+    /// by an actual allocator probe; for now triggered before shader
+    /// recompile, matching today's behaviour.
+    MemoryPressure   { level: PressureLevel },
+}
+
+pub trait Node: NodeProperties + Send + Sync {
+    // ... lifecycle methods as above ...
+
+    /// Default impl returns Ok(()). Nodes opt in by overriding.
+    fn handle_event(&mut self, ev: NodeEvent<'_, dyn Artifact>,
+                    ctx: &mut dyn EventContext) -> Result<(), Error> {
+        let _ = (ev, ctx);
+        Ok(())
+    }
+}
+```
+
+**Decisions:**
+
+- **Single dispatch point on `Node`.** A `match` on the event enum
+  inside the impl, not a method-per-event. Keeps the trait surface
+  small and lets us add events without re-vtabling. Trade-off:
+  every event allocates a `match`, but events are rare relative to
+  ticks.
+- **Subscription is by *capability*, not by *registration*.** A
+  node opts in by overriding `handle_event`; the engine fans out
+  every event to every node that overrode it. M5 cheats: it iterates
+  the tree and calls everyone (cheap at our scale, ~hundreds of
+  nodes). M6 may add a routing index keyed by event variant if it
+  matters.
+- **Artifact events route by refcount.** When `ArtifactManager`
+  reloads spec X, only nodes holding an `ArtifactRef<_>` to X get
+  the event. Implementation: each `ArtifactRef` registers its
+  owning `NodeId` with the manager; reload iterates that list. This
+  is the *only* per-event routing optimisation in M5 — artifact
+  reload is the hot path.
+- **`shed_optional_buffers` becomes a `MemoryPressure` event in M6+.**
+  In M5 it stays as an explicit method, mirroring legacy. The
+  `MemoryPressure` variant is reserved in the enum so the API doesn't
+  bikeshed-churn when we cut over.
+- **`update_artifact` is not redundant with `ArtifactReloaded`.**
+  `update_artifact` is the lifecycle hook called once at init when
+  the node receives its initial `ArtifactRef`. `ArtifactReloaded`
+  is the *change* event after init. A node that does the same thing
+  in both can implement one and delegate from the other.
+
+**Open question — frame-boundary hooks.** Some plausible nodes
+(metrics, recorders, the legacy "scene graph clearer") want pre-tick
+or post-tick callbacks distinct from `tick`. Holding off until a
+real consumer asks for it. If we add them, they're events, not new
+trait methods.
+
 ## §2 — `NodeTree` container
 
 ```rust
@@ -370,21 +520,35 @@ pub struct ArtifactRef<A: Artifact> {
     `Rc<RefCell<ArtifactManager<D>>>`; `Drop::drop` borrows it
     mutably and evicts.
 - **Hot reload: replace content, keep handle** (prior-art §3, F-3).
-  fs-watch detects modify; `ArtifactManager::reload(spec)` replaces
-  the `Arc<A>` content (or, if interior-mutability cost is too high,
-  swaps the whole `Arc<A>` and bumps a `version` on the `Entry`;
-  consumers re-read on `version` change). Existing nodes hold
-  `Arc<A>`s — they keep working until they observe the change event.
+  fs-watch detects modify; `ArtifactManager::reload(spec)` swaps
+  the `Arc<A>` content and bumps a `version` on the `Entry`. Holding
+  nodes' `ArtifactRef`s remain valid pointers; they observe the
+  change via the dispatched event (below).
+- **Reload dispatches `NodeEvent::ArtifactReloaded`** (§1.Y). Each
+  `ArtifactRef` registers its owning `NodeId` with the manager at
+  construction. On `reload(spec)`, the manager iterates only those
+  registered ids and calls `Node::handle_event` on each — no fan-out
+  to nodes that don't hold the spec. Unaffected nodes pay nothing.
+  - This is what supersedes the legacy `Node::handle_fs_change`
+    plumbing. The runtime no longer pushes raw `FsChange` records
+    into nodes; instead, `ArtifactManager` is the *only* consumer
+    of fs-watch for `.toml` / `.glsl` / `.frag` / `.vert` files,
+    and it emits `ArtifactReloaded` / `ArtifactMissing` to nodes
+    that asked for the spec.
+  - Files that aren't artifacts (project metadata, etc.) stay on
+    the runtime's existing fs-change dispatch — they don't go
+    through the artifact manager.
 - **`Placeholder` for missing artifact** (prior-art §9, LX). When
   `ArtifactManager::load(spec)` fails:
   1. Entry created with `placeholder: Some(toml_blob)`,
      `artifact: None`-equivalent.
   2. `Node::init` returns `Err(InitError::MissingArtifact { spec })`.
-  3. NodeEntry status becomes `InitError(spec)`.
+  3. `NodeEntry` status becomes `InitError(spec)`.
   4. Re-saving a project round-trips the placeholder TOML untouched.
   5. fs-watch detecting the artifact reappearing triggers
      `ArtifactManager::reload(spec)`, which promotes the placeholder
-     to a real load and notifies the affected NodeEntry to re-init.
+     to a real load and dispatches `ArtifactReloaded` to the
+     waiting nodes (each may transition out of `InitError`).
 - **Refcount eviction is *immediate*** (Godot `Ref<T>`). No deferred
   GC, no end-of-frame sweep. Node destroy → `ArtifactRef::drop` →
   refcount-zero → evict. Predictable embedded behaviour.
@@ -451,36 +615,42 @@ versus node-side.
      `NodeTree::init_subtree`. On `Err`, status → `InitError(...)`,
      Node is dropped, NodeEntry retained as a placeholder for hot
      re-init.
-  2. `Node::render` may be called many times after a successful
+  2. `Node::tick` may be called many times after a successful
      `init`, never before. On `Err`, status → `Error(...)`. Next
-     render attempt only happens after status returns to `Ok`
-     (config update, fs change resolution, etc.).
+     tick attempt only happens after status returns to `Ok`
+     (config update, artifact reload, etc.).
   3. `Node::destroy` is called once when the entry is removed.
      Cannot fail meaningfully — log on error, continue tear-down.
   4. `Node::update_config` may transition `Ok ↔ Warn ↔ Error` or
      trigger re-init. Implementation chooses; tree records the new
      status.
-  5. `Node::handle_fs_change` is for non-config files (e.g.,
-     `*.glsl` for shaders). Same status transitions as
-     `update_config`.
-  6. `Node::shed_optional_buffers` is idempotent and side-effect-
-     free except for memory release. Status unchanged.
-- **Panic recovery:** All five hooks except `destroy` and
+  5. `Node::update_artifact` is the lifecycle hook fired once after
+     `init` to bind the node's `ArtifactRef`. Same status
+     transitions as `update_config`.
+  6. `Node::handle_event` (§1.Y) is the dispatch path for runtime
+     changes: `ArtifactReloaded`, `ArtifactMissing`,
+     `MemoryPressure`. Status transitions as for `update_config`.
+  7. `Node::shed_optional_buffers` is idempotent and side-effect-
+     free except for memory release. Status unchanged. (Reserved
+     for replacement by a `MemoryPressure` event in M6+; see §1.Y.)
+- **Panic recovery:** All hooks except `destroy` and
   `shed_optional_buffers` are wrapped in
   `panic_node::catch_node_panic`. A panic surfaces as
   `Err(NodePanicked { ... })`, which the tree treats as
   `Error(panic_msg)`. (F-1.)
-- **Frame increment:** Done by `ProjectRuntime::tick(delta_ms)`
-  *before* dispatching renders. `frame_id` is monotonic, never
-  decreases. Per-FrameId mapping to wall-clock time lives in
-  `FrameTime` (existing).
-- **Render order:** Lazy demand-driven (existing lp-engine
+- **Frame increment:** Done by `ProjectRuntime::tick()` *before*
+  dispatching the per-node tick pass. `frame_id` is monotonic,
+  never decreases. Wall-clock time (when relevant) flows through
+  the bus's `engine/time_secs` channel — see §1.X. The legacy
+  `FrameTime` mapping continues to back this channel for the
+  legacy domain.
+- **Tick order:** Lazy demand-driven (existing lp-engine
   `ensure_texture_rendered`). Outputs declare what they need;
   textures and shaders evaluate on demand. **Subtle**: this
   doesn't fit "post-order tree traversal" cleanly — a Texture
-  might *not* be rendered if no Output asks for it. Decision:
+  might *not* be ticked if no Output asks for it. Decision:
   the spine doesn't impose an order; `ProjectRuntime::tick`
-  delegates render-order to `D::tick` via a domain hook (legacy
+  delegates tick-order to `D::tick` via a domain hook (legacy
   domain keeps lp-engine's lazy traversal; future domains can
   pick post-order or different).
 
@@ -631,10 +801,10 @@ without changing `Node`.
 |-------------------------------------------|------------------------------------|
 | `TextureConfig { width, height, format }` | `params: { width, height, format }` |
 | `TextureRuntime` owns `LpTexture`         | `state: { texture_handle }`         |
-| Re-render on demand (lazy)                | `outputs[0]: Slot<Kind::TextureRgba8>`; `D::tick` calls render lazily |
-| Renders into its own buffer               | impl `render`; output slot exposes the buffer |
+| Re-render on demand (lazy)                | `outputs[0]: Slot<Kind::TextureRgba8>`; `D::tick` calls tick lazily |
+| Renders into its own buffer               | impl `tick`; output slot exposes the buffer |
 | Reload on `node.json` change              | `update_config`                     |
-| No fs-change handler                      | `handle_fs_change` returns `Ok(())` |
+| No artifact-event handler                 | `handle_event` returns `Ok(())` (default impl) |
 | No children                               | `inputs: []`                        |
 
 **Maps cleanly.** No trait change needed.
@@ -644,9 +814,9 @@ without changing `Node`.
 | Behaviour today                                    | New shape                                                                |
 |----------------------------------------------------|--------------------------------------------------------------------------|
 | `ShaderConfig { glsl_path, target_textures, ... }` | `params: { glsl_path, target_textures }`                                  |
-| Reads `main.glsl`                                  | `handle_fs_change` watches `*.glsl`                                       |
-| Compiles GLSL → LPVM → native                       | `init` (or first `render` on lazy)                                        |
-| `shed_optional_buffers` drops compiled output      | `shed_optional_buffers`                                                   |
+| Reads `main.glsl`                                  | `update_artifact` (initial) + `handle_event(ArtifactReloaded)` (hot reload) |
+| Compiles GLSL → LPVM → native                       | `init` (or first `tick` on lazy)                                          |
+| `shed_optional_buffers` drops compiled output      | `shed_optional_buffers` (M5) → `handle_event(MemoryPressure)` (M6+)       |
 | Renders into target textures                       | `inputs: [target_texture_refs]` (param-promoted? structural? — see below) |
 | Frame-time logging via `time_provider`             | Stays; lives on `ProjectRuntime`, not `Node`                              |
 
@@ -669,7 +839,7 @@ roadmap's full bus story.
 | `init` opens the channel                 | `init`                                                                           |
 | `destroy` closes the channel             | `destroy`                                                                        |
 | Receives buffer from a Fixture           | `inputs[0]: Slot<Kind::TextureRgba8 | Kind::TextureWs2811>` — bus-bound from the Fixture |
-| No `render` (drains the buffer)          | `render` flushes the input buffer to hardware                                    |
+| No `render` (drains the buffer)          | `tick` flushes the input buffer to hardware                                      |
 
 **Maps cleanly.** Output is "leaf node, has inputs, no outputs."
 
@@ -679,8 +849,8 @@ roadmap's full bus story.
 |--------------------------------------------------------|------------------------------------------------------------------------------------------|
 | `FixtureConfig { mapping, gamma, output_ref, texture_ref }` | `params: { mapping, gamma }`; `inputs[0]: texture (bus)`; `inputs[1]: output (bus)` |
 | `FixtureRuntime` owns `Mapping` data                   | `state: { mapping }`                                                                     |
-| Samples the texture, writes to the output buffer       | `render`                                                                                 |
-| `handle_fs_change` for `mapping.json`                  | `handle_fs_change`                                                                       |
+| Samples the texture, writes to the output buffer       | `tick`                                                                                   |
+| `handle_fs_change` for `mapping.json`                  | `update_artifact` + `handle_event(ArtifactReloaded)` (mapping is an artifact)            |
 
 **Maps cleanly.**
 
