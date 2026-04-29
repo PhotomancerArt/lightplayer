@@ -766,8 +766,11 @@ and **param-promoted** children (a `Pattern` filling a
 Per F-1 + prior-art §5: **no external prior art**. We design from
 lp-engine's existing implementation, polishing the seams.
 
-### Decisions
+### Server side
 
+- **`NodeTree` lives only on the server.** It owns the live nodes,
+  the `ArtifactManager`, the bus. The client never has a `NodeTree`
+  — it has a *mirror* (below).
 - **`get_changes(since: FrameId, spec: &ApiNodeSpecifier,
   theoretical_fps: Option<f32>) -> Result<D::Response, Error>`.**
   Domain-parametric. Returns the domain-specific response payload.
@@ -788,6 +791,95 @@ lp-engine's existing implementation, polishing the seams.
 - **No protocol-level versioning beyond what's there today.**
   Future protocol bumps go through the existing `Message<R>`
   enumeration.
+
+### Client side — `ClientNodeTree`
+
+The editor needs a tree view. That means the client must hold a
+*synchronised mirror* of the server's `NodeTree`, kept current by
+the same `since_frame` poll mechanism. M2 already has the bones
+(`lp-engine-client::ClientProjectView`); M5 evolves it into a real
+mirror.
+
+- **`ClientNodeTree`** lives in `lpc-runtime` (host-only, behind a
+  `client` feature). It is **not** a re-parented copy of `NodeTree`
+  — it does not own `Box<dyn Node>` and has no slot values. It is a
+  read-only view of "what nodes exist, their paths, statuses,
+  versioned config blobs, and tree structure."
+
+  ```rust
+  pub struct ClientNodeTree {
+      nodes:     Vec<Option<ClientNodeEntry>>,    // by NodeId.0
+      by_path:   HashMap<NodePath, NodeId>,
+      root:      NodeId,
+      last_seen: FrameId,                          // "we are caught up to this"
+  }
+
+  pub struct ClientNodeEntry {
+      pub id:       NodeId,
+      pub path:     NodePath,
+      pub parent:   Option<NodeId>,
+      pub children: Vec<NodeId>,
+      pub status:       NodeStatus,
+      pub status_ver:   FrameId,
+      pub config_ver:   FrameId,
+      pub state_ver:    FrameId,
+
+      /// Authored config snapshot — what the user is editing.
+      /// Domain-typed; the client is parameterised over D::ConfigView.
+      pub config_view: D::ConfigView,
+  }
+  ```
+
+- **Sync protocol:** standard `since_frame` pull.
+  1. Client polls `get_changes(last_seen, spec)`.
+  2. Server returns `D::Response` containing
+     `(added, modified, removed)` keyed by `NodeId` plus the new
+     `last_seen`.
+  3. Client applies the diff to its `ClientNodeTree` and bumps
+     `last_seen`.
+  4. UI redraws affected entries (status colour, config diff,
+     etc.).
+
+- **Tree structural events** (`add_child`, `remove_child`,
+  `re-parent` if/when supported) are encoded in the response as
+  explicit `ChildrenChanged { id, children: Vec<NodeId> }`
+  records, not implicit from `children` field diffing — keeps the
+  client robust to ordering changes.
+
+- **Config view payload (`D::ConfigView`)** is per-domain. Legacy
+  domain ships the full `lpl_model::NodeConfig` enum (which
+  matches the on-disk TOML 1:1). A future visual domain might ship
+  a richer `lpv_model::NodeConfigView` that already resolves slot
+  bindings to displayable form. The spine doesn't decide the
+  shape; it only carries the bytes.
+
+- **Selective subscription via `ApiNodeSpecifier`.** Clients ask
+  for full detail on a focused subtree (the editor's "open node")
+  and minimal detail (just status + path) on the rest. The
+  response shape encodes both tiers; the dirty-set walk on the
+  server respects it.
+
+- **Reconciliation on reconnect.** If `last_seen` is older than
+  the server's oldest preserved frame, the server returns a full
+  snapshot (treated as "every node added"). This is the existing
+  behaviour and survives unchanged.
+
+- **What the client does NOT mirror:**
+  - Slot *runtime values* (live texture buffers, output channel
+    state) — ephemeral, costs too much over the wire, and the UI
+    doesn't currently render them. If a UI surface needs a live
+    preview, it asks via a separate streamed channel (out of M5
+    scope).
+  - The `ArtifactManager` cache — the client doesn't run nodes,
+    so it doesn't need parsed artifacts. It does mirror the
+    *artifact specs* nodes reference (so the editor can show
+    `gradient = ./fluid.pattern.toml`).
+
+- **Editor commands ride the existing request channel** (M2's
+  `Message<R>` set: `set_property`, `add_node`, `remove_node`,
+  etc.). They do not mutate `ClientNodeTree` directly; the next
+  `get_changes` reply does. This keeps the server as single source
+  of truth.
 
 ## §9 — Legacy node mapping
 
