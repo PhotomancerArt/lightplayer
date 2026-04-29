@@ -110,6 +110,7 @@ fn walk_and_materialize<T: Artifact>(artifact: &T, ctx: &mut LoadCtx) {
 mod tests {
     use super::*;
     use crate::path::LpPathBuf;
+    use alloc::string::{String, ToString};
 
     /// Minimal deserialize target for loader tests (visual `Pattern` lives in `lpv-model`).
     #[derive(Debug, serde::Deserialize)]

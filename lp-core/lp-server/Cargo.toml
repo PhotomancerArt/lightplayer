@@ -9,16 +9,19 @@ rust-version.workspace = true
 [features]
 default = ["std"]
 # Panic recovery via catch_unwind (shader compilation, node render)
-panic-recovery = ["lp-engine/panic-recovery"]
+panic-recovery = ["lpc-runtime/panic-recovery", "lpl-runtime/panic-recovery"]
 std = [
 	"lp-shared/std",
-	"lp-engine/std",
+	"lpc-runtime/std",
+	"lpl-runtime/std",
+	"lpl-model/std",
 	"lpfs/std",
 	"log/std"
 ]
 
 [dependencies]
-lp-engine = { path = "../lp-engine", default-features = false }
+lpc-runtime = { path = "../lpc-runtime", default-features = false }
+lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
@@ -27,7 +30,8 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 [dev-dependencies]
-lp-engine = { path = "../lp-engine", default-features = false, features = ["std"] }
+lpc-runtime = { path = "../lpc-runtime", default-features = false, features = ["std"] }
+lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false, features = ["std"] }
 lp-engine-client = { path = "../lp-engine-client", default-features = false, features = ["std"] }
 lp-shared = { path = "../lp-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }

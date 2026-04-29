@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["toml/std", "lps-shared/std"]
+std = ["toml/std", "toml/preserve_order", "lps-shared/std"]
 # JSON Schema for model types (host-side tooling)
 schema-gen = ["std", "dep:schemars", "lps-shared/schemars"]
 # Experimental: ser-write-json for streaming serialization (ESP32)
@@ -22,13 +22,13 @@ lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde-json-core = { version = "0.6", default-features = false, features = ["custom-error-messages"] }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
-toml = { workspace = true, features = ["display", "preserve_order"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3"
-toml = { workspace = true, features = ["display", "preserve_order"] }
+toml = { workspace = true, features = ["display"] }
 
 [lints]
 workspace = true

@@ -9,10 +9,10 @@ use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
 use log;
-use lp_engine::LpGraphics;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
 use lpc_model::{LpPath, LpPathBuf};
+use lpc_runtime::LpGraphics;
 use lpfs::{FsChange, LpFs};
 use lpl_model::{LegacyMessage, LegacyServerMessage};
 
@@ -64,7 +64,7 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let graphics = Arc::new(lp_engine::Graphics::new());
+    /// let graphics = Arc::new(lpc_runtime::Graphics::new());
     /// let server = LpServer::new(
     ///     output_provider,
     ///     base_fs,
@@ -123,7 +123,7 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsMemory::new());
-    /// let graphics = Arc::new(lp_engine::Graphics::new());
+    /// let graphics = Arc::new(lpc_runtime::Graphics::new());
     /// let mut server = LpServer::new(
     ///     output_provider,
     ///     base_fs,

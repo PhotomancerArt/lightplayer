@@ -1,0 +1,24 @@
+[package]
+name = "lpl-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std"]
+std = ["lpc-model/std"]
+ser-write-json = ["lpc-model/ser-write-json"]
+
+[dependencies]
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+hashbrown = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde-json-core = { version = "0.6", default-features = false, features = ["custom-error-messages"] }
+base64 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

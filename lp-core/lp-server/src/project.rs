@@ -5,10 +5,10 @@ extern crate alloc;
 use crate::error::ServerError;
 use alloc::{format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lp_engine::{LpGraphics, MemoryStatsFn, ProjectRuntime};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
 use lpc_model::{LpPath, LpPathBuf};
+use lpc_runtime::{LpGraphics, MemoryStatsFn, ProjectRuntime};
 use lpfs::{FsVersion, LpFs};
 
 /// A project instance wrapping a ProjectRuntime
@@ -37,6 +37,7 @@ impl Project {
         time_provider: Option<Rc<dyn TimeProvider>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, ServerError> {
+        lpl_runtime::install();
         let runtime =
             ProjectRuntime::new(fs, output_provider, memory_stats, time_provider, graphics)
                 .map_err(|e| ServerError::Core(format!("{e}")))?;

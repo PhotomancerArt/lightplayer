@@ -5,7 +5,7 @@ members = [
     "lp-base/lpfs",
     "lp-vis/lpv-model",
     # lp-app workspace members
-    "lp-core/lp-engine",
+    "lp-core/lpc-runtime",
     "lp-core/lp-engine-client",
     "lp-core/lp-shared",
     "lp-core/lp-server",
@@ -17,6 +17,7 @@ members = [
     "lp-fw/fw-tests",
     "lp-core/lpc-model",
     "lp-legacy/lpl-model",
+    "lp-legacy/lpl-runtime",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -57,7 +58,7 @@ default-members = [
     "lp-base/lpfs",
     "lp-vis/lpv-model",
     # lp-app workspace members
-    "lp-core/lp-engine",
+    "lp-core/lpc-runtime",
     "lp-core/lp-engine-client",
     "lp-core/lp-shared",
     "lp-core/lp-server",
@@ -67,6 +68,7 @@ default-members = [
     "lp-cli",
     "lp-core/lpc-model",
     "lp-legacy/lpl-model",
+    "lp-legacy/lpl-runtime",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -189,7 +191,7 @@ debug = 1
 
 # Hot-path crates: optimize for speed instead of size
 # These crates are in the critical rendering path and benefit from speed optimizations
-[profile.release.package.lp-engine]
+[profile.release.package.lpc-runtime]
 # Optimize for speed (hot path in rendering loop)
 opt-level = 3
 # Keep multiple codegen units for faster compilation and better parallelization

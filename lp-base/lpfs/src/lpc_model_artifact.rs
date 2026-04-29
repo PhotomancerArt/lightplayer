@@ -1,14 +1,25 @@
 //! [`lpc_model::ArtifactReadRoot`] for [`crate::LpFs`] implementations.
 
-use crate::LpFs;
 use crate::error::FsError;
-use lpc_model::ArtifactReadRoot;
+use crate::{LpFs, LpFsMemory, LpFsView};
 use lpc_model::path::LpPath;
+use lpc_model::ArtifactReadRoot;
 
-impl<T: LpFs + ?Sized> ArtifactReadRoot for T {
-    type Err = FsError;
+macro_rules! impl_artifact_read_root {
+    ($t:ty) => {
+        impl ArtifactReadRoot for $t {
+            type Err = FsError;
 
-    fn read_file(&self, path: &LpPath) -> Result<alloc::vec::Vec<u8>, FsError> {
-        LpFs::read_file(self, path)
-    }
+            fn read_file(&self, path: &LpPath) -> Result<alloc::vec::Vec<u8>, FsError> {
+                LpFs::read_file(self, path)
+            }
+        }
+    };
 }
+
+impl_artifact_read_root!(LpFsMemory);
+impl_artifact_read_root!(LpFsView);
+impl_artifact_read_root!(dyn LpFs);
+
+#[cfg(feature = "std")]
+impl_artifact_read_root!(crate::LpFsStd);

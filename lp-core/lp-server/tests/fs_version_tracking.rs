@@ -3,9 +3,9 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_engine::MemoryOutputProvider;
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lpc_model::{AsLpPath, AsLpPathBuf};
+use lpc_runtime::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
 #[test]

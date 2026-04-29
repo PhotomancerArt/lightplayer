@@ -7,13 +7,13 @@ use crate::project_manager::ProjectManager;
 use crate::server::MemoryStatsFn;
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
-use lp_engine::LpGraphics;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
 use lpc_model::{
     AsLpPath, ClientMessage, LpPath, LpPathBuf,
     server::{AvailableProject, FsRequest, FsResponse},
 };
+use lpc_runtime::LpGraphics;
 use lpfs::LpFs;
 use lpl_model::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 

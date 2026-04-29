@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn lookup_static_symbol_is_demangled_and_shortened() {
-        // v0-mangled `<lp_engine::...::FixtureRuntime as lp_engine::...::NodeRuntime>::render`
+        // v0-mangled (symbol still encodes legacy crate `lp_engine`): FixtureRuntime in lpl_runtime, NodeRuntime in lpc_runtime
         let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
         let s = for_test(vec![sym(0x1000, 0x10, mangled)], vec![]);
         assert_eq!(s.lookup(0x1000).as_ref(), "FixtureRuntime::render");

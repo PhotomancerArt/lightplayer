@@ -4005,33 +4005,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-engine"
-version = "40.0.0"
-dependencies = [
- "env_logger 0.11.9",
- "hashbrown 0.15.5",
- "libm",
- "log",
- "lp-engine-client",
- "lp-perf",
- "lp-shader",
- "lp-shared",
- "lpc-model",
- "lpfs",
- "lpir",
- "lpl-model",
- "lps-builtins",
- "lps-frontend",
- "lps-q32",
- "lps-shared",
- "lpvm",
- "lpvm-native",
- "lpvm-wasm",
- "serde",
- "unwinding",
-]
-
-[[package]]
 name = "lp-engine-client"
 version = "40.0.0"
 dependencies = [
@@ -4124,12 +4097,13 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
- "lp-engine",
  "lp-engine-client",
  "lp-shared",
  "lpc-model",
+ "lpc-runtime",
  "lpfs",
  "lpl-model",
+ "lpl-runtime",
 ]
 
 [[package]]
@@ -4162,10 +4136,43 @@ version = "40.0.0"
 dependencies = [
  "base64",
  "hashbrown 0.15.5",
+ "lps-shared",
+ "schemars",
  "ser-write-json",
  "serde",
  "serde-json-core",
+ "serde_json",
  "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "lpc-runtime"
+version = "40.0.0"
+dependencies = [
+ "env_logger 0.11.9",
+ "hashbrown 0.15.5",
+ "libm",
+ "log",
+ "lp-engine-client",
+ "lp-perf",
+ "lp-shader",
+ "lp-shared",
+ "lpc-model",
+ "lpfs",
+ "lpir",
+ "lpl-model",
+ "lpl-runtime",
+ "lps-builtins",
+ "lps-frontend",
+ "lps-q32",
+ "lps-shared",
+ "lpvm",
+ "lpvm-native",
+ "lpvm-wasm",
+ "serde",
+ "spin",
+ "unwinding",
 ]
 
 [[package]]
@@ -4229,6 +4236,32 @@ dependencies = [
  "serde",
  "serde-json-core",
  "tempfile",
+]
+
+[[package]]
+name = "lpl-runtime"
+version = "40.0.0"
+dependencies = [
+ "hashbrown 0.15.5",
+ "libm",
+ "log",
+ "lp-perf",
+ "lp-shader",
+ "lp-shared",
+ "lpc-model",
+ "lpc-runtime",
+ "lpfs",
+ "lpir",
+ "lpl-model",
+ "lps-builtins",
+ "lps-frontend",
+ "lps-q32",
+ "lps-shared",
+ "lpvm",
+ "lpvm-native",
+ "lpvm-wasm",
+ "serde",
+ "unwinding",
 ]
 
 [[package]]

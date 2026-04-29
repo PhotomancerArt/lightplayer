@@ -14,11 +14,11 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lp_engine::{LpGraphics, MemoryStatsFn};
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
 use lpc_model::project::ProjectHandle;
 use lpc_model::{LpPath, LpPathBuf};
+use lpc_runtime::{LpGraphics, MemoryStatsFn};
 use lpfs::LpFs;
 
 /// Manages multiple project instances
