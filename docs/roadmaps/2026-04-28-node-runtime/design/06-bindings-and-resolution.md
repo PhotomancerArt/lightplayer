@@ -14,21 +14,29 @@ pub enum Binding {
     /// Read or write the named bus channel.
     Bus(ChannelName),                  // bind = { bus = "audio/in/0/level" }
 
-    /// Inline literal value.  Type must match the slot's kind.
-    Literal(LpsValue),                 // bind = { literal = 0.7 }
+    /// Inline literal value or texture recipe. Type must match the slot's kind.
+    /// Wire form uses `ValueSpec` (not `LpsValue`) because `LpsValue::Texture2D`
+    /// carries a runtime handle that's not portable across the wire. `ValueSpec`
+    /// is the portable recipe that the loader materializes into a handle.
+    Literal(ValueSpec),                // bind = { literal = 0.7 }
 
     /// Read another node's output slot.
-    NodeProp(NodePropRef),             // bind = { node = { node = "...", prop = "outputs[0]" } }
+    NodeProp(NodePropSpec),            // bind = { node = { node = "...", prop = "outputs[0]" } }
 }
 
+/// Note: the implementation reuses the existing `NodePropSpec` type (defined in
+/// `lpc-model::node::node_prop_spec`) rather than introducing a new `NodePropRef`.
+/// Both have the same shape: `{ node: TreePath, prop: PropPath }`.
 #[derive(Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct NodePropRef {
-    pub node: NodePath,                // absolute path; relative addressing
+pub struct NodePropSpec {
+    pub node: TreePath,                // absolute path; relative addressing
                                        // is a future binding-resolver feature.
     pub prop: PropPath,                // "outputs[0]" or "outputs[0].rgb" etc.
 }
 ```
+
+> **Implementation note:** `Binding::Literal(ValueSpec)` rather than `Binding::Literal(LpsValue)` is **wire-boundary-by-design**, not M2 expedience. `LpsValue` is the GLSL-runtime value type (carrying GPU handles); `ValueSpec` is the portable, serializable recipe. The deeper crate split introducing a focused `WireValue` enum is captured as M4.3a (see [`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md)).
 
 Three variants. Three is enough.
 
@@ -208,6 +216,12 @@ namespace must be `outputs` or `state` (see [05](05-slots-and-props.md)).
 Targeting `params` or `inputs` is rejected during config-load —
 they're sink-side (consumed). State is introspectable but not
 bindable; M5 also rejects state targets.
+
+> M4.3's config-load enforces this in one line using
+> `NodePropSpec::target_namespace()` (shipped in M4.2). The helper
+> projects any `PropPath` to `Option<PropNamespace>` —
+> `Params | Inputs | Outputs | State` — so the loader can assert
+> `target_namespace() == Some(Outputs)` (or later, allow `State`).
 
 (O-2 resolved: outputs only for now. May relax to state later if a
 real use case arrives.)

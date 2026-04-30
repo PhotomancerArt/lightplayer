@@ -11,19 +11,23 @@
 
 extern crate alloc;
 
+pub mod bus;
 pub mod error;
 pub mod gfx;
 pub mod nodes;
 pub mod output;
 pub mod panic_node;
 pub mod project;
+pub mod resolver;
 pub mod runtime;
 pub mod tree;
 
+pub use bus::{Bus, BusError, ChannelEntry};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use nodes::NodeRuntime;
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project::{MemoryStatsFn, ProjectRuntime};
+pub use resolver::{BindingKind, ResolveSource, ResolvedSlot, ResolverCache};
 pub use runtime::{NodeInitContext, RenderContext};
 pub use tree::{EntryState, NodeEntry, NodeTree, TreeError, tree_deltas_since};

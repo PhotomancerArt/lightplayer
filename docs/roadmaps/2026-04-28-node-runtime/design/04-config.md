@@ -87,15 +87,22 @@ Quick recap (full design in [06](06-bindings-and-resolution.md)):
 ```rust
 pub enum Binding {
     Bus(ChannelName),                  // bus = "audio/in/0/level"
-    Literal(LpsValue),                 // literal = 0.7   (or shorthand)
-    NodeProp(NodePropRef),             // node = { node = "...", prop = "..." }
+    Literal(ValueSpec),                // literal = 0.7   (or shorthand)
+    NodeProp(NodePropSpec),            // node = { node = "...", prop = "..." }
 }
 
-pub struct NodePropRef {
-    pub node: NodePath,                // absolute or relative
+pub struct NodePropSpec {
+    pub node: TreePath,                // absolute or relative
     pub prop: PropPath,                // "outputs[0]" etc.
 }
 ```
+
+> **Implementation note:** `Binding::Literal(ValueSpec)` is the
+> wire-boundary-by-design form — `ValueSpec` is portable across the
+> wire, while `LpsValue` carries runtime handles. The `NodePropSpec`
+> type (same shape as aspirational `NodePropRef`) gains a
+> `target_namespace()` helper in M4.2 so M4.3 config-load can enforce
+> the "only outputs (not params/inputs)" policy in one line.
 
 What an override does:
 

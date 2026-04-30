@@ -86,7 +86,7 @@ impl<N> NodeEntry<N> {
 mod tests {
     use super::NodeEntry;
     use lpc_model::project::api::NodeStatus;
-    use lpc_model::{ChildKind, FrameId, NodeId, NodeName, SlotIdx, TreePath};
+    use lpc_model::{ChildKind, FrameId, NodeId, SlotIdx, TreePath};
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {

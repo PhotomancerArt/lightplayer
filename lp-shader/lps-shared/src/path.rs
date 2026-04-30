@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 /// One step in a value path (`obj.things[2].prop`)
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum LpsPathSeg {
     Field(String),

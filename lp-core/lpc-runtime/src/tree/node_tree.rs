@@ -211,7 +211,6 @@ impl<N> NodeTree<N> {
 mod tests {
     use super::NodeTree;
     use alloc::vec::Vec;
-    use lpc_model::project::api::NodeStatus;
     use lpc_model::{ChildKind, FrameId, NodeId, NodeName, SlotIdx, TreePath};
 
     fn make_tree() -> NodeTree<()> {

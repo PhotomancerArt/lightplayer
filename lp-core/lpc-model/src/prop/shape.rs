@@ -283,6 +283,11 @@ impl Slot {
                 Binding::Bus(ch) => {
                     t.insert("bus".into(), toml::Value::String(ch.0.clone()));
                 }
+                Binding::Literal(_) | Binding::NodeProp(_) => {
+                    return Err(FromTomlError(String::from(
+                        "Literal and NodeProp bindings are runtime-only, not valid in artifact TOML",
+                    )));
+                }
             }
             table.insert("bind".into(), toml::Value::Table(t));
         }

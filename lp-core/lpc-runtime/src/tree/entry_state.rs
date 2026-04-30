@@ -37,7 +37,6 @@ impl<N> EntryState<N> {
 }
 
 /// Convert server-side `EntryState<N>` to wire-side `EntryStateView`.
-#[cfg(feature = "std")]
 impl<N> From<&EntryState<N>> for lpc_model::EntryStateView {
     fn from(state: &EntryState<N>) -> Self {
         match state {

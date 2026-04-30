@@ -16,17 +16,31 @@
 //! sibling keys (`bind = { constant = ... }`, etc.); the on-disk grammar
 //! stays a flat key-mutex on the `bind` table.
 
+use crate::ValueSpec;
 use crate::bus::ChannelName;
+use crate::node::node_prop_spec::NodePropSpec;
 
-/// A **connection** from a slot to a bus channel. v0 has a single variant.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// A **connection** from a slot to a data source.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Binding {
-    /// Read or write (per container context) the named channel. Convention:
+    /// Read or write the named bus channel. Convention:
     /// names like `time`, `video/in/0`, `audio/in/0/level` — see
     /// `docs/design/lightplayer/quantity.md` §8 and §11 (channel naming).
+    /// Wire form: `{ "bus": "audio/in/0/level" }`.
     Bus(ChannelName),
+
+    /// Inline literal value or texture spec.
+    /// Wire form: `{ "literal": { "kind": "literal", "value": 0.7 } }`.
+    /// Authoring shorthand (`scale = 6.0`) is a TOML-loader concern (M4.3).
+    Literal(ValueSpec),
+
+    /// Read another node's output slot.
+    /// Wire form: `{ "node": { "node": "/path", "prop": "outputs[0]" } }`.
+    /// Per-variant rename so the wire key is `node`, not `node_prop`.
+    #[serde(rename = "node")]
+    NodeProp(NodePropSpec),
 }
 
 /// **Compose-time** lookup for "what [`Kind`](crate::prop::kind::Kind) does this
@@ -65,6 +79,70 @@ mod tests {
         let b: Binding = serde_json::from_str(r#"{"bus":"video/in/0"}"#).unwrap();
         match b {
             Binding::Bus(ChannelName(s)) => assert_eq!(s, "video/in/0"),
+            _ => panic!("expected Bus variant"),
         }
+    }
+
+    #[test]
+    fn literal_binding_serde_round_trips() {
+        use crate::LpsValue;
+        let b = Binding::Literal(ValueSpec::Literal(LpsValue::F32(0.7)));
+        let json = serde_json::to_string(&b).unwrap();
+        let back: Binding = serde_json::from_str(&json).unwrap();
+        assert_eq!(b, back);
+    }
+
+    #[test]
+    fn literal_binding_json_form_is_nested() {
+        use crate::LpsValue;
+        let b = Binding::Literal(ValueSpec::Literal(LpsValue::F32(0.7)));
+        let json = serde_json::to_string(&b).unwrap();
+        assert_eq!(
+            json,
+            r#"{"literal":{"kind":"literal","value":{"f32":0.7}}}"#
+        );
+    }
+
+    #[test]
+    fn literal_binding_toml_round_trips() {
+        use crate::LpsValue;
+        let b = Binding::Literal(ValueSpec::Literal(LpsValue::F32(1.5)));
+        let toml_str = toml::to_string(&b).unwrap();
+        let back: Binding = toml::from_str(&toml_str).unwrap();
+        assert_eq!(b, back);
+    }
+
+    #[test]
+    fn node_prop_binding_serde_round_trips() {
+        let spec = NodePropSpec::parse("/main.show/fluid.vis#speed").unwrap();
+        let b = Binding::NodeProp(spec);
+        let json = serde_json::to_string(&b).unwrap();
+        let back: Binding = serde_json::from_str(&json).unwrap();
+        assert_eq!(b, back);
+    }
+
+    #[test]
+    fn node_prop_binding_uses_node_key_on_wire() {
+        // NodePropSpec requires name.type format
+        let spec = NodePropSpec::parse("/main.show#outputs[0]").unwrap();
+        let b = Binding::NodeProp(spec);
+        let json = serde_json::to_string(&b).unwrap();
+        // Verify the variant serializes with "node" key (not "node_prop")
+        assert!(
+            json.contains(r#""node":"#),
+            "wire key should be 'node', not 'node_prop'"
+        );
+        // TreePath serializes as array of segments, not a string
+        assert!(json.contains(r#""node":"#));
+        assert!(json.contains(r#""prop":"#));
+    }
+
+    #[test]
+    fn node_prop_binding_toml_round_trips() {
+        let spec = NodePropSpec::parse("/x.y#a.b[0]").unwrap();
+        let b = Binding::NodeProp(spec);
+        let toml_str = toml::to_string(&b).unwrap();
+        let back: Binding = toml::from_str(&toml_str).unwrap();
+        assert_eq!(b, back);
     }
 }

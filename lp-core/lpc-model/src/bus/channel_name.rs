@@ -6,7 +6,9 @@ use core::fmt;
 /// `docs/design/lightplayer/quantity.md` §8 and §11 (channel naming). The type
 /// does not enforce the grammar in v0; compose-time code validates against the
 /// project’s bus graph.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct ChannelName(pub String);
