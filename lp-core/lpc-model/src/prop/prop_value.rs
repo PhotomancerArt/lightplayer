@@ -1,4 +1,4 @@
-//! [`Prop`]: a value with frame-stamped change tracking — the runtime
+//! [`PropValue`]: a value with frame-stamped change tracking — the runtime
 //! change-tracking primitive used by the spine.
 //!
 //! Server-side `*Props` structs (e.g. `TextureProps`) hold one `Prop<T>`
@@ -12,12 +12,12 @@ use crate::project::FrameId;
 
 /// A value of type `T` plus the [`FrameId`] at which it last changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Prop<T> {
+pub struct PropValue<T> {
     value: T,
     changed_frame: FrameId,
 }
 
-impl<T> Prop<T> {
+impl<T> PropValue<T> {
     /// Create a new `Prop` with the given value and frame ID.
     pub fn new(frame_id: FrameId, value: T) -> Self {
         Self {
@@ -69,7 +69,7 @@ impl<T> Prop<T> {
     }
 }
 
-impl<T: PartialEq> PartialEq<T> for Prop<T> {
+impl<T: PartialEq> PartialEq<T> for PropValue<T> {
     fn eq(&self, other: &T) -> bool {
         &self.value == other
     }
@@ -81,14 +81,14 @@ mod tests {
 
     #[test]
     fn test_prop_new() {
-        let field = Prop::new(FrameId::new(10), 42);
+        let field = PropValue::new(FrameId::new(10), 42);
         assert_eq!(field.get(), &42);
         assert_eq!(field.changed_frame(), FrameId::new(10));
     }
 
     #[test]
     fn test_prop_set() {
-        let mut field = Prop::new(FrameId::new(5), 10);
+        let mut field = PropValue::new(FrameId::new(5), 10);
         field.set(FrameId::new(20), 30);
         assert_eq!(field.get(), &30);
         assert_eq!(field.changed_frame(), FrameId::new(20));
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_prop_mark_updated() {
-        let mut field = Prop::new(FrameId::new(5), 10);
+        let mut field = PropValue::new(FrameId::new(5), 10);
         *field.get_mut() = 20;
         field.mark_updated(FrameId::new(15));
         assert_eq!(field.get(), &20);
@@ -105,21 +105,21 @@ mod tests {
 
     #[test]
     fn test_prop_into_value() {
-        let field = Prop::new(FrameId::new(5), 42);
+        let field = PropValue::new(FrameId::new(5), 42);
         let value = field.into_value();
         assert_eq!(value, 42);
     }
 
     #[test]
     fn test_prop_value_alias() {
-        let field = Prop::new(FrameId::new(5), 42);
+        let field = PropValue::new(FrameId::new(5), 42);
         assert_eq!(field.value(), &42);
         assert_eq!(field.get(), field.value());
     }
 
     #[test]
     fn test_prop_partial_eq_with_value() {
-        let field = Prop::new(FrameId::new(5), 42);
+        let field = PropValue::new(FrameId::new(5), 42);
         assert_eq!(field, 42);
         assert_ne!(field, 10);
     }

@@ -1,4 +1,4 @@
-use crate::Prop;
+use crate::PropValue;
 use crate::project::FrameId;
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
@@ -6,17 +6,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStru
 /// Test state struct for validating `Prop<T>` serialization
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestState {
-    pub field1: Prop<String>,
-    pub field2: Prop<u32>,
-    pub field3: Prop<Vec<u8>>,
+    pub field1: PropValue<String>,
+    pub field2: PropValue<u32>,
+    pub field3: PropValue<Vec<u8>>,
 }
 
 impl TestState {
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            field1: Prop::new(frame_id, String::from("default")),
-            field2: Prop::new(frame_id, 0),
-            field3: Prop::new(frame_id, Vec::new()),
+            field1: PropValue::new(frame_id, String::from("default")),
+            field2: PropValue::new(frame_id, 0),
+            field3: PropValue::new(frame_id, Vec::new()),
         }
     }
 }

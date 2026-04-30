@@ -37,6 +37,7 @@ pub mod serial;
 pub mod server;
 pub mod state;
 pub mod transport_error;
+pub mod tree;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 /// Cross-cutting error for [`NodeProps`](node::node_props::NodeProps) property access and related domain operations.
@@ -56,7 +57,7 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 pub use kind::Kind;
 pub use node::node_props::NodeProps;
 pub use presentation::Presentation;
-pub use prop::Prop;
+pub use prop::PropValue;
 pub use prop::shape::{Shape, Slot};
 pub use value_spec::ValueSpec;
 

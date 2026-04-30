@@ -1,5 +1,5 @@
 use alloc::{string::String, vec::Vec};
-use lpc_model::Prop;
+use lpc_model::PropValue;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
@@ -9,14 +9,14 @@ use lpc_model::impl_state_serialization;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputState {
     /// Channel data: high byte per channel, 3 bytes per LED (RGB). Serialized as base64.
-    pub channel_data: Prop<Vec<u8>>,
+    pub channel_data: PropValue<Vec<u8>>,
 }
 
 impl OutputState {
     /// Create a new OutputState with default values
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            channel_data: Prop::new(frame_id, Vec::new()),
+            channel_data: PropValue::new(frame_id, Vec::new()),
         }
     }
 
