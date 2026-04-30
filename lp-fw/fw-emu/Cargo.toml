@@ -32,7 +32,7 @@ test_unwind = []
 [build-dependencies]
 
 [dev-dependencies]
-lp-client = { path = "../../lp-app/lp-client", features = ["serial"] }
+lpa-client = { path = "../../lp-app/lp-client", features = ["serial"] }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }

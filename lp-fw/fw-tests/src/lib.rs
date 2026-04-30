@@ -1,11 +1,11 @@
 //! Firmware integration tests
 
-use lp_client::{LpClient, serializable_response_to_project_response};
+use lpa_client::{LpClient, serializable_response_to_project_response};
 use lpc_view::ClientProjectView;
 use lpc_wire::WireProjectHandle as ProjectHandle;
 
 pub mod transport_emu_serial {
-    pub use lp_client::transport_emu_serial::SerialEmuClientTransport;
+    pub use lpa_client::transport_emu_serial::SerialEmuClientTransport;
 }
 
 /// Sync [`ClientProjectView`] with the firmware over the given client (emu serial transport).

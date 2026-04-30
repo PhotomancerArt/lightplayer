@@ -4,7 +4,7 @@
 //! a client transport interface for communicating with it.
 
 use anyhow::Result;
-use lp_client::{AsyncLocalClientTransport, ClientTransport, create_local_transport_pair};
+use lpa_client::{AsyncLocalClientTransport, ClientTransport, create_local_transport_pair};
 use lpc_wire::{TransportError, message::ClientMessage};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

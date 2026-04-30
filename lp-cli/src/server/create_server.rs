@@ -1,7 +1,7 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
 use lp_server::{Graphics, LpGraphics, LpServer};
-use lpc_shared::output::MemoryOutputProvider;
 use lpc_model::AsLpPath;
+use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFs;
 use std::cell::RefCell;
 use std::path::Path;
@@ -124,7 +124,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_server_loop_async_compiles() {
         use crate::server::{create_server, run_server_loop_async};
-        use lp_client::create_local_transport_pair;
+        use lpa_client::create_local_transport_pair;
 
         // Create server and transport pair
         let (server, _fs) = create_server::create_server(None, true, None).unwrap();

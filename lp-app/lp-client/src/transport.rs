@@ -17,7 +17,7 @@ use lpl_model::LegacyServerMessage;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use lp_client::ClientTransport;
+/// use lpa_client::ClientTransport;
 /// use lpc_wire::{ClientMessage, TransportError};
 /// use lpl_model::LegacyServerMessage;
 ///

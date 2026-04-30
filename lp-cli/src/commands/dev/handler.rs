@@ -10,7 +10,7 @@ use tokio::signal;
 use crate::client::{LpClient, client_connect};
 use crate::commands::dev::{fs_loop, push_project_async, validation};
 use crate::debug_ui::DebugUiState;
-use lp_client::HostSpecifier;
+use lpa_client::HostSpecifier;
 
 use super::args::DevArgs;
 

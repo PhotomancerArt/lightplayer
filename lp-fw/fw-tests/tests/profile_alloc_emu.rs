@@ -19,7 +19,6 @@ use fw_tests::shader_emu_gate::assert_shader_compiled_ok;
 use fw_tests::sync_emu_project_view;
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
-use lp_client::LpClient;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -28,8 +27,9 @@ use lp_riscv_emu::{
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
-use lpc_shared::ProjectBuilder;
+use lpa_client::LpClient;
 use lpc_model::AsLpPath;
+use lpc_shared::ProjectBuilder;
 use lpc_view::ClientProjectView;
 use lpfs::LpFsMemory;
 

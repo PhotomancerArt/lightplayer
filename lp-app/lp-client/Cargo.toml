@@ -1,5 +1,5 @@
 [package]
-name = "lp-client"
+name = "lpa-client"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

@@ -38,7 +38,7 @@ impl HostSpecifier {
     /// # Examples
     ///
     /// ```
-    /// use lp_client::HostSpecifier;
+    /// use lpa_client::HostSpecifier;
     ///
     /// let ws = HostSpecifier::parse("ws://localhost:2812/").unwrap();
     /// assert!(ws.is_websocket());

@@ -5,10 +5,10 @@ extern crate alloc;
 use crate::error::ServerError;
 use alloc::{format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lpc_shared::output::OutputProvider;
-use lpc_shared::time::TimeProvider;
 use lpc_engine::{LpGraphics, MemoryStatsFn, ProjectRuntime};
 use lpc_model::{LpPath, LpPathBuf};
+use lpc_shared::output::OutputProvider;
+use lpc_shared::time::TimeProvider;
 use lpfs::{FsVersion, LpFs};
 
 /// A project instance wrapping a ProjectRuntime

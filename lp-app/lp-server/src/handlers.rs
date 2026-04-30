@@ -7,10 +7,10 @@ use crate::project_manager::ProjectManager;
 use crate::server::MemoryStatsFn;
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
-use lpc_shared::output::OutputProvider;
-use lpc_shared::time::TimeProvider;
 use lpc_engine::LpGraphics;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
+use lpc_shared::output::OutputProvider;
+use lpc_shared::time::TimeProvider;
 use lpc_wire::{
     message::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},

@@ -12,8 +12,8 @@ use core::cell::RefCell;
 // They need to be rewritten to use the new async LpClient API. Marked as #[ignore] for now.
 
 use lp_server::LpServer;
-use lpc_shared::output::MemoryOutputProvider;
 use lpc_model::AsLpPath;
+use lpc_shared::output::MemoryOutputProvider;
 use lpfs::{LpFs, LpFsMemory};
 use lpl_model::LegacyMessage;
 

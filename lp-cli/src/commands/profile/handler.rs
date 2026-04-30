@@ -1,8 +1,6 @@
 //! `lp-cli profile` — run a workload under the emulator with unified profiling.
 
 use anyhow::{Context, Result, bail};
-use lp_client::LpClient;
-use lp_client::transport_emu_serial::SerialEmuClientTransport;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -13,6 +11,8 @@ use lp_riscv_emu::{
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
+use lpa_client::LpClient;
+use lpa_client::transport_emu_serial::SerialEmuClientTransport;
 use std::collections::HashSet;
 use std::path::Component;
 use std::path::Path;

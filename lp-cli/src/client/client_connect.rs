@@ -5,11 +5,6 @@
 
 use anyhow::{Context, Result};
 #[cfg(feature = "serial")]
-use lp_client::transport_serial::{
-    BacktraceInfo, create_emulator_serial_transport_pair, create_hardware_serial_transport_pair,
-};
-use lp_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
-#[cfg(feature = "serial")]
 use lp_riscv_elf::load_elf;
 #[cfg(feature = "serial")]
 use lp_riscv_emu::{
@@ -18,6 +13,11 @@ use lp_riscv_emu::{
 };
 #[cfg(feature = "serial")]
 use lp_riscv_inst::Gpr;
+#[cfg(feature = "serial")]
+use lpa_client::transport_serial::{
+    BacktraceInfo, create_emulator_serial_transport_pair, create_hardware_serial_transport_pair,
+};
+use lpa_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
 #[cfg(feature = "serial")]
 use std::sync::{Arc, Mutex};
 
@@ -43,7 +43,7 @@ use crate::client::serial_port::detect_serial_port;
 ///
 /// ```
 /// use lp_cli::client::client_connect;
-/// use lp_client::HostSpecifier;
+/// use lpa_client::HostSpecifier;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Connect to local in-memory server

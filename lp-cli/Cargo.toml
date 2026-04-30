@@ -28,7 +28,7 @@ lp-server = { path = "../lp-app/lp-server" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
-lp-client = { path = "../lp-app/lp-client", features = ["ws", "serial", "emu"] }
+lpa-client = { path = "../lp-app/lp-client", features = ["ws", "serial", "emu"] }
 lp-riscv-emu = { path = "../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
