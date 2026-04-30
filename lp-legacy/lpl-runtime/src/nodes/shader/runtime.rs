@@ -9,11 +9,11 @@ use core::panic::AssertUnwindSafe;
 use log;
 use lp_perf::EVENT_SHADER_COMPILE;
 use lpc_model::{LpPathBuf, NodeId, project::FrameId};
-use lpc_runtime::NodeRuntime;
-use lpc_runtime::error::Error;
-use lpc_runtime::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
-use lpc_runtime::output::OutputProvider;
-use lpc_runtime::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
+use lpc_engine::NodeRuntime;
+use lpc_engine::error::Error;
+use lpc_engine::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
+use lpc_engine::output::OutputProvider;
+use lpc_engine::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
 use lpfs::{ChangeType, FsChange};
 use lpl_model::NodeConfig;
 use lpl_model::glsl_opts::{AddSubMode, DivMode, MulMode};
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn test_shader_runtime_creation() {
         let handle = lpc_model::NodeId::new(0);
-        let graphics: Arc<dyn LpGraphics> = Arc::new(lpc_runtime::Graphics::new());
+        let graphics: Arc<dyn LpGraphics> = Arc::new(lpc_engine::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }

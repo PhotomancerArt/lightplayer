@@ -8,7 +8,7 @@ use core::cell::RefCell;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
 use lpc_model::{LpPath, LpPathBuf};
-use lpc_runtime::{LpGraphics, MemoryStatsFn, ProjectRuntime};
+use lpc_engine::{LpGraphics, MemoryStatsFn, ProjectRuntime};
 use lpfs::{FsVersion, LpFs};
 
 /// A project instance wrapping a ProjectRuntime

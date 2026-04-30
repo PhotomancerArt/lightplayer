@@ -20,7 +20,7 @@ std = [
 ]
 
 [dependencies]
-lpc-runtime = { path = "../lpc-runtime", default-features = false }
+lpc-engine = { path = "../lpc-engine", default-features = false }
 lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
@@ -30,7 +30,7 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 [dev-dependencies]
-lpc-runtime = { path = "../lpc-runtime", default-features = false, features = ["std"] }
+lpc-engine = { path = "../lpc-engine", default-features = false, features = ["std"] }
 lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false, features = ["std"] }
 lp-engine-client = { path = "../lp-engine-client", default-features = false, features = ["std"] }
 lp-shared = { path = "../lp-shared", default-features = false, features = ["std"] }

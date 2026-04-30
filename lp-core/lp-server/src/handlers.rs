@@ -13,7 +13,7 @@ use lpc_model::{
     AsLpPath, ClientMessage, LpPath, LpPathBuf,
     server::{AvailableProject, FsRequest, FsResponse},
 };
-use lpc_runtime::LpGraphics;
+use lpc_engine::LpGraphics;
 use lpfs::LpFs;
 use lpl_model::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 

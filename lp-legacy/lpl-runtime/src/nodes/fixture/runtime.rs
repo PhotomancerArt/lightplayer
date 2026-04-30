@@ -5,10 +5,10 @@ use crate::nodes::fixture::mapping::{
 };
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 use lpc_model::FrameId;
-use lpc_runtime::NodeRuntime;
-use lpc_runtime::error::Error;
-use lpc_runtime::output::OutputProvider;
-use lpc_runtime::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
+use lpc_engine::NodeRuntime;
+use lpc_engine::error::Error;
+use lpc_engine::output::OutputProvider;
+use lpc_engine::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use lpfs::FsChange;
 use lpl_model::NodeConfig;
 use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};

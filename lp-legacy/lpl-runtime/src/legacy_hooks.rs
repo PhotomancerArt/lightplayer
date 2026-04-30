@@ -23,13 +23,13 @@ use lpc_model::{
     FrameId, LpPathBuf, NodeId,
     project::api::{ApiNodeSpecifier, NodeStatus as ApiNodeStatus},
 };
-use lpc_runtime::error::Error;
-use lpc_runtime::nodes::NodeRuntime;
-use lpc_runtime::output::OutputProvider;
-use lpc_runtime::panic_node::catch_node_panic;
-use lpc_runtime::project::ProjectRuntime;
-use lpc_runtime::project::project_runtime::{NodeEntry, NodeStatus};
-use lpc_runtime::runtime::frame_time::FrameTime;
+use lpc_engine::error::Error;
+use lpc_engine::nodes::NodeRuntime;
+use lpc_engine::output::OutputProvider;
+use lpc_engine::panic_node::catch_node_panic;
+use lpc_engine::project::ProjectRuntime;
+use lpc_engine::project::project_runtime::{NodeEntry, NodeStatus};
+use lpc_engine::runtime::frame_time::FrameTime;
 use lpfs::{FsChange, LpFs};
 use lpl_model::{NodeChange, NodeConfig, NodeDetail, NodeKind, NodeState, ProjectResponse};
 
@@ -412,8 +412,8 @@ fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<()
         if change.path.has_suffix("/node.json") {
             // Reload config
             let (_, config_for_update) =
-                lpc_runtime::project::loader::load_node(&*rt.fs.borrow(), &path)?;
-            let (_, new_config) = lpc_runtime::project::loader::load_node(&*rt.fs.borrow(), &path)?;
+                lpc_engine::project::loader::load_node(&*rt.fs.borrow(), &path)?;
+            let (_, new_config) = lpc_engine::project::loader::load_node(&*rt.fs.borrow(), &path)?;
 
             // Update node entry config
             let has_runtime = {
@@ -854,7 +854,7 @@ pub fn get_changes(
 }
 
 struct InitContext<'a> {
-    runtime: &'a lpc_runtime::project::ProjectRuntime,
+    runtime: &'a lpc_engine::project::ProjectRuntime,
     #[allow(
         dead_code,
         reason = "Used for chroot filesystem creation, may be needed for future features"
@@ -865,7 +865,7 @@ struct InitContext<'a> {
 
 impl<'a> InitContext<'a> {
     pub fn new(
-        runtime: &'a lpc_runtime::project::ProjectRuntime,
+        runtime: &'a lpc_engine::project::ProjectRuntime,
         node_path: &'a LpPathBuf,
     ) -> Result<Self, Error> {
         let node_dir = node_path.as_str();
@@ -886,7 +886,7 @@ impl<'a> InitContext<'a> {
     }
 }
 
-impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
+impl<'a> lpc_engine::runtime::contexts::NodeInitContext for InitContext<'a> {
     fn resolve_node(&self, spec: &lpc_model::NodeSpec) -> Result<lpc_model::NodeId, Error> {
         let spec_path = spec.as_str();
         let node_path = if spec_path.starts_with('/') {
@@ -929,7 +929,7 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
     fn resolve_output(
         &self,
         spec: &lpc_model::NodeSpec,
-    ) -> Result<lpc_runtime::runtime::contexts::OutputHandle, Error> {
+    ) -> Result<lpc_engine::runtime::contexts::OutputHandle, Error> {
         let handle = self.resolve_node(spec)?;
         let entry = self
             .runtime
@@ -947,13 +947,13 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
             });
         }
 
-        Ok(lpc_runtime::runtime::contexts::OutputHandle::new(handle))
+        Ok(lpc_engine::runtime::contexts::OutputHandle::new(handle))
     }
 
     fn resolve_texture(
         &self,
         spec: &lpc_model::NodeSpec,
-    ) -> Result<lpc_runtime::runtime::contexts::TextureHandle, Error> {
+    ) -> Result<lpc_engine::runtime::contexts::TextureHandle, Error> {
         let handle = self.resolve_node(spec)?;
         let entry = self
             .runtime
@@ -971,7 +971,7 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
             });
         }
 
-        Ok(lpc_runtime::runtime::contexts::TextureHandle::new(handle))
+        Ok(lpc_engine::runtime::contexts::TextureHandle::new(handle))
     }
 
     fn get_node_fs(&self) -> &dyn lpfs::LpFs {
@@ -994,7 +994,7 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
 
     fn get_texture_config(
         &self,
-        handle: lpc_runtime::runtime::contexts::TextureHandle,
+        handle: lpc_engine::runtime::contexts::TextureHandle,
     ) -> Result<lpl_model::nodes::texture::TextureConfig, Error> {
         let node_handle = handle.as_node_handle();
         let entry = self
@@ -1035,7 +1035,7 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
 
     fn texture_output_buffer_owner(
         &self,
-        handle: lpc_runtime::runtime::contexts::TextureHandle,
+        handle: lpc_engine::runtime::contexts::TextureHandle,
         fallback_if_no_shader_yet: NodeId,
     ) -> NodeId {
         texture_output_owner_handle(&self.runtime.nodes, handle)
@@ -1045,8 +1045,8 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
 
 /// Shader node that owns the shared CPU buffer for a texture target (see [`texture_output_owner_handle`]).
 fn texture_output_owner_handle(
-    nodes: &BTreeMap<lpc_model::NodeId, lpc_runtime::project::project_runtime::NodeEntry>,
-    texture_handle: lpc_runtime::runtime::contexts::TextureHandle,
+    nodes: &BTreeMap<lpc_model::NodeId, lpc_engine::project::project_runtime::NodeEntry>,
+    texture_handle: lpc_engine::runtime::contexts::TextureHandle,
 ) -> Option<NodeId> {
     let mut best: Option<(i32, NodeId)> = None;
     for (h, entry) in nodes.iter() {
@@ -1084,10 +1084,10 @@ struct RenderContextImpl<'a> {
     output_provider: Rc<RefCell<dyn OutputProvider>>,
 }
 
-impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a> {
+impl<'a> lpc_engine::runtime::contexts::RenderContext for RenderContextImpl<'a> {
     fn get_texture(
         &mut self,
-        handle: lpc_runtime::runtime::contexts::TextureHandle,
+        handle: lpc_engine::runtime::contexts::TextureHandle,
     ) -> Result<&dyn lps_shared::TextureBuffer, Error> {
         Self::ensure_texture_rendered(
             self.nodes,
@@ -1114,7 +1114,7 @@ impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a>
 
     fn get_target_texture_pixels_mut(
         &mut self,
-        handle: lpc_runtime::runtime::contexts::TextureHandle,
+        handle: lpc_engine::runtime::contexts::TextureHandle,
     ) -> Result<&mut lp_shader::LpsTextureBuf, Error> {
         Self::ensure_texture_rendered(
             self.nodes,
@@ -1146,7 +1146,7 @@ impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a>
 
     fn get_output(
         &mut self,
-        handle: lpc_runtime::runtime::contexts::OutputHandle,
+        handle: lpc_engine::runtime::contexts::OutputHandle,
         _universe: u32,
         start_ch: u32,
         ch_count: u32,
@@ -1215,7 +1215,7 @@ impl<'a> RenderContextImpl<'a> {
     /// 3. Marks the texture as rendered
     fn ensure_texture_rendered(
         nodes: &mut BTreeMap<NodeId, NodeEntry>,
-        handle: lpc_runtime::runtime::contexts::TextureHandle,
+        handle: lpc_engine::runtime::contexts::TextureHandle,
         frame_id: FrameId,
         frame_time: FrameTime,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
@@ -1349,7 +1349,7 @@ impl<'a> RenderContextImpl<'a> {
     /// [`texture_output_owner_handle`]).
     fn find_shader_for_texture(
         nodes: &mut BTreeMap<NodeId, NodeEntry>,
-        texture_handle: lpc_runtime::runtime::contexts::TextureHandle,
+        texture_handle: lpc_engine::runtime::contexts::TextureHandle,
     ) -> Option<&mut ShaderRuntime> {
         let best_h = texture_output_owner_handle(nodes, texture_handle)?;
         let entry = nodes.get_mut(&best_h)?;

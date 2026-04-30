@@ -7,7 +7,7 @@ use lp_engine_client::ClientProjectView;
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::ProjectBuilder;
 use lpc_model::{AsLpPath, AsLpPathBuf};
-use lpc_runtime::MemoryOutputProvider;
+use lpc_engine::MemoryOutputProvider;
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]

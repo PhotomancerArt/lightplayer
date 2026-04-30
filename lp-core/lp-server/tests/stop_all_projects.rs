@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use lp_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
 use lp_shared::ProjectBuilder;
 use lpc_model::{AsLpPath, AsLpPathBuf, ClientMessage, ClientRequest};
-use lpc_runtime::MemoryOutputProvider;
+use lpc_engine::MemoryOutputProvider;
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]

@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_engine_client::ClientProjectView;
 use lp_shared::ProjectBuilder;
-use lpc_runtime::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
+use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lpfs::LpFsMemory;
 
 #[test]

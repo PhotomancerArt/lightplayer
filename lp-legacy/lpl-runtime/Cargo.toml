@@ -22,7 +22,7 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
-lpc-runtime = { path = "../../lp-core/lpc-runtime", default-features = false }
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpl-model = { path = "../lpl-model", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }

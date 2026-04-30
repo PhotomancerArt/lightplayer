@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lpc_model::{AsLpPath, AsLpPathBuf};
-use lpc_runtime::MemoryOutputProvider;
+use lpc_engine::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
 #[test]

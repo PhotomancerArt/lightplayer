@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, format, string::ToString};
 use lpc_model::{NodeId, project::FrameId};
-use lpc_runtime::NodeRuntime;
-use lpc_runtime::error::Error;
-use lpc_runtime::output::OutputProvider;
-use lpc_runtime::runtime::contexts::{NodeInitContext, RenderContext};
+use lpc_engine::NodeRuntime;
+use lpc_engine::error::Error;
+use lpc_engine::output::OutputProvider;
+use lpc_engine::runtime::contexts::{NodeInitContext, RenderContext};
 use lpfs::FsChange;
 use lpl_model::NodeConfig;
 use lpl_model::nodes::texture::{TextureConfig, TextureFormat, TextureState};

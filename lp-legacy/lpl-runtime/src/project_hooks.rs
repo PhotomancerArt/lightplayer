@@ -3,9 +3,9 @@
 use alloc::sync::Arc;
 use lpc_model::FrameId;
 use lpc_model::project::api::ApiNodeSpecifier;
-use lpc_runtime::error::Error;
-use lpc_runtime::project::ProjectRuntime;
-use lpc_runtime::project::hooks::{ProjectHooks, set_project_hooks};
+use lpc_engine::error::Error;
+use lpc_engine::project::ProjectRuntime;
+use lpc_engine::project::hooks::{ProjectHooks, set_project_hooks};
 use lpfs::FsChange;
 use lpl_model::ProjectResponse;
 

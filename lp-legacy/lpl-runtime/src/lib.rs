@@ -1,4 +1,4 @@
-//! lpl-runtime: legacy node runtimes implementing lpc_runtime::NodeRuntime
+//! lpl-runtime: legacy node runtimes implementing lpc_engine::NodeRuntime
 
 #![no_std]
 
@@ -13,5 +13,5 @@ pub use nodes::{FixtureRuntime, OutputRuntime, ShaderRuntime, TextureRuntime};
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project_hooks::install;
 
-pub use lpc_runtime::NodeRuntime;
+pub use lpc_engine::NodeRuntime;
 pub use lpl_model::NodeConfig;
