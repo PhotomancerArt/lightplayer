@@ -52,7 +52,7 @@ Related roadmap context:
 cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
-cargo check -p lp-server
+cargo check -p lpa-server
 cargo check -p lpvm-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf
 ```
 

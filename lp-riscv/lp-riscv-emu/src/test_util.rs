@@ -132,7 +132,7 @@ mod std_impl {
             .map_err(|e| std::format!("Failed to acquire build lock: {e}"))?;
 
         // Do not skip the build when a cached copy exists: the cache key does not include
-        // dependency sources, so a stale binary would otherwise mask fixes in lp-engine / lp-server.
+        // dependency sources, so a stale binary would otherwise mask fixes in lp-engine / lpa-server.
 
         // Build binary
         std::println!("Building {} for {}...", config.package, config.target);

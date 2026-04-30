@@ -13,7 +13,7 @@
 cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
-cargo check -p lp-server
+cargo check -p lpa-server
 ```
 
 5. Fix **all** warnings that are in scope for this change set.

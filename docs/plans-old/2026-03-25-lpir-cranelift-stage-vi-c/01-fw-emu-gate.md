@@ -40,7 +40,7 @@ This is the dependency agreed in Q4.
    Include scene-render coverage if not already implied:
 
    ```bash
-   cargo test -p lp-client --features serial --test scene_render_emu_async
+   cargo test -p lpa-client --features serial --test scene_render_emu_async
    ```
 
    Adjust flags if your workflow uses `--features` on these crates.
@@ -57,7 +57,7 @@ This is the dependency agreed in Q4.
 ```bash
 just build-fw-emu
 cargo test -p fw-tests
-cargo test -p lp-client --features serial --test scene_render_emu_async
+cargo test -p lpa-client --features serial --test scene_render_emu_async
 ```
 
 Add `cargo build --target riscv32imac-unknown-none-elf -p fw-emu --release`

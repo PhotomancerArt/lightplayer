@@ -57,7 +57,7 @@ Create a stub main entry point:
 ```rust
 //! Firmware emulator application
 //!
-//! Runs lp-server firmware in RISC-V32 emulator for testing without hardware.
+//! Runs lpa-server firmware in RISC-V32 emulator for testing without hardware.
 
 #![no_std]
 #![no_main]
@@ -237,7 +237,7 @@ Create a stub server loop:
 ```rust
 //! Server loop for emulator firmware
 //!
-//! Main loop that runs in the emulator and calls lp-server::tick().
+//! Main loop that runs in the emulator and calls lpa-server::tick().
 
 // TODO: Implement server loop
 // This will be implemented in a later phase

@@ -3,7 +3,7 @@
 Engine-client wire model for LightPlayer core.
 
 This crate owns the serializable request/response and sync shapes exchanged
-between `lpc-engine`/`lp-server` and `lpc-view`: messages, project
+between `lpc-engine`/`lpa-server` and `lpc-view`: messages, project
 views, tree deltas, transport errors, JSON helpers, and legacy partial state
 serialization helpers.
 

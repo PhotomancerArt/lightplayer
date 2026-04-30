@@ -1,4 +1,4 @@
-// Re-export everything from lp-client for backward compatibility
+// Re-export everything from lpa-client for backward compatibility
 pub use lpa_client::*;
 
 // CLI-specific modules

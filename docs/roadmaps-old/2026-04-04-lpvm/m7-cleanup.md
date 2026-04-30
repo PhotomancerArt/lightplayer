@@ -35,11 +35,11 @@ Adjust **`-p` package names** if crates are not yet renamed on disk.
 cargo check
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
-cargo check -p lp-server
+cargo check -p lpa-server
 cargo test -p lps-filetests          # or current filetests package name
 cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
 cargo test -p lpir
-cargo test -p lp-server --no-run
+cargo test -p lpa-server --no-run
 ```
 
 ## Web / demo

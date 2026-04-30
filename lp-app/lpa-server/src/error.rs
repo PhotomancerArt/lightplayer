@@ -1,11 +1,11 @@
-//! Error types for lp-server
+//! Error types for lpa-server
 
 extern crate alloc;
 
 use alloc::string::String;
 use core::fmt;
 
-/// Error type for lp-server operations
+/// Error type for lpa-server operations
 #[derive(Debug, Clone)]
 pub enum ServerError {
     /// Project not found

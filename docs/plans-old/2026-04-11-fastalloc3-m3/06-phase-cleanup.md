@@ -87,7 +87,7 @@ cargo check -p lp-cli
 cargo run -p lps-filetests-app -- test --target rv32fa.q32
 
 # Host check
-cargo check -p lp-server
+cargo check -p lpa-server
 ```
 
 ### 7. Plan cleanup

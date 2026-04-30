@@ -20,7 +20,7 @@ the project.
 
    ```bash
    cargo test -p lp-engine
-   cargo test -p lp-server
+   cargo test -p lpa-server
    cargo test -p lpvm-cranelift
    ```
 
@@ -35,7 +35,7 @@ the project.
    crates from workspace clippy. At minimum:
 
    ```bash
-   cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
+   cargo clippy -p lp-engine -p lpa-server -p lpvm-cranelift --all-features -- -D warnings
    ```
 
 4. Fix **warnings** that are not deferred to a later roadmap stage (per project
@@ -47,10 +47,10 @@ the project.
 
 ```bash
 cargo test -p lp-engine
-cargo test -p lp-server
+cargo test -p lpa-server
 cargo test -p lpvm-cranelift
 cargo test -p lpvm-cranelift --no-default-features
-cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
+cargo clippy -p lp-engine -p lpa-server -p lpvm-cranelift --all-features -- -D warnings
 ```
 
 Re-run Phase 1 commands if any dependency graph change touched `fw-emu`.

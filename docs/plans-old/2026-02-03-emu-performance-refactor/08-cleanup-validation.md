@@ -83,7 +83,7 @@ cd lp-riscv/lp-riscv-emu
 cargo test
 
 # Also test dependent crates
-cd ../../lp-core/lp-client
+cd ../../lp-core/lpa-client
 cargo test
 
 cd ../../lp-shader/lps-compiler
@@ -109,7 +109,7 @@ cargo +nightly fmt --check
 cargo clippy -- -D warnings
 
 # Check dependent crates
-cd ../../lp-core/lp-client
+cd ../../lp-core/lpa-client
 cargo check
 cargo test
 

@@ -48,11 +48,11 @@ Run the following commands to ensure everything works:
 
 ```bash
 # Check both crates compile
-cargo check --package lp-client
+cargo check --package lpa-client
 cargo check --package lp-cli
 
 # Run tests
-cargo test --package lp-client
+cargo test --package lpa-client
 cargo test --package lp-cli
 
 # Check workspace builds

@@ -45,7 +45,7 @@ impl LocalServerTransport {
         // Spawn server thread
         let closed_clone = Arc::clone(&closed);
         let server_handle = thread::Builder::new()
-            .name("lp-server".to_string())
+            .name("lpa-server".to_string())
             .spawn(move || {
                 // Create tokio runtime for server
                 let runtime = match tokio::runtime::Runtime::new() {

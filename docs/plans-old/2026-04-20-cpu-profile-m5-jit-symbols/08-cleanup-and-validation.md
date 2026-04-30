@@ -120,8 +120,8 @@ If `just` is not available in the agent environment, fall back to
 the explicit set:
 
 ```bash
-cargo build -p lp-server
-cargo test  -p lp-server --no-run
+cargo build -p lpa-server
+cargo test  -p lpa-server --no-run
 cargo test  -p lp-riscv-emu
 cargo test  -p lp-riscv-emu-shared
 cargo test  -p lp-cli

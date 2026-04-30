@@ -101,7 +101,7 @@ cargo test
 
 Also check dependent crates:
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo check
 cargo test
 ```

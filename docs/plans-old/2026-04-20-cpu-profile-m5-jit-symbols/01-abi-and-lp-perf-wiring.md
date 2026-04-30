@@ -240,7 +240,7 @@ cargo build -p lp-perf --features log
 cargo test -p lp-riscv-emu-shared
 
 # Confirm we haven't broken the workspace host build
-cargo build -p lp-server
+cargo build -p lpa-server
 ```
 
 All five must succeed cleanly with no warnings.

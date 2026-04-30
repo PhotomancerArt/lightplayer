@@ -27,8 +27,8 @@ changes. Align with **`justfile`** / CI expectations where practical.
 ## Validate
 
 ```bash
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 # Optional depth (timeboxed):
 # cargo test -p lps-filetests --no-run
 # just clippy (or workspace clippy excluding cross-only crates per repo convention)

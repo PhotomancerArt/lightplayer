@@ -70,7 +70,7 @@ No changes needed to `get_runtime()`, `get_runtime_mut()`, `get_fs()` — they r
 ## Validate
 
 ```bash
-cargo check -p lp-server --lib 2>&1 | head -20
+cargo check -p lpa-server --lib 2>&1 | head -20
 ```
 
 Expected: Errors in LpServer::new() call sites (fw-esp32, fw-emu, tests).

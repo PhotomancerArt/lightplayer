@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_server::{Graphics, LpGraphics, LpServer};
+use lpa_server::{Graphics, LpGraphics, LpServer};
 use lpc_engine::MemoryOutputProvider;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpfs::LpFsMemory;

@@ -71,7 +71,7 @@ cranelift = ["lp-engine/cranelift", "lp-server/cranelift"]
 If `lp-server` re-exports anything from `lp-engine`:
 
 ```toml
-# In lp-server/Cargo.toml
+# In lpa-server/Cargo.toml
 [features]
 cranelift = ["lp-engine/cranelift"]
 ```

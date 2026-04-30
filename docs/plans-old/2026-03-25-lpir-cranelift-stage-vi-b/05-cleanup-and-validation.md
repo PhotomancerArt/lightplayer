@@ -26,7 +26,7 @@ Remove stray references. Ensure no `lp-engine` path still imports the old crate.
 ### 2. Warnings
 
 ```bash
-cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
+cargo clippy -p lp-engine -p lpa-server -p lpvm-cranelift --all-features -- -D warnings
 cargo check -p lpvm-cranelift --no-default-features --target riscv32imac-unknown-none-elf
 ```
 

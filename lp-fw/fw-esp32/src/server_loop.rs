@@ -1,6 +1,6 @@
 //! Server loop for ESP32 firmware
 //!
-//! Main async loop that handles hardware I/O and calls lp-server::tick().
+//! Main async loop that handles hardware I/O and calls lpa-server::tick().
 //!
 //! # Heartbeat Messages
 //!
@@ -26,7 +26,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lp_server::LpServer;
+use lpa_server::LpServer;
 use lpc_shared::fps::FpsTracker;
 use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;

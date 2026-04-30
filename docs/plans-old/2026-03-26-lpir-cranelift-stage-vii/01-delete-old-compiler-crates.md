@@ -65,7 +65,7 @@ resolve because `lps-frontend` has no path dep on `lps-cranelift`.
 
 ```bash
 cargo metadata --format-version=1 > /dev/null
-cargo check -p lp-server
+cargo check -p lpa-server
 cargo check -p lp-engine
 cargo check -p lpvm-cranelift
 ```

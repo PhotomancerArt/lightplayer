@@ -161,16 +161,16 @@ cargo check --target riscv32imac-unknown-none-elf --features esp32c6
 cd lp-fw/fw-emu
 cargo check
 
-# Check lp-client
-cd lp-core/lp-client
+# Check lpa-client
+cd lp-core/lpa-client
 cargo check
 
 # Check lp-cli
 cd lp-cli
 cargo check
 
-# Check lp-server (should not need changes)
-cd lp-core/lp-server
+# Check lpa-server (should not need changes)
+cd lp-core/lpa-server
 cargo check
 ```
 

@@ -195,7 +195,7 @@ fn test_display_serial_with_baud_rate() {
 Run the following commands to validate the phase:
 
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo check
 cargo test
 ```

@@ -117,5 +117,5 @@ cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6
 
 # Host tests
 cargo test -p lp-engine --features test-cranelift
-cargo test -p lp-server --lib
+cargo test -p lpa-server --lib
 ```

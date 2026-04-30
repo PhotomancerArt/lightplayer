@@ -63,8 +63,8 @@ cargo test -p lps-filetests --tests
 # Engine and server
 cargo test -p lp-engine --lib
 cargo test -p lp-engine --tests
-cargo test -p lp-server --lib
-cargo test -p lp-server --tests
+cargo test -p lpa-server --lib
+cargo test -p lpa-server --tests
 ```
 
 ### Cross-Compilation (Embedded Targets)

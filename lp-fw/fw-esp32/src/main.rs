@@ -186,7 +186,7 @@ use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
-    lp_server::{Graphics, LpGraphics, LpServer},
+    lpa_server::{Graphics, LpGraphics, LpServer},
     lpc_model::lp_path::AsLpPath,
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,

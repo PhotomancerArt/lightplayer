@@ -135,7 +135,7 @@ cd lp-core/lp-model
 cargo test project::api
 cargo check
 
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo test
 cargo check
 ```

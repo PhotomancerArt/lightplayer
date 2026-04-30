@@ -66,10 +66,10 @@ cargo +nightly fmt
 # Host workspace
 cargo check --workspace --exclude fw-esp32 --exclude fw-emu --exclude lps-builtins-emu-app --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 cargo test -p lp-engine
-cargo test -p lp-server
+cargo test -p lpa-server
 cargo test -p lpvm-cranelift
 cargo test -p lps-filetests -- test_glsl
-cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
+cargo clippy -p lp-engine -p lpa-server -p lpvm-cranelift --all-features -- -D warnings
 
 # Builtins generation still works
 cargo run -p lps-builtins-gen-app

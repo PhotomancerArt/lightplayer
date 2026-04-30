@@ -36,7 +36,7 @@ Ensure both async and sync CLI server loops correctly await or block_on transpor
 just check
 just build-fw-esp32
 just build-app
-cargo test -p fw-core -p lp-server -p lp-client -p lp-cli
+cargo test -p fw-core -p lpa-server -p lpa-client -p lp-cli
 ```
 
 Expect: All packages compile and tests pass.

@@ -1,4 +1,4 @@
-use lp_server::LpServer;
+use lpa_server::LpServer;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::TransportError;
 use lpl_model::LegacyMessage;

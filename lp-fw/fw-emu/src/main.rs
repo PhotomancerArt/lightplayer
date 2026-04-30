@@ -22,7 +22,7 @@ use core::cell::RefCell;
 use fw_core::log::init_emu_logger;
 use fw_core::transport::SerialTransport;
 use lp_riscv_emu_guest::allocator;
-use lp_server::{Graphics, LpGraphics, LpServer};
+use lpa_server::{Graphics, LpGraphics, LpServer};
 use lpc_model::AsLpPath;
 use lpc_shared::output::OutputProvider;
 use lpfs::LpFsMemory;

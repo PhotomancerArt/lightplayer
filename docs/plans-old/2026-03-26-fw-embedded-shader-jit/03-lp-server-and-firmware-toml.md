@@ -42,7 +42,7 @@ strictly necessary. **`fw-emu`** and **`fw-esp32`** default **`server`** images 
 ## Validate
 
 ```bash
-cargo +nightly fmt -p lp-server -p fw-emu -p fw-esp32 -p fw-core
+cargo +nightly fmt -p lpa-server -p fw-emu -p fw-esp32 -p fw-core
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```

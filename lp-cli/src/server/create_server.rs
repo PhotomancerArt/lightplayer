@@ -1,5 +1,5 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
-use lp_server::{Graphics, LpGraphics, LpServer};
+use lpa_server::{Graphics, LpGraphics, LpServer};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFs;

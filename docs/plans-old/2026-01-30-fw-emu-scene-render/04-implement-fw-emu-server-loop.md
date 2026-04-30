@@ -19,7 +19,7 @@ Complete the fw-emu implementation by implementing the server loop and completin
 ```rust
 //! Server loop for emulator firmware
 //!
-//! Main loop that runs in the emulator and calls lp-server::tick().
+//! Main loop that runs in the emulator and calls lpa-server::tick().
 
 use fw_core::transport::SerialTransport;
 use lp_model::Message;
@@ -111,7 +111,7 @@ fn yield_to_host() -> ! {
 ```rust
 //! Firmware emulator application
 //!
-//! Runs lp-server firmware in RISC-V32 emulator for testing without hardware.
+//! Runs lpa-server firmware in RISC-V32 emulator for testing without hardware.
 
 #![no_std]
 #![no_main]

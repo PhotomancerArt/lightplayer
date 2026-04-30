@@ -269,7 +269,7 @@ pub use hardware::create_hardware_serial_transport_pair;  // NEW
 Run the following commands to validate the phase:
 
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo check --features serial
 cargo test --features serial
 ```

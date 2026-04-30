@@ -122,7 +122,7 @@ pub use transport_ws::WebSocketClientTransport;
 
 ```rust
 pub mod client {
-    // Re-export everything from lp-client
+    // Re-export everything from lpa-client
     pub use lp_client::*;
 
     // Add CLI-specific types

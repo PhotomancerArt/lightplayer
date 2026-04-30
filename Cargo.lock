@@ -2757,7 +2757,7 @@ dependencies = [
  "critical-section",
  "embassy-sync 0.7.2",
  "log",
- "lp-server",
+ "lpa-server",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
@@ -2778,8 +2778,8 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
- "lp-server",
  "lpa-client",
+ "lpa-server",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -2814,7 +2814,7 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-perf",
- "lp-server",
+ "lpa-server",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
@@ -3950,9 +3950,9 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
- "lp-server",
  "lp-shader",
  "lpa-client",
+ "lpa-server",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -4063,22 +4063,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-server"
-version = "40.0.0"
-dependencies = [
- "hashbrown 0.15.5",
- "log",
- "lpc-engine",
- "lpc-model",
- "lpc-shared",
- "lpc-view",
- "lpc-wire",
- "lpfs",
- "lpl-model",
- "lpl-runtime",
-]
-
-[[package]]
 name = "lp-shader"
 version = "40.0.0"
 dependencies = [
@@ -4112,6 +4096,22 @@ dependencies = [
  "test-log",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "lpa-server"
+version = "40.0.0"
+dependencies = [
+ "hashbrown 0.15.5",
+ "log",
+ "lpc-engine",
+ "lpc-model",
+ "lpc-shared",
+ "lpc-view",
+ "lpc-wire",
+ "lpfs",
+ "lpl-model",
+ "lpl-runtime",
 ]
 
 [[package]]

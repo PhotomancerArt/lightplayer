@@ -65,10 +65,10 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-native/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lpfx/lpfx-cpu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-shader/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-client/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-client/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-server/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-server/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-client/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-server/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-base/lp-perf/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-base/lp-perf/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-base/lpfs/src" isTestSource="false" />

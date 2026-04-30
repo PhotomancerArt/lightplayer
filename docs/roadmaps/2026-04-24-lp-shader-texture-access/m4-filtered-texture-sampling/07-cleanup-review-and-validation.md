@@ -118,8 +118,8 @@ cargo test -p lps-filetests textures
 Then run broader shader pipeline validation appropriate for this repo:
 
 ```bash
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 ```

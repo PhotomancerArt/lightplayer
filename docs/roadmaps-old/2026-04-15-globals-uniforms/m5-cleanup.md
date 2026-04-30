@@ -31,8 +31,8 @@ remove stubs, fix warnings. All validation commands pass.
     --profile release-esp32 --features esp32c6,server
   cargo check -p fw-emu --target riscv32imac-unknown-none-elf \
     --profile release-emu
-  cargo check -p lp-server
-  cargo test -p lp-server --no-run
+  cargo check -p lpa-server
+  cargo test -p lpa-server --no-run
   ```
 
 - **Filetest audit**: Verify no `@unimplemented` remains on global filetests

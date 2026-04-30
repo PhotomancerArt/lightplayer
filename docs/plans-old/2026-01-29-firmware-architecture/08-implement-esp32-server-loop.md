@@ -21,7 +21,7 @@ Implement the server loop:
 ```rust
 //! Server loop for ESP32 firmware
 //!
-//! Main loop that handles hardware I/O and calls lp-server::tick().
+//! Main loop that handles hardware I/O and calls lpa-server::tick().
 
 use embassy_time::{Duration, Instant, Timer};
 use fw_core::transport::SerialTransport;
@@ -112,7 +112,7 @@ Complete the main entry point:
 ```rust
 //! ESP32 firmware application
 //!
-//! Main entry point for ESP32 firmware running lp-server.
+//! Main entry point for ESP32 firmware running lpa-server.
 
 #![no_std]
 #![no_main]

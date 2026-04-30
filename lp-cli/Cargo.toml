@@ -24,11 +24,11 @@ notify = "6"
 lpc-model = { path = "../lp-core/lpc-model" }
 lpc-wire = { path = "../lp-core/lpc-wire" }
 lpl-model = { path = "../lp-legacy/lpl-model", default-features = false }
-lp-server = { path = "../lp-app/lp-server" }
+lpa-server = { path = "../lp-app/lpa-server" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
-lpa-client = { path = "../lp-app/lp-client", features = ["ws", "serial", "emu"] }
+lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu"] }
 lp-riscv-emu = { path = "../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
@@ -48,7 +48,7 @@ rustc-demangle = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
-lp-server = { path = "../lp-app/lp-server" }
+lpa-server = { path = "../lp-app/lpa-server" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-model = { path = "../lp-core/lpc-model" }

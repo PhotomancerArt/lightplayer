@@ -17,7 +17,7 @@ Update `lp-cli/src/client/mod.rs` to re-export from `lp-client`, and update `loc
 1. Update `lp-cli/src/client/mod.rs`:
 
    ```rust
-   // Re-export everything from lp-client for backward compatibility
+   // Re-export everything from lpa-client for backward compatibility
    pub use lp_client::*;
 
    // CLI-specific modules

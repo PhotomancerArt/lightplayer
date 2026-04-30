@@ -82,7 +82,7 @@ Update to use async transport with `.await`:
 ```rust
 //! Server loop for ESP32 firmware
 //!
-//! Main async loop that handles hardware I/O and calls lp-server::tick().
+//! Main async loop that handles hardware I/O and calls lpa-server::tick().
 
 extern crate alloc;
 

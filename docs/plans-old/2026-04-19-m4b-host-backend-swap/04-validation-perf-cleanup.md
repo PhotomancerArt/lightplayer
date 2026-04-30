@@ -77,7 +77,7 @@ Run all of the below in order. Capture the elapsed time for the
 
 ```bash
 # Baseline: the workspace check that AGENTS.md uses for daily dev.
-time cargo check -p lp-server
+time cargo check -p lpa-server
 
 # Workspace host build (excludes RV32-only).
 cargo build --workspace \

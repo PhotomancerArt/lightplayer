@@ -137,8 +137,8 @@ functions. No change for files without calls (arithmetic, control flow).
 ### Step 4: Host still works
 
 ```bash
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 ```
 
 ## Rollback

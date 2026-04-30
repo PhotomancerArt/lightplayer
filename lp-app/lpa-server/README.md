@@ -1,4 +1,4 @@
-# lp-server
+# lpa-server
 
 The LightPlayer server module, handles communication, project management for a LightPlayer server.
 

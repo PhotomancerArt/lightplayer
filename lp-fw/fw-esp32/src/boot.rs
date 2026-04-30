@@ -3,7 +3,7 @@
 //! Reads lightplayer.json for startup_project, or falls back to lexical-first
 //! project in projects/ directory.
 
-use lp_server::LpServer;
+use lpa_server::LpServer;
 use lpc_model::{LpPathBuf, lp_config::LightplayerConfig, lp_path::AsLpPath};
 use lpfs::LpFs;
 

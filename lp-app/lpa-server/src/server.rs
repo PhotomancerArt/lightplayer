@@ -56,7 +56,7 @@ impl LpServer {
     /// ```rust,no_run
     /// extern crate alloc;
     /// use lpc_model::AsLpPath;
-    /// use lp_server::LpServer;
+    /// use lpa_server::LpServer;
     /// use lpfs::LpFsStd;
     /// use lpc_shared::output::MemoryOutputProvider;
     /// use alloc::{boxed::Box, rc::Rc, sync::Arc};
@@ -115,7 +115,7 @@ impl LpServer {
     /// extern crate alloc;
     /// use lpc_model::AsLpPath;
     /// use lpl_model::LegacyMessage;
-    /// use lp_server::LpServer;
+    /// use lpa_server::LpServer;
     /// use lpfs::LpFsMemory;
     /// use lpc_shared::output::MemoryOutputProvider;
     /// use alloc::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};

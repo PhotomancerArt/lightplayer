@@ -112,7 +112,7 @@ Update all tests that use `AsyncLocalServerTransport` to use async:
 
 Run:
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo check
 cargo test
 ```

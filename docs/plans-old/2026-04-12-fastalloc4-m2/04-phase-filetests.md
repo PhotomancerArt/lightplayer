@@ -64,7 +64,7 @@ cargo test -p lps-filetests -- --test-threads=1 spill_simple
 # Full validation
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
-cargo check -p lp-server
+cargo check -p lpa-server
 ```
 
 ## Success Criteria

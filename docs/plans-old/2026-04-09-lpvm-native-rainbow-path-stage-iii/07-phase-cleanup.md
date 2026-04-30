@@ -71,8 +71,8 @@ cargo test -p fw-tests --test scene_render_emu
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 
 # Host validation
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 ```
 
 ### 6. Verify exports

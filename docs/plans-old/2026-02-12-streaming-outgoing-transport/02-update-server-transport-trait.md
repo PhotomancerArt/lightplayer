@@ -66,7 +66,7 @@ All tests that use ServerTransport must call `send().await`, `receive().await`.
 just check
 just build-fw-esp32
 just build-app
-cargo test -p fw-core -p lp-model -p lp-server -p lp-client
+cargo test -p fw-core -p lp-model -p lpa-server -p lpa-client
 ```
 
 Expect: Full workspace compiles; tests pass.

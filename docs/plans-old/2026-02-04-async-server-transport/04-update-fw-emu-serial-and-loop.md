@@ -160,7 +160,7 @@ Update to use `block_on` to call async transport (safe in sync context):
 ```rust
 //! Server loop for emulator firmware
 //!
-//! Main loop that runs in the emulator and calls lp-server::tick().
+//! Main loop that runs in the emulator and calls lpa-server::tick().
 
 use crate::serial::{AsyncSyscallSerial, AsyncSyscallSerialRx, AsyncSyscallSerialTx};
 use crate::time::SyscallTimeProvider;

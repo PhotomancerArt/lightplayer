@@ -49,7 +49,7 @@ use lp_model::json::Error;
 Run all tests to ensure nothing broke:
 
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo test
 ```
 
@@ -58,7 +58,7 @@ cargo test
 Run the following commands to validate:
 
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo check
 cargo test
 ```

@@ -43,7 +43,7 @@ pub trait ClientTransport: Send {
 ### client.rs (NEW)
 
 ```rust
-// Standalone LpClient - no dependency on lp-client
+// Standalone LpClient - no dependency on lpa-client
 pub struct LpClient {
     transport: Arc<dyn ClientTransport>,
     next_request_id: Arc<AtomicU64>,

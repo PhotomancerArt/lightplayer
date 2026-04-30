@@ -1,6 +1,6 @@
 //! Server loop for emulator firmware
 //!
-//! Main loop that runs in the emulator and calls lp-server::tick().
+//! Main loop that runs in the emulator and calls lpa-server::tick().
 
 use crate::serial::SyscallSerialIo;
 use crate::time::SyscallTimeProvider;
@@ -11,7 +11,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use fw_core::transport::SerialTransport;
 use log;
 use lp_riscv_emu_guest::sys_yield;
-use lp_server::LpServer;
+use lpa_server::LpServer;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
 use lpl_model::LegacyMessage;

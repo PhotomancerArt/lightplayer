@@ -18,14 +18,14 @@ lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
-lp-server = { path = "../../lp-app/lp-server", default-features = false }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false }
 log = { workspace = true, default-features = false }
 embassy-sync = "0.7.2"
 serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
-lp-server = { path = "../../lp-app/lp-server", default-features = false, features = ["std"] }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["std"] }
 critical-section = { version = "1.2", features = ["std"] }
 pollster = "0.3"
 

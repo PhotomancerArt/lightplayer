@@ -113,8 +113,8 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 And host checks:
 
 ```bash
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 ```
 
 ## What NOT To Do

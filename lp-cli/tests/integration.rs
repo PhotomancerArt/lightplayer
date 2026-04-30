@@ -8,10 +8,10 @@ extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc};
 use core::cell::RefCell;
-// NOTE: These integration tests use the old synchronous lp-client API which no longer exists.
+// NOTE: These integration tests use the old synchronous lpa-client API which no longer exists.
 // They need to be rewritten to use the new async LpClient API. Marked as #[ignore] for now.
 
-use lp_server::LpServer;
+use lpa_server::LpServer;
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::{LpFs, LpFsMemory};
@@ -79,13 +79,13 @@ fn create_test_project(fs: &mut LpFsMemory, name: &str, uid: &str) -> Result<(),
 }
 
 #[test]
-#[ignore] // Uses old lp-client API, needs to be rewritten for async LpClient
+#[ignore] // Uses old lpa-client API, needs to be rewritten for async LpClient
 fn test_server_startup_with_memory_filesystem() {
     // Create server with memory filesystem
     let fs = LpFsMemory::new();
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: std::sync::Arc<dyn lp_server::LpGraphics> =
-        std::sync::Arc::new(lp_server::Graphics::new());
+    let graphics: std::sync::Arc<dyn lpa_server::LpGraphics> =
+        std::sync::Arc::new(lpa_server::Graphics::new());
     let _server = LpServer::new(
         output_provider,
         Box::new(fs),
@@ -101,19 +101,19 @@ fn test_server_startup_with_memory_filesystem() {
 }
 
 #[test]
-#[ignore] // Uses old lp-client API, needs to be rewritten for async LpClient
+#[ignore] // Uses old lpa-client API, needs to be rewritten for async LpClient
 fn test_client_server_communication() {
     unimplemented!("Needs to be rewritten for async LpClient")
 }
 
 #[test]
-#[ignore] // Uses old lp-client API, needs to be rewritten for async LpClient
+#[ignore] // Uses old lpa-client API, needs to be rewritten for async LpClient
 fn test_end_to_end_project_push() {
     unimplemented!("Needs to be rewritten for async LpClient")
 }
 
 #[test]
-#[ignore] // Uses old lp-client API, needs to be rewritten for async LpClient
+#[ignore] // Uses old lpa-client API, needs to be rewritten for async LpClient
 fn test_create_command_structure() {
     // Simulate create command by creating a project structure
     let mut fs = LpFsMemory::new();

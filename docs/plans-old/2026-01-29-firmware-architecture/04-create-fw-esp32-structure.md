@@ -71,7 +71,7 @@ Create a stub main entry point:
 ```rust
 //! ESP32 firmware application
 //!
-//! Main entry point for ESP32 firmware running lp-server.
+//! Main entry point for ESP32 firmware running lpa-server.
 
 #![no_std]
 #![no_main]
@@ -176,7 +176,7 @@ Create a stub server loop:
 ```rust
 //! Server loop for ESP32 firmware
 //!
-//! Main loop that handles hardware I/O and calls lp-server::tick().
+//! Main loop that handles hardware I/O and calls lpa-server::tick().
 
 // TODO: Implement server loop
 // This will be implemented in a later phase

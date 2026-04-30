@@ -115,7 +115,7 @@ cargo check -p lps-frontend
 Host server smoke (when engine/server touched):
 
 ```bash
-cargo check -p lp-server
+cargo check -p lpa-server
 ```
 
 ## Out of scope (this stage)

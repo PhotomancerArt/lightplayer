@@ -21,7 +21,7 @@ Run full check:
 cd lp-app
 cargo check --package fw-emu
 
-cd ../lp-core/lp-client
+cd ../lp-core/lpa-client
 cargo check --features serial
 
 cd ../../lp-riscv/lp-riscv-emu

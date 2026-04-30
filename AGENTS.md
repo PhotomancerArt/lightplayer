@@ -190,8 +190,8 @@ cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 
 # Host still works
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 ```
 
 ## CI gate (run this before pushing)

@@ -214,7 +214,7 @@ mod tests {
 Run from `lp-core/lp-client/` directory:
 
 ```bash
-cd lp-core/lp-client
+cd lp-core/lpa-client
 cargo check --features serial
 cargo test --features serial
 ```

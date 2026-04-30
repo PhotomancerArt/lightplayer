@@ -47,7 +47,7 @@ cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-
 
 ```bash
 # Server tests
-cargo test -p lp-server --lib
+cargo test -p lpa-server --lib
 
 # Engine tests with cranelift
 cargo test -p lp-engine --lib --features test-cranelift
@@ -78,7 +78,7 @@ cargo test -p lp-engine --lib --no-default-features
 # Full test suite
 cargo test -p fw-tests
 cargo test -p lp-engine
-cargo test -p lp-server
+cargo test -p lpa-server
 
 # ESP32 build verification
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server

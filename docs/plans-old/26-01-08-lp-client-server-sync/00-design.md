@@ -132,7 +132,7 @@ pub trait ClientTransport {
 ### Client Structure
 
 ```rust
-// lp-client/src/client.rs
+// lpa-client/src/client.rs
 pub struct LpClient<T: ClientTransport> {
     transport: T,
     projects: HashMap<ProjectHandle, RemoteProject>,
@@ -161,7 +161,7 @@ impl<T: ClientTransport> LpClient<T> {
     fn process_messages(&mut self) -> Result<(), Error>;
 }
 
-// lp-client/src/project.rs
+// lpa-client/src/project.rs
 pub struct ProjectInfo {
     path: String,
 }
@@ -191,7 +191,7 @@ pub struct RemoteNode {
 ### Server Handler
 
 ```rust
-// lp-server/src/handlers.rs
+// lpa-server/src/handlers.rs
 impl ProjectManager {
     pub fn handle_project_request(
         &mut self,

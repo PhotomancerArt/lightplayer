@@ -20,7 +20,7 @@ Search for and remove any temporary code:
 
 ```bash
 cd /Users/yona/dev/photomancer/lp2025
-grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.rs" lp-cli/ lp-core/lp-client/ lp-core/lp-server/ lp-core/lp-model/ | grep -v "// TODO" | grep -v "todo!()"
+grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.rs" lp-cli/ lp-core/lpa-client/ lp-core/lpa-server/ lp-core/lp-model/ | grep -v "// TODO" | grep -v "todo!()"
 ```
 
 Review any remaining TODOs and either:

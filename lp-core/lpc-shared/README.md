@@ -1,6 +1,6 @@
 # lpc-shared
 
-Shared lightplayer code for use by `lp-engine`, `lp-server` and other embeddable portions of
+Shared lightplayer code for use by `lp-engine`, `lpa-server` and other embeddable portions of
 Lightplayer.
 
 `no_std`, desinged for running on embedded devices.
