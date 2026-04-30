@@ -9,7 +9,7 @@ use crate::{
 use alloc::{format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_model::path::{LpPath, LpPathBuf};
+use lpc_model::lp_path::{LpPath, LpPathBuf};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;

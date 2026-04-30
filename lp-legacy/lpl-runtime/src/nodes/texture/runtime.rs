@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, format, string::ToString};
-use lpc_model::{NodeHandle, project::FrameId};
+use lpc_model::{NodeId, project::FrameId};
 use lpc_runtime::NodeRuntime;
 use lpc_runtime::error::Error;
 use lpc_runtime::output::OutputProvider;
@@ -12,11 +12,11 @@ use lpl_model::nodes::texture::{TextureConfig, TextureFormat, TextureState};
 pub struct TextureRuntime {
     config: Option<TextureConfig>,
     pub state: TextureState,
-    node_handle: NodeHandle,
+    node_handle: NodeId,
 }
 
 impl TextureRuntime {
-    pub fn new(node_handle: NodeHandle) -> Self {
+    pub fn new(node_handle: NodeId) -> Self {
         Self {
             config: None,
             state: TextureState::new(FrameId::default()),
@@ -56,7 +56,7 @@ impl TextureRuntime {
 impl NodeRuntime for TextureRuntime {
     fn init(&mut self, _ctx: &dyn NodeInitContext) -> Result<(), Error> {
         self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
-            node_path: format!("texture-{}", self.node_handle.as_i32()),
+            node_path: format!("texture-{}", self.node_handle.as_u32()),
             reason: "Config not set".to_string(),
         })?;
         self.sync_state_from_config();
@@ -94,7 +94,7 @@ impl NodeRuntime for TextureRuntime {
             .as_any()
             .downcast_ref::<TextureConfig>()
             .ok_or_else(|| Error::InvalidConfig {
-                node_path: format!("texture-{}", self.node_handle.as_i32()),
+                node_path: format!("texture-{}", self.node_handle.as_u32()),
                 reason: "Config is not a TextureConfig".to_string(),
             })?;
 
@@ -119,8 +119,8 @@ mod tests {
 
     #[test]
     fn test_texture_runtime_creation() {
-        use lpc_model::NodeHandle;
-        let handle = NodeHandle::new(0);
+        use lpc_model::NodeId;
+        let handle = NodeId::new(0);
         let runtime = TextureRuntime::new(handle);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }

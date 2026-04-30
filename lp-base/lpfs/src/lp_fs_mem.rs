@@ -10,7 +10,7 @@ use crate::{
 use alloc::{format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_model::path::{LpPath, LpPathBuf};
+use lpc_model::lp_path::{LpPath, LpPathBuf};
 
 /// In-memory filesystem implementation for testing
 pub struct LpFsMemory {

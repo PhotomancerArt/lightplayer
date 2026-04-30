@@ -4,7 +4,7 @@ use crate::client::{LpClient, serializable_response_to_project_response};
 use crate::debug_ui::panels;
 use eframe::egui;
 use lp_engine_client::project::ClientProjectView;
-use lpc_model::{NodeHandle, project::FrameId, project::handle::ProjectHandle};
+use lpc_model::{NodeId, project::FrameId, project::handle::ProjectHandle};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -19,7 +19,7 @@ pub struct DebugUiState {
     /// Async client for syncing (shared via Arc<Mutex<>>)
     async_client: Arc<tokio::sync::Mutex<LpClient>>,
     /// Nodes we're tracking detail for
-    tracked_nodes: BTreeSet<NodeHandle>,
+    tracked_nodes: BTreeSet<NodeId>,
     /// "All detail" checkbox state
     all_detail: bool,
     /// Whether a sync is currently in progress

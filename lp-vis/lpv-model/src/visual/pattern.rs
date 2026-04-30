@@ -2,10 +2,10 @@
 //! See `docs/design/lightplayer/domain.md` and
 //! `docs/design/lpfx/overview.md`.
 
-use crate::schema::Artifact;
-use crate::shape::Slot;
 use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef};
 use alloc::string::String;
+use lpc_model::artifact::artifact::Artifact;
+use lpc_model::prop::shape::Slot;
 
 /// A texture-producing Visual: shader source + parameter surface. No
 /// input slot; Patterns generate their pixels from `time`, params, and

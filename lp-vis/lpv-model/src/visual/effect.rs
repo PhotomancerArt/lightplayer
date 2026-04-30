@@ -2,10 +2,10 @@
 //! through a shader. See `docs/design/lightplayer/domain.md` and
 //! `docs/design/lpfx/overview.md`.
 
-use crate::schema::Artifact;
-use crate::shape::Slot;
 use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef, visual_input::VisualInput};
 use alloc::string::String;
+use lpc_model::artifact::artifact::Artifact;
+use lpc_model::prop::shape::Slot;
 
 /// An input-transforming Visual: input slot + shader + parameter
 /// surface. The shader reads the input via a sampler uniform

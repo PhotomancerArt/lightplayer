@@ -41,7 +41,7 @@
 
 use crate::LpsValue;
 use crate::kind::{Kind, MAX_GRADIENT_STOPS, MAX_PALETTE_LEN};
-use crate::shape::Shape;
+use crate::prop::shape::Shape;
 use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
@@ -1262,7 +1262,7 @@ impl TextureSpec {
     }
 }
 
-/// Delegates to the private `ValueSpecWire` type’s `JsonSchema` impl so recursive [`Shape`] / [`Slot`](crate::shape::Slot)
+/// Delegates to the private `ValueSpecWire` type’s `JsonSchema` impl so recursive [`Shape`] / [`Slot`](crate::prop::shape::Slot)
 /// can derive schemas without exposing the wire type.
 #[cfg(feature = "schema-gen")]
 impl schemars::JsonSchema for ValueSpec {
@@ -1295,9 +1295,9 @@ fn texture_handle_value(ctx: &mut LoadCtx, format: i32, width: i32, height: i32)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NodeName;
     use crate::kind::Kind;
-    use crate::shape::{Shape, Slot};
-    use crate::types::Name;
+    use crate::prop::shape::{Shape, Slot};
     use alloc::boxed::Box;
 
     #[test]
@@ -1503,7 +1503,7 @@ mod tests {
         let v = toml::Value::Table(table);
         let fields = alloc::vec![
             (
-                Name::parse("a").unwrap(),
+                NodeName::parse("a").unwrap(),
                 Slot {
                     shape: amp_slot(),
                     label: None,
@@ -1513,7 +1513,7 @@ mod tests {
                 },
             ),
             (
-                Name::parse("b").unwrap(),
+                NodeName::parse("b").unwrap(),
                 Slot {
                     shape: amp_slot(),
                     label: None,

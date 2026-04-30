@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use lp_perf::EVENT_PROJECT_LOAD;
-use lpc_model::{FrameId, LpPath, LpPathBuf, NodeHandle, project::api::ApiNodeSpecifier};
+use lpc_model::{FrameId, LpPath, LpPathBuf, NodeId, project::api::ApiNodeSpecifier};
 use lpfs::FsChange;
 use lpl_model::{NodeConfig, NodeKind, ProjectResponse};
 
@@ -65,7 +65,7 @@ impl ProjectRuntime {
         for path in node_paths {
             match crate::project::loader::load_node(&*self.fs.borrow(), &path) {
                 Ok((path, config)) => {
-                    let handle = NodeHandle::new(self.next_handle);
+                    let handle = NodeId::new(self.next_handle);
                     self.next_handle += 1;
 
                     let kind = config.kind();
@@ -84,7 +84,7 @@ impl ProjectRuntime {
                 }
                 Err(e) => {
                     // Create entry with error status
-                    let handle = NodeHandle::new(self.next_handle);
+                    let handle = NodeId::new(self.next_handle);
                     self.next_handle += 1;
 
                     // Try to determine kind from path
@@ -110,8 +110,8 @@ impl ProjectRuntime {
                             })
                         }
                         NodeKind::Fixture => Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                            output_spec: lpc_model::NodeSpecifier::from(""),
-                            texture_spec: lpc_model::NodeSpecifier::from(""),
+                            output_spec: lpc_model::NodeSpec::from(""),
+                            texture_spec: lpc_model::NodeSpec::from(""),
                             mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                 paths: vec![],
                                 sample_diameter: 2.0,
@@ -190,7 +190,7 @@ impl ProjectRuntime {
     /// Resolve a path to a node handle
     ///
     /// Returns the handle for the node at the given path, or an error if not found.
-    pub fn handle_for_path(&self, path: &LpPath) -> Result<NodeHandle, Error> {
+    pub fn handle_for_path(&self, path: &LpPath) -> Result<NodeId, Error> {
         let node_path = LpPathBuf::from(path);
 
         // Look up node by path
@@ -279,10 +279,10 @@ impl ProjectRuntime {
     }
 
     /// Load a single node by path
-    pub fn load_node_by_path(&mut self, path: &LpPath) -> Result<NodeHandle, Error> {
+    pub fn load_node_by_path(&mut self, path: &LpPath) -> Result<NodeId, Error> {
         match crate::project::loader::load_node(&*self.fs.borrow(), path) {
             Ok((path, config)) => {
-                let handle = NodeHandle::new(self.next_handle);
+                let handle = NodeId::new(self.next_handle);
                 self.next_handle += 1;
 
                 let kind = config.kind();

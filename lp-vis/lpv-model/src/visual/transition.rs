@@ -3,10 +3,10 @@
 //! uniforms (`inputA`, `inputB`); not declared in the artifact.
 //! See `docs/design/lightplayer/domain.md`.
 
-use crate::schema::Artifact;
-use crate::shape::Slot;
 use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef};
 use alloc::string::String;
+use lpc_model::artifact::artifact::Artifact;
+use lpc_model::prop::shape::Slot;
 
 /// A 2-input Visual that interpolates between `inputA` and `inputB`
 /// based on the `progress` parameter. Used by Live (between

@@ -1,4 +1,4 @@
-use crate::nodes::NodeHandle;
+use crate::NodeId;
 use crate::project::FrameId;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -12,7 +12,7 @@ pub enum ApiNodeSpecifier {
     /// All nodes
     All,
     /// Specific handles
-    ByHandles(Vec<NodeHandle>),
+    ByHandles(Vec<NodeId>),
 }
 
 /// Project request from client
@@ -55,7 +55,7 @@ mod tests {
         let spec = ApiNodeSpecifier::All;
         assert_eq!(spec, ApiNodeSpecifier::All);
 
-        let spec = ApiNodeSpecifier::ByHandles(vec![NodeHandle::new(1), NodeHandle::new(2)]);
+        let spec = ApiNodeSpecifier::ByHandles(vec![NodeId::new(1), NodeId::new(2)]);
         match spec {
             ApiNodeSpecifier::ByHandles(handles) => {
                 assert_eq!(handles.len(), 2);

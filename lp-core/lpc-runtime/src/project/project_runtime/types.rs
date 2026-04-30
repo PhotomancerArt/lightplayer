@@ -9,7 +9,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_shared::time::TimeProvider;
-use lpc_model::{FrameId, LpPathBuf, NodeHandle};
+use lpc_model::{FrameId, LpPathBuf, NodeId};
 use lpfs::LpFs;
 use lpl_model::{NodeConfig, NodeKind};
 
@@ -27,9 +27,9 @@ pub struct ProjectRuntime {
     /// Output provider (shared across nodes)
     pub output_provider: Rc<RefCell<dyn OutputProvider>>,
     /// Node entries
-    pub nodes: BTreeMap<NodeHandle, NodeEntry>,
+    pub nodes: BTreeMap<NodeId, NodeEntry>,
     /// Next handle to assign
-    pub next_handle: i32,
+    pub next_handle: u32,
     /// Optional memory stats for shed logging (ESP32 passes, others None)
     pub memory_stats: Option<MemoryStatsFn>,
     /// Optional time provider for perf timing (e.g. shader comp duration). ESP32/emu pass, others None.

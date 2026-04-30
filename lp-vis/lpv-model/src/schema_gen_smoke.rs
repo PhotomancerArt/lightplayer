@@ -6,19 +6,21 @@
 #[cfg(test)]
 mod tests {
     use crate::LpsType;
-    use crate::binding::Binding;
+    use crate::NodeName;
     use crate::constraint::Constraint;
     use crate::kind::{Colorspace, Dimension, InterpMethod, Kind, Unit};
     use crate::presentation::Presentation;
-    use crate::shape::{Shape, Slot};
-    use crate::types::{
-        ArtifactSpec, ChannelName, Name, NodePath, NodePathSegment, NodePropSpec, Uid,
-    };
     use crate::value_spec::{TextureSpec, ValueSpec};
     use crate::{
         Effect, EffectRef, Live, LiveCandidate, ParamsTable, Pattern, Playlist, PlaylistBehavior,
         PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
     };
+    use lpc_model::node::node_id::NodeId;
+    use lpc_model::node::node_path::{NodePath, NodePathSegment};
+    use lpc_model::node::node_prop_spec::NodePropSpec;
+    use lpc_model::prop::binding::Binding;
+    use lpc_model::prop::shape::{Shape, Slot};
+    use lpc_model::{ArtifactSpec, ChannelName};
 
     macro_rules! assert_schema_compiles {
         ($t:ty) => {{

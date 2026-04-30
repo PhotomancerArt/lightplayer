@@ -9,7 +9,7 @@
 
 use crate::error::FsError;
 use crate::fs_event::{FsChange, FsVersion};
-use lpc_model::path::{LpPath, LpPathBuf};
+use lpc_model::lp_path::{LpPath, LpPathBuf};
 
 /// Platform-agnostic filesystem trait
 ///

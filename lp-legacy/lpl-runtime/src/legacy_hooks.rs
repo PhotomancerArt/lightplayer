@@ -20,7 +20,7 @@ use log;
 use lp_perf::EVENT_FRAME;
 use lpc_model::AsLpPath;
 use lpc_model::{
-    FrameId, LpPathBuf, NodeHandle,
+    FrameId, LpPathBuf, NodeId,
     project::api::{ApiNodeSpecifier, NodeStatus as ApiNodeStatus},
 };
 use lpc_runtime::error::Error;
@@ -43,7 +43,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
     ];
 
     for kind in init_order.iter() {
-        let handles: Vec<NodeHandle> = rt
+        let handles: Vec<NodeId> = rt
             .nodes
             .iter()
             .filter(|(_, entry)| entry.kind == *kind && entry.status == NodeStatus::Created)
@@ -54,7 +54,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
             // Get node path and kind before mutable borrow
             let (node_path, node_kind) = {
                 let entry = rt.nodes.get(&handle).ok_or_else(|| Error::Other {
-                    message: format!("Node handle {} not found", handle.as_i32()),
+                    message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 (entry.path.clone(), entry.kind)
             };
@@ -63,7 +63,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
             // Load config from filesystem since we can't extract from Box<dyn NodeConfig>
             let texture_config = if node_kind == NodeKind::Texture {
                 let entry = rt.nodes.get(&handle).ok_or_else(|| Error::Other {
-                    message: format!("Node handle {} not found", handle.as_i32()),
+                    message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
                 let node_json_path = entry.path.join("node.json");
@@ -88,7 +88,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
 
             let fixture_config = if node_kind == NodeKind::Fixture {
                 let entry = rt.nodes.get(&handle).ok_or_else(|| Error::Other {
-                    message: format!("Node handle {} not found", handle.as_i32()),
+                    message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
                 let node_json_path = entry.path.join("node.json");
@@ -113,7 +113,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
 
             let shader_config = if node_kind == NodeKind::Shader {
                 let entry = rt.nodes.get(&handle).ok_or_else(|| Error::Other {
-                    message: format!("Node handle {} not found", handle.as_i32()),
+                    message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
                 let node_json_path = entry.path.join("node.json");
@@ -138,7 +138,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
 
             let output_config = if node_kind == NodeKind::Output {
                 let entry = rt.nodes.get(&handle).ok_or_else(|| Error::Other {
-                    message: format!("Node handle {} not found", handle.as_i32()),
+                    message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
                 let node_json_path = entry.path.join("node.json");
@@ -256,7 +256,7 @@ pub fn tick(rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
 
     // Render the frame
     // Render all fixtures
-    let fixture_handles: Vec<NodeHandle> = rt
+    let fixture_handles: Vec<NodeId> = rt
         .nodes
         .iter()
         .filter(|(_, entry)| {
@@ -317,7 +317,7 @@ pub fn tick(rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
     }
 
     // Flush outputs with state_ver == frame_id (outputs that were written to this frame)
-    let output_handles: Vec<NodeHandle> = rt
+    let output_handles: Vec<NodeId> = rt
         .nodes
         .iter()
         .filter(|(_, entry)| {
@@ -394,7 +394,7 @@ pub fn handle_fs_changes(rt: &mut ProjectRuntime, changes: &[FsChange]) -> Resul
 /// Handle a modify change
 fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<(), Error> {
     // Find which node this file belongs to - collect handle, path, and kind
-    let mut target_handle: Option<NodeHandle> = None;
+    let mut target_handle: Option<NodeId> = None;
     let mut target_path: Option<LpPathBuf> = None;
     let mut target_kind: Option<NodeKind> = None;
 
@@ -569,7 +569,7 @@ pub fn get_changes(
     }
 
     // Determine which handles need detail
-    let detail_handles: BTreeSet<NodeHandle> = match detail_specifier {
+    let detail_handles: BTreeSet<NodeId> = match detail_specifier {
         ApiNodeSpecifier::None => BTreeSet::new(),
         ApiNodeSpecifier::All => rt.nodes.keys().copied().collect(),
         ApiNodeSpecifier::ByHandles(handles) => handles.iter().copied().collect(),
@@ -789,8 +789,8 @@ pub fn get_changes(
                                 Box::new(fixture_config.clone())
                             } else {
                                 Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                                    output_spec: lpc_model::NodeSpecifier::from(""),
-                                    texture_spec: lpc_model::NodeSpecifier::from(""),
+                                    output_spec: lpc_model::NodeSpec::from(""),
+                                    texture_spec: lpc_model::NodeSpec::from(""),
                                     mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
@@ -803,8 +803,8 @@ pub fn get_changes(
                             }
                         } else {
                             Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                                output_spec: lpc_model::NodeSpecifier::from(""),
-                                texture_spec: lpc_model::NodeSpecifier::from(""),
+                                output_spec: lpc_model::NodeSpec::from(""),
+                                texture_spec: lpc_model::NodeSpec::from(""),
                                 mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                     paths: vec![],
                                     sample_diameter: 2.0,
@@ -817,8 +817,8 @@ pub fn get_changes(
                         }
                     } else {
                         Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                            output_spec: lpc_model::NodeSpecifier::from(""),
-                            texture_spec: lpc_model::NodeSpecifier::from(""),
+                            output_spec: lpc_model::NodeSpec::from(""),
+                            texture_spec: lpc_model::NodeSpec::from(""),
                             mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                 paths: vec![],
                                 sample_diameter: 2.0,
@@ -887,10 +887,7 @@ impl<'a> InitContext<'a> {
 }
 
 impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
-    fn resolve_node(
-        &self,
-        spec: &lpc_model::NodeSpecifier,
-    ) -> Result<lpc_model::NodeHandle, Error> {
+    fn resolve_node(&self, spec: &lpc_model::NodeSpec) -> Result<lpc_model::NodeId, Error> {
         let spec_path = spec.as_str();
         let node_path = if spec_path.starts_with('/') {
             // Absolute path
@@ -931,7 +928,7 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
 
     fn resolve_output(
         &self,
-        spec: &lpc_model::NodeSpecifier,
+        spec: &lpc_model::NodeSpec,
     ) -> Result<lpc_runtime::runtime::contexts::OutputHandle, Error> {
         let handle = self.resolve_node(spec)?;
         let entry = self
@@ -955,7 +952,7 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
 
     fn resolve_texture(
         &self,
-        spec: &lpc_model::NodeSpecifier,
+        spec: &lpc_model::NodeSpec,
     ) -> Result<lpc_runtime::runtime::contexts::TextureHandle, Error> {
         let handle = self.resolve_node(spec)?;
         let entry = self
@@ -1005,33 +1002,33 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
             .nodes
             .get(&node_handle)
             .ok_or_else(|| Error::NotFound {
-                path: format!("texture-{}", node_handle.as_i32()),
+                path: format!("texture-{}", node_handle.as_u32()),
             })?;
 
         if entry.kind != NodeKind::Texture {
             return Err(Error::WrongNodeKind {
-                specifier: format!("texture-{}", node_handle.as_i32()),
+                specifier: format!("texture-{}", node_handle.as_u32()),
                 expected: NodeKind::Texture,
                 actual: entry.kind,
             });
         }
 
         let runtime = entry.runtime.as_ref().ok_or_else(|| Error::Other {
-            message: format!("Texture node {} has no runtime", node_handle.as_i32()),
+            message: format!("Texture node {} has no runtime", node_handle.as_u32()),
         })?;
 
         let tex_runtime = runtime
             .as_any()
             .downcast_ref::<TextureRuntime>()
             .ok_or_else(|| Error::Other {
-                message: format!("Node {} is not a texture runtime", node_handle.as_i32()),
+                message: format!("Node {} is not a texture runtime", node_handle.as_u32()),
             })?;
 
         tex_runtime
             .get_config()
             .cloned()
             .ok_or_else(|| Error::InvalidConfig {
-                node_path: format!("texture-{}", node_handle.as_i32()),
+                node_path: format!("texture-{}", node_handle.as_u32()),
                 reason: String::from("Config not set"),
             })
     }
@@ -1039,8 +1036,8 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
     fn texture_output_buffer_owner(
         &self,
         handle: lpc_runtime::runtime::contexts::TextureHandle,
-        fallback_if_no_shader_yet: NodeHandle,
-    ) -> NodeHandle {
+        fallback_if_no_shader_yet: NodeId,
+    ) -> NodeId {
         texture_output_owner_handle(&self.runtime.nodes, handle)
             .unwrap_or(fallback_if_no_shader_yet)
     }
@@ -1048,10 +1045,10 @@ impl<'a> lpc_runtime::runtime::contexts::NodeInitContext for InitContext<'a> {
 
 /// Shader node that owns the shared CPU buffer for a texture target (see [`texture_output_owner_handle`]).
 fn texture_output_owner_handle(
-    nodes: &BTreeMap<lpc_model::NodeHandle, lpc_runtime::project::project_runtime::NodeEntry>,
+    nodes: &BTreeMap<lpc_model::NodeId, lpc_runtime::project::project_runtime::NodeEntry>,
     texture_handle: lpc_runtime::runtime::contexts::TextureHandle,
-) -> Option<NodeHandle> {
-    let mut best: Option<(i32, NodeHandle)> = None;
+) -> Option<NodeId> {
+    let mut best: Option<(i32, NodeId)> = None;
     for (h, entry) in nodes.iter() {
         if entry.kind != NodeKind::Shader || entry.status != NodeStatus::Ok {
             continue;
@@ -1069,7 +1066,7 @@ fn texture_output_owner_handle(
         let replace = match best {
             None => true,
             Some((best_ord, best_h)) => {
-                ord > best_ord || (ord == best_ord && h.as_i32() > best_h.as_i32())
+                ord > best_ord || (ord == best_ord && h.as_u32() > best_h.as_u32())
             }
         };
         if replace {
@@ -1081,7 +1078,7 @@ fn texture_output_owner_handle(
 
 /// Render context implementation
 struct RenderContextImpl<'a> {
-    nodes: &'a mut BTreeMap<NodeHandle, NodeEntry>,
+    nodes: &'a mut BTreeMap<NodeId, NodeEntry>,
     frame_id: FrameId,
     frame_time: FrameTime,
     output_provider: Rc<RefCell<dyn OutputProvider>>,
@@ -1103,14 +1100,14 @@ impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a>
         let shader = Self::find_shader_for_texture(self.nodes, handle).ok_or_else(|| Error::Other {
             message: format!(
                 "Texture {} has no shader writing to it; there are no shader-independent texture sources",
-                handle.as_node_handle().as_i32()
+                handle.as_node_handle().as_u32()
             ),
         })?;
 
         shader.output_buffer().ok_or_else(|| Error::Other {
             message: format!(
                 "Shader output buffer for texture {} is not allocated",
-                handle.as_node_handle().as_i32()
+                handle.as_node_handle().as_u32()
             ),
         })
     }
@@ -1130,14 +1127,14 @@ impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a>
         let shader = Self::find_shader_for_texture(self.nodes, handle).ok_or_else(|| Error::Other {
             message: format!(
                 "Texture {} has no shader writing to it; there are no shader-independent texture sources",
-                handle.as_node_handle().as_i32()
+                handle.as_node_handle().as_u32()
             ),
         })?;
 
         shader.output_buffer_mut().ok_or_else(|| Error::Other {
             message: format!(
                 "Shader output buffer for texture {} is not allocated",
-                handle.as_node_handle().as_i32()
+                handle.as_node_handle().as_u32()
             ),
         })
     }
@@ -1160,7 +1157,7 @@ impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a>
             .nodes
             .get_mut(&node_handle)
             .ok_or_else(|| Error::NotFound {
-                path: format!("output-{}", node_handle.as_i32()),
+                path: format!("output-{}", node_handle.as_u32()),
             })?;
 
         // Update output state_ver to current frame (state changed when accessed)
@@ -1169,7 +1166,7 @@ impl<'a> lpc_runtime::runtime::contexts::RenderContext for RenderContextImpl<'a>
         if old_state_ver != self.frame_id {
             log::debug!(
                 "RenderContext::get_output: Output {} ({}) state_ver updated: {} -> {} (channels {}-{})",
-                node_handle.as_i32(),
+                node_handle.as_u32(),
                 entry.path.as_str(),
                 old_state_ver.as_i64(),
                 self.frame_id.as_i64(),
@@ -1217,7 +1214,7 @@ impl<'a> RenderContextImpl<'a> {
     /// 2. Renders those shaders in render_order (lowest first)
     /// 3. Marks the texture as rendered
     fn ensure_texture_rendered(
-        nodes: &mut BTreeMap<NodeHandle, NodeEntry>,
+        nodes: &mut BTreeMap<NodeId, NodeEntry>,
         handle: lpc_runtime::runtime::contexts::TextureHandle,
         frame_id: FrameId,
         frame_time: FrameTime,
@@ -1227,7 +1224,7 @@ impl<'a> RenderContextImpl<'a> {
 
         log::trace!(
             "RenderContextImpl::ensure_texture_rendered: Ensuring texture {} is rendered (frame {})",
-            node_handle.as_i32(),
+            node_handle.as_u32(),
             frame_id.as_i64()
         );
 
@@ -1236,7 +1233,7 @@ impl<'a> RenderContextImpl<'a> {
             if entry.state_ver >= frame_id {
                 log::trace!(
                     "RenderContextImpl::ensure_texture_rendered: Texture {} already rendered",
-                    node_handle.as_i32()
+                    node_handle.as_u32()
                 );
                 return Ok(());
             }
@@ -1244,7 +1241,7 @@ impl<'a> RenderContextImpl<'a> {
 
         // Find all shader nodes that target this texture
         // Collect (handle, render_order) pairs for shaders targeting this texture
-        let mut shader_handles: Vec<(NodeHandle, i32)> = Vec::new();
+        let mut shader_handles: Vec<(NodeId, i32)> = Vec::new();
 
         for (shader_handle, entry) in nodes.iter() {
             if entry.kind == NodeKind::Shader
@@ -1273,7 +1270,7 @@ impl<'a> RenderContextImpl<'a> {
         log::trace!(
             "RenderContextImpl::ensure_texture_rendered: Found {} shader(s) targeting texture {}",
             shader_handles.len(),
-            node_handle.as_i32()
+            node_handle.as_u32()
         );
 
         // Mark texture as rendering BEFORE calling shader.render() to prevent infinite recursion
@@ -1286,8 +1283,8 @@ impl<'a> RenderContextImpl<'a> {
         for (shader_handle, _) in shader_handles {
             log::trace!(
                 "RenderContextImpl::ensure_texture_rendered: Rendering shader {} for texture {}",
-                shader_handle.as_i32(),
-                node_handle.as_i32()
+                shader_handle.as_u32(),
+                node_handle.as_u32()
             );
             // Create RenderContext for each shader render
             let mut ctx = RenderContextImpl {
@@ -1351,7 +1348,7 @@ impl<'a> RenderContextImpl<'a> {
     /// Resolves the shader that owns the shared output buffer for this texture (see
     /// [`texture_output_owner_handle`]).
     fn find_shader_for_texture(
-        nodes: &mut BTreeMap<NodeHandle, NodeEntry>,
+        nodes: &mut BTreeMap<NodeId, NodeEntry>,
         texture_handle: lpc_runtime::runtime::contexts::TextureHandle,
     ) -> Option<&mut ShaderRuntime> {
         let best_h = texture_output_owner_handle(nodes, texture_handle)?;

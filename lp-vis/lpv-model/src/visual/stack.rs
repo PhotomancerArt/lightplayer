@@ -2,13 +2,13 @@
 //! references. See `docs/design/lightplayer/domain.md` and
 //! `docs/design/lpfx/overview.md`.
 
-use crate::schema::Artifact;
-use crate::shape::Slot;
-use crate::types::ArtifactSpec;
 use crate::visual::{params_table::ParamsTable, visual_input::VisualInput};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lpc_model::ArtifactSpec;
+use lpc_model::artifact::artifact::Artifact;
+use lpc_model::prop::shape::Slot;
 
 /// One Effect in a Stack's chain. Order is the order of declaration.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

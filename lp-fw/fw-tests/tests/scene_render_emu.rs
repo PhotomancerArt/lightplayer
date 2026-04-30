@@ -214,7 +214,7 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
 }
 
 /// Assert that the output channel has the expected red value
-fn assert_output_red(view: &ClientProjectView, handle: lpc_model::NodeHandle, expected_r: u8) {
+fn assert_output_red(view: &ClientProjectView, handle: lpc_model::NodeId, expected_r: u8) {
     let data = view
         .get_output_data(handle)
         .expect("Failed to get output data");

@@ -12,10 +12,10 @@
 //! constraint, presentation, and intent — see the §3 table in `quantity.md`).
 
 use crate::LpsType;
-use crate::binding::Binding;
-use crate::constraint::{Constraint, ConstraintFree, ConstraintRange};
+use crate::bus::ChannelName;
 use crate::presentation::Presentation;
-use crate::types::ChannelName;
+use crate::prop::binding::Binding;
+use crate::prop::constraint::{Constraint, ConstraintFree, ConstraintRange};
 use alloc::boxed::Box;
 use alloc::string::String;
 use lps_shared::StructMember;
@@ -208,7 +208,7 @@ impl Kind {
     /// per-`Kind` contract and §5: constraints **refine** the kind, they don’t
     /// replace it).
     ///
-    /// v0 range fields are F32 in [`crate::constraint::Constraint`]; see
+    /// v0 range fields are F32 in [`crate::prop::constraint::Constraint`]; see
     /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (F32
     /// narrowing and future widening).
     pub fn default_constraint(self) -> Constraint {
@@ -225,7 +225,7 @@ impl Kind {
         }
     }
 
-    /// **Default** [`Presentation`]: which widget to use when a [`crate::shape::Slot`]
+    /// **Default** [`Presentation`]: which widget to use when a [`crate::prop::shape::Slot`]
     /// omits an explicit `present` override (`docs/design/lightplayer/quantity.md` §9
     /// and the default table there).
     pub fn default_presentation(self) -> Presentation {

@@ -6,9 +6,9 @@
 //! `toml::Table` keeps authoring order on round-trip (unlike a plain
 //! `BTreeMap` ordering).
 
-use crate::shape::{Shape, Slot};
-use crate::types::Name;
+use crate::NodeName;
 use alloc::vec::Vec;
+use lpc_model::prop::shape::{Shape, Slot};
 
 /// A Visual’s `[params]` block: a [`Slot`] whose [`Shape`] is always
 /// [`Shape::Struct`], synthesized from the TOML table keys.
@@ -36,9 +36,9 @@ impl<'de> serde::Deserialize<'de> for ParamsTable {
         D: serde::Deserializer<'de>,
     {
         let table: toml::Table = toml::Table::deserialize(de)?;
-        let mut fields: Vec<(Name, Slot)> = Vec::with_capacity(table.len());
+        let mut fields: Vec<(NodeName, Slot)> = Vec::with_capacity(table.len());
         for (k, v) in table {
-            let name = Name::parse(&k).map_err(|e| {
+            let name = NodeName::parse(&k).map_err(|e| {
                 serde::de::Error::custom(alloc::format!("invalid param name `{k}`: {e}"))
             })?;
             let s = toml::ser::to_string(&v).map_err(serde::de::Error::custom)?;
@@ -113,7 +113,7 @@ mod tests {
     use super::*;
 
     use crate::kind::Kind;
-    use crate::shape::Shape;
+    use lpc_model::prop::shape::Shape;
 
     #[test]
     fn empty_params_round_trips() {

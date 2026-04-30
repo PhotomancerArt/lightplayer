@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::{vec, vec::Vec};
 use lpc_model::{
-    FrameId, LpPathBuf, NodeHandle,
+    FrameId, LpPathBuf, NodeId,
     project::api::{ApiNodeSpecifier, NodeStatus},
 };
 use lpl_model::{NodeChange, NodeConfig, NodeKind, NodeState};
@@ -25,11 +25,11 @@ pub struct ClientProjectView {
     /// Current frame ID (last synced)
     pub frame_id: FrameId,
     /// Node entries
-    pub nodes: BTreeMap<NodeHandle, ClientNodeEntry>,
+    pub nodes: BTreeMap<NodeId, ClientNodeEntry>,
     /// Which nodes we're tracking detail for
-    pub detail_tracking: BTreeSet<NodeHandle>,
+    pub detail_tracking: BTreeSet<NodeId>,
     /// Previous status for each node (for detecting status changes)
-    previous_status: BTreeMap<NodeHandle, NodeStatus>,
+    previous_status: BTreeMap<NodeId, NodeStatus>,
 }
 
 /// Client node entry
@@ -56,12 +56,12 @@ impl ClientProjectView {
     }
 
     /// Start tracking detail for a node
-    pub fn watch_detail(&mut self, handle: NodeHandle) {
+    pub fn watch_detail(&mut self, handle: NodeId) {
         self.detail_tracking.insert(handle);
     }
 
     /// Stop tracking detail for a node
-    pub fn unwatch_detail(&mut self, handle: NodeHandle) {
+    pub fn unwatch_detail(&mut self, handle: NodeId) {
         self.detail_tracking.remove(&handle);
         // Clear state when stopping detail
         if let Some(entry) = self.nodes.get_mut(&handle) {
@@ -99,7 +99,7 @@ impl ClientProjectView {
                 self.frame_id = *current_frame;
 
                 // Prune removed nodes
-                let handles_set: BTreeSet<NodeHandle> = node_handles.iter().copied().collect();
+                let handles_set: BTreeSet<NodeId> = node_handles.iter().copied().collect();
                 self.nodes.retain(|handle, _| handles_set.contains(handle));
 
                 // Apply changes
@@ -125,8 +125,8 @@ impl ClientProjectView {
                                 }
                                 NodeKind::Fixture => {
                                     Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                                        output_spec: lpc_model::NodeSpecifier::from(""),
-                                        texture_spec: lpc_model::NodeSpecifier::from(""),
+                                        output_spec: lpc_model::NodeSpec::from(""),
+                                        texture_spec: lpc_model::NodeSpec::from(""),
                                         mapping:
                                             lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                                 paths: vec![],
@@ -224,8 +224,8 @@ impl ClientProjectView {
                             }
                             NodeKind::Fixture => {
                                 Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                                    output_spec: lpc_model::NodeSpecifier::from(""),
-                                    texture_spec: lpc_model::NodeSpecifier::from(""),
+                                    output_spec: lpc_model::NodeSpec::from(""),
+                                    texture_spec: lpc_model::NodeSpec::from(""),
                                     mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
@@ -276,8 +276,8 @@ impl ClientProjectView {
                             }
                             NodeKind::Fixture => {
                                 Box::new(lpl_model::nodes::fixture::FixtureConfig {
-                                    output_spec: lpc_model::NodeSpecifier::from(""),
-                                    texture_spec: lpc_model::NodeSpecifier::from(""),
+                                    output_spec: lpc_model::NodeSpec::from(""),
+                                    texture_spec: lpc_model::NodeSpec::from(""),
                                     mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
@@ -325,11 +325,11 @@ impl ClientProjectView {
     /// - The node doesn't exist
     /// - The node is not a texture node
     /// - The node doesn't have state (not being tracked for detail)
-    pub fn get_texture_data(&self, handle: NodeHandle) -> Result<Vec<u8>, String> {
+    pub fn get_texture_data(&self, handle: NodeId) -> Result<Vec<u8>, String> {
         let entry = self
             .nodes
             .get(&handle)
-            .ok_or_else(|| format!("Node handle {} not found in client view", handle.as_i32()))?;
+            .ok_or_else(|| format!("Node handle {} not found in client view", handle.as_u32()))?;
 
         if entry.kind != NodeKind::Texture {
             return Err(format!(
@@ -358,11 +358,11 @@ impl ClientProjectView {
     /// - The node doesn't exist
     /// - The node is not an output node
     /// - The node doesn't have state (not being tracked for detail)
-    pub fn get_output_data(&self, handle: NodeHandle) -> Result<Vec<u8>, String> {
+    pub fn get_output_data(&self, handle: NodeId) -> Result<Vec<u8>, String> {
         let entry = self
             .nodes
             .get(&handle)
-            .ok_or_else(|| format!("Node handle {} not found in client view", handle.as_i32()))?;
+            .ok_or_else(|| format!("Node handle {} not found in client view", handle.as_u32()))?;
 
         if entry.kind != NodeKind::Output {
             return Err(format!(

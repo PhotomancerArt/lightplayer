@@ -1,32 +1,32 @@
 use crate::error::Error;
 use crate::output::OutputProvider;
-use lpc_model::{FrameId, NodeHandle, NodeSpecifier};
+use lpc_model::{FrameId, NodeId, NodeSpec};
 use lpfs::LpFs;
 
 /// Handle for resolved texture nodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TextureHandle(NodeHandle);
+pub struct TextureHandle(NodeId);
 
 impl TextureHandle {
-    pub fn new(handle: NodeHandle) -> Self {
+    pub fn new(handle: NodeId) -> Self {
         Self(handle)
     }
 
-    pub fn as_node_handle(&self) -> NodeHandle {
+    pub fn as_node_handle(&self) -> NodeId {
         self.0
     }
 }
 
 /// Handle for resolved output nodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OutputHandle(NodeHandle);
+pub struct OutputHandle(NodeId);
 
 impl OutputHandle {
-    pub fn new(handle: NodeHandle) -> Self {
+    pub fn new(handle: NodeId) -> Self {
         Self(handle)
     }
 
-    pub fn as_node_handle(&self) -> NodeHandle {
+    pub fn as_node_handle(&self) -> NodeId {
         self.0
     }
 }
@@ -34,13 +34,13 @@ impl OutputHandle {
 /// Context for node initialization
 pub trait NodeInitContext {
     /// Resolve a node specifier to a node handle (common method)
-    fn resolve_node(&self, spec: &NodeSpecifier) -> Result<NodeHandle, Error>;
+    fn resolve_node(&self, spec: &NodeSpec) -> Result<NodeId, Error>;
 
     /// Resolve an output node specifier to a handle
-    fn resolve_output(&self, spec: &NodeSpecifier) -> Result<OutputHandle, Error>;
+    fn resolve_output(&self, spec: &NodeSpec) -> Result<OutputHandle, Error>;
 
     /// Resolve a texture node specifier to a handle
-    fn resolve_texture(&self, spec: &NodeSpecifier) -> Result<TextureHandle, Error>;
+    fn resolve_texture(&self, spec: &NodeSpec) -> Result<TextureHandle, Error>;
 
     /// Get filesystem for this node
     fn get_node_fs(&self) -> &dyn LpFs;
@@ -71,8 +71,8 @@ pub trait NodeInitContext {
     fn texture_output_buffer_owner(
         &self,
         handle: TextureHandle,
-        fallback_if_no_shader_yet: NodeHandle,
-    ) -> NodeHandle;
+        fallback_if_no_shader_yet: NodeId,
+    ) -> NodeId;
 }
 
 /// Context for rendering

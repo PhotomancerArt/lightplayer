@@ -3,7 +3,7 @@
 //! inferred from extension), or builtin Rust impl by name. See
 //! `docs/design/lpfx/overview.md` and the M3 design doc.
 
-use crate::types::Name;
+use crate::NodeName;
 use alloc::string::String;
 
 /// Inline GLSL source (TOML key `glsl`).
@@ -27,7 +27,7 @@ pub struct ShaderRefFile {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ShaderRefBuiltin {
-    pub builtin: Name,
+    pub builtin: NodeName,
 }
 
 /// The shader source backing a visual artifact (pattern, effect, transition, …).
@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn builtin_variant_round_trips() {
         let s = ShaderRef::Builtin(ShaderRefBuiltin {
-            builtin: Name::parse("fluid").unwrap(),
+            builtin: NodeName::parse("fluid").unwrap(),
         });
         let toml = toml::to_string(&s).unwrap();
         let back: ShaderRef = toml::from_str(&toml).unwrap();

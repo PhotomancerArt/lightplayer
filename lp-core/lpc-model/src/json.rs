@@ -299,7 +299,7 @@ mod tests {
 #[cfg(all(test, feature = "ser-write-json"))]
 mod ser_write_json_tests {
     use super::*;
-    use crate::path::AsLpPathBuf;
+    use crate::lp_path::AsLpPathBuf;
     use crate::project::ProjectHandle;
     use crate::server::{FsResponse, LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
     use alloc::string::ToString;

@@ -19,16 +19,29 @@ pub use visual::{
 
 // Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)
 pub use lpc_model::{
-    artifact, binding, constraint, error, kind, node, presentation, schema, shape, types,
-    value_spec,
+    artifact, constraint, error, kind, node, presentation, schema, types, value_spec,
 };
 
 // Re-export foundation types from lpc-model for convenience
 pub use lpc_model::{
-    ArtifactSpec, Binding, ChannelName, Constraint, ConstraintChoice, ConstraintFree,
-    ConstraintRange, DomainError, Kind, LpsType, LpsValue, Name, NodePath, NodePropSpec,
-    NodeProperties, Presentation, PropPath, Shape, Slot, TextureBuffer, TextureStorageFormat, Uid,
-    ValueSpec,
+    Binding, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, DomainError, Kind,
+    LpsType, LpsValue, NodeId, NodeName, Presentation, Shape, Slot, TextureBuffer,
+    TextureStorageFormat, ValueSpec,
 };
 
 pub use lpc_model::artifact::{LoadError, load_artifact};
+// Re-export foundation types from lpc-model for convenience
+pub use lpc_model::ArtifactSpec;
+pub use lpc_model::ChannelName;
+// Re-export foundation types from lpc-model for convenience
+pub use lpc_model::node::node_props::NodeProps;
+// Re-export foundation types from lpc-model for convenience
+pub use lpc_model::node::node_path::NodePath;
+// Re-export foundation types from lpc-model for convenience
+pub use lpc_model::node::node_prop_spec::NodePropSpec;
+// Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)
+pub use lpc_model::prop::binding;
+// Re-export foundation types from lpc-model for convenience
+pub use lpc_model::prop::prop_path::PropPath;
+// Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)
+pub use lpc_model::prop::shape;

@@ -20,13 +20,12 @@
 //! [`Shape::Struct`]’s `fields` are a **vector** to preserve TOML order, std430
 //! layout, and panel field order (`quantity.md` §6).
 
-use crate::binding::Binding;
-use crate::constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
-use crate::kind::Kind;
 use crate::presentation::Presentation;
-use crate::types::Name;
+use crate::prop::binding::Binding;
+use crate::prop::constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
+use crate::prop::kind::Kind;
 use crate::value_spec::{FromTomlError, LoadCtx, ValueSpec};
-use crate::{LpsType, LpsValue};
+use crate::{LpsType, LpsValue, NodeName};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::string::ToString;
@@ -63,7 +62,7 @@ pub enum Shape {
     /// Ordered struct fields. Optional aggregate default: `None` ⇒ struct
     /// map from each field’s default (`quantity.md` §6).
     Struct {
-        fields: Vec<(Name, Slot)>,
+        fields: Vec<(NodeName, Slot)>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<ValueSpec>,
     },
@@ -142,7 +141,7 @@ impl Slot {
     }
 
     /// Structural type for GPU and serializers: for scalars,
-    /// [`Kind::storage`](crate::kind::Kind::storage) for the leaf kind; for arrays, element type
+    /// [`Kind::storage`](crate::prop::kind::Kind::storage) for the leaf kind; for arrays, element type
     /// with length; for structs, ordered members (`quantity.md` §2 table and §6
     /// `storage()` sketch).
     pub fn storage(&self) -> LpsType {
@@ -512,7 +511,7 @@ fn deserialize_shape_from_table(
             let a = fields_v
                 .as_array()
                 .ok_or_else(|| String::from("`fields` must be a TOML array"))?;
-            let mut out: Vec<(Name, Slot)> = Vec::with_capacity(a.len());
+            let mut out: Vec<(NodeName, Slot)> = Vec::with_capacity(a.len());
             for (i, item) in a.iter().enumerate() {
                 let arr = item
                     .as_array()
@@ -523,7 +522,8 @@ fn deserialize_shape_from_table(
                 let n_str = arr[0]
                     .as_str()
                     .ok_or_else(|| alloc::format!("`fields[{i}][0]` must be a string"))?;
-                let name = Name::parse(n_str).map_err(|e| alloc::format!("`fields[{i}]`: {e}"))?;
+                let name =
+                    NodeName::parse(n_str).map_err(|e| alloc::format!("`fields[{i}]`: {e}"))?;
                 let slot: Slot = slot_from_toml_value(arr[1].clone())
                     .map_err(|_| alloc::format!("`fields[{i}]`: bad nested slot"))?;
                 out.push((name, slot));
@@ -759,7 +759,7 @@ impl schemars::JsonSchema for Slot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constraint::ConstraintRange;
+    use crate::prop::constraint::ConstraintRange;
 
     #[test]
     fn scalar_default_value_is_literal() {
@@ -834,7 +834,7 @@ mod tests {
 
     #[test]
     fn struct_with_no_default_derives_from_fields() {
-        let speed = (Name::parse("speed").unwrap(), scalar_amplitude_slot());
+        let speed = (NodeName::parse("speed").unwrap(), scalar_amplitude_slot());
         let struct_slot = Slot {
             shape: Shape::Struct {
                 fields: alloc::vec![speed],
@@ -920,7 +920,7 @@ mod tests {
 
     #[test]
     fn slot_serde_round_trips_recursive() {
-        let speed = (Name::parse("speed").unwrap(), scalar_amplitude_slot());
+        let speed = (NodeName::parse("speed").unwrap(), scalar_amplitude_slot());
         let struct_slot = Slot {
             shape: Shape::Struct {
                 fields: alloc::vec![speed],
@@ -1079,8 +1079,8 @@ mod tests {
 
     #[test]
     fn slot_metadata_fields_coexist_with_shape() {
-        use crate::binding::Binding;
-        use crate::types::ChannelName;
+        use crate::ChannelName;
+        use crate::prop::binding::Binding;
 
         let expected = Slot {
             label: Some(String::from("Speed")),
@@ -1156,7 +1156,7 @@ mod tests {
 
     #[test]
     fn struct_slot_roundtrips_in_toml() {
-        let speed = (Name::parse("speed").unwrap(), scalar_amplitude_slot());
+        let speed = (NodeName::parse("speed").unwrap(), scalar_amplitude_slot());
         let slot = Slot {
             shape: Shape::Struct {
                 fields: alloc::vec![speed],

@@ -8,7 +8,7 @@ use alloc::{
 use core::panic::AssertUnwindSafe;
 use log;
 use lp_perf::EVENT_SHADER_COMPILE;
-use lpc_model::{LpPathBuf, NodeHandle, project::FrameId};
+use lpc_model::{LpPathBuf, NodeId, project::FrameId};
 use lpc_runtime::NodeRuntime;
 use lpc_runtime::error::Error;
 use lpc_runtime::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
@@ -52,12 +52,12 @@ pub struct ShaderRuntime {
     texture_handle: Option<TextureHandle>,
     compilation_error: Option<String>,
     pub state: ShaderState,
-    node_handle: NodeHandle,
+    node_handle: NodeId,
     render_order: i32,
 }
 
 impl ShaderRuntime {
-    pub fn new(node_handle: NodeHandle, graphics: Arc<dyn LpGraphics>) -> Self {
+    pub fn new(node_handle: NodeId, graphics: Arc<dyn LpGraphics>) -> Self {
         Self {
             config: None,
             graphics,
@@ -118,7 +118,7 @@ impl ShaderRuntime {
 impl NodeRuntime for ShaderRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         let config = self.config.clone().ok_or_else(|| Error::InvalidConfig {
-            node_path: format!("shader-{}", self.node_handle.as_i32()),
+            node_path: format!("shader-{}", self.node_handle.as_u32()),
             reason: alloc::string::String::from("Config not set"),
         })?;
 
@@ -176,7 +176,7 @@ impl NodeRuntime for ShaderRuntime {
             .as_any()
             .downcast_ref::<ShaderConfig>()
             .ok_or_else(|| Error::InvalidConfig {
-                node_path: format!("shader-{}", self.node_handle.as_i32()),
+                node_path: format!("shader-{}", self.node_handle.as_u32()),
                 reason: "Config is not a ShaderConfig".to_string(),
             })?;
 
@@ -232,7 +232,7 @@ impl NodeRuntime for ShaderRuntime {
             .as_ref()
             .map(|c| c.glsl_path.clone())
             .ok_or_else(|| Error::InvalidConfig {
-                node_path: format!("shader-{}", self.node_handle.as_i32()),
+                node_path: format!("shader-{}", self.node_handle.as_u32()),
                 reason: "Config not set".to_string(),
             })?;
 
@@ -240,7 +240,7 @@ impl NodeRuntime for ShaderRuntime {
             match change.change_type {
                 ChangeType::Create | ChangeType::Modify => {
                     let config = self.config.clone().ok_or_else(|| Error::InvalidConfig {
-                        node_path: format!("shader-{}", self.node_handle.as_i32()),
+                        node_path: format!("shader-{}", self.node_handle.as_u32()),
                         reason: "Config not set".to_string(),
                     })?;
                     let _ = self.load_and_compile_shader(&config, ctx);
@@ -283,7 +283,7 @@ impl ShaderRuntime {
                 .graphics
                 .alloc_output_buffer(cfg.width, cfg.height)
                 .map_err(|e| Error::InvalidConfig {
-                    node_path: format!("shader-{}", self.node_handle.as_i32()),
+                    node_path: format!("shader-{}", self.node_handle.as_u32()),
                     reason: format!("Failed to allocate shader output buffer: {e}"),
                 })?;
             self.output_buffer = Some(buf);
@@ -342,7 +342,7 @@ impl ShaderRuntime {
     fn compile_shader_inner(&mut self, glsl_source: &str) -> Result<(), Error> {
         log::info!(
             "Shader {} compilation starting ({} bytes)",
-            self.node_handle.as_i32(),
+            self.node_handle.as_u32(),
             glsl_source.len()
         );
         if log::log_enabled!(log::Level::Trace) {
@@ -366,7 +366,7 @@ impl ShaderRuntime {
 
         log::info!(
             "Shader {} q32 options: add_sub={:?}, mul={:?}, div={:?}",
-            self.node_handle.as_i32(),
+            self.node_handle.as_u32(),
             q32_options.add_sub,
             q32_options.mul,
             q32_options.div,
@@ -409,11 +409,11 @@ impl ShaderRuntime {
                 self.state.error.set(frame_id, Some(e.clone()));
                 log::warn!(
                     "Shader {} compilation failed: {}",
-                    self.node_handle.as_i32(),
+                    self.node_handle.as_u32(),
                     e
                 );
                 Err(Error::InvalidConfig {
-                    node_path: format!("shader-{}", self.node_handle.as_i32()),
+                    node_path: format!("shader-{}", self.node_handle.as_u32()),
                     reason: format!("GLSL compilation failed: {e}"),
                 })
             }
@@ -436,11 +436,11 @@ impl ShaderRuntime {
                 let elapsed_ms = end.saturating_sub(start);
                 log::info!(
                     "Shader {} compiled in {}ms",
-                    self.node_handle.as_i32(),
+                    self.node_handle.as_u32(),
                     elapsed_ms
                 );
             } else {
-                log::info!("Shader {} compiled", self.node_handle.as_i32());
+                log::info!("Shader {} compiled", self.node_handle.as_u32());
             }
         }
         result?;
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_shader_runtime_creation() {
-        let handle = lpc_model::NodeHandle::new(0);
+        let handle = lpc_model::NodeId::new(0);
         let graphics: Arc<dyn LpGraphics> = Arc::new(lpc_runtime::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);

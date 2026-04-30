@@ -2,7 +2,7 @@ use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 use lpc_model::Prop;
-use lpc_model::nodes::NodeHandle;
+use lpc_model::nodes::NodeId;
 use lpc_model::project::FrameId;
 
 use lpc_model::impl_state_serialization;
@@ -26,9 +26,9 @@ pub struct FixtureState {
     /// Post-transform mapping cells (sampling regions)
     pub mapping_cells: Prop<Vec<MappingCell>>,
     /// Resolved texture handle (if fixture has been initialized)
-    pub texture_handle: Prop<Option<NodeHandle>>,
+    pub texture_handle: Prop<Option<NodeId>>,
     /// Resolved output handle (if fixture has been initialized)
-    pub output_handle: Prop<Option<NodeHandle>>,
+    pub output_handle: Prop<Option<NodeId>>,
 }
 
 impl FixtureState {
@@ -74,7 +74,7 @@ impl_state_serialization! {
     FixtureState => SerializableFixtureState {
         #[base64] lamp_colors: Vec<u8>,
         mapping_cells: Vec<MappingCell>,
-        texture_handle: Option<NodeHandle>,
-        output_handle: Option<NodeHandle>,
+        texture_handle: Option<NodeId>,
+        output_handle: Option<NodeId>,
     }
 }

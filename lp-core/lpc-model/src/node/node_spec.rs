@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// May support other specifier types in the future (e.g., expressions, handles).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeSpecifier(pub String);
+pub struct NodeSpec(pub String);
 
-impl NodeSpecifier {
+impl NodeSpec {
     pub fn new(spec: String) -> Self {
         Self(spec)
     }
@@ -17,13 +17,13 @@ impl NodeSpecifier {
     }
 }
 
-impl From<String> for NodeSpecifier {
+impl From<String> for NodeSpec {
     fn from(s: String) -> Self {
         Self(s)
     }
 }
 
-impl From<&str> for NodeSpecifier {
+impl From<&str> for NodeSpec {
     fn from(s: &str) -> Self {
         Self(s.to_string())
     }
@@ -35,19 +35,19 @@ mod tests {
 
     #[test]
     fn test_node_specifier_creation() {
-        let spec = NodeSpecifier::new("/src/test.texture".to_string());
+        let spec = NodeSpec::new("/src/test.texture".to_string());
         assert_eq!(spec.as_str(), "/src/test.texture");
     }
 
     #[test]
     fn test_node_specifier_from_string() {
-        let spec = NodeSpecifier::from("/src/test.shader".to_string());
+        let spec = NodeSpec::from("/src/test.shader".to_string());
         assert_eq!(spec.as_str(), "/src/test.shader");
     }
 
     #[test]
     fn test_node_specifier_from_str() {
-        let spec = NodeSpecifier::from("/src/test.output");
+        let spec = NodeSpec::from("/src/test.output");
         assert_eq!(spec.as_str(), "/src/test.output");
     }
 }

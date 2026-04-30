@@ -813,17 +813,10 @@ share a value, the producer mirrors it to an output (forcing
 function for explicit contracts). May relax later if a real
 use case arrives.
 
-**O-3 — Inline child binding inside params.** When you bind
-`params.gradient` to an inline `LfoNode`, today the model says
-"param-promoted to child" (the slot's binding becomes
-`NodeProp(child_path, "output")` and the child becomes a real
-subtree node). We haven't yet drawn the line clearly between
-"bind to a sibling's `outputs`" and "promote a child node into
-the param slot." The two should be the same shape —
-`Binding::NodeProp { node: NodePath, prop: PropPath }` — with
-the difference being where the target `node` lives in the
-tree, not in the binding's type. Confirm in the next
-iteration.
+**~~O-3 — Inline child binding inside params~~ — RESOLVED.**
+Three child kinds, three lifetime policies, one runtime
+mechanism. See the dedicated subsection
+"Child kinds and lazy lifecycle" below.
 
 **O-4 — Whether to physically move existing `width / height /
 format` from `*State` to `*Params`.** Sharpening the semantics
@@ -882,6 +875,213 @@ either grow `Bus` to take a struct or add a `BusOn` variant —
 either is purely additive and doesn't break artifacts in the
 field.
 
+### Child kinds and lazy lifecycle
+
+Three child kinds, three lifetime policies, one runtime
+mechanism. Resolves O-3.
+
+| ChildKind | TOML form                                | Lifetime         | Use case |
+|-----------|------------------------------------------|------------------|----------|
+| `Input`   | `[input] visual = "..."`                 | parent's lifetime | structural composition (Stack effects) |
+| `Sidecar` | `[children.<name>]`                      | parent's lifetime | shared LFOs, programmer model — one node, many bindings reference it |
+| `Inline`  | `[params.<name>.bind] visual = "..."`    | slot binding's lifetime | author UX — drop a Visual on a slot in one operation |
+
+```rust
+pub enum ChildKind {
+    Input    { source: SlotIdx },     // [input.N]
+    Sidecar  { name: Name },          // [children.<name>]
+    Inline   { source: PropPath },    // [params.<name>.bind] visual = ...
+}
+```
+
+All three live as `NodeId`s in the parent's `children: Vec<NodeId>`,
+are addressable by `NodePath`, and are bindable from anywhere via
+`NodeProp { node, prop }`. The `ChildKind` only governs **when the
+child is destroyed** and **what TOML form authored it**.
+
+TOML key for `Sidecar` is `[children.<name>]` even though the
+runtime kind is `Sidecar` — small split between authoring
+vocabulary (where "children" reads naturally) and code vocabulary
+(where "Sidecar" disambiguates from the broader fact that all
+three kinds are children).
+
+**Authoring asymmetry on `params.<name>.bind`:** the binding
+table accepts a 4th key `visual = "..."` that is **loader-side
+sugar only**. The runtime `Binding` enum stays at three variants
+(`Bus`, `Literal`, `NodeProp`). On config-load, `bind = { visual =
+"...", params = {...} }` desugars to (a) creating an `Inline`
+child, (b) storing `Binding::NodeProp { node: <child path>, prop:
+outputs[0] }` for that slot.
+
+**Removing the last binding to a `Sidecar` does nothing** to the
+sidecar's lifetime — sidecars are parent-owned, not
+binding-owned. That matches the "I want a shared LFO" use case.
+
+**Removing or changing an `Inline`'s authoring binding destroys
+the child** — its lifetime is the slot binding's lifetime by
+definition. If the binding switches from `visual = "..."` to
+`literal = ...`, the child is destroyed; if the new binding is
+also `visual = "..."` (different artifact), the old child is
+destroyed and a new one created.
+
+**Sharing across slots: only `Sidecar`.** `Inline` is 1:1 with
+its slot by construction. Trying to bind a different slot to an
+`Inline` child would imply two different lifecycle owners — flag
+as authoring error.
+
+### Lazy lifecycle (EntryState machine)
+
+Children are **always-lazy** by default. Memory pressure on
+ESP32 is the dominating constraint, and "user has 30 sidecars in
+their library, uses 4 at a time" is a real authoring shape.
+Eager instantiation would be a footgun.
+
+```rust
+pub enum EntryState {
+    /// Artifact handle resolved + refcounted; node not instantiated.
+    Pending,
+    /// Node instantiated and ticking.
+    Alive(Box<dyn Node>),
+    /// Instantiation failed; resolution falls through to slot.default.
+    Failed(ErrorReason),
+}
+```
+
+**Init pass for a parent** does just enough to know the child is
+real:
+
+1. Resolve the `ArtifactSpec` via `ArtifactManager` — this
+   validates the path, parses the artifact TOML, schema-checks
+   it, increments the refcount. Cheap: no `Node::init()`, no
+   shader compile.
+2. Create a `NodeEntry` with `EntryState::Pending`, register it
+   in the tree (it has a `NodeId`, `NodePath`, `parent`,
+   `ChildKind`, the resolved artifact handle, and the
+   per-instance config).
+3. That's it. No `Box<dyn Node>` until the entry is woken.
+
+**Two error tiers:**
+
+- **Parse-time** (artifact-level, surfaces at parent-init).
+  Path-not-found, TOML schema error, type error in the
+  artifact. The entry never reaches `Pending`; the parent's
+  init returns `Err` and the user sees the failure
+  immediately.
+- **Init-time** (node-level, surfaces lazily on first wake).
+  Shader compile failure, OOM during resource allocation, etc.
+  Entry transitions `Pending → Failed`. Resolution treats
+  `Failed` like an empty channel — falls through to
+  `Slot.default`. The `NodeEntry` records the reason; editor
+  surfaces it. Optional retry on next `config_ver` bump or
+  `MemoryPressure` event.
+
+**Memory pressure interaction.** A natural response to a
+`MemoryPressure` event is "evict the most-recently-unused
+`Alive` sidecar back to `Pending`". Drop the box, keep the
+entry. The next access re-instantiates. This is the killer
+feature of always-lazy: it gives us a memory-pressure release
+valve essentially for free.
+
+### ArtifactManager state machine
+
+The artifact side of laziness needs its own state model. An
+artifact has multiple potential states between "spec referenced"
+and "instances running":
+
+```rust
+pub enum ArtifactState {
+    /// Path validated; refcount > 0; TOML not yet parsed.
+    Resolved,
+    /// TOML parsed and schema-validated; ready to spawn instances.
+    Loaded,
+    /// One-time prep done (e.g. shader compiled into a shared
+    /// program). For artifacts without expensive prep, identical
+    /// to Loaded.
+    Prepared,
+    /// Refcount = 0 but cached; eligible for eviction under
+    /// MemoryPressure. Idle artifacts still answer queries.
+    Idle,
+    /// Path lookup or filesystem read failed.
+    ResolutionError(ErrorReason),
+    /// TOML parse / schema validation failed.
+    LoadError(ErrorReason),
+    /// One-time prep failed (e.g. shader didn't compile).
+    PrepareError(ErrorReason),
+}
+```
+
+State transitions:
+
+- `<unknown>` → `Resolved` on first reference (path probe + ref).
+- `Resolved` → `Loaded` lazily on first `Pending → Alive` of any
+  instance (or eagerly during parent-init if we choose to
+  pre-validate, see below).
+- `Loaded` → `Prepared` on first instance wake that requires
+  prep (shader compile etc.).
+- `*` → `Idle` when refcount drops to 0; entry retained.
+- `Idle` → eviction (drop entry entirely) under `MemoryPressure`
+  or some LRU policy.
+- `Idle` → `Loaded`/`Prepared` again on next reference (no
+  re-parse needed unless evicted).
+- Any → corresponding `*Error` state on failure; the error
+  propagates to whatever called for the transition.
+
+**Open: when does `Resolved → Loaded` happen?** Two options:
+
+- **(a)** Eagerly at parent-init. Catches schema errors at the
+  earliest possible moment. Cost: every referenced artifact
+  parses, even if its instances never wake. Probably fine — TOML
+  parse is cheap, and this is the model that gives us the "two
+  error tiers" cleanly (parse errors at init, compile errors on
+  wake).
+- **(b)** Lazily on first instance wake. Saves the parse for
+  artifacts that never get used. Errors only surface when an
+  instance actually demands the artifact.
+
+Going with **(a)** for now — simpler error model, parse cost is
+real but bounded, and authors get fast feedback on TOML errors.
+Revisit if profiling shows TOML parse dominating cold-start.
+
+**Refcounting:** each `EntryState::Pending | Alive | Failed`
+holds one ref on its artifact. `Failed` retains the ref because
+a `MemoryPressure → retry` sequence may re-attempt instantiation
+without re-parsing.
+
+### Open questions / flagged
+
+**O-7 — Wake trigger for `Pending → Alive`.** Three candidates:
+
+- **Pull from binding resolution.** Cleanest semantically: when
+  a slot's binding lands on `NodeProp { node: <pending child> }`,
+  the resolver wakes it up. But this means instantiation
+  happens inside `tick`, which is the hot path and may include
+  shader compilation (= JIT, = real time). Risky.
+- **Pre-tick warmup pass.** Walk the binding graph at the start
+  of a frame; wake any reachable `Pending` nodes before tick
+  starts. Keeps `tick` clean, but requires a separate traversal
+  each frame (cheap if cached: only changed bindings produce new
+  wake-ups).
+- **Out-of-band wake.** The editor / sync layer asks for the
+  child explicitly (e.g. when the user opens its detail view).
+  Useful for sidecars that live in a library but aren't yet
+  bound to anything.
+
+Decision: **start with hot-path wake from binding resolution
+(option 1)** — simplest, gets us shipping. We'll likely need to
+refine to "schedule for waking between frames" or option (b)
+warmup pass once we measure JIT cost in the hot path. Option (c)
+explicit wake lands when editor flows need it. Flag for
+iteration during M5 implementation.
+
+**O-8 — Cycles in binding resolution.** `A` binds to `B.output`,
+`B` binds to `A.output`. Forbidden in M5 (compile-time error
+during binding resolution build-up). Future direction: **read
+last frame's value** for backward edges in a detected cycle.
+That handles feedback-style use cases (an input can bind to its
+own output for one-frame delay) elegantly, at the cost of an
+implicit per-cycle-edge buffer of last-frame values. Defer the
+implementation; record the design intent.
+
 ### What changes in `design.md` once we lock these
 
 - §4 (Slot views) gets rewritten. Drop the table headers'
@@ -895,6 +1095,20 @@ field.
   + the `#` separator for combined `NodePropSpec` strings.
 - A new §6.5 on the **`Binding` enum extension** captures the
   Bus / Literal / NodeProp variants (per O-6 above).
+- §7 (lifecycle) gets rewritten to **three child kinds** —
+  `Input` / `Sidecar` / `Inline` — with the authoring forms
+  and lifetime policies in the table above. The existing
+  "Structural / ParamPromoted" framing becomes "Input /
+  Inline" with `Sidecar` as the new third kind.
+- A new §7.5 on the **`EntryState` machine** (`Pending` /
+  `Alive` / `Failed`) and the lazy-instantiation contract.
+- §8 (sync layer) extended: client tree mirror reports
+  `state: pending | alive | failed` per entry; only `Alive`
+  entries push prop values.
+- A new §10.5 on the **`ArtifactManager` state machine**
+  (`Resolved` / `Loaded` / `Prepared` / `Idle` / errors), the
+  refcount discipline, and the parse-eagerly / compile-lazily
+  error model.
 - §11 unchanged.
 
 ## M2 C4 done (out of order, via cargo-rename + agent)

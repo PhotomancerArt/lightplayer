@@ -8,9 +8,10 @@
 //! why it lives here and not as a `Binding` variant. See `00-notes.md`
 //! Q-D3 for the full discussion.
 
-use crate::types::{ArtifactSpec, ChannelName};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lpc_model::ArtifactSpec;
+use lpc_model::ChannelName;
 
 /// Child visual reference plus optional param overrides (TOML keys `visual`, `params`).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

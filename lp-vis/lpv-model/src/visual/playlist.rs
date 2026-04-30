@@ -6,13 +6,13 @@
 //! M3 deliberately omits per-entry transition overrides
 //! (Q-D4); they are an additive future change.
 
-use crate::binding::Binding;
-use crate::schema::Artifact;
-use crate::types::ArtifactSpec;
 use crate::visual::transition_ref::TransitionRef;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lpc_model::ArtifactSpec;
+use lpc_model::artifact::artifact::Artifact;
+use lpc_model::prop::binding::Binding;
 
 /// One entry in a Playlist. `duration: None` means "wait for cue".
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -94,7 +94,7 @@ impl Artifact for Playlist {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ChannelName;
+    use lpc_model::ChannelName;
 
     #[test]
     fn playlist_loads_with_two_entries() {

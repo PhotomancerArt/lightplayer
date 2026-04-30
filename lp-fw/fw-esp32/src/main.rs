@@ -186,7 +186,7 @@ use {
     core::cell::RefCell,
     lp_server::{Graphics, LpGraphics, LpServer},
     lp_shared::output::OutputProvider,
-    lpc_model::path::AsLpPath,
+    lpc_model::lp_path::AsLpPath,
     lpfs::LpFsMemory,
     output::Esp32OutputProvider,
     serial::io_task,

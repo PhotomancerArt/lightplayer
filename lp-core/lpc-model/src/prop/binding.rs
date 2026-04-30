@@ -6,7 +6,7 @@
 //! the slot's **role** in its container (e.g. under `params` vs an output
 //! declaration), not from the [`Binding`] enum (`quantity.md` §8 "Direction is
 //! contextual"). The first writer/reader to a channel establishes its
-//! [`Kind`](crate::kind::Kind); mismatches are compose-time errors (same
+//! [`Kind`](crate::prop::kind::Kind); mismatches are compose-time errors (same
 //! section).
 //!
 //! # On-disk shape
@@ -16,7 +16,7 @@
 //! sibling keys (`bind = { constant = ... }`, etc.); the on-disk grammar
 //! stays a flat key-mutex on the `bind` table.
 
-use crate::types::ChannelName;
+use crate::bus::ChannelName;
 
 /// A **connection** from a slot to a bus channel. v0 has a single variant.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -29,7 +29,7 @@ pub enum Binding {
     Bus(ChannelName),
 }
 
-/// **Compose-time** lookup for "what [`Kind`](crate::kind::Kind) does this
+/// **Compose-time** lookup for "what [`Kind`](crate::prop::kind::Kind) does this
 /// channel carry?", used to validate that a slot's kind matches the bus. A
 /// real implementation lands in M3+; this is only a trait shape
 /// (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md`).
@@ -37,7 +37,7 @@ pub trait BindingResolver {
     /// The kind currently associated with `channel`, if any. `None` means the
     /// channel will be **declared** by this binding (first use), per
     /// `docs/design/lightplayer/quantity.md` §8 "Compose-time validation".
-    fn channel_kind(&self, channel: &ChannelName) -> Option<crate::kind::Kind>;
+    fn channel_kind(&self, channel: &ChannelName) -> Option<crate::prop::kind::Kind>;
 }
 
 #[cfg(test)]

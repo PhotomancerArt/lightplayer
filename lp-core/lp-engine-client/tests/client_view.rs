@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use lp_engine_client::ClientProjectView;
-use lpc_model::{FrameId, NodeHandle};
+use lpc_model::{FrameId, NodeId};
 use lpl_model::ProjectResponse;
 
 #[test]
@@ -16,7 +16,7 @@ fn test_client_view_creation() {
 #[test]
 fn test_request_detail() {
     let mut view = ClientProjectView::new();
-    let handle = NodeHandle::new(1);
+    let handle = NodeId::new(1);
 
     view.watch_detail(handle);
     assert!(view.detail_tracking.contains(&handle));
@@ -35,7 +35,7 @@ fn test_request_detail() {
 #[test]
 fn test_stop_detail() {
     let mut view = ClientProjectView::new();
-    let handle = NodeHandle::new(1);
+    let handle = NodeId::new(1);
 
     view.watch_detail(handle);
     assert!(view.detail_tracking.contains(&handle));
@@ -56,7 +56,7 @@ fn test_sync_with_changes() {
     let mut view = ClientProjectView::new();
 
     // Create a mock response with a created node
-    let handle = NodeHandle::new(1);
+    let handle = NodeId::new(1);
     let response = ProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
@@ -87,7 +87,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
     use lpl_model::{NodeChange, NodeDetail, NodeState};
 
     let mut view = ClientProjectView::new();
-    let handle = NodeHandle::new(1);
+    let handle = NodeId::new(1);
     let path = lpc_model::LpPathBuf::from("/src/s.shader");
     let frame = FrameId::new(1);
 
@@ -125,7 +125,7 @@ fn test_partial_state_merge_texture() {
     use lpl_model::nodes::texture::{TextureConfig, TextureState};
 
     let mut view = ClientProjectView::new();
-    let handle = NodeHandle::new(1);
+    let handle = NodeId::new(1);
 
     // Initial sync: full state with texture_data, width, height, format
     let mut initial_state = TextureState::new(FrameId::new(1));
@@ -248,7 +248,7 @@ fn test_partial_state_merge_output() {
     use lpl_model::nodes::output::{OutputConfig, OutputState};
 
     let mut view = ClientProjectView::new();
-    let handle = NodeHandle::new(1);
+    let handle = NodeId::new(1);
 
     // Initial sync: full state with channel_data
     let mut initial_state = OutputState::new(FrameId::new(1));

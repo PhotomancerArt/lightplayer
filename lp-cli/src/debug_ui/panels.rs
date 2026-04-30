@@ -4,7 +4,7 @@ use crate::debug_ui::nodes::shader;
 use crate::debug_ui::nodes::{fixture, output, texture};
 use eframe::egui::{self, Color32};
 use lp_engine_client::project::ClientProjectView;
-use lpc_model::{NodeHandle, project::FrameId, project::api::NodeStatus};
+use lpc_model::{NodeId, project::FrameId, project::api::NodeStatus};
 use lpl_model::NodeKind;
 
 /// Render status panel
@@ -37,7 +37,7 @@ pub fn render_status_panel(
 pub fn render_all_nodes_panel(
     ui: &mut egui::Ui,
     view: &ClientProjectView,
-    tracked_nodes: &mut std::collections::BTreeSet<NodeHandle>,
+    tracked_nodes: &mut std::collections::BTreeSet<NodeId>,
     all_detail: &mut bool,
     show_texture_background: &mut bool,
     show_texture_labels: &mut bool,

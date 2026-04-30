@@ -6,7 +6,7 @@
 //! time (per `docs/design/lightplayer/quantity.md` §7 and non-negotiable §6).
 //! Materialization uses [`LoadCtx`]; resulting
 //! [`LpsValue`](crate::LpsValue)s are not cached in M3 — this module only checks
-//! that [`Slot::default_value`](crate::shape::Slot::default_value) completes.
+//! that [`Slot::default_value`](crate::prop::shape::Slot::default_value) completes.
 //!
 //! # Errors
 //!
@@ -19,9 +19,9 @@
 //! Cross-artifact resolution (e.g. stack references) is out of scope; one file
 //! per call.
 
+use crate::artifact::artifact::Artifact;
 use crate::error::DomainError;
-use crate::path::LpPath;
-use crate::schema::Artifact;
+use crate::lp_path::LpPath;
 use crate::value_spec::LoadCtx;
 
 /// Narrow filesystem surface for [`load_artifact`].
@@ -109,7 +109,7 @@ fn walk_and_materialize<T: Artifact>(artifact: &T, ctx: &mut LoadCtx) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::path::LpPathBuf;
+    use crate::lp_path::LpPathBuf;
     use alloc::string::{String, ToString};
 
     /// Minimal deserialize target for loader tests (visual `Pattern` lives in `lpv-model`).

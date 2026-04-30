@@ -11,8 +11,8 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_model::nodes::NodeHandle;
-use lpc_model::path::LpPathBuf;
+use lpc_model::lp_path::LpPathBuf;
+use lpc_model::nodes::NodeId;
 use lpc_model::project::FrameId;
 use lpc_model::project::api::NodeStatus;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant};
@@ -34,11 +34,11 @@ pub enum ProjectResponse {
         /// Frame ID to compare against (since_frame from request)
         since_frame: FrameId,
         /// All current node handles (for pruning removed nodes)
-        node_handles: Vec<NodeHandle>,
+        node_handles: Vec<NodeId>,
         /// Changed nodes since since_frame
         node_changes: Vec<NodeChange>,
         /// Full detail for requested nodes
-        node_details: BTreeMap<NodeHandle, NodeDetail>,
+        node_details: BTreeMap<NodeId, NodeDetail>,
         /// Theoretical FPS based on frame processing time (None if not available)
         theoretical_fps: Option<f32>,
     },
@@ -49,27 +49,18 @@ pub enum ProjectResponse {
 pub enum NodeChange {
     /// New node created
     Created {
-        handle: NodeHandle,
+        handle: NodeId,
         path: LpPathBuf,
         kind: NodeKind,
     },
     /// Config updated
-    ConfigUpdated {
-        handle: NodeHandle,
-        config_ver: FrameId,
-    },
+    ConfigUpdated { handle: NodeId, config_ver: FrameId },
     /// State updated
-    StateUpdated {
-        handle: NodeHandle,
-        state_ver: FrameId,
-    },
+    StateUpdated { handle: NodeId, state_ver: FrameId },
     /// Status changed
-    StatusChanged {
-        handle: NodeHandle,
-        status: NodeStatus,
-    },
+    StatusChanged { handle: NodeId, status: NodeStatus },
     /// Node removed
-    Removed { handle: NodeHandle },
+    Removed { handle: NodeId },
 }
 /// Node detail - full config + state
 ///
@@ -206,12 +197,12 @@ pub enum SerializableProjectResponse {
         /// Frame ID to compare against (since_frame from request)
         since_frame: FrameId,
         /// All current node handles (for pruning removed nodes)
-        node_handles: Vec<NodeHandle>,
+        node_handles: Vec<NodeId>,
         /// Changed nodes since since_frame
         node_changes: Vec<NodeChange>,
         /// Full detail for requested nodes (serializable)
         /// Uses Vec instead of BTreeMap for JSON compatibility
-        node_details: Vec<(NodeHandle, SerializableNodeDetail)>,
+        node_details: Vec<(NodeId, SerializableNodeDetail)>,
         /// Theoretical FPS based on frame processing time (None if not available)
         theoretical_fps: Option<f32>,
     },
@@ -361,9 +352,9 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
 struct GetChangesSerializer<'a> {
     current_frame: &'a FrameId,
     since_frame: &'a FrameId,
-    node_handles: &'a Vec<NodeHandle>,
+    node_handles: &'a Vec<NodeId>,
     node_changes: &'a Vec<NodeChange>,
-    node_details: &'a Vec<(NodeHandle, SerializableNodeDetail)>,
+    node_details: &'a Vec<(NodeId, SerializableNodeDetail)>,
     theoretical_fps: &'a Option<f32>,
 }
 
@@ -640,7 +631,7 @@ mod tests {
         use crate::nodes::texture::TextureConfig;
         let mut node_details = BTreeMap::new();
         node_details.insert(
-            NodeHandle::new(1),
+            NodeId::new(1),
             NodeDetail {
                 path: LpPathBuf::from("/src/texture.texture"),
                 config: Box::new(TextureConfig {
@@ -667,7 +658,7 @@ mod tests {
         let response = ProjectResponse::GetChanges {
             current_frame: FrameId::default(),
             since_frame: FrameId::default(),
-            node_handles: vec![NodeHandle::new(1)],
+            node_handles: vec![NodeId::new(1)],
             node_changes: vec![],
             node_details,
             theoretical_fps: None,
@@ -690,7 +681,7 @@ mod tests {
                 assert!(
                     node_details
                         .iter()
-                        .any(|(handle, _)| *handle == NodeHandle::new(1))
+                        .any(|(handle, _)| *handle == NodeId::new(1))
                 );
             }
         }
@@ -739,7 +730,7 @@ mod tests {
         use crate::nodes::texture::TextureConfig;
         let mut node_details = Vec::new();
         node_details.push((
-            NodeHandle::new(1),
+            NodeId::new(1),
             SerializableNodeDetail::Texture {
                 path: LpPathBuf::from("/src/texture.texture"),
                 config: TextureConfig {
@@ -766,7 +757,7 @@ mod tests {
         let response = SerializableProjectResponse::GetChanges {
             current_frame: FrameId::default(),
             since_frame: FrameId::default(),
-            node_handles: vec![NodeHandle::new(1)],
+            node_handles: vec![NodeId::new(1)],
             node_changes: vec![],
             node_details,
             theoretical_fps: None,

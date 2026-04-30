@@ -1,5 +1,5 @@
 use crate::ClientProjectView;
-use lpc_model::NodeHandle;
+use lpc_model::NodeId;
 
 /// Assert first output channel RGB values
 ///
@@ -7,7 +7,7 @@ use lpc_model::NodeHandle;
 /// has the expected red value
 pub fn assert_first_output_red(
     client_view: &mut ClientProjectView,
-    handle: NodeHandle,
+    handle: NodeId,
     expected_r: u8,
 ) {
     let data = client_view.get_output_data(handle).unwrap();

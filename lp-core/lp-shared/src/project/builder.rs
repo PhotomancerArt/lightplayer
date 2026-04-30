@@ -2,8 +2,8 @@
 
 use alloc::{format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
+use lpc_model::lp_path::LpPathBuf;
 use lpc_model::nodes::NodeSpecifier;
-use lpc_model::path::LpPathBuf;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpfs::LpFs;
 use lpl_model::glsl_opts::GlslOpts;

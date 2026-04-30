@@ -7,13 +7,13 @@
 //! for the M3 milestone; this struct exists primarily to reserve
 //! the on-disk shape and the artifact KIND.
 
-use crate::binding::Binding;
-use crate::schema::Artifact;
-use crate::types::ArtifactSpec;
 use crate::visual::transition_ref::TransitionRef;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lpc_model::ArtifactSpec;
+use lpc_model::artifact::artifact::Artifact;
+use lpc_model::prop::binding::Binding;
 
 /// One candidate Visual in a Live show.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -93,7 +93,7 @@ impl Artifact for Live {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ChannelName;
+    use lpc_model::ChannelName;
 
     #[test]
     fn live_loads_with_two_candidates() {

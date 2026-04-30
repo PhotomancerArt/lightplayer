@@ -21,7 +21,7 @@ impl LpPath {
     /// # Examples
     ///
     /// ```
-    /// use lpc_model::path::LpPath;
+    /// use lpc_model::lp_path::LpPath;
     ///
     /// let path = LpPath::new("foo.txt");
     /// ```
@@ -52,7 +52,7 @@ impl LpPath {
     /// # Examples
     ///
     /// ```
-    /// use lpc_model::path::{LpPath, LpPathBuf};
+    /// use lpc_model::lp_path::{LpPath, LpPathBuf};
     ///
     /// let path = LpPath::new("/foo/bar");
     /// let owned = path.to_path_buf();
@@ -268,7 +268,7 @@ impl LpPath {
     /// # Examples
     ///
     /// ```
-    /// use lpc_model::path::LpPath;
+    /// use lpc_model::lp_path::LpPath;
     ///
     /// let path = LpPath::new("/src/my-shader.shader");
     /// assert!(path.has_suffix(".shader"));
@@ -489,7 +489,7 @@ impl fmt::Display for LpPathBuf {
 /// # Examples
 ///
 /// ```
-/// use lpc_model::path::AsLpPath;
+/// use lpc_model::lp_path::AsLpPath;
 ///
 /// let path_str = "/test.txt";
 /// let path = path_str.as_path();
@@ -531,7 +531,7 @@ impl AsLpPath for &LpPath {
 /// # Examples
 ///
 /// ```
-/// use lpc_model::path::AsLpPathBuf;
+/// use lpc_model::lp_path::AsLpPathBuf;
 ///
 /// let path_str = "/test.txt";
 /// let path_buf = path_str.as_path_buf();

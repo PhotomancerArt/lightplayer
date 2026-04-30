@@ -3,9 +3,9 @@
 //! by [`crate::visual::Live`] and [`crate::visual::Playlist`] as the
 //! default transition between candidates / entries.
 
-use crate::types::ArtifactSpec;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lpc_model::ArtifactSpec;
 
 /// Reference to a Transition with playback parameters.
 ///

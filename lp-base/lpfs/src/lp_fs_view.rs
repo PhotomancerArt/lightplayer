@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 use core::cell::RefCell;
-use lpc_model::path::{LpPath, LpPathBuf};
+use lpc_model::lp_path::{LpPath, LpPathBuf};
 
 /// A filesystem view that translates paths relative to a prefix
 ///
