@@ -764,19 +764,43 @@ Cache invalidates on `config_ver` bump.
 
 ### Open questions / flagged
 
-**O-1 — Path grammar (carried).** Bindings reference busses,
-sibling / child node outputs, etc. Two candidates on the table:
+**~~O-1 — Path grammar~~ — RESOLVED, retired.** A small spike
+through what's already in `lp-core/lpc-model/src/binding.rs`
+and `lp-vis/lpv-model/src/visual/visual_input.rs` showed the
+decision had effectively already been made:
 
-- **Drive-prefix style** (Windows-like):
-  `<type>:<spec>:<prop>`, e.g. `node:..:output`, `bus:time/0`.
-- **Unified unix-style**: `/bus/time/0`, `../output`,
-  `./child/output.xyz`.
+- `Binding` is an enum that serialises as a flat-key-mutex
+  inline TOML table (`bind = { bus = "time" }`). Its rsdoc
+  explicitly states future variants land additively as sibling
+  keys (`bind = { constant = ... }`, etc.).
+- `VisualInput` follows the same pattern (`#[serde(untagged)]`
+  + per-variant `deny_unknown_fields`): `[input] visual = "..."`
+  vs. `[input] bus = "..."`.
+- `Kind::default_bind` already exists and returns
+  `Some(Binding::Bus(...))` for time / texture / audio_level —
+  so eliding `bind` in artifact TOML already picks up sensible
+  defaults.
 
-The unified style matches `NodePath` already and keeps the
-mental model uniform; the drive style is grep-friendly and
-self-documenting. **Decision deferred to a near-term iteration**;
-we'll spike both against the existing `NodePath` / `PropPath`
-work (Q-C in this file) before locking it in.
+We **lock in object syntax** for `Binding`. Extension is
+additive: add `Binding::Literal(LpsValue)` and
+`Binding::NodeProp(NodePropRef)` as sibling variants. No
+string-path "bus:time/0" / "node:../lfo:output" sigil
+grammar — it bought less than it cost (literal-vs-path
+ambiguity, weaker editor introspection, custom parser, fragile
+multi-bus extension).
+
+The only string-form path that survives is the `[bindings]`
+cascade-table key (`"candidates/0#emitter_x"` in
+`main.live.toml`), where TOML keys must be strings. That's a
+combined `NodePath#PropPath` reference — and we lock in **`#`
+as the `NodePropSpec` separator**, which the existing artifact
+already uses.
+
+What remains open out of "path grammar" is the `NodePath`
+grammar itself (segment separator, indices, `..` / `.`,
+`%name`), which is the long-running Q-C in this file and is
+already partially designed in `design.md` §6. That work
+survives unchanged.
 
 **O-2 — `NodeProp` binding scope.** Tentatively, `NodeProp`
 bindings only target *outputs* of the source node, not its
@@ -788,13 +812,14 @@ case.
 **O-3 — Inline child binding inside params.** When you bind
 `params.gradient` to an inline `LfoNode`, today the model says
 "param-promoted to child" (the slot's binding becomes
-`ChildOutput(child_id)` and the child becomes a real subtree
-node). We haven't yet drawn the line clearly between "bind to a
-sibling's `outputs`" and "promote a child node into the param
-slot." The two should be the same shape — `NodeProp { node,
-prop }` — with the difference being where the target `node`
-lives in the tree, not in the binding's type. Confirm in the
-next iteration.
+`NodeProp(child_path, "output")` and the child becomes a real
+subtree node). We haven't yet drawn the line clearly between
+"bind to a sibling's `outputs`" and "promote a child node into
+the param slot." The two should be the same shape —
+`Binding::NodeProp { node: NodePath, prop: PropPath }` — with
+the difference being where the target `node` lives in the
+tree, not in the binding's type. Confirm in the next
+iteration.
 
 **O-4 — Whether to physically move existing `width / height /
 format` from `*State` to `*Params`.** Sharpening the semantics
@@ -811,6 +836,31 @@ to clarify in the docs whether an artifact author can *combine*
 binding wins; the value is the fallback). This is consistent
 with the M5 resolution logic but currently undocumented.
 
+**O-6 — `Binding` enum extension shape.** Concrete proposal,
+pending design.md write-up:
+
+```rust
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Binding {
+    Bus(ChannelName),                 // bind = { bus = "time" }
+    Literal(LpsValue),                // bind = { literal = 0.7 }
+    NodeProp(NodePropRef),            // bind = { node = { node = "../lfo", prop = "output" } }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodePropRef {
+    pub node: NodePath,
+    pub prop: PropPath,
+}
+```
+
+Multi-bus deferred (no rabbit hole). When it lands it will
+either grow `Bus` to take a struct or add a `BusOn` variant —
+either is purely additive and doesn't break artifacts in the
+field.
+
 ### What changes in `design.md` once we lock these
 
 - §4 (Slot views) gets rewritten. Drop the table headers'
@@ -819,7 +869,11 @@ with the M5 resolution logic but currently undocumented.
 - A new §4.5 or §5.5 on **Resolution** (pull-based, top-down,
   cached on `NodeEntry`, with the binding stack search
   explicitly described).
-- §6 (paths) absorbs the binding-path grammar once O-1 lands.
+- §6 (paths) doesn't absorb a binding-path grammar — bindings
+  are objects, not strings. §6 is just `NodePath` + `PropPath`
+  + the `#` separator for combined `NodePropSpec` strings.
+- A new §6.5 on the **`Binding` enum extension** captures the
+  Bus / Literal / NodeProp variants (per O-6 above).
 - §11 unchanged.
 
 ## M2 C4 done (out of order, via cargo-rename + agent)
