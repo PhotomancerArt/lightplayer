@@ -1,7 +1,7 @@
 //! Firmware integration tests
 
 use lp_client::{LpClient, serializable_response_to_project_response};
-use lp_engine_client::ClientProjectView;
+use lpc_view::ClientProjectView;
 use lpc_wire::WireProjectHandle as ProjectHandle;
 
 pub mod transport_emu_serial {
@@ -35,7 +35,7 @@ pub async fn sync_emu_project_view(
 pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
-    use lp_engine_client::ClientProjectView;
+    use lpc_view::ClientProjectView;
     use lpc_wire::WireNodeStatus;
     use lpl_model::{NodeKind, NodeState};
 

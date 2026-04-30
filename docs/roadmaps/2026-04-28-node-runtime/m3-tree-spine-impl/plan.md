@@ -343,7 +343,7 @@ pub enum EntryState<N> {
 ```
 
 ```rust
-// lp-engine-client::tree::client_tree_entry
+// lpc-view::tree::client_tree_entry
 pub struct ClientTreeEntry {
     pub id: NodeId,
     pub path: NodePath,

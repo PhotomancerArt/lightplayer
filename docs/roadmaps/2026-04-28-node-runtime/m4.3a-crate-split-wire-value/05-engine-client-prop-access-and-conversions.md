@@ -159,9 +159,9 @@ Run:
 
 ```bash
 cargo test -p lpc-engine
-cargo test -p lp-engine-client
+cargo test -p lpc-view
 cargo test -p lpc-model
-cargo check -p lp-engine-client --no-default-features
+cargo check -p lpc-view --no-default-features
 ```
 
 If formatting changed, run:

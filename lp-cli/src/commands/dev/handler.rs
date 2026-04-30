@@ -116,7 +116,7 @@ async fn handle_dev_async(
     } else {
         // Run UI
         let project_view = Arc::new(std::sync::Mutex::new(
-            lp_engine_client::project::ClientProjectView::new(),
+            lpc_view::project::ClientProjectView::new(),
         ));
 
         // Create a new LpClient for the UI (shares the same transport)

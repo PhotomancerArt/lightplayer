@@ -33,7 +33,7 @@ log = { workspace = true, default-features = false }
 [dev-dependencies]
 lpc-engine = { path = "../lpc-engine", default-features = false, features = ["std"] }
 lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false, features = ["std"] }
-lp-engine-client = { path = "../lp-engine-client", default-features = false, features = ["std"] }
+lpc-view = { path = "../lpc-view", default-features = false, features = ["std"] }
 lp-shared = { path = "../lp-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
 

@@ -2775,7 +2775,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-client",
- "lp-engine-client",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -2783,6 +2782,7 @@ dependencies = [
  "lp-server",
  "lp-shared",
  "lpc-model",
+ "lpc-view",
  "lpfs",
  "lpl-model",
  "lps-builtins",
@@ -2837,12 +2837,12 @@ dependencies = [
  "log",
  "lp-cli",
  "lp-client",
- "lp-engine-client",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shared",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpl-model",
@@ -3947,7 +3947,6 @@ dependencies = [
  "futures-util",
  "log",
  "lp-client",
- "lp-engine-client",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -3956,6 +3955,7 @@ dependencies = [
  "lp-shader",
  "lp-shared",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpir",
@@ -3985,12 +3985,12 @@ dependencies = [
  "futures-util",
  "hashbrown 0.15.5",
  "log",
- "lp-engine-client",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shared",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpl-model",
@@ -4007,16 +4007,6 @@ version = "1.0.0"
 source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4bf6e7af1c3e1db84c20095d0aad56"
 dependencies = [
  "rustc-hash 2.1.1",
-]
-
-[[package]]
-name = "lp-engine-client"
-version = "40.0.0"
-dependencies = [
- "hashbrown 0.15.5",
- "lpc-model",
- "lpc-wire",
- "lpl-model",
 ]
 
 [[package]]
@@ -4103,10 +4093,10 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
- "lp-engine-client",
  "lp-shared",
  "lpc-engine",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpl-model",
@@ -4146,11 +4136,11 @@ dependencies = [
  "hashbrown 0.15.5",
  "libm",
  "log",
- "lp-engine-client",
  "lp-perf",
  "lp-shader",
  "lp-shared",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpir",
@@ -4189,6 +4179,16 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "lpc-view"
+version = "40.0.0"
+dependencies = [
+ "hashbrown 0.15.5",
+ "lpc-model",
+ "lpc-wire",
+ "lpl-model",
 ]
 
 [[package]]

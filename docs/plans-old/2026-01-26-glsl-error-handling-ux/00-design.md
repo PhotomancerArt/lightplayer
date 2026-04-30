@@ -114,7 +114,7 @@ impl ProjectRuntime {
 ### ClientProjectView Changes
 
 ```rust
-// lp-engine-client/src/project/view.rs
+// lpc-view/src/project/view.rs
 
 impl ClientProjectView {
     pub fn apply_changes(

@@ -12,7 +12,6 @@ use fw_tests::sync_emu_project_view;
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
 use lp_client::LpClient;
-use lp_engine_client::ClientProjectView;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -21,6 +20,7 @@ use lp_riscv_emu::{
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
 use lpc_model::{AsLpPath, FrameId};
+use lpc_view::ClientProjectView;
 use lpfs::LpFsMemory;
 
 #[tokio::test]

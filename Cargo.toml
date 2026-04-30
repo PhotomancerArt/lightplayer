@@ -6,7 +6,7 @@ members = [
     "lp-vis/lpv-model",
     # lp-app workspace members
     "lp-core/lpc-engine",
-    "lp-core/lp-engine-client",
+    "lp-core/lpc-view",
     "lp-core/lp-shared",
     "lp-core/lp-server",
     "lp-core/lp-client",
@@ -61,7 +61,7 @@ default-members = [
     "lp-vis/lpv-model",
     # lp-app workspace members
     "lp-core/lpc-engine",
-    "lp-core/lp-engine-client",
+    "lp-core/lpc-view",
     "lp-core/lp-shared",
     "lp-core/lp-server",
     "lp-core/lp-client",

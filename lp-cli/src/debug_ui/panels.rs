@@ -3,8 +3,8 @@
 use crate::debug_ui::nodes::shader;
 use crate::debug_ui::nodes::{fixture, output, texture};
 use eframe::egui::{self, Color32};
-use lp_engine_client::project::ClientProjectView;
 use lpc_model::{NodeId, project::FrameId};
+use lpc_view::project::ClientProjectView;
 use lpc_wire::WireNodeStatus;
 use lpl_model::NodeKind;
 

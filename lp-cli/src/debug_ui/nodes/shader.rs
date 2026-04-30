@@ -1,4 +1,4 @@
-use lp_engine_client::ClientNodeEntry;
+use lpc_view::ClientNodeEntry;
 use lpl_model::nodes::shader::ShaderState;
 
 /// Render shader panel

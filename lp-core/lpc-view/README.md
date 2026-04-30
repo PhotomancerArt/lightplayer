@@ -1,4 +1,4 @@
-# lp-engine-client
+# lpc-view
 
 Client-side view/cache for the LightPlayer engine.
 

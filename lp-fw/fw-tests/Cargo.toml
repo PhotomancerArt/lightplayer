@@ -12,7 +12,7 @@ test_usb = []
 [dependencies]
 hashbrown = { workspace = true }
 lp-client = { path = "../../lp-core/lp-client", features = ["serial", "emu"] }
-lp-engine-client = { path = "../../lp-core/lp-engine-client" }
+lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }

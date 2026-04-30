@@ -7,8 +7,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-esp32/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-model/src" isTestSource="false" />
@@ -79,6 +77,8 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-model/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-source/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-view/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-view/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-wire/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-legacy/lpl-model/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-legacy/lpl-runtime/src" isTestSource="false" />

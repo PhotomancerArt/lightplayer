@@ -1,8 +1,8 @@
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
-use lp_engine_client::ClientProjectView;
 use lpc_model::{FrameId, NodeId};
+use lpc_view::ClientProjectView;
 use lpl_model::ProjectResponse;
 
 #[test]

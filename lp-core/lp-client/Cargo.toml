@@ -32,7 +32,7 @@ ws = ["tokio-tungstenite"]
 [dev-dependencies]
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
-lp-engine-client = { path = "../lp-engine-client" }
+lpc-view = { path = "../lpc-view" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 test-log = { workspace = true }
 

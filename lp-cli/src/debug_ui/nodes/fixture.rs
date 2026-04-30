@@ -1,7 +1,7 @@
 use crate::debug_ui::nodes::texture;
 use eframe::epaint::Color32;
 use egui::Painter;
-use lp_engine_client::{ClientNodeEntry, ClientProjectView};
+use lpc_view::{ClientNodeEntry, ClientProjectView};
 use lpl_model::NodeKind;
 use lpl_model::nodes::fixture::{FixtureState, MappingCell};
 

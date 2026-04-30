@@ -3,8 +3,8 @@
 use crate::client::{LpClient, serializable_response_to_project_response};
 use crate::debug_ui::panels;
 use eframe::egui;
-use lp_engine_client::project::ClientProjectView;
 use lpc_model::{NodeId, project::FrameId};
+use lpc_view::project::ClientProjectView;
 use lpc_wire::WireProjectHandle as ProjectHandle;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};

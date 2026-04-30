@@ -13,7 +13,6 @@ use lp_client::{
     LpClient, serializable_response_to_project_response,
     transport_serial::{BacktraceInfo, create_emulator_serial_transport_pair},
 };
-use lp_engine_client::ClientProjectView;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -22,6 +21,7 @@ use lp_riscv_emu::{
 use lp_riscv_inst::Gpr;
 use lp_shared::ProjectBuilder;
 use lpc_model::{AsLpPath, FrameId};
+use lpc_view::ClientProjectView;
 use lpfs::LpFsMemory;
 use tokio::time::sleep;
 

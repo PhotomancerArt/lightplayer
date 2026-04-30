@@ -97,7 +97,7 @@ update imports/types as needed.
 Run targeted checks first:
 
 ```bash
-cargo check -p lpc-model -p lpc-source -p lpc-wire -p lpc-engine -p lp-engine-client
+cargo check -p lpc-model -p lpc-source -p lpc-wire -p lpc-engine -p lpc-view
 cargo check -p lpl-model -p lpl-runtime
 cargo check -p lp-server -p lp-client
 cargo check -p lpfx -p lpfx-cpu

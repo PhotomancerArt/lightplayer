@@ -1,6 +1,6 @@
 use eframe::epaint::Color32;
 use egui::Vec2;
-use lp_engine_client::ClientNodeEntry;
+use lpc_view::ClientNodeEntry;
 use lpl_model::nodes::output::OutputState;
 
 /// Render output panel

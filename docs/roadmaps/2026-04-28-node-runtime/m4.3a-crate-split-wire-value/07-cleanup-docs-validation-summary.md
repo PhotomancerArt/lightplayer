@@ -116,12 +116,12 @@ cargo +nightly fmt
 Run focused checks:
 
 ```bash
-cargo check -p lpc-model -p lpc-source -p lpc-wire -p lpc-engine -p lp-engine-client
+cargo check -p lpc-model -p lpc-source -p lpc-wire -p lpc-engine -p lpc-view
 cargo test -p lpc-model
 cargo test -p lpc-source
 cargo test -p lpc-wire
 cargo test -p lpc-engine
-cargo test -p lp-engine-client
+cargo test -p lpc-view
 ```
 
 Run broader host validation:
