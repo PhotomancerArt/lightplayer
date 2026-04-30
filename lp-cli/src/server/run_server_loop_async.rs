@@ -1,5 +1,5 @@
 use lp_server::LpServer;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::transport::ServerTransport;
 use lpc_wire::TransportError;
 use lpl_model::LegacyMessage;
 use std::time::{Duration, Instant};

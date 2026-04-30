@@ -587,7 +587,7 @@ pub fn serializable_response_to_project_response(
 mod tests {
     use super::*;
     use crate::local::create_local_transport_pair;
-    use lp_shared::transport::ServerTransport;
+    use lpc_shared::transport::ServerTransport;
     use lpc_model::LpPathBuf;
     use lpc_wire::{
         WireProjectHandle as ProjectHandle,

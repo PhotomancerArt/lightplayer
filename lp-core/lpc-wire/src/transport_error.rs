@@ -1,6 +1,6 @@
 //! Transport error type
 //!
-//! Moved from lp-shared to lp-model to break circular dependency.
+//! Moved from lpc-shared to lp-model to break circular dependency.
 //! Transport errors are related to message protocol, so they belong in lp-model.
 
 use alloc::string::String;

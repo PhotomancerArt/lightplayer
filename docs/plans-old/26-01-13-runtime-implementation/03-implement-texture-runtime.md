@@ -124,7 +124,7 @@ impl NodeRuntime for TextureRuntime {
         match config {
             TextureConfig::Memory { width, height } => {
                 // Create texture with RGBA8 format (default for now)
-                let format = "RGBA8".to_string();  // From lp-shared formats
+                let format = "RGBA8".to_string();  // From lpc-shared formats
                 let texture = Texture::new(*width, *height, format)
                     .map_err(|e| Error::InvalidConfig {
                         node_path: format!("texture-{}", self.node_handle.as_i32()),

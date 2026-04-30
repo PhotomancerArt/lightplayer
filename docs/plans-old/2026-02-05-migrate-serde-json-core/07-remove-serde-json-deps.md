@@ -50,7 +50,7 @@ Run cargo check on all affected crates:
 
 ```bash
 cd lp-core/lp-model && cargo check
-cd lp-core/lp-shared && cargo check
+cd lp-core/lpc-shared && cargo check
 cd lp-core/lp-engine && cargo check
 cd lp-core/lp-client && cargo check
 cd lp-core/lp-server && cargo check

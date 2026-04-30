@@ -15,7 +15,7 @@ use core::str;
 use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::transport::ServerTransport;
 use lpc_wire::{TransportError, json, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 

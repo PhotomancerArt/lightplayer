@@ -1,6 +1,6 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
 use lp_server::{Graphics, LpGraphics, LpServer};
-use lp_shared::output::MemoryOutputProvider;
+use lpc_shared::output::MemoryOutputProvider;
 use lpc_model::AsLpPath;
 use lpfs::LpFs;
 use std::cell::RefCell;

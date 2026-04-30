@@ -22,7 +22,7 @@ impl ProjectRuntime {
         fs: Rc<RefCell<dyn lpfs::LpFs>>,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
-        time_provider: Option<Rc<dyn lp_shared::time::TimeProvider>>,
+        time_provider: Option<Rc<dyn lpc_shared::time::TimeProvider>>,
         graphics: Arc<dyn crate::gfx::LpGraphics>,
     ) -> Result<Self, Error> {
         lp_perf::emit_begin!(EVENT_PROJECT_LOAD);

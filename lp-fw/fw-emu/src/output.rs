@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use lp_riscv_emu_guest::println;
-use lp_shared::OutputError;
-use lp_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+use lpc_shared::OutputError;
+use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 
 /// Syscall-based OutputProvider implementation
 ///
@@ -36,7 +36,7 @@ impl OutputProvider for SyscallOutputProvider {
         pin: u32,
         byte_count: u32,
         format: OutputFormat,
-        options: Option<lp_shared::output::OutputDriverOptions>,
+        options: Option<lpc_shared::output::OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
         let _ = options;
         let handle_id = *self.next_handle.borrow();

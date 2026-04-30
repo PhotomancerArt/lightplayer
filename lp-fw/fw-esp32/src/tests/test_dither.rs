@@ -13,7 +13,7 @@ use core::cell::RefCell;
 use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
 use log::info;
-use lp_shared::{DisplayPipeline, DisplayPipelineOptions};
+use lpc_shared::{DisplayPipeline, DisplayPipelineOptions};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;

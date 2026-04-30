@@ -1,4 +1,4 @@
-//! Error types for lp-shared
+//! Error types for lpc-shared
 
 use alloc::string::String;
 use core::fmt;

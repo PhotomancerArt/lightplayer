@@ -100,7 +100,7 @@ pub struct NodeRuntimeBase {
 ### Message Protocol
 
 ```rust
-// lp-shared/src/message.rs
+// lpc-shared/src/message.rs
 pub enum Message {
     Request {
         id: u64,
@@ -121,7 +121,7 @@ pub enum Message {
 ### Transport Trait
 
 ```rust
-// lp-shared/src/transport.rs
+// lpc-shared/src/transport.rs
 pub trait ClientTransport {
     fn send_message(&mut self, message: &Message) -> Result<(), Error>;
     fn receive_message(&mut self) -> Result<Option<Message>, Error>;

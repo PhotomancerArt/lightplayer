@@ -10,7 +10,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-model/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/tests" isTestSource="true" />
@@ -76,6 +75,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-model/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-source/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-view/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-view/tests" isTestSource="true" />

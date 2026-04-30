@@ -5,7 +5,7 @@ use crate::error::Error;
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
 #[cfg(feature = "panic-recovery")]
-use lp_shared::backtrace::PanicPayload;
+use lpc_shared::backtrace::PanicPayload;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 

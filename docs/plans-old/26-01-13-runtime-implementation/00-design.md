@@ -115,7 +115,7 @@ impl<'a> RenderContext for RenderContextImpl<'a> {
 use lp_shared::util::Texture;
 
 pub struct TextureRuntime {
-    texture: Texture,  // From lp-shared::util::Texture
+    texture: Texture,  // From lpc-shared::util::Texture
     node_handle: NodeHandle,  // For state extraction
 }
 

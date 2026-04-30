@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::format;
 
 use crate::message_router::MessageRouter;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::transport::ServerTransport;
 use lpc_wire::{TransportError, json, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 

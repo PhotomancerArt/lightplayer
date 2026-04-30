@@ -65,7 +65,7 @@ RUST_LOG=debug cargo run --bin lp-cli -- <command>
 
 **Tests**:
 ```bash
-RUST_LOG=debug cargo test --package lp-shared
+RUST_LOG=debug cargo test --package lpc-shared
 # Verify test logs appear
 ```
 

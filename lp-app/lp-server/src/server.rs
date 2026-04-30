@@ -9,8 +9,8 @@ use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
 use log;
-use lp_shared::output::OutputProvider;
-use lp_shared::time::TimeProvider;
+use lpc_shared::output::OutputProvider;
+use lpc_shared::time::TimeProvider;
 use lpc_engine::LpGraphics;
 use lpc_model::{LpPath, LpPathBuf};
 use lpfs::{FsChange, LpFs};
@@ -58,7 +58,7 @@ impl LpServer {
     /// use lpc_model::AsLpPath;
     /// use lp_server::LpServer;
     /// use lpfs::LpFsStd;
-    /// use lp_shared::output::MemoryOutputProvider;
+    /// use lpc_shared::output::MemoryOutputProvider;
     /// use alloc::{boxed::Box, rc::Rc, sync::Arc};
     /// use core::cell::RefCell;
     ///
@@ -117,7 +117,7 @@ impl LpServer {
     /// use lpl_model::LegacyMessage;
     /// use lp_server::LpServer;
     /// use lpfs::LpFsMemory;
-    /// use lp_shared::output::MemoryOutputProvider;
+    /// use lpc_shared::output::MemoryOutputProvider;
     /// use alloc::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
     /// use core::cell::RefCell;
     ///

@@ -27,10 +27,10 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use lp_server::LpServer;
-use lp_shared::fps::FpsTracker;
-use lp_shared::stats::WindowedStatsCollector;
-use lp_shared::time::TimeProvider;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::fps::FpsTracker;
+use lpc_shared::stats::WindowedStatsCollector;
+use lpc_shared::time::TimeProvider;
+use lpc_shared::transport::ServerTransport;
 use lpl_model::LegacyMessage;
 
 use crate::time::Esp32TimeProvider;

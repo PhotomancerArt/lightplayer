@@ -10,7 +10,7 @@ rust-version.workspace = true
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
-lp-shared = { path = "../../lp-core/lp-shared" }
+lpc-shared = { path = "../../lp-core/lpc-shared" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 tokio-tungstenite = { version = "0.21", optional = true }

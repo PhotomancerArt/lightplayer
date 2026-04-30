@@ -1,6 +1,6 @@
 //! RGB MSAFluid live demo on the `examples/basic` 241-lamp circular
 //! ring fixture, GPIO18. Solver + emitters + sampler + readout +
-//! `lp_shared::DisplayPipeline` + RMT, all in `no_std` Rust.
+//! `lpc_shared::DisplayPipeline` + RMT, all in `no_std` Rust.
 //!
 //! See `docs/plans/2026-04-20-fluid-demo/00-design.md` for the
 //! architecture and tunables.
@@ -17,7 +17,7 @@ use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
-use lp_shared::{DisplayPipeline, DisplayPipelineOptions};
+use lpc_shared::{DisplayPipeline, DisplayPipelineOptions};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;

@@ -145,8 +145,8 @@ Update all tests:
 Run compilation checks for all affected crates:
 
 ```bash
-# Check lp-shared
-cd lp-core/lp-shared
+# Check lpc-shared
+cd lp-core/lpc-shared
 cargo check
 
 # Check fw-core

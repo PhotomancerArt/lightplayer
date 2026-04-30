@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_shared::ProjectBuilder;
+use lpc_shared::ProjectBuilder;
 use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lpc_model::AsLpPath;
 use lpfs::LpFsMemory;

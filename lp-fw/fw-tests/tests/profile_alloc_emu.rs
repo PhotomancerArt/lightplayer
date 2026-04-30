@@ -28,7 +28,7 @@ use lp_riscv_emu::{
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
-use lp_shared::ProjectBuilder;
+use lpc_shared::ProjectBuilder;
 use lpc_model::AsLpPath;
 use lpc_view::ClientProjectView;
 use lpfs::LpFsMemory;

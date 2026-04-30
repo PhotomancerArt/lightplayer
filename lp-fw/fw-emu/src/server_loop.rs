@@ -12,8 +12,8 @@ use fw_core::transport::SerialTransport;
 use log;
 use lp_riscv_emu_guest::sys_yield;
 use lp_server::LpServer;
-use lp_shared::time::TimeProvider;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::time::TimeProvider;
+use lpc_shared::transport::ServerTransport;
 use lpl_model::LegacyMessage;
 
 /// Block on a future until completion. Uses sys_yield when pending.

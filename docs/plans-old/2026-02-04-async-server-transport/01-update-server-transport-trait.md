@@ -129,7 +129,7 @@ mod tests {
 
 Run:
 ```bash
-cd lp-core/lp-shared
+cd lp-core/lpc-shared
 cargo check
 ```
 

@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lp_shared::DisplayPipelineOptions;
+use lpc_shared::DisplayPipelineOptions;
 use lpc_engine::NodeRuntime;
 use lpc_engine::error::Error;
 use lpc_engine::output::{OutputChannelHandle, OutputFormat, OutputProvider};

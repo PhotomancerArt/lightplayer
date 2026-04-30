@@ -1,5 +1,5 @@
 [package]
-name = "lp-shared"
+name = "lpc-shared"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

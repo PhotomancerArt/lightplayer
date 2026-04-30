@@ -4,7 +4,7 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
-use lp_shared::ProjectBuilder;
+use lpc_shared::ProjectBuilder;
 use lpc_engine::MemoryOutputProvider;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_wire::message::{ClientMessage, ClientRequest};
@@ -78,7 +78,7 @@ fn test_stop_all_projects() {
     }
 
     // Create output provider
-    let output_provider: Rc<RefCell<dyn lp_shared::output::OutputProvider>> =
+    let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 

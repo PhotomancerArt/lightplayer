@@ -11,7 +11,7 @@ default = ["std"]
 # Panic recovery via catch_unwind (shader compilation, node render)
 panic-recovery = ["lpc-engine/panic-recovery", "lpl-runtime/panic-recovery"]
 std = [
-	"lp-shared/std",
+	"lpc-shared/std",
 	"lpc-engine/std",
 	"lpl-runtime/std",
 	"lpl-model/std",
@@ -25,7 +25,7 @@ lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
@@ -34,7 +34,7 @@ log = { workspace = true, default-features = false }
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["std"] }
 lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false, features = ["std"] }
 lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false, features = ["std"] }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
 
 [lints]

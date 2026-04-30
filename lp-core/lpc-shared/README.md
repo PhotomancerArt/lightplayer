@@ -1,4 +1,4 @@
-# lp-shared
+# lpc-shared
 
 Shared lightplayer code for use by `lp-engine`, `lp-server` and other embeddable portions of
 Lightplayer.

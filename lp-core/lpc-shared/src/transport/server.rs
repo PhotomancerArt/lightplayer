@@ -26,7 +26,7 @@ use lpl_model::LegacyServerMessage;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use lp_shared::transport::ServerTransport;
+/// use lpc_shared::transport::ServerTransport;
 /// use lpc_wire::{ClientMessage, TransportError};
 /// use lpl_model::LegacyServerMessage;
 ///

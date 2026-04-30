@@ -145,8 +145,8 @@ Run from `lp-app/` directory:
 
 ```bash
 cd lp-app
-cargo check --package lp-shared
-cargo test --package lp-shared
+cargo check --package lpc-shared
+cargo test --package lpc-shared
 ```
 
 Ensure:

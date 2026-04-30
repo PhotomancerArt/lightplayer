@@ -307,9 +307,9 @@ server = [
     "lp-server",
     "lp-shared",
     "ser-write-json",
-]  # Enable server dependencies (lp-server, lp-shared, lp-model)
+]  # Enable server dependencies (lp-server, lpc-shared, lp-model)
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
-test_dither = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
+test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)

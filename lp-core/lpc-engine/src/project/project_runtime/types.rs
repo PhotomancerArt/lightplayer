@@ -8,7 +8,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_shared::time::TimeProvider;
+use lpc_shared::time::TimeProvider;
 use lpc_model::{FrameId, LpPathBuf, NodeId};
 use lpfs::LpFs;
 use lpl_model::{NodeConfig, NodeKind};

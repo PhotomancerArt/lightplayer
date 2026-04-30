@@ -7,7 +7,7 @@ members = [
     # lp-app workspace members
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
-    "lp-core/lp-shared",
+    "lp-core/lpc-shared",
     "lp-app/lp-server",
     "lp-app/lp-client",
     "lp-fw/fw-core",
@@ -62,7 +62,7 @@ default-members = [
     # lp-app workspace members
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
-    "lp-core/lp-shared",
+    "lp-core/lpc-shared",
     "lp-app/lp-server",
     "lp-app/lp-client",
     "lp-fw/fw-core",

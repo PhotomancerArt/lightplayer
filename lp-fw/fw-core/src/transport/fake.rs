@@ -7,7 +7,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::transport::ServerTransport;
 use lpc_wire::{TransportError, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 

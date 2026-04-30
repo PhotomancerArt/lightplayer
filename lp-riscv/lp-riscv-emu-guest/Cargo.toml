@@ -10,7 +10,7 @@ crate-type = ["lib"]
 [dependencies]
 linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"] }
 lp-riscv-emu-shared = { path = "../lp-riscv-emu-shared" }
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 log = { workspace = true, default-features = false }
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 

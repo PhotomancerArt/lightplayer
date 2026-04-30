@@ -4,7 +4,7 @@
 //! running in the same process. Uses unbounded channels for simplicity.
 
 use crate::transport::ClientTransport;
-use lp_shared::transport::ServerTransport;
+use lpc_shared::transport::ServerTransport;
 use lpc_wire::{TransportError, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 use tokio::sync::mpsc;

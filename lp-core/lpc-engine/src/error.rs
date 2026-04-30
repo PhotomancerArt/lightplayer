@@ -85,20 +85,20 @@ extern crate std;
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-impl From<lp_shared::OutputError> for Error {
-    fn from(err: lp_shared::OutputError) -> Self {
+impl From<lpc_shared::OutputError> for Error {
+    fn from(err: lpc_shared::OutputError) -> Self {
         match err {
-            lp_shared::OutputError::PinAlreadyOpen { pin } => Error::Other {
+            lpc_shared::OutputError::PinAlreadyOpen { pin } => Error::Other {
                 message: format!("Pin {pin} is already open"),
             },
-            lp_shared::OutputError::InvalidHandle { handle } => Error::Other {
+            lpc_shared::OutputError::InvalidHandle { handle } => Error::Other {
                 message: format!("Invalid handle: {handle}"),
             },
-            lp_shared::OutputError::InvalidConfig { reason } => Error::InvalidConfig {
+            lpc_shared::OutputError::InvalidConfig { reason } => Error::InvalidConfig {
                 node_path: String::from("output"),
                 reason,
             },
-            lp_shared::OutputError::DataLengthMismatch { expected, actual } => {
+            lpc_shared::OutputError::DataLengthMismatch { expected, actual } => {
                 Error::InvalidConfig {
                     node_path: String::from("output"),
                     reason: format!(
@@ -106,7 +106,7 @@ impl From<lp_shared::OutputError> for Error {
                     ),
                 }
             }
-            lp_shared::OutputError::Other { message } => Error::Other { message },
+            lpc_shared::OutputError::Other { message } => Error::Other { message },
         }
     }
 }

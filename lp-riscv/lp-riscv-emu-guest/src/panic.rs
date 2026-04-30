@@ -108,7 +108,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         (None, None)
     };
 
-    let payload = lp_shared::backtrace::PanicPayload::new(message, file, line);
+    let payload = lpc_shared::backtrace::PanicPayload::new(message, file, line);
     let _code = unwinding::panic::begin_panic(alloc::boxed::Box::new(payload));
 
     // begin_panic returned — no catch_unwind on stack. Fall back to host report.

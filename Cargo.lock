@@ -2758,8 +2758,8 @@ dependencies = [
  "embassy-sync 0.7.2",
  "log",
  "lp-server",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-wire",
  "lpl-model",
  "pollster",
@@ -2780,8 +2780,8 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
  "lp-server",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-view",
  "lpfs",
  "lpl-model",
@@ -2815,8 +2815,8 @@ dependencies = [
  "log",
  "lp-perf",
  "lp-server",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-wire",
  "lpfs",
  "lpl-model",
@@ -2840,8 +2840,8 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-view",
  "lpc-wire",
  "lpfs",
@@ -3953,8 +3953,8 @@ dependencies = [
  "lp-riscv-inst",
  "lp-server",
  "lp-shader",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-view",
  "lpc-wire",
  "lpfs",
@@ -3988,8 +3988,8 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-view",
  "lpc-wire",
  "lpfs",
@@ -4062,7 +4062,7 @@ dependencies = [
  "linked_list_allocator",
  "log",
  "lp-riscv-emu-shared",
- "lp-shared",
+ "lpc-shared",
  "unwinding",
 ]
 
@@ -4093,9 +4093,9 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
- "lp-shared",
  "lpc-engine",
  "lpc-model",
+ "lpc-shared",
  "lpc-view",
  "lpc-wire",
  "lpfs",
@@ -4115,20 +4115,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-shared"
-version = "40.0.0"
-dependencies = [
- "libm",
- "log",
- "lpc-model",
- "lpc-wire",
- "lpfs",
- "lpl-model",
- "lps-shared",
- "serde",
-]
-
-[[package]]
 name = "lpc-engine"
 version = "40.0.0"
 dependencies = [
@@ -4138,8 +4124,8 @@ dependencies = [
  "log",
  "lp-perf",
  "lp-shader",
- "lp-shared",
  "lpc-model",
+ "lpc-shared",
  "lpc-view",
  "lpc-wire",
  "lpfs",
@@ -4168,6 +4154,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "lpc-shared"
+version = "40.0.0"
+dependencies = [
+ "libm",
+ "log",
+ "lpc-model",
+ "lpc-wire",
+ "lpfs",
+ "lpl-model",
+ "lps-shared",
+ "serde",
 ]
 
 [[package]]
@@ -4277,9 +4277,9 @@ dependencies = [
  "log",
  "lp-perf",
  "lp-shader",
- "lp-shared",
  "lpc-engine",
  "lpc-model",
+ "lpc-shared",
  "lpc-wire",
  "lpfs",
  "lpir",

@@ -14,8 +14,8 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lp_shared::output::OutputProvider;
-use lp_shared::time::TimeProvider;
+use lpc_shared::output::OutputProvider;
+use lpc_shared::time::TimeProvider;
 use lpc_engine::{LpGraphics, MemoryStatsFn};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::WireProjectHandle as ProjectHandle;
