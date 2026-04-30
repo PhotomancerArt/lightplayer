@@ -7,10 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-lpc-model = { path = "../lpc-model" }
-lpc-wire = { path = "../lpc-wire" }
+lpc-model = { path = "../../lp-core/lpc-model" }
+lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
-lp-shared = { path = "../lp-shared" }
+lp-shared = { path = "../../lp-core/lp-shared" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 tokio-tungstenite = { version = "0.21", optional = true }
@@ -32,7 +32,7 @@ ws = ["tokio-tungstenite"]
 [dev-dependencies]
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
-lpc-view = { path = "../lpc-view" }
+lpc-view = { path = "../../lp-core/lpc-view" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 test-log = { workspace = true }
 

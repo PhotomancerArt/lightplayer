@@ -51,7 +51,7 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
-lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"], optional = true }
+lp-server = { path = "../../lp-app/lp-server", default-features = false, features = ["panic-recovery"], optional = true }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
