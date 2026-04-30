@@ -802,12 +802,16 @@ grammar itself (segment separator, indices, `..` / `.`,
 already partially designed in `design.md` §6. That work
 survives unchanged.
 
-**O-2 — `NodeProp` binding scope.** Tentatively, `NodeProp`
-bindings only target *outputs* of the source node, not its
-`state`. Rationale: `state` is internal-debug; making it
-bindable creates a back-channel that bypasses the producer's
-`outputs` contract. Confirm-or-revisit when we have a real use
-case.
+**~~O-2 — `NodeProp` binding scope~~ — RESOLVED.**
+**Outputs-only**, for now. Syntactically a future authoring
+form could let an author target `state` / `params` / `inputs`,
+but resolution rejects it. `state` is internal-debug, made
+introspectable via `NodeProperties::get_property` but not
+bindable: don't turn implementation detail into API. `params`
+and `inputs` are sink-side on the target — if you want to
+share a value, the producer mirrors it to an output (forcing
+function for explicit contracts). May relax later if a real
+use case arrives.
 
 **O-3 — Inline child binding inside params.** When you bind
 `params.gradient` to an inline `LfoNode`, today the model says
@@ -827,14 +831,31 @@ doesn't require a code move now — the legacy ports in M5 can
 live with the historical placement and we re-classify on the
 domain-model rewrite. Flag, defer.
 
-**O-5 — Default values: literal in `Slot.default`, vs
-`Slot.bind = Bus(...)` as a default binding, vs both?** Today
-`Slot.default` is a `ValueSpec` (literal-ish) and `Slot.bind` is
-optional. Resolution treats `bind` as winning if active. We need
-to clarify in the docs whether an artifact author can *combine*
-"default value 0" with "default binding to bus(time/0)" (the
-binding wins; the value is the fallback). This is consistent
-with the M5 resolution logic but currently undocumented.
+**~~O-5 — Default values vs default bindings~~ — RESOLVED.**
+**Both coexist; they have orthogonal roles.**
+
+- `Slot.default` is **mandatory** for every value-bearing
+  slot (already required for `Shape::Scalar`; we extend the
+  rule to Array/Struct via the existing derived defaults). No
+  `Option`-shaped values reach GLSL: a slot always has a
+  literal value to fall back to. This is the "value when no
+  signal is flowing" position.
+- `Slot.bind` is **optional**. It's the artifact author's
+  hint: *"the suggested signal source for this slot."*
+  `Kind::default_bind` populates it for kinds like `Instant`
+  (→ `Bus("time")`) and `AudioLevel`
+  (→ `Bus("audio/in/0/level")`). Authors can override or
+  clear it.
+- **Per-instance binding overrides the artifact's `bind`
+  entirely** — replace, not stack. When an author at the use
+  site writes "bind to audio level," they mean it; silently
+  falling through to the artifact's default `bind` if audio
+  drops out would surprise. The literal `default` is the
+  universal floor.
+- Resolution rule (one sentence):
+  > The active binding is whichever is highest priority and
+  > produces a value (per-instance > artifact `bind`); if no
+  > binding produces, return `Slot.default`.
 
 **O-6 — `Binding` enum extension shape.** Concrete proposal,
 pending design.md write-up:
