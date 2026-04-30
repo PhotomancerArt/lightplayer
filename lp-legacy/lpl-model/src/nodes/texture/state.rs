@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
+use lpc_model::Prop;
 use lpc_model::project::FrameId;
-use lpc_model::state::StateField;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 use super::format::TextureFormat;
@@ -11,23 +11,23 @@ use lpc_model::impl_state_serialization;
 pub struct TextureState {
     /// Texture pixel data. Format-agnostic raw bytes; interpretation depends on `format`.
     /// For Rgba16: 8 bytes/pixel (little-endian u16 RGBA). Serialized as base64.
-    pub texture_data: StateField<Vec<u8>>,
+    pub texture_data: Prop<Vec<u8>>,
     /// Texture width in pixels
-    pub width: StateField<u32>,
+    pub width: Prop<u32>,
     /// Texture height in pixels
-    pub height: StateField<u32>,
+    pub height: Prop<u32>,
     /// Texture format
-    pub format: StateField<TextureFormat>,
+    pub format: Prop<TextureFormat>,
 }
 
 impl TextureState {
     /// Create a new TextureState with default values
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            texture_data: StateField::new(frame_id, Vec::new()),
-            width: StateField::new(frame_id, 0),
-            height: StateField::new(frame_id, 0),
-            format: StateField::new(frame_id, TextureFormat::Rgba16),
+            texture_data: Prop::new(frame_id, Vec::new()),
+            width: Prop::new(frame_id, 0),
+            height: Prop::new(frame_id, 0),
+            format: Prop::new(frame_id, TextureFormat::Rgba16),
         }
     }
 

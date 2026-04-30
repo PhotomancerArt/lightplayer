@@ -19,6 +19,7 @@ pub mod error;
 pub mod kind;
 pub mod node;
 pub mod presentation;
+pub mod prop;
 pub mod schema;
 pub mod shape;
 pub mod types;
@@ -56,6 +57,7 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 pub use kind::Kind;
 pub use node::NodeProperties;
 pub use presentation::Presentation;
+pub use prop::Prop;
 pub use schema::{Artifact, Migration, Registry};
 pub use shape::{Shape, Slot};
 pub use types::{

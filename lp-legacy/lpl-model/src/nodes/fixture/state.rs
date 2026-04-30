@@ -1,9 +1,9 @@
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
+use lpc_model::Prop;
 use lpc_model::nodes::NodeHandle;
 use lpc_model::project::FrameId;
-use lpc_model::state::StateField;
 
 use lpc_model::impl_state_serialization;
 
@@ -22,23 +22,23 @@ pub struct MappingCell {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FixtureState {
     /// Lamp color values (RGB per lamp)
-    pub lamp_colors: StateField<Vec<u8>>,
+    pub lamp_colors: Prop<Vec<u8>>,
     /// Post-transform mapping cells (sampling regions)
-    pub mapping_cells: StateField<Vec<MappingCell>>,
+    pub mapping_cells: Prop<Vec<MappingCell>>,
     /// Resolved texture handle (if fixture has been initialized)
-    pub texture_handle: StateField<Option<NodeHandle>>,
+    pub texture_handle: Prop<Option<NodeHandle>>,
     /// Resolved output handle (if fixture has been initialized)
-    pub output_handle: StateField<Option<NodeHandle>>,
+    pub output_handle: Prop<Option<NodeHandle>>,
 }
 
 impl FixtureState {
     /// Create a new FixtureState with default values
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            lamp_colors: StateField::new(frame_id, Vec::new()),
-            mapping_cells: StateField::new(frame_id, Vec::new()),
-            texture_handle: StateField::new(frame_id, None),
-            output_handle: StateField::new(frame_id, None),
+            lamp_colors: Prop::new(frame_id, Vec::new()),
+            mapping_cells: Prop::new(frame_id, Vec::new()),
+            texture_handle: Prop::new(frame_id, None),
+            output_handle: Prop::new(frame_id, None),
         }
     }
 

@@ -1,4 +1,4 @@
-/// Macro to generate serialization boilerplate for StateField-wrapped state structs
+/// Macro to generate serialization boilerplate for `Prop<T>`-wrapped state structs
 ///
 /// Usage:
 /// ```ignore
