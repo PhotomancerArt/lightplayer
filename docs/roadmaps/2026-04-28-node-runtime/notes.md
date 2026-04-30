@@ -633,6 +633,195 @@ instances) hitting macOS-reported memory accounting weirdly on a test
 binary linked against `lp-cli`. **No reproducer** as of the M2 close;
 flagged here to keep an eye on during M3 verification.
 
+## M3 design discussion — Slot / Prop / Value / Binding
+
+This is a working-log of the conversation iteration. The decisions
+land in `design.md` once we're done converging; this section is the
+log. All references to the design doc below point at sections still
+to be rewritten — `design.md` §4 / §5 / §6 will be redone in a
+follow-up commit once this lands.
+
+### Where we landed (decisions, pending design.md write-up)
+
+**Schema vs runtime values are distinct, but the schema layer
+already exists.**
+
+- `lpc_model::Slot` is the schema (recursive `Shape` ∈
+  {`Scalar`, `Array`, `Struct`} + `Kind` + `Constraint` +
+  `default: ValueSpec` + optional `bind` and `present` metadata).
+  Lives on artifacts. Already TOML-mature; we keep it as-is.
+- `StateField<T>` (current) is the runtime change-tracking
+  primitive. Rename → **`Prop<T>`**. Same shape: `value: T,
+  changed: FrameId`. Composite values continue to live inside
+  `LpsValue` (no parallel value tree).
+- Today's `*State` structs (`TextureState`, etc.) get renamed to
+  `*Props` and stay as the **server-typed** per-node-type
+  representation. They're a struct of `Prop<T>` per top-level
+  field. A derived `PropAccess` impl yields the generic view.
+
+**Granularity is asymmetric across server / wire / client:**
+
+| Layer       | Representation                                          |
+|-------------|---------------------------------------------------------|
+| Server (typed) | `*Props` struct, `Prop<T>` per top-level field. FrameId tracking is **for delta computation only**. |
+| Wire        | Per-node delta: `{ node_id, changed: [(PropPath, LpsValue)], last_frame }`. Only fields whose `Prop::changed >= since_frame` go on the wire. |
+| Client mirror | `NodeView { values: HashMap<PropPath, LpsValue>, last_seen: FrameId }`. **No** per-field FrameIds — just latest value, one timestamp per node. |
+
+The client doesn't need the rename; `Prop<T>` is internal to the
+server. Generic-of-a-whole-node on the client is `NodeView`.
+
+**Three "layers" was misleading.** It's really one slot with a
+short *stack of override sources*:
+
+```
+artifact slot default                        ← always there
+   ↓ overridden by
+parent's per-instance override (in TOML)     ← optional
+   ↓ overridden by
+slot.bind (if active and the channel/source produces a value)
+   ↓
+resolved value @ this frame
+```
+
+**Resolution is pull-based, top-down search**, fall through to
+`slot.default`:
+
+```rust
+fn resolve(path, frame) -> &LpsValue {
+    cached if cache.changed >= frame, else:
+    walk binding stack high-to-low; first to produce a value wins;
+    if none, return slot.default.
+}
+```
+
+A `Bus` binding to an empty channel returns `None` and we fall
+through. Resolution result cached on `NodeEntry`, keyed by frame.
+Cache invalidates on `config_ver` bump.
+
+**Bindings:**
+
+- For M5 scope: **two binding sources** —
+  1. Artifact's `Slot.bind` (default for the slot kind), and
+  2. Per-instance override authored in the parent's TOML at the
+     use site.
+
+  Modulator chains, grandparent inheritance, cross-tree
+  patching: deferred to lp-vis or later.
+- **There is no separate "value override" concept.** A `params.x =
+  0.7` in the parent's TOML compiles to `Binding::Literal(0.7)`.
+  One overrides map per node, keyed by `PropPath`.
+- Authored truth lives on the **parent**'s `NodeEntry`
+  (`child_overrides: HashMap<NodeId, HashMap<PropPath, Binding>>`).
+  The child caches its effective bindings for fast resolution.
+  The cache is regenerated on `config_ver` change.
+- **Binding TOML uses `source`, not `target`.** Example:
+  ```toml
+  [params.time.bind]
+  source = "/bus/time/0"
+  ```
+- Internal Rust enum (parsed once at config-load):
+  ```rust
+  pub enum Binding {
+      Literal(LpsValue),
+      Bus      { bus: BusSpec, channel: ChannelName },
+      NodeProp { node: NodeSpec, prop: PropPath },
+  }
+  ```
+
+**Bus naming and multi-bus.**
+
+- Each bus gets its **own root in the path**:
+  `/bus/<channel>` for local, `/group/<channel>` for the
+  inter-Lightplayer sync bus, `/sync/<channel>` or
+  `/flock/<channel>` if we end up wanting a 3rd (GlowFlock-style
+  collaboration). No bus indices, no wildcards.
+- Rust representation is a small **compile-time enum**:
+  ```rust
+  pub enum BusSpec { Local, Group /* , Sync, Flock, ... */ }
+  ```
+- For M5 we only implement `Local`. The rest exist in the type
+  to keep the wire format and binding parser stable as more
+  busses come on line.
+
+**Namespace semantics sharpened:**
+
+- `params` and `inputs` are **slots / bindable** — values come
+  from outside the node (literal authored, bus, child output,
+  another node's output).
+- `outputs` and `state` are **produced by the node** — the node
+  writes them; they're not bindable. Both are introspectable for
+  the editor / sync layer; outputs feed downstream consumers,
+  state is read-only debug.
+- `params` vs `state` is sharpened to **authored vs computed**.
+  (Today's `width / height / format` on Texture are conceptually
+  `params`, not `state`. Whether to physically move them is a
+  separate question.) Naming-wise: `params` are values the user
+  *sets*; `state` are values the node *records*.
+- `params` and `inputs` differ only in named-vs-indexed storage
+  and default presentation; runtime treatment is symmetric.
+  Keep them as separate namespaces for ergonomics, treat them
+  symmetrically in resolution code.
+
+### Open questions / flagged
+
+**O-1 — Path grammar (carried).** Bindings reference busses,
+sibling / child node outputs, etc. Two candidates on the table:
+
+- **Drive-prefix style** (Windows-like):
+  `<type>:<spec>:<prop>`, e.g. `node:..:output`, `bus:time/0`.
+- **Unified unix-style**: `/bus/time/0`, `../output`,
+  `./child/output.xyz`.
+
+The unified style matches `NodePath` already and keeps the
+mental model uniform; the drive style is grep-friendly and
+self-documenting. **Decision deferred to a near-term iteration**;
+we'll spike both against the existing `NodePath` / `PropPath`
+work (Q-C in this file) before locking it in.
+
+**O-2 — `NodeProp` binding scope.** Tentatively, `NodeProp`
+bindings only target *outputs* of the source node, not its
+`state`. Rationale: `state` is internal-debug; making it
+bindable creates a back-channel that bypasses the producer's
+`outputs` contract. Confirm-or-revisit when we have a real use
+case.
+
+**O-3 — Inline child binding inside params.** When you bind
+`params.gradient` to an inline `LfoNode`, today the model says
+"param-promoted to child" (the slot's binding becomes
+`ChildOutput(child_id)` and the child becomes a real subtree
+node). We haven't yet drawn the line clearly between "bind to a
+sibling's `outputs`" and "promote a child node into the param
+slot." The two should be the same shape — `NodeProp { node,
+prop }` — with the difference being where the target `node`
+lives in the tree, not in the binding's type. Confirm in the
+next iteration.
+
+**O-4 — Whether to physically move existing `width / height /
+format` from `*State` to `*Params`.** Sharpening the semantics
+doesn't require a code move now — the legacy ports in M5 can
+live with the historical placement and we re-classify on the
+domain-model rewrite. Flag, defer.
+
+**O-5 — Default values: literal in `Slot.default`, vs
+`Slot.bind = Bus(...)` as a default binding, vs both?** Today
+`Slot.default` is a `ValueSpec` (literal-ish) and `Slot.bind` is
+optional. Resolution treats `bind` as winning if active. We need
+to clarify in the docs whether an artifact author can *combine*
+"default value 0" with "default binding to bus(time/0)" (the
+binding wins; the value is the fallback). This is consistent
+with the M5 resolution logic but currently undocumented.
+
+### What changes in `design.md` once we lock these
+
+- §4 (Slot views) gets rewritten. Drop the table headers'
+  "named-vs-indexed-vs-bus-bindable" framing in favour of the
+  sharpened "consumed/produced + authored/computed" framing.
+- A new §4.5 or §5.5 on **Resolution** (pull-based, top-down,
+  cached on `NodeEntry`, with the binding stack search
+  explicitly described).
+- §6 (paths) absorbs the binding-path grammar once O-1 lands.
+- §11 unchanged.
+
 ## M2 C4 done (out of order, via cargo-rename + agent)
 
 Experiment: validate that an agent using `cargo rename` can
