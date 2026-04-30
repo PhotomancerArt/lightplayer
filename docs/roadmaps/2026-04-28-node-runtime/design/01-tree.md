@@ -59,19 +59,21 @@ pub struct NodeEntry<D: ProjectDomain> {
     pub id: NodeId,
     pub path: NodePath,                                 // canonical absolute
     pub parent: Option<NodeId>,
+    pub child_kind: Option<ChildKind>,                  // None for root; immutable for entry's lifetime
     pub children: Vec<NodeId>,                          // ordered
-    pub child_kinds: Vec<ChildKind>,                    // see §ChildKind below
 
     pub status: NodeStatus,                             // Created | Ok | Warn | Error | InitError
-    pub status_ver: FrameId,
-    pub config_ver: FrameId,
-    pub state_ver:  FrameId,
-
     pub state: EntryState,                              // Pending | Alive(Box<dyn Node>) | Failed
+
+    // Three frame counters per entry (12 bytes/entry); see "Frame versioning" below.
+    pub created_frame: FrameId,                         // set on insert; never bumped
+    pub change_frame:  FrameId,                         // bumped on status / EntryState / NodeConfig change
+    pub children_ver:  FrameId,                         // bumped on children-list mutation
+
     pub config:   NodeConfig,                           // authored use-site data (§04)
     pub artifact: ArtifactRef<D::Artifact>,             // refcount holder (§03)
 
-    pub resolver_cache: BTreeMap<PropPath, ResolvedSlot>,  // §06
+    pub prop_cache: BTreeMap<PropPath, ResolvedSlot>,   // §06; future: separate prop_cache_ver if editor watches live state
 }
 ```
 
@@ -80,10 +82,10 @@ pub struct NodeEntry<D: ProjectDomain> {
 | Lives on `Node` (the impl)                                            | Lives on `NodeEntry` (the container)                                                |
 |-----------------------------------------------------------------------|-------------------------------------------------------------------------------------|
 | (no identity accessors)                                               | identity (`id`, `path`, `parent`) — **source of truth**; passed via context         |
-| (no parent / children accessors)                                      | `parent`, `children`, `child_kinds` — exclusive owner                               |
+| (no parent / children accessors)                                      | `parent`, `children`, `child_kind` — exclusive owner                                |
 | `*Props` (outputs + state only)                                       | nothing (the impl owns its `*Props`)                                                |
 | `props() -> &dyn PropAccess` accessor                                 | nothing                                                                             |
-| lifecycle hooks (`tick` / `destroy` / `handle_memory_pressure`)       | `status`, `*_ver`, `EntryState`                                                     |
+| lifecycle hooks (`tick` / `destroy` / `handle_memory_pressure`)       | `status`, `created_frame` / `change_frame` / `children_ver`, `EntryState`           |
 | (impl exists only when `Alive`)                                       | `EntryState::{Pending,Alive,Failed}` — the lazy lifecycle owner                     |
 
 The trait carries **no tree links**. `Node` impls do not know their
@@ -277,17 +279,33 @@ preserving expressivity at the data flow layer.
 
 ## Frame versioning
 
-Every change to an entry bumps a `FrameId` on the corresponding
-`*_ver` field:
+Per-entry counters (three for M5; ~12 bytes/entry):
 
-- `status_ver` — when `status` changes
-- `config_ver` — when `NodeConfig` changes (e.g., set_property,
-  binding edit, hot reload of the parent's TOML)
-- `state_ver` — when any `Prop<T>` in the impl's `*Props` ticks
-  forward (set by the impl via `Prop::set` / `mark_updated`)
+- `created_frame` — set when the entry is first inserted; never
+  bumped after. Lets a client distinguish "entry I haven't seen
+  yet" from "entry that changed since I last looked".
+- `change_frame` — bumped on `status` change, on `EntryState`
+  transition (`Pending → Alive → Failed`), and on `NodeConfig`
+  edit (set_property, binding edit, hot reload of the parent's
+  TOML). One coarse counter is enough for M5; the editor doesn't
+  yet need to distinguish "status flipped" from "config edited".
+- `children_ver` — bumped on any children-list mutation
+  (insert, remove, reorder). Drives `TreeDelta::ChildrenChanged`
+  ([07](07-sync.md)). The client diffs the children list against
+  its mirror to **infer** removals — the server never tracks
+  destroyed ids.
 
 The sync layer reads `since > FrameId` to find dirty entries
 ([07](07-sync.md)).
+
+**Why three (not five).** Earlier drafts had separate `status_ver`,
+`config_ver`, `state_ver`. M5 collapses status/state/config into
+`change_frame` because the editor's first-pass UX doesn't need
+finer granularity, and every `FrameId` field is 4 bytes/entry on
+the hot path. When the editor grows live-state watching, a
+separate `prop_cache_ver` (or per-prop versioning inside
+`prop_cache`) is the natural extension — kept commented in
+`NodeEntry` so the future shape is visible at the call site.
 
 ## Open questions
 

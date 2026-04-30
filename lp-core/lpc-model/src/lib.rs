@@ -68,9 +68,9 @@ pub use artifact::{Artifact, ArtifactReadRoot, ArtifactSpec, LoadError, load_art
 pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
-pub use node::node_path::{NodePath, NodePathSegment, PathError};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::{NodeId, NodeName, NodeNameError, NodeSpec};
+pub use tree::tree_path::{NodePathSegment, PathError, TreePath};
 /// Legacy name for [`NodeSpec`] (`lpc_model::nodes::NodeSpecifier` in older call sites).
 pub type NodeSpecifier = NodeSpec;
 
@@ -84,3 +84,4 @@ pub use prop::prop_path::PropPath;
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use server::{AvailableProject, FsRequest, FsResponse, LoadedProject};
 pub use transport_error::TransportError;
+pub use tree::{ChildKind, EntryStateView, SlotIdx, TreeDelta};

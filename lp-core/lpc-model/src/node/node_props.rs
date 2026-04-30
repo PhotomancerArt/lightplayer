@@ -1,14 +1,14 @@
-use crate::node::node_path::NodePath;
 use crate::prop::prop_path::PropPath;
+use crate::tree::tree_path::TreePath;
 use crate::{DomainError, NodeId};
 use lps_shared::LpsValueF32 as LpsValue;
 
 /// A **node instance** in the runtime graph: addressable, property-get/set.
 pub trait NodeProps {
-    /// The process-local [`NodeId`]; not the same as a [`NodePath`].
+    /// The process-local [`NodeId`]; not the same as a [`TreePath`].
     fn uid(&self) -> NodeId;
-    /// Slash-joined path of `name.type` segments (see [`NodePath`]). Stable across sessions for authored content.
-    fn path(&self) -> &NodePath;
+    /// Slash-joined path of `name.type` segments (see [`TreePath`]). Stable across sessions for authored content.
+    fn path(&self) -> &TreePath;
 
     /// Read a property; paths use [`PropPath`] (dot fields and `[index]`).
     /// Errors map to [`DomainError`] (e.g. unknown key or type mismatch when setting).
@@ -20,14 +20,14 @@ pub trait NodeProps {
 #[cfg(test)]
 mod tests {
     use super::NodeProps;
-    use crate::node::node_path::NodePath;
+    use crate::tree::tree_path::TreePath;
     use crate::{DomainError, LpsValue, NodeId, PropPath};
     use alloc::string::{String, ToString};
     use alloc::vec;
 
     struct DummyNode {
         uid: NodeId,
-        path: NodePath,
+        path: TreePath,
         speed: f32,
     }
 
@@ -35,7 +35,7 @@ mod tests {
         fn uid(&self) -> NodeId {
             self.uid
         }
-        fn path(&self) -> &NodePath {
+        fn path(&self) -> &TreePath {
             &self.path
         }
 
@@ -85,7 +85,7 @@ mod tests {
     fn node_is_object_safe() {
         let node: alloc::boxed::Box<dyn NodeProps> = alloc::boxed::Box::new(DummyNode {
             uid: NodeId(1),
-            path: NodePath::parse("/main.show").unwrap(),
+            path: TreePath::parse("/main.show").unwrap(),
             speed: 1.0,
         });
         assert_eq!(node.uid(), NodeId(1));
@@ -96,7 +96,7 @@ mod tests {
     fn dummy_node_round_trips_speed() {
         let mut node = DummyNode {
             uid: NodeId(7),
-            path: NodePath::parse("/main.show").unwrap(),
+            path: TreePath::parse("/main.show").unwrap(),
             speed: 1.0,
         };
         let prop = vec![crate::prop::Segment::Field(String::from("speed"))];

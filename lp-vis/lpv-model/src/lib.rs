@@ -36,7 +36,7 @@ pub use lpc_model::ChannelName;
 // Re-export foundation types from lpc-model for convenience
 pub use lpc_model::node::node_props::NodeProps;
 // Re-export foundation types from lpc-model for convenience
-pub use lpc_model::node::node_path::NodePath;
+pub use lpc_model::tree::tree_path::TreePath;
 // Re-export foundation types from lpc-model for convenience
 pub use lpc_model::node::node_prop_spec::NodePropSpec;
 // Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)

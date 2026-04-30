@@ -16,10 +16,10 @@ mod tests {
         PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
     };
     use lpc_model::node::node_id::NodeId;
-    use lpc_model::node::node_path::{NodePath, NodePathSegment};
     use lpc_model::node::node_prop_spec::NodePropSpec;
     use lpc_model::prop::binding::Binding;
     use lpc_model::prop::shape::{Shape, Slot};
+    use lpc_model::tree::tree_path::{NodePathSegment, TreePath};
     use lpc_model::{ArtifactSpec, ChannelName};
 
     macro_rules! assert_schema_compiles {

@@ -6,11 +6,11 @@ use core::fmt;
 /// v0 uses `u32` for embedded *performance* (Copy, no heap, cheap compare/hash)
 /// instead of a base-62 string, per
 /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (Uid
-/// decision). **Authored** identity uses [`NodePath`](crate::NodePath) and
+/// decision). **Authored** identity uses [`NodePath`](crate::TreePath) and
 /// [`NodePropSpec`](crate::NodePropSpec), not
 /// a serialized Uid in artifact files (see same summary: “runtime-only”). Serde
 /// derives on this type support schema/tests in this crate; persisted authored
-/// graphs use string paths (e.g. [`NodePath`](crate::NodePath)), not embedding Uid in TOML, per
+/// graphs use string paths (e.g. [`NodePath`](crate::TreePath)), not embedding Uid in TOML, per
 /// the same M2 “runtime-only / addressing split” story.
 #[derive(
     Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,

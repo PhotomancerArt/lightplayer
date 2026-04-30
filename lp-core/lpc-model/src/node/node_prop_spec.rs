@@ -1,5 +1,5 @@
-use crate::node::node_path::{NodePath, PathError};
 use crate::prop::prop_path::{PropPath, Segment};
+use crate::tree::tree_path::{PathError, TreePath};
 use core::fmt;
 use lps_shared::path;
 
@@ -11,7 +11,7 @@ pub enum NodePropSpecError {
     MissingHash,
     /// More than one `#`.
     ExtraHash,
-    /// The left-hand [`NodePath`] could not be parsed.
+    /// The left-hand [`TreePath`] could not be parsed.
     Path(PathError),
     /// The right-hand property string could not be parsed.
     Prop(path::PathParseError),
@@ -37,7 +37,7 @@ impl core::error::Error for NodePropSpecError {
     }
 }
 
-/// A **node + property** address: a [`NodePath`], a single `#`, then a
+/// A **node + property** address: a [`TreePath`], a single `#`, then a
 /// [`PropPath`]. `Display` is round-trippable (see module tests) and matches
 /// the v0 `node#property` form in
 /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/00-design.md` (`NodePropSpec`).
@@ -45,20 +45,20 @@ impl core::error::Error for NodePropSpecError {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodePropSpec {
     /// Which node in the project graph.
-    pub node: NodePath,
+    pub node: TreePath,
     /// Which property (possibly nested) on that node.
     pub prop: PropPath,
 }
 
 impl NodePropSpec {
-    /// Parses `node#prop` where `node` is a [`NodePath`] string and `prop` is
+    /// Parses `node#prop` where `node` is a [`TreePath`] string and `prop` is
     /// a property path for [`path::parse_path`].
     pub fn parse(s: &str) -> Result<Self, NodePropSpecError> {
         let (node_part, prop_part) = s.split_once('#').ok_or(NodePropSpecError::MissingHash)?;
         if prop_part.contains('#') {
             return Err(NodePropSpecError::ExtraHash);
         }
-        let node = NodePath::parse(node_part).map_err(NodePropSpecError::Path)?;
+        let node = TreePath::parse(node_part).map_err(NodePropSpecError::Path)?;
         let prop = path::parse_path(prop_part).map_err(NodePropSpecError::Prop)?;
         Ok(NodePropSpec { node, prop })
     }

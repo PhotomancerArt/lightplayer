@@ -11,6 +11,8 @@ extern crate alloc;
 pub mod api;
 pub mod project;
 pub mod test_util;
+pub mod tree;
 
 pub use api::ClientApi;
 pub use project::{ClientNodeEntry, ClientProjectView, StatusChange};
+pub use tree::{ApplyError, ClientNodeTree, ClientTreeEntry, apply_tree_delta, apply_tree_deltas};

@@ -162,7 +162,8 @@ This vocabulary is used consistently across all design files.
 - **NodeTree** — central container; `Vec<Option<NodeEntry>>` indexed
   by `NodeId.0`, plus path / sibling indices. ([01](01-tree.md))
 - **NodeEntry** — per-instance metadata: `id`, `path`, `parent`,
-  `children`, `child_kinds`, `status`, `*_ver: FrameId`,
+  `child_kind`, `children`, `status`, three frame counters
+  (`created_frame`, `change_frame`, `children_ver`),
   `EntryState`, `NodeConfig`, `ArtifactRef`. ([01](01-tree.md))
 - **EntryState** — lazy lifecycle state of a `NodeEntry`:
   `Pending` (artifact resolved, node not instantiated) / `Alive`

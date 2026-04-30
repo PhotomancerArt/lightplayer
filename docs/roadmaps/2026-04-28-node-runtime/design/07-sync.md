@@ -22,9 +22,19 @@ pub struct ProjectRuntime<D: ProjectDomain> {
 
 Per-entry frame versions ([01](01-tree.md)):
 
-- `status_ver` — when `status` changes.
-- `config_ver` — when `NodeConfig` changes.
-- `state_ver` — when any `Prop<T>` in `*Props` ticks forward.
+- `created_frame` — set when the entry is first inserted; never
+  bumped. Lets a client distinguish "I haven't seen this entry"
+  from "this entry changed".
+- `change_frame` — bumped on `status` change, on `EntryState`
+  transition, and on `NodeConfig` change.
+- `children_ver` — bumped on any children-list mutation. Drives
+  `TreeDelta::ChildrenChanged`; the client diffs the new list
+  against its mirror to **infer** removals.
+
+(M5 collapses status / state / config into one `change_frame`.
+A future `prop_cache_ver` is pre-wired in `NodeEntry` as a
+commented-out field for when the editor needs live-state
+watching.)
 
 The sync API:
 
@@ -52,15 +62,15 @@ deltas.
 
 The `get_changes` body is generic across domains:
 
-1. Walk every entry whose `max(status_ver, config_ver, state_ver)
-   > since_frame`.
-2. For each, decide what to ship:
-   - **`status_ver` advanced**: ship `NodeStatus` + new `status_ver`.
-   - **`config_ver` advanced**: ship the new `NodeConfig` (or a
-     diff thereof — TBD).
-   - **`state_ver` advanced**: walk the entry's `Node::props()`
-     via `iter_changed_since(since_frame)`, ship per-prop deltas.
-3. Pack into `D::Response` and return.
+1. Tree-shape pass: walk entries with `created_frame > since_frame`
+   (new) or `children_ver > since_frame` (children moved). Emit
+   `TreeDelta::Created` or `TreeDelta::ChildrenChanged`.
+2. Per-entry pass: walk entries with `change_frame > since_frame`.
+   Emit `TreeDelta::EntryChanged { status, state, config? }`.
+3. (Future, commented) per-prop pass: walk `Alive` entries whose
+   `Node::props()` has any `Prop<T>::changed_frame > since_frame`.
+   Emit per-prop deltas via `iter_changed_since(since_frame)`.
+4. Pack into `D::Response` and return.
 
 Frame IDs increase monotonically; clients always know what they
 last saw.
@@ -80,17 +90,21 @@ pub struct NodeView {
     pub id: NodeId,
     pub path: NodePath,
     pub parent: Option<NodeId>,
-    pub children: Vec<NodeId>,
-    pub child_kinds: Vec<ChildKind>,
+    pub child_kind: Option<ChildKind>,   // None for root; immutable
+    pub children: Vec<NodeId>,           // ordered; client diffs to infer removals
 
     pub state: EntryStateView,           // Pending / Alive / Failed
     pub status: NodeStatus,
-    pub status_ver: FrameId,
-    pub config_ver: FrameId,
-    pub state_ver: FrameId,
+
+    pub created_frame: FrameId,
+    pub change_frame:  FrameId,
+    pub children_ver:  FrameId,
 
     pub config: NodeConfig,              // mirror of authored data
-    pub props: BTreeMap<PropPath, (LpsValue, FrameId)>,  // produced fields snapshot
+
+    // Future (pre-wired, commented in code):
+    // pub prop_cache: BTreeMap<PropPath, (LpsValue, FrameId)>,
+    // pub prop_cache_ver: FrameId,
 }
 
 pub enum EntryStateView {
@@ -117,41 +131,75 @@ Differences from server-side `NodeEntry`:
 
 ## Delta protocol
 
-```rust
-pub struct NodeChange {
-    pub id: NodeId,
-    pub path: NodePath,
-    pub diff: NodeDiff,
-}
+The shared, domain-agnostic shape lives in `lpc-model::tree`:
 
-pub enum NodeDiff {
-    Created  { kind: D::ArtifactKindTag, parent: Option<NodeId>,
-               child_kind: ChildKind, config: NodeConfig },
-    StatusChanged { status: NodeStatus, status_ver: FrameId },
-    ConfigChanged { config: NodeConfig, config_ver: FrameId },
-    PropsChanged  { entries: Vec<(PropPath, LpsValue)>, state_ver: FrameId },
-    StateChanged  { state: EntryStateView },
-    Destroyed,
+```rust
+pub enum TreeDelta {
+    /// New entry (first time client sees it). Carries everything
+    /// needed to seed a NodeView.
+    Created {
+        id: NodeId,
+        path: NodePath,
+        parent: Option<NodeId>,
+        child_kind: Option<ChildKind>,
+        status: NodeStatus,
+        state:  EntryStateView,
+        created_frame: FrameId,
+        change_frame:  FrameId,
+        children_ver:  FrameId,
+        // Future (commented in code):
+        // config: NodeConfig,
+    },
+
+    /// Existing entry's status / state / (config) changed.
+    EntryChanged {
+        id: NodeId,
+        status: NodeStatus,
+        state:  EntryStateView,
+        change_frame: FrameId,
+        // Future (commented in code):
+        // config: Option<NodeConfig>,
+    },
+
+    /// Children list mutated (insert, remove, reorder). Client
+    /// infers removals by diffing against its mirror.
+    ChildrenChanged {
+        id: NodeId,
+        children: Vec<NodeId>,
+        children_ver: FrameId,
+    },
 }
 ```
 
+**No `Destroyed` variant.** Removals are inferred by the client:
+when it receives a `ChildrenChanged`, it compares the new list
+against its mirror's children. Any id that disappeared is
+destroyed; the client evicts it locally and recurses. The server
+never has to track destroyed ids.
+
 (The legacy `lpl_model::NodeChange` has `Created` / `StateUpdated`
 / `StatusChanged` / `Destroyed`. M5 keeps the legacy variant set
-for `LegacyDomain`; the generic shape above is the framing the
-domains share.)
+for `LegacyDomain`; `TreeDelta` is the framing **all** domains
+share — the domain-specific response in [08](08-domain.md) wraps
+`TreeDelta` plus any extras the domain needs.)
 
 ### What the wire ships
 
-- **Bulk on first connect or on `since_frame = 0`:** every node's
-  full `NodeView`. Includes config, status, props snapshot.
-- **Per-frame deltas:** only entries with advanced `*_ver`. Tight.
-- **`config_ver` deltas** are the heaviest payload. M5 ships the
-  full new `NodeConfig`; future optimisation: ship the per-entry
+- **Bulk on first connect or on `since_frame = 0`:** one
+  `TreeDelta::Created` per existing entry, ordered parent-first
+  so the client can seed its mirror in a single pass. Plus
+  per-domain extras (e.g., legacy ships its full
+  `lpl_model::ProjectResponse` shape).
+- **Per-frame deltas:** only entries whose `change_frame` /
+  `children_ver` advanced. Tight.
+- **`change_frame` deltas (config sub-payload)** are the heaviest
+  payload when authored data churns. M5 ships the full new
+  `NodeConfig`; future optimisation: ship the per-entry
   override-map diff. Defer until profiling justifies it.
-- **`state_ver` deltas** are the most frequent. Per-prop deltas
-  via `props().iter_changed_since(since)`. The producer side
-  enforces a "stable" prop schema — the wire delta carries only
-  changed fields, indexed by `PropPath`.
+- **Live-state deltas** (per-prop, props snapshot) are the most
+  frequent — but pre-wired only. M5 lands the spine without them
+  and adds them when the editor demands. See the commented-out
+  `prop_cache` + `prop_cache_ver` on `NodeView` / `NodeEntry`.
 
 ### Detail-specifier policy
 

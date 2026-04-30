@@ -3,7 +3,49 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-/// Error from [`NodePath::parse`]: empty path, bad slash layout, a segment
+/// A **hierarchical** node address: a leading `/`, then one or more
+/// [`NodePathSegment`]s (each `name.type`), concatenated. Display never puts a
+/// trailing slash. Example: `/main.show/fluid.vis` (see
+/// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/00-design.md` and unit tests
+/// in this module).
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct TreePath(pub Vec<NodePathSegment>);
+
+impl TreePath {
+    /// Parses a string into a [`TreePath`], enforcing a leading `/` and the
+    /// per-segment `name.ty` form.
+    pub fn parse(s: &str) -> Result<Self, PathError> {
+        let s = s.strip_prefix('/').ok_or(PathError::MissingLeadingSlash)?;
+        if s.is_empty() {
+            return Err(PathError::Empty);
+        }
+        let mut segments = Vec::new();
+        for raw in s.split('/') {
+            if raw.is_empty() {
+                return Err(PathError::EmptySegment);
+            }
+            let (name, ty) = raw
+                .split_once('.')
+                .ok_or_else(|| PathError::SegmentMissingType(String::from(raw)))?;
+            let name = NodeName::parse(name).map_err(PathError::InvalidName)?;
+            let ty = NodeName::parse(ty).map_err(PathError::InvalidName)?;
+            segments.push(NodePathSegment { name, ty });
+        }
+        Ok(TreePath(segments))
+    }
+}
+
+impl fmt::Display for TreePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for seg in &self.0 {
+            write!(f, "/{}.{}", seg.name, seg.ty)?;
+        }
+        Ok(())
+    }
+}
+
+/// Error from [`TreePath::parse`]: empty path, bad slash layout, a segment
 /// missing `name.type`, or a nested [`NodeNameError`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PathError {
@@ -41,52 +83,9 @@ impl core::error::Error for PathError {
         }
     }
 }
-
-/// A **hierarchical** node address: a leading `/`, then one or more
-/// [`NodePathSegment`]s (each `name.type`), concatenated. Display never puts a
-/// trailing slash. Example: `/main.show/fluid.vis` (see
-/// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/00-design.md` and unit tests
-/// in this module).
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct NodePath(pub Vec<NodePathSegment>);
-
-impl NodePath {
-    /// Parses a string into a [`NodePath`], enforcing a leading `/` and the
-    /// per-segment `name.ty` form.
-    pub fn parse(s: &str) -> Result<Self, PathError> {
-        let s = s.strip_prefix('/').ok_or(PathError::MissingLeadingSlash)?;
-        if s.is_empty() {
-            return Err(PathError::Empty);
-        }
-        let mut segments = Vec::new();
-        for raw in s.split('/') {
-            if raw.is_empty() {
-                return Err(PathError::EmptySegment);
-            }
-            let (name, ty) = raw
-                .split_once('.')
-                .ok_or_else(|| PathError::SegmentMissingType(String::from(raw)))?;
-            let name = NodeName::parse(name).map_err(PathError::InvalidName)?;
-            let ty = NodeName::parse(ty).map_err(PathError::InvalidName)?;
-            segments.push(NodePathSegment { name, ty });
-        }
-        Ok(NodePath(segments))
-    }
-}
-
-impl fmt::Display for NodePath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for seg in &self.0 {
-            write!(f, "/{}.{}", seg.name, seg.ty)?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::NodePath;
+    use super::TreePath;
     use alloc::string::ToString;
 
     #[test]
@@ -96,7 +95,7 @@ mod tests {
             "/main.show/fluid.vis",
             "/dome.rig/main.layout/sector4.fixture",
         ] {
-            let parsed = NodePath::parse(s).unwrap();
+            let parsed = TreePath::parse(s).unwrap();
             assert_eq!(parsed.to_string(), s);
         }
     }
@@ -104,15 +103,15 @@ mod tests {
     #[test]
     fn node_path_rejects_malformed() {
         for s in ["", "main.show", "/", "//", "/main", "/main.show//x.y"] {
-            assert!(NodePath::parse(s).is_err(), "should have rejected {s:?}");
+            assert!(TreePath::parse(s).is_err(), "should have rejected {s:?}");
         }
     }
 }
 
-/// A single path segment: **`name`**.**`ty`**, the atom of a [`NodePath`]
+/// A single path segment: **`name`**.**`ty`**, the atom of a [`TreePath`]
 /// (examples in tests: `main.show`, `fluid.vis` — see `m2` design: slash-joined
 /// `/<name>.<type>/…`).
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodePathSegment {
     /// Instance name in the parent container.
