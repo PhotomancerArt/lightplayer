@@ -10,7 +10,7 @@ use crate::resolver::binding_kind::BindingKind;
 /// this value?".
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResolveSource {
-    /// Came from `NodeConfig.overrides[prop]`.
+    /// Came from `SrcNodeConfig.overrides[prop]`.
     Override(BindingKind),
     /// Came from `Slot.bind` on the artifact.
     ArtifactBind(BindingKind),

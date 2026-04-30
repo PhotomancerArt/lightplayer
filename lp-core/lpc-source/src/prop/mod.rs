@@ -11,12 +11,10 @@ mod toml_parse;
 pub mod binding {
     //! Historical `lpc_model::prop::binding` path.
     pub use super::src_binding::*;
-    pub use crate::Binding;
 }
 pub mod shape {
     //! Historical `lpc_model::prop::shape` path.
-    pub use super::src_shape::*;
-    pub use crate::{Shape, Slot};
+    pub use super::src_shape::{SrcShape, SrcSlot};
 }
 pub mod value_spec {
     //! Historical `lpc_model::value_spec` path.

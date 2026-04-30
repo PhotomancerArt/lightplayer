@@ -62,7 +62,7 @@ pub trait ProjectDomain: Send + Sync + 'static {
         &self,
         rt: &ProjectRuntime<Self>,
         since_frame: FrameId,
-        detail_specifier: &ApiNodeSpecifier,
+        detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<Self::Response, Error>;
 
@@ -128,13 +128,13 @@ impl<D: ProjectDomain> ProjectRuntime<D> {
     }
 
     pub fn get_changes(
-        &self, since: FrameId, spec: &ApiNodeSpecifier, fps: Option<f32>,
+        &self, since: FrameId, spec: &WireNodeSpecifier, fps: Option<f32>,
     ) -> Result<D::Response, Error> {
         self.domain.build_response(self, since, spec, fps)
     }
 
     pub fn set_property(
-        &mut self, node: &NodePath, prop: &PropPath, value: WireValue,
+        &mut self, node: &NodePath, prop: &PropPath, value: ModelValue,
     ) -> Result<(), Error> {
         // generic: walk to entry, insert into config.overrides,
         // bump config_ver. No domain hook.
@@ -386,9 +386,9 @@ For mixed-domain server, the alias becomes
 `type Project = ProjectRuntime<MultiDomain>` and `lp-server` is
 generic over `D::Response`. Defer until `lpv-runtime` exists.
 
-## What changes in `lp-engine-client`
+## What changes in `lpc-view`
 
-Already-shipped `lp-engine-client::ProjectView` is generic over
+Already-shipped `lpc-view::ProjectView` is generic over
 the response type or hard-coded to `ProjectResponse`. M5 keeps
 hard-coded; M6 / next-roadmap parameterises by `D::Response` if
 needed for the visual editor. Pin in M5 implementation.
@@ -421,7 +421,7 @@ then generic-ify. We don't, because:
   visual node to a legacy node's   outputs. The spine treats both
   as `Box<dyn Node>` with runtime property access (`RuntimePropAccess` /
   engine-side `LpsValueF32`); cross-domain works when wire-facing recipes
-  agree on **`WireValue` shape**.
+  agree on **`ModelValue` shape**.
 - **Multi-domain `ArtifactManager`.** One manager per
   `ProjectRuntime<D>` keeps it simple. If `MultiDomain` arrives,
   the manager grows a per-extension dispatch (same crate, same

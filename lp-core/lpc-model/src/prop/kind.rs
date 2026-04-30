@@ -2,24 +2,24 @@
 //!
 //! In the five-layer Quantity model, [`Kind`] sits *above* storage types and
 //! *below* per-slot legality: it answers “what category of thing is this value?”
-//! while [`crate::WireType`] and runtime shader value types cover raw
+//! while [`crate::ModelType`] and runtime shader value types cover raw
 //! shape. See `docs/design/lightplayer/quantity.md` §0, §1, §2, and §3.
 //!
 //! A [`Kind`] is **orthogonal to storage** in the sense that each variant maps
 //! to a **fixed** [`Kind::storage`] recipe for GPU and serialization, while
 //! still carrying a distinct *meaning* (e.g. [`Kind::Amplitude`] vs
-//! [`Kind::Ratio`] both use `WireType::F32` in v0 but differ in default
+//! [`Kind::Ratio`] both use `ModelType::F32` in v0 but differ in default
 //! constraint, presentation, and intent — see the §3 table in `quantity.md`).
 
 use crate::prop::constraint::{Constraint, ConstraintFree, ConstraintRange};
-use crate::prop::wire_type::{WireStructMember, WireType};
+use crate::prop::model_type::{ModelStructMember, ModelType};
 use alloc::boxed::Box;
 use alloc::string::String;
 
 /// Maximum number of colors in a [`Kind::ColorPalette`] value’s fixed array storage.
 ///
 /// v0 is deliberately small for embedded targets; the same constant sizes the
-/// `entries` field in the palette’s [`WireType`] (see `quantity.md` §3 “Storage
+/// `entries` field in the palette’s [`ModelType`] (see `quantity.md` §3 “Storage
 /// recipes” and the roadmap risk note on fixed-size arrays).
 pub const MAX_PALETTE_LEN: u32 = 16;
 
@@ -111,11 +111,11 @@ pub enum Kind {
     Ratio,
     /// [0, 1) **wrapping** cycle position; distinct from [`Kind::Angle`] and [`Kind::Ratio`] by intent (`quantity.md` §3; see also `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` Q3 for `Phase` vs `Angle`).
     Phase,
-    /// Non-negative integer count; storage `WireType::I32` (`quantity.md` §3, storage table).
+    /// Non-negative integer count; storage `ModelType::I32` (`quantity.md` §3, storage table).
     Count,
     /// Boolean.
     Bool,
-    /// Discrete choice; storage `WireType::I32` in v0 (`quantity.md` §3).
+    /// Discrete choice; storage `ModelType::I32` in v0 (`quantity.md` §3).
     Choice,
 
     /// Time **instant** as F32 seconds since an epoch; [`Dimension::Time`] (`quantity.md` §3). Default bus is [`Binding::Bus`] with channel `"time"` when no explicit bind (`quantity.md` §8).
@@ -139,9 +139,9 @@ pub enum Kind {
     /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the gradient
     /// to a height-one texture and binds it as a shader field like `params.gradient`.
     Gradient,
-    /// 2D position as `WireType::Vec2` (`quantity.md` §3).
+    /// 2D position as `ModelType::Vec2` (`quantity.md` §3).
     Position2d,
-    /// 3D position as `WireType::Vec3` (`quantity.md` §3).
+    /// 3D position as `ModelType::Vec3` (`quantity.md` §3).
     Position3d,
 
     /// Opaque **GPU** texture: handle/width/height/format struct; pixel data lives in runtime texture storage (`quantity.md` §3, storage table). Default bus: `"video/in/0"` when no explicit bind (`quantity.md` §8).
@@ -157,14 +157,14 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Returns the **structural** [`WireType`] the serializer and layout logic
+    /// Returns the **structural** [`ModelType`] the serializer and layout logic
     /// agree on: the “storage recipe” for this [`Kind`]
     /// (`docs/design/lightplayer/quantity.md` §3, “Storage recipes”, and `impl`
     /// block in §3).
     ///
     /// For `ColorPalette` and `Gradient`, this is the **authoring** storage type.
     /// The shader-visible runtime form is a baked texture field inside `params`.
-    pub fn storage(self) -> WireType {
+    pub fn storage(self) -> ModelType {
         match self {
             Self::Amplitude
             | Self::Ratio
@@ -172,11 +172,11 @@ impl Kind {
             | Self::Instant
             | Self::Duration
             | Self::Frequency
-            | Self::Angle => WireType::F32,
-            Self::Count | Self::Choice => WireType::I32,
-            Self::Bool => WireType::Bool,
-            Self::Position2d => WireType::Vec2,
-            Self::Position3d => WireType::Vec3,
+            | Self::Angle => ModelType::F32,
+            Self::Count | Self::Choice => ModelType::I32,
+            Self::Bool => ModelType::Bool,
+            Self::Position2d => ModelType::Vec2,
+            Self::Position3d => ModelType::Vec3,
             Self::Color => color_struct(),
             Self::ColorPalette => color_palette_struct(),
             Self::Gradient => gradient_struct(),
@@ -222,118 +222,118 @@ impl Kind {
     }
 }
 
-fn color_struct() -> WireType {
-    WireType::Struct {
+fn color_struct() -> ModelType {
+    ModelType::Struct {
         name: Some(String::from("Color")),
         fields: alloc::vec![
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("space"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("coords"),
-                ty: WireType::Vec3,
+                ty: ModelType::Vec3,
             },
         ],
     }
 }
 
-fn color_palette_struct() -> WireType {
-    WireType::Struct {
+fn color_palette_struct() -> ModelType {
+    ModelType::Struct {
         name: Some(String::from("ColorPalette")),
         fields: alloc::vec![
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("space"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("count"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("entries"),
-                ty: WireType::Array(Box::new(WireType::Vec3), MAX_PALETTE_LEN as usize),
+                ty: ModelType::Array(Box::new(ModelType::Vec3), MAX_PALETTE_LEN as usize),
             },
         ],
     }
 }
 
-fn gradient_struct() -> WireType {
-    let stop = WireType::Struct {
+fn gradient_struct() -> ModelType {
+    let stop = ModelType::Struct {
         name: Some(String::from("GradientStop")),
         fields: alloc::vec![
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("at"),
-                ty: WireType::F32,
+                ty: ModelType::F32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("c"),
-                ty: WireType::Vec3,
+                ty: ModelType::Vec3,
             },
         ],
     };
-    WireType::Struct {
+    ModelType::Struct {
         name: Some(String::from("Gradient")),
         fields: alloc::vec![
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("space"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("method"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("count"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("stops"),
-                ty: WireType::Array(Box::new(stop), MAX_GRADIENT_STOPS as usize),
+                ty: ModelType::Array(Box::new(stop), MAX_GRADIENT_STOPS as usize),
             },
         ],
     }
 }
 
-fn texture_struct() -> WireType {
-    WireType::Struct {
+fn texture_struct() -> ModelType {
+    ModelType::Struct {
         name: Some(String::from("Texture")),
         fields: alloc::vec![
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("format"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("width"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("height"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("handle"),
-                ty: WireType::I32,
+                ty: ModelType::I32,
             },
         ],
     }
 }
 
-fn audio_level_struct() -> WireType {
-    WireType::Struct {
+fn audio_level_struct() -> ModelType {
+    ModelType::Struct {
         name: Some(String::from("AudioLevel")),
         fields: alloc::vec![
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("low"),
-                ty: WireType::F32,
+                ty: ModelType::F32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("mid"),
-                ty: WireType::F32,
+                ty: ModelType::F32,
             },
-            WireStructMember {
+            ModelStructMember {
                 name: String::from("high"),
-                ty: WireType::F32,
+                ty: ModelType::F32,
             },
         ],
     }
@@ -370,30 +370,30 @@ mod tests {
 
     #[test]
     fn float_scalar_storages() {
-        assert_eq!(Kind::Amplitude.storage(), WireType::F32);
-        assert_eq!(Kind::Frequency.storage(), WireType::F32);
+        assert_eq!(Kind::Amplitude.storage(), ModelType::F32);
+        assert_eq!(Kind::Frequency.storage(), ModelType::F32);
     }
 
     #[test]
     fn int_scalar_storages() {
-        assert_eq!(Kind::Count.storage(), WireType::I32);
-        assert_eq!(Kind::Choice.storage(), WireType::I32);
+        assert_eq!(Kind::Count.storage(), ModelType::I32);
+        assert_eq!(Kind::Choice.storage(), ModelType::I32);
     }
 
     #[test]
     fn position_storages() {
-        assert_eq!(Kind::Position2d.storage(), WireType::Vec2);
-        assert_eq!(Kind::Position3d.storage(), WireType::Vec3);
+        assert_eq!(Kind::Position2d.storage(), ModelType::Vec2);
+        assert_eq!(Kind::Position3d.storage(), ModelType::Vec3);
     }
 
     #[test]
     fn texture_storage_has_four_int_fields() {
         let s = Kind::Texture.storage();
         match s {
-            WireType::Struct { fields, .. } => {
+            ModelType::Struct { fields, .. } => {
                 assert_eq!(fields.len(), 4);
                 for m in fields {
-                    assert_eq!(m.ty, WireType::I32);
+                    assert_eq!(m.ty, ModelType::I32);
                 }
             }
             _ => panic!("Texture storage must be a Struct"),
@@ -434,13 +434,13 @@ mod tests {
     fn audio_level_storage_is_three_floats() {
         let s = Kind::AudioLevel.storage();
         match s {
-            WireType::Struct { fields, .. } => {
+            ModelType::Struct { fields, .. } => {
                 assert_eq!(fields.len(), AUDIO_LEVEL_BANDS);
                 assert_eq!(fields[0].name.as_str(), "low");
                 assert_eq!(fields[1].name.as_str(), "mid");
                 assert_eq!(fields[2].name.as_str(), "high");
                 for m in &fields {
-                    assert_eq!(m.ty, WireType::F32);
+                    assert_eq!(m.ty, ModelType::F32);
                 }
             }
             _ => panic!("AudioLevel storage must be a Struct"),

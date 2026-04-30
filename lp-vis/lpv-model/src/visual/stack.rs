@@ -6,16 +6,16 @@ use crate::visual::{params_table::ParamsTable, visual_input::VisualInput};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_source::ArtifactSpec;
-use lpc_source::artifact::artifact::Artifact;
-use lpc_source::prop::shape::Slot;
+use lpc_source::SrcArtifactSpec;
+use lpc_source::artifact::src_artifact::SrcArtifact;
+use lpc_source::prop::shape::SrcSlot;
 
 /// One Effect in a Stack's chain. Order is the order of declaration.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct EffectRef {
-    pub visual: ArtifactSpec,
+    pub visual: SrcArtifactSpec,
     #[cfg_attr(
         feature = "schema-gen",
         schemars(schema_with = "crate::visual::params_table::toml_value_btree_map_schema")
@@ -63,7 +63,7 @@ pub struct Stack {
     pub params: ParamsTable,
 }
 
-impl Artifact for Stack {
+impl SrcArtifact for Stack {
     const KIND: &'static str = "stack";
     const CURRENT_VERSION: u32 = 1;
 
@@ -71,7 +71,7 @@ impl Artifact for Stack {
         self.schema_version
     }
 
-    fn walk_slots<F: FnMut(&Slot)>(&self, mut f: F) {
+    fn walk_slots<F: FnMut(&SrcSlot)>(&self, mut f: F) {
         f(&self.params.0);
     }
 }

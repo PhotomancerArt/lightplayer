@@ -196,7 +196,7 @@ identically by tick.
 
 ```rust
 pub enum ChildKind {
-    Input    { source: SlotIdx },     // [input.N]
+    Input    { source: WireSlotIndex },     // [input.N]
     Sidecar  { name: NodeName },      // [children.<name>]
     Inline   { source: PropPath },    // [params.<name>.bind] visual = ...
 }

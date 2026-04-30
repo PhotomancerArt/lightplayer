@@ -6,7 +6,7 @@ use crate::project::project_runtime::ProjectRuntime;
 use alloc::string::String;
 use alloc::sync::Arc;
 use lpc_model::FrameId;
-use lpc_wire::ApiNodeSpecifier;
+use lpc_wire::WireNodeSpecifier;
 use lpfs::FsChange;
 use lpl_model::ProjectResponse;
 use spin::Mutex;
@@ -24,7 +24,7 @@ pub trait ProjectHooks: Send + Sync {
         &self,
         rt: &ProjectRuntime,
         since_frame: FrameId,
-        detail_specifier: &ApiNodeSpecifier,
+        detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error>;
 }

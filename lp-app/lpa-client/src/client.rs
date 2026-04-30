@@ -5,7 +5,7 @@
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf, project::FrameId};
 use lpc_wire::{
-    ApiNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
+    WireNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
@@ -421,7 +421,7 @@ impl LpClient {
         &self,
         handle: ProjectHandle,
         since_frame: Option<FrameId>,
-        detail_specifier: ApiNodeSpecifier,
+        detail_specifier: WireNodeSpecifier,
     ) -> Result<SerializableProjectResponse> {
         // Use FrameId::default() if since_frame is None (get all changes)
         let since_frame = since_frame.unwrap_or_default();

@@ -21,7 +21,7 @@ use lpa_client::{
 };
 use lpc_model::{AsLpPath, FrameId};
 use lpc_shared::ProjectBuilder;
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
 use tokio::time::sleep;
 
@@ -117,7 +117,7 @@ async fn test_scene_render_fw_emu_async() {
         .expect("Failed to load project");
 
     // Create client view for syncing
-    let mut client_view = ClientProjectView::new();
+    let mut client_view = ProjectView::new();
 
     // Initial sync to get all nodes (they may not be initialized yet)
     sync_client_view(&client, project_handle, &mut client_view).await;
@@ -223,13 +223,13 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
 async fn sync_client_view(
     client: &LpClient,
     handle: lpc_wire::WireProjectHandle,
-    view: &mut ClientProjectView,
+    view: &mut ProjectView,
 ) {
     // For initial sync (empty view), request all nodes to populate the list
     // Otherwise use normal detail_specifier
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lpc_wire::ApiNodeSpecifier::All
+        lpc_wire::WireNodeSpecifier::All
     } else {
         view.detail_specifier()
     };

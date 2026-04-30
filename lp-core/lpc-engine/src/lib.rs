@@ -34,4 +34,4 @@ pub use prop::RuntimePropAccess;
 pub use resolver::{BindingKind, ResolveSource, ResolvedSlot, ResolverCache};
 pub use runtime::{NodeInitContext, RenderContext};
 pub use tree::{EntryState, NodeEntry, NodeTree, TreeError, tree_deltas_since};
-pub use wire_bridge::{lps_value_f32_to_wire_value, wire_type_to_lps_type};
+pub use wire_bridge::{lps_value_f32_to_model_value, model_type_to_lps_type};

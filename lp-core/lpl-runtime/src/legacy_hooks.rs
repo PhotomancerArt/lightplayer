@@ -27,7 +27,7 @@ use lpc_engine::project::project_runtime::{NodeEntry, NodeStatus};
 use lpc_engine::runtime::frame_time::FrameTime;
 use lpc_model::AsLpPath;
 use lpc_model::{FrameId, LpPathBuf, NodeId};
-use lpc_wire::{ApiNodeSpecifier, WireNodeStatus as ApiNodeStatus};
+use lpc_wire::{WireNodeSpecifier, WireNodeStatus as ApiNodeStatus};
 use lpfs::{FsChange, LpFs};
 use lpl_model::{NodeChange, NodeConfig, NodeDetail, NodeKind, NodeState, ProjectResponse};
 
@@ -554,7 +554,7 @@ fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<()
 pub fn get_changes(
     rt: &ProjectRuntime,
     since_frame: FrameId,
-    detail_specifier: &ApiNodeSpecifier,
+    detail_specifier: &WireNodeSpecifier,
     theoretical_fps: Option<f32>,
 ) -> Result<ProjectResponse, Error> {
     let mut node_handles = Vec::new();
@@ -568,16 +568,16 @@ pub fn get_changes(
 
     // Determine which handles need detail
     let detail_handles: BTreeSet<NodeId> = match detail_specifier {
-        ApiNodeSpecifier::None => BTreeSet::new(),
-        ApiNodeSpecifier::All => rt.nodes.keys().copied().collect(),
-        ApiNodeSpecifier::ByHandles(handles) => handles.iter().copied().collect(),
+        WireNodeSpecifier::None => BTreeSet::new(),
+        WireNodeSpecifier::All => rt.nodes.keys().copied().collect(),
+        WireNodeSpecifier::ByHandles(handles) => handles.iter().copied().collect(),
     };
 
     // Collect changes and details
     for (handle, entry) in &rt.nodes {
         // Emit `Created` before `StatusChanged` so clients that apply changes in order create
         // the entry first; otherwise `StatusChanged` is a no-op and `Created` leaves
-        // `NodeStatus::Created` (see `ClientProjectView::apply_changes`).
+        // `NodeStatus::Created` (see `ProjectView::apply_changes`).
         if entry.config_ver.as_i64() > since_frame.as_i64() && entry.config_ver == entry.state_ver {
             node_changes.push(NodeChange::Created {
                 handle: *handle,

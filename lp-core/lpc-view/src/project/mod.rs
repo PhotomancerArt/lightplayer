@@ -1,3 +1,3 @@
-pub mod view;
+pub mod project_view;
 
-pub use view::{ClientNodeEntry, ClientProjectView, StatusChange};
+pub use project_view::{NodeEntryView, ProjectView, StatusChangeView};

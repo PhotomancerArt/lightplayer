@@ -1,5 +1,5 @@
-//! Client-side property view over [`lpc_model::WireValue`] (no `lps-shared`).
+//! Property access views over cached portable values.
 
-mod wire_prop_access;
+pub mod prop_access_view;
 
-pub use wire_prop_access::{WirePropAccess, WirePropsMap};
+pub use prop_access_view::{PropAccessView, PropsMapView};

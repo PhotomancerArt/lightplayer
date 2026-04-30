@@ -12,7 +12,7 @@ use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use lp_perf::EVENT_PROJECT_LOAD;
 use lpc_model::{FrameId, LpPath, LpPathBuf, NodeId};
-use lpc_wire::ApiNodeSpecifier;
+use lpc_wire::WireNodeSpecifier;
 use lpfs::FsChange;
 use lpl_model::{NodeConfig, NodeKind, ProjectResponse};
 
@@ -324,7 +324,7 @@ impl ProjectRuntime {
     pub fn get_changes(
         &self,
         since_frame: FrameId,
-        detail_specifier: &ApiNodeSpecifier,
+        detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error> {
         crate::project::hooks::with_hooks(|h| {

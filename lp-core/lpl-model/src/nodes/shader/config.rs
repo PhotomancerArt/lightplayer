@@ -1,6 +1,6 @@
 use crate::glsl_opts::GlslOpts;
 use crate::nodes::{NodeConfig, NodeKind};
-use lpc_model::nodes::NodeSpecifier;
+use lpc_model::NodeSpec;
 use lpc_model::{AsLpPathBuf, LpPathBuf};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub struct ShaderConfig {
     /// Path to GLSL file (relative to node directory)
     pub glsl_path: LpPathBuf,
     /// Texture to render to (specifier)
-    pub texture_spec: NodeSpecifier,
+    pub texture_spec: NodeSpec,
     /// Render order - lower numbers render first (default 0)
     pub render_order: i32,
     /// GLSL compilation options
@@ -22,7 +22,7 @@ impl Default for ShaderConfig {
     fn default() -> Self {
         Self {
             glsl_path: "main.glsl".as_path_buf(),
-            texture_spec: NodeSpecifier::from(""),
+            texture_spec: NodeSpec::from(""),
             render_order: 0,
             glsl_opts: GlslOpts::default(),
         }
@@ -48,7 +48,7 @@ mod tests {
     fn test_shader_config_kind() {
         let config = ShaderConfig {
             glsl_path: "main.glsl".as_path_buf(),
-            texture_spec: NodeSpecifier::from("/src/tex.texture"),
+            texture_spec: NodeSpec::from("/src/tex.texture"),
             render_order: 0,
             glsl_opts: GlslOpts::default(),
         };

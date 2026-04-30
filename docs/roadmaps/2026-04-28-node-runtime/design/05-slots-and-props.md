@@ -5,7 +5,7 @@
 > `SrcBinding`). Shared paths/kinds/value shapes remain in
 > `lpc-model`. Runtime property reflection is
 > `lpc-engine::RuntimePropAccess` over `LpsValueF32`; client-side
-> views use `lp-engine-client::WirePropAccess` over `WireValue`.
+> views use `lpc-view::PropAccessView` over `ModelValue`.
 
 Two distinct concepts that share a structural type system but live
 in different worlds.
@@ -325,8 +325,8 @@ Cross-cutting validation that touches both schema and wire:
 - **`Slot.bind` Kind matches Slot Kind.** Caught at artifact load
   if we're strict; at resolution if we're lenient. M5: lenient,
   warn at resolution.
-- **Override `Binding::Literal`'s `WireValue` / `SrcValueSpec` shape matches
-  `Shape.storage()` / `WireType`.** A scalar slot can't accept a struct literal.
+- **Override `Binding::Literal`'s `ModelValue` / `SrcValueSpec` shape matches
+  `Shape.storage()` / `ModelType`.** A scalar slot can't accept a struct literal.
   Caught at config-load by existing value-spec helpers
   (`from_toml_for_kind`; naming migrates with M4.3a).
 
@@ -352,6 +352,6 @@ Cross-cutting validation that touches both schema and wire:
   on a `Vec3` output: the derive macro needs to either flatten or
   recurse. Implementation detail; pin in M4.
 - **Texture metadata on wire.** The legacy `TextureBuffer` is opaque
-  bytes in-process (`LpsValueF32`). On the wire, ship **`WireValue::Texture`**
+  bytes in-process (`LpsValueF32`). On the wire, ship **`ModelValue::Texture`**
   metadata only; the client's `Prop` mirror never holds GPU bytes. Lossy by
   design; thumbnails use a separate channel. Pin detail in M4 / M4.4 sync.

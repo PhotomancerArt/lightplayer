@@ -7,7 +7,7 @@ use lpa_server::{Graphics, LpGraphics, LpServer};
 use lpc_engine::MemoryOutputProvider;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_shared::ProjectBuilder;
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]
@@ -115,7 +115,7 @@ fn test_server_tick_propagates_to_projects() {
     };
 
     // Create client view
-    let mut client_view = ClientProjectView::new();
+    let mut client_view = ProjectView::new();
 
     // Get output handle from server project
     let project = server
@@ -214,7 +214,7 @@ fn test_server_tick_propagates_to_projects() {
 fn sync_client_view_from_server(
     server: &LpServer,
     project_handle: lpc_wire::WireProjectHandle,
-    client_view: &mut ClientProjectView,
+    client_view: &mut ProjectView,
 ) {
     let project = server
         .project_manager()

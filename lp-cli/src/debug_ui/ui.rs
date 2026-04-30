@@ -4,7 +4,7 @@ use crate::client::{LpClient, serializable_response_to_project_response};
 use crate::debug_ui::panels;
 use eframe::egui;
 use lpc_model::{NodeId, project::FrameId};
-use lpc_view::project::ClientProjectView;
+use lpc_view::project::ProjectView;
 use lpc_wire::WireProjectHandle as ProjectHandle;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 /// Debug UI application state
 pub struct DebugUiState {
     /// Project view (shared between sync and UI)
-    project_view: Arc<Mutex<ClientProjectView>>,
+    project_view: Arc<Mutex<ProjectView>>,
     /// Project handle
     project_handle: ProjectHandle,
     /// Async client for syncing (shared via Arc<Mutex<>>)
@@ -54,7 +54,7 @@ pub struct DebugUiState {
 impl DebugUiState {
     /// Create new debug UI state
     pub fn new(
-        project_view: Arc<Mutex<ClientProjectView>>,
+        project_view: Arc<Mutex<ProjectView>>,
         project_handle: ProjectHandle,
         async_client: LpClient,
         runtime_handle: tokio::runtime::Handle,
@@ -202,7 +202,7 @@ impl DebugUiState {
                 // For initial sync (empty view), request all nodes to populate the list
                 // Otherwise use normal detail_specifier
                 let detail_specifier = if is_initial_sync {
-                    lpc_wire::ApiNodeSpecifier::All
+                    lpc_wire::WireNodeSpecifier::All
                 } else {
                     view.detail_specifier()
                 };

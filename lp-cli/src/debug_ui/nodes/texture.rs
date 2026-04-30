@@ -1,12 +1,12 @@
 use eframe::epaint::{Color32, ColorImage, TextureHandle};
 use egui::Image;
-use lpc_view::ClientNodeEntry;
+use lpc_view::NodeEntryView;
 use lpl_model::nodes::texture::{TextureFormat, TextureState};
 
 /// Render texture panel
 pub fn render_texture_panel(
     ui: &mut egui::Ui,
-    entry: &ClientNodeEntry,
+    entry: &NodeEntryView,
     state: &TextureState,
     show_background: bool,
     _show_labels: bool,

@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use lpc_model::nodes::NodeSpecifier;
+use lpc_model::NodeSpec;
 use lpc_model::project::config::ProjectConfig;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpfs::LpFs;
@@ -157,7 +157,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
     // Create shader node
     let shader_config = ShaderConfig {
         glsl_path: "main.glsl".as_path_buf(),
-        texture_spec: NodeSpecifier::from("/src/main.texture"),
+        texture_spec: NodeSpec::from("/src/main.texture"),
         render_order: 0,
         glsl_opts: lpl_model::glsl_opts::GlslOpts::default(),
     };
@@ -252,8 +252,8 @@ vec4 render(vec2 pos) {
 
     // Create fixture node
     let fixture_config = FixtureConfig {
-        output_spec: NodeSpecifier::from("/src/strip.output"),
-        texture_spec: NodeSpecifier::from("/src/main.texture"),
+        output_spec: NodeSpec::from("/src/strip.output"),
+        texture_spec: NodeSpec::from("/src/main.texture"),
         mapping: MappingConfig::PathPoints {
             paths: vec![],
             sample_diameter: 2.0,
@@ -444,7 +444,7 @@ mod tests {
         // Create shader node
         let shader_config = ShaderConfig {
             glsl_path: "main.glsl".as_path_buf(),
-            texture_spec: NodeSpecifier::from("/src/main.texture"),
+            texture_spec: NodeSpec::from("/src/main.texture"),
             render_order: 0,
             glsl_opts: lpl_model::glsl_opts::GlslOpts::default(),
         };
@@ -539,8 +539,8 @@ vec4 render(vec2 pos) {
 
         // Create fixture node
         let fixture_config = FixtureConfig {
-            output_spec: NodeSpecifier::from("/src/strip.output"),
-            texture_spec: NodeSpecifier::from("/src/main.texture"),
+            output_spec: NodeSpec::from("/src/strip.output"),
+            texture_spec: NodeSpec::from("/src/main.texture"),
             mapping: MappingConfig::PathPoints {
                 paths: vec![],
                 sample_diameter: 2.0,

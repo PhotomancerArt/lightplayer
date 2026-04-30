@@ -82,7 +82,7 @@ Move these files from `lp-core/lp-model/src/` into
   `LoadedProject`, `SampleStats`, `MemoryStats`. Now fully
   generic, lives in lpc-model.
 - **From `project/api.rs`** — only the generic items move to
-  lpc-model: `ProjectRequest`, `ApiNodeSpecifier`,
+  lpc-model: `ProjectRequest`, `WireNodeSpecifier`,
   `NodeStatus`. The legacy-aware items
   (`NodeChange`, `NodeDetail`, `NodeState`, `SerializableNodeDetail`,
   `SerializableProjectResponse`, `ProjectResponse`) stay in
@@ -112,7 +112,7 @@ pub mod config;
 pub mod frame_id;
 pub mod handle;
 
-pub use api::{ApiNodeSpecifier, NodeStatus, ProjectRequest};
+pub use api::{WireNodeSpecifier, NodeStatus, ProjectRequest};
 pub use config::ProjectConfig;
 pub use frame_id::FrameId;
 pub use handle::ProjectHandle;
@@ -160,7 +160,7 @@ pub use config::LightplayerConfig;
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
 pub use nodes::{NodeHandle, NodeSpecifier};
 pub use path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
-pub use project::{ApiNodeSpecifier, FrameId, NodeStatus, ProjectConfig, ProjectHandle, ProjectRequest};
+pub use project::{WireNodeSpecifier, FrameId, NodeStatus, ProjectConfig, ProjectHandle, ProjectRequest};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use server::{ClientMsgBody, FsRequest, FsResponse, ServerConfig, ServerMsgBody};
 pub use transport_error::TransportError;
@@ -268,7 +268,7 @@ its package-rename refactor; the agent will sweep for stragglers.
 Cross-references to update once `project/api.rs` is split:
 
 - `lpc-model/project/api.rs` (post-split): contains
-  `ProjectRequest`, `ApiNodeSpecifier`, `NodeStatus`. References
+  `ProjectRequest`, `WireNodeSpecifier`, `NodeStatus`. References
   only foundation types (`FrameId`, `NodeHandle`) — all already
   local.
 - `lpc-model/server/api.rs` (post-move): the unbake removed

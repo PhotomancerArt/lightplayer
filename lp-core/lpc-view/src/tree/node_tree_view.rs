@@ -6,19 +6,19 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use lpc_model::{FrameId, NodeId, TreePath};
 
-use super::ClientTreeEntry;
+use super::TreeEntryView;
 
 /// Client-side mirror of the node tree.
 ///
 /// Maintained by applying `WireTreeDelta`s from the server.
 #[derive(Clone, Debug)]
-pub struct ClientNodeTree {
-    pub nodes: BTreeMap<NodeId, ClientTreeEntry>,
+pub struct NodeTreeView {
+    pub nodes: BTreeMap<NodeId, TreeEntryView>,
     pub by_path: BTreeMap<TreePath, NodeId>,
     pub last_synced_frame: FrameId,
 }
 
-impl ClientNodeTree {
+impl NodeTreeView {
     /// Create an empty tree.
     pub fn new() -> Self {
         Self {
@@ -29,12 +29,12 @@ impl ClientNodeTree {
     }
 
     /// Get a reference to an entry by id.
-    pub fn get(&self, id: NodeId) -> Option<&ClientTreeEntry> {
+    pub fn get(&self, id: NodeId) -> Option<&TreeEntryView> {
         self.nodes.get(&id)
     }
 
     /// Get a mutable reference to an entry by id.
-    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut ClientTreeEntry> {
+    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut TreeEntryView> {
         self.nodes.get_mut(&id)
     }
 
@@ -44,7 +44,7 @@ impl ClientNodeTree {
     }
 
     /// Insert an entry (used during delta application).
-    pub fn insert(&mut self, entry: ClientTreeEntry) {
+    pub fn insert(&mut self, entry: TreeEntryView) {
         self.by_path.insert(entry.path.clone(), entry.id);
         self.nodes.insert(entry.id, entry);
     }
@@ -90,7 +90,7 @@ impl ClientNodeTree {
     }
 }
 
-impl Default for ClientNodeTree {
+impl Default for NodeTreeView {
     fn default() -> Self {
         Self::new()
     }

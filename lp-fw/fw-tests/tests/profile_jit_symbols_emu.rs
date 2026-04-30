@@ -23,7 +23,7 @@ use lp_riscv_inst::Gpr;
 use lpa_client::LpClient;
 use lpc_model::AsLpPath;
 use lpc_shared::ProjectBuilder;
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
 
 /// `ProjectBuilder::shader_basic` uses GLSL with entry point `render` (see `lp-shader`).
@@ -115,7 +115,7 @@ async fn jit_symbols_round_trip_to_meta_and_symbolizer() {
         .await
         .expect("Failed to load project");
 
-    let mut client_view = ClientProjectView::new();
+    let mut client_view = ProjectView::new();
     sync_emu_project_view(&client, project_handle, &mut client_view).await;
 
     let shader_handle = client_view

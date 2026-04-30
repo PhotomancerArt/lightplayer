@@ -11,7 +11,7 @@
 
 use lpc_model::lp_path::LpPathBuf;
 #[cfg(feature = "schema-gen")]
-use lpc_source::artifact::artifact::Artifact;
+use lpc_source::artifact::src_artifact::SrcArtifact;
 use lpfs::lp_fs_std::LpFsStd;
 use lpv_model::load_artifact;
 use lpv_model::visual::{Effect, Live, Pattern, Playlist, Stack, Transition};
@@ -168,9 +168,9 @@ fn playlist_corpus_validates_against_schema() {
 #[cfg(feature = "schema-gen")]
 #[test]
 fn slot_wire_json_schema_rejects_malformed_slot_tables() {
-    use lpc_source::prop::shape::Slot;
+    use lpc_source::prop::shape::SrcSlot;
 
-    let root = schemars::schema_for!(Slot);
+    let root = schemars::schema_for!(SrcSlot);
     let schema_json = serde_json::to_value(&root).expect("schema→json");
     let v = jsonschema::validator_for(&schema_json).expect("compile slot schema");
 
@@ -250,7 +250,7 @@ where
 #[cfg(feature = "schema-gen")]
 fn assert_validates<T>(rel_path: &str)
 where
-    T: schemars::JsonSchema + serde::Serialize + serde::de::DeserializeOwned + Artifact,
+    T: schemars::JsonSchema + serde::Serialize + serde::de::DeserializeOwned + SrcArtifact,
 {
     let loaded: T = load_artifact(&fs(), LpPathBuf::from(rel_path).as_path())
         .unwrap_or_else(|e| panic!("load {rel_path}: {e:?}"));

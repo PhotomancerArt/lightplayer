@@ -19,7 +19,7 @@ References:
 **M4.3 detailed phases:** not expanded yet — replace this stub via
 `/plan-small` (or `/plan`) when execution starts.
 
-**M4.3a (crate split + `WireValue`):** tracked in
+**M4.3a (crate split + `ModelValue`):** tracked in
 [`../m4.3a-crate-split-wire-value/`](../m4.3a-crate-split-wire-value/); not
 future work relative to this milestone. The runtime spine should assume the
 five-crate roles below from the start.
@@ -53,5 +53,5 @@ five-crate roles below from the start.
 - Per-prop sync deltas + extended wire (M4.4).
 - Legacy node port (M5).
 - Visual subsystem changes (next roadmap).
-- Crate split / `WireValue` — **M4.3a owns this** (see sibling folder).
+- Crate split / portable model values (`ModelValue`, …) — **M4.3a owns this** (see sibling folder).
   M4.3 assumes the crate split is done or underway; no "split after M4.3".

@@ -5,7 +5,7 @@ use lpc_engine::error::Error;
 use lpc_engine::project::ProjectRuntime;
 use lpc_engine::project::hooks::{ProjectHooks, set_project_hooks};
 use lpc_model::FrameId;
-use lpc_wire::ApiNodeSpecifier;
+use lpc_wire::WireNodeSpecifier;
 use lpfs::FsChange;
 use lpl_model::ProjectResponse;
 
@@ -37,7 +37,7 @@ impl ProjectHooks for DefaultProjectHooks {
         &self,
         rt: &ProjectRuntime,
         since_frame: FrameId,
-        detail_specifier: &ApiNodeSpecifier,
+        detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error> {
         crate::legacy_hooks::get_changes(rt, since_frame, detail_specifier, theoretical_fps)

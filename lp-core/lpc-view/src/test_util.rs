@@ -1,16 +1,12 @@
-use crate::ClientProjectView;
+use crate::ProjectView;
 use lpc_model::NodeId;
 
 /// Assert first output channel RGB values
 ///
 /// Output channels are RGB (3 bytes per channel). Checks that the first channel
 /// has the expected red value
-pub fn assert_first_output_red(
-    client_view: &mut ClientProjectView,
-    handle: NodeId,
-    expected_r: u8,
-) {
-    let data = client_view.get_output_data(handle).unwrap();
+pub fn assert_first_output_red(view: &mut ProjectView, handle: NodeId, expected_r: u8) {
+    let data = view.get_output_data(handle).unwrap();
     assert!(
         data.len() >= 3,
         "Output data should have at least 3 bytes (RGB) for first channel, got {}",

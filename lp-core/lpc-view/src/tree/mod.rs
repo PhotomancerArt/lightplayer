@@ -6,9 +6,9 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 pub mod apply;
-pub mod client_node_tree;
-pub mod client_tree_entry;
+pub mod node_tree_view;
+pub mod tree_entry_view;
 
 pub use apply::{ApplyError, apply_tree_delta, apply_tree_deltas};
-pub use client_node_tree::ClientNodeTree;
-pub use client_tree_entry::ClientTreeEntry;
+pub use node_tree_view::NodeTreeView;
+pub use tree_entry_view::TreeEntryView;

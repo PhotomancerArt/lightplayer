@@ -2,12 +2,12 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use lpc_model::{FrameId, NodeId};
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpl_model::ProjectResponse;
 
 #[test]
 fn test_client_view_creation() {
-    let view = ClientProjectView::new();
+    let view = ProjectView::new();
     assert_eq!(view.frame_id, FrameId::default());
     assert!(view.nodes.is_empty());
     assert!(view.detail_tracking.is_empty());
@@ -15,7 +15,7 @@ fn test_client_view_creation() {
 
 #[test]
 fn test_request_detail() {
-    let mut view = ClientProjectView::new();
+    let mut view = ProjectView::new();
     let handle = NodeId::new(1);
 
     view.watch_detail(handle);
@@ -24,7 +24,7 @@ fn test_request_detail() {
     // Generate specifier
     let spec = view.detail_specifier();
     match spec {
-        lpc_wire::ApiNodeSpecifier::ByHandles(handles) => {
+        lpc_wire::WireNodeSpecifier::ByHandles(handles) => {
             assert_eq!(handles.len(), 1);
             assert_eq!(handles[0], handle);
         }
@@ -34,7 +34,7 @@ fn test_request_detail() {
 
 #[test]
 fn test_stop_detail() {
-    let mut view = ClientProjectView::new();
+    let mut view = ProjectView::new();
     let handle = NodeId::new(1);
 
     view.watch_detail(handle);
@@ -46,14 +46,14 @@ fn test_stop_detail() {
     // Generate specifier should be None
     let spec = view.detail_specifier();
     match spec {
-        lpc_wire::ApiNodeSpecifier::None => {}
+        lpc_wire::WireNodeSpecifier::None => {}
         _ => panic!("Expected None"),
     }
 }
 
 #[test]
 fn test_sync_with_changes() {
-    let mut view = ClientProjectView::new();
+    let mut view = ProjectView::new();
 
     // Create a mock response with a created node
     let handle = NodeId::new(1);
@@ -86,7 +86,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
     use lpl_model::nodes::shader::ShaderState;
     use lpl_model::{NodeChange, NodeDetail, NodeState};
 
-    let mut view = ClientProjectView::new();
+    let mut view = ProjectView::new();
     let handle = NodeId::new(1);
     let path = lpc_model::LpPathBuf::from("/src/s.shader");
     let frame = FrameId::new(1);
@@ -124,7 +124,7 @@ fn test_partial_state_merge_texture() {
     use lpl_model::NodeState;
     use lpl_model::nodes::texture::{TextureConfig, TextureState};
 
-    let mut view = ClientProjectView::new();
+    let mut view = ProjectView::new();
     let handle = NodeId::new(1);
 
     // Initial sync: full state with texture_data, width, height, format
@@ -247,7 +247,7 @@ fn test_partial_state_merge_output() {
     use lpl_model::NodeState;
     use lpl_model::nodes::output::{OutputConfig, OutputState};
 
-    let mut view = ClientProjectView::new();
+    let mut view = ProjectView::new();
     let handle = NodeId::new(1);
 
     // Initial sync: full state with channel_data

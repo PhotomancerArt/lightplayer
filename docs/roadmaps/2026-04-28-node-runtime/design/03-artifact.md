@@ -273,7 +273,7 @@ on host. ESP32 single-thread justifies the simple impl.
   transitions — this replaces older **`lpc-runtime::artifact_manager`** wording.
 
 Keeping managers in the spine crate preserves `LpFs`, fs-watch, and tick access
-without dragging them into **`lp-engine-client`**.
+without dragging them into **`lpc-view`**.
 
 ## Worked examples
 

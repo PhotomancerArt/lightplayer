@@ -1,6 +1,6 @@
 //! Object-safe reflection over a node's *produced* fields (outputs and state)
 //! at engine runtime. Payloads use [`lps_shared::LpsValueF32`]; sync/wire paths
-//! use [`lpc_model::WireValue`] via [`crate::wire_bridge`].
+//! use [`lpc_model::ModelValue`] via [`crate::wire_bridge`].
 
 use alloc::boxed::Box;
 
@@ -11,7 +11,7 @@ use lps_shared::LpsValueF32;
 /// Object-safe reflection over a node's *produced* fields (outputs and state).
 ///
 /// Implemented by runtime `*Props` structs; consumed by sync and tooling on the
-/// engine side before values cross the wire as [`lpc_model::WireValue`].
+/// engine side before values cross the wire as [`lpc_model::ModelValue`].
 pub trait RuntimePropAccess {
     /// Get the current value at `path`, if any.
     fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)>;

@@ -86,7 +86,7 @@ impl<N> NodeEntry<N> {
 mod tests {
     use super::NodeEntry;
     use lpc_model::{FrameId, NodeId, TreePath};
-    use lpc_wire::{SlotIdx, WireChildKind, WireNodeStatus};
+    use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
@@ -146,7 +146,9 @@ mod tests {
             NodeId::new(2),
             TreePath::parse("/main.show/child.vis").unwrap(),
             Some(NodeId::new(1)),
-            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             frame,
         );
         assert!(entry.child_kind.is_some());

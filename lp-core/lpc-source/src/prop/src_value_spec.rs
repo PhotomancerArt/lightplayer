@@ -20,21 +20,21 @@
 //! | `Amplitude`, `Ratio`, `Phase`, `Instant`, `Duration`, `Frequency`, `Angle` | any TOML number → `F32` runtime literal |
 //! | `Count`, `Choice` | integer → `I32` runtime literal |
 //! | `Bool` | bool |
-//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`WireType`](lpc_model::WireType) order: `space`, `coords`) |
+//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`ModelType`](lpc_model::ModelType) order: `space`, `coords`) |
 //! | `ColorPalette` | authoring table `{ space, count?, entries = [[f,f,f],…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Gradient` | authoring table `{ space, method, count?, stops = [{at,c},…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Position2d` / `Position3d` | 2- or 3-long array of numbers → `Vec2` / `Vec3` |
 //! | `AudioLevel` | table `{ low, mid, high }` |
 //! | `Texture` | string `"black"` (v0) → [`SrcValueSpec::Texture`] |
 //! | `SrcShape::Array` | TOML array, length must match, elements per element [`SrcSlot`][`crate::prop::src_shape::SrcSlot`]’s shape |
-//! | `SrcShape::Struct` | TOML table, one key per struct field, field **declaration** order in [`WireType`] / slot list |
+//! | `SrcShape::Struct` | TOML table, one key per struct field, field **declaration** order in [`ModelType`] / slot list |
 //!
 //! The inverse is `SrcValueSpec::to_toml_for_kind` / `SrcValueSpec::to_toml_for_shape` (private helpers).
 //!
 //! ## Serde and equality
 //!
-//! `WireValue` in `lpc-model` does not derive `Serialize` / `PartialEq` in
-//! M2; this module uses [`WireValue`] for serde and hand-written
+//! `ModelValue` in `lpc-model` does not derive `Serialize` / `PartialEq` in
+//! M2; this module uses [`ModelValue`] for serde and hand-written
 //! [`SrcValueSpec`]:[`PartialEq`] (see
 //! `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` — “SrcValueSpec
 //! serde via wire enum” and hand-written `PartialEq` for `SrcValueSpec`).
@@ -50,13 +50,13 @@ use crate::prop::toml_color::{
     from_toml_struct_kind, wire_color_palette_to_toml, wire_color_to_toml, wire_gradient_to_toml,
 };
 use crate::prop::toml_parse::{
-    toml_f32, toml_i32, vec_n_from_toml, vec2_to_toml_value, vec3_to_toml_value,
-    wire_audio_level_to_toml, wire_value_audio_level,
+    model_value_audio_level, toml_f32, toml_i32, vec_n_from_toml, vec2_to_toml_value,
+    vec3_to_toml_value, wire_audio_level_to_toml,
 };
 
 pub use crate::prop::toml_parse::FromTomlError;
 
-use lpc_model::WireValue;
+use lpc_model::ModelValue;
 use lpc_model::kind::Kind;
 
 /// Load-time context for **materializing** author specs: allocating handles,
@@ -88,12 +88,12 @@ impl From<SrcValueSpecWire> for SrcValueSpec {
     }
 }
 
-/// Either a portable [`WireValue`] for value-typed kinds, or a handle recipe
+/// Either a portable [`ModelValue`] for value-typed kinds, or a handle recipe
 /// for opaque kinds (`docs/design/lightplayer/quantity.md` §7).
 #[derive(Clone, Debug)]
 pub enum SrcValueSpec {
-    /// Portable literal or texture recipe; see [`SrcValueSpec::default_wire_value`].
-    Literal(WireValue),
+    /// Portable literal or texture recipe; see [`SrcValueSpec::default_model_value`].
+    Literal(ModelValue),
     /// [`SrcTextureSpec`] for [`Kind::Texture`] defaults
     /// (M2: v0 has [`SrcTextureSpec::Black`] only, `quantity.md` §7 sketch).
     Texture(SrcTextureSpec),
@@ -123,11 +123,11 @@ impl PartialEq for SrcValueSpec {
 
 impl SrcValueSpec {
     /// Default **wire** value for this spec: clone for [`SrcValueSpec::Literal`];
-    /// for [`SrcValueSpec::Texture`], allocate handle-shaped [`WireValue`] through `ctx`.
-    pub fn default_wire_value(&self, ctx: &mut LoadCtx) -> WireValue {
+    /// for [`SrcValueSpec::Texture`], allocate handle-shaped [`ModelValue`] through `ctx`.
+    pub fn default_model_value(&self, ctx: &mut LoadCtx) -> ModelValue {
         match self {
             Self::Literal(v) => v.clone(),
-            Self::Texture(spec) => spec.default_wire_value(ctx),
+            Self::Texture(spec) => spec.default_model_value(ctx),
         }
     }
 
@@ -154,7 +154,7 @@ impl SrcValueSpec {
         }
 
         if k == Kind::AudioLevel {
-            return Ok(SrcValueSpec::Literal(wire_value_audio_level(
+            return Ok(SrcValueSpec::Literal(model_value_audio_level(
                 value
                     .as_table()
                     .ok_or_else(|| FromTomlError::msg("audio_level default must be a table"))?,
@@ -184,9 +184,9 @@ impl SrcValueSpec {
                 | Kind::Instant
                 | Kind::Duration
                 | Kind::Frequency
-                | Kind::Angle => WireValue::F32(toml_f32(value)?),
-                Kind::Count | Kind::Choice => WireValue::I32(toml_i32(value)?),
-                Kind::Bool => WireValue::Bool(value.as_bool().ok_or_else(|| {
+                | Kind::Angle => ModelValue::F32(toml_f32(value)?),
+                Kind::Count | Kind::Choice => ModelValue::I32(toml_i32(value)?),
+                Kind::Bool => ModelValue::Bool(value.as_bool().ok_or_else(|| {
                     FromTomlError::msg("bool kind expects a TOML boolean `default`")
                 })?),
                 Kind::Texture
@@ -233,13 +233,13 @@ impl SrcValueSpec {
                         }
                     }
                 }
-                Ok(SrcValueSpec::Literal(WireValue::Array(out)))
+                Ok(SrcValueSpec::Literal(ModelValue::Array(out)))
             }
             SrcShape::Struct { fields, default: _ } => {
                 let t = value
                     .as_table()
                     .ok_or_else(|| FromTomlError::msg("struct default must be a TOML table"))?;
-                let mut out_fields: Vec<(String, WireValue)> = Vec::with_capacity(fields.len());
+                let mut out_fields: Vec<(String, ModelValue)> = Vec::with_capacity(fields.len());
                 for (name, slot) in fields {
                     let v = t.get(name.0.as_str()).ok_or_else(|| {
                         FromTomlError(format!("struct default table missing field `{}`", name.0))
@@ -253,7 +253,7 @@ impl SrcValueSpec {
                         }
                     }
                 }
-                Ok(SrcValueSpec::Literal(WireValue::Struct {
+                Ok(SrcValueSpec::Literal(ModelValue::Struct {
                     name: None,
                     fields: out_fields,
                 }))
@@ -283,19 +283,19 @@ impl SrcValueSpec {
             (SrcValueSpec::Literal(v), Kind::Position2d) => vec2_to_toml_value(v),
             (SrcValueSpec::Literal(v), Kind::Position3d) => vec3_to_toml_value(v),
             (SrcValueSpec::Literal(v), _) if k == Kind::Bool => match v {
-                WireValue::Bool(b) => Ok(toml::Value::Boolean(*b)),
+                ModelValue::Bool(b) => Ok(toml::Value::Boolean(*b)),
                 _ => Err(FromTomlError::msg(
                     "bool literal expected in SrcValueSpec::Literal",
                 )),
             },
             (SrcValueSpec::Literal(v), _) if k == Kind::Count || k == Kind::Choice => match v {
-                WireValue::I32(i) => Ok(toml::Value::Integer(i64::from(*i))),
+                ModelValue::I32(i) => Ok(toml::Value::Integer(i64::from(*i))),
                 _ => Err(FromTomlError::msg(
                     "i32 literal expected in SrcValueSpec::Literal",
                 )),
             },
             (SrcValueSpec::Literal(v), _) => match v {
-                WireValue::F32(f) => Ok(toml::Value::Float(f64::from(*f))),
+                ModelValue::F32(f) => Ok(toml::Value::Float(f64::from(*f))),
                 _ => Err(FromTomlError::msg("f32 scalar literal expected")),
             },
         }
@@ -327,9 +327,9 @@ impl SrcValueSpec {
                 },
             ) => {
                 let a = match v {
-                    WireValue::Array(x) => x,
+                    ModelValue::Array(x) => x,
                     _ => {
-                        return Err(FromTomlError::msg("array spec must be WireValue::Array"));
+                        return Err(FromTomlError::msg("array spec must be ModelValue::Array"));
                     }
                 };
                 if a.len() as u32 != *length {
@@ -352,9 +352,9 @@ impl SrcValueSpec {
             }
             (SrcValueSpec::Literal(v), SrcShape::Struct { fields, .. }) => {
                 let tval = match v {
-                    WireValue::Struct { fields, .. } => fields,
+                    ModelValue::Struct { fields, .. } => fields,
                     _ => {
-                        return Err(FromTomlError::msg("struct spec must be WireValue::Struct"));
+                        return Err(FromTomlError::msg("struct spec must be ModelValue::Struct"));
                     }
                 };
                 let mut map: toml::map::Map<String, toml::Value> = toml::map::Map::new();
@@ -387,9 +387,9 @@ mod tests {
     #[test]
     fn literal_materializes_to_itself() {
         let mut ctx = LoadCtx::default();
-        let spec = SrcValueSpec::Literal(WireValue::F32(0.5));
-        match spec.default_wire_value(&mut ctx) {
-            WireValue::F32(v) => assert_eq!(v, 0.5),
+        let spec = SrcValueSpec::Literal(ModelValue::F32(0.5));
+        match spec.default_model_value(&mut ctx) {
+            ModelValue::F32(v) => assert_eq!(v, 0.5),
             other => panic!("expected F32(0.5), got {other:?}"),
         }
     }
@@ -398,15 +398,15 @@ mod tests {
     fn texture_black_materializes_to_handle_zero() {
         let mut ctx = LoadCtx::default();
         let spec = SrcValueSpec::Texture(SrcTextureSpec::Black);
-        let v = spec.default_wire_value(&mut ctx);
+        let v = spec.default_model_value(&mut ctx);
         match v {
-            WireValue::Struct { fields, .. } => {
+            ModelValue::Struct { fields, .. } => {
                 let handle = fields
                     .iter()
                     .find(|(n, _)| n == "handle")
                     .expect("handle field");
                 match &handle.1 {
-                    WireValue::I32(h) => assert_eq!(*h, 0),
+                    ModelValue::I32(h) => assert_eq!(*h, 0),
                     _ => panic!("handle must be I32"),
                 }
             }
@@ -488,8 +488,8 @@ mod tests {
         ];
         for (_label, tval, sp, a, b0, c0) in cases {
             let s = SrcValueSpec::from_toml_for_kind(&tval, Kind::Color).unwrap();
-            let got = s.default_wire_value(&mut LoadCtx::default());
-            let WireValue::Struct { fields, .. } = got else {
+            let got = s.default_model_value(&mut LoadCtx::default());
+            let ModelValue::Struct { fields, .. } = got else {
                 panic!("struct color");
             };
             let space = fields
@@ -500,10 +500,10 @@ mod tests {
                 .iter()
                 .find_map(|(n, v)| (n == "coords").then(|| v))
                 .expect("coords");
-            let WireValue::I32(sid) = space else {
+            let ModelValue::I32(sid) = space else {
                 panic!("space");
             };
-            let WireValue::Vec3([x, y, z]) = coords else {
+            let ModelValue::Vec3([x, y, z]) = coords else {
                 panic!("coords");
             };
             assert_eq!(*sid, sp);
@@ -551,7 +551,7 @@ mod tests {
         SrcShape::Scalar {
             kind: Kind::Amplitude,
             constraint: lpc_model::prop::kind::Kind::Amplitude.default_constraint(),
-            default: SrcValueSpec::Literal(WireValue::F32(0.0)),
+            default: SrcValueSpec::Literal(ModelValue::F32(0.0)),
         }
     }
 
@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn literal_f32_serde_tag_matches_internal_wire_form() {
-        let spec = SrcValueSpec::Literal(WireValue::F32(0.25));
+        let spec = SrcValueSpec::Literal(ModelValue::F32(0.25));
         let json = serde_json::to_string(&spec).unwrap();
         assert_eq!(json, r#"{"kind":"literal","value":{"f32":0.25}}"#);
     }

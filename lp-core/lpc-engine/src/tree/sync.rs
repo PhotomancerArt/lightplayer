@@ -115,7 +115,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_wire::{SlotIdx, WireChildKind, WireEntryState, WireTreeDelta};
+    use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
     fn make_tree() -> NodeTree<()> {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
@@ -132,7 +132,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -141,7 +143,9 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(1) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(1),
+                },
                 FrameId::new(2),
             )
             .unwrap();
@@ -180,7 +184,9 @@ mod tests {
             root,
             NodeName::parse("a").unwrap(),
             NodeName::parse("vis").unwrap(),
-            WireChildKind::Input { source: SlotIdx(0) },
+            WireChildKind::Input {
+                source: WireSlotIndex(0),
+            },
             FrameId::new(1),
         )
         .unwrap();
@@ -204,7 +210,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -256,7 +264,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(5),
             )
             .unwrap();
@@ -300,7 +310,9 @@ mod tests {
                 parent,
                 NodeName::parse("child").unwrap(),
                 NodeName::parse("fx").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(2),
             )
             .unwrap();
@@ -333,7 +345,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -367,7 +381,7 @@ mod tests {
     /// Full round-trip test: server tree → deltas → client mirror
     #[test]
     fn tree_round_trip_server_to_client() {
-        use lpc_view::{ClientNodeTree, apply_tree_deltas};
+        use lpc_view::{NodeTreeView, apply_tree_deltas};
 
         // Build server tree
         let mut server_tree = make_tree();
@@ -378,7 +392,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -387,7 +403,9 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(1) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(1),
+                },
                 FrameId::new(2),
             )
             .unwrap();
@@ -396,7 +414,7 @@ mod tests {
         let deltas = tree_deltas_since(&server_tree, FrameId::new(0));
 
         // Apply to client
-        let mut client_tree = ClientNodeTree::new();
+        let mut client_tree = NodeTreeView::new();
         apply_tree_deltas(&mut client_tree, &deltas, FrameId::new(0)).unwrap();
 
         // Verify client matches server

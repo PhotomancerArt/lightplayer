@@ -1,4 +1,4 @@
-//! Portable wire/disk value shape (`WireValue`), serde-friendly at the foundation layer.
+//! Portable structural value shape (`ModelValue`), serde-friendly at the foundation layer.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum WireValue {
+pub enum ModelValue {
     I32(i32),
     U32(u32),
     F32(f32),
@@ -35,61 +35,61 @@ pub enum WireValue {
         height: u32,
         row_stride: u32,
     },
-    Array(Vec<WireValue>),
+    Array(Vec<ModelValue>),
     Struct {
         name: Option<String>,
-        fields: Vec<(String, WireValue)>,
+        fields: Vec<(String, ModelValue)>,
     },
 }
 
 #[cfg(test)]
 mod tests {
-    use super::WireValue;
+    use super::ModelValue;
     use alloc::string::String;
     use alloc::vec;
 
     #[test]
-    fn wire_value_serde_roundtrip_scalar_and_vectors() {
+    fn model_value_serde_roundtrip_scalar_and_vectors() {
         for v in [
-            WireValue::I32(-1),
-            WireValue::F32(1.5),
-            WireValue::Bool(true),
-            WireValue::Vec2([0.0, 1.0]),
-            WireValue::Vec3([1.0, 2.0, 3.0]),
+            ModelValue::I32(-1),
+            ModelValue::F32(1.5),
+            ModelValue::Bool(true),
+            ModelValue::Vec2([0.0, 1.0]),
+            ModelValue::Vec3([1.0, 2.0, 3.0]),
         ] {
             let json = serde_json::to_string(&v).unwrap();
-            let back: WireValue = serde_json::from_str(&json).unwrap();
+            let back: ModelValue = serde_json::from_str(&json).unwrap();
             assert_eq!(v, back);
         }
     }
 
     #[test]
-    fn wire_value_serde_roundtrip_texture2d_descriptor() {
-        let v = WireValue::Texture2D {
+    fn model_value_serde_roundtrip_texture2d_descriptor() {
+        let v = ModelValue::Texture2D {
             ptr: 0x1000,
             width: 64,
             height: 32,
             row_stride: 256,
         };
         let json = serde_json::to_string(&v).unwrap();
-        let back: WireValue = serde_json::from_str(&json).unwrap();
+        let back: ModelValue = serde_json::from_str(&json).unwrap();
         assert_eq!(v, back);
     }
 
     #[test]
-    fn wire_value_serde_roundtrip_array_and_struct() {
-        let v = WireValue::Struct {
+    fn model_value_serde_roundtrip_array_and_struct() {
+        let v = ModelValue::Struct {
             name: Some(String::from("S")),
             fields: vec![
                 (
                     String::from("items"),
-                    WireValue::Array(vec![WireValue::I32(1), WireValue::I32(2)]),
+                    ModelValue::Array(vec![ModelValue::I32(1), ModelValue::I32(2)]),
                 ),
-                (String::from("flag"), WireValue::Bool(false)),
+                (String::from("flag"), ModelValue::Bool(false)),
             ],
         };
         let json = serde_json::to_string(&v).unwrap();
-        let back: WireValue = serde_json::from_str(&json).unwrap();
+        let back: ModelValue = serde_json::from_str(&json).unwrap();
         assert_eq!(v, back);
     }
 }

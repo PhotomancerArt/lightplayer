@@ -5,7 +5,7 @@ pub mod migration {
 
     /// One **migrator** in a `FROM` → `FROM+1` chain on raw [`toml::Value`].
     pub trait Migration {
-        /// Must match the [`crate::artifact::Artifact::KIND`] this migration applies to.
+        /// Must match the [`crate::artifact::SrcArtifact::KIND`] this migration applies to.
         const KIND: &'static str;
         /// Source schema version this function can upgrade from.
         const FROM: u32;
@@ -41,11 +41,11 @@ pub use registry::Registry;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::Artifact;
+    use crate::artifact::SrcArtifact;
     use alloc::string::String;
 
     struct DummyArtifact;
-    impl Artifact for DummyArtifact {
+    impl SrcArtifact for DummyArtifact {
         const KIND: &'static str = "dummy";
         const CURRENT_VERSION: u32 = 1;
 

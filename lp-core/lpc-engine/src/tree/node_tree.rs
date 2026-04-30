@@ -213,7 +213,7 @@ mod tests {
     use super::NodeTree;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_wire::{SlotIdx, WireChildKind};
+    use lpc_wire::{WireChildKind, WireSlotIndex};
 
     fn make_tree() -> NodeTree<()> {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
@@ -238,7 +238,9 @@ mod tests {
                 root,
                 NodeName::parse("fluid").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -304,7 +306,9 @@ mod tests {
                 root,
                 NodeName::parse("fluid").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -341,7 +345,9 @@ mod tests {
                 root,
                 NodeName::parse("temp").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -360,7 +366,9 @@ mod tests {
                 root,
                 NodeName::parse("temp").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -401,7 +409,9 @@ mod tests {
                 child,
                 NodeName::parse("nested").unwrap(),
                 NodeName::parse("fx").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(2),
             )
             .unwrap();
@@ -426,7 +436,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -435,7 +447,9 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(1) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(1),
+                },
                 FrameId::new(2),
             )
             .unwrap();
@@ -459,7 +473,9 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(1),
             )
             .unwrap();
@@ -472,7 +488,9 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                WireChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
                 FrameId::new(3),
             )
             .unwrap();

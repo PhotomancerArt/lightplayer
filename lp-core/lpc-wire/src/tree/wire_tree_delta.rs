@@ -44,7 +44,7 @@ pub enum WireTreeDelta {
 mod tests {
     use super::WireTreeDelta;
     use crate::project::WireNodeStatus;
-    use crate::tree::{SlotIdx, WireChildKind, WireEntryState};
+    use crate::tree::{WireChildKind, WireEntryState, WireSlotIndex};
     use lpc_model::node::{NodeId, TreePath};
     use lpc_model::project::FrameId;
 
@@ -54,7 +54,9 @@ mod tests {
             id: NodeId::new(7),
             path: TreePath::parse("/main.show/fluid.vis").unwrap(),
             parent: Some(NodeId::new(1)),
-            child_kind: Some(WireChildKind::Input { source: SlotIdx(0) }),
+            child_kind: Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             children: alloc::vec![NodeId::new(8), NodeId::new(9)],
             status: WireNodeStatus::Created,
             state: WireEntryState::Pending,

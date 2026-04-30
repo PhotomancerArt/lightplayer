@@ -27,7 +27,7 @@ use lp_riscv_inst::Gpr;
 use lpa_client::LpClient;
 use lpc_model::{AsLpPath, FrameId};
 use lpc_shared::ProjectBuilder;
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
 use lpl_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 
@@ -148,7 +148,7 @@ async fn test_scene_render_position_varies_fw_emu() {
         .await
         .expect("Failed to load project");
 
-    let mut client_view = ClientProjectView::new();
+    let mut client_view = ProjectView::new();
     sync_emu_project_view(&client, project_handle, &mut client_view).await;
 
     let shader_handle = client_view

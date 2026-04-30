@@ -30,7 +30,7 @@ use lp_riscv_inst::Gpr;
 use lpa_client::LpClient;
 use lpc_model::AsLpPath;
 use lpc_shared::ProjectBuilder;
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
 
 const FRAMES: u32 = 3;
@@ -127,7 +127,7 @@ async fn test_profile_alloc_produces_valid_output() {
         .await
         .expect("Failed to load project");
 
-    let mut client_view = ClientProjectView::new();
+    let mut client_view = ProjectView::new();
     sync_emu_project_view(&client, project_handle, &mut client_view).await;
 
     let shader_handle = client_view

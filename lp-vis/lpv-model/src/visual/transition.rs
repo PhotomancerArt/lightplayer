@@ -5,8 +5,8 @@
 
 use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef};
 use alloc::string::String;
-use lpc_source::artifact::artifact::Artifact;
-use lpc_source::prop::shape::Slot;
+use lpc_source::artifact::src_artifact::SrcArtifact;
+use lpc_source::prop::shape::SrcSlot;
 
 /// A 2-input Visual that interpolates between `inputA` and `inputB`
 /// based on the `progress` parameter. Used by Live (between
@@ -44,7 +44,7 @@ pub struct Transition {
     pub params: ParamsTable,
 }
 
-impl Artifact for Transition {
+impl SrcArtifact for Transition {
     const KIND: &'static str = "transition";
     const CURRENT_VERSION: u32 = 1;
 
@@ -52,7 +52,7 @@ impl Artifact for Transition {
         self.schema_version
     }
 
-    fn walk_slots<F: FnMut(&Slot)>(&self, mut f: F) {
+    fn walk_slots<F: FnMut(&SrcSlot)>(&self, mut f: F) {
         f(&self.params.0);
     }
 }

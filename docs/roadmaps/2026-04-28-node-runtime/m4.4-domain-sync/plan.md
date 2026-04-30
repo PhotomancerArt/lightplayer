@@ -14,9 +14,9 @@ References:
 ## Status
 
 **Not yet planned.** M4.3a (**in progress / executed per sibling folder**) already
-defines the crate split, `WireValue`, `RuntimePropAccess` (`LpsValueF32`) vs
-`WirePropAccess`, and where tree deltas live. M4.4 builds on that — design
-`PropsChanged` against `lpc-wire` payloads (`WireValue`), not as future
+defines the crate split, `ModelValue` / `ModelType`, `RuntimePropAccess` (`LpsValueF32`) vs
+`PropAccessView`, and where tree deltas live. M4.4 builds on that — design
+`PropsChanged` against `lpc-wire` payloads (`ModelValue`), not as future
 dependency on an unstarted split.
 
 When M4.3 runtime-spine phases land, expand this file via `/plan-small`
@@ -32,11 +32,11 @@ When M4.3 runtime-spine phases land, expand this file via `/plan-small`
   engine runtime, parameterised over the domain. Replaces / wraps
   the legacy `ProjectRuntime` flat-map.
 - `lpc-wire::WireTreeDelta::PropsChanged` — wire variant for produced
-  values, carrying `WireValue` entries converted by `lpc-engine`.
+  values, carrying `ModelValue` entries converted by `lpc-engine`.
   Authored against `RuntimePropAccess::iter_changed_since`.
-- `lp-engine-client` node view prop cache — client-side mirror of produced
+- `lpc-view` node view prop cache — client-side mirror of produced
   props, keyed by `PropPath`. `prop_cache_ver` frame counter.
-- `lp-engine-client::apply_tree_delta` — handle `PropsChanged`,
+- `lpc-view::apply_tree_delta` — handle `PropsChanged`,
   bump `prop_cache_ver`.
 - `lpc-engine::tree_deltas_since` — emit `PropsChanged` deltas
   alongside structural deltas, walking each `Alive` entry's

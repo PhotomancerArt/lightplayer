@@ -4,7 +4,7 @@
 //! Together they are the **composition** layer of the Quantity model
 //! (`docs/design/lightplayer/quantity.md` §1, §2, and §6). `Shape` is *only*
 //! `Scalar | Array | Struct` (no tuples or sum types) so every slot’s storage
-//! projects cleanly to a [`crate::WireType`] and GPU layouts (`quantity.md` §6,
+//! projects cleanly to a [`crate::ModelType`] and GPU layouts (`quantity.md` §6,
 //! “Why no tuples”).
 //!
 //! **Defaults (M2, “Q15 Option A”):** [`SrcShape::Scalar`] carries a **mandatory**
@@ -27,11 +27,11 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
+use lpc_model::ModelValue;
 use lpc_model::NodeName;
-use lpc_model::WireValue;
 use lpc_model::prop::constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 use lpc_model::prop::kind::Kind;
-use lpc_model::prop::wire_type::{WireStructMember, WireType};
+use lpc_model::prop::model_type::{ModelStructMember, ModelType};
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Error;
@@ -108,16 +108,16 @@ impl SrcSlot {
     /// that; otherwise build `Array` of `length` / `Struct` of field name →
     /// child default, per `docs/design/lightplayer/quantity.md` §6 “Defaults
     /// for compositions”.
-    pub fn default_value(&self, ctx: &mut LoadCtx) -> WireValue {
+    pub fn default_value(&self, ctx: &mut LoadCtx) -> ModelValue {
         match &self.shape {
-            SrcShape::Scalar { default, .. } => default.default_wire_value(ctx),
+            SrcShape::Scalar { default, .. } => default.default_model_value(ctx),
             SrcShape::Array {
                 element,
                 length,
                 default,
             } => match default {
-                Some(d) => d.default_wire_value(ctx),
-                None => WireValue::Array({
+                Some(d) => d.default_model_value(ctx),
+                None => ModelValue::Array({
                     let mut elems = Vec::with_capacity(*length as usize);
                     for _ in 0..*length {
                         elems.push(element.default_value(ctx));
@@ -126,8 +126,8 @@ impl SrcSlot {
                 }),
             },
             SrcShape::Struct { fields, default } => match default {
-                Some(d) => d.default_wire_value(ctx),
-                None => WireValue::Struct {
+                Some(d) => d.default_model_value(ctx),
+                None => ModelValue::Struct {
                     name: None,
                     fields: fields
                         .iter()
@@ -142,17 +142,17 @@ impl SrcSlot {
     /// [`Kind::storage`](crate::prop::kind::Kind::storage) for the leaf kind; for arrays, element type
     /// with length; for structs, ordered members (`quantity.md` §2 table and §6
     /// `storage()` sketch).
-    pub fn storage(&self) -> WireType {
+    pub fn storage(&self) -> ModelType {
         match &self.shape {
             SrcShape::Scalar { kind, .. } => kind.storage(),
             SrcShape::Array {
                 element, length, ..
-            } => WireType::Array(Box::new(element.storage()), *length as usize),
-            SrcShape::Struct { fields, .. } => WireType::Struct {
+            } => ModelType::Array(Box::new(element.storage()), *length as usize),
+            SrcShape::Struct { fields, .. } => ModelType::Struct {
                 name: None,
                 fields: fields
                     .iter()
-                    .map(|(name, slot)| WireStructMember {
+                    .map(|(name, slot)| ModelStructMember {
                         name: name.0.clone(),
                         ty: slot.storage(),
                     })
@@ -761,7 +761,7 @@ impl schemars::JsonSchema for SrcSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::WireType;
+    use lpc_model::ModelType;
     use lpc_model::prop::constraint::{Constraint, ConstraintRange};
     use lpc_model::prop::kind::Kind;
 
@@ -769,7 +769,7 @@ mod tests {
     fn scalar_default_value_is_literal() {
         let mut ctx = LoadCtx::default();
         match scalar_amplitude_slot().default_value(&mut ctx) {
-            WireValue::F32(v) => assert_eq!(v, 1.0),
+            ModelValue::F32(v) => assert_eq!(v, 1.0),
             other => panic!("expected F32(1.0), got {other:?}"),
         }
     }
@@ -790,11 +790,11 @@ mod tests {
         };
         let mut ctx = LoadCtx::default();
         match array_slot.default_value(&mut ctx) {
-            WireValue::Array(items) => {
+            ModelValue::Array(items) => {
                 assert_eq!(items.len(), 3);
                 for item in items.iter() {
                     match item {
-                        WireValue::F32(v) => assert_eq!(*v, 1.0),
+                        ModelValue::F32(v) => assert_eq!(*v, 1.0),
                         other => panic!("expected F32, got {other:?}"),
                     }
                 }
@@ -806,12 +806,12 @@ mod tests {
     #[test]
     fn array_with_explicit_default_uses_override() {
         let elem = scalar_amplitude_slot();
-        let preset: Vec<WireValue> = alloc::vec![WireValue::F32(0.2), WireValue::F32(0.7)];
+        let preset: Vec<ModelValue> = alloc::vec![ModelValue::F32(0.2), ModelValue::F32(0.7)];
         let array_slot = SrcSlot {
             shape: SrcShape::Array {
                 element: Box::new(elem),
                 length: 2,
-                default: Some(SrcValueSpec::Literal(WireValue::Array(preset))),
+                default: Some(SrcValueSpec::Literal(ModelValue::Array(preset))),
             },
             label: None,
             description: None,
@@ -820,10 +820,10 @@ mod tests {
         };
         let mut ctx = LoadCtx::default();
         match array_slot.default_value(&mut ctx) {
-            WireValue::Array(items) => {
+            ModelValue::Array(items) => {
                 assert_eq!(items.len(), 2);
                 match (&items[0], &items[1]) {
-                    (WireValue::F32(a), WireValue::F32(b)) => {
+                    (ModelValue::F32(a), ModelValue::F32(b)) => {
                         assert_eq!(*a, 0.2);
                         assert_eq!(*b, 0.7);
                     }
@@ -849,12 +849,12 @@ mod tests {
         };
         let mut ctx = LoadCtx::default();
         match struct_slot.default_value(&mut ctx) {
-            WireValue::Struct { fields, .. } => {
+            ModelValue::Struct { fields, .. } => {
                 assert_eq!(fields.len(), 1);
                 let (name, val) = &fields[0];
                 assert_eq!(name, "speed");
                 match val {
-                    WireValue::F32(v) => assert_eq!(*v, 1.0),
+                    ModelValue::F32(v) => assert_eq!(*v, 1.0),
                     other => panic!("expected F32, got {other:?}"),
                 }
             }
@@ -864,7 +864,7 @@ mod tests {
 
     #[test]
     fn slot_storage_projection_scalar() {
-        assert_eq!(scalar_amplitude_slot().storage(), WireType::F32);
+        assert_eq!(scalar_amplitude_slot().storage(), ModelType::F32);
     }
 
     #[test]
@@ -881,8 +881,8 @@ mod tests {
             present: None,
         };
         match array_slot.storage() {
-            WireType::Array(element, len) => {
-                assert_eq!(*element, WireType::F32);
+            ModelType::Array(element, len) => {
+                assert_eq!(*element, ModelType::F32);
                 assert_eq!(len, 4);
             }
             _ => panic!("expected Array storage"),
@@ -989,11 +989,11 @@ mod tests {
 
     #[test]
     fn color_slot_roundtrips_toml_css_string() {
-        let c = WireValue::Struct {
+        let c = ModelValue::Struct {
             name: Some(String::from("Color")),
             fields: alloc::vec![
-                (String::from("space"), WireValue::I32(0)),
-                (String::from("coords"), WireValue::Vec3([0.7, 0.15, 90.0])),
+                (String::from("space"), ModelValue::I32(0)),
+                (String::from("coords"), ModelValue::Vec3([0.7, 0.15, 90.0])),
             ],
         };
         let slot = SrcSlot {
@@ -1019,12 +1019,12 @@ mod tests {
 
     #[test]
     fn audio_level_slot_roundtrips_toml() {
-        let a = WireValue::Struct {
+        let a = ModelValue::Struct {
             name: Some(String::from("AudioLevel")),
             fields: alloc::vec![
-                (String::from("low"), WireValue::F32(0.0)),
-                (String::from("mid"), WireValue::F32(0.0)),
-                (String::from("high"), WireValue::F32(0.0)),
+                (String::from("low"), ModelValue::F32(0.0)),
+                (String::from("mid"), ModelValue::F32(0.0)),
+                (String::from("high"), ModelValue::F32(0.0)),
             ],
         };
         let slot = SrcSlot {
@@ -1049,7 +1049,7 @@ mod tests {
             shape: SrcShape::Scalar {
                 kind: Kind::Bool,
                 constraint: Kind::Bool.default_constraint(),
-                default: SrcValueSpec::Literal(WireValue::Bool(true)),
+                default: SrcValueSpec::Literal(ModelValue::Bool(true)),
             },
             label: None,
             description: None,
@@ -1067,7 +1067,7 @@ mod tests {
             shape: SrcShape::Scalar {
                 kind: Kind::Position2d,
                 constraint: Kind::Position2d.default_constraint(),
-                default: SrcValueSpec::Literal(WireValue::Vec2([0.5, 0.5])),
+                default: SrcValueSpec::Literal(ModelValue::Vec2([0.5, 0.5])),
             },
             label: None,
             description: None,
@@ -1193,7 +1193,7 @@ mod tests {
                     range: [0.0, 1.0],
                     step: None,
                 }),
-                default: SrcValueSpec::Literal(WireValue::F32(1.0)),
+                default: SrcValueSpec::Literal(ModelValue::F32(1.0)),
             },
             label: None,
             description: None,
@@ -1207,7 +1207,7 @@ mod tests {
             shape: SrcShape::Scalar {
                 kind: Kind::Count,
                 constraint: Kind::Count.default_constraint(),
-                default: SrcValueSpec::Literal(WireValue::I32(n)),
+                default: SrcValueSpec::Literal(ModelValue::I32(n)),
             },
             label: None,
             description: None,

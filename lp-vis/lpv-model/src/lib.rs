@@ -20,7 +20,6 @@ pub use visual::{
 pub use lpc_model::{constraint, error, kind, node, types};
 pub use lpc_source::{artifact, presentation, schema};
 
-pub use lpc_model::node::node_props::NodeProps;
 pub use lpc_model::tree::tree_path::TreePath;
 pub use lpc_model::{
     ChannelName, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, DomainError, Kind,
@@ -28,7 +27,7 @@ pub use lpc_model::{
 };
 pub use lpc_source::prop::{binding, shape};
 pub use lpc_source::{
-    ArtifactSpec, Binding, LoadError, NodeConfig, Presentation, Shape, Slot, TextureSpec,
-    ValueSpec, load_artifact,
+    LoadError, Presentation, SrcArtifactSpec, SrcBinding, SrcNodeConfig, SrcShape, SrcSlot,
+    SrcTextureSpec, SrcValueSpec, load_artifact,
 };
 pub use lps_shared::{LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat};

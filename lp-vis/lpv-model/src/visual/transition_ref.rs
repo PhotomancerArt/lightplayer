@@ -5,7 +5,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use lpc_source::ArtifactSpec;
+use lpc_source::SrcArtifactSpec;
 
 /// Reference to a Transition with playback parameters.
 ///
@@ -27,7 +27,7 @@ use lpc_source::ArtifactSpec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct TransitionRef {
-    pub visual: ArtifactSpec,
+    pub visual: SrcArtifactSpec,
     pub duration: f32,
     #[cfg_attr(
         feature = "schema-gen",

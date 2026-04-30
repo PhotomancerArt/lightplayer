@@ -25,23 +25,23 @@ These files build on each other; read in order.
 | 07 | [sync](07-sync.md)                                              | Client/server mirror, `FrameId`, `NodeView` snapshots, delta computation                                |
 | 08 | [domain](08-domain.md)                                          | `ProjectDomain` trait, legacy / visual / future-domain mapping, M2 flag resolution                      |
 
-## M4.3a crate split update
+## M4.3a / M4.3b crate split update
 
-M4.3a moved the design vocabulary onto clearer crate roles:
+M4.3a split crates; M4.3b aligned public names to those roles:
 
 - `lpc-model`: shared concepts only (`NodeId`, `TreePath`,
-  `PropPath`, `FrameId`, `Kind`, `WireType`, `WireValue`).
+  `PropPath`, `FrameId`, `Kind`, `ModelType`, `ModelValue`).
 - `lpc-source`: authored/on-disk source model (`SrcArtifact`,
   `SrcBinding`, `SrcShape`, `SrcValueSpec`).
-- `lpc-wire`: engine-client wire model (`WireMessage`,
+- `lpc-wire`: engine-client wire model (`Message`, `ClientMessage`,
   `WireTreeDelta`, `WireProjectHandle`, state serialization helpers).
 - `lpc-engine`: runtime spine and shader/runtime conversion boundary.
-- `lp-engine-client`: client-side engine view/cache.
+- `lpc-view`: client-side engine view/cache (`ProjectView`, tree/prop mirrors).
 
-Older design files may still use pre-M4.3a names such as
-`lpc-runtime`, `TreeDelta`, or `ValueSpec` in explanatory text. Read
+Older design files may still use pre-split names such as
+`lpc-runtime`, `TreeDelta`, or legacy `ValueSpec` in explanatory text. Read
 those as **`lpc-engine`**, **`lpc-wire::WireTreeDelta`**, and
-**`SrcValueSpec`/`WireValue` payloads** respectively, unless the text is explicitly describing
+**`SrcValueSpec`/`ModelValue` payloads** respectively, unless the text is explicitly describing
 runtime-only **`LpsValueF32`** behavior.
 
 ## Cross-references

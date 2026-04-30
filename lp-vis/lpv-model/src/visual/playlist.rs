@@ -10,16 +10,16 @@ use crate::visual::transition_ref::TransitionRef;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_source::ArtifactSpec;
-use lpc_source::artifact::artifact::Artifact;
-use lpc_source::prop::binding::Binding;
+use lpc_source::SrcArtifactSpec;
+use lpc_source::artifact::src_artifact::SrcArtifact;
+use lpc_source::prop::binding::SrcBinding;
 
 /// One entry in a Playlist. `duration: None` means "wait for cue".
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct PlaylistEntry {
-    pub visual: ArtifactSpec,
+    pub visual: SrcArtifactSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<f32>,
     #[cfg_attr(
@@ -79,10 +79,10 @@ pub struct Playlist {
     pub behavior: PlaylistBehavior,
     // TODO(binding-resolution): see Live::bindings.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub bindings: BTreeMap<String, Binding>,
+    pub bindings: BTreeMap<String, SrcBinding>,
 }
 
-impl Artifact for Playlist {
+impl SrcArtifact for Playlist {
     const KIND: &'static str = "playlist";
     const CURRENT_VERSION: u32 = 1;
 
@@ -152,7 +152,9 @@ mod tests {
         assert_eq!(p, back);
         assert_eq!(
             back.bindings.get("rainbow.pattern#params.speed"),
-            Some(&Binding::Bus(ChannelName(String::from("audio/in/0/level"))))
+            Some(&SrcBinding::Bus(ChannelName(String::from(
+                "audio/in/0/level"
+            ))))
         );
     }
 

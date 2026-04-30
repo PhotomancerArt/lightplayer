@@ -7,7 +7,7 @@ use crate::prop::src_shape::SrcSlot;
 ///
 /// Typed deserialize, JSON Schema bounds, and migration wiring come in
 /// M5+ (`// TODO` on this trait).
-pub trait Artifact {
+pub trait SrcArtifact {
     /// TOML/JSON `kind` discriminator and file extension family (e.g. `"pattern"`).
     const KIND: &'static str;
     /// Breaking-schema bump only; see `single schema_version` in `overview.md` compatibility model.

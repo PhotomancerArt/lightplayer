@@ -115,9 +115,7 @@ async fn handle_dev_async(
         println!("Shutting down...");
     } else {
         // Run UI
-        let project_view = Arc::new(std::sync::Mutex::new(
-            lpc_view::project::ClientProjectView::new(),
-        ));
+        let project_view = Arc::new(std::sync::Mutex::new(lpc_view::project::ProjectView::new()));
 
         // Create a new LpClient for the UI (shares the same transport)
         let ui_client = LpClient::new_shared(Arc::clone(&shared_transport));

@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lpc_shared::ProjectBuilder;
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
 
 #[test]
@@ -46,7 +46,7 @@ fn test_scene_render() {
     runtime.ensure_all_nodes_initialized().unwrap();
 
     // Create a client view
-    let mut client_view = ClientProjectView::new();
+    let mut client_view = ProjectView::new();
 
     // Get output handle
     let output_handle = runtime.handle_for_path(output_path.as_path()).unwrap();
@@ -115,7 +115,7 @@ fn assert_memory_output_red(
 }
 
 /// Sync the client view with the runtime
-fn sync_client_view(runtime: &ProjectRuntime, client_view: &mut ClientProjectView) {
+fn sync_client_view(runtime: &ProjectRuntime, client_view: &mut ProjectView) {
     let response = runtime
         .get_changes(client_view.frame_id, &client_view.detail_specifier(), None)
         .unwrap();

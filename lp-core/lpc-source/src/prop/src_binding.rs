@@ -4,7 +4,7 @@
 //! There is no separate "bus object" in authored files: **channels exist** when
 //! at least one binding references them; direction (read vs write) comes from
 //! the slot's **role** in its container (e.g. under `params` vs an output
-//! declaration), not from the [`Binding`] enum (`quantity.md` §8 "Direction is
+//! declaration), not from the [`SrcBinding`] enum (`quantity.md` §8 "Direction is
 //! contextual"). The first writer/reader to a channel establishes its
 //! [`Kind`](lpc_model::prop::kind::Kind); mismatches are compose-time errors (same
 //! section).
@@ -85,8 +85,8 @@ mod tests {
 
     #[test]
     fn literal_binding_serde_round_trips() {
-        use lpc_model::WireValue;
-        let b = SrcBinding::Literal(SrcValueSpec::Literal(WireValue::F32(0.7)));
+        use lpc_model::ModelValue;
+        let b = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(0.7)));
         let json = serde_json::to_string(&b).unwrap();
         let back: SrcBinding = serde_json::from_str(&json).unwrap();
         assert_eq!(b, back);
@@ -94,8 +94,8 @@ mod tests {
 
     #[test]
     fn literal_binding_json_form_is_nested() {
-        use lpc_model::WireValue;
-        let b = SrcBinding::Literal(SrcValueSpec::Literal(WireValue::F32(0.7)));
+        use lpc_model::ModelValue;
+        let b = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(0.7)));
         let json = serde_json::to_string(&b).unwrap();
         assert_eq!(
             json,
@@ -105,8 +105,8 @@ mod tests {
 
     #[test]
     fn literal_binding_toml_round_trips() {
-        use lpc_model::WireValue;
-        let b = SrcBinding::Literal(SrcValueSpec::Literal(WireValue::F32(1.5)));
+        use lpc_model::ModelValue;
+        let b = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(1.5)));
         let toml_str = toml::to_string(&b).unwrap();
         let back: SrcBinding = toml::from_str(&toml_str).unwrap();
         assert_eq!(b, back);

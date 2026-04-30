@@ -1,37 +1,37 @@
-//! Object-safe read-only view of properties held in client cache / wire state.
+//! Object-safe read-only view of properties held in view cache / wire state.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use lpc_model::WireValue;
+use lpc_model::ModelValue;
 use lpc_model::project::FrameId;
 use lpc_model::prop::PropPath;
 
-/// Client-side reflection over cached wire-safe property values.
-pub trait WirePropAccess {
+/// Reflection over cached wire-safe property values held by a view/cache.
+pub trait PropAccessView {
     /// Get the current value at `path`, if any.
-    fn get(&self, path: &PropPath) -> Option<(&WireValue, FrameId)>;
+    fn get(&self, path: &PropPath) -> Option<(&ModelValue, FrameId)>;
 
     /// Iterate entries whose `changed_frame > since`.
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a WireValue, FrameId)> + 'a>;
+    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a>;
 
     /// All cached entries.
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a WireValue, FrameId)> + 'a>;
+    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a>;
 }
 
-/// Simple in-memory cache backing [`WirePropAccess`] for tests and small clients.
+/// Simple in-memory cache backing [`PropAccessView`] for tests and small clients.
 #[derive(Default)]
-pub struct WirePropsMap {
-    values: Vec<(PropPath, WireValue, FrameId)>,
+pub struct PropsMapView {
+    values: Vec<(PropPath, ModelValue, FrameId)>,
 }
 
-impl WirePropsMap {
-    pub fn insert(&mut self, path: PropPath, value: WireValue, frame: FrameId) {
+impl PropsMapView {
+    pub fn insert(&mut self, path: PropPath, value: ModelValue, frame: FrameId) {
         if let Some(i) = self.values.iter().position(|(p, _, _)| p == &path) {
             self.values[i] = (path, value, frame);
         } else {
@@ -40,8 +40,8 @@ impl WirePropsMap {
     }
 }
 
-impl WirePropAccess for WirePropsMap {
-    fn get(&self, path: &PropPath) -> Option<(&WireValue, FrameId)> {
+impl PropAccessView for PropsMapView {
+    fn get(&self, path: &PropPath) -> Option<(&ModelValue, FrameId)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -51,7 +51,7 @@ impl WirePropAccess for WirePropsMap {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a WireValue, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -62,7 +62,7 @@ impl WirePropAccess for WirePropsMap {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a WireValue, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a> {
         Box::new(self.values.iter().map(|(p, v, f)| (p, v, *f)))
     }
 }
@@ -73,27 +73,27 @@ mod tests {
     use lpc_model::prop::prop_path::parse_path;
 
     #[test]
-    fn wire_prop_access_is_object_safe() {
-        let _: Box<dyn WirePropAccess> = Box::new(WirePropsMap::default());
+    fn prop_access_view_is_object_safe() {
+        let _: Box<dyn PropAccessView> = Box::new(PropsMapView::default());
     }
 
     #[test]
     fn map_get_and_snapshot() {
-        let mut m = WirePropsMap::default();
+        let mut m = PropsMapView::default();
         let p = parse_path("outputs.x").unwrap();
-        m.insert(p.clone(), WireValue::F32(2.0), FrameId::new(1));
+        m.insert(p.clone(), ModelValue::F32(2.0), FrameId::new(1));
 
-        assert_eq!(m.get(&p), Some((&WireValue::F32(2.0), FrameId::new(1))));
+        assert_eq!(m.get(&p), Some((&ModelValue::F32(2.0), FrameId::new(1))));
         assert_eq!(m.snapshot().count(), 1);
     }
 
     #[test]
     fn iter_changed_since_respects_frame() {
-        let mut m = WirePropsMap::default();
+        let mut m = PropsMapView::default();
         let p1 = parse_path("a").unwrap();
         let p2 = parse_path("b").unwrap();
-        m.insert(p1.clone(), WireValue::I32(1), FrameId::new(1));
-        m.insert(p2.clone(), WireValue::I32(2), FrameId::new(10));
+        m.insert(p1.clone(), ModelValue::I32(1), FrameId::new(1));
+        m.insert(p2.clone(), ModelValue::I32(2), FrameId::new(10));
 
         let recent: Vec<_> = m.iter_changed_since(FrameId::new(5)).collect();
         assert_eq!(recent.len(), 1);

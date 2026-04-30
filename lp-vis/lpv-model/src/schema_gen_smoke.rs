@@ -10,10 +10,10 @@ mod tests {
     use crate::kind::{Colorspace, Dimension, InterpMethod, Kind, Unit};
     use crate::presentation::Presentation;
     use crate::{
-        ArtifactSpec, Binding, ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId,
-        NodeName, NodePropSpec, ParamsTable, Pattern, Playlist, PlaylistBehavior, PlaylistEntry,
-        ShaderRef, Shape, Slot, Stack, TextureSpec, Transition, TransitionRef, TreePath, ValueSpec,
-        VisualInput,
+        ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId, NodeName, NodePropSpec,
+        ParamsTable, Pattern, Playlist, PlaylistBehavior, PlaylistEntry, ShaderRef,
+        SrcArtifactSpec, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec, SrcValueSpec, Stack,
+        Transition, TransitionRef, TreePath, VisualInput,
     };
     use lpc_model::tree::tree_path::NodePathSegment;
 
@@ -47,7 +47,7 @@ mod tests {
     }
     #[test]
     fn schema_artifact_spec() {
-        assert_schema_compiles!(ArtifactSpec);
+        assert_schema_compiles!(SrcArtifactSpec);
     }
     #[test]
     fn schema_channel_name() {
@@ -85,24 +85,24 @@ mod tests {
     }
     #[test]
     fn schema_binding() {
-        assert_schema_compiles!(Binding);
+        assert_schema_compiles!(SrcBinding);
     }
     #[test]
     fn schema_value_spec() {
-        assert_schema_compiles!(ValueSpec);
+        assert_schema_compiles!(SrcValueSpec);
     }
     #[test]
     fn schema_texture_spec() {
-        assert_schema_compiles!(TextureSpec);
+        assert_schema_compiles!(SrcTextureSpec);
     }
 
     #[test]
     fn schema_shape() {
-        assert_schema_compiles!(Shape);
+        assert_schema_compiles!(SrcShape);
     }
     #[test]
     fn schema_slot() {
-        assert_schema_compiles!(Slot);
+        assert_schema_compiles!(SrcSlot);
     }
     #[test]
     fn schema_lps_type() {
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn slot_schema_is_recursive_and_non_trivial() {
-        let schema = schemars::schema_for!(Slot);
+        let schema = schemars::schema_for!(SrcSlot);
         let json = serde_json::to_string(&schema).unwrap();
         // Wire-true `JsonSchema` for `Slot` (see `impl JsonSchema for Slot`): a
         // `oneOf` of scalar range/choice/free, array, and struct arms — no
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn shape_schema_includes_all_variants() {
-        let schema = schemars::schema_for!(Shape);
+        let schema = schemars::schema_for!(SrcShape);
         let json = serde_json::to_string(&schema).unwrap();
         for variant in ["scalar", "array", "struct"] {
             assert!(

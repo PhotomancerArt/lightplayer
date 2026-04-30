@@ -1,15 +1,15 @@
 use crate::nodes::fixture::mapping::MappingConfig;
 use crate::nodes::{NodeConfig, NodeKind};
-use lpc_model::nodes::NodeSpecifier;
+use lpc_model::NodeSpec;
 use serde::{Deserialize, Serialize};
 
 /// Fixture node configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FixtureConfig {
     /// Output node specifier
-    pub output_spec: NodeSpecifier,
+    pub output_spec: NodeSpec,
     /// Texture node specifier
-    pub texture_spec: NodeSpecifier,
+    pub texture_spec: NodeSpec,
     /// Mapping configuration (simplified for now)
     pub mapping: MappingConfig,
     /// Color order for RGB channels
@@ -165,8 +165,8 @@ mod tests {
     fn test_fixture_config_kind() {
         use crate::nodes::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
         let config = FixtureConfig {
-            output_spec: NodeSpecifier::from("/src/out.output"),
-            texture_spec: NodeSpecifier::from("/src/tex.texture"),
+            output_spec: NodeSpec::from("/src/out.output"),
+            texture_spec: NodeSpec::from("/src/tex.texture"),
             mapping: MappingConfig::PathPoints {
                 paths: vec![PathSpec::RingArray {
                     center: (0.5, 0.5),

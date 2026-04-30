@@ -17,10 +17,10 @@ pub mod transport_error;
 pub mod tree;
 
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
-pub use project::{ApiNodeSpecifier, WireNodeStatus, WireProjectHandle, WireProjectRequest};
+pub use project::{WireNodeSpecifier, WireNodeStatus, WireProjectHandle, WireProjectRequest};
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use transport_error::TransportError;
-pub use tree::{SlotIdx, WireChildKind, WireEntryState, WireTreeDelta};
+pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};

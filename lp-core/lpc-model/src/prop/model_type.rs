@@ -1,4 +1,4 @@
-//! Model-side structural type projection for storage and slot layout (`WireType`).
+//! Model-side structural type projection for storage and slot layout (`ModelType`).
 //!
 //! Model-side layout types only; conversion to shader ABI types stays in `lpc-engine`.
 
@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum WireType {
+pub enum ModelType {
     I32,
     U32,
     F32,
@@ -31,17 +31,17 @@ pub enum WireType {
     Mat3x3,
     Mat4x4,
     Texture2D,
-    Array(Box<WireType>, usize),
+    Array(Box<ModelType>, usize),
     Struct {
         name: Option<String>,
-        fields: Vec<WireStructMember>,
+        fields: Vec<ModelStructMember>,
     },
 }
 
-/// One field in a [`WireType::Struct`].
+/// One field in a [`ModelType::Struct`].
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct WireStructMember {
+pub struct ModelStructMember {
     pub name: String,
-    pub ty: WireType,
+    pub ty: ModelType,
 }

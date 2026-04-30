@@ -1,8 +1,8 @@
-use lpc_view::ClientNodeEntry;
+use lpc_view::NodeEntryView;
 use lpl_model::nodes::shader::ShaderState;
 
 /// Render shader panel
-pub fn render_shader_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &ShaderState) {
+pub fn render_shader_panel(ui: &mut egui::Ui, entry: &NodeEntryView, state: &ShaderState) {
     ui.heading("Shader");
     ui.separator();
 

@@ -5,6 +5,8 @@
 use lpc_model::PropPath;
 use lpc_model::node::NodeName;
 
+use super::WireSlotIndex;
+
 /// How a child relates to its parent for lifecycle purposes.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -13,7 +15,7 @@ pub enum WireChildKind {
     /// Structural input from the artifact (`[input]`).
     Input {
         /// Index into the parent's slot list.
-        source: SlotIdx,
+        source: WireSlotIndex,
     },
     /// Programmer-declared sidecar (`[children.*]`).
     Sidecar {
@@ -27,23 +29,17 @@ pub enum WireChildKind {
     },
 }
 
-/// Index into a parent's slot list.
-#[derive(
-    Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
-)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(transparent)]
-pub struct SlotIdx(pub u32);
-
 #[cfg(test)]
 mod tests {
-    use super::{SlotIdx, WireChildKind};
+    use super::{WireChildKind, WireSlotIndex};
     use lpc_model::node::NodeName;
     use lpc_model::prop::parse_path;
 
     #[test]
     fn child_kind_input_round_trips() {
-        let kind = WireChildKind::Input { source: SlotIdx(3) };
+        let kind = WireChildKind::Input {
+            source: WireSlotIndex(3),
+        };
         let json = serde_json::to_string(&kind).unwrap();
         let decoded: WireChildKind = serde_json::from_str(&json).unwrap();
         assert_eq!(kind, decoded);

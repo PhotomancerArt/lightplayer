@@ -4,12 +4,12 @@ use alloc::format;
 use alloc::string::String;
 use alloc::{vec, vec::Vec};
 use lpc_model::{FrameId, LpPathBuf, NodeId};
-use lpc_wire::{ApiNodeSpecifier, WireNodeStatus};
+use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
 use lpl_model::{NodeChange, NodeConfig, NodeKind, NodeState};
 
-/// Status change information
+/// Status change information surfaced by [`ProjectView::apply_changes`].
 #[derive(Debug, Clone)]
-pub struct StatusChange {
+pub struct StatusChangeView {
     /// Node path
     pub path: LpPathBuf,
     /// Previous status
@@ -18,20 +18,19 @@ pub struct StatusChange {
     pub new_status: WireNodeStatus,
 }
 
-/// Client view of project
-pub struct ClientProjectView {
+/// Cached view of project state synced from engine responses.
+pub struct ProjectView {
     /// Current frame ID (last synced)
     pub frame_id: FrameId,
     /// Node entries
-    pub nodes: BTreeMap<NodeId, ClientNodeEntry>,
+    pub nodes: BTreeMap<NodeId, NodeEntryView>,
     /// Which nodes we're tracking detail for
     pub detail_tracking: BTreeSet<NodeId>,
     /// Previous status for each node (for detecting status changes)
     previous_status: BTreeMap<NodeId, WireNodeStatus>,
 }
 
-/// Client node entry
-pub struct ClientNodeEntry {
+pub struct NodeEntryView {
     pub path: LpPathBuf,
     pub kind: NodeKind,
     pub config: Box<dyn NodeConfig>, // todo!("Proper config storage/cloning")
@@ -42,7 +41,7 @@ pub struct ClientNodeEntry {
     pub status_ver: FrameId,
 }
 
-impl ClientProjectView {
+impl ProjectView {
     /// Create new client view
     pub fn new() -> Self {
         Self {
@@ -68,11 +67,11 @@ impl ClientProjectView {
     }
 
     /// Generate detail specifier for sync
-    pub fn detail_specifier(&self) -> ApiNodeSpecifier {
+    pub fn detail_specifier(&self) -> WireNodeSpecifier {
         if self.detail_tracking.is_empty() {
-            ApiNodeSpecifier::None
+            WireNodeSpecifier::None
         } else {
-            ApiNodeSpecifier::ByHandles(self.detail_tracking.iter().copied().collect())
+            WireNodeSpecifier::ByHandles(self.detail_tracking.iter().copied().collect())
         }
     }
 
@@ -82,7 +81,7 @@ impl ClientProjectView {
     pub fn apply_changes(
         &mut self,
         response: &lpl_model::ProjectResponse,
-    ) -> Result<Vec<StatusChange>, String> {
+    ) -> Result<Vec<StatusChangeView>, String> {
         let mut status_changes = Vec::new();
         match response {
             lpl_model::ProjectResponse::GetChanges {
@@ -141,7 +140,7 @@ impl ClientProjectView {
                             let initial_status = WireNodeStatus::Created;
                             self.nodes.insert(
                                 *handle,
-                                ClientNodeEntry {
+                                NodeEntryView {
                                     path: path.clone(),
                                     kind: *kind,
                                     config,
@@ -173,7 +172,7 @@ impl ClientProjectView {
                                 let new_status = status.clone();
 
                                 // Track all status changes - StatusChanged event indicates a change occurred
-                                status_changes.push(StatusChange {
+                                status_changes.push(StatusChangeView {
                                     path: entry.path.clone(),
                                     old_status: old_status.clone(),
                                     new_status: new_status.clone(),
@@ -192,9 +191,9 @@ impl ClientProjectView {
                             }
                         }
                         NodeChange::Removed { handle } => {
-                            self.nodes.remove(handle);
-                            self.detail_tracking.remove(handle);
-                            self.previous_status.remove(handle);
+                            self.nodes.remove(&handle);
+                            self.detail_tracking.remove(&handle);
+                            self.previous_status.remove(&handle);
                         }
                     }
                 }
@@ -297,7 +296,7 @@ impl ClientProjectView {
 
                         self.nodes.insert(
                             *handle,
-                            ClientNodeEntry {
+                            NodeEntryView {
                                 path: detail.path.clone(),
                                 kind,
                                 config,

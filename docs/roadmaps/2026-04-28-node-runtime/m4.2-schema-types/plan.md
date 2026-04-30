@@ -2,8 +2,8 @@
 ---
 
 > **Naming (planning onward):** `lpc-runtime` answers in this M4.2 doc denote
-> **`lpc-engine`**. Authored literals / wire payloads align with **`WireValue` /
-> `SrcValueSpec`** per M4.3a.
+> **`lpc-engine`**. Authored literals / wire payloads align with **`ModelValue` /
+> `SrcValueSpec`** per M4.3a–M4.3b (was `WireValue` before rename).
 
 # Decisions for future reference
 
@@ -12,7 +12,7 @@
 - **Decision:** `Binding::Literal` carries `ValueSpec` (the portable recipe), not `LpsValue` (the runtime handle-bearing type). The wire boundary intentionally uses `ValueSpec`; `LpsValue` is GLSL-runtime-only.
 - **Why:** `LpsValue::Texture2D` carries a GPU handle that's meaningless across the wire. The design has `ValueSpec` as the portable form; teaching `LpsValue` serde would propagate the architectural smell deeper.
 - **Rejected alternatives:** (a) Add serde to `LpsValueF32` — rejected because texture handles are fundamentally not portable; (b) Have `Binding::Literal` be a special wire form — rejected because `ValueSpec` already exists and works.
-- **Revisit when:** The M4.3a crate split introduces a focused `WireValue` enum that obsoletes both `ValueSpec` on the wire and the `LpsValueWire` private mirror in `value_spec.rs`.
+- **Revisit when:** The M4.3a/M4.3b work lands a focused portable value enum (`ModelValue`, formerly `WireValue`) that obsoletes both `ValueSpec` on the wire and the `LpsValueWire` private mirror in `value_spec.rs`.
 
 ## `PropAccess` uses `Box<dyn Iterator>`
 
@@ -78,4 +78,4 @@ Historical notes from plan development — kept for context.
 | Q-A | `PropAccess` uses `Box<dyn Iterator<Item = (PropPath, LpsValue, FrameId)> + '_>` for `iter_changed_since` and `snapshot`. Implementor simplicity wins; sync is editor-only (not hot-path), `LpsValue` is small (no pixel bytes — `Texture2D` carries descriptor only), and the per-call `Box` is short-lived. |
 | Q-B | `Bus` ships a five-method operational API in M4.2: `new`, `claim_writer(channel, writer, prop, kind) -> Result<(), BusError>`, `publish(channel, value, frame)`, `read(channel) -> Option<&LpsValue>`, `last_writer_frame(channel) -> FrameId`, `kind(channel) -> Option<Kind>`. `BusError::KindMismatch` on first-writer-kind conflict. Round-trip test (claim → publish → read) lands in M4.2; M4.3 wires it into `TickContext`. |
 | Q-C | `NodePropSpec` deserialize stays permissive (any well-formed `(node, prop)` pair). The "target must address `outputs`" policy lives at config-load in M4.3. M4.2 ships a `PropNamespace { Params, Inputs, Outputs, State }` enum + `NodePropSpec::target_namespace() -> Option<PropNamespace>` helper so the M4.3 check is a one-liner. Design 06 gets a note about this M4.3 deliverable. |
-| —   | **Implementation reconciliations** (caught while writing phases): (a) reuse existing `NodePropSpec` rather than create a new `NodePropRef`; (b) `Binding::Literal(ValueSpec)` not `Binding::Literal(LpsValue)`. The latter is **wire-boundary-by-design**, not an M2 workaround: `LpsValue::Texture2D` carries a runtime handle that's not meaningful across the wire, and `ValueSpec` is the existing portable form. Phase 3 documents this framing in design 04 / 06. The deeper crate split + a focused `WireValue` enum is M4.3a (see [`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md)).
+| —   | **Implementation reconciliations** (caught while writing phases): (a) reuse existing `NodePropSpec` rather than create a new `NodePropRef`; (b) `Binding::Literal(ValueSpec)` not `Binding::Literal(LpsValue)`. The latter is **wire-boundary-by-design**, not an M2 workaround: `LpsValue::Texture2D` carries a runtime handle that's not meaningful across the wire, and `ValueSpec` is the existing portable form. Phase 3 documents this framing in design 04 / 06. The deeper crate split + a focused portable value enum (`ModelValue`) is M4.3a–M4.3b (see [`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md), [`../m4.3b-name-alignment/00-design.md`](../m4.3b-name-alignment/00-design.md)).

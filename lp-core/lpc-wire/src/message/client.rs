@@ -35,7 +35,7 @@ pub enum ClientRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::ApiNodeSpecifier;
+    use crate::project::WireNodeSpecifier;
     use lpc_model::lp_path::AsLpPathBuf;
     use lpc_model::project::FrameId;
 
@@ -93,7 +93,7 @@ mod tests {
             handle: WireProjectHandle::new(1),
             request: WireProjectRequest::GetChanges {
                 since_frame: FrameId::default(),
-                detail_specifier: ApiNodeSpecifier::All,
+                detail_specifier: WireNodeSpecifier::All,
             },
         };
         let json = crate::json::to_string(&req).unwrap();
@@ -107,7 +107,7 @@ mod tests {
                         detail_specifier,
                     } => {
                         assert_eq!(since_frame, FrameId::default());
-                        assert_eq!(detail_specifier, ApiNodeSpecifier::All);
+                        assert_eq!(detail_specifier, WireNodeSpecifier::All);
                     }
                 }
             }

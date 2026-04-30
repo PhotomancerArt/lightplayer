@@ -2,23 +2,23 @@
 //! composes a child Visual into the node tree or routes from a bus channel.
 //!
 //! `[input]` is **structural composition**, not a binding. A
-//! [`crate::binding::Binding`] is pure routing: it points to existing
+//! [`crate::binding::SrcBinding`] is pure routing: it points to existing
 //! values and never instantiates nodes.
 //! [`VisualInput::Visual`] *does* instantiate a child node, which is
-//! why it lives here and not as a `Binding` variant. See `00-notes.md`
+//! why it lives here and not as a `SrcBinding` variant. See `00-notes.md`
 //! Q-D3 for the full discussion.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use lpc_model::ChannelName;
-use lpc_source::ArtifactSpec;
+use lpc_source::SrcArtifactSpec;
 
 /// Child visual reference plus optional param overrides (TOML keys `visual`, `params`).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)] // Mutex flat keys; typos → hard errors per 00-design.md §Constraint.
 pub struct VisualInputVisual {
-    pub visual: ArtifactSpec,
+    pub visual: SrcArtifactSpec,
     /// `toml::Value` per key; schemars uses an open object so serde JSON and
     /// schema both allow `params` when present.
     #[cfg_attr(
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn visual_variant_round_trips() {
         let v = VisualInput::Visual(VisualInputVisual {
-            visual: ArtifactSpec("../patterns/fbm.pattern.toml".into()),
+            visual: SrcArtifactSpec("../patterns/fbm.pattern.toml".into()),
             params: BTreeMap::new(),
         });
         let toml_str = toml::to_string(&v).unwrap();
@@ -88,7 +88,7 @@ mod tests {
         let mut params = BTreeMap::new();
         params.insert("scale".into(), toml::Value::Float(6.0));
         let v = VisualInput::Visual(VisualInputVisual {
-            visual: ArtifactSpec("../patterns/fbm.pattern.toml".into()),
+            visual: SrcArtifactSpec("../patterns/fbm.pattern.toml".into()),
             params,
         });
         let toml_str = toml::to_string(&v).unwrap();

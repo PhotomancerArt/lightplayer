@@ -2,8 +2,8 @@
 
 use alloc::{format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
+use lpc_model::NodeSpec;
 use lpc_model::lp_path::LpPathBuf;
-use lpc_model::nodes::NodeSpecifier;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpfs::LpFs;
 use lpl_model::glsl_opts::GlslOpts;
@@ -250,7 +250,7 @@ impl ShaderBuilder {
 
         let config = ShaderConfig {
             glsl_path: "main.glsl".as_path_buf(),
-            texture_spec: NodeSpecifier::from(self.texture_path.as_str()),
+            texture_spec: NodeSpec::from(self.texture_path.as_str()),
             render_order: self.render_order,
             glsl_opts: GlslOpts::default(),
         };
@@ -339,8 +339,8 @@ impl FixtureBuilder {
         let node_path = format!("{path_str}/node.json");
 
         let config = FixtureConfig {
-            output_spec: NodeSpecifier::from(self.output_path.as_str()),
-            texture_spec: NodeSpecifier::from(self.texture_path.as_str()),
+            output_spec: NodeSpec::from(self.output_path.as_str()),
+            texture_spec: NodeSpec::from(self.texture_path.as_str()),
             mapping: self.mapping,
             color_order: self.color_order,
             transform: self.transform,

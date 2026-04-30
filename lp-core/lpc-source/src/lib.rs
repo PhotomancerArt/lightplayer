@@ -14,17 +14,11 @@ pub mod prop;
 pub mod schema;
 
 pub use artifact::{
-    Artifact, ArtifactReadRoot, ArtifactSpec, LoadError, Migration, Registry, load_artifact,
+    ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact, SrcArtifactSpec, load_artifact,
 };
-pub use node::{NodeConfig, SrcNodeConfig};
+pub use node::SrcNodeConfig;
 pub use presentation::Presentation;
 pub use prop::{
     BindingResolver, FromTomlError, LoadCtx, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec,
     SrcValueSpec, kind_default_bind, kind_default_presentation,
 };
-// `Src*` names are primary; keep short-term aliases expected by current call sites.
-pub type Binding = SrcBinding;
-pub type Shape = SrcShape;
-pub type Slot = SrcSlot;
-pub type TextureSpec = SrcTextureSpec;
-pub type ValueSpec = SrcValueSpec;

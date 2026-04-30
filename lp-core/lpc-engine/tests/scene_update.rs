@@ -68,7 +68,7 @@ fn test_node_json_modification() {
     let response = runtime
         .get_changes(
             before_frame,
-            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![shader_handle]),
+            &lpc_wire::WireNodeSpecifier::ByHandles(vec![shader_handle]),
             None,
         )
         .unwrap();

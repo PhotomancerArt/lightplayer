@@ -1,22 +1,22 @@
 //! Firmware integration tests
 
 use lpa_client::{LpClient, serializable_response_to_project_response};
-use lpc_view::ClientProjectView;
+use lpc_view::ProjectView;
 use lpc_wire::WireProjectHandle as ProjectHandle;
 
 pub mod transport_emu_serial {
     pub use lpa_client::transport_emu_serial::SerialEmuClientTransport;
 }
 
-/// Sync [`ClientProjectView`] with the firmware over the given client (emu serial transport).
+/// Sync [`ProjectView`] with the firmware over the given client (emu serial transport).
 pub async fn sync_emu_project_view(
     client: &LpClient,
     handle: ProjectHandle,
-    view: &mut ClientProjectView,
+    view: &mut ProjectView,
 ) {
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lpc_wire::ApiNodeSpecifier::All
+        lpc_wire::WireNodeSpecifier::All
     } else {
         view.detail_specifier()
     };
@@ -35,11 +35,11 @@ pub async fn sync_emu_project_view(
 pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
-    use lpc_view::ClientProjectView;
+    use lpc_view::ProjectView;
     use lpc_wire::WireNodeStatus;
     use lpl_model::{NodeKind, NodeState};
 
-    pub fn assert_shader_compiled_ok(view: &ClientProjectView, shader_path: &str) {
+    pub fn assert_shader_compiled_ok(view: &ProjectView, shader_path: &str) {
         let handle = view
             .nodes
             .iter()

@@ -4,7 +4,7 @@ use crate::debug_ui::nodes::shader;
 use crate::debug_ui::nodes::{fixture, output, texture};
 use eframe::egui::{self, Color32};
 use lpc_model::{NodeId, project::FrameId};
-use lpc_view::project::ClientProjectView;
+use lpc_view::project::ProjectView;
 use lpc_wire::WireNodeStatus;
 use lpl_model::NodeKind;
 
@@ -37,7 +37,7 @@ pub fn render_status_panel(
 /// Render all nodes panel (sorted by path)
 pub fn render_all_nodes_panel(
     ui: &mut egui::Ui,
-    view: &ClientProjectView,
+    view: &ProjectView,
     tracked_nodes: &mut std::collections::BTreeSet<NodeId>,
     all_detail: &mut bool,
     show_texture_background: &mut bool,

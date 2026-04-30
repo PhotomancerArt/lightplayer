@@ -8,4 +8,10 @@ shader/runtime values and portable model or wire values.
 
 Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
 `lps-shared` because it is responsible for converting between `LpsValue` /
-`LpsType` and `WireValue` / `WireType`.
+`LpsType` and `ModelValue` / `ModelType`.
+
+**Naming:** Prefer plain engine/runtime nouns when the crate already owns the
+concept (`ProjectRuntime`, `NodeTree`, `ResolverCache`, `Bus`). Use an `Engine*`
+prefix only when ambiguity with another layer remains high. Conversion helpers
+should name both sides of the boundary (for example functions that mention
+`model_value` / `ModelType` vs `LpsValueF32` / `LpsType`).

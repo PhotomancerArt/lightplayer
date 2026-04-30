@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 use alloc::vec;
-use lpc_model::WireValue;
+use lpc_model::ModelValue;
 
 use crate::prop::src_value_spec::LoadCtx;
 
@@ -23,23 +23,28 @@ pub enum SrcTextureSpec {
 }
 
 impl SrcTextureSpec {
-    /// Handle-shaped [`WireValue`] struct for [`Kind::Texture`] storage (`quantity.md` §3).
-    pub fn default_wire_value(&self, ctx: &mut LoadCtx) -> WireValue {
+    /// Handle-shaped [`ModelValue`] struct for [`Kind::Texture`] storage (`quantity.md` §3).
+    pub fn default_model_value(&self, ctx: &mut LoadCtx) -> ModelValue {
         match self {
-            Self::Black => texture_wire_handle_value(ctx, 0, 1, 1),
+            Self::Black => texture_model_handle_value(ctx, 0, 1, 1),
         }
     }
 }
 
-fn texture_wire_handle_value(ctx: &mut LoadCtx, format: i32, width: i32, height: i32) -> WireValue {
+fn texture_model_handle_value(
+    ctx: &mut LoadCtx,
+    format: i32,
+    width: i32,
+    height: i32,
+) -> ModelValue {
     let handle = ctx.next_texture_handle;
-    WireValue::Struct {
+    ModelValue::Struct {
         name: None,
         fields: vec![
-            (String::from("format"), WireValue::I32(format)),
-            (String::from("width"), WireValue::I32(width)),
-            (String::from("height"), WireValue::I32(height)),
-            (String::from("handle"), WireValue::I32(handle)),
+            (String::from("format"), ModelValue::I32(format)),
+            (String::from("width"), ModelValue::I32(width)),
+            (String::from("height"), ModelValue::I32(height)),
+            (String::from("handle"), ModelValue::I32(handle)),
         ],
     }
 }

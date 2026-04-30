@@ -1,10 +1,10 @@
 # 07 — Client / server sync
 
-> **M4.3a update:** Structural sync deltas are **`lpc_wire::WireTreeDelta`**
+> **M4.3a / M4.3b update:** Structural sync deltas are **`lpc_wire::WireTreeDelta`**
 > (Rust sketch uses that name below). Produced fields use
-> **`lpc_model::WireValue`** on the wire. **`LpsValueF32`** stays inside
+> **`lpc_model::ModelValue`** on the wire. **`LpsValueF32`** stays inside
 > `lpc-engine` / runtime crates; convert at the engine boundary. Replace any
-> legacy “wire ships `LpsValue`” wording with **`WireValue`**.
+> legacy “wire ships `LpsValue`” wording with **`ModelValue`**.
 
 The client is a thin mirror of the engine's tree. The client owns
 no `Box<dyn Node>`s, runs no tick logic, holds no resources. It
@@ -54,7 +54,7 @@ impl<D: ProjectDomain> ProjectRuntime<D> {
     pub fn get_changes(
         &self,
         since_frame: FrameId,
-        detail_specifier: &ApiNodeSpecifier,
+        detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<D::Response, Error>;
 }
@@ -109,7 +109,7 @@ pub struct NodeView {
     pub config: NodeConfig,              // mirror of authored data
 
     // Future (pre-wired, commented in code):
-    // pub prop_cache: BTreeMap<PropPath, (WireValue, FrameId)>,
+    // pub prop_cache: BTreeMap<PropPath, (ModelValue, FrameId)>,
     // pub prop_cache_ver: FrameId,
 }
 
@@ -210,10 +210,10 @@ it plus any extras the domain needs.)
 
 ### Detail-specifier policy
 
-Existing `ApiNodeSpecifier`:
+Existing `WireNodeSpecifier`:
 
 ```rust
-pub enum ApiNodeSpecifier {
+pub enum WireNodeSpecifier {
     None,                    // metadata only; no per-prop deltas
     All,                     // every node's full deltas
     ByHandles(Vec<NodeId>),  // selected nodes' full deltas
@@ -288,17 +288,17 @@ Created. Lean: keep `Created` as the catch-all "not yet alive"
 state and read `EntryState` for fine-grained detail; clients that
 care can read both.
 
-## Why the wire ships `WireValue` and not typed `T`
+## Why the wire ships `ModelValue` and not typed `T`
 
 The wire is structurally typed. The client doesn't have the impl's
 typed `*Props` struct (and shouldn't — `lpl-runtime` is server-only;
-the client compiles without pulling in shader/JIT crates). **`WireValue`**
+the client compiles without pulling in shader/JIT crates). **`ModelValue`**
 is the portable union on the wire; **`LpsValueF32`** stays inside
 `lpc-engine`, `lpl-runtime`, and similar.
 
 Lossy round-trip is acceptable:
 
-- `Prop<TextureBuffer>` ships as **`WireValue::Texture` (descriptor /
+- `Prop<TextureBuffer>` ships as **`ModelValue::Texture` (descriptor /
   metadata only)** — the editor doesn't need pixel data, it needs a
   thumbnail (which goes through a separate request channel).
 - `Prop<ShaderProgram>` doesn't ship to the client; it's
@@ -326,7 +326,7 @@ edits — those go through the `lp-server`-level filesystem API
   ESP32 / mobile profiling may force binary. Pin in M5
   implementation.
 - **Per-prop ship granularity.** Dense outputs may imply large numeric
-  `WireValue` payloads each frame (older sketches compared this to repeating
+  `ModelValue` payloads each frame (older sketches compared this to repeating
   `Vec3`-like values row-wise). Ship full vectors or ship sub-paths?
   Lean ship-full for M5; M6 cleanup adds finer-grained diff if needed.
 - **`Created` payload size.** The wire ships full `NodeConfig` on

@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpc_model::{FrameId, NodeId};
 use lpc_wire::WireTreeDelta;
 
-use super::{ClientNodeTree, ClientTreeEntry};
+use super::{NodeTreeView, TreeEntryView};
 
 /// Error from applying a delta.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,7 +51,7 @@ impl core::error::Error for ApplyError {}
 ///   **infer removals** by recursively removing any previous children that
 ///   are no longer in the new list.
 pub fn apply_tree_delta(
-    tree: &mut ClientNodeTree,
+    tree: &mut NodeTreeView,
     delta: &WireTreeDelta,
     frame: FrameId,
 ) -> Result<(), ApplyError> {
@@ -68,7 +68,7 @@ pub fn apply_tree_delta(
             change_frame,
             children_ver,
         } => {
-            let mut entry = ClientTreeEntry::new(
+            let mut entry = TreeEntryView::new(
                 *id,
                 path.clone(),
                 *parent,
@@ -131,7 +131,7 @@ pub fn apply_tree_delta(
 
 /// Apply multiple deltas in order.
 pub fn apply_tree_deltas(
-    tree: &mut ClientNodeTree,
+    tree: &mut NodeTreeView,
     deltas: &[WireTreeDelta],
     frame: FrameId,
 ) -> Result<(), ApplyError> {
@@ -143,13 +143,13 @@ pub fn apply_tree_deltas(
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientNodeTree, ClientTreeEntry, apply_tree_delta};
+    use super::{NodeTreeView, TreeEntryView, apply_tree_delta};
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_wire::{SlotIdx, WireChildKind, WireEntryState, WireNodeStatus, WireTreeDelta};
+    use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus, WireSlotIndex, WireTreeDelta};
 
-    fn make_tree_with_root() -> ClientNodeTree {
-        let mut tree = ClientNodeTree::new();
-        let root = ClientTreeEntry::new(
+    fn make_tree_with_root() -> NodeTreeView {
+        let mut tree = NodeTreeView::new();
+        let root = TreeEntryView::new(
             NodeId::new(0),
             TreePath::parse("/root.show").unwrap(),
             None,
@@ -172,7 +172,9 @@ mod tests {
             id: NodeId::new(1),
             path: TreePath::parse("/root.show/child.vis").unwrap(),
             parent: Some(NodeId::new(0)),
-            child_kind: Some(WireChildKind::Input { source: SlotIdx(0) }),
+            child_kind: Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             children: alloc::vec![],
             status: WireNodeStatus::Created,
             state: WireEntryState::Pending,
@@ -192,11 +194,13 @@ mod tests {
         let mut tree = make_tree_with_root();
 
         // Add a child first
-        let child = ClientTreeEntry::new(
+        let child = TreeEntryView::new(
             NodeId::new(1),
             TreePath::parse("/root.show/child.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
             FrameId::new(1),
@@ -226,11 +230,13 @@ mod tests {
         let mut tree = make_tree_with_root();
 
         // Add a child
-        let child = ClientTreeEntry::new(
+        let child = TreeEntryView::new(
             NodeId::new(1),
             TreePath::parse("/root.show/child.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
             FrameId::new(1),
@@ -258,22 +264,26 @@ mod tests {
         let mut tree = make_tree_with_root();
 
         // Add two children
-        let a = ClientTreeEntry::new(
+        let a = TreeEntryView::new(
             NodeId::new(1),
             TreePath::parse("/root.show/a.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
             FrameId::new(1),
             FrameId::new(1),
             FrameId::new(1),
         );
-        let b = ClientTreeEntry::new(
+        let b = TreeEntryView::new(
             NodeId::new(2),
             TreePath::parse("/root.show/b.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(WireChildKind::Input { source: SlotIdx(1) }),
+            Some(WireChildKind::Input {
+                source: WireSlotIndex(1),
+            }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
             FrameId::new(1),
@@ -309,7 +319,7 @@ mod tests {
         let mut tree = make_tree_with_root();
 
         // Create grandchild -> parent -> root
-        let parent = ClientTreeEntry::new(
+        let parent = TreeEntryView::new(
             NodeId::new(1),
             TreePath::parse("/root.show/parent.vis").unwrap(),
             Some(NodeId::new(0)),
@@ -322,11 +332,13 @@ mod tests {
             FrameId::new(1),
             FrameId::new(1),
         );
-        let grandchild = ClientTreeEntry::new(
+        let grandchild = TreeEntryView::new(
             NodeId::new(2),
             TreePath::parse("/root.show/parent.vis/grand.fx").unwrap(),
             Some(NodeId::new(1)),
-            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            Some(WireChildKind::Input {
+                source: WireSlotIndex(0),
+            }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
             FrameId::new(2),

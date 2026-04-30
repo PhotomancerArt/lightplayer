@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lpc_model::AsLpPath;
-use lpc_model::nodes::NodeSpecifier;
+use lpc_model::NodeSpec;
 use lpc_shared::ProjectBuilder;
 use lpfs::LpFsMemory;
 use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
@@ -77,7 +77,7 @@ fn test_partial_state_updates() {
     let initial_response = runtime
         .get_changes(
             lpc_model::FrameId::default(),
-            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
@@ -116,7 +116,7 @@ fn test_partial_state_updates() {
     let lamp_colors_response = runtime
         .get_changes(
             initial_frame,
-            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
@@ -161,8 +161,8 @@ fn test_partial_state_updates() {
     // Now update the fixture config with new mapping
     let fixture_config_path = "/src/fixture-1.fixture/node.json";
     let new_config = FixtureConfig {
-        output_spec: NodeSpecifier::from("/src/output-1.output"),
-        texture_spec: NodeSpecifier::from("/src/texture-1.texture"),
+        output_spec: NodeSpec::from("/src/output-1.output"),
+        texture_spec: NodeSpec::from("/src/texture-1.texture"),
         mapping: MappingConfig::PathPoints {
             paths: vec![PathSpec::RingArray {
                 center: (0.7, 0.7),
@@ -203,7 +203,7 @@ fn test_partial_state_updates() {
     let mapping_response = runtime
         .get_changes(
             after_lamp_colors_frame,
-            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();

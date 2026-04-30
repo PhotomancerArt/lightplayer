@@ -1,8 +1,8 @@
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
+use lpc_model::NodeId;
 use lpc_model::PropValue;
-use lpc_model::nodes::NodeId;
 use lpc_model::project::FrameId;
 
 use lpc_wire::impl_state_serialization;

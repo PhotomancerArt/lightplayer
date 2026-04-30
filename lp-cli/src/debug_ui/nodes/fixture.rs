@@ -1,15 +1,15 @@
 use crate::debug_ui::nodes::texture;
 use eframe::epaint::Color32;
 use egui::Painter;
-use lpc_view::{ClientNodeEntry, ClientProjectView};
+use lpc_view::{NodeEntryView, ProjectView};
 use lpl_model::NodeKind;
 use lpl_model::nodes::fixture::{FixtureState, MappingCell};
 
 /// Render fixture panel
 pub fn render_fixture_panel(
     ui: &mut egui::Ui,
-    view: &ClientProjectView,
-    entry: &ClientNodeEntry,
+    view: &ProjectView,
+    entry: &NodeEntryView,
     state: &FixtureState,
     show_background: bool,
     show_labels: bool,

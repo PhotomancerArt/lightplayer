@@ -517,7 +517,7 @@ that the protocol envelope was already mostly generic — the
 A pre-M2 refactor pass parameterized on that response shape
 and now the entire envelope (including `Message`,
 `ClientRequest`, `ClientMsgBody`, `ServerMsgBody`,
-`ProjectRequest`, `ApiNodeSpecifier`, `NodeStatus`, etc.) is
+`ProjectRequest`, `WireNodeSpecifier`, `NodeStatus`, etc.) is
 slated for `lpc-model`; `lpl-model` only holds the
 legacy-aware payload (`NodeDetail`, `NodeState`,
 `SerializableNodeDetail`, `SerializableProjectResponse`,
@@ -888,7 +888,7 @@ mechanism. Resolves O-3.
 
 ```rust
 pub enum ChildKind {
-    Input    { source: SlotIdx },     // [input.N]
+    Input    { source: WireSlotIndex },     // [input.N]
     Sidecar  { name: Name },          // [children.<name>]
     Inline   { source: PropPath },    // [params.<name>.bind] visual = ...
 }

@@ -1,4 +1,4 @@
-//! [`ParamsTable`]: the implicit [`Shape::Struct`] form of a Visual’s
+//! [`ParamsTable`]: the implicit [`SrcShape::Struct`] form of a Visual’s
 //! top-level `[params]` block. See `docs/design/lightplayer/quantity.md` §10
 //! (“Top-level `[params]` is implicit `Shape::Struct`.”).
 //!
@@ -8,17 +8,17 @@
 
 use crate::NodeName;
 use alloc::vec::Vec;
-use lpc_source::prop::shape::{Shape, Slot};
+use lpc_source::prop::shape::{SrcShape, SrcSlot};
 
-/// A Visual’s `[params]` block: a [`Slot`] whose [`Shape`] is always
-/// [`Shape::Struct`], synthesized from the TOML table keys.
+/// A Visual’s `[params]` block: a [`SrcSlot`] whose [`SrcShape`] is always
+/// [`SrcShape::Struct`], synthesized from the TOML table keys.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ParamsTable(pub Slot);
+pub struct ParamsTable(pub SrcSlot);
 
 impl Default for ParamsTable {
     fn default() -> Self {
-        ParamsTable(Slot {
-            shape: Shape::Struct {
+        ParamsTable(SrcSlot {
+            shape: SrcShape::Struct {
                 fields: Vec::new(),
                 default: None,
             },
@@ -36,17 +36,17 @@ impl<'de> serde::Deserialize<'de> for ParamsTable {
         D: serde::Deserializer<'de>,
     {
         let table: toml::Table = toml::Table::deserialize(de)?;
-        let mut fields: Vec<(NodeName, Slot)> = Vec::with_capacity(table.len());
+        let mut fields: Vec<(NodeName, SrcSlot)> = Vec::with_capacity(table.len());
         for (k, v) in table {
             let name = NodeName::parse(&k).map_err(|e| {
                 serde::de::Error::custom(alloc::format!("invalid param name `{k}`: {e}"))
             })?;
             let s = toml::ser::to_string(&v).map_err(serde::de::Error::custom)?;
-            let slot: Slot = toml::from_str(&s).map_err(serde::de::Error::custom)?;
+            let slot: SrcSlot = toml::from_str(&s).map_err(serde::de::Error::custom)?;
             fields.push((name, slot));
         }
-        Ok(ParamsTable(Slot {
-            shape: Shape::Struct {
+        Ok(ParamsTable(SrcSlot {
+            shape: SrcShape::Struct {
                 fields,
                 default: None,
             },
@@ -65,7 +65,7 @@ impl serde::Serialize for ParamsTable {
     {
         use serde::ser::SerializeMap;
         let fields = match &self.0.shape {
-            Shape::Struct { fields, .. } => fields,
+            SrcShape::Struct { fields, .. } => fields,
             _ => {
                 return Err(serde::ser::Error::custom(
                     "ParamsTable inner shape must be Struct",
@@ -87,7 +87,7 @@ impl schemars::JsonSchema for ParamsTable {
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let slot_schema = <Slot as schemars::JsonSchema>::json_schema(generator);
+        let slot_schema = <SrcSlot as schemars::JsonSchema>::json_schema(generator);
         schemars::json_schema!({
             "description": "Implicit Shape::Struct for [params]. Keys are param names; values are Slot tables.",
             "type": "object",
@@ -113,7 +113,7 @@ mod tests {
     use super::*;
 
     use crate::kind::Kind;
-    use lpc_source::prop::shape::Shape;
+    use lpc_source::prop::shape::SrcShape;
 
     #[test]
     fn empty_params_round_trips() {
@@ -133,12 +133,12 @@ mod tests {
         "#;
         let p: ParamsTable = toml::from_str(toml_str).unwrap();
         match &p.0.shape {
-            Shape::Struct { fields, .. } => {
+            SrcShape::Struct { fields, .. } => {
                 assert_eq!(fields.len(), 1);
                 assert_eq!(fields[0].0.0, "speed");
                 assert!(matches!(
                     fields[0].1.shape,
-                    Shape::Scalar {
+                    SrcShape::Scalar {
                         kind: Kind::Amplitude,
                         ..
                     }
@@ -165,7 +165,7 @@ mod tests {
         "#;
         let p: ParamsTable = toml::from_str(toml_str).unwrap();
         match &p.0.shape {
-            Shape::Struct { fields, .. } => {
+            SrcShape::Struct { fields, .. } => {
                 assert_eq!(fields.len(), 3);
                 let order: alloc::vec::Vec<_> = fields.iter().map(|(n, _)| n.0.as_str()).collect();
                 assert_eq!(order, alloc::vec!["time", "speed", "saturation"]);

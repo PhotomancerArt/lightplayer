@@ -1,21 +1,10 @@
 //! Wire-visible project request / node status types.
 
 use alloc::string::String;
-use alloc::vec::Vec;
-use lpc_model::node::NodeId;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Serialize};
 
-/// Node specifier for sync/API requests over the wire.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ApiNodeSpecifier {
-    /// No nodes.
-    None,
-    /// All nodes.
-    All,
-    /// Specific handles.
-    ByHandles(Vec<NodeId>),
-}
+use super::WireNodeSpecifier;
 
 /// Project-scoped request from client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +14,7 @@ pub enum WireProjectRequest {
         /// Last frame the client synced.
         since_frame: FrameId,
         /// Which nodes need full detail.
-        detail_specifier: ApiNodeSpecifier,
+        detail_specifier: WireNodeSpecifier,
     },
 }
 
@@ -47,19 +36,21 @@ pub enum WireNodeStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WireNodeSpecifier;
     use alloc::vec;
+    use lpc_model::node::NodeId;
 
     #[test]
-    fn api_node_specifier_round_trips() {
-        let spec = ApiNodeSpecifier::None;
-        assert_eq!(spec, ApiNodeSpecifier::None);
+    fn wire_node_specifier_round_trips() {
+        let spec = WireNodeSpecifier::None;
+        assert_eq!(spec, WireNodeSpecifier::None);
 
-        let spec = ApiNodeSpecifier::All;
-        assert_eq!(spec, ApiNodeSpecifier::All);
+        let spec = WireNodeSpecifier::All;
+        assert_eq!(spec, WireNodeSpecifier::All);
 
-        let spec = ApiNodeSpecifier::ByHandles(vec![NodeId::new(1), NodeId::new(2)]);
+        let spec = WireNodeSpecifier::ByHandles(vec![NodeId::new(1), NodeId::new(2)]);
         match spec {
-            ApiNodeSpecifier::ByHandles(handles) => {
+            WireNodeSpecifier::ByHandles(handles) => {
                 assert_eq!(handles.len(), 2);
             }
             _ => panic!("Expected ByHandles"),
@@ -70,7 +61,7 @@ mod tests {
     fn wire_project_request_shape() {
         let request = WireProjectRequest::GetChanges {
             since_frame: FrameId::default(),
-            detail_specifier: ApiNodeSpecifier::All,
+            detail_specifier: WireNodeSpecifier::All,
         };
         match request {
             WireProjectRequest::GetChanges {
@@ -78,7 +69,7 @@ mod tests {
                 detail_specifier,
             } => {
                 assert_eq!(since_frame, FrameId::default());
-                assert_eq!(detail_specifier, ApiNodeSpecifier::All);
+                assert_eq!(detail_specifier, WireNodeSpecifier::All);
             }
         }
     }

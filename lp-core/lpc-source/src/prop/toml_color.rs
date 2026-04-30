@@ -1,4 +1,4 @@
-//! TOML and CSS helpers for color, palette, and gradient [`WireValue`] shapes.
+//! TOML and CSS helpers for color, palette, and gradient [`ModelValue`] shapes.
 
 use alloc::format;
 use alloc::string::String;
@@ -6,7 +6,7 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpc_model::WireValue;
+use lpc_model::ModelValue;
 use lpc_model::kind::{Kind, MAX_GRADIENT_STOPS, MAX_PALETTE_LEN};
 
 use super::toml_parse::{
@@ -157,12 +157,12 @@ fn parse_hex_color(s: &str) -> Result<(i32, [f32; 3]), FromTomlError> {
     Ok((3, [rf, gf, bf]))
 }
 
-fn color_struct_from_space_coords(space: i32, c: [f32; 3]) -> WireValue {
-    WireValue::Struct {
+fn color_struct_from_space_coords(space: i32, c: [f32; 3]) -> ModelValue {
+    ModelValue::Struct {
         name: Some(String::from("Color")),
         fields: vec![
-            (String::from("space"), WireValue::I32(space)),
-            (String::from("coords"), WireValue::Vec3(c)),
+            (String::from("space"), ModelValue::I32(space)),
+            (String::from("coords"), ModelValue::Vec3(c)),
         ],
     }
 }
@@ -280,22 +280,22 @@ fn interp_method_name(id: i32) -> Result<&'static str, FromTomlError> {
     }
 }
 
-pub(super) fn wire_value_color(v: &toml::Value) -> Result<WireValue, FromTomlError> {
+pub(super) fn model_value_color(v: &toml::Value) -> Result<ModelValue, FromTomlError> {
     match v {
         toml::Value::String(s) => {
             let (id, c) = parse_css_color_string(s)?;
             Ok(color_struct_from_space_coords(id, c))
         }
-        toml::Value::Table(t) => wire_value_color_table(t),
+        toml::Value::Table(t) => model_value_color_table(t),
         _ => Err(FromTomlError::msg(
             "color: expected a CSS string or a table { space, coords }",
         )),
     }
 }
 
-fn wire_value_color_table(
+fn model_value_color_table(
     t: &toml::map::Map<String, toml::Value>,
-) -> Result<WireValue, FromTomlError> {
+) -> Result<ModelValue, FromTomlError> {
     let space = t
         .get("space")
         .and_then(toml::Value::as_str)
@@ -304,18 +304,21 @@ fn wire_value_color_table(
         .get("coords")
         .ok_or_else(|| FromTomlError::msg("color: missing `coords`"))?;
     let v3 = vec3_from_toml(coords, "color.coords")?;
-    Ok(WireValue::Struct {
+    Ok(ModelValue::Struct {
         name: Some(String::from("Color")),
         fields: vec![
-            (String::from("space"), WireValue::I32(colorspace_id(space)?)),
+            (
+                String::from("space"),
+                ModelValue::I32(colorspace_id(space)?),
+            ),
             (String::from("coords"), v3),
         ],
     })
 }
 
-pub(super) fn wire_value_color_palette(
+pub(super) fn model_value_color_palette(
     t: &toml::map::Map<String, toml::Value>,
-) -> Result<WireValue, FromTomlError> {
+) -> Result<ModelValue, FromTomlError> {
     let space = t
         .get("space")
         .and_then(toml::Value::as_str)
@@ -339,27 +342,30 @@ pub(super) fn wire_value_color_palette(
             "color_palette: not enough `entries` for `count`",
         ));
     }
-    let mut v3s: Vec<WireValue> = Vec::new();
+    let mut v3s: Vec<ModelValue> = Vec::new();
     for e in entries.iter().take(count as usize) {
         v3s.push(vec3_from_toml(e, "color_palette.entries")?);
     }
     while v3s.len() < MAX_PALETTE_LEN as usize {
-        v3s.push(WireValue::Vec3([0.0, 0.0, 0.0]));
+        v3s.push(ModelValue::Vec3([0.0, 0.0, 0.0]));
     }
-    let entries_lps = WireValue::Array(v3s);
-    Ok(WireValue::Struct {
+    let entries_lps = ModelValue::Array(v3s);
+    Ok(ModelValue::Struct {
         name: Some(String::from("ColorPalette")),
         fields: vec![
-            (String::from("space"), WireValue::I32(colorspace_id(space)?)),
-            (String::from("count"), WireValue::I32(count as i32)),
+            (
+                String::from("space"),
+                ModelValue::I32(colorspace_id(space)?),
+            ),
+            (String::from("count"), ModelValue::I32(count as i32)),
             (String::from("entries"), entries_lps),
         ],
     })
 }
 
-pub(super) fn wire_value_gradient(
+pub(super) fn model_value_gradient(
     t: &toml::map::Map<String, toml::Value>,
-) -> Result<WireValue, FromTomlError> {
+) -> Result<ModelValue, FromTomlError> {
     let space = t
         .get("space")
         .and_then(toml::Value::as_str)
@@ -388,26 +394,29 @@ pub(super) fn wire_value_gradient(
             "gradient: not enough `stops` for `count`",
         ));
     }
-    let mut out: Vec<WireValue> = Vec::new();
+    let mut out: Vec<ModelValue> = Vec::new();
     for s in stops.iter().take(count as usize) {
         out.push(gradient_stop_from_toml(s)?);
     }
     while out.len() < MAX_GRADIENT_STOPS as usize {
         out.push(gradient_stop_default());
     }
-    let stops_lps = WireValue::Array(out);
-    Ok(WireValue::Struct {
+    let stops_lps = ModelValue::Array(out);
+    Ok(ModelValue::Struct {
         name: Some(String::from("Gradient")),
         fields: vec![
-            (String::from("space"), WireValue::I32(colorspace_id(space)?)),
-            (String::from("method"), WireValue::I32(method_id)),
-            (String::from("count"), WireValue::I32(count as i32)),
+            (
+                String::from("space"),
+                ModelValue::I32(colorspace_id(space)?),
+            ),
+            (String::from("method"), ModelValue::I32(method_id)),
+            (String::from("count"), ModelValue::I32(count as i32)),
             (String::from("stops"), stops_lps),
         ],
     })
 }
 
-fn gradient_stop_from_toml(v: &toml::Value) -> Result<WireValue, FromTomlError> {
+fn gradient_stop_from_toml(v: &toml::Value) -> Result<ModelValue, FromTomlError> {
     let t = v
         .as_table()
         .ok_or_else(|| FromTomlError::msg("gradient stop must be a table"))?;
@@ -418,52 +427,52 @@ fn gradient_stop_from_toml(v: &toml::Value) -> Result<WireValue, FromTomlError> 
         .get("c")
         .ok_or_else(|| FromTomlError::msg("gradient stop: missing `c` (vec3)"))?;
     let cv = vec3_from_toml(c, "stop.c")?;
-    Ok(WireValue::Struct {
+    Ok(ModelValue::Struct {
         name: Some(String::from("GradientStop")),
         fields: vec![
-            (String::from("at"), WireValue::F32(toml_f32(at)?)),
+            (String::from("at"), ModelValue::F32(toml_f32(at)?)),
             (String::from("c"), cv),
         ],
     })
 }
 
-fn gradient_stop_default() -> WireValue {
-    WireValue::Struct {
+fn gradient_stop_default() -> ModelValue {
+    ModelValue::Struct {
         name: Some(String::from("GradientStop")),
         fields: vec![
-            (String::from("at"), WireValue::F32(0.0)),
-            (String::from("c"), WireValue::Vec3([0.0, 0.0, 0.0])),
+            (String::from("at"), ModelValue::F32(0.0)),
+            (String::from("c"), ModelValue::Vec3([0.0, 0.0, 0.0])),
         ],
     }
 }
 
-/// Parse `WireValue` for struct kinds (Color, ColorPalette, Gradient).
+/// Parse `ModelValue` for struct kinds (Color, ColorPalette, Gradient).
 pub(super) fn from_toml_struct_kind(
     value: &toml::Value,
     k: Kind,
-) -> Result<WireValue, FromTomlError> {
+) -> Result<ModelValue, FromTomlError> {
     match k {
-        Kind::Color => wire_value_color(value),
+        Kind::Color => model_value_color(value),
         Kind::ColorPalette => {
             let t = value
                 .as_table()
                 .ok_or_else(|| FromTomlError::msg("expected a TOML table"))?;
-            wire_value_color_palette(t)
+            model_value_color_palette(t)
         }
         Kind::Gradient => {
             let t = value
                 .as_table()
                 .ok_or_else(|| FromTomlError::msg("expected a TOML table"))?;
-            wire_value_gradient(t)
+            model_value_gradient(t)
         }
         _ => Err(FromTomlError::msg("internal: not a struct color kind")),
     }
 }
 
-pub(super) fn wire_color_to_toml(v: &WireValue) -> Result<toml::Value, FromTomlError> {
-    let WireValue::Struct { name, fields } = v else {
+pub(super) fn wire_color_to_toml(v: &ModelValue) -> Result<toml::Value, FromTomlError> {
+    let ModelValue::Struct { name, fields } = v else {
         return Err(FromTomlError::msg(
-            "Color literal must be a struct WireValue",
+            "Color literal must be a struct ModelValue",
         ));
     };
     if name.as_deref() != Some("Color") {
@@ -482,10 +491,10 @@ pub(super) fn wire_color_to_toml(v: &WireValue) -> Result<toml::Value, FromTomlE
     Ok(toml::Value::String(s))
 }
 
-pub(super) fn wire_color_palette_to_toml(v: &WireValue) -> Result<toml::Value, FromTomlError> {
-    let WireValue::Struct { name, fields } = v else {
+pub(super) fn wire_color_palette_to_toml(v: &ModelValue) -> Result<toml::Value, FromTomlError> {
+    let ModelValue::Struct { name, fields } = v else {
         return Err(FromTomlError::msg(
-            "ColorPalette must be a struct WireValue",
+            "ColorPalette must be a struct ModelValue",
         ));
     };
     if name.as_deref() != Some("ColorPalette") {
@@ -508,9 +517,9 @@ pub(super) fn wire_color_palette_to_toml(v: &WireValue) -> Result<toml::Value, F
     Ok(toml::Value::Table(m))
 }
 
-pub(super) fn wire_gradient_to_toml(v: &WireValue) -> Result<toml::Value, FromTomlError> {
-    let WireValue::Struct { name, fields } = v else {
-        return Err(FromTomlError::msg("Gradient must be a struct WireValue"));
+pub(super) fn wire_gradient_to_toml(v: &ModelValue) -> Result<toml::Value, FromTomlError> {
+    let ModelValue::Struct { name, fields } = v else {
+        return Err(FromTomlError::msg("Gradient must be a struct ModelValue"));
     };
     if name.as_deref() != Some("Gradient") {
         return Err(FromTomlError::msg("Gradient: wrong struct name"));
@@ -543,8 +552,8 @@ pub(super) fn wire_gradient_to_toml(v: &WireValue) -> Result<toml::Value, FromTo
     Ok(toml::Value::Table(m))
 }
 
-fn gradient_stop_to_toml(s: &WireValue) -> Result<toml::Value, FromTomlError> {
-    let WireValue::Struct { fields, name } = s else {
+fn gradient_stop_to_toml(s: &ModelValue) -> Result<toml::Value, FromTomlError> {
+    let ModelValue::Struct { fields, name } = s else {
         return Err(FromTomlError::msg("stop must be struct"));
     };
     if name.as_deref() != Some("GradientStop") {

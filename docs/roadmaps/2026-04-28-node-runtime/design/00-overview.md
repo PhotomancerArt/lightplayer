@@ -8,18 +8,18 @@ The roadmap originally described a broader `lpc-model` plus
 ```text
 lp-core/
   lpc-model/        shared concepts only: NodeId, TreePath, PropPath,
-                    FrameId, Kind, WireType, WireValue.
+                    FrameId, Kind, ModelType, ModelValue.
   lpc-source/       authored/on-disk source model: SrcArtifact,
                     SrcBinding, SrcShape, SrcValueSpec, TOML/schema.
-  lpc-wire/         engine-client wire model: WireMessage,
+  lpc-wire/         engine-client wire model: Message, ClientMessage,
                     WireTreeDelta, WireProjectHandle, state serialization.
   lpc-engine/       runtime spine and LpsValueF32 / LpsType conversions.
-  lp-engine-client/ client-side tree/prop view cache.
+  lpc-view/         client-side tree/prop view cache.
 ```
 
 When older sections below say `lpc-runtime`, read that as
 `lpc-engine`. When they say wire/client values use `LpsValue`, read
-that as `WireValue` on the wire and `LpsValueF32` only inside
+that as `ModelValue` on the wire and `LpsValueF32` only inside
 `lpc-engine`.
 
 ## Where we are
@@ -29,8 +29,8 @@ After M2, the workspace looks like this:
 ```
 lp-core/
   lpc-model/      shared types: NodeId, TreePath, PropPath, Kind,
-                  WireType, WireValue, ChannelName, FrameId, …
-  lpc-source/     authored source: ArtifactSpec, SrcShape,
+                  ModelType, ModelValue, ChannelName, FrameId, …
+  lpc-source/     authored source: SrcArtifactSpec, SrcShape,
                   SrcValueSpec, SrcBinding, schema/TOML loading.
   lpc-wire/       engine-client messages, tree deltas, project views.
   lpc-engine/     spine in progress: ProjectRuntime, flat NodeEntry map,
@@ -206,8 +206,8 @@ This vocabulary is used consistently across all design files.
 - **Prop\<T\>** — runtime value with `FrameId` change tracking, used
   for produced fields (outputs + state) inside the node impl's
   `*Props` struct. Renamed from `StateField`. ([05](05-slots-and-props.md))
-- **Binding** — `enum Binding { Bus(ChannelName), Literal(WireValue),
-  NodeProp(NodePropRef) }`. Literal payloads are wire-portable (**`WireValue`**
+- **Binding** — `enum Binding { Bus(ChannelName), Literal(ModelValue),
+  NodeProp(NodePropRef) }`. Literal payloads are wire-portable (**`ModelValue`**
   via `SrcValueSpec`); runtime materialization yields `LpsValueF32` only in
   `lpc-engine` / nodes. Stored on `NodeConfig`, applied at resolution time.
   ([06](06-bindings-and-resolution.md))
