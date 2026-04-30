@@ -9,7 +9,7 @@ rust-version.workspace = true
 [dependencies]
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
-lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
+lpl-model = { path = "../../lp-core/lpl-model", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"

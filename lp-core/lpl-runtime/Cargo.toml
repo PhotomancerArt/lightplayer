@@ -21,13 +21,13 @@ serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
-lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
-lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpc-wire = { path = "../lpc-wire", default-features = false }
+lpc-engine = { path = "../lpc-engine", default-features = false }
 lpl-model = { path = "../lpl-model", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
-lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+lpc-shared = { path = "../lpc-shared", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 lpir = { path = "../../lp-shader/lpir", default-features = false }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }

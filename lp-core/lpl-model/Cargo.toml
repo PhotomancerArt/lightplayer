@@ -11,8 +11,8 @@ std = ["lpc-model/std", "lpc-wire/std"]
 ser-write-json = ["lpc-wire/ser-write-json"]
 
 [dependencies]
-lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
-lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpc-wire = { path = "../lpc-wire", default-features = false }
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 base64 = { workspace = true }

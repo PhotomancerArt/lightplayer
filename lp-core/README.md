@@ -1,24 +1,34 @@
-# LightPlayer Application
+# lp-core
 
-LightPlayer is a framework for building and deploying interactive visualization applications
-using GLSL primarily for addressable LED control on embedded systems.
+Core LightPlayer engine crates.
 
-It employs a client-server architecture, where the server runs the visualization on
-a headless machine (e.g. an esp32-c6 or raspberry pi), and the client communicates with
-the server via a network or serial connection.
+`lp-core` is about the internals of one LightPlayer engine: the authored
+source model it loads, the runtime that ticks it, the wire/view shapes used to
+observe it, and small shared utilities used by those pieces.
 
-The server portion is portable, and is designed to be runnable from any OS for
-development, a headless host for larger deployments, or as bare-metal firmware
-on an embedded system.
+Application-level orchestration lives outside this directory. Code that starts
+servers, opens transports, talks to firmware, or coordinates one or more
+engines belongs in `lp-app`, `lp-fw`, or another app-facing layer.
 
-On machines without OpenGL support, such as embedded systems, the shaders are compiled to native
-code using the bespoke LightPlayer GLSL compiler (`lpvm-native` custom RV32 backend, with a
-Cranelift-based reference backend also available).
+## Crates
 
-# Workspace
+- `lpc-model` — shared core vocabulary: ids, paths, frame ids, kinds,
+  `WireValue`, and `WireType`.
+- `lpc-source` — authored/on-disk source model: artifacts, slots, source
+  bindings, value specs, TOML loading, and schema migration.
+- `lpc-wire` — engine/client wire contract: messages, tree deltas, project
+  requests, transport errors, JSON helpers, and partial state serialization.
+- `lpc-engine` — runtime for one loaded engine/project, including node trees,
+  resolver caches, buses, shader/runtime value conversion, and execution.
+- `lpc-view` — client-side view/cache for one engine, built from `lpc-wire`
+  updates.
+- `lpc-shared` — small shared support utilities used by core/app crates.
 
-This workspace contains the main LightPlayer application, including the device specific firmware,
-engine, server, and clients.
+## Dependency Shape
 
-It exists within cranelift temporarily during active development of the compiler, because managing
-multiple repositories is too cumbersome.
+`lpc-model`, `lpc-source`, `lpc-wire`, and `lpc-view` should stay free of
+shader runtime dependencies. `lpc-engine` owns the boundary to `lps-*` crates
+because compiling and executing GLSL is engine behavior.
+
+Most crates here are `no_std`-compatible so the same engine core can run on
+host tools and embedded firmware.

@@ -1,8 +1,12 @@
 # lpa-server
 
-The LightPlayer server module, handles communication, project management for a LightPlayer server.
+The LightPlayer application server layer.
 
-Used by apps and firmwares to provide lightplayer server functionality.
+This crate hosts one or more core engines behind the `lpc-wire` API and handles
+project management, request routing, and server-side integration points.
 
-`no_std`, designed for embedding. All communications are abstracted (no serial or http here, that's
-handled by the apps).
+Used by apps and firmware to provide LightPlayer server functionality. All
+communications are abstracted: serial, websocket, HTTP, or other concrete
+transports are supplied by the embedding app.
+
+`no_std`, designed for embedding.

@@ -21,10 +21,10 @@ std = [
 
 [dependencies]
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
-lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false }
+lpl-runtime = { path = "../../lp-core/lpl-runtime", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
-lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
+lpl-model = { path = "../../lp-core/lpl-model", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 hashbrown = { workspace = true }
@@ -32,7 +32,7 @@ log = { workspace = true, default-features = false }
 
 [dev-dependencies]
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["std"] }
-lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false, features = ["std"] }
+lpl-runtime = { path = "../../lp-core/lpl-runtime", default-features = false, features = ["std"] }
 lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }

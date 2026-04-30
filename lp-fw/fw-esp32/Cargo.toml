@@ -56,7 +56,7 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, opti
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
-lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false, optional = true, features = ["ser-write-json"] }
+lpl-model = { path = "../../lp-core/lpl-model", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }

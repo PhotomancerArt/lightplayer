@@ -15,7 +15,7 @@ lpa-client = { path = "../../lp-app/lpa-client", features = ["serial", "emu"] }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
-lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
+lpl-model = { path = "../../lp-core/lpl-model", default-features = false }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }

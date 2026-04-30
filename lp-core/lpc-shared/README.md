@@ -1,10 +1,11 @@
 # lpc-shared
 
-Shared lightplayer code for use by `lp-engine`, `lpa-server` and other embeddable portions of
+Shared lightplayer code for use by `lpc-engine`, `lpa-server` and other embeddable portions of
 Lightplayer.
 
-`no_std`, desinged for running on embedded devices.
+`no_std`, designed for running on embedded devices.
 
-Contains shared code for the various lightplayer modules, like logging, file IO, etc.
+Contains support code for the various LightPlayer modules, like logging, file IO, etc.
 
-Does _not_ include the application model (config, state) which is in `lpc-model`
+Does _not_ include core model/source/wire definitions, which live in
+`lpc-model`, `lpc-source`, and `lpc-wire`.
