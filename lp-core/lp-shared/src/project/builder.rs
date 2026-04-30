@@ -195,7 +195,7 @@ impl ProjectBuilder {
             name: self.name.clone(),
         };
         let project_json =
-            lpc_model::json::to_string(&config).expect("Failed to serialize project config");
+            lpc_wire::json::to_string(&config).expect("Failed to serialize project config");
         self.write_file_helper("/project.json", project_json.as_bytes())
             .expect("Failed to write project.json");
         // Node files are already written by their respective add() methods
@@ -216,7 +216,7 @@ impl TextureBuilder {
             height: self.height,
         };
 
-        let json = lpc_model::json::to_string(&config).expect("Failed to serialize texture config");
+        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize texture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -255,7 +255,7 @@ impl ShaderBuilder {
             glsl_opts: GlslOpts::default(),
         };
 
-        let json = lpc_model::json::to_string(&config).expect("Failed to serialize shader config");
+        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize shader config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -289,7 +289,7 @@ impl OutputBuilder {
             options: Some(self.options),
         };
 
-        let json = lpc_model::json::to_string(&config).expect("Failed to serialize output config");
+        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize output config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -348,7 +348,7 @@ impl FixtureBuilder {
             gamma_correction: self.gamma_correction,
         };
 
-        let json = lpc_model::json::to_string(&config).expect("Failed to serialize fixture config");
+        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize fixture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -361,7 +361,7 @@ impl FixtureBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::json;
+    use lpc_wire::json;
     use lpfs::LpFsMemory;
 
     #[test]

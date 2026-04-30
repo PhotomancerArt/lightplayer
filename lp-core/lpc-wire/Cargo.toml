@@ -1,0 +1,28 @@
+[package]
+name = "lpc-wire"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std"]
+std = ["lpc-model/std"]
+schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
+# Experimental: ser-write-json for streaming serialization (ESP32)
+ser-write-json = ["dep:ser-write-json"]
+
+[dependencies]
+base64 = { workspace = true }
+lpc-model = { path = "../lpc-model", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde-json-core = { version = "0.6", default-features = false, features = ["custom-error-messages"] }
+schemars = { workspace = true, optional = true }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

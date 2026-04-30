@@ -17,6 +17,7 @@ esp32c6 = [
 ]
 server = [
     "lpc-model",
+    "lpc-wire",
     "lpl-model",
     "lp-server",
     "lp-shared",
@@ -53,7 +54,8 @@ libm = "0.2"
 lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"], optional = true }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
-lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true, features = ["ser-write-json"] }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }

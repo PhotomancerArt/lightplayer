@@ -1,5 +1,11 @@
 # 07 — Client / server sync
 
+> **M4.3a update:** Structural sync deltas are **`lpc_wire::WireTreeDelta`**
+> (Rust sketch uses that name below). Produced fields use
+> **`lpc_model::WireValue`** on the wire. **`LpsValueF32`** stays inside
+> `lpc-engine` / runtime crates; convert at the engine boundary. Replace any
+> legacy “wire ships `LpsValue`” wording with **`WireValue`**.
+
 The client is a thin mirror of the engine's tree. The client owns
 no `Box<dyn Node>`s, runs no tick logic, holds no resources. It
 holds **`NodeView`** snapshots: per-entry blobs of address +
@@ -28,7 +34,7 @@ Per-entry frame versions ([01](01-tree.md)):
 - `change_frame` — bumped on `status` change, on `EntryState`
   transition, and on `NodeConfig` change.
 - `children_ver` — bumped on any children-list mutation. Drives
-  `TreeDelta::ChildrenChanged`; the client diffs the new list
+  `WireTreeDelta::ChildrenChanged`; the client diffs the new list
   against its mirror to **infer** removals.
 
 (M5 collapses status / state / config into one `change_frame`.
@@ -64,9 +70,9 @@ The `get_changes` body is generic across domains:
 
 1. Tree-shape pass: walk entries with `created_frame > since_frame`
    (new) or `children_ver > since_frame` (children moved). Emit
-   `TreeDelta::Created` or `TreeDelta::ChildrenChanged`.
+   `WireTreeDelta::Created` or `WireTreeDelta::ChildrenChanged`.
 2. Per-entry pass: walk entries with `change_frame > since_frame`.
-   Emit `TreeDelta::EntryChanged { status, state, config? }`.
+   Emit `WireTreeDelta::EntryChanged { status, state, config? }`.
 3. (Future, commented) per-prop pass: walk `Alive` entries whose
    `Node::props()` has any `Prop<T>::changed_frame > since_frame`.
    Emit per-prop deltas via `iter_changed_since(since_frame)`.
@@ -103,7 +109,7 @@ pub struct NodeView {
     pub config: NodeConfig,              // mirror of authored data
 
     // Future (pre-wired, commented in code):
-    // pub prop_cache: BTreeMap<PropPath, (LpsValue, FrameId)>,
+    // pub prop_cache: BTreeMap<PropPath, (WireValue, FrameId)>,
     // pub prop_cache_ver: FrameId,
 }
 
@@ -131,10 +137,11 @@ Differences from server-side `NodeEntry`:
 
 ## Delta protocol
 
-The shared, domain-agnostic shape lives in `lpc-model::tree`:
+The shared, domain-agnostic delta shape **`lpc_wire::WireTreeDelta`**
+(corresponds to the old `TreeDelta` sketch in early M3 drafts). Variants:
 
 ```rust
-pub enum TreeDelta {
+pub enum WireTreeDelta {
     /// New entry (first time client sees it). Carries everything
     /// needed to seed a NodeView.
     Created {
@@ -179,14 +186,14 @@ never has to track destroyed ids.
 
 (The legacy `lpl_model::NodeChange` has `Created` / `StateUpdated`
 / `StatusChanged` / `Destroyed`. M5 keeps the legacy variant set
-for `LegacyDomain`; `TreeDelta` is the framing **all** domains
+for `LegacyDomain`; `WireTreeDelta` is the framing **all** domains
 share — the domain-specific response in [08](08-domain.md) wraps
-`TreeDelta` plus any extras the domain needs.)
+it plus any extras the domain needs.)
 
 ### What the wire ships
 
 - **Bulk on first connect or on `since_frame = 0`:** one
-  `TreeDelta::Created` per existing entry, ordered parent-first
+  `WireTreeDelta::Created` per existing entry, ordered parent-first
   so the client can seed its mirror in a single pass. Plus
   per-domain extras (e.g., legacy ships its full
   `lpl_model::ProjectResponse` shape).
@@ -281,17 +288,18 @@ Created. Lean: keep `Created` as the catch-all "not yet alive"
 state and read `EntryState` for fine-grained detail; clients that
 care can read both.
 
-## Why the wire ships `LpsValue` and not typed `T`
+## Why the wire ships `WireValue` and not typed `T`
 
 The wire is structurally typed. The client doesn't have the impl's
-typed `*Props` struct (and shouldn't — `lpl-runtime` is server-only,
-the client compiles for browser / mobile / desktop without
-shader-compile machinery). `LpsValue` is the lingua franca.
+typed `*Props` struct (and shouldn't — `lpl-runtime` is server-only;
+the client compiles without pulling in shader/JIT crates). **`WireValue`**
+is the portable union on the wire; **`LpsValueF32`** stays inside
+`lpc-engine`, `lpl-runtime`, and similar.
 
 Lossy round-trip is acceptable:
 
-- `Prop<TextureBuffer>` ships as `LpsValue::Texture(<metadata>)`
-  on the wire — the editor doesn't need pixel data, it needs a
+- `Prop<TextureBuffer>` ships as **`WireValue::Texture` (descriptor /
+  metadata only)** — the editor doesn't need pixel data, it needs a
   thumbnail (which goes through a separate request channel).
 - `Prop<ShaderProgram>` doesn't ship to the client; it's
   server-internal. The `PropAccess` derive flags it as
@@ -317,10 +325,10 @@ edits — those go through the `lp-server`-level filesystem API
   binary encoding (postcard / bincode)? M5 keeps JSON; future
   ESP32 / mobile profiling may force binary. Pin in M5
   implementation.
-- **Per-prop ship granularity.** `outputs[0]` is a `LpsValue::Vec3`
-  on a 60-pixel-wide texture node — that's a struct of 60×3 floats
-  every frame. Ship full or ship sub-paths? Lean ship-full for
-  M5; M6 cleanup adds per-LpsValue diff if needed.
+- **Per-prop ship granularity.** Dense outputs may imply large numeric
+  `WireValue` payloads each frame (older sketches compared this to repeating
+  `Vec3`-like values row-wise). Ship full vectors or ship sub-paths?
+  Lean ship-full for M5; M6 cleanup adds finer-grained diff if needed.
 - **`Created` payload size.** The wire ships full `NodeConfig` on
   create. For a freshly-loaded project with hundreds of nodes,
   that's a single big response. Tolerable; profile.

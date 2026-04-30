@@ -9,10 +9,10 @@ rust-version.workspace = true
 [features]
 default = ["std"]
 # Panic recovery via catch_unwind (shader compilation, node render)
-panic-recovery = ["lpc-runtime/panic-recovery", "lpl-runtime/panic-recovery"]
+panic-recovery = ["lpc-engine/panic-recovery", "lpl-runtime/panic-recovery"]
 std = [
 	"lp-shared/std",
-	"lpc-runtime/std",
+	"lpc-engine/std",
 	"lpl-runtime/std",
 	"lpl-model/std",
 	"lpfs/std",
@@ -23,6 +23,7 @@ std = [
 lpc-engine = { path = "../lpc-engine", default-features = false }
 lpl-runtime = { path = "../../lp-legacy/lpl-runtime", default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
+lpc-wire = { path = "../lpc-wire", default-features = false }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }

@@ -2,28 +2,24 @@
 //!
 //! In the five-layer Quantity model, [`Kind`] sits *above* storage types and
 //! *below* per-slot legality: it answers “what category of thing is this value?”
-//! while [`crate::LpsType`] and [`crate::LpsValue`] (from `lps_shared`) cover raw
+//! while [`crate::WireType`] and runtime shader value types cover raw
 //! shape. See `docs/design/lightplayer/quantity.md` §0, §1, §2, and §3.
 //!
 //! A [`Kind`] is **orthogonal to storage** in the sense that each variant maps
 //! to a **fixed** [`Kind::storage`] recipe for GPU and serialization, while
 //! still carrying a distinct *meaning* (e.g. [`Kind::Amplitude`] vs
-//! [`Kind::Ratio`] both use `LpsType::Float` in v0 but differ in default
+//! [`Kind::Ratio`] both use `WireType::F32` in v0 but differ in default
 //! constraint, presentation, and intent — see the §3 table in `quantity.md`).
 
-use crate::LpsType;
-use crate::bus::ChannelName;
-use crate::presentation::Presentation;
-use crate::prop::binding::Binding;
 use crate::prop::constraint::{Constraint, ConstraintFree, ConstraintRange};
+use crate::prop::wire_type::{WireStructMember, WireType};
 use alloc::boxed::Box;
 use alloc::string::String;
-use lps_shared::StructMember;
 
 /// Maximum number of colors in a [`Kind::ColorPalette`] value’s fixed array storage.
 ///
 /// v0 is deliberately small for embedded targets; the same constant sizes the
-/// `entries` field in the palette’s [`LpsType`] (see `quantity.md` §3 “Storage
+/// `entries` field in the palette’s [`WireType`] (see `quantity.md` §3 “Storage
 /// recipes” and the roadmap risk note on fixed-size arrays).
 pub const MAX_PALETTE_LEN: u32 = 16;
 
@@ -73,7 +69,7 @@ pub enum Unit {
     Radians,
 }
 
-/// Authoritative color space tag used **inside** color-family `LpsValue` structs; values line up with `docs/design/color.md` and the `space: I32` field in the [`Kind::Color`]/[`Kind::ColorPalette`]/[`Kind::Gradient`] storage recipes (`quantity.md` §3).
+/// Authoritative color space tag used **inside** color-family runtime structs; values line up with `docs/design/color.md` and the `space: I32` field in the [`Kind::Color`]/[`Kind::ColorPalette`]/[`Kind::Gradient`] storage recipes (`quantity.md` §3).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Colorspace {
@@ -115,11 +111,11 @@ pub enum Kind {
     Ratio,
     /// [0, 1) **wrapping** cycle position; distinct from [`Kind::Angle`] and [`Kind::Ratio`] by intent (`quantity.md` §3; see also `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` Q3 for `Phase` vs `Angle`).
     Phase,
-    /// Non-negative integer count; storage `LpsType::Int` (`quantity.md` §3, storage table).
+    /// Non-negative integer count; storage `WireType::I32` (`quantity.md` §3, storage table).
     Count,
     /// Boolean.
     Bool,
-    /// Discrete choice; storage `LpsType::Int` in v0 (`quantity.md` §3).
+    /// Discrete choice; storage `WireType::I32` in v0 (`quantity.md` §3).
     Choice,
 
     /// Time **instant** as F32 seconds since an epoch; [`Dimension::Time`] (`quantity.md` §3). Default bus is [`Binding::Bus`] with channel `"time"` when no explicit bind (`quantity.md` §8).
@@ -143,12 +139,12 @@ pub enum Kind {
     /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the gradient
     /// to a height-one texture and binds it as a shader field like `params.gradient`.
     Gradient,
-    /// 2D position as `LpsType::Vec2` (`quantity.md` §3).
+    /// 2D position as `WireType::Vec2` (`quantity.md` §3).
     Position2d,
-    /// 3D position as `LpsType::Vec3` (`quantity.md` §3).
+    /// 3D position as `WireType::Vec3` (`quantity.md` §3).
     Position3d,
 
-    /// Opaque **GPU** texture: handle/width/height/format struct; pixel data in [`crate::TextureBuffer`] (`quantity.md` §3, storage table). Default bus: `"video/in/0"` when no explicit bind (`quantity.md` §8).
+    /// Opaque **GPU** texture: handle/width/height/format struct; pixel data lives in runtime texture storage (`quantity.md` §3, storage table). Default bus: `"video/in/0"` when no explicit bind (`quantity.md` §8).
     Texture,
 
     /// Audio frequency-band levels (low / mid / high) as F32 RMS values.
@@ -161,14 +157,14 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Returns the **structural** [`LpsType`] the shader, serializer, and
-    /// runtime agree on: the “storage recipe” for this [`Kind`]
+    /// Returns the **structural** [`WireType`] the serializer and layout logic
+    /// agree on: the “storage recipe” for this [`Kind`]
     /// (`docs/design/lightplayer/quantity.md` §3, “Storage recipes”, and `impl`
     /// block in §3).
     ///
     /// For `ColorPalette` and `Gradient`, this is the **authoring** storage type.
     /// The shader-visible runtime form is a baked texture field inside `params`.
-    pub fn storage(self) -> LpsType {
+    pub fn storage(self) -> WireType {
         match self {
             Self::Amplitude
             | Self::Ratio
@@ -176,11 +172,11 @@ impl Kind {
             | Self::Instant
             | Self::Duration
             | Self::Frequency
-            | Self::Angle => LpsType::Float,
-            Self::Count | Self::Choice => LpsType::Int,
-            Self::Bool => LpsType::Bool,
-            Self::Position2d => LpsType::Vec2,
-            Self::Position3d => LpsType::Vec3,
+            | Self::Angle => WireType::F32,
+            Self::Count | Self::Choice => WireType::I32,
+            Self::Bool => WireType::Bool,
+            Self::Position2d => WireType::Vec2,
+            Self::Position3d => WireType::Vec3,
             Self::Color => color_struct(),
             Self::ColorPalette => color_palette_struct(),
             Self::Gradient => gradient_struct(),
@@ -224,162 +220,120 @@ impl Kind {
             _ => Constraint::Free(ConstraintFree {}),
         }
     }
-
-    /// **Default** [`Presentation`]: which widget to use when a [`crate::prop::shape::Slot`]
-    /// omits an explicit `present` override (`docs/design/lightplayer/quantity.md` §9
-    /// and the default table there).
-    pub fn default_presentation(self) -> Presentation {
-        use Presentation::*;
-        match self {
-            Self::Instant | Self::Count => NumberInput,
-            Self::Duration | Self::Amplitude | Self::Ratio => Fader,
-            Self::Frequency | Self::Angle | Self::Phase => Knob,
-            Self::Bool => Toggle,
-            Self::Choice => Dropdown,
-            Self::Color => ColorPicker,
-            Self::ColorPalette => PaletteEditor,
-            Self::Gradient => GradientEditor,
-            Self::Position2d => XyPad,
-            Self::Position3d => NumberInput,
-            Self::Texture => TexturePreview,
-            Self::AudioLevel => NumberInput,
-        }
-    }
-
-    /// **Conventional** input binding when a slot’s `bind` is absent: bus
-    /// resolution order is **explicit slot bind → kind default here → use the
-    /// slot’s default value** (materialized from [`ValueSpec`](crate::value_spec::ValueSpec),
-    /// `docs/design/lightplayer/quantity.md` §8). Output-side defaults are
-    /// module-level (e.g. shows writing `video/out/0`), not listed here
-    /// (`quantity.md` §8).
-    pub fn default_bind(self) -> Option<Binding> {
-        match self {
-            Self::Instant => Some(Binding::Bus(ChannelName(String::from("time")))),
-            Self::Texture => Some(Binding::Bus(ChannelName(String::from("video/in/0")))),
-            Self::AudioLevel => Some(Binding::Bus(ChannelName(String::from("audio/in/0/level")))),
-            _ => None,
-        }
-    }
 }
 
-fn color_struct() -> LpsType {
-    LpsType::Struct {
+fn color_struct() -> WireType {
+    WireType::Struct {
         name: Some(String::from("Color")),
-        members: alloc::vec![
-            StructMember {
-                name: Some(String::from("space")),
-                ty: LpsType::Int,
+        fields: alloc::vec![
+            WireStructMember {
+                name: String::from("space"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("coords")),
-                ty: LpsType::Vec3,
+            WireStructMember {
+                name: String::from("coords"),
+                ty: WireType::Vec3,
             },
         ],
     }
 }
 
-fn color_palette_struct() -> LpsType {
-    LpsType::Struct {
+fn color_palette_struct() -> WireType {
+    WireType::Struct {
         name: Some(String::from("ColorPalette")),
-        members: alloc::vec![
-            StructMember {
-                name: Some(String::from("space")),
-                ty: LpsType::Int,
+        fields: alloc::vec![
+            WireStructMember {
+                name: String::from("space"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("count")),
-                ty: LpsType::Int,
+            WireStructMember {
+                name: String::from("count"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("entries")),
-                ty: LpsType::Array {
-                    element: Box::new(LpsType::Vec3),
-                    len: MAX_PALETTE_LEN,
-                },
+            WireStructMember {
+                name: String::from("entries"),
+                ty: WireType::Array(Box::new(WireType::Vec3), MAX_PALETTE_LEN as usize),
             },
         ],
     }
 }
 
-fn gradient_struct() -> LpsType {
-    let stop = LpsType::Struct {
+fn gradient_struct() -> WireType {
+    let stop = WireType::Struct {
         name: Some(String::from("GradientStop")),
-        members: alloc::vec![
-            StructMember {
-                name: Some(String::from("at")),
-                ty: LpsType::Float,
+        fields: alloc::vec![
+            WireStructMember {
+                name: String::from("at"),
+                ty: WireType::F32,
             },
-            StructMember {
-                name: Some(String::from("c")),
-                ty: LpsType::Vec3,
+            WireStructMember {
+                name: String::from("c"),
+                ty: WireType::Vec3,
             },
         ],
     };
-    LpsType::Struct {
+    WireType::Struct {
         name: Some(String::from("Gradient")),
-        members: alloc::vec![
-            StructMember {
-                name: Some(String::from("space")),
-                ty: LpsType::Int,
+        fields: alloc::vec![
+            WireStructMember {
+                name: String::from("space"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("method")),
-                ty: LpsType::Int,
+            WireStructMember {
+                name: String::from("method"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("count")),
-                ty: LpsType::Int,
+            WireStructMember {
+                name: String::from("count"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("stops")),
-                ty: LpsType::Array {
-                    element: Box::new(stop),
-                    len: MAX_GRADIENT_STOPS,
-                },
+            WireStructMember {
+                name: String::from("stops"),
+                ty: WireType::Array(Box::new(stop), MAX_GRADIENT_STOPS as usize),
             },
         ],
     }
 }
 
-fn texture_struct() -> LpsType {
-    LpsType::Struct {
+fn texture_struct() -> WireType {
+    WireType::Struct {
         name: Some(String::from("Texture")),
-        members: alloc::vec![
-            StructMember {
-                name: Some(String::from("format")),
-                ty: LpsType::Int,
+        fields: alloc::vec![
+            WireStructMember {
+                name: String::from("format"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("width")),
-                ty: LpsType::Int,
+            WireStructMember {
+                name: String::from("width"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("height")),
-                ty: LpsType::Int,
+            WireStructMember {
+                name: String::from("height"),
+                ty: WireType::I32,
             },
-            StructMember {
-                name: Some(String::from("handle")),
-                ty: LpsType::Int,
+            WireStructMember {
+                name: String::from("handle"),
+                ty: WireType::I32,
             },
         ],
     }
 }
 
-fn audio_level_struct() -> LpsType {
-    LpsType::Struct {
+fn audio_level_struct() -> WireType {
+    WireType::Struct {
         name: Some(String::from("AudioLevel")),
-        members: alloc::vec![
-            StructMember {
-                name: Some(String::from("low")),
-                ty: LpsType::Float,
+        fields: alloc::vec![
+            WireStructMember {
+                name: String::from("low"),
+                ty: WireType::F32,
             },
-            StructMember {
-                name: Some(String::from("mid")),
-                ty: LpsType::Float,
+            WireStructMember {
+                name: String::from("mid"),
+                ty: WireType::F32,
             },
-            StructMember {
-                name: Some(String::from("high")),
-                ty: LpsType::Float,
+            WireStructMember {
+                name: String::from("high"),
+                ty: WireType::F32,
             },
         ],
     }
@@ -416,30 +370,30 @@ mod tests {
 
     #[test]
     fn float_scalar_storages() {
-        assert_eq!(Kind::Amplitude.storage(), LpsType::Float);
-        assert_eq!(Kind::Frequency.storage(), LpsType::Float);
+        assert_eq!(Kind::Amplitude.storage(), WireType::F32);
+        assert_eq!(Kind::Frequency.storage(), WireType::F32);
     }
 
     #[test]
     fn int_scalar_storages() {
-        assert_eq!(Kind::Count.storage(), LpsType::Int);
-        assert_eq!(Kind::Choice.storage(), LpsType::Int);
+        assert_eq!(Kind::Count.storage(), WireType::I32);
+        assert_eq!(Kind::Choice.storage(), WireType::I32);
     }
 
     #[test]
     fn position_storages() {
-        assert_eq!(Kind::Position2d.storage(), LpsType::Vec2);
-        assert_eq!(Kind::Position3d.storage(), LpsType::Vec3);
+        assert_eq!(Kind::Position2d.storage(), WireType::Vec2);
+        assert_eq!(Kind::Position3d.storage(), WireType::Vec3);
     }
 
     #[test]
     fn texture_storage_has_four_int_fields() {
         let s = Kind::Texture.storage();
         match s {
-            LpsType::Struct { members, .. } => {
-                assert_eq!(members.len(), 4);
-                for m in members {
-                    assert_eq!(m.ty, LpsType::Int);
+            WireType::Struct { fields, .. } => {
+                assert_eq!(fields.len(), 4);
+                for m in fields {
+                    assert_eq!(m.ty, WireType::I32);
                 }
             }
             _ => panic!("Texture storage must be a Struct"),
@@ -454,35 +408,6 @@ mod tests {
         assert_eq!(Kind::Angle.dimension(), Dimension::Angle);
         assert_eq!(Kind::Amplitude.dimension(), Dimension::Dimensionless);
         assert_eq!(Kind::Phase.dimension(), Dimension::Dimensionless);
-    }
-
-    #[test]
-    fn default_presentation_table() {
-        assert_eq!(Kind::Amplitude.default_presentation(), Presentation::Fader);
-        assert_eq!(Kind::Frequency.default_presentation(), Presentation::Knob);
-        assert_eq!(Kind::Bool.default_presentation(), Presentation::Toggle);
-        assert_eq!(
-            Kind::Color.default_presentation(),
-            Presentation::ColorPicker
-        );
-        assert_eq!(Kind::Position2d.default_presentation(), Presentation::XyPad);
-        assert_eq!(
-            Kind::Texture.default_presentation(),
-            Presentation::TexturePreview
-        );
-    }
-
-    #[test]
-    fn default_bind_for_instant_is_time() {
-        match Kind::Instant.default_bind() {
-            Some(Binding::Bus(ChannelName(ch))) => assert_eq!(ch, "time"),
-            other => panic!("expected Bus(time), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn default_bind_for_color_is_none() {
-        assert!(Kind::Color.default_bind().is_none());
     }
 
     #[test]
@@ -509,13 +434,13 @@ mod tests {
     fn audio_level_storage_is_three_floats() {
         let s = Kind::AudioLevel.storage();
         match s {
-            LpsType::Struct { members, .. } => {
-                assert_eq!(members.len(), AUDIO_LEVEL_BANDS);
-                assert_eq!(members[0].name.as_deref(), Some("low"));
-                assert_eq!(members[1].name.as_deref(), Some("mid"));
-                assert_eq!(members[2].name.as_deref(), Some("high"));
-                for m in &members {
-                    assert_eq!(m.ty, LpsType::Float);
+            WireType::Struct { fields, .. } => {
+                assert_eq!(fields.len(), AUDIO_LEVEL_BANDS);
+                assert_eq!(fields[0].name.as_str(), "low");
+                assert_eq!(fields[1].name.as_str(), "mid");
+                assert_eq!(fields[2].name.as_str(), "high");
+                for m in &fields {
+                    assert_eq!(m.ty, WireType::F32);
                 }
             }
             _ => panic!("AudioLevel storage must be a Struct"),
@@ -533,22 +458,6 @@ mod tests {
             Kind::AudioLevel.default_constraint(),
             Constraint::Free(ConstraintFree {})
         ));
-    }
-
-    #[test]
-    fn audio_level_default_presentation_is_number_input() {
-        assert_eq!(
-            Kind::AudioLevel.default_presentation(),
-            Presentation::NumberInput
-        );
-    }
-
-    #[test]
-    fn audio_level_default_bind_is_audio_in_level() {
-        match Kind::AudioLevel.default_bind() {
-            Some(Binding::Bus(ChannelName(ch))) => assert_eq!(ch, "audio/in/0/level"),
-            other => panic!("expected Bus(audio/in/0/level), got {other:?}"),
-        }
     }
 
     #[test]

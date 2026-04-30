@@ -1,8 +1,8 @@
 # 02 — `Node` trait
 
 `Node` is the small object-safe runtime spine that every node-type
-implements. It lives in `lpc-runtime`. Property reflection
-(`PropAccess`) is exposed via a method, not a supertrait.
+implements. It lives in `lpc-engine`. Property reflection
+(`RuntimePropAccess`) is exposed via a method, not a supertrait.
 
 ## Trait surface
 

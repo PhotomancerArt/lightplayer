@@ -3,7 +3,7 @@
 //! Defines the async interface for client-side transport implementations.
 //! Messages are consumed (moved) on send, and receive operations are async.
 
-use lpc_model::{ClientMessage, TransportError};
+use lpc_wire::{TransportError, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 
 /// Trait for client-side transport implementations
@@ -18,7 +18,7 @@ use lpl_model::LegacyServerMessage;
 ///
 /// ```rust,no_run
 /// use lp_client::ClientTransport;
-/// use lpc_model::{ClientMessage, TransportError};
+/// use lpc_wire::{ClientMessage, TransportError};
 /// use lpl_model::LegacyServerMessage;
 ///
 /// struct MyTransport;

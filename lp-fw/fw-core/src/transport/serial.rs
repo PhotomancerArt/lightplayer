@@ -16,7 +16,7 @@ use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
 use lp_shared::transport::ServerTransport;
-use lpc_model::{ClientMessage, TransportError, json};
+use lpc_wire::{TransportError, json, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 
 /// Serial transport implementation
@@ -261,7 +261,7 @@ mod tests {
     use crate::serial::SerialError;
     use alloc::vec::Vec;
     use core::{cell::RefCell, str};
-    use lpc_model::ClientRequest;
+    use lpc_wire::ClientRequest;
 
     // Mock SerialIo for testing
     struct MockSerialIo {
@@ -314,7 +314,7 @@ mod tests {
 
         let msg = LegacyServerMessage {
             id: 1,
-            msg: lpc_model::server::ServerMsgBody::UnloadProject,
+            msg: lpc_wire::server::ServerMsgBody::UnloadProject,
         };
         pollster::block_on(transport.send(msg)).unwrap();
 

@@ -1,8 +1,7 @@
 use crate::prop::prop_namespace::PropNamespace;
-use crate::prop::prop_path::{PropPath, Segment};
+use crate::prop::prop_path::{PathParseError, PropPath, Segment, parse_path};
 use crate::tree::tree_path::{PathError, TreePath};
 use core::fmt;
-use lps_shared::path;
 
 /// Error from [`NodePropSpec::parse`]: missing or duplicate `#` separator, a
 /// path error, or a property path parse error.
@@ -15,7 +14,7 @@ pub enum NodePropSpecError {
     /// The left-hand [`TreePath`] could not be parsed.
     Path(PathError),
     /// The right-hand property string could not be parsed.
-    Prop(path::PathParseError),
+    Prop(PathParseError),
 }
 
 impl fmt::Display for NodePropSpecError {
@@ -53,14 +52,14 @@ pub struct NodePropSpec {
 
 impl NodePropSpec {
     /// Parses `node#prop` where `node` is a [`TreePath`] string and `prop` is
-    /// a property path for [`path::parse_path`].
+    /// a property path for [`parse_path`].
     pub fn parse(s: &str) -> Result<Self, NodePropSpecError> {
         let (node_part, prop_part) = s.split_once('#').ok_or(NodePropSpecError::MissingHash)?;
         if prop_part.contains('#') {
             return Err(NodePropSpecError::ExtraHash);
         }
         let node = TreePath::parse(node_part).map_err(NodePropSpecError::Path)?;
-        let prop = path::parse_path(prop_part).map_err(NodePropSpecError::Prop)?;
+        let prop = parse_path(prop_part).map_err(NodePropSpecError::Prop)?;
         Ok(NodePropSpec { node, prop })
     }
 }
@@ -73,8 +72,8 @@ impl fmt::Display for NodePropSpec {
                 f.write_str(".")?;
             }
             match seg {
-                path::LpsPathSeg::Field(name) => f.write_str(name)?,
-                path::LpsPathSeg::Index(idx) => write!(f, "[{idx}]")?,
+                Segment::Field(name) => f.write_str(name)?,
+                Segment::Index(idx) => write!(f, "[{idx}]")?,
             }
         }
         Ok(())

@@ -1,5 +1,9 @@
 # 04 — `NodeConfig`
 
+> **M4.3a update:** This authored instance-use-site type now lives
+> in `lpc-source` as `SrcNodeConfig`. Shared addressing remains in
+> `lpc-model`; runtime resolution happens in `lpc-engine`.
+
 `NodeConfig` is the **per-instance authored use-site data** for a
 node. The artifact ([03](03-artifact.md)) is the *class*;
 `NodeConfig` is the *instance customization*.
@@ -277,7 +281,7 @@ observes via `ctx.changed_since` next tick.
 
 ## Set-property edits (editor flow)
 
-The editor talks to `lpc-runtime` through the existing
+The editor talks to `lpc-engine` through the existing
 project-level set-property API (M2 has a stub:
 `NodeProperties::set_property`). On the spine side:
 

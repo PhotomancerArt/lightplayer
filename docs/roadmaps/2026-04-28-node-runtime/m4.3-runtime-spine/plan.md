@@ -1,4 +1,6 @@
-# M4.3 — Runtime spine (placeholder)
+# M4.3 — Runtime spine
+
+Planning stub for phased work once M4.3 is expanded.
 
 Land the **runtime contract** for nodes on top of the M4.2 schema layer:
 the `Node` trait, `TickContext`, the `ArtifactManager` state machine,
@@ -14,21 +16,24 @@ References:
 
 ## Status
 
-**Not yet planned.** Waiting on M4.2 (schema types) to settle the data
-shape that the runtime contract reads / writes.
+**M4.3 detailed phases:** not expanded yet — replace this stub via
+`/plan-small` (or `/plan`) when execution starts.
 
-When M4.2 commits, expand this file via `/plan-small` (or `/plan` if
-the scope grows) and replace this placeholder with the real plan.
+**M4.3a (crate split + `WireValue`):** tracked in
+[`../m4.3a-crate-split-wire-value/`](../m4.3a-crate-split-wire-value/); not
+future work relative to this milestone. The runtime spine should assume the
+five-crate roles below from the start.
 
 ## Tentative scope (subject to plan iteration)
 
-- `lpc-runtime::Node` trait — minimal shape from
+- `lpc-engine::Node` trait — minimal shape from
   [`design/02-node.md`](../design/02-node.md):
   `tick(&mut self, &mut TickContext)`, `destroy`,
-  `handle_memory_pressure`, `props() -> &dyn PropAccess`.
-- `lpc-runtime::TickContext` — bus access, resolver-cache access,
+  `handle_memory_pressure`, `props() -> &dyn RuntimePropAccess` (or
+  temporary `PropAccess` alias during transition; see M4.3a phase 5).
+- `lpc-engine::TickContext` — bus access, resolver-cache access,
   tree access (read-only), frame counters.
-- `lpc-runtime::ArtifactManager` — load / cache / refcount / shed
+- `lpc-engine::ArtifactManager` — load / cache / refcount / shed
   with the `Resolved | Loaded | Prepared | Idle | Error` state
   machine ([`design/03-artifact.md`](../design/03-artifact.md)).
 - Binding resolver — pull-based three-layer cascade (overrides →
@@ -39,7 +44,8 @@ the scope grows) and replace this placeholder with the real plan.
 - Generalised TOML artifact loader — replaces the `std`-only
   one-shot loader in `lpv-model`. `no_std`-compatible.
 - `PropAccess` derive macro (if not already shipped in M4.2) —
-  lives in a new `lpc-derive` proc-macro crate.
+  lives in a new `lpc-derive` proc-macro crate (or temporarily in
+  `lpc-engine` until split).
 
 ## Out of scope here
 
@@ -47,7 +53,5 @@ the scope grows) and replace this placeholder with the real plan.
 - Per-prop sync deltas + extended wire (M4.4).
 - Legacy node port (M5).
 - Visual subsystem changes (next roadmap).
-- **Crate split / `WireValue` introduction** — see
-  [`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md).
-  M4.3 ships against the current `lpc-model` shape; the split lands
-  as a focused refactor between M4.3 and M4.4.
+- Crate split / `WireValue` — **M4.3a owns this** (see sibling folder).
+  M4.3 assumes the crate split is done or underway; no "split after M4.3".

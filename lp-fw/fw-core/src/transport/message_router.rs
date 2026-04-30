@@ -9,7 +9,7 @@ use alloc::format;
 
 use crate::message_router::MessageRouter;
 use lp_shared::transport::ServerTransport;
-use lpc_model::{ClientMessage, TransportError, json};
+use lpc_wire::{TransportError, json, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 
 /// Transport implementation using MessageRouter
@@ -105,7 +105,7 @@ mod tests {
     };
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::Channel;
-    use lpc_model::ClientRequest;
+    use lpc_wire::ClientRequest;
 
     /// Helper to create a router with fresh channels for each test
     fn create_test_router() -> (
@@ -126,7 +126,7 @@ mod tests {
 
         let msg = LegacyServerMessage {
             id: 1,
-            msg: lpc_model::server::ServerMsgBody::UnloadProject,
+            msg: lpc_wire::server::ServerMsgBody::UnloadProject,
         };
         pollster::block_on(transport.send(msg)).unwrap();
 

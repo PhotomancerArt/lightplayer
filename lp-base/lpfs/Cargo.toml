@@ -14,6 +14,7 @@ std = []
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-source = { path = "../../lp-core/lpc-source", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]

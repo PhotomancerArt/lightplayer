@@ -8,7 +8,7 @@
 
 use crate::NodeName;
 use alloc::vec::Vec;
-use lpc_model::prop::shape::{Shape, Slot};
+use lpc_source::prop::shape::{Shape, Slot};
 
 /// A Visual’s `[params]` block: a [`Slot`] whose [`Shape`] is always
 /// [`Shape::Struct`], synthesized from the TOML table keys.
@@ -113,7 +113,7 @@ mod tests {
     use super::*;
 
     use crate::kind::Kind;
-    use lpc_model::prop::shape::Shape;
+    use lpc_source::prop::shape::Shape;
 
     #[test]
     fn empty_params_round_trips() {

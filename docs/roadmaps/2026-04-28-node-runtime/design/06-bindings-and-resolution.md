@@ -1,5 +1,10 @@
 # 06 — Bindings and resolution
 
+> **M4.3a update:** Authored bindings live in `lpc-source` as
+> source-side binding/value-spec types. Wire-safe literal payloads use
+> `lpc_model::WireValue`; runtime resolution in `lpc-engine` produces
+> `LpsValueF32` and converts only at the wire boundary.
+
 A binding is a *connection*, on a slot, that says "instead of using
 the slot's default value, take it from this source." Resolution is
 the per-tick walk that turns each consumed slot into a current
@@ -14,11 +19,10 @@ pub enum Binding {
     /// Read or write the named bus channel.
     Bus(ChannelName),                  // bind = { bus = "audio/in/0/level" }
 
-    /// Inline literal value or texture recipe. Type must match the slot's kind.
-    /// Wire form uses `ValueSpec` (not `LpsValue`) because `LpsValue::Texture2D`
-    /// carries a runtime handle that's not portable across the wire. `ValueSpec`
-    /// is the portable recipe that the loader materializes into a handle.
-    Literal(ValueSpec),                // bind = { literal = 0.7 }
+    /// Inline literal / texture recipe. Authored portable form carries
+    /// `WireValue` (inside `SrcValueSpec` / legacy `ValueSpec`); resolves to
+    /// `LpsValueF32` only inside `lpc-engine`.
+    Literal(ValueSpec),                // bind = { literal = 0.7 } — rename → SrcValueSpec
 
     /// Read another node's output slot.
     NodeProp(NodePropSpec),            // bind = { node = { node = "...", prop = "outputs[0]" } }
@@ -36,7 +40,11 @@ pub struct NodePropSpec {
 }
 ```
 
-> **Implementation note:** `Binding::Literal(ValueSpec)` rather than `Binding::Literal(LpsValue)` is **wire-boundary-by-design**, not M2 expedience. `LpsValue` is the GLSL-runtime value type (carrying GPU handles); `ValueSpec` is the portable, serializable recipe. The deeper crate split introducing a focused `WireValue` enum is captured as M4.3a (see [`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md)).
+> **Implementation note:** `Binding::Literal` stores the authored portable recipe
+> — today **`ValueSpec`**, migrating its literal arm to **`WireValue`** / **`SrcValueSpec`**
+> naming in M4.3a — not bare **`LpsValueF32`** (handles are runtime-only).
+> Older text contrasted against `Binding::Literal(LpsValue)`; same boundary,
+> sharper type names ([`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md)).
 
 Three variants. Three is enough.
 

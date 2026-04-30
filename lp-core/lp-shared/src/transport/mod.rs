@@ -9,5 +9,5 @@
 pub mod server;
 
 // Re-export TransportError from lp-model for convenience
-pub use lpc_model::TransportError;
+pub use lpc_wire::TransportError;
 pub use server::ServerTransport;

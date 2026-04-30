@@ -11,8 +11,8 @@ use hashbrown::HashMap;
 use log;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
-use lpc_model::{LpPath, LpPathBuf};
 use lpc_engine::LpGraphics;
+use lpc_model::{LpPath, LpPathBuf};
 use lpfs::{FsChange, LpFs};
 use lpl_model::{LegacyMessage, LegacyServerMessage};
 
@@ -287,7 +287,7 @@ impl LpServer {
                             // Send error response for this message
                             responses.push(LegacyMessage::Server(LegacyServerMessage {
                                 id: msg_id,
-                                msg: lpc_model::server::ServerMsgBody::Error {
+                                msg: lpc_wire::server::ServerMsgBody::Error {
                                     error: format!("{e}"),
                                 },
                             }));
@@ -346,7 +346,7 @@ impl LpServer {
     pub fn load_project(
         &mut self,
         path: &lpc_model::lp_path::LpPath,
-    ) -> Result<lpc_model::project::ProjectHandle, ServerError> {
+    ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
         self.project_manager.load_project(
             path,
             &mut *self.base_fs,

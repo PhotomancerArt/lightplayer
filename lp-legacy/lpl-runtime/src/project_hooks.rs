@@ -1,11 +1,11 @@
 //! Register legacy project behavior with `lpc-runtime` (breaks the `lpc-runtime` ↔ `lpl-runtime` cycle).
 
 use alloc::sync::Arc;
-use lpc_model::FrameId;
-use lpc_model::project::api::ApiNodeSpecifier;
 use lpc_engine::error::Error;
 use lpc_engine::project::ProjectRuntime;
 use lpc_engine::project::hooks::{ProjectHooks, set_project_hooks};
+use lpc_model::FrameId;
+use lpc_wire::ApiNodeSpecifier;
 use lpfs::FsChange;
 use lpl_model::ProjectResponse;
 

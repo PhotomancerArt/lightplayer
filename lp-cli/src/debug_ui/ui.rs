@@ -4,7 +4,8 @@ use crate::client::{LpClient, serializable_response_to_project_response};
 use crate::debug_ui::panels;
 use eframe::egui;
 use lp_engine_client::project::ClientProjectView;
-use lpc_model::{NodeId, project::FrameId, project::handle::ProjectHandle};
+use lpc_model::{NodeId, project::FrameId};
+use lpc_wire::WireProjectHandle as ProjectHandle;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -106,8 +107,8 @@ impl DebugUiState {
                                     for change in &status_changes {
                                         match (&change.old_status, &change.new_status) {
                                             (
-                                                lpc_model::project::api::NodeStatus::Ok,
-                                                lpc_model::project::api::NodeStatus::Error(msg),
+                                                lpc_wire::WireNodeStatus::Ok,
+                                                lpc_wire::WireNodeStatus::Error(msg),
                                             ) => {
                                                 println!(
                                                     "[{}] Status changed: Ok -> Error(\"{}\")",
@@ -116,8 +117,8 @@ impl DebugUiState {
                                                 );
                                             }
                                             (
-                                                lpc_model::project::api::NodeStatus::Error(old_msg),
-                                                lpc_model::project::api::NodeStatus::Ok,
+                                                lpc_wire::WireNodeStatus::Error(old_msg),
+                                                lpc_wire::WireNodeStatus::Ok,
                                             ) => {
                                                 println!(
                                                     "[{}] Status changed: Error(\"{}\") -> Ok",
@@ -201,7 +202,7 @@ impl DebugUiState {
                 // For initial sync (empty view), request all nodes to populate the list
                 // Otherwise use normal detail_specifier
                 let detail_specifier = if is_initial_sync {
-                    lpc_model::project::api::ApiNodeSpecifier::All
+                    lpc_wire::ApiNodeSpecifier::All
                 } else {
                     view.detail_specifier()
                 };

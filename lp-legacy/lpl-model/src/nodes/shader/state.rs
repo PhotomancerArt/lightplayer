@@ -3,7 +3,7 @@ use lpc_model::PropValue;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
-use lpc_model::impl_state_serialization;
+use lpc_wire::impl_state_serialization;
 
 /// Shader node state - runtime values
 #[derive(Debug, Clone, PartialEq, Eq)]

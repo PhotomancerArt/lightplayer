@@ -5,7 +5,7 @@
 
 use alloc::vec::Vec;
 
-use lpc_model::server::SampleStats;
+use lpc_wire::server::SampleStats;
 
 /// Default minimum samples before using mean for avg (avoids cold-start dilution).
 const DEFAULT_MIN_SAMPLES_FOR_AVG: usize = 3;

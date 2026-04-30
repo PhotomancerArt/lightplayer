@@ -3,8 +3,8 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::project::api::NodeStatus;
-use lpc_model::{ChildKind, FrameId, NodeId, TreePath};
+use lpc_model::{FrameId, NodeId, TreePath};
+use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use super::EntryState;
 
@@ -20,10 +20,10 @@ pub struct NodeEntry<N> {
     pub id: NodeId,
     pub path: TreePath,
     pub parent: Option<NodeId>,
-    pub child_kind: Option<ChildKind>, // None for root; immutable for entry's lifetime
-    pub children: Vec<NodeId>,         // ordered
+    pub child_kind: Option<WireChildKind>, // None for root; immutable for entry's lifetime
+    pub children: Vec<NodeId>,             // ordered
 
-    pub status: NodeStatus,
+    pub status: WireNodeStatus,
     pub state: EntryState<N>,
 
     // Three frame counters per entry (12 bytes/entry); see design/01-tree.md
@@ -45,7 +45,7 @@ impl<N> NodeEntry<N> {
         id: NodeId,
         path: TreePath,
         parent: Option<NodeId>,
-        child_kind: Option<ChildKind>,
+        child_kind: Option<WireChildKind>,
         frame: FrameId,
     ) -> Self {
         Self {
@@ -54,7 +54,7 @@ impl<N> NodeEntry<N> {
             parent,
             child_kind,
             children: Vec::new(),
-            status: NodeStatus::Created,
+            status: WireNodeStatus::Created,
             state: EntryState::Pending,
             created_frame: frame,
             change_frame: frame,
@@ -63,7 +63,7 @@ impl<N> NodeEntry<N> {
     }
 
     /// Set status and bump `change_frame`.
-    pub fn set_status(&mut self, status: NodeStatus, frame: FrameId) {
+    pub fn set_status(&mut self, status: WireNodeStatus, frame: FrameId) {
         self.status = status;
         self.change_frame = frame;
     }
@@ -85,8 +85,8 @@ impl<N> NodeEntry<N> {
 #[cfg(test)]
 mod tests {
     use super::NodeEntry;
-    use lpc_model::project::api::NodeStatus;
-    use lpc_model::{ChildKind, FrameId, NodeId, SlotIdx, TreePath};
+    use lpc_model::{FrameId, NodeId, TreePath};
+    use lpc_wire::{SlotIdx, WireChildKind, WireNodeStatus};
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
@@ -101,7 +101,7 @@ mod tests {
         assert_eq!(entry.created_frame.0, 5);
         assert_eq!(entry.change_frame.0, 5);
         assert_eq!(entry.children_ver.0, 5);
-        assert_eq!(entry.status, NodeStatus::Created);
+        assert_eq!(entry.status, WireNodeStatus::Created);
         assert!(entry.state.is_pending());
     }
 
@@ -115,8 +115,8 @@ mod tests {
             None,
             frame,
         );
-        entry.set_status(NodeStatus::Ok, FrameId::new(10));
-        assert_eq!(entry.status, NodeStatus::Ok);
+        entry.set_status(WireNodeStatus::Ok, FrameId::new(10));
+        assert_eq!(entry.status, WireNodeStatus::Ok);
         assert_eq!(entry.change_frame.0, 10);
         // created_frame and children_ver unchanged
         assert_eq!(entry.created_frame.0, 5);
@@ -146,10 +146,13 @@ mod tests {
             NodeId::new(2),
             TreePath::parse("/main.show/child.vis").unwrap(),
             Some(NodeId::new(1)),
-            Some(ChildKind::Input { source: SlotIdx(0) }),
+            Some(WireChildKind::Input { source: SlotIdx(0) }),
             frame,
         );
         assert!(entry.child_kind.is_some());
-        assert!(matches!(entry.child_kind, Some(ChildKind::Input { .. })));
+        assert!(matches!(
+            entry.child_kind,
+            Some(WireChildKind::Input { .. })
+        ));
     }
 }

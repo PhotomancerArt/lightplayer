@@ -11,8 +11,8 @@ server architecture, frame-versioning, fs-watch routing, and
 panic recovery are load-bearing and well-tuned; rebuilding (or
 porting "later") wastes the existing investment. Instead, the
 new spine concepts (node tree, slots, artifact manager) land
-*inside* `lpc-runtime`, with the existing machinery generalised
-to support them.
+*inside* `lpc-engine` (historical wording: `lpc-runtime`), with the
+existing machinery generalised to support them.
 
 ## D-2 — Per-domain model + runtime crate split
 

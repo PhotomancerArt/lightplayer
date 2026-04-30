@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use lp_shared::transport::ServerTransport;
-use lpc_model::{ClientMessage, TransportError, json};
+use lpc_wire::{TransportError, json, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 
 use crate::serial::io_task;

@@ -1,5 +1,5 @@
 //! lpv-model: visual types (Pattern, Effect, Stack, Playlist, etc.).
-//! Foundation types live in [`lpc_model`].
+//! Foundation types live in [`lpc_model`]; authored source types in [`lpc_source`].
 
 #![no_std]
 extern crate alloc;
@@ -17,31 +17,18 @@ pub use visual::{
     PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
 };
 
-// Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)
-pub use lpc_model::{
-    artifact, constraint, error, kind, node, presentation, schema, types, value_spec,
-};
+pub use lpc_model::{constraint, error, kind, node, types};
+pub use lpc_source::{artifact, presentation, schema};
 
-// Re-export foundation types from lpc-model for convenience
-pub use lpc_model::{
-    Binding, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, DomainError, Kind,
-    LpsType, LpsValue, NodeId, NodeName, Presentation, Shape, Slot, TextureBuffer,
-    TextureStorageFormat, ValueSpec,
-};
-
-pub use lpc_model::artifact::{LoadError, load_artifact};
-// Re-export foundation types from lpc-model for convenience
-pub use lpc_model::ArtifactSpec;
-pub use lpc_model::ChannelName;
-// Re-export foundation types from lpc-model for convenience
 pub use lpc_model::node::node_props::NodeProps;
-// Re-export foundation types from lpc-model for convenience
 pub use lpc_model::tree::tree_path::TreePath;
-// Re-export foundation types from lpc-model for convenience
-pub use lpc_model::node::node_prop_spec::NodePropSpec;
-// Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)
-pub use lpc_model::prop::binding;
-// Re-export foundation types from lpc-model for convenience
-pub use lpc_model::prop::prop_path::PropPath;
-// Foundation modules (same paths as upstream `lp-domain` / `lpv-model` for `crate::kind::` etc.)
-pub use lpc_model::prop::shape;
+pub use lpc_model::{
+    ChannelName, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, DomainError, Kind,
+    NodeId, NodeName, NodePropSpec, PropPath,
+};
+pub use lpc_source::prop::{binding, shape};
+pub use lpc_source::{
+    ArtifactSpec, Binding, LoadError, NodeConfig, Presentation, Shape, Slot, TextureSpec,
+    ValueSpec, load_artifact,
+};
+pub use lps_shared::{LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat};

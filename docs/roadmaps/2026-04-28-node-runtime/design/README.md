@@ -25,6 +25,25 @@ These files build on each other; read in order.
 | 07 | [sync](07-sync.md)                                              | Client/server mirror, `FrameId`, `NodeView` snapshots, delta computation                                |
 | 08 | [domain](08-domain.md)                                          | `ProjectDomain` trait, legacy / visual / future-domain mapping, M2 flag resolution                      |
 
+## M4.3a crate split update
+
+M4.3a moved the design vocabulary onto clearer crate roles:
+
+- `lpc-model`: shared concepts only (`NodeId`, `TreePath`,
+  `PropPath`, `FrameId`, `Kind`, `WireType`, `WireValue`).
+- `lpc-source`: authored/on-disk source model (`SrcArtifact`,
+  `SrcBinding`, `SrcShape`, `SrcValueSpec`).
+- `lpc-wire`: engine-client wire model (`WireMessage`,
+  `WireTreeDelta`, `WireProjectHandle`, state serialization helpers).
+- `lpc-engine`: runtime spine and shader/runtime conversion boundary.
+- `lp-engine-client`: client-side engine view/cache.
+
+Older design files may still use pre-M4.3a names such as
+`lpc-runtime`, `TreeDelta`, or `ValueSpec` in explanatory text. Read
+those as **`lpc-engine`**, **`lpc-wire::WireTreeDelta`**, and
+**`SrcValueSpec`/`WireValue` payloads** respectively, unless the text is explicitly describing
+runtime-only **`LpsValueF32`** behavior.
+
 ## Cross-references
 
 - Strawman + decisions log: [`../notes.md`](../notes.md). Files here
@@ -32,7 +51,8 @@ These files build on each other; read in order.
 - Prior-art synthesis: [`../m1-prior-art/synthesis.md`](../m1-prior-art/synthesis.md).
   Cited inline as "(prior-art §N)" where decisions trace to specific
   findings.
-- M2 as-built: `lp-core/lpc-model/`, `lp-core/lpc-runtime/`,
+- M2 as-built: `lp-core/lpc-model/`, `lp-core/lpc-engine/`,
+  `lp-core/lpc-source/`, `lp-core/lpc-wire/`,
   `lp-legacy/lpl-model/`, `lp-legacy/lpl-runtime/`. The current
   `NodeRuntime` trait is the kernel of `Node` (02); the current
   `ProjectRuntime` is the kernel of `ProjectRuntime<D>` (08).

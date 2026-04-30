@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 use lpc_model::lp_path::LpPathBuf;
 use lpc_model::nodes::NodeId;
 use lpc_model::project::FrameId;
-use lpc_model::project::api::NodeStatus;
+use lpc_wire::WireNodeStatus;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant};
 
 /// Project response from server
@@ -58,7 +58,10 @@ pub enum NodeChange {
     /// State updated
     StateUpdated { handle: NodeId, state_ver: FrameId },
     /// Status changed
-    StatusChanged { handle: NodeId, status: NodeStatus },
+    StatusChanged {
+        handle: NodeId,
+        status: WireNodeStatus,
+    },
     /// Node removed
     Removed { handle: NodeId },
 }
@@ -708,8 +711,8 @@ mod tests {
             },
             state: NodeState::Texture(tex_state),
         };
-        let json = lpc_model::json::to_string(&detail).unwrap();
-        let deserialized: SerializableNodeDetail = lpc_model::json::from_str(&json).unwrap();
+        let json = lpc_wire::json::to_string(&detail).unwrap();
+        let deserialized: SerializableNodeDetail = lpc_wire::json::from_str(&json).unwrap();
         match deserialized {
             SerializableNodeDetail::Texture {
                 path,
@@ -763,8 +766,8 @@ mod tests {
             theoretical_fps: None,
         };
 
-        let json = lpc_model::json::to_string(&response).unwrap();
-        let deserialized: SerializableProjectResponse = lpc_model::json::from_str(&json).unwrap();
+        let json = lpc_wire::json::to_string(&response).unwrap();
+        let deserialized: SerializableProjectResponse = lpc_wire::json::from_str(&json).unwrap();
         match deserialized {
             SerializableProjectResponse::GetChanges {
                 current_frame,

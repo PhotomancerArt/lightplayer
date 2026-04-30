@@ -9,11 +9,12 @@ use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lp_shared::output::OutputProvider;
 use lp_shared::time::TimeProvider;
-use lpc_model::{
-    AsLpPath, ClientMessage, LpPath, LpPathBuf,
+use lpc_engine::LpGraphics;
+use lpc_model::{AsLpPath, LpPath, LpPathBuf};
+use lpc_wire::{
+    message::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
-use lpc_engine::LpGraphics;
 use lpfs::LpFs;
 use lpl_model::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 
@@ -45,10 +46,10 @@ pub fn handle_client_message(
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
-        lpc_model::ClientRequest::Filesystem(fs_request) => {
+        lpc_wire::ClientRequest::Filesystem(fs_request) => {
             ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
         }
-        lpc_model::ClientRequest::LoadProject { path } => handle_load_project(
+        lpc_wire::ClientRequest::LoadProject { path } => handle_load_project(
             project_manager,
             base_fs,
             output_provider,
@@ -57,19 +58,19 @@ pub fn handle_client_message(
             graphics,
             path.as_path(),
         )?,
-        lpc_model::ClientRequest::UnloadProject { handle } => {
+        lpc_wire::ClientRequest::UnloadProject { handle } => {
             handle_unload_project(project_manager, memory_stats, handle)?
         }
-        lpc_model::ClientRequest::ProjectRequest { handle, request } => {
+        lpc_wire::ClientRequest::ProjectRequest { handle, request } => {
             handle_project_request(project_manager, handle, request, theoretical_fps)?
         }
-        lpc_model::ClientRequest::ListAvailableProjects => {
+        lpc_wire::ClientRequest::ListAvailableProjects => {
             handle_list_available_projects(project_manager, base_fs)?
         }
-        lpc_model::ClientRequest::ListLoadedProjects => {
+        lpc_wire::ClientRequest::ListLoadedProjects => {
             handle_list_loaded_projects(project_manager)?
         }
-        lpc_model::ClientRequest::StopAllProjects => {
+        lpc_wire::ClientRequest::StopAllProjects => {
             handle_stop_all_projects(project_manager, memory_stats)?
         }
     };
@@ -156,7 +157,7 @@ fn handle_load_project(
 fn handle_unload_project(
     project_manager: &mut ProjectManager,
     _memory_stats: Option<&MemoryStatsFn>,
-    handle: lpc_model::project::ProjectHandle,
+    handle: lpc_wire::WireProjectHandle,
 ) -> Result<ServerMessagePayload, ServerError> {
     log::info!("Unloading project handle {}", handle.id());
     project_manager.unload_project(handle)?;
@@ -166,8 +167,8 @@ fn handle_unload_project(
 /// Handle a ProjectRequest (project-specific request)
 fn handle_project_request(
     project_manager: &mut ProjectManager,
-    handle: lpc_model::project::ProjectHandle,
-    request: lpc_model::project::api::ProjectRequest,
+    handle: lpc_wire::WireProjectHandle,
+    request: lpc_wire::WireProjectRequest,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
     let project = project_manager
@@ -175,7 +176,7 @@ fn handle_project_request(
         .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
 
     match request {
-        lpc_model::project::api::ProjectRequest::GetChanges {
+        lpc_wire::WireProjectRequest::GetChanges {
             since_frame,
             detail_specifier,
         } => {

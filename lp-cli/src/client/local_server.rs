@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use lp_client::{AsyncLocalClientTransport, ClientTransport, create_local_transport_pair};
-use lpc_model::TransportError;
+use lpc_wire::{TransportError, message::ClientMessage};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
@@ -140,7 +140,7 @@ impl LocalServerTransport {
 
 #[async_trait::async_trait]
 impl ClientTransport for LocalServerTransport {
-    async fn send(&mut self, msg: lpc_model::ClientMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         match &mut self.client_transport {
             Some(transport) => transport.send(msg).await,
             None => Err(TransportError::ConnectionLost),
@@ -223,7 +223,7 @@ impl Drop for LocalServerTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::{ClientMessage, ClientRequest};
+    use lpc_wire::message::{ClientMessage, ClientRequest};
 
     #[tokio::test]
     async fn test_local_server_transport_creation() {

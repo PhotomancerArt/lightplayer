@@ -1,5 +1,12 @@
 # 05 — Slots, Props, namespaces
 
+> **M4.3a update:** Authored slot/source schema moved to
+> `lpc-source` (`SrcShape`, `SrcSlot`, `SrcValueSpec`,
+> `SrcBinding`). Shared paths/kinds/value shapes remain in
+> `lpc-model`. Runtime property reflection is
+> `lpc-engine::RuntimePropAccess` over `LpsValueF32`; client-side
+> views use `lp-engine-client::WirePropAccess` over `WireValue`.
+
 Two distinct concepts that share a structural type system but live
 in different worlds.
 
@@ -318,24 +325,22 @@ Cross-cutting validation that touches both schema and wire:
 - **`Slot.bind` Kind matches Slot Kind.** Caught at artifact load
   if we're strict; at resolution if we're lenient. M5: lenient,
   warn at resolution.
-- **Override `Binding::Literal`'s `LpsValue` shape matches
-  Shape.storage().** A scalar slot can't accept a struct literal.
-  Caught at config-load by `ValueSpec::from_toml_for_kind`
-  (already shipped in M2).
+- **Override `Binding::Literal`'s `WireValue` / `SrcValueSpec` shape matches
+  `Shape.storage()` / `WireType`.** A scalar slot can't accept a struct literal.
+  Caught at config-load by existing value-spec helpers
+  (`from_toml_for_kind`; naming migrates with M4.3a).
 
 ## Where this code lives
 
-- **`lpc-model/src/prop/`** — `Prop<T>` (shipped), `Slot` /
-  `Shape` / `Kind` / `Constraint` (shipped via `prop::shape` etc.),
-  `Binding` (shipped).
-- **`lpc-model/src/node/node_props.rs`** — `NodeProps` trait
-  (shipped, will be retired in M5; the new `PropAccess` derive
-  replaces it for produced reflection).
-- **`lpc-runtime/src/resolver/`** — new in M5; the resolver cache
-  + binding stack.
-- **The `PropAccess` derive** — new in M4; lands as
-  `lpc-derive` (or stays inside `lpc-runtime` if no other crates
-  consume it). M5 hardens the macro.
+- **`lpc-source/src/prop/`** (after M4.3a) — authored `SrcSlot` /
+  `SrcShape`, `SrcBinding`; foundation `Kind` / constraints may remain in
+  `lpc-model` per split notes.
+- **`lpc-engine`** — `Prop<T>` (runtime introspection surfaces through
+  `RuntimePropAccess`); **`lpc-engine/src/resolver/`** — resolver cache and
+  binding stack (targets M4.3 spine).
+- **`lp-legacy/lpl-model/...`** — legacy `NodeProps` trait (retires M5).
+- **Derived reflection** — `RuntimePropAccess` + optional `lpc-derive`
+  crate (or temporary home in `lpc-engine`).
 
 ## Open questions
 
@@ -346,8 +351,7 @@ Cross-cutting validation that touches both schema and wire:
 - **`PropAccess` `get` for nested struct paths.** `outputs[0].rgb`
   on a `Vec3` output: the derive macro needs to either flatten or
   recurse. Implementation detail; pin in M4.
-- **Texture and `LpsValue`.** The legacy `TextureBuffer` is opaque
-  bytes; we store it as `LpsValue::Texture(...)` on the wire,
-  but the in-memory `Prop<TextureBuffer>` is the typed version.
-  Lossy round-trip for the wire is acceptable (the editor doesn't
-  need pixel data, just metadata + thumbnail). Pin in M4.
+- **Texture metadata on wire.** The legacy `TextureBuffer` is opaque
+  bytes in-process (`LpsValueF32`). On the wire, ship **`WireValue::Texture`**
+  metadata only; the client's `Prop` mirror never holds GPU bytes. Lossy by
+  design; thumbnails use a separate channel. Pin detail in M4 / M4.4 sync.

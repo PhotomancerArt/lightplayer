@@ -14,6 +14,7 @@ hashbrown = { workspace = true }
 lp-client = { path = "../../lp-core/lp-client", features = ["serial", "emu"] }
 lp-engine-client = { path = "../../lp-core/lp-engine-client" }
 lpc-model = { path = "../../lp-core/lpc-model" }
+lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpl-model = { path = "../../lp-legacy/lpl-model", default-features = false }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }

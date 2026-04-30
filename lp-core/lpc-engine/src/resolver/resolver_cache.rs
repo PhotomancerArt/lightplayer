@@ -55,11 +55,13 @@ mod tests {
     use super::{PropPath, ResolvedSlot, ResolverCache};
     use crate::resolver::resolve_source::ResolveSource;
     use alloc::vec::Vec;
-    use lpc_model::{FrameId, LpsValue};
+    use lpc_model::FrameId;
+    use lpc_model::prop::prop_path::Segment;
+    use lps_shared::LpsValueF32;
 
     fn make_slot(value: f32, frame: i64) -> ResolvedSlot {
         ResolvedSlot::new(
-            LpsValue::F32(value),
+            LpsValueF32::F32(value),
             FrameId::new(frame),
             ResolveSource::Default,
         )
@@ -72,7 +74,7 @@ mod tests {
     fn first_seg_is_field(path: &PropPath, expected: &str) -> bool {
         matches!(
             path.first(),
-            Some(lps_shared::path::LpsPathSeg::Field(s)) if s == expected
+            Some(Segment::Field(s)) if s == expected
         )
     }
 

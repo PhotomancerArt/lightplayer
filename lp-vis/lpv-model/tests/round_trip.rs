@@ -9,9 +9,9 @@
 //! - `cargo test -p lpv-model --features std --test round_trip`
 //! - `cargo test -p lpv-model --features std,schema-gen --test round_trip`
 
-#[cfg(feature = "schema-gen")]
-use lpc_model::artifact::artifact::Artifact;
 use lpc_model::lp_path::LpPathBuf;
+#[cfg(feature = "schema-gen")]
+use lpc_source::artifact::artifact::Artifact;
 use lpfs::lp_fs_std::LpFsStd;
 use lpv_model::load_artifact;
 use lpv_model::visual::{Effect, Live, Pattern, Playlist, Stack, Transition};
@@ -168,7 +168,7 @@ fn playlist_corpus_validates_against_schema() {
 #[cfg(feature = "schema-gen")]
 #[test]
 fn slot_wire_json_schema_rejects_malformed_slot_tables() {
-    use lpc_model::prop::shape::Slot;
+    use lpc_source::prop::shape::Slot;
 
     let root = schemars::schema_for!(Slot);
     let schema_json = serde_json::to_value(&root).expect("schema→json");

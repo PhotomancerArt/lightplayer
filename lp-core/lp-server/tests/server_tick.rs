@@ -6,8 +6,8 @@ use core::cell::RefCell;
 use lp_engine_client::ClientProjectView;
 use lp_server::{Graphics, LpGraphics, LpServer};
 use lp_shared::ProjectBuilder;
-use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_engine::MemoryOutputProvider;
+use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]
@@ -213,7 +213,7 @@ fn test_server_tick_propagates_to_projects() {
 /// Sync the client view with the server project
 fn sync_client_view_from_server(
     server: &LpServer,
-    project_handle: lpc_model::project::handle::ProjectHandle,
+    project_handle: lpc_wire::WireProjectHandle,
     client_view: &mut ClientProjectView,
 ) {
     let project = server

@@ -1,5 +1,10 @@
 # 03 — `Artifact`, `ArtifactSpec`, `ArtifactManager`
 
+> **M4.3a update:** Authored artifact/source types now live in
+> `lpc-source`; runtime loading/cache/manager behavior lives in
+> `lpc-engine`. Older sections that say `lpc-model::artifact`
+> should be read as `lpc-source::artifact`.
+
 The **artifact** is a Lightplayer's first-class novelty over a
 plain "scene tree." It's the on-disk *class* / prototype, separate
 from any one running instance.
@@ -117,7 +122,7 @@ where
 This handles the **Resolved → Loaded** transition (parse + schema
 validate) only. Prepare is the manager's job.
 
-## `ArtifactManager` (lpc-runtime, lands in M4)
+## `ArtifactManager` (`lpc-engine`, lands in M4)
 
 The manager owns:
 
@@ -259,18 +264,16 @@ pub struct ArtifactRef<A> {
 For the prototype, this can degenerate to `Rc<ArtifactEntry<A>>`
 on host. ESP32 single-thread justifies the simple impl.
 
-## What about `lpc-model` vs `lpc-runtime`?
+## What about crates? (`lpc-model` / `lpc-source` / `lpc-engine`)
 
-- **`lpc-model::artifact`** owns the trait + the loader + spec
-  type. No state, no manager. This is the wire-and-disk interface.
-- **`lpc-runtime::artifact_manager`** owns the manager + state
-  machine + refcount + `ArtifactRef`. This is the runtime
-  convenience.
+- **Authored artifact types**, TOML load glue, and `ArtifactSpec` usage on disk
+  belong in **`lpc-source`** (plus shared primitives in **`lpc-model`**). See the
+  M4.3a banner at top.
+- **`lpc-engine`** hosts **`ArtifactManager`**, refcounting, and **`ArtifactRef`**
+  transitions — this replaces older **`lpc-runtime::artifact_manager`** wording.
 
-Splitting this way keeps `lpc-model` pure data (good for
-filetests, schema gen, lpv-model consumers that want the types but
-not the manager), while the manager lives where it can use `LpFs`
-and friends.
+Keeping managers in the spine crate preserves `LpFs`, fs-watch, and tick access
+without dragging them into **`lp-engine-client`**.
 
 ## Worked examples
 

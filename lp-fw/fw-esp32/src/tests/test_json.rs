@@ -13,7 +13,7 @@ extern crate alloc;
 
 use alloc::vec;
 use lpc_model::lp_path::AsLpPathBuf;
-use lpc_model::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
+use lpc_wire::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
 use lpl_model::LegacyServerMessage;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
@@ -51,7 +51,7 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                     },
                     frame_count,
                     loaded_projects: vec![LoadedProject {
-                        handle: lpc_model::project::ProjectHandle::new(1),
+                        handle: lpc_wire::WireProjectHandle::new(1),
                         path: "projects/test".as_path_buf(),
                     }],
                     uptime_ms: frame_count * 1000,

@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn test_output_config_with_options_deserialize() {
         let json = r#"{"GpioStrip": {"pin": 18, "options": {"interpolation_enabled": true, "dithering_enabled": true, "lut_enabled": true, "brightness": 0.25}}}"#;
-        let config: OutputConfig = lpc_model::json::from_str(json).unwrap();
+        let config: OutputConfig = lpc_wire::json::from_str(json).unwrap();
         match &config {
             OutputConfig::GpioStrip { pin, options } => {
                 assert_eq!(*pin, 18);

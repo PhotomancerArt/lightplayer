@@ -4,9 +4,9 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_shared::ProjectBuilder;
+use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lpc_model::AsLpPath;
 use lpc_model::nodes::NodeSpecifier;
-use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lpfs::LpFsMemory;
 use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
 
@@ -77,7 +77,7 @@ fn test_partial_state_updates() {
     let initial_response = runtime
         .get_changes(
             lpc_model::FrameId::default(),
-            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
@@ -116,7 +116,7 @@ fn test_partial_state_updates() {
     let lamp_colors_response = runtime
         .get_changes(
             initial_frame,
-            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();
@@ -186,7 +186,7 @@ fn test_partial_state_updates() {
         gamma_correction: None,
     };
     let config_json =
-        lpc_model::json::to_string(&new_config).expect("Failed to serialize fixture config");
+        lpc_wire::json::to_string(&new_config).expect("Failed to serialize fixture config");
     fs.borrow_mut()
         .write_file_mut(fixture_config_path.as_path(), config_json.as_bytes())
         .unwrap();
@@ -203,7 +203,7 @@ fn test_partial_state_updates() {
     let mapping_response = runtime
         .get_changes(
             after_lamp_colors_frame,
-            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![fixture_handle]),
             None,
         )
         .unwrap();

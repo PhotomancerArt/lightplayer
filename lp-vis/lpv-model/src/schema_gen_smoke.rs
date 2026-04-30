@@ -6,21 +6,16 @@
 #[cfg(test)]
 mod tests {
     use crate::LpsType;
-    use crate::NodeName;
     use crate::constraint::Constraint;
     use crate::kind::{Colorspace, Dimension, InterpMethod, Kind, Unit};
     use crate::presentation::Presentation;
-    use crate::value_spec::{TextureSpec, ValueSpec};
     use crate::{
-        Effect, EffectRef, Live, LiveCandidate, ParamsTable, Pattern, Playlist, PlaylistBehavior,
-        PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
+        ArtifactSpec, Binding, ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId,
+        NodeName, NodePropSpec, ParamsTable, Pattern, Playlist, PlaylistBehavior, PlaylistEntry,
+        ShaderRef, Shape, Slot, Stack, TextureSpec, Transition, TransitionRef, TreePath, ValueSpec,
+        VisualInput,
     };
-    use lpc_model::node::node_id::NodeId;
-    use lpc_model::node::node_prop_spec::NodePropSpec;
-    use lpc_model::prop::binding::Binding;
-    use lpc_model::prop::shape::{Shape, Slot};
-    use lpc_model::tree::tree_path::{NodePathSegment, TreePath};
-    use lpc_model::{ArtifactSpec, ChannelName};
+    use lpc_model::tree::tree_path::NodePathSegment;
 
     macro_rules! assert_schema_compiles {
         ($t:ty) => {{
@@ -31,16 +26,16 @@ mod tests {
     }
 
     #[test]
-    fn schema_uid() {
-        assert_schema_compiles!(Uid);
+    fn schema_node_id() {
+        assert_schema_compiles!(NodeId);
     }
     #[test]
-    fn schema_name() {
-        assert_schema_compiles!(Name);
+    fn schema_node_name() {
+        assert_schema_compiles!(NodeName);
     }
     #[test]
-    fn schema_node_path() {
-        assert_schema_compiles!(NodePath);
+    fn schema_tree_path() {
+        assert_schema_compiles!(TreePath);
     }
     #[test]
     fn schema_node_path_seg() {

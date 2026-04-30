@@ -4,7 +4,7 @@
 //! Works with both emulator and hardware serial (future) via factory functions.
 
 use crate::transport::ClientTransport;
-use lpc_model::{ClientMessage, TransportError};
+use lpc_wire::{TransportError, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};

@@ -22,6 +22,7 @@ egui = "0.30"
 eframe = "0.30"
 notify = "6"
 lpc-model = { path = "../lp-core/lpc-model" }
+lpc-wire = { path = "../lp-core/lpc-wire" }
 lpl-model = { path = "../lp-legacy/lpl-model", default-features = false }
 lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
@@ -51,6 +52,7 @@ lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-model = { path = "../lp-core/lpc-model" }
+lpc-wire = { path = "../lp-core/lpc-wire" }
 serde_json = "1"
 
 [features]

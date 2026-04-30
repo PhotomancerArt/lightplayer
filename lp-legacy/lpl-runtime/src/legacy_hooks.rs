@@ -18,11 +18,6 @@ use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use log;
 use lp_perf::EVENT_FRAME;
-use lpc_model::AsLpPath;
-use lpc_model::{
-    FrameId, LpPathBuf, NodeId,
-    project::api::{ApiNodeSpecifier, NodeStatus as ApiNodeStatus},
-};
 use lpc_engine::error::Error;
 use lpc_engine::nodes::NodeRuntime;
 use lpc_engine::output::OutputProvider;
@@ -30,6 +25,9 @@ use lpc_engine::panic_node::catch_node_panic;
 use lpc_engine::project::ProjectRuntime;
 use lpc_engine::project::project_runtime::{NodeEntry, NodeStatus};
 use lpc_engine::runtime::frame_time::FrameTime;
+use lpc_model::AsLpPath;
+use lpc_model::{FrameId, LpPathBuf, NodeId};
+use lpc_wire::{ApiNodeSpecifier, WireNodeStatus as ApiNodeStatus};
 use lpfs::{FsChange, LpFs};
 use lpl_model::{NodeChange, NodeConfig, NodeDetail, NodeKind, NodeState, ProjectResponse};
 
@@ -76,11 +74,11 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
                         details: format!("Failed to read: {e:?}"),
                     })?;
                 Some(
-                    lpc_model::json::from_slice::<lpl_model::nodes::texture::TextureConfig>(&data)
+                    lpc_wire::json::from_slice::<lpl_model::nodes::texture::TextureConfig>(&data)
                         .map_err(|e| Error::Parse {
-                            file: node_json_path.as_str().to_string(),
-                            error: format!("Failed to parse texture config: {e}"),
-                        })?,
+                        file: node_json_path.as_str().to_string(),
+                        error: format!("Failed to parse texture config: {e}"),
+                    })?,
                 )
             } else {
                 None
@@ -101,11 +99,11 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
                         details: format!("Failed to read: {e:?}"),
                     })?;
                 Some(
-                    lpc_model::json::from_slice::<lpl_model::nodes::fixture::FixtureConfig>(&data)
+                    lpc_wire::json::from_slice::<lpl_model::nodes::fixture::FixtureConfig>(&data)
                         .map_err(|e| Error::Parse {
-                            file: node_json_path.as_str().to_string(),
-                            error: format!("Failed to parse fixture config: {e}"),
-                        })?,
+                        file: node_json_path.as_str().to_string(),
+                        error: format!("Failed to parse fixture config: {e}"),
+                    })?,
                 )
             } else {
                 None
@@ -126,7 +124,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
                         details: format!("Failed to read: {e:?}"),
                     })?;
                 Some(
-                    lpc_model::json::from_slice::<lpl_model::nodes::shader::ShaderConfig>(&data)
+                    lpc_wire::json::from_slice::<lpl_model::nodes::shader::ShaderConfig>(&data)
                         .map_err(|e| Error::Parse {
                             file: node_json_path.as_str().to_string(),
                             error: format!("Failed to parse shader config: {e}"),
@@ -151,7 +149,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
                         details: format!("Failed to read: {e:?}"),
                     })?;
                 Some(
-                    lpc_model::json::from_slice::<lpl_model::nodes::output::OutputConfig>(&data)
+                    lpc_wire::json::from_slice::<lpl_model::nodes::output::OutputConfig>(&data)
                         .map_err(|e| Error::Parse {
                             file: node_json_path.as_str().to_string(),
                             error: format!("Failed to parse output config: {e}"),

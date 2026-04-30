@@ -4,8 +4,8 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lp_shared::ProjectBuilder;
-use lpc_model::AsLpPath;
 use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
+use lpc_model::AsLpPath;
 use lpfs::LpFsMemory;
 
 #[test]
@@ -68,7 +68,7 @@ fn test_node_json_modification() {
     let response = runtime
         .get_changes(
             before_frame,
-            &lpc_model::project::api::ApiNodeSpecifier::ByHandles(vec![shader_handle]),
+            &lpc_wire::ApiNodeSpecifier::ByHandles(vec![shader_handle]),
             None,
         )
         .unwrap();

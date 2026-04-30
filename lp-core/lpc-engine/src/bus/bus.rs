@@ -3,7 +3,8 @@
 use crate::bus::bus_error::BusError;
 use crate::bus::channel_entry::ChannelEntry;
 use alloc::collections::BTreeMap;
-use lpc_model::{ChannelName, FrameId, Kind, LpsValue, NodeId, PropPath};
+use lpc_model::{ChannelName, FrameId, Kind, NodeId, PropPath};
+use lps_shared::LpsValueF32;
 
 /// Runtime registry of bus channels.
 ///
@@ -60,7 +61,7 @@ impl Bus {
     /// Publish `value` on `channel`. Bumps `last_writer_frame` and
     /// replaces `last_value`. No-op if no writer has been claimed
     /// for `channel`.
-    pub fn publish(&mut self, channel: &ChannelName, value: LpsValue, frame: FrameId) {
+    pub fn publish(&mut self, channel: &ChannelName, value: LpsValueF32, frame: FrameId) {
         if let Some(entry) = self.channels.get_mut(channel) {
             if entry.writer.is_some() {
                 entry.last_value = Some(value);
@@ -70,7 +71,7 @@ impl Bus {
     }
 
     /// Read the last published value, cross-tick stable.
-    pub fn read(&self, channel: &ChannelName) -> Option<&LpsValue> {
+    pub fn read(&self, channel: &ChannelName) -> Option<&LpsValueF32> {
         self.channels
             .get(channel)
             .and_then(|e| e.last_value.as_ref())
@@ -93,8 +94,9 @@ impl Bus {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bus, BusError, ChannelName, FrameId, Kind, LpsValue, NodeId};
+    use super::{Bus, BusError, ChannelName, FrameId, Kind, NodeId};
     use lpc_model::PropPath;
+    use lps_shared::LpsValueF32;
 
     fn ch(name: &str) -> ChannelName {
         ChannelName(alloc::string::String::from(name))
@@ -119,11 +121,11 @@ mod tests {
         .unwrap();
 
         // Publish
-        bus.publish(&channel, LpsValue::F32(3.5), FrameId::new(10));
+        bus.publish(&channel, LpsValueF32::F32(3.5), FrameId::new(10));
 
         // Read
         let val = bus.read(&channel).unwrap();
-        assert!(matches!(val, LpsValue::F32(3.5)));
+        assert!(matches!(val, LpsValueF32::F32(3.5)));
         assert_eq!(bus.last_writer_frame(&channel).as_i64(), 10);
     }
 
@@ -164,7 +166,7 @@ mod tests {
         let mut bus = Bus::new();
         let channel = ch("unclaimed");
 
-        bus.publish(&channel, LpsValue::F32(5.0), FrameId::new(5));
+        bus.publish(&channel, LpsValueF32::F32(5.0), FrameId::new(5));
 
         assert!(bus.read(&channel).is_none());
         assert_eq!(bus.last_writer_frame(&channel).as_i64(), 0);

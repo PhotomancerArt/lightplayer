@@ -3,22 +3,23 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::{FrameId, TreeDelta};
+use lpc_model::FrameId;
+use lpc_wire::WireTreeDelta;
 
 use super::{NodeEntry, NodeTree};
 
 /// Generate tree deltas since a given frame.
 ///
 /// Returns deltas for:
-/// 1. Entries whose `created_frame > since` (or all entries if `since == 0`) → `TreeDelta::Created`
-/// 2. Entries whose `children_ver > since` (and not newly created) → `TreeDelta::ChildrenChanged`
-/// 3. Entries whose `change_frame > since` (and not newly created) → `TreeDelta::EntryChanged`
+/// 1. Entries whose `created_frame > since` (or all entries if `since == 0`) → `WireTreeDelta::Created`
+/// 2. Entries whose `children_ver > since` (and not newly created) → `WireTreeDelta::ChildrenChanged`
+/// 3. Entries whose `change_frame > since` (and not newly created) → `WireTreeDelta::EntryChanged`
 ///
 /// `since == 0` is a special case that returns all entries (bulk sync). This allows
 /// the initial sync to work correctly even though root is created at frame 0.
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
-pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: FrameId) -> Vec<TreeDelta>
+pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: FrameId) -> Vec<WireTreeDelta>
 where
     N: Clone,
 {
@@ -36,7 +37,7 @@ where
     let created_ids: alloc::collections::BTreeSet<lpc_model::NodeId> = deltas
         .iter()
         .filter_map(|d| {
-            if let TreeDelta::Created { id, .. } = d {
+            if let WireTreeDelta::Created { id, .. } = d {
                 Some(*id)
             } else {
                 None
@@ -47,7 +48,7 @@ where
     // Pass 2: ChildrenChanged (children_ver > since, but not newly created)
     for entry in &entries {
         if entry.children_ver.0 > since.0 && !created_ids.contains(&entry.id) {
-            deltas.push(TreeDelta::ChildrenChanged {
+            deltas.push(WireTreeDelta::ChildrenChanged {
                 id: entry.id,
                 children: entry.children.clone(),
                 children_ver: entry.children_ver,
@@ -58,7 +59,7 @@ where
     // Pass 3: EntryChanged (change_frame > since, but not newly created)
     for entry in &entries {
         if entry.change_frame.0 > since.0 && !created_ids.contains(&entry.id) {
-            deltas.push(TreeDelta::EntryChanged {
+            deltas.push(WireTreeDelta::EntryChanged {
                 id: entry.id,
                 status: entry.status.clone(),
                 state: (&entry.state).into(),
@@ -78,14 +79,14 @@ fn collect_created_deltas<N>(
     tree: &NodeTree<N>,
     id: lpc_model::NodeId,
     since: FrameId,
-    deltas: &mut Vec<TreeDelta>,
+    deltas: &mut Vec<WireTreeDelta>,
 ) where
     N: Clone,
 {
     if let Some(entry) = tree.get(id) {
         let include = since.0 == 0 || entry.created_frame.0 > since.0;
         if include {
-            deltas.push(TreeDelta::Created {
+            deltas.push(WireTreeDelta::Created {
                 id: entry.id,
                 path: entry.path.clone(),
                 parent: entry.parent,
@@ -113,9 +114,8 @@ mod tests {
     use crate::tree::{EntryState, NodeTree};
     use alloc::vec;
     use alloc::vec::Vec;
-    use lpc_model::{
-        ChildKind, EntryStateView, FrameId, NodeId, NodeName, SlotIdx, TreeDelta, TreePath,
-    };
+    use lpc_model::{FrameId, NodeId, NodeName, TreePath};
+    use lpc_wire::{SlotIdx, WireChildKind, WireEntryState, WireTreeDelta};
 
     fn make_tree() -> NodeTree<()> {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
@@ -132,7 +132,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -141,7 +141,7 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(1) },
+                WireChildKind::Input { source: SlotIdx(1) },
                 FrameId::new(2),
             )
             .unwrap();
@@ -149,9 +149,9 @@ mod tests {
         let deltas = tree_deltas_since(&tree, FrameId::new(0));
 
         // Should have 3 Created deltas (root + a + b)
-        let created: Vec<&TreeDelta> = deltas
+        let created: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::Created { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
             .collect();
         assert_eq!(created.len(), 3);
 
@@ -159,7 +159,7 @@ mod tests {
         let ids: Vec<NodeId> = created
             .iter()
             .map(|d| {
-                if let TreeDelta::Created { id, .. } = **d {
+                if let WireTreeDelta::Created { id, .. } = **d {
                     id
                 } else {
                     panic!()
@@ -180,15 +180,15 @@ mod tests {
             root,
             NodeName::parse("a").unwrap(),
             NodeName::parse("vis").unwrap(),
-            ChildKind::Input { source: SlotIdx(0) },
+            WireChildKind::Input { source: SlotIdx(0) },
             FrameId::new(1),
         )
         .unwrap();
 
         let deltas = tree_deltas_since(&tree, FrameId::new(1));
-        let created: Vec<&TreeDelta> = deltas
+        let created: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::Created { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
             .collect();
         // Only root was created at frame 0, so nothing new at frame 1
         assert!(created.is_empty());
@@ -204,7 +204,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -212,36 +212,36 @@ mod tests {
         // Change status at frame 5
         tree.get_mut(a)
             .unwrap()
-            .set_status(lpc_model::project::api::NodeStatus::Ok, FrameId::new(5));
+            .set_status(lpc_wire::WireNodeStatus::Ok, FrameId::new(5));
 
         let deltas = tree_deltas_since(&tree, FrameId::new(0));
 
         // Bulk sync since frame 0 should include all entries
-        let created: Vec<&TreeDelta> = deltas
+        let created: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::Created { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
             .collect();
 
         assert_eq!(created.len(), 2); // root + a
 
         // Since frame 1: a was created at frame 1, so 1 > 1 is false, no Created
         let deltas = tree_deltas_since(&tree, FrameId::new(1));
-        let created: Vec<&TreeDelta> = deltas
+        let created: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::Created { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
             .collect();
         assert_eq!(created.len(), 0); // a already seen at frame 1
 
         // Now check deltas since frame 4 (after a was created but before status change)
         let deltas = tree_deltas_since(&tree, FrameId::new(4));
-        let changed: Vec<&TreeDelta> = deltas
+        let changed: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::EntryChanged { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::EntryChanged { .. }))
             .collect();
         assert_eq!(changed.len(), 1);
-        if let TreeDelta::EntryChanged { id, status, .. } = changed[0] {
+        if let WireTreeDelta::EntryChanged { id, status, .. } = changed[0] {
             assert_eq!(*id, a);
-            assert!(matches!(status, lpc_model::project::api::NodeStatus::Ok));
+            assert!(matches!(status, lpc_wire::WireNodeStatus::Ok));
         }
     }
 
@@ -256,7 +256,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(5),
             )
             .unwrap();
@@ -265,12 +265,12 @@ mod tests {
         let deltas = tree_deltas_since(&tree, FrameId::new(1));
 
         // Root's children changed (a was added)
-        let children_changed: Vec<&TreeDelta> = deltas
+        let children_changed: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::ChildrenChanged { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::ChildrenChanged { .. }))
             .collect();
         assert_eq!(children_changed.len(), 1);
-        if let TreeDelta::ChildrenChanged { id, children, .. } = children_changed[0] {
+        if let WireTreeDelta::ChildrenChanged { id, children, .. } = children_changed[0] {
             assert_eq!(*id, root);
             assert!(children.contains(&a));
         }
@@ -289,7 +289,7 @@ mod tests {
                 root,
                 NodeName::parse("parent").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Sidecar {
+                WireChildKind::Sidecar {
                     name: NodeName::parse("parent").unwrap(),
                 },
                 FrameId::new(1),
@@ -300,7 +300,7 @@ mod tests {
                 parent,
                 NodeName::parse("child").unwrap(),
                 NodeName::parse("fx").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(2),
             )
             .unwrap();
@@ -311,7 +311,7 @@ mod tests {
         let created_order: Vec<NodeId> = deltas
             .iter()
             .filter_map(|d| {
-                if let TreeDelta::Created { id, .. } = d {
+                if let WireTreeDelta::Created { id, .. } = d {
                     Some(*id)
                 } else {
                     None
@@ -333,7 +333,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -346,20 +346,20 @@ mod tests {
 
         // Should have ChildrenChanged for root (a was removed)
         // No Destroyed delta - client infers from ChildrenChanged
-        let children_changed: Vec<&TreeDelta> = deltas
+        let children_changed: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::ChildrenChanged { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::ChildrenChanged { .. }))
             .collect();
         assert_eq!(children_changed.len(), 1);
-        if let TreeDelta::ChildrenChanged { id, children, .. } = children_changed[0] {
+        if let WireTreeDelta::ChildrenChanged { id, children, .. } = children_changed[0] {
             assert_eq!(*id, root);
             assert!(!children.contains(&a)); // a not in children anymore
         }
 
         // a's Created should NOT be in deltas (it's tombstoned)
-        let created: Vec<&TreeDelta> = deltas
+        let created: Vec<&WireTreeDelta> = deltas
             .iter()
-            .filter(|d| matches!(d, TreeDelta::Created { .. }))
+            .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
             .collect();
         assert!(created.is_empty());
     }
@@ -378,7 +378,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -387,7 +387,7 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(1) },
+                WireChildKind::Input { source: SlotIdx(1) },
                 FrameId::new(2),
             )
             .unwrap();
@@ -429,7 +429,7 @@ mod tests {
         {
             let b_entry = server_tree.get_mut(b).unwrap();
             b_entry.set_state(EntryState::Alive(()), FrameId::new(5));
-            b_entry.set_status(lpc_model::project::api::NodeStatus::Ok, FrameId::new(5));
+            b_entry.set_status(lpc_wire::WireNodeStatus::Ok, FrameId::new(5));
         }
 
         // Get deltas since frame 2 (after b was created)
@@ -442,11 +442,8 @@ mod tests {
         assert!(client_tree.get(a).is_none()); // a removed
         assert!(client_tree.get(b).is_some()); // b still there
         let client_b = client_tree.get(b).unwrap();
-        assert!(matches!(
-            client_b.status,
-            lpc_model::project::api::NodeStatus::Ok
-        ));
-        assert!(matches!(client_b.state, EntryStateView::Alive));
+        assert!(matches!(client_b.status, lpc_wire::WireNodeStatus::Ok));
+        assert!(matches!(client_b.state, WireEntryState::Alive));
 
         // Verify root's children list updated
         let client_root = client_tree.get(root).unwrap();

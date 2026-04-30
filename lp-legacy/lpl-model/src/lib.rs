@@ -1,6 +1,6 @@
 //! lpl-model: legacy node configs and legacy-aware payload
 //! types for LightPlayer 2025 (Texture / Shader / Output /
-//! Fixture). The protocol envelope itself lives in lpc-model.
+//! Fixture). The protocol envelope lives in `lpc-wire`.
 
 #![no_std]
 
@@ -16,17 +16,17 @@ pub use project::{
     SerializableProjectResponse,
 };
 
-pub type LegacyMessage = lpc_model::Message<SerializableProjectResponse>;
-pub type LegacyServerMessage = lpc_model::ServerMessage<SerializableProjectResponse>;
-pub type LegacyServerMsgBody = lpc_model::server::ServerMsgBody<SerializableProjectResponse>;
+pub type LegacyMessage = lpc_wire::Message<SerializableProjectResponse>;
+pub type LegacyServerMessage = lpc_wire::ServerMessage<SerializableProjectResponse>;
+pub type LegacyServerMsgBody = lpc_wire::server::ServerMsgBody<SerializableProjectResponse>;
 
 #[cfg(test)]
 mod legacy_message_tests {
     use super::{LegacyMessage, LegacyServerMessage};
     use lpc_model::AsLpPathBuf;
-    use lpc_model::message::{ClientMessage, ClientRequest};
-    use lpc_model::server::ServerMsgBody as ServerMessagePayload;
-    use lpc_model::server::{FsRequest, FsResponse};
+    use lpc_wire::message::{ClientMessage, ClientRequest};
+    use lpc_wire::server::ServerMsgBody as ServerMessagePayload;
+    use lpc_wire::server::{FsRequest, FsResponse};
 
     #[test]
     fn test_message_serialization() {
@@ -37,8 +37,8 @@ mod legacy_message_tests {
             }),
         };
         let message = LegacyMessage::Client(client_msg);
-        let json = lpc_model::json::to_string(&message).unwrap();
-        let deserialized: LegacyMessage = lpc_model::json::from_str(&json).unwrap();
+        let json = lpc_wire::json::to_string(&message).unwrap();
+        let deserialized: LegacyMessage = lpc_wire::json::from_str(&json).unwrap();
         match deserialized {
             LegacyMessage::Client(ClientMessage { id, msg }) => {
                 assert_eq!(id, 1);
@@ -64,8 +64,8 @@ mod legacy_message_tests {
             }),
         };
         let message = LegacyMessage::Server(server_msg);
-        let json = lpc_model::json::to_string(&message).unwrap();
-        let deserialized: LegacyMessage = lpc_model::json::from_str(&json).unwrap();
+        let json = lpc_wire::json::to_string(&message).unwrap();
+        let deserialized: LegacyMessage = lpc_wire::json::from_str(&json).unwrap();
         match deserialized {
             LegacyMessage::Server(LegacyServerMessage { id, msg }) => {
                 assert_eq!(id, 1);

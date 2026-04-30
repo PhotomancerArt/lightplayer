@@ -1,7 +1,6 @@
 use crate::prop::prop_path::PropPath;
 use crate::tree::tree_path::TreePath;
-use crate::{DomainError, NodeId};
-use lps_shared::LpsValueF32 as LpsValue;
+use crate::{DomainError, NodeId, WireValue};
 
 /// A **node instance** in the runtime graph: addressable, property-get/set.
 pub trait NodeProps {
@@ -12,16 +11,16 @@ pub trait NodeProps {
 
     /// Read a property; paths use [`PropPath`] (dot fields and `[index]`).
     /// Errors map to [`DomainError`] (e.g. unknown key or type mismatch when setting).
-    fn get_property(&self, prop: &PropPath) -> Result<LpsValue, DomainError>;
+    fn get_property(&self, prop: &PropPath) -> Result<WireValue, DomainError>;
     /// Write a property, validating shape against the domain model where applicable.
-    fn set_property(&mut self, prop: &PropPath, value: LpsValue) -> Result<(), DomainError>;
+    fn set_property(&mut self, prop: &PropPath, value: WireValue) -> Result<(), DomainError>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::NodeProps;
     use crate::tree::tree_path::TreePath;
-    use crate::{DomainError, LpsValue, NodeId, PropPath};
+    use crate::{DomainError, NodeId, PropPath, WireValue};
     use alloc::string::{String, ToString};
     use alloc::vec;
 
@@ -39,19 +38,19 @@ mod tests {
             &self.path
         }
 
-        fn get_property(&self, prop: &PropPath) -> Result<LpsValue, DomainError> {
+        fn get_property(&self, prop: &PropPath) -> Result<WireValue, DomainError> {
             match prop.first() {
                 Some(crate::prop::Segment::Field(name)) if name == "speed" => {
-                    Ok(LpsValue::F32(self.speed))
+                    Ok(WireValue::F32(self.speed))
                 }
                 _ => Err(DomainError::UnknownProperty(prop_path_to_string(prop))),
             }
         }
 
-        fn set_property(&mut self, prop: &PropPath, value: LpsValue) -> Result<(), DomainError> {
+        fn set_property(&mut self, prop: &PropPath, value: WireValue) -> Result<(), DomainError> {
             match prop.first() {
                 Some(crate::prop::Segment::Field(name)) if name == "speed" => match value {
-                    LpsValue::F32(v) => {
+                    WireValue::F32(v) => {
                         self.speed = v;
                         Ok(())
                     }
@@ -100,9 +99,9 @@ mod tests {
             speed: 1.0,
         };
         let prop = vec![crate::prop::Segment::Field(String::from("speed"))];
-        node.set_property(&prop, LpsValue::F32(3.5)).unwrap();
+        node.set_property(&prop, WireValue::F32(3.5)).unwrap();
         match node.get_property(&prop).unwrap() {
-            LpsValue::F32(v) => assert!((v - 3.5f32).abs() < 1e-5),
+            WireValue::F32(v) => assert!((v - 3.5f32).abs() < 1e-5),
             other => panic!("expected F32, got {other:?}"),
         }
     }

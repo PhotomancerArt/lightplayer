@@ -4,7 +4,8 @@ use crate::debug_ui::nodes::shader;
 use crate::debug_ui::nodes::{fixture, output, texture};
 use eframe::egui::{self, Color32};
 use lp_engine_client::project::ClientProjectView;
-use lpc_model::{NodeId, project::FrameId, project::api::NodeStatus};
+use lpc_model::{NodeId, project::FrameId};
+use lpc_wire::WireNodeStatus;
 use lpl_model::NodeKind;
 
 /// Render status panel
@@ -81,10 +82,12 @@ pub fn render_all_nodes_panel(
         ui.horizontal(|ui| {
             // Status indicator circle
             let status_color = match &entry.status {
-                NodeStatus::Ok => Color32::from_rgb(0, 255, 0), // Green
-                NodeStatus::Error(_) | NodeStatus::InitError(_) => Color32::from_rgb(255, 0, 0), // Red
-                NodeStatus::Warn(_) => Color32::from_rgb(255, 255, 0), // Yellow
-                NodeStatus::Created => Color32::from_rgb(128, 128, 128), // Gray
+                WireNodeStatus::Ok => Color32::from_rgb(0, 255, 0), // Green
+                WireNodeStatus::Error(_) | WireNodeStatus::InitError(_) => {
+                    Color32::from_rgb(255, 0, 0)
+                } // Red
+                WireNodeStatus::Warn(_) => Color32::from_rgb(255, 255, 0), // Yellow
+                WireNodeStatus::Created => Color32::from_rgb(128, 128, 128), // Gray
             };
 
             // Draw status indicator circle using painter

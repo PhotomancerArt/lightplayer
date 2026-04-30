@@ -84,12 +84,12 @@ pub fn parse_message_line(line: &str) -> Option<&str> {
 /// # Returns
 ///
 /// Serialized message string with `M!` prefix and newline
-pub fn serialize_command(cmd: &TestCommand) -> Result<String, lpc_model::TransportError> {
+pub fn serialize_command(cmd: &TestCommand) -> Result<String, lpc_wire::TransportError> {
     use alloc::format;
-    use lpc_model::json;
+    use lpc_wire::json;
 
     let json = json::to_string(cmd).map_err(|e| {
-        lpc_model::TransportError::Serialization(format!("Failed to serialize TestCommand: {e:?}"))
+        lpc_wire::TransportError::Serialization(format!("Failed to serialize TestCommand: {e:?}"))
     })?;
     Ok(format!("M!{json}\n"))
 }
@@ -107,7 +107,7 @@ pub fn serialize_command(cmd: &TestCommand) -> Result<String, lpc_model::Transpo
 /// * `Ok(Some(cmd))` if valid command
 /// * `Ok(None)` if line doesn't start with `M!` (not a message)
 /// * `Err` if JSON parsing fails
-pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lpc_model::TransportError> {
+pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lpc_wire::TransportError> {
     use alloc::format;
 
     let json_str = match parse_message_line(line) {
@@ -115,9 +115,9 @@ pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lpc_model:
         None => return Ok(None), // Not a message line
     };
 
-    use lpc_model::json;
+    use lpc_wire::json;
     let cmd: TestCommand = json::from_str(json_str).map_err(|e| {
-        lpc_model::TransportError::Deserialization(format!("Failed to parse TestCommand: {e:?}"))
+        lpc_wire::TransportError::Deserialization(format!("Failed to parse TestCommand: {e:?}"))
     })?;
     Ok(Some(cmd))
 }
@@ -133,12 +133,12 @@ pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lpc_model:
 /// # Returns
 ///
 /// Serialized message string with `M!` prefix and newline
-pub fn serialize_response(resp: &TestResponse) -> Result<String, lpc_model::TransportError> {
+pub fn serialize_response(resp: &TestResponse) -> Result<String, lpc_wire::TransportError> {
     use alloc::format;
-    use lpc_model::json;
+    use lpc_wire::json;
 
     let json = json::to_string(resp).map_err(|e| {
-        lpc_model::TransportError::Serialization(format!("Failed to serialize TestResponse: {e:?}"))
+        lpc_wire::TransportError::Serialization(format!("Failed to serialize TestResponse: {e:?}"))
     })?;
     Ok(format!("M!{json}\n"))
 }

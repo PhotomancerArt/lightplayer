@@ -10,7 +10,7 @@ use super::ClientTreeEntry;
 
 /// Client-side mirror of the node tree.
 ///
-/// Maintained by applying `TreeDelta`s from the server.
+/// Maintained by applying `WireTreeDelta`s from the server.
 #[derive(Clone, Debug)]
 pub struct ClientNodeTree {
     pub nodes: BTreeMap<NodeId, ClientTreeEntry>,

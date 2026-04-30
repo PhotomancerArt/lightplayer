@@ -6,8 +6,8 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::project::api::NodeStatus;
-use lpc_model::{ChildKind, EntryStateView, FrameId, NodeId, TreePath};
+use lpc_model::{FrameId, NodeId, TreePath};
+use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus};
 
 /// Client-side mirror of a `NodeEntry`.
 ///
@@ -18,11 +18,11 @@ pub struct ClientTreeEntry {
     pub id: NodeId,
     pub path: TreePath,
     pub parent: Option<NodeId>,
-    pub child_kind: Option<ChildKind>,
+    pub child_kind: Option<WireChildKind>,
     pub children: Vec<NodeId>,
 
-    pub status: NodeStatus,
-    pub state: EntryStateView,
+    pub status: WireNodeStatus,
+    pub state: WireEntryState,
 
     pub created_frame: FrameId,
     pub change_frame: FrameId,
@@ -39,9 +39,9 @@ impl ClientTreeEntry {
         id: NodeId,
         path: TreePath,
         parent: Option<NodeId>,
-        child_kind: Option<ChildKind>,
-        status: NodeStatus,
-        state: EntryStateView,
+        child_kind: Option<WireChildKind>,
+        status: WireNodeStatus,
+        state: WireEntryState,
         created_frame: FrameId,
         change_frame: FrameId,
         children_ver: FrameId,

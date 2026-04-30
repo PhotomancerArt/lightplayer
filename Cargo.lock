@@ -2760,6 +2760,7 @@ dependencies = [
  "lp-server",
  "lp-shared",
  "lpc-model",
+ "lpc-wire",
  "lpl-model",
  "pollster",
  "ser-write-json",
@@ -2816,6 +2817,7 @@ dependencies = [
  "lp-server",
  "lp-shared",
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "lpl-model",
  "lps-q32",
@@ -2841,6 +2843,7 @@ dependencies = [
  "lp-riscv-inst",
  "lp-shared",
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "lpl-model",
  "serde_json",
@@ -3953,6 +3956,7 @@ dependencies = [
  "lp-shader",
  "lp-shared",
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "lpir",
  "lpl-model",
@@ -3987,6 +3991,7 @@ dependencies = [
  "lp-riscv-inst",
  "lp-shared",
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "lpl-model",
  "serde",
@@ -4010,6 +4015,7 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "lpc-model",
+ "lpc-wire",
  "lpl-model",
 ]
 
@@ -4099,8 +4105,9 @@ dependencies = [
  "log",
  "lp-engine-client",
  "lp-shared",
+ "lpc-engine",
  "lpc-model",
- "lpc-runtime",
+ "lpc-wire",
  "lpfs",
  "lpl-model",
  "lpl-runtime",
@@ -4124,6 +4131,7 @@ dependencies = [
  "libm",
  "log",
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "lpl-model",
  "lps-shared",
@@ -4131,23 +4139,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpc-model"
-version = "40.0.0"
-dependencies = [
- "base64",
- "hashbrown 0.15.5",
- "lps-shared",
- "schemars",
- "ser-write-json",
- "serde",
- "serde-json-core",
- "serde_json",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "lpc-runtime"
+name = "lpc-engine"
 version = "40.0.0"
 dependencies = [
  "env_logger 0.11.9",
@@ -4159,6 +4151,7 @@ dependencies = [
  "lp-shader",
  "lp-shared",
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "lpir",
  "lpl-model",
@@ -4173,6 +4166,42 @@ dependencies = [
  "serde",
  "spin",
  "unwinding",
+]
+
+[[package]]
+name = "lpc-model"
+version = "40.0.0"
+dependencies = [
+ "hashbrown 0.15.5",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "lpc-source"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "schemars",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "lpc-wire"
+version = "40.0.0"
+dependencies = [
+ "base64",
+ "lpc-model",
+ "schemars",
+ "ser-write-json",
+ "serde",
+ "serde-json-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -4191,6 +4220,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lpc-model",
+ "lpc-source",
  "serde",
  "tempfile",
 ]
@@ -4233,8 +4263,8 @@ dependencies = [
  "base64",
  "hashbrown 0.15.5",
  "lpc-model",
+ "lpc-wire",
  "serde",
- "serde-json-core",
  "tempfile",
 ]
 
@@ -4248,8 +4278,9 @@ dependencies = [
  "lp-perf",
  "lp-shader",
  "lp-shared",
+ "lpc-engine",
  "lpc-model",
- "lpc-runtime",
+ "lpc-wire",
  "lpfs",
  "lpir",
  "lpl-model",
@@ -4384,6 +4415,7 @@ version = "40.0.0"
 dependencies = [
  "jsonschema",
  "lpc-model",
+ "lpc-source",
  "lpfs",
  "lps-shared",
  "schemars",

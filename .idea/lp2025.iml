@@ -78,6 +78,8 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-model/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-source/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-wire/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-legacy/lpl-model/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-legacy/lpl-runtime/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins/tests" isTestSource="true" />

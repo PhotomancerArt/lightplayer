@@ -2,7 +2,7 @@
 
 use lp_client::{LpClient, serializable_response_to_project_response};
 use lp_engine_client::ClientProjectView;
-use lpc_model::project::handle::ProjectHandle;
+use lpc_wire::WireProjectHandle as ProjectHandle;
 
 pub mod transport_emu_serial {
     pub use lp_client::transport_emu_serial::SerialEmuClientTransport;
@@ -16,7 +16,7 @@ pub async fn sync_emu_project_view(
 ) {
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lpc_model::project::api::ApiNodeSpecifier::All
+        lpc_wire::ApiNodeSpecifier::All
     } else {
         view.detail_specifier()
     };
@@ -36,7 +36,7 @@ pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
     use lp_engine_client::ClientProjectView;
-    use lpc_model::project::api::NodeStatus;
+    use lpc_wire::WireNodeStatus;
     use lpl_model::{NodeKind, NodeState};
 
     pub fn assert_shader_compiled_ok(view: &ClientProjectView, shader_path: &str) {
@@ -63,8 +63,8 @@ pub mod shader_emu_gate {
         );
 
         assert!(
-            matches!(entry.status, NodeStatus::Ok),
-            "shader must reach NodeStatus::Ok on firmware (embedded GLSL codegen); got {:?}",
+            matches!(entry.status, WireNodeStatus::Ok),
+            "shader must reach WireNodeStatus::Ok on firmware (embedded GLSL codegen); got {:?}",
             entry.status
         );
 

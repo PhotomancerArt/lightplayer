@@ -1,6 +1,10 @@
 
 ---
 
+> **Naming (planning onward):** `lpc-runtime` answers in this M4.2 doc denote
+> **`lpc-engine`**. Authored literals / wire payloads align with **`WireValue` /
+> `SrcValueSpec`** per M4.3a.
+
 # Decisions for future reference
 
 ## `Binding::Literal(ValueSpec)` — wire-boundary-by-design

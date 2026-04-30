@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use lp_shared::transport::ServerTransport;
-use lpc_model::{ClientMessage, TransportError};
+use lpc_wire::{TransportError, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 
 /// Fake transport that can simulate client messages

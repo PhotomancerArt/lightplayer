@@ -9,12 +9,13 @@ rust-version.workspace = true
 
 [features]
 default = []
-std = ["dep:lpfs", "lpc-model/std", "lpfs/std", "toml/std"]
-schema-gen = ["std", "lps-shared/schemars", "dep:schemars", "lpc-model/schema-gen"]
+std = ["dep:lpfs", "lpc-model/std", "lpc-source/std", "lpfs/std", "toml/std"]
+schema-gen = ["std", "lps-shared/schemars", "dep:schemars", "lpc-model/schema-gen", "lpc-source/schema-gen"]
 
 [dependencies]
 lps-shared = { path = "../../lp-shader/lps-shared" }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-source = { path = "../../lp-core/lpc-source", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", optional = true }
 serde = { workspace = true, features = ["derive"] }
 toml = { workspace = true, features = ["display", "preserve_order"] }

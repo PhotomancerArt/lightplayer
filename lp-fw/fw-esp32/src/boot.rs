@@ -15,7 +15,7 @@ const CONFIG_PATH: &str = "/lightplayer.json";
 /// Returns None if file is missing, unreadable, or invalid JSON.
 pub fn read_config(fs: &dyn LpFs) -> Option<LightplayerConfig> {
     let data = fs.read_file(CONFIG_PATH.as_path()).ok()?;
-    lpc_model::json::from_slice(&data).ok()
+    lpc_wire::json::from_slice(&data).ok()
 }
 
 /// Auto-load a project at boot: use startup_project from config if set,

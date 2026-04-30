@@ -3,13 +3,10 @@
 //! Provides async methods for filesystem and project operations.
 
 use anyhow::{Error, Result};
-use lpc_model::{
-    ClientMessage, ClientRequest, LpPath, LpPathBuf,
-    project::{
-        FrameId,
-        api::{ApiNodeSpecifier, ProjectRequest},
-        handle::ProjectHandle,
-    },
+use lpc_model::{LpPath, LpPathBuf, project::FrameId};
+use lpc_wire::{
+    ApiNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
+    message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
 use lpl_model::{LegacyServerMessage, SerializableProjectResponse};
@@ -139,11 +136,11 @@ impl LpClient {
 
     /// Display heartbeat with colors and memory bar chart
     fn display_heartbeat(
-        fps: &lpc_model::server::SampleStats,
+        fps: &lpc_wire::server::SampleStats,
         _frame_count: u64,
-        loaded_projects: &[lpc_model::server::LoadedProject],
+        loaded_projects: &[lpc_wire::server::LoadedProject],
         uptime_ms: u64,
-        memory: &Option<lpc_model::server::MemoryStats>,
+        memory: &Option<lpc_wire::server::MemoryStats>,
     ) {
         const BOLD: &str = "\x1b[1m";
         const DIM: &str = "\x1b[90m";
@@ -240,7 +237,7 @@ impl LpClient {
     /// * `Ok(Vec<u8>)` if the file was read successfully
     /// * `Err` if reading failed or transport error occurred
     pub async fn fs_read(&self, path: &LpPath) -> Result<Vec<u8>> {
-        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::Read {
+        let request = ClientRequest::Filesystem(lpc_wire::server::FsRequest::Read {
             path: path.to_path_buf(),
         });
 
@@ -272,7 +269,7 @@ impl LpClient {
     /// * `Ok(())` if the file was written successfully
     /// * `Err` if writing failed or transport error occurred
     pub async fn fs_write(&self, path: &LpPath, data: Vec<u8>) -> Result<()> {
-        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::Write {
+        let request = ClientRequest::Filesystem(lpc_wire::server::FsRequest::Write {
             path: path.to_path_buf(),
             data,
         });
@@ -304,7 +301,7 @@ impl LpClient {
     /// * `Ok(())` if the file was deleted successfully
     /// * `Err` if deletion failed or transport error occurred
     pub async fn fs_delete_file(&self, path: &LpPath) -> Result<()> {
-        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::DeleteFile {
+        let request = ClientRequest::Filesystem(lpc_wire::server::FsRequest::DeleteFile {
             path: path.to_path_buf(),
         });
 
@@ -336,7 +333,7 @@ impl LpClient {
     /// * `Ok(Vec<LpPathBuf>)` - List of file/directory paths
     /// * `Err` if listing failed or transport error occurred
     pub async fn fs_list_dir(&self, path: &LpPath, recursive: bool) -> Result<Vec<LpPathBuf>> {
-        let request = ClientRequest::Filesystem(lpc_model::server::FsRequest::ListDir {
+        let request = ClientRequest::Filesystem(lpc_wire::server::FsRequest::ListDir {
             path: path.to_path_buf(),
             recursive,
         });
@@ -431,7 +428,7 @@ impl LpClient {
 
         let request = ClientRequest::ProjectRequest {
             handle,
-            request: ProjectRequest::GetChanges {
+            request: WireProjectRequest::GetChanges {
                 since_frame,
                 detail_specifier,
             },
@@ -591,9 +588,9 @@ mod tests {
     use super::*;
     use crate::local::create_local_transport_pair;
     use lp_shared::transport::ServerTransport;
-    use lpc_model::{
-        LpPathBuf,
-        project::handle::ProjectHandle,
+    use lpc_model::LpPathBuf;
+    use lpc_wire::{
+        WireProjectHandle as ProjectHandle,
         server::{LoadedProject, SampleStats, ServerMsgBody},
     };
     use tokio::task;

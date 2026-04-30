@@ -36,13 +36,13 @@ impl<N> EntryState<N> {
     }
 }
 
-/// Convert server-side `EntryState<N>` to wire-side `EntryStateView`.
-impl<N> From<&EntryState<N>> for lpc_model::EntryStateView {
+/// Convert server-side `EntryState<N>` to wire-side `WireEntryState`.
+impl<N> From<&EntryState<N>> for lpc_wire::WireEntryState {
     fn from(state: &EntryState<N>) -> Self {
         match state {
-            EntryState::Pending => lpc_model::EntryStateView::Pending,
-            EntryState::Alive(_) => lpc_model::EntryStateView::Alive,
-            EntryState::Failed { reason } => lpc_model::EntryStateView::Failed {
+            EntryState::Pending => lpc_wire::WireEntryState::Pending,
+            EntryState::Alive(_) => lpc_wire::WireEntryState::Alive,
+            EntryState::Failed { reason } => lpc_wire::WireEntryState::Failed {
                 reason: reason.clone(),
             },
         }

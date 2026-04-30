@@ -4,7 +4,8 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{ChildKind, FrameId, NodeId, NodeName, NodePathSegment, TreePath};
+use lpc_model::{FrameId, NodeId, NodeName, NodePathSegment, TreePath};
+use lpc_wire::WireChildKind;
 
 use super::{NodeEntry, TreeError};
 
@@ -88,7 +89,7 @@ impl<N> NodeTree<N> {
         parent: NodeId,
         name: NodeName,
         ty: NodeName,
-        child_kind: ChildKind,
+        child_kind: WireChildKind,
         frame: FrameId,
     ) -> Result<NodeId, TreeError> {
         // Validate parent exists and is in the tree
@@ -211,7 +212,8 @@ impl<N> NodeTree<N> {
 mod tests {
     use super::NodeTree;
     use alloc::vec::Vec;
-    use lpc_model::{ChildKind, FrameId, NodeId, NodeName, SlotIdx, TreePath};
+    use lpc_model::{FrameId, NodeId, NodeName, TreePath};
+    use lpc_wire::{SlotIdx, WireChildKind};
 
     fn make_tree() -> NodeTree<()> {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
@@ -236,7 +238,7 @@ mod tests {
                 root,
                 NodeName::parse("fluid").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -257,7 +259,7 @@ mod tests {
             root,
             NodeName::parse("a").unwrap(),
             NodeName::parse("vis").unwrap(),
-            ChildKind::Sidecar {
+            WireChildKind::Sidecar {
                 name: NodeName::parse("a").unwrap(),
             },
             frame,
@@ -278,7 +280,7 @@ mod tests {
             root,
             name.clone(),
             ty.clone(),
-            ChildKind::Sidecar { name: name.clone() },
+            WireChildKind::Sidecar { name: name.clone() },
             FrameId::new(1),
         )
         .unwrap();
@@ -287,7 +289,7 @@ mod tests {
             root,
             name.clone(),
             ty,
-            ChildKind::Sidecar { name: name.clone() },
+            WireChildKind::Sidecar { name: name.clone() },
             FrameId::new(2),
         );
         assert!(result.is_err());
@@ -302,7 +304,7 @@ mod tests {
                 root,
                 NodeName::parse("fluid").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -321,7 +323,7 @@ mod tests {
                 root,
                 name.clone(),
                 NodeName::parse("mod").unwrap(),
-                ChildKind::Sidecar { name: name.clone() },
+                WireChildKind::Sidecar { name: name.clone() },
                 FrameId::new(1),
             )
             .unwrap();
@@ -339,7 +341,7 @@ mod tests {
                 root,
                 NodeName::parse("temp").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -358,7 +360,7 @@ mod tests {
                 root,
                 NodeName::parse("temp").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -387,7 +389,7 @@ mod tests {
                 root,
                 NodeName::parse("parent").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Sidecar {
+                WireChildKind::Sidecar {
                     name: NodeName::parse("parent").unwrap(),
                 },
                 FrameId::new(1),
@@ -399,7 +401,7 @@ mod tests {
                 child,
                 NodeName::parse("nested").unwrap(),
                 NodeName::parse("fx").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(2),
             )
             .unwrap();
@@ -424,7 +426,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -433,7 +435,7 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(1) },
+                WireChildKind::Input { source: SlotIdx(1) },
                 FrameId::new(2),
             )
             .unwrap();
@@ -457,7 +459,7 @@ mod tests {
                 root,
                 NodeName::parse("a").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(1),
             )
             .unwrap();
@@ -470,7 +472,7 @@ mod tests {
                 root,
                 NodeName::parse("b").unwrap(),
                 NodeName::parse("vis").unwrap(),
-                ChildKind::Input { source: SlotIdx(0) },
+                WireChildKind::Input { source: SlotIdx(0) },
                 FrameId::new(3),
             )
             .unwrap();

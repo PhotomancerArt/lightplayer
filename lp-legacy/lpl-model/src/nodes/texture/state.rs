@@ -4,7 +4,7 @@ use lpc_model::project::FrameId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 use super::format::TextureFormat;
-use lpc_model::impl_state_serialization;
+use lpc_wire::impl_state_serialization;
 
 /// Texture node state - runtime values
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +73,7 @@ impl_state_serialization! {
 mod tests {
     use super::*;
     use alloc::{format, vec};
-    use lpc_model::json;
+    use lpc_wire::json;
 
     #[test]
     fn test_serialize_all_fields_initial_sync() {

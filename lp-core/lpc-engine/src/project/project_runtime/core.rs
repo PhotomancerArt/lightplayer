@@ -11,7 +11,8 @@ use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use lp_perf::EVENT_PROJECT_LOAD;
-use lpc_model::{FrameId, LpPath, LpPathBuf, NodeId, project::api::ApiNodeSpecifier};
+use lpc_model::{FrameId, LpPath, LpPathBuf, NodeId};
+use lpc_wire::ApiNodeSpecifier;
 use lpfs::FsChange;
 use lpl_model::{NodeConfig, NodeKind, ProjectResponse};
 

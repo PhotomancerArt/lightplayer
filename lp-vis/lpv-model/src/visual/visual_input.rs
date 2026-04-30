@@ -10,8 +10,8 @@
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use lpc_model::ArtifactSpec;
 use lpc_model::ChannelName;
+use lpc_source::ArtifactSpec;
 
 /// Child visual reference plus optional param overrides (TOML keys `visual`, `params`).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

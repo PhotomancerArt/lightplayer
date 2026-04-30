@@ -19,8 +19,8 @@
 //! `quantity.md` §5).
 //!
 //! v0 **narrows** range and choice payloads to `f32` so this enum derives
-//! `serde`/`JsonSchema` without `LpsValue` carrying serde in `lps-shared` yet.
-//! A future **widening** to `LpsValue` is recorded as intent in
+//! `serde`/`JsonSchema` without pulling in shader-runtime serde yet.
+//! A future **widening** to richer runtime payloads is recorded as intent in
 //! `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (“F32
 //! narrowing in v0”).
 
@@ -52,7 +52,7 @@ pub struct ConstraintChoice {
 #[serde(deny_unknown_fields)]
 pub struct ConstraintFree {}
 
-/// Declares which [`crate::LpsValue`]s are *allowed* for a slot (together with
+/// Declares which wire-level values are *allowed* for a slot (together with
 /// its [`Kind`][`crate::kind::Kind`]). On-disk shape uses **peer-key**
 /// inference (`#[serde(untagged)]`): see module docs.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

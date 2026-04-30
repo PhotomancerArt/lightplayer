@@ -3,7 +3,8 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId, TreeDelta};
+use lpc_model::{FrameId, NodeId};
+use lpc_wire::WireTreeDelta;
 
 use super::{ClientNodeTree, ClientTreeEntry};
 
@@ -51,11 +52,11 @@ impl core::error::Error for ApplyError {}
 ///   are no longer in the new list.
 pub fn apply_tree_delta(
     tree: &mut ClientNodeTree,
-    delta: &TreeDelta,
+    delta: &WireTreeDelta,
     frame: FrameId,
 ) -> Result<(), ApplyError> {
     match delta {
-        TreeDelta::Created {
+        WireTreeDelta::Created {
             id,
             path,
             parent,
@@ -82,7 +83,7 @@ pub fn apply_tree_delta(
             tree.insert(entry);
         }
 
-        TreeDelta::EntryChanged {
+        WireTreeDelta::EntryChanged {
             id,
             status,
             state,
@@ -94,7 +95,7 @@ pub fn apply_tree_delta(
             entry.change_frame = *change_frame;
         }
 
-        TreeDelta::ChildrenChanged {
+        WireTreeDelta::ChildrenChanged {
             id,
             children,
             children_ver,
@@ -131,7 +132,7 @@ pub fn apply_tree_delta(
 /// Apply multiple deltas in order.
 pub fn apply_tree_deltas(
     tree: &mut ClientNodeTree,
-    deltas: &[TreeDelta],
+    deltas: &[WireTreeDelta],
     frame: FrameId,
 ) -> Result<(), ApplyError> {
     for delta in deltas {
@@ -143,9 +144,8 @@ pub fn apply_tree_deltas(
 #[cfg(test)]
 mod tests {
     use super::{ClientNodeTree, ClientTreeEntry, apply_tree_delta};
-    use lpc_model::{
-        ChildKind, EntryStateView, FrameId, NodeId, NodeName, SlotIdx, TreeDelta, TreePath,
-    };
+    use lpc_model::{FrameId, NodeId, NodeName, TreePath};
+    use lpc_wire::{SlotIdx, WireChildKind, WireEntryState, WireNodeStatus, WireTreeDelta};
 
     fn make_tree_with_root() -> ClientNodeTree {
         let mut tree = ClientNodeTree::new();
@@ -154,8 +154,8 @@ mod tests {
             TreePath::parse("/root.show").unwrap(),
             None,
             None,
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(0),
             FrameId::new(0),
             FrameId::new(0),
@@ -168,14 +168,14 @@ mod tests {
     fn apply_created_adds_entry() {
         let mut tree = make_tree_with_root();
 
-        let delta = TreeDelta::Created {
+        let delta = WireTreeDelta::Created {
             id: NodeId::new(1),
             path: TreePath::parse("/root.show/child.vis").unwrap(),
             parent: Some(NodeId::new(0)),
-            child_kind: Some(ChildKind::Input { source: SlotIdx(0) }),
+            child_kind: Some(WireChildKind::Input { source: SlotIdx(0) }),
             children: alloc::vec![],
-            status: lpc_model::project::api::NodeStatus::Created,
-            state: EntryStateView::Pending,
+            status: WireNodeStatus::Created,
+            state: WireEntryState::Pending,
             created_frame: FrameId::new(1),
             change_frame: FrameId::new(1),
             children_ver: FrameId::new(1),
@@ -196,9 +196,9 @@ mod tests {
             NodeId::new(1),
             TreePath::parse("/root.show/child.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(ChildKind::Input { source: SlotIdx(0) }),
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(1),
             FrameId::new(1),
             FrameId::new(1),
@@ -206,21 +206,18 @@ mod tests {
         tree.insert(child);
 
         // Apply status change
-        let delta = TreeDelta::EntryChanged {
+        let delta = WireTreeDelta::EntryChanged {
             id: NodeId::new(1),
-            status: lpc_model::project::api::NodeStatus::Ok,
-            state: EntryStateView::Alive,
+            status: WireNodeStatus::Ok,
+            state: WireEntryState::Alive,
             change_frame: FrameId::new(5),
         };
 
         apply_tree_delta(&mut tree, &delta, FrameId::new(5)).unwrap();
 
         let entry = tree.get(NodeId::new(1)).unwrap();
-        assert!(matches!(
-            entry.status,
-            lpc_model::project::api::NodeStatus::Ok
-        ));
-        assert!(matches!(entry.state, EntryStateView::Alive));
+        assert!(matches!(entry.status, WireNodeStatus::Ok));
+        assert!(matches!(entry.state, WireEntryState::Alive));
         assert_eq!(entry.change_frame.0, 5);
     }
 
@@ -233,9 +230,9 @@ mod tests {
             NodeId::new(1),
             TreePath::parse("/root.show/child.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(ChildKind::Input { source: SlotIdx(0) }),
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(1),
             FrameId::new(1),
             FrameId::new(1),
@@ -243,7 +240,7 @@ mod tests {
         tree.insert(child);
 
         // Update root's children list
-        let delta = TreeDelta::ChildrenChanged {
+        let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(0),
             children: alloc::vec![NodeId::new(1)],
             children_ver: FrameId::new(2),
@@ -265,9 +262,9 @@ mod tests {
             NodeId::new(1),
             TreePath::parse("/root.show/a.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(ChildKind::Input { source: SlotIdx(0) }),
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(1),
             FrameId::new(1),
             FrameId::new(1),
@@ -276,9 +273,9 @@ mod tests {
             NodeId::new(2),
             TreePath::parse("/root.show/b.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(ChildKind::Input { source: SlotIdx(1) }),
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            Some(WireChildKind::Input { source: SlotIdx(1) }),
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(1),
             FrameId::new(1),
             FrameId::new(1),
@@ -293,7 +290,7 @@ mod tests {
         }
 
         // Apply delta that removes b from children
-        let delta = TreeDelta::ChildrenChanged {
+        let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(0),
             children: alloc::vec![NodeId::new(1)], // b is gone
             children_ver: FrameId::new(5),
@@ -316,11 +313,11 @@ mod tests {
             NodeId::new(1),
             TreePath::parse("/root.show/parent.vis").unwrap(),
             Some(NodeId::new(0)),
-            Some(ChildKind::Sidecar {
+            Some(WireChildKind::Sidecar {
                 name: NodeName::parse("parent").unwrap(),
             }),
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(1),
             FrameId::new(1),
             FrameId::new(1),
@@ -329,9 +326,9 @@ mod tests {
             NodeId::new(2),
             TreePath::parse("/root.show/parent.vis/grand.fx").unwrap(),
             Some(NodeId::new(1)),
-            Some(ChildKind::Input { source: SlotIdx(0) }),
-            lpc_model::project::api::NodeStatus::Created,
-            EntryStateView::Pending,
+            Some(WireChildKind::Input { source: SlotIdx(0) }),
+            WireNodeStatus::Created,
+            WireEntryState::Pending,
             FrameId::new(2),
             FrameId::new(2),
             FrameId::new(2),
@@ -350,7 +347,7 @@ mod tests {
         }
 
         // Remove parent from root's children
-        let delta = TreeDelta::ChildrenChanged {
+        let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(0),
             children: alloc::vec![], // parent is gone
             children_ver: FrameId::new(5),
@@ -368,10 +365,10 @@ mod tests {
     fn apply_entry_changed_missing_node_errors() {
         let mut tree = make_tree_with_root();
 
-        let delta = TreeDelta::EntryChanged {
+        let delta = WireTreeDelta::EntryChanged {
             id: NodeId::new(99), // doesn't exist
-            status: lpc_model::project::api::NodeStatus::Ok,
-            state: EntryStateView::Alive,
+            status: WireNodeStatus::Ok,
+            state: WireEntryState::Alive,
             change_frame: FrameId::new(5),
         };
 

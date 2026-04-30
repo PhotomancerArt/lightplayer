@@ -1,15 +1,39 @@
 # 00 — Overview
 
+## M4.3a crate split update
+
+The roadmap originally described a broader `lpc-model` plus
+`lpc-runtime` split. M4.3a tightened that into five roles:
+
+```text
+lp-core/
+  lpc-model/        shared concepts only: NodeId, TreePath, PropPath,
+                    FrameId, Kind, WireType, WireValue.
+  lpc-source/       authored/on-disk source model: SrcArtifact,
+                    SrcBinding, SrcShape, SrcValueSpec, TOML/schema.
+  lpc-wire/         engine-client wire model: WireMessage,
+                    WireTreeDelta, WireProjectHandle, state serialization.
+  lpc-engine/       runtime spine and LpsValueF32 / LpsType conversions.
+  lp-engine-client/ client-side tree/prop view cache.
+```
+
+When older sections below say `lpc-runtime`, read that as
+`lpc-engine`. When they say wire/client values use `LpsValue`, read
+that as `WireValue` on the wire and `LpsValueF32` only inside
+`lpc-engine`.
+
 ## Where we are
 
 After M2, the workspace looks like this:
 
 ```
 lp-core/
-  lpc-model/      foundation types: NodeId, NodePath, ArtifactSpec,
-                  Slot/Shape/Kind/Constraint/ValueSpec, Binding,
-                  Artifact trait, ChannelName, FrameId, …
-  lpc-runtime/    spine in progress: ProjectRuntime, flat NodeEntry map,
+  lpc-model/      shared types: NodeId, TreePath, PropPath, Kind,
+                  WireType, WireValue, ChannelName, FrameId, …
+  lpc-source/     authored source: ArtifactSpec, SrcShape,
+                  SrcValueSpec, SrcBinding, schema/TOML loading.
+  lpc-wire/       engine-client messages, tree deltas, project views.
+  lpc-engine/     spine in progress: ProjectRuntime, flat NodeEntry map,
                   fs-watch, frame versioning, panic recovery — but no
                   tree, no artifacts, no slot resolution.
 lp-legacy/
@@ -34,7 +58,7 @@ The **visual world** has rich on-disk types with slot grammar, but
 there's no runtime — `lpv-model` types have only ever been
 serialised, never instantiated.
 
-This roadmap **bridges them** by evolving `lpc-runtime` into a
+This roadmap **bridges them** by evolving `lpc-engine` into a
 domain-agnostic spine that both worlds plug into. Legacy nodes port
 to the new shape (M5); visual nodes get their runtime in the next
 roadmap.
@@ -87,13 +111,15 @@ writes during `tick`. (Detail in [05](05-slots-and-props.md).)
 
 ```
 lp-core/
-  lpc-model/        foundation, no domain knowledge.
-  lpc-runtime/      generic spine: ProjectRuntime<D: ProjectDomain>,
+  lpc-model/        shared model concepts, no domain knowledge.
+  lpc-source/       authored source model.
+  lpc-wire/         engine-client wire contract.
+  lpc-engine/       generic spine: ProjectRuntime<D: ProjectDomain>,
                     NodeTree, ArtifactManager, sync, panic recovery.
 
 lp-legacy/
   lpl-model/        legacy configs (no longer carry NodeConfig trait).
-  lpl-runtime/      legacy nodes impl lpc_runtime::Node.
+  lpl-runtime/      legacy nodes impl lpc_engine::Node.
                     LegacyDomain: ProjectDomain.
 
 lp-vis/
@@ -180,9 +206,11 @@ This vocabulary is used consistently across all design files.
 - **Prop\<T\>** — runtime value with `FrameId` change tracking, used
   for produced fields (outputs + state) inside the node impl's
   `*Props` struct. Renamed from `StateField`. ([05](05-slots-and-props.md))
-- **Binding** — `enum Binding { Bus(ChannelName), Literal(LpsValue),
-  NodeProp(NodePropRef) }`. Stored on `NodeConfig`, applied at
-  resolution time. ([06](06-bindings-and-resolution.md))
+- **Binding** — `enum Binding { Bus(ChannelName), Literal(WireValue),
+  NodeProp(NodePropRef) }`. Literal payloads are wire-portable (**`WireValue`**
+  via `SrcValueSpec`); runtime materialization yields `LpsValueF32` only in
+  `lpc-engine` / nodes. Stored on `NodeConfig`, applied at resolution time.
+  ([06](06-bindings-and-resolution.md))
 - **PropAccess** — derived reflection trait on `*Props` structs;
   lets the editor / sync layer read produced values generically.
   ([05](05-slots-and-props.md))

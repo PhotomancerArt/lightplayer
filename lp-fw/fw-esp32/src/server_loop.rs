@@ -145,7 +145,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             // Query heap memory from esp_alloc
             let used_bytes = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
             let free_bytes = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-            let memory = Some(lpc_model::server::MemoryStats {
+            let memory = Some(lpc_wire::server::MemoryStats {
                 free_bytes,
                 used_bytes,
                 total_bytes: used_bytes.saturating_add(free_bytes),
@@ -154,7 +154,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             // Create heartbeat message
             let heartbeat_msg = lpl_model::LegacyServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
-                msg: lpc_model::server::ServerMsgBody::Heartbeat {
+                msg: lpc_wire::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,
                     frame_count: frame_count as u64,
                     loaded_projects,

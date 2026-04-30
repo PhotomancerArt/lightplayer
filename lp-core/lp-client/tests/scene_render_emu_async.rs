@@ -222,14 +222,14 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
 /// Sync client view with server
 async fn sync_client_view(
     client: &LpClient,
-    handle: lpc_model::project::handle::ProjectHandle,
+    handle: lpc_wire::WireProjectHandle,
     view: &mut ClientProjectView,
 ) {
     // For initial sync (empty view), request all nodes to populate the list
     // Otherwise use normal detail_specifier
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lpc_model::project::api::ApiNodeSpecifier::All
+        lpc_wire::ApiNodeSpecifier::All
     } else {
         view.detail_specifier()
     };

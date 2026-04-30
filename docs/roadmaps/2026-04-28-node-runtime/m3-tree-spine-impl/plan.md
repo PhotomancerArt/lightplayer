@@ -1,9 +1,13 @@
 # M3 — Tree spine implementation
 
+> **Naming (planning onward):** `lpc-runtime` in this M3 plan denotes
+> **`lpc-engine`** after M4.3a. Structural delta types migrated to **`lpc-wire`**
+> as `WireTreeDelta` (conceptually aligned with `TreeDelta` here).
+
 Stand up the new node-tree types — `NodeTree`, `NodeEntry`,
 `EntryState`, `ChildKind`, the wire-side mirror, and the structural
-delta protocol — across `lpc-model`, `lpc-runtime`, and
-`lp-engine-client`. The new types **coexist** with the legacy
+delta protocol — across `lpc-model`, `lpc-engine` (still called `lpc-runtime` when M3 was written),
+and `lp-engine-client`. The new types **coexist** with the legacy
 `ProjectRuntime` flat-map; cutover lands in a later plan.
 
 Reference: [`../design/01-tree.md`](../design/01-tree.md) and

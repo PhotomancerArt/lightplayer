@@ -4,11 +4,11 @@ use crate::nodes::fixture::mapping::{
     generate_mapping_points,
 };
 use alloc::{boxed::Box, format, string::String, vec::Vec};
-use lpc_model::FrameId;
 use lpc_engine::NodeRuntime;
 use lpc_engine::error::Error;
 use lpc_engine::output::OutputProvider;
 use lpc_engine::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
+use lpc_model::FrameId;
 use lpfs::FsChange;
 use lpl_model::NodeConfig;
 use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};

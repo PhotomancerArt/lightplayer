@@ -1,5 +1,10 @@
 # 08 — `ProjectDomain`, legacy bridge, visual mapping
 
+> **M4.3a update:** The generic spine crate is `lpc-engine`, the
+> wire crate is `lpc-wire`, and authored source types live in
+> `lpc-source`. Older references to `lpc-runtime` in this document
+> should be read as `lpc-engine`.
+
 The spine is generic over a `ProjectDomain` trait that pins the
 **domain-specific** parts: which artifact types exist, how to
 instantiate a node from one, what response shape the wire ships.
@@ -81,7 +86,7 @@ pub trait ProjectDomain: Send + Sync + 'static {
 The trait is small but does most of the per-domain work.
 Everything that's *generic* — tree management, lifecycle, frame
 versioning, panic recovery, sync skeleton, artifact manager —
-lives in `lpc-runtime` directly; everything that's *specific* —
+lives in `lpc-engine` directly; everything that's *specific* —
 which artifact types, how to instantiate, what to do on fs changes
 — is `ProjectDomain` impl.
 
@@ -129,7 +134,7 @@ impl<D: ProjectDomain> ProjectRuntime<D> {
     }
 
     pub fn set_property(
-        &mut self, node: &NodePath, prop: &PropPath, value: LpsValue,
+        &mut self, node: &NodePath, prop: &PropPath, value: WireValue,
     ) -> Result<(), Error> {
         // generic: walk to entry, insert into config.overrides,
         // bump config_ver. No domain hook.
@@ -341,8 +346,8 @@ pub enum VisualArtifact {
 }
 ```
 
-Crucially: same spine, different domain. The `lpc-runtime` crate
-doesn't grow when visual lands.
+Crucially: same spine, different domain. The **`lpc-engine`** crate footprint
+doesn't need to balloon when visual lands (`ProjectDomain` parameterisation).
 
 ## Co-existence: legacy + visual?
 
@@ -413,9 +418,10 @@ then generic-ify. We don't, because:
   (not a `D::Bus` associated type). When mixed-domain projects
   arrive, validate.
 - **Cross-domain bindings.** `Binding::NodeProp` from a
-  visual node to a legacy node's outputs. The spine treats both
-  as `Box<dyn Node>` with `PropAccess`; cross-domain works for
-  free if both sides agree on `LpsValue` shape.
+  visual node to a legacy node's   outputs. The spine treats both
+  as `Box<dyn Node>` with runtime property access (`RuntimePropAccess` /
+  engine-side `LpsValueF32`); cross-domain works when wire-facing recipes
+  agree on **`WireValue` shape**.
 - **Multi-domain `ArtifactManager`.** One manager per
   `ProjectRuntime<D>` keeps it simple. If `MultiDomain` arrives,
   the manager grows a per-extension dispatch (same crate, same

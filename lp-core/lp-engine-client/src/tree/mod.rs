@@ -1,7 +1,7 @@
 //! Client-side tree mirror and delta application.
 //!
 //! This module provides the client-side mirror of the server tree, maintained
-//! by applying `TreeDelta`s from the server.
+//! by applying `WireTreeDelta`s from the server.
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 

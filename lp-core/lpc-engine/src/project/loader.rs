@@ -68,7 +68,7 @@ pub fn load_from_filesystem(fs: &dyn LpFs) -> Result<ProjectConfig, Error> {
         format!("{data:02x?}")
     };
 
-    let config: ProjectConfig = lpc_model::json::from_slice(&data).map_err(|e| Error::Parse {
+    let config: ProjectConfig = lpc_wire::json::from_slice(&data).map_err(|e| Error::Parse {
         file: path.to_string(),
         error: format!(
             "{e}\n\nActual project.json content ({} bytes):\n{}\n\nHex dump (first 100 bytes):\n{}",
@@ -116,15 +116,15 @@ pub fn load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn Nod
     // Parse config based on kind
     let config: Box<dyn NodeConfig> = match kind {
         NodeKind::Texture => {
-            let cfg: lpl_model::nodes::texture::TextureConfig = lpc_model::json::from_slice(&data)
+            let cfg: lpl_model::nodes::texture::TextureConfig = lpc_wire::json::from_slice(&data)
                 .map_err(|e| Error::Parse {
-                    file: node_json_path.as_str().to_string(),
-                    error: format!("Failed to parse texture config: {e}"),
-                })?;
+                file: node_json_path.as_str().to_string(),
+                error: format!("Failed to parse texture config: {e}"),
+            })?;
             Box::new(cfg)
         }
         NodeKind::Shader => {
-            let cfg: lpl_model::nodes::shader::ShaderConfig = lpc_model::json::from_slice(&data)
+            let cfg: lpl_model::nodes::shader::ShaderConfig = lpc_wire::json::from_slice(&data)
                 .map_err(|e| Error::Parse {
                     file: node_json_path.as_str().to_string(),
                     error: format!("Failed to parse shader config: {e}"),
@@ -132,7 +132,7 @@ pub fn load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn Nod
             Box::new(cfg)
         }
         NodeKind::Output => {
-            let cfg: lpl_model::nodes::output::OutputConfig = lpc_model::json::from_slice(&data)
+            let cfg: lpl_model::nodes::output::OutputConfig = lpc_wire::json::from_slice(&data)
                 .map_err(|e| Error::Parse {
                     file: node_json_path.as_str().to_string(),
                     error: format!("Failed to parse output config: {e}"),
@@ -140,11 +140,11 @@ pub fn load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn Nod
             Box::new(cfg)
         }
         NodeKind::Fixture => {
-            let cfg: lpl_model::nodes::fixture::FixtureConfig = lpc_model::json::from_slice(&data)
+            let cfg: lpl_model::nodes::fixture::FixtureConfig = lpc_wire::json::from_slice(&data)
                 .map_err(|e| Error::Parse {
-                    file: node_json_path.as_str().to_string(),
-                    error: format!("Failed to parse fixture config: {e}"),
-                })?;
+                file: node_json_path.as_str().to_string(),
+                error: format!("Failed to parse fixture config: {e}"),
+            })?;
             Box::new(cfg)
         }
     };

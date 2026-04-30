@@ -8,7 +8,7 @@ use hashbrown::HashMap;
 use log;
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
-use lpc_model::{ClientMessage, TransportError, json};
+use lpc_wire::{TransportError, json, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 use std::sync::{Arc, Mutex};
 

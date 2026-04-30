@@ -10,9 +10,9 @@ use crate::visual::transition_ref::TransitionRef;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_model::ArtifactSpec;
-use lpc_model::artifact::artifact::Artifact;
-use lpc_model::prop::binding::Binding;
+use lpc_source::ArtifactSpec;
+use lpc_source::artifact::artifact::Artifact;
+use lpc_source::prop::binding::Binding;
 
 /// One entry in a Playlist. `duration: None` means "wait for cue".
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

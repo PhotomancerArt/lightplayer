@@ -3,10 +3,8 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
 use alloc::{vec, vec::Vec};
-use lpc_model::{
-    FrameId, LpPathBuf, NodeId,
-    project::api::{ApiNodeSpecifier, NodeStatus},
-};
+use lpc_model::{FrameId, LpPathBuf, NodeId};
+use lpc_wire::{ApiNodeSpecifier, WireNodeStatus};
 use lpl_model::{NodeChange, NodeConfig, NodeKind, NodeState};
 
 /// Status change information
@@ -15,9 +13,9 @@ pub struct StatusChange {
     /// Node path
     pub path: LpPathBuf,
     /// Previous status
-    pub old_status: NodeStatus,
+    pub old_status: WireNodeStatus,
     /// New status
-    pub new_status: NodeStatus,
+    pub new_status: WireNodeStatus,
 }
 
 /// Client view of project
@@ -29,7 +27,7 @@ pub struct ClientProjectView {
     /// Which nodes we're tracking detail for
     pub detail_tracking: BTreeSet<NodeId>,
     /// Previous status for each node (for detecting status changes)
-    previous_status: BTreeMap<NodeId, NodeStatus>,
+    previous_status: BTreeMap<NodeId, WireNodeStatus>,
 }
 
 /// Client node entry
@@ -40,7 +38,7 @@ pub struct ClientNodeEntry {
     pub config_ver: FrameId,
     pub state: Option<NodeState>, // Only present if in detail_tracking
     pub state_ver: FrameId,
-    pub status: NodeStatus,
+    pub status: WireNodeStatus,
     pub status_ver: FrameId,
 }
 
@@ -140,7 +138,7 @@ impl ClientProjectView {
                                 }
                             };
 
-                            let initial_status = NodeStatus::Created;
+                            let initial_status = WireNodeStatus::Created;
                             self.nodes.insert(
                                 *handle,
                                 ClientNodeEntry {
@@ -295,7 +293,7 @@ impl ClientProjectView {
                         let initial_status = self
                             .previous_status
                             .remove(handle)
-                            .unwrap_or(NodeStatus::Created);
+                            .unwrap_or(WireNodeStatus::Created);
 
                         self.nodes.insert(
                             *handle,

@@ -1,5 +1,5 @@
-//! LightPlayer **core model** crate: wire protocol definitions and **foundation**
-//! types (identity, addressing, Quantity model, artifact schema traits).
+//! LightPlayer **core model** crate: **foundation** types (identity, addressing,
+//! Quantity model). Wire/protocol shapes live in `lpc-wire`.
 //!
 //! Legacy node configs (Texture / Shader / Output / Fixture) live in `lpl-model`.
 
@@ -10,67 +10,40 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-// --- Foundation (Quantity model + artifact traits) -----------------------------------------
+// --- Foundation (Quantity model) -------------------------------------------------------------
 
-pub mod artifact;
-pub use prop::binding;
-pub use prop::constraint;
 pub mod error;
-pub use prop::kind;
 pub mod node;
-pub mod presentation;
 pub mod prop;
-pub mod schema;
 pub mod types;
-pub mod value_spec;
 
-// --- Protocol / project surface --------------------------------------------------------------
+// --- Shared surface (non-wire) ---------------------------------------------------------------
 
 pub mod bus;
-pub mod json;
 pub mod lp_config;
 pub mod lp_path;
-pub mod message;
-pub mod project;
-pub mod serde_base64;
 pub mod serial;
-pub mod server;
-pub mod state;
-pub mod transport_error;
 pub mod tree;
+
+pub mod project;
+
 // --- Foundation re-exports ------------------------------------------------------------------
 
-/// Cross-cutting error for [`NodeProps`](node::node_props::NodeProps) property access and related domain operations.
-pub use error::DomainError;
-/// Shader-facing structural type system (mirrors [`LpsValue`]); shared with the GLSL/compilation stack.
-pub use lps_shared::LpsType;
-/// Canonical structural **value** type for the engine and tooling.
-pub use lps_shared::LpsValueF32 as LpsValue;
-/// Opaque texture pixel storage (lives beside handle values in the GPU/loader story).
-pub use lps_shared::TextureBuffer;
-/// Texture format id for [`Kind::Texture`](kind::Kind::Texture) storage.
-pub use lps_shared::TextureStorageFormat;
+pub use prop::constraint;
+pub use prop::kind;
 
-pub use binding::Binding;
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
+/// Cross-cutting error for [`NodeProps`](node::node_props::NodeProps) property access and related domain operations.
+pub use error::DomainError;
 pub use kind::Kind;
-pub use node::NodeConfig;
 pub use node::node_props::NodeProps;
-pub use presentation::Presentation;
-pub use prop::PropAccess;
 pub use prop::PropNamespace;
 pub use prop::PropValue;
-pub use prop::shape::{Shape, Slot};
-pub use value_spec::ValueSpec;
-
-pub use artifact::{Artifact, ArtifactReadRoot, ArtifactSpec, LoadError, load_artifact};
-
-// --- Protocol re-exports --------------------------------------------------------------------
+pub use prop::{WireStructMember, WireType, WireValue};
 
 pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
-pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::{NodeId, NodeName, NodeNameError, NodeSpec};
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};
@@ -85,6 +58,3 @@ pub mod nodes {
 pub use project::{FrameId, ProjectConfig};
 pub use prop::prop_path::PropPath;
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
-pub use server::{AvailableProject, FsRequest, FsResponse, LoadedProject};
-pub use transport_error::TransportError;
-pub use tree::{ChildKind, EntryStateView, SlotIdx, TreeDelta};

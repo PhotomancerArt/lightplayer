@@ -13,35 +13,34 @@ References:
 
 ## Status
 
-**Not yet planned.** Waiting on **M4.3a** (crate split + `WireValue`,
-[`../m4.3a-crate-split-wire-value/plan.md`](../m4.3a-crate-split-wire-value/plan.md))
-which itself waits on M4.3 (runtime spine). The `PropsChanged` delta
-introduced here is the first real wire load for produced values;
-designing it against `WireValue` (not `LpsValue`) is cleaner than
-retrofitting after.
+**Not yet planned.** M4.3a (**in progress / executed per sibling folder**) already
+defines the crate split, `WireValue`, `RuntimePropAccess` (`LpsValueF32`) vs
+`WirePropAccess`, and where tree deltas live. M4.4 builds on that — design
+`PropsChanged` against `lpc-wire` payloads (`WireValue`), not as future
+dependency on an unstarted split.
 
-When M4.3 commits, expand this file via `/plan-small` (or `/plan` if
-the scope grows) and replace this placeholder with the real plan.
+When M4.3 runtime-spine phases land, expand this file via `/plan-small`
+(or `/plan`).
 
 ## Tentative scope (subject to plan iteration)
 
-- `lpc-runtime::ProjectDomain` trait — abstracts domain-specific
+- `lpc-engine::ProjectDomain` trait — abstracts domain-specific
   artifact instantiation (`fn instantiate(spec, ...) -> Box<dyn
   Node>`), domain-specific status mapping, and any per-domain
   resources `TickContext` exposes.
-- `lpc-runtime::ProjectRuntime<D: ProjectDomain>` — the central
+- `lpc-engine::ProjectRuntime<D: ProjectDomain>` — the central
   engine runtime, parameterised over the domain. Replaces / wraps
   the legacy `ProjectRuntime` flat-map.
-- `lpc-model::TreeDelta::PropsChanged` — wire variant for produced
-  values: `{ id: NodeId, changed: Vec<(PropPath, LpsValue, FrameId)> }`.
-  Authored against `PropAccess::iter_changed_since`.
-- `lpc-model::NodeView.prop_cache` — client-side mirror of produced
+- `lpc-wire::WireTreeDelta::PropsChanged` — wire variant for produced
+  values, carrying `WireValue` entries converted by `lpc-engine`.
+  Authored against `RuntimePropAccess::iter_changed_since`.
+- `lp-engine-client` node view prop cache — client-side mirror of produced
   props, keyed by `PropPath`. `prop_cache_ver` frame counter.
 - `lp-engine-client::apply_tree_delta` — handle `PropsChanged`,
   bump `prop_cache_ver`.
-- `lpc-runtime::tree_deltas_since` — emit `PropsChanged` deltas
+- `lpc-engine::tree_deltas_since` — emit `PropsChanged` deltas
   alongside structural deltas, walking each `Alive` entry's
-  `PropAccess::iter_changed_since(since)`.
+  `RuntimePropAccess::iter_changed_since(since)`.
 - Plumb `ProjectDomain` through `lp-engine` / `lp-server` so
   existing visual / legacy entry points still work.
 

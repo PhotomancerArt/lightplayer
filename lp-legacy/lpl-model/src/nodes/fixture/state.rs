@@ -5,7 +5,7 @@ use lpc_model::PropValue;
 use lpc_model::nodes::NodeId;
 use lpc_model::project::FrameId;
 
-use lpc_model::impl_state_serialization;
+use lpc_wire::impl_state_serialization;
 
 /// Mapping cell - represents a post-transform sampling region
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

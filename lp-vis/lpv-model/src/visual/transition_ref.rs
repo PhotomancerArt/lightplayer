@@ -5,7 +5,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use lpc_model::ArtifactSpec;
+use lpc_source::ArtifactSpec;
 
 /// Reference to a Transition with playback parameters.
 ///

@@ -16,6 +16,8 @@ members = [
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-model",
+    "lp-core/lpc-source",
+    "lp-core/lpc-wire",
     "lp-legacy/lpl-model",
     "lp-legacy/lpl-runtime",
     # lps workspace members
@@ -67,6 +69,8 @@ default-members = [
     "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lpc-model",
+    "lp-core/lpc-source",
+    "lp-core/lpc-wire",
     "lp-legacy/lpl-model",
     "lp-legacy/lpl-runtime",
     # lps workspace members (excluding lps-builtins-emu-app)
@@ -191,7 +195,7 @@ debug = 1
 
 # Hot-path crates: optimize for speed instead of size
 # These crates are in the critical rendering path and benefit from speed optimizations
-[profile.release.package.lpc-runtime]
+[profile.release.package.lpc-engine]
 # Optimize for speed (hot path in rendering loop)
 opt-level = 3
 # Keep multiple codegen units for faster compilation and better parallelization

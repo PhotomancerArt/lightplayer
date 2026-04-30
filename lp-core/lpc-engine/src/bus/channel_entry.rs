@@ -1,6 +1,7 @@
 //! ChannelEntry — per-channel state on the bus.
 
-use lpc_model::{FrameId, Kind, LpsValue, NodeId, PropPath};
+use lpc_model::{FrameId, Kind, NodeId, PropPath};
+use lps_shared::LpsValueF32;
 
 /// Per-channel state on the bus.
 #[derive(Clone, Debug)]
@@ -11,7 +12,7 @@ pub struct ChannelEntry {
 
     /// Last value published to this channel. `None` means no
     /// publish has happened yet.
-    pub last_value: Option<LpsValue>,
+    pub last_value: Option<LpsValueF32>,
 
     /// Frame at which `last_value` was published. `FrameId::new(0)`
     /// if never written.

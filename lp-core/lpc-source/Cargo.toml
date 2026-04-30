@@ -1,0 +1,25 @@
+[package]
+name = "lpc-source"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std"]
+std = ["lpc-model/std", "toml/std", "toml/preserve_order"]
+schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
+
+[dependencies]
+lpc-model = { path = "../lpc-model", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+toml = { workspace = true, features = ["display"] }
+
+[lints]
+workspace = true

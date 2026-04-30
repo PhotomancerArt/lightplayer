@@ -5,7 +5,7 @@
 
 use crate::transport::ClientTransport;
 use lp_shared::transport::ServerTransport;
-use lpc_model::{ClientMessage, TransportError};
+use lpc_wire::{TransportError, message::ClientMessage};
 use lpl_model::LegacyServerMessage;
 use tokio::sync::mpsc;
 
@@ -177,7 +177,7 @@ pub fn create_local_transport_pair() -> (AsyncLocalClientTransport, AsyncLocalSe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::ClientRequest;
+    use lpc_wire::ClientRequest;
     use lpl_model::LegacyServerMessage;
 
     #[tokio::test]
@@ -206,7 +206,7 @@ mod tests {
         // Send response from server
         let server_msg = LegacyServerMessage {
             id: 1,
-            msg: lpc_model::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
+            msg: lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
         };
         server_transport.send(server_msg).await.unwrap();
 

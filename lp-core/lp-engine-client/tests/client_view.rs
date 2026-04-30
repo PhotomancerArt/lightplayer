@@ -24,7 +24,7 @@ fn test_request_detail() {
     // Generate specifier
     let spec = view.detail_specifier();
     match spec {
-        lpc_model::project::api::ApiNodeSpecifier::ByHandles(handles) => {
+        lpc_wire::ApiNodeSpecifier::ByHandles(handles) => {
             assert_eq!(handles.len(), 1);
             assert_eq!(handles[0], handle);
         }
@@ -46,7 +46,7 @@ fn test_stop_detail() {
     // Generate specifier should be None
     let spec = view.detail_specifier();
     match spec {
-        lpc_model::project::api::ApiNodeSpecifier::None => {}
+        lpc_wire::ApiNodeSpecifier::None => {}
         _ => panic!("Expected None"),
     }
 }
@@ -82,7 +82,7 @@ fn test_sync_with_changes() {
 #[test]
 fn test_detail_only_entry_uses_pending_status_changed() {
     use alloc::boxed::Box;
-    use lpc_model::project::api::NodeStatus;
+    use lpc_wire::WireNodeStatus;
     use lpl_model::nodes::shader::ShaderState;
     use lpl_model::{NodeChange, NodeDetail, NodeState};
 
@@ -107,7 +107,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
         node_handles: vec![handle],
         node_changes: vec![NodeChange::StatusChanged {
             handle,
-            status: NodeStatus::Ok,
+            status: WireNodeStatus::Ok,
         }],
         node_details: details,
         theoretical_fps: None,
@@ -115,7 +115,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
 
     view.apply_changes(&response).unwrap();
     let entry = view.nodes.get(&handle).expect("node");
-    assert!(matches!(entry.status, NodeStatus::Ok));
+    assert!(matches!(entry.status, WireNodeStatus::Ok));
 }
 
 #[test]
