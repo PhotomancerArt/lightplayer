@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 /// - ELF header
 /// - Program header for the code segment
 /// - The machine code itself
-#[allow(dead_code)] // Reserved for future use
+#[allow(dead_code, reason = "reserved for future embive ELF generation")]
 pub fn generate_simple_elf(code: &[u8]) -> Vec<u8> {
     let mut elf = Vec::new();
 

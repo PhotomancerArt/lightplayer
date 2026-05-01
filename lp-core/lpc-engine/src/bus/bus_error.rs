@@ -49,7 +49,7 @@ mod tests {
             established: Kind::Amplitude,
             attempted: Kind::Ratio,
         };
-        let msg = alloc::format!("{}", err);
+        let msg = alloc::format!("{err}");
         assert!(msg.contains("audio/in/0"));
         assert!(msg.contains("Amplitude"));
         assert!(msg.contains("Ratio"));
@@ -73,7 +73,7 @@ mod tests {
             established: Kind::Instant,
             attempted: Kind::Duration,
         };
-        let s = alloc::format!("{:?}", err);
+        let s = alloc::format!("{err:?}");
         assert!(s.contains("KindMismatch"));
         assert!(s.contains("time"));
     }

@@ -65,7 +65,7 @@ mod tests {
             FrameId::new(1),
             ResolveSource::Default,
         );
-        let s = alloc::format!("{:?}", slot);
+        let s = alloc::format!("{slot:?}");
         assert!(s.contains("ResolvedSlot"));
         assert!(s.contains("F32(3.0)"));
     }

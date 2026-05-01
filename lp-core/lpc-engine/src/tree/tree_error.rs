@@ -54,7 +54,7 @@ mod tests {
             parent: NodeId::new(1),
             name: NodeName::parse("foo").unwrap(),
         };
-        let s = alloc::format!("{}", err);
+        let s = alloc::format!("{err}");
         assert!(s.contains("foo"));
         assert!(s.contains("1"));
     }

@@ -52,7 +52,10 @@ pub fn lps_sincos_q32_pair(x: i32) -> (i32, i32) {
 }
 
 /// C ABI: writes `(sin, cos)` to out-pointers (matches `__lps_sin_q32` / `__lps_cos_q32` numerically).
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes to caller-provided out-pointers"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lps_sincos_q32(x: i32, sin_out: *mut i32, cos_out: *mut i32) {
     let (s, c) = lps_sincos_q32_pair(x);

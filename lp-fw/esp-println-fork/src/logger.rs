@@ -33,7 +33,7 @@ impl log::Log for EspLogger {
         true
     }
 
-    #[allow(unused)]
+    #[allow(unused, reason = "logger filtering is retained for fork parity")]
     fn log(&self, record: &log::Record) {
         // check enabled log targets if any
         if let Some(targets) = LOG_TARGETS {

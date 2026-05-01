@@ -26,7 +26,11 @@ type ClientError = ();
 ///
 /// Returns `(server, client, client_transport, server_transport)` for
 /// synchronous message processing in tests.
-#[allow(dead_code, unused_variables)]
+#[allow(
+    dead_code,
+    unused_variables,
+    reason = "async client integration tests are being rewritten"
+)]
 fn setup_server_and_client(
     _fs: LpFsMemory,
 ) -> (LpServer, LpClient, LocalTransport, LocalTransport) {
@@ -34,7 +38,11 @@ fn setup_server_and_client(
 }
 
 /// Extract ClientMessage from LegacyMessage envelope and send via transport
-#[allow(dead_code, unused_variables)]
+#[allow(
+    dead_code,
+    unused_variables,
+    reason = "async client integration tests are being rewritten"
+)]
 fn send_client_message(
     _transport: &mut LocalTransport,
     _msg: LegacyMessage,
@@ -46,7 +54,11 @@ fn send_client_message(
 ///
 /// This bridges messages through the transport, processing them on both
 /// client and server using their tick() methods.
-#[allow(dead_code, unused_variables)]
+#[allow(
+    dead_code,
+    unused_variables,
+    reason = "async client integration tests are being rewritten"
+)]
 fn process_messages(
     _client: &mut LpClient,
     _server: &mut LpServer,
@@ -59,7 +71,10 @@ fn process_messages(
 /// Create a test project on a filesystem
 ///
 /// Creates a minimal project with project.json and returns the project UID.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "async client integration tests are being rewritten"
+)]
 fn create_test_project(fs: &mut LpFsMemory, name: &str, uid: &str) -> Result<(), ClientError> {
     // Create project.json
     let project_json = format!(

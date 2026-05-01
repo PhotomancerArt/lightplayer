@@ -1,7 +1,10 @@
 //! GLSL type and function-signature shapes for builtin codegen (subset of the old frontend).
 
 /// GLSL type (subset used by LPFX / builtin signature parsing).
-#[allow(dead_code)] // Mirrors full GLSL type set; not every variant appears in LPFX signatures.
+#[allow(
+    dead_code,
+    reason = "mirrors full GLSL type set; not every variant appears in LPFX signatures"
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Void,
@@ -42,7 +45,10 @@ pub struct FunctionSignature {
 
 #[derive(Debug, Clone)]
 pub struct Parameter {
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "parameter names are preserved for future diagnostics"
+    )]
     pub name: String,
     pub ty: Type,
     pub qualifier: ParamQualifier,

@@ -47,7 +47,10 @@ pub fn lpfn_srandom3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Vec3Q32 {
 /// * `seed` - Seed value for randomization
 /// * `out` - Pointer to output vec3 [x, y, z] as i32
 #[lpfn_impl_macro::lpfn_impl(q32, "vec3 lpfn_srandom3_tile(vec3 p, float tileLength, uint seed)")]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes vec3 through caller-provided out-pointer"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_srandom3_tile_q32(
     out: *mut i32,

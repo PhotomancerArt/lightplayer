@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn pad_preserves_ansi_visible_width() {
-        let s = format!("{}hi{}", GREEN, RESET);
+        let s = format!("{GREEN}hi{RESET}");
         assert_eq!(visible_width(&s), 2);
         let p = pad_cell(&s, 5, ColAlign::Right);
         assert_eq!(visible_width(&p), 5);

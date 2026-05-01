@@ -32,7 +32,7 @@ mod tests {
     #[test]
     fn binding_kind_debug_prints() {
         let k = BindingKind::Bus;
-        let s = alloc::format!("{:?}", k);
+        let s = alloc::format!("{k:?}");
         assert_eq!(s, "Bus");
     }
 

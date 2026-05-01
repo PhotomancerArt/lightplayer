@@ -4,7 +4,10 @@ use std::fmt;
 
 /// Error type for LPFX codegen operations
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Some variants reserved for future use
+#[allow(
+    dead_code,
+    reason = "some variants are reserved for future codegen paths"
+)]
 pub enum LpfnCodegenError {
     /// Function is missing the #[lpfn_impl] attribute
     MissingAttribute {

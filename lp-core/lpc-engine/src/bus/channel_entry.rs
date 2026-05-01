@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn channel_entry_debug_prints() {
         let entry = ChannelEntry::default();
-        let s = alloc::format!("{:?}", entry);
+        let s = alloc::format!("{entry:?}");
         assert!(s.contains("ChannelEntry"));
     }
 }

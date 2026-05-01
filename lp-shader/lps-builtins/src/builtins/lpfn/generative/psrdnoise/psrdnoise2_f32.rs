@@ -40,7 +40,10 @@ use lps_q32::q32::Q32;
     f32,
     "float lpfn_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)"
 )]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes gradient through caller-provided out-pointer"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_psrdnoise2_f32(
     x: f32,

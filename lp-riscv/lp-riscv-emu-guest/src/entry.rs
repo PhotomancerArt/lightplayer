@@ -83,7 +83,10 @@ pub unsafe extern "C" fn _code_entry() -> ! {
         core::arch::asm!("ebreak");
     }
 
-    #[allow(clippy::empty_loop)]
+    #[allow(
+        clippy::empty_loop,
+        reason = "bare-metal guest halts here after ebreak"
+    )]
     loop {
         // Infinite loop after ebreak - execution should never reach here
     }

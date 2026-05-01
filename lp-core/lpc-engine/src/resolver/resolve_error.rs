@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn display_trait_works() {
         let err = ResolveError::new("test");
-        let s = alloc::format!("{}", err);
+        let s = alloc::format!("{err}");
         assert_eq!(s, "test");
     }
 }
