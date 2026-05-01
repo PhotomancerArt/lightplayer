@@ -2,7 +2,6 @@
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_model::{FrameId, NodeId, TreePath};
 use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
@@ -47,11 +46,13 @@ pub struct NodeEntry<N> {
 
 impl<N> NodeEntry<N> {
     /// Placeholder artifact path for [`Self::new`] (tests and roots without a real spec yet).
-    pub(crate) const PLACEHOLDER_ARTIFACT_PATH: &'static str = "";
+    ///
+    /// Spine placeholder artifact path: empty authored `""` normalizes to `/` (`lpc_model::LpPathBuf`).
+    pub(crate) const PLACEHOLDER_ARTIFACT_PATH: &'static str = "/";
 
     /// Create a new entry. Sets `created_frame = change_frame = children_ver = frame`.
     ///
-    /// Fills spine fields with placeholders: empty artifact path, handle `0`, empty resolver cache.
+    /// Fills spine fields with placeholders: root-normalized artifact path (`/`), handle `0`, empty resolver cache.
     pub fn new(
         id: NodeId,
         path: TreePath,
@@ -64,9 +65,7 @@ impl<N> NodeEntry<N> {
             path,
             parent,
             child_kind,
-            SrcNodeConfig::new(SrcArtifactSpec(String::from(
-                Self::PLACEHOLDER_ARTIFACT_PATH,
-            ))),
+            SrcNodeConfig::new(SrcArtifactSpec::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
             ArtifactId::from_raw(0),
             frame,
         )
@@ -123,7 +122,6 @@ impl<N> NodeEntry<N> {
 mod tests {
     use super::NodeEntry;
     use crate::resolver::{ResolveSource, ResolvedSlot};
-    use alloc::string::String;
     use lpc_model::prop::prop_path::parse_path;
     use lpc_model::{FrameId, NodeId, TreePath};
     use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
@@ -203,7 +201,7 @@ mod tests {
     #[test]
     fn node_entry_new_spine_stores_config_and_artifact() {
         let frame = FrameId::new(1);
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./fluid.vis")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./fluid.vis"));
         let artifact = crate::artifact::ArtifactId::from_raw(7);
         let entry: NodeEntry<()> = NodeEntry::new_spine(
             NodeId::new(1),

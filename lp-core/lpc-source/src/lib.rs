@@ -14,7 +14,8 @@ pub mod prop;
 pub mod schema;
 
 pub use artifact::{
-    ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact, SrcArtifactSpec, load_artifact,
+    ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact, SrcArtifactLibRef,
+    SrcArtifactSpec, load_artifact,
 };
 pub use node::SrcNodeConfig;
 pub use presentation::Presentation;

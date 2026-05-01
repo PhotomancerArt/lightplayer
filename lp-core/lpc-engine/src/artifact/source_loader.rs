@@ -106,9 +106,9 @@ schema_version = 1
 title = "hi"
 "#,
         );
-        let location = ArtifactLocation::file_from_spec(&SrcArtifactSpec(String::from(
-            "/src/pattern.lp.toml",
-        )));
+        let location =
+            ArtifactLocation::try_from_src_spec(&SrcArtifactSpec::path("/src/pattern.lp.toml"))
+                .unwrap();
         let a: DummySrcArtifact = load_source_artifact(&fs, &location).unwrap();
         assert_eq!(a.title, "hi");
     }
@@ -123,7 +123,7 @@ title = "x"
 "#,
         );
         let location =
-            ArtifactLocation::file_from_spec(&SrcArtifactSpec(String::from("/bad.toml")));
+            ArtifactLocation::try_from_src_spec(&SrcArtifactSpec::path("/bad.toml")).unwrap();
         let err = load_source_artifact::<DummySrcArtifact, _>(&fs, &location).unwrap_err();
         match err {
             ArtifactError::Load(s) => {

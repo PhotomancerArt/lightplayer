@@ -26,7 +26,6 @@ pub trait Node {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
-    use alloc::string::String;
     use alloc::vec::Vec;
 
     use crate::artifact::ArtifactId;
@@ -132,7 +131,7 @@ mod tests {
 
         // Set up context dependencies
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
 
         // Create a test resolver context

@@ -347,7 +347,7 @@ mod tests {
     }
 
     fn make_config() -> SrcNodeConfig {
-        SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")))
+        SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"))
     }
 
     fn make_config_with_override(prop: &str, binding: SrcBinding) -> SrcNodeConfig {

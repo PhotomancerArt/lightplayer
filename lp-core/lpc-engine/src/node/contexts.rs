@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn tick_context_accessors() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let artifact_ref = ArtifactId::from_raw(1);
         let resolver = TestResolverContext::new(FrameId::new(10));
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn tick_context_resolve_delegates_to_supplied_resolver() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
 
         // Set up resolver with artifact binding
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn tick_context_resolve_uses_artifact_default_via_resolver() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
 
         // Set up resolver with artifact default (no binding)
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn tick_context_resolve_bus_via_resolver() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
 
         // Set up resolver with bus value
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn tick_context_resolve_override_beats_artifact_binding() {
         let bus = Bus::new();
-        let mut config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         // Add override
         config.overrides.push((
             parse_path("params.priority").unwrap(),
@@ -433,7 +433,7 @@ mod tests {
     #[test]
     fn tick_context_changed_since_reads_cache_frames() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let resolver = TestResolverContext::new(FrameId::new(10));
 
@@ -480,7 +480,7 @@ mod tests {
     #[test]
     fn tick_context_changed_since_returns_false_for_unknown_prop() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let resolver = TestResolverContext::new(FrameId::new(10));
 
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn tick_context_artifact_changed_since_compares_content_frame() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let resolver = TestResolverContext::new(FrameId::new(10));
 
@@ -539,7 +539,7 @@ mod tests {
         .unwrap();
         bus.publish(&channel, LpsValueF32::F32(7.5), FrameId::new(3));
 
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let resolver = TestResolverContext::new(FrameId::new(10));
 
@@ -561,7 +561,7 @@ mod tests {
     #[test]
     fn tick_context_bus_read_missing_returns_none() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let resolver = TestResolverContext::new(FrameId::new(10));
 
@@ -594,7 +594,7 @@ mod tests {
         .unwrap();
         bus.publish(&channel, LpsValueF32::F32(1.0), FrameId::new(7));
 
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
         let resolver = TestResolverContext::new(FrameId::new(10));
 
@@ -727,7 +727,7 @@ mod tests {
     #[test]
     fn dummy_node_can_resolve_artifact_default_from_tick() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
 
         // Set up resolver with artifact default
@@ -757,7 +757,7 @@ mod tests {
     #[test]
     fn dummy_node_can_resolve_bus_binding_from_tick() {
         let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let mut cache = ResolverCache::new();
 
         // Set up resolver with bus binding and value

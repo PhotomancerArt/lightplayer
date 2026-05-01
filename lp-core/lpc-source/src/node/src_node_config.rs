@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn node_config_round_trips_empty_overrides() {
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./fluid.vis")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./fluid.vis"));
         let json = serde_json::to_string(&config).unwrap();
         let back: SrcNodeConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config, back);
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn overrides_omitted_when_empty() {
-        let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
+        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
         let json = serde_json::to_string(&config).unwrap();
         assert!(
             !json.contains("overrides"),
@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn node_config_round_trips_with_literal_override() {
-        let mut config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./shader.lp")));
+        let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("./shader.lp"));
         let path = parse_path("params.scale").unwrap();
         let binding = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(6.0)));
         config.overrides.push((path, binding));
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn node_config_round_trips_with_bus_override() {
-        let mut config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./output.lp")));
+        let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("./output.lp"));
         let path = parse_path("inputs.level").unwrap();
         let binding = SrcBinding::Bus(ChannelName(String::from("audio/in/0")));
         config.overrides.push((path, binding));
@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn node_config_toml_round_trips() {
-        let mut config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./pattern.lp")));
+        let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("./pattern.lp"));
         let path = parse_path("params.speed").unwrap();
         let binding = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(1.5)));
         config.overrides.push((path, binding));

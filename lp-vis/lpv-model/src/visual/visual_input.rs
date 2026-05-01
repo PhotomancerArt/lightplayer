@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn visual_variant_round_trips() {
         let v = VisualInput::Visual(VisualInputVisual {
-            visual: SrcArtifactSpec("../patterns/fbm.pattern.toml".into()),
+            visual: SrcArtifactSpec::path("../patterns/fbm.pattern.toml"),
             params: BTreeMap::new(),
         });
         let toml_str = toml::to_string(&v).unwrap();
@@ -88,7 +88,7 @@ mod tests {
         let mut params = BTreeMap::new();
         params.insert("scale".into(), toml::Value::Float(6.0));
         let v = VisualInput::Visual(VisualInputVisual {
-            visual: SrcArtifactSpec("../patterns/fbm.pattern.toml".into()),
+            visual: SrcArtifactSpec::path("../patterns/fbm.pattern.toml"),
             params,
         });
         let toml_str = toml::to_string(&v).unwrap();

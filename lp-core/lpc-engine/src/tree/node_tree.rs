@@ -237,7 +237,7 @@ mod tests {
     fn tree_add_child_stores_config_and_artifact() {
         let mut tree = make_tree();
         let root = tree.root();
-        let cfg = SrcNodeConfig::new(SrcArtifactSpec(alloc::string::String::from("child.lp")));
+        let cfg = SrcNodeConfig::new(SrcArtifactSpec::path("child.lp"));
         let art = ArtifactId::from_raw(9);
         let child = tree
             .add_child(

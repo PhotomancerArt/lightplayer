@@ -22,9 +22,8 @@ pub use tree_error::TreeError;
 
 #[cfg(test)]
 pub(crate) fn test_placeholder_spine() -> (lpc_source::SrcNodeConfig, crate::artifact::ArtifactId) {
-    use alloc::string::String;
     (
-        lpc_source::SrcNodeConfig::new(lpc_source::SrcArtifactSpec(String::from("__test__.vis"))),
+        lpc_source::SrcNodeConfig::new(lpc_source::SrcArtifactSpec::path("__test__.vis")),
         crate::artifact::ArtifactId::from_raw(0),
     )
 }

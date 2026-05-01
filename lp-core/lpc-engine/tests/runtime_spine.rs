@@ -56,7 +56,7 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
 #[test]
 fn runtime_spine_literal_override_and_artifact_default_resolution() {
     let mut cache = ResolverCache::new();
-    let mut config = SrcNodeConfig::new(SrcArtifactSpec(String::from("a.lp")));
+    let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("a.lp"));
     let prop_lit = parse_path("params.gain").unwrap();
     config.overrides.push((
         prop_lit.clone(),
@@ -89,7 +89,7 @@ fn runtime_spine_bus_claim_publish_resolver_sees_value_in_resolved_slot() {
     bus.publish(&channel, LpsValueF32::F32(9.0), FrameId::new(11));
 
     let mut cache = ResolverCache::new();
-    let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("b.lp")));
+    let config = SrcNodeConfig::new(SrcArtifactSpec::path("b.lp"));
 
     let ctx = SyntheticResolverContext::new(FrameId::new(100))
         .with_bus(&bus)
@@ -118,7 +118,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
     targets.insert(target_path, target_props);
 
     let mut cache = ResolverCache::new();
-    let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("c.lp")));
+    let config = SrcNodeConfig::new(SrcArtifactSpec::path("c.lp"));
 
     let spec =
         NodePropSpec::parse("/show.demo/node_a.demo#outputs[0]").expect("outputs NodePropSpec");
@@ -139,7 +139,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
 #[test]
 fn runtime_spine_node_prop_non_outputs_returns_resolve_error() {
     let mut cache = ResolverCache::new();
-    let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("d.lp")));
+    let config = SrcNodeConfig::new(SrcArtifactSpec::path("d.lp"));
 
     let spec = NodePropSpec::parse("/show.demo/node_a.demo#params.k").expect("params spec");
     let ctx = SyntheticResolverContext::new(FrameId::new(1))
@@ -167,12 +167,12 @@ fn runtime_spine_tick_context_resolve_changed_since_and_artifact_frames() {
     .unwrap();
     bus.publish(&channel, LpsValueF32::F32(2.0), FrameId::new(15));
 
-    let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("e.lp")));
+    let config = SrcNodeConfig::new(SrcArtifactSpec::path("e.lp"));
     let mut cache = ResolverCache::new();
 
     let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
     let ar = mgr.acquire_location(
-        ArtifactLocation::file_from_spec(&config.artifact),
+        ArtifactLocation::try_from_src_spec(&config.artifact).unwrap(),
         FrameId::new(0),
     );
     mgr.load_with(&ar, FrameId::new(40), |_location| Ok(7u8))

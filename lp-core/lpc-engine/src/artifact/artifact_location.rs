@@ -21,8 +21,13 @@ impl ArtifactLocation {
         Self::File(path.into())
     }
 
-    pub fn file_from_spec(spec: &SrcArtifactSpec) -> Self {
-        Self::file(spec.0.as_str())
+    pub fn try_from_src_spec(spec: &SrcArtifactSpec) -> Result<Self, super::ArtifactError> {
+        match spec {
+            SrcArtifactSpec::Path(path) => Ok(Self::File(path.clone())),
+            SrcArtifactSpec::Lib(lib) => Err(super::ArtifactError::Resolution(alloc::format!(
+                "library artifact references are not supported yet ({lib})"
+            ))),
+        }
     }
 }
 
@@ -43,14 +48,21 @@ impl PartialOrd for ArtifactLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::String;
 
+    use crate::artifact::ArtifactError;
     #[test]
-    fn file_from_spec_preserves_file_path_location() {
-        let spec = SrcArtifactSpec(String::from("./fx/../fx/a.effect.toml"));
-        let location = ArtifactLocation::file_from_spec(&spec);
+    fn try_from_src_spec_preserves_file_path_location() {
+        let spec = SrcArtifactSpec::path("./fx/../fx/a.effect.toml");
+        let location = ArtifactLocation::try_from_src_spec(&spec).unwrap();
         match location {
             ArtifactLocation::File(path) => assert_eq!(path.as_str(), "fx/../fx/a.effect.toml"),
         }
+    }
+
+    #[test]
+    fn try_from_src_spec_rejects_lib_for_now() {
+        let spec = SrcArtifactSpec::parse("lib:core/x").unwrap();
+        let err = ArtifactLocation::try_from_src_spec(&spec).unwrap_err();
+        assert!(matches!(err, ArtifactError::Resolution(s) if s.contains("not supported")));
     }
 }
