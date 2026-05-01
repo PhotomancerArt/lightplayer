@@ -26,7 +26,8 @@ In scope:
   - `NodeError`
 - Runtime artifact cache:
   - `ArtifactManager<A>`
-  - `ArtifactRef`
+  - `ArtifactLocation`
+  - `ArtifactId`
   - `ArtifactEntry<A>`
   - `ArtifactState<A>`
   - `ArtifactError`
@@ -68,7 +69,8 @@ lp-core/lpc-engine/src/
 ├── artifact/                            # NEW: runtime artifact state/cache
 │   ├── mod.rs
 │   ├── artifact_manager.rs              # ArtifactManager<A>
-│   ├── artifact_ref.rs                  # ArtifactRef
+│   ├── artifact_id.rs                   # ArtifactId
+│   ├── artifact_location.rs             # ArtifactLocation
 │   ├── artifact_entry.rs                # ArtifactEntry<A>
 │   ├── artifact_state.rs                # ArtifactState<A>
 │   └── artifact_error.rs                # ArtifactError
@@ -102,13 +104,13 @@ lp-core/lpc-engine/src/
 SrcNodeConfig + SrcArtifactSpec
         │
         ▼
-ArtifactManager<A> ── acquire/load/release ── ArtifactRef
-        │                                      │ content_frame
-        ▼                                      ▼
+ArtifactLocation ── ArtifactManager<A> ── acquire/load/release ── ArtifactId
+        │                                                        │ content_frame
+        ▼                                                        ▼
 NodeTree<Box<dyn Node>> ─ NodeEntry ─ resolver_cache
         │                    │
         │                    ├─ config: SrcNodeConfig
-        │                    ├─ artifact: ArtifactRef
+        │                    ├─ artifact: ArtifactId
         │                    └─ state: Pending | Alive(Box<dyn Node>) | Failed
         │
         ▼
@@ -165,14 +167,14 @@ artifact payload type and accept closure-based loading/preparation hooks.
 
 Required behavior:
 
-- Acquire a `SrcArtifactSpec` and create/reuse an entry.
+- Acquire an `ArtifactLocation` and create/reuse an entry.
 - Track refcount.
 - Transition `Resolved -> Loaded`.
 - Transition `Loaded` / `Prepared` to `Idle` when refcount reaches zero.
 - Preserve error states.
 - Bump `content_frame` on successful reload/load.
 
-`ArtifactRef` is the runtime handle stored on new spine `NodeEntry` values.
+`ArtifactId` is the runtime handle stored on new spine `NodeEntry` values.
 It exposes enough metadata for `TickContext::artifact_changed_since`.
 
 ## `tree`
@@ -181,7 +183,7 @@ M4.3 extends the existing generic `NodeTree<N>` / `NodeEntry<N>` data path
 so new spine entries can carry:
 
 - `SrcNodeConfig`
-- `ArtifactRef`
+- `ArtifactId`
 - `ResolverCache`
 - existing lifecycle/status/frame counters
 

@@ -9,8 +9,8 @@ are **M5** ([`../m5-node-spine-cutover.md`](../m5-node-spine-cutover.md)).
 | Phase | Focus |
 | --- | --- |
 | [01](01-add-node-contracts.md) | `node`: `Node`, contexts, `NodeError`, `PressureLevel` |
-| [02](02-add-artifact-manager.md) | `artifact`: `ArtifactManager`, `ArtifactRef`, state machine |
-| [03](03-extend-spine-node-entry.md) | `tree::NodeEntry`: `SrcNodeConfig`, `ArtifactRef`, `ResolverCache` |
+| [02](02-add-artifact-manager.md) | `artifact`: `ArtifactManager`, `ArtifactId`, state machine |
+| [03](03-extend-spine-node-entry.md) | `tree::NodeEntry`: `SrcNodeConfig`, `ArtifactId`, `ResolverCache` |
 | [04](04-implement-resolver-context-and-cascade.md) | Resolver cascade, `ResolverContext`, `ResolveError` |
 | [05](05-wire-tick-context.md) | `TickContext` wired to resolver, bus, artifact frame |
 | [06](06-source-artifact-loader-orchestration.md) | `load_source_artifact` → `lpc_source::load_artifact` |
@@ -18,6 +18,7 @@ are **M5** ([`../m5-node-spine-cutover.md`](../m5-node-spine-cutover.md)).
 
 References: [`00-design.md`](00-design.md), [`00-notes.md`](00-notes.md),
 [`summary.md`](summary.md),
+[`artifact-location-cleanup.md`](artifact-location-cleanup.md),
 [`../design/02-node.md`](../design/02-node.md),
 [`../design/03-artifact.md`](../design/03-artifact.md),
 [`../design/04-config.md`](../design/04-config.md),
@@ -29,6 +30,8 @@ References: [`00-design.md`](00-design.md), [`00-notes.md`](00-notes.md),
   `LegacyNodeRuntime` in `src/nodes/`.
 - Use `RuntimePropAccess`, `SrcNodeConfig`, `SrcArtifactSpec`, `LpsValueF32`.
   No `PropAccess` compatibility alias.
+- Use `SrcArtifactSpec -> ArtifactLocation -> ArtifactId` for authored specs,
+  resolved runtime locations, and dense manager handles.
 - `#[derive(RuntimePropAccess)]` / `lpc-derive` remain future work.
 
 ## Follow-on

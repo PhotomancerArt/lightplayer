@@ -1,20 +1,19 @@
-//! Maps [`SrcArtifactSpec`](lpc_source::SrcArtifactSpec) to refcounted runtime entries.
+//! Maps [`ArtifactLocation`](super::ArtifactLocation) to refcounted runtime entries.
 
 use alloc::collections::BTreeMap;
 
 use lpc_model::FrameId;
-use lpc_source::SrcArtifactSpec;
 
-use super::{ArtifactEntry, ArtifactError, ArtifactRef, ArtifactState};
+use super::{ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactState};
 
-/// Cache of artifacts keyed by opaque handle and by authored spec string.
+/// Cache of artifacts keyed by opaque handle and resolved location.
 ///
 /// When the refcount of an entry in [`ArtifactState::Resolved`] or an error state reaches zero,
 /// the entry is **removed** from both maps. Payload-bearing states transition to [`ArtifactState::Idle`]
-/// instead so the spec continues to resolve to the same handle for future acquires.
+/// instead so the location continues to resolve to the same handle for future acquires.
 pub struct ArtifactManager<A> {
     by_handle: BTreeMap<u32, ArtifactEntry<A>>,
-    spec_to_handle: BTreeMap<alloc::string::String, u32>,
+    location_to_handle: BTreeMap<ArtifactLocation, u32>,
     next_handle: u32,
 }
 
@@ -22,7 +21,7 @@ impl<A> ArtifactManager<A> {
     pub fn new() -> Self {
         Self {
             by_handle: BTreeMap::new(),
-            spec_to_handle: BTreeMap::new(),
+            location_to_handle: BTreeMap::new(),
             next_handle: 1,
         }
     }
@@ -36,31 +35,32 @@ impl<A> ArtifactManager<A> {
         h
     }
 
-    /// Acquire (or reuse) an entry for `spec`, increment refcount, and return its handle.
+    /// Acquire (or reuse) an entry for `location`, increment refcount, and return its handle.
     ///
     /// New entries start as [`ArtifactState::Resolved`] with `content_frame = frame`.
-    pub fn acquire_resolved(&mut self, spec: SrcArtifactSpec, frame: FrameId) -> ArtifactRef {
-        let key = spec.0.clone();
-        if let Some(&handle) = self.spec_to_handle.get(&key) {
+    pub fn acquire_location(&mut self, location: ArtifactLocation, frame: FrameId) -> ArtifactId {
+        if let Some(&handle) = self.location_to_handle.get(&location) {
             if let Some(entry) = self.by_handle.get_mut(&handle) {
                 entry.refcount += 1;
-                return ArtifactRef::from_raw(handle);
+                return ArtifactId::from_raw(handle);
             }
-            self.spec_to_handle.remove(&key);
+            self.location_to_handle.remove(&location);
         }
         let handle = self.alloc_handle();
-        self.spec_to_handle.insert(key, handle);
+        self.location_to_handle.insert(location.clone(), handle);
+        let id = ArtifactId::from_raw(handle);
         self.by_handle.insert(
             handle,
             ArtifactEntry {
-                spec,
+                id,
+                location,
                 state: ArtifactState::Resolved,
                 refcount: 1,
                 content_frame: frame,
                 error: None,
             },
         );
-        ArtifactRef::from_raw(handle)
+        id
     }
 
     /// Run `loader` for this handle and update state / `content_frame` on success.
@@ -69,20 +69,20 @@ impl<A> ArtifactManager<A> {
     /// [`ArtifactEntry::content_frame`].
     pub fn load_with<F>(
         &mut self,
-        r: &ArtifactRef,
+        r: &ArtifactId,
         frame: FrameId,
         loader: F,
     ) -> Result<(), ArtifactError>
     where
-        F: FnOnce(&SrcArtifactSpec) -> Result<A, ArtifactError>,
+        F: FnOnce(&ArtifactLocation) -> Result<A, ArtifactError>,
     {
         let handle = r.handle();
         let entry = self
             .by_handle
             .get_mut(&handle)
             .ok_or(ArtifactError::UnknownHandle { handle })?;
-        let spec = entry.spec.clone();
-        match loader(&spec) {
+        let location = entry.location.clone();
+        match loader(&location) {
             Ok(a) => {
                 entry.state = ArtifactState::Loaded(a);
                 entry.content_frame = frame;
@@ -104,7 +104,7 @@ impl<A> ArtifactManager<A> {
 
     /// Decrement refcount. Payload-bearing entries become [`ArtifactState::Idle`] at zero refs;
     /// resolved-only and error entries are removed (see struct docs).
-    pub fn release(&mut self, r: &ArtifactRef, _frame: FrameId) -> Result<(), ArtifactError> {
+    pub fn release(&mut self, r: &ArtifactId, _frame: FrameId) -> Result<(), ArtifactError> {
         let handle = r.handle();
         let entry = self
             .by_handle
@@ -123,8 +123,8 @@ impl<A> ArtifactManager<A> {
             | ArtifactState::ResolutionError(_)
             | ArtifactState::LoadError(_)
             | ArtifactState::PrepareError(_) => {
-                let key = entry.spec.0.clone();
-                self.spec_to_handle.remove(&key);
+                let location = entry.location.clone();
+                self.location_to_handle.remove(&location);
                 self.by_handle.remove(&handle);
             }
             ArtifactState::Loaded(a) | ArtifactState::Prepared(a) => {
@@ -137,15 +137,15 @@ impl<A> ArtifactManager<A> {
         Ok(())
     }
 
-    pub fn entry(&self, r: &ArtifactRef) -> Option<&ArtifactEntry<A>> {
+    pub fn entry(&self, r: &ArtifactId) -> Option<&ArtifactEntry<A>> {
         self.by_handle.get(&r.handle())
     }
 
-    pub fn content_frame(&self, r: &ArtifactRef) -> Option<FrameId> {
+    pub fn content_frame(&self, r: &ArtifactId) -> Option<FrameId> {
         self.entry(r).map(|e| e.content_frame)
     }
 
-    pub fn refcount(&self, r: &ArtifactRef) -> Option<u32> {
+    pub fn refcount(&self, r: &ArtifactId) -> Option<u32> {
         self.entry(r).map(|e| e.refcount)
     }
 }
@@ -161,16 +161,16 @@ mod tests {
     use super::*;
     use alloc::string::String;
 
-    fn spec(path: &str) -> SrcArtifactSpec {
-        SrcArtifactSpec(String::from(path))
+    fn location(path: &str) -> ArtifactLocation {
+        ArtifactLocation::file(path)
     }
 
     #[test]
-    fn acquire_same_spec_reuses_handle_and_increments_refcount() {
+    fn acquire_same_location_reuses_handle_and_increments_refcount() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let s = spec("a.lp");
-        let r1 = m.acquire_resolved(s.clone(), FrameId::new(1));
-        let r2 = m.acquire_resolved(s, FrameId::new(2));
+        let l = location("a.lp");
+        let r1 = m.acquire_location(l.clone(), FrameId::new(1));
+        let r2 = m.acquire_location(l, FrameId::new(2));
         assert_eq!(r1.handle(), r2.handle());
         assert_eq!(m.refcount(&r1), Some(2));
     }
@@ -178,21 +178,23 @@ mod tests {
     #[test]
     fn release_decrements_refcount() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_resolved(spec("b.lp"), FrameId::new(1));
+        let r = m.acquire_location(location("b.lp"), FrameId::new(1));
         let h = r.handle();
-        let r2 = m.acquire_resolved(spec("b.lp"), FrameId::new(1));
+        let r2 = m.acquire_location(location("b.lp"), FrameId::new(1));
         assert_eq!(m.refcount(&r), Some(2));
         m.release(&r2, FrameId::new(1)).unwrap();
         assert_eq!(m.refcount(&r), Some(1));
-        assert_eq!(m.entry(&r).unwrap().spec.0, "b.lp");
-        assert_eq!(m.entry(&ArtifactRef::from_raw(h)).unwrap().refcount, 1);
+        assert_eq!(m.entry(&r).unwrap().id.handle(), h);
+        assert_eq!(m.entry(&r).unwrap().location, location("b.lp"));
+        assert_eq!(m.entry(&ArtifactId::from_raw(h)).unwrap().refcount, 1);
     }
 
     #[test]
     fn loaded_moves_to_idle_when_refcount_reaches_zero() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_resolved(spec("c.lp"), FrameId::new(1));
-        m.load_with(&r, FrameId::new(5), |_s| Ok(42)).unwrap();
+        let r = m.acquire_location(location("c.lp"), FrameId::new(1));
+        m.load_with(&r, FrameId::new(5), |_location| Ok(42))
+            .unwrap();
         assert!(matches!(
             m.entry(&r).unwrap().state,
             ArtifactState::Loaded(42)
@@ -206,10 +208,12 @@ mod tests {
     #[test]
     fn load_success_bumps_content_frame() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_resolved(spec("d.lp"), FrameId::new(1));
-        m.load_with(&r, FrameId::new(10), |_s| Ok(1)).unwrap();
+        let r = m.acquire_location(location("d.lp"), FrameId::new(1));
+        m.load_with(&r, FrameId::new(10), |_location| Ok(1))
+            .unwrap();
         assert_eq!(m.content_frame(&r), Some(FrameId::new(10)));
-        m.load_with(&r, FrameId::new(99), |_s| Ok(2)).unwrap();
+        m.load_with(&r, FrameId::new(99), |_location| Ok(2))
+            .unwrap();
         assert_eq!(m.content_frame(&r), Some(FrameId::new(99)));
         if let ArtifactState::Loaded(v) = &m.entry(&r).unwrap().state {
             assert_eq!(*v, 2);
@@ -221,9 +225,9 @@ mod tests {
     #[test]
     fn load_failure_records_load_error() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_resolved(spec("e.lp"), FrameId::new(1));
+        let r = m.acquire_location(location("e.lp"), FrameId::new(1));
         let err = m
-            .load_with(&r, FrameId::new(3), |_s| {
+            .load_with(&r, FrameId::new(3), |_location| {
                 Err(ArtifactError::Load(String::from("boom")))
             })
             .unwrap_err();
@@ -238,13 +242,13 @@ mod tests {
     #[test]
     fn unknown_handle_returns_structured_error() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let bad = ArtifactRef::from_raw(999);
+        let bad = ArtifactId::from_raw(999);
         assert_eq!(
             m.release(&bad, FrameId::default()).unwrap_err(),
             ArtifactError::UnknownHandle { handle: 999 }
         );
         assert_eq!(
-            m.load_with(&bad, FrameId::default(), |_s| Ok(0))
+            m.load_with(&bad, FrameId::default(), |_location| Ok(0))
                 .unwrap_err(),
             ArtifactError::UnknownHandle { handle: 999 }
         );

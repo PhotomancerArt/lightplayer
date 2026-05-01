@@ -111,7 +111,7 @@ fn collect_created_deltas<N>(
 #[cfg(test)]
 mod tests {
     use super::tree_deltas_since;
-    use crate::artifact::ArtifactRef;
+    use crate::artifact::ArtifactId;
     use crate::tree::test_placeholder_spine;
     use crate::tree::{EntryState, NodeTree};
     use alloc::vec;
@@ -124,7 +124,7 @@ mod tests {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
     }
 
-    fn spine_placeholder() -> (SrcNodeConfig, ArtifactRef) {
+    fn spine_placeholder() -> (SrcNodeConfig, ArtifactId) {
         test_placeholder_spine()
     }
 

@@ -1,25 +1,25 @@
-//! Engine-side orchestration from [`SrcArtifactSpec`] to typed [`SrcArtifact`] loads via
+//! Engine-side orchestration from [`ArtifactLocation`](super::ArtifactLocation) to typed [`SrcArtifact`] loads via
 //! [`lpc_source::load_artifact`], mapping [`lpc_source::LoadError`] into [`ArtifactError`].
 //!
 //! Use with [`super::ArtifactManager::load_with`], e.g.
-//! `manager.load_with(&artifact_ref, frame, |spec| load_source_artifact(fs, spec))`.
+//! `manager.load_with(&artifact_id, frame, |location| load_source_artifact(fs, location))`.
 
 use alloc::format;
 
-use lpc_model::lp_path::LpPath;
-use lpc_source::{ArtifactReadRoot, LoadError, SrcArtifact, SrcArtifactSpec, load_artifact};
+use lpc_source::{ArtifactReadRoot, LoadError, SrcArtifact, load_artifact};
 
-use super::ArtifactError;
+use super::{ArtifactError, ArtifactLocation};
 
-/// Load the TOML artifact referenced by `spec` through `fs` and validate schema version.
-pub fn load_source_artifact<A, R>(fs: &R, spec: &SrcArtifactSpec) -> Result<A, ArtifactError>
+/// Load the TOML artifact referenced by `location` through `fs` and validate schema version.
+pub fn load_source_artifact<A, R>(fs: &R, location: &ArtifactLocation) -> Result<A, ArtifactError>
 where
     A: SrcArtifact + serde::de::DeserializeOwned,
     R: ArtifactReadRoot,
     R::Err: core::fmt::Debug,
 {
-    let path = LpPath::new(spec.0.as_str());
-    load_artifact(fs, path).map_err(map_load_error)
+    match location {
+        ArtifactLocation::File(path) => load_artifact(fs, path.as_path()).map_err(map_load_error),
+    }
 }
 
 fn map_load_error<E: core::fmt::Debug>(err: LoadError<E>) -> ArtifactError {
@@ -45,8 +45,8 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec::Vec;
 
-    use lpc_model::FrameId;
-    use lpc_model::lp_path::LpPathBuf;
+    use lpc_model::{FrameId, LpPath, LpPathBuf};
+    use lpc_source::SrcArtifactSpec;
     use lpc_source::SrcSlot;
 
     use crate::artifact::{ArtifactManager, ArtifactState};
@@ -106,8 +106,10 @@ schema_version = 1
 title = "hi"
 "#,
         );
-        let spec = SrcArtifactSpec(String::from("/src/pattern.lp.toml"));
-        let a: DummySrcArtifact = load_source_artifact(&fs, &spec).unwrap();
+        let location = ArtifactLocation::file_from_spec(&SrcArtifactSpec(String::from(
+            "/src/pattern.lp.toml",
+        )));
+        let a: DummySrcArtifact = load_source_artifact(&fs, &location).unwrap();
         assert_eq!(a.title, "hi");
     }
 
@@ -120,8 +122,9 @@ schema_version = 99
 title = "x"
 "#,
         );
-        let spec = SrcArtifactSpec(String::from("/bad.toml"));
-        let err = load_source_artifact::<DummySrcArtifact, _>(&fs, &spec).unwrap_err();
+        let location =
+            ArtifactLocation::file_from_spec(&SrcArtifactSpec(String::from("/bad.toml")));
+        let err = load_source_artifact::<DummySrcArtifact, _>(&fs, &location).unwrap_err();
         match err {
             ArtifactError::Load(s) => {
                 assert!(s.contains("schema version mismatch"));
@@ -143,9 +146,11 @@ title = "from-manager"
 "#,
         );
         let mut m: ArtifactManager<DummySrcArtifact> = ArtifactManager::new();
-        let r = m.acquire_resolved(SrcArtifactSpec(String::from("/eff.toml")), FrameId::new(1));
-        m.load_with(&r, FrameId::new(2), |spec| load_source_artifact(&fs, spec))
-            .unwrap();
+        let r = m.acquire_location(ArtifactLocation::file("/eff.toml"), FrameId::new(1));
+        m.load_with(&r, FrameId::new(2), |location| {
+            load_source_artifact(&fs, location)
+        })
+        .unwrap();
         match &m.entry(&r).unwrap().state {
             ArtifactState::Loaded(a) => assert_eq!(a.title, "from-manager"),
             s => panic!("expected Loaded, got {s:?}"),

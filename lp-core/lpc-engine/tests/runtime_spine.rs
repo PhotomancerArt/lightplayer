@@ -11,8 +11,8 @@ use alloc::vec::Vec;
 use lpc_engine::node::NodeError;
 use lpc_engine::resolver::{ResolverContext, resolve_slot};
 use lpc_engine::{
-    ArtifactManager, ArtifactState, BindingKind, Bus, LegacyNodeRuntime, Node, ResolveSource,
-    ResolverCache, TickContext,
+    ArtifactLocation, ArtifactManager, ArtifactState, BindingKind, Bus, LegacyNodeRuntime, Node,
+    ResolveSource, ResolverCache, TickContext,
 };
 use lpc_model::{
     FrameId, Kind, ModelValue, NodeId, NodePropSpec, PropPath, bus::ChannelName,
@@ -29,14 +29,17 @@ use lps_shared::LpsValueF32;
 #[test]
 fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount() {
     let mut mgr: ArtifactManager<String> = ArtifactManager::new();
-    let spec = SrcArtifactSpec(String::from("dummy/test.lp"));
-    let r = mgr.acquire_resolved(spec.clone(), FrameId::new(1));
+    let location = ArtifactLocation::file("dummy/test.lp");
+    let r = mgr.acquire_location(location, FrameId::new(1));
 
     assert_eq!(mgr.refcount(&r), Some(1));
     assert_eq!(mgr.content_frame(&r), Some(FrameId::new(1)));
 
-    mgr.load_with(&r, FrameId::new(20), |s| Ok(format!("loaded:{}", s.0)))
-        .unwrap();
+    mgr.load_with(&r, FrameId::new(20), |location| {
+        let ArtifactLocation::File(path) = location;
+        Ok(format!("loaded:{}", path.as_str()))
+    })
+    .unwrap();
 
     assert_eq!(mgr.content_frame(&r), Some(FrameId::new(20)));
     let ent = mgr.entry(&r).expect("entry");
@@ -168,8 +171,12 @@ fn runtime_spine_tick_context_resolve_changed_since_and_artifact_frames() {
     let mut cache = ResolverCache::new();
 
     let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
-    let ar = mgr.acquire_resolved(config.artifact.clone(), FrameId::new(0));
-    mgr.load_with(&ar, FrameId::new(40), |_| Ok(7u8)).unwrap();
+    let ar = mgr.acquire_location(
+        ArtifactLocation::file_from_spec(&config.artifact),
+        FrameId::new(0),
+    );
+    mgr.load_with(&ar, FrameId::new(40), |_location| Ok(7u8))
+        .unwrap();
     let content_frame = mgr.content_frame(&ar).expect("content_frame");
 
     let resolver = SyntheticResolverContext::new(FrameId::new(99))

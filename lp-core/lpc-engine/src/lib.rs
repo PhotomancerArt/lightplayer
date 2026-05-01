@@ -26,7 +26,9 @@ pub mod runtime;
 pub mod tree;
 pub mod wire_bridge;
 
-pub use artifact::{ArtifactEntry, ArtifactError, ArtifactManager, ArtifactRef, ArtifactState};
+pub use artifact::{
+    ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactManager, ArtifactState,
+};
 pub use bus::{Bus, BusError, ChannelEntry};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};

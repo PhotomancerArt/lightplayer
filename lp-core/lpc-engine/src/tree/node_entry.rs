@@ -8,7 +8,7 @@ use lpc_model::{FrameId, NodeId, TreePath};
 use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
-use crate::artifact::ArtifactRef;
+use crate::artifact::ArtifactId;
 use crate::resolver::ResolverCache;
 
 use super::EntryState;
@@ -40,7 +40,7 @@ pub struct NodeEntry<N> {
     /// Authored per-instance config (artifact spec + overrides).
     pub config: SrcNodeConfig,
     /// Runtime handle into [`crate::artifact::ArtifactManager`].
-    pub artifact: ArtifactRef,
+    pub artifact: ArtifactId,
     /// Resolved values for consumed slots (`params` / `inputs`).
     pub resolver_cache: ResolverCache,
 }
@@ -67,7 +67,7 @@ impl<N> NodeEntry<N> {
             SrcNodeConfig::new(SrcArtifactSpec(String::from(
                 Self::PLACEHOLDER_ARTIFACT_PATH,
             ))),
-            ArtifactRef::from_raw(0),
+            ArtifactId::from_raw(0),
             frame,
         )
     }
@@ -79,7 +79,7 @@ impl<N> NodeEntry<N> {
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
         config: SrcNodeConfig,
-        artifact: ArtifactRef,
+        artifact: ArtifactId,
         frame: FrameId,
     ) -> Self {
         Self {
@@ -204,7 +204,7 @@ mod tests {
     fn node_entry_new_spine_stores_config_and_artifact() {
         let frame = FrameId::new(1);
         let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./fluid.vis")));
-        let artifact = crate::artifact::ArtifactRef::from_raw(7);
+        let artifact = crate::artifact::ArtifactId::from_raw(7);
         let entry: NodeEntry<()> = NodeEntry::new_spine(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),

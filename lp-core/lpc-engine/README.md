@@ -7,9 +7,9 @@ resolver caches, buses, runtime property access, and the boundary between
 shader/runtime values and portable model or wire values.
 
 **Spine (M4.3):** `node` defines the new `Node` trait and tick/context
-types. `artifact` holds `ArtifactManager` / `ArtifactRef` and source-load
-helpers. `resolver` implements the consumed-slot binding cascade.
-`tree::NodeEntry` carries `SrcNodeConfig`, artifact handles, and
+types. `artifact` holds `ArtifactManager`, `ArtifactLocation`, `ArtifactId`,
+and source-load helpers. `resolver` implements the consumed-slot binding
+cascade. `tree::NodeEntry` carries `SrcNodeConfig`, artifact handles, and
 `ResolverCache` on the generic spine path. Legacy visual runtimes remain under
 `nodes` (`LegacyNodeRuntime`) beside this spine until M5 cutover.
 

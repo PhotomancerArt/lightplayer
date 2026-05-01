@@ -1,8 +1,8 @@
 ### What was built
 
 - **`node`:** Object-safe `Node` trait with `tick`, `destroy`, `handle_memory_pressure`, and `props() -> &dyn RuntimePropAccess`; focused `NodeError` and `PressureLevel`; tick/destroy/memory-pressure contexts including `TickContext` wired to resolver cache, `SrcNodeConfig`, artifact content frame, bus reads, and slot resolution.
-- **`artifact`:** Generic `ArtifactManager<A>` with refcounting, `Resolved → Loaded` transitions, idle/error states, `content_frame` bumps, and `ArtifactRef` handles; `load_source_artifact` bridges to `lpc_source::load_artifact` without coupling the manager to `ProjectDomain`.
-- **`tree`:** Spine `NodeEntry` carries `SrcNodeConfig`, `ArtifactRef`, and `ResolverCache` alongside existing lifecycle fields (legacy `ProjectRuntime` storage unchanged).
+- **`artifact`:** Generic `ArtifactManager<A>` with refcounting, `Resolved → Loaded` transitions, idle/error states, `content_frame` bumps, `ArtifactLocation` cache keys, and `ArtifactId` handles; `load_source_artifact` bridges file-backed locations to `lpc_source::load_artifact` without coupling the manager to `ProjectDomain`.
+- **`tree`:** Spine `NodeEntry` carries `SrcNodeConfig`, `ArtifactId`, and `ResolverCache` alongside existing lifecycle fields (legacy `ProjectRuntime` storage unchanged).
 - **`resolver`:** Three-layer cascade (instance overrides → artifact bind → default), `SrcBinding` literal/bus/node-prop handling with outputs-only `NodeProp` dereference via target `RuntimePropAccess`, `ResolveError`, and `ResolverContext` facade.
 - **Tests:** Phase/module tests plus integration-style `runtime_spine` coverage; legacy `LegacyNodeRuntime` remains exported beside `Node`.
 

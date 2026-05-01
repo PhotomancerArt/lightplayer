@@ -21,11 +21,10 @@ pub use sync::tree_deltas_since;
 pub use tree_error::TreeError;
 
 #[cfg(test)]
-pub(crate) fn test_placeholder_spine() -> (lpc_source::SrcNodeConfig, crate::artifact::ArtifactRef)
-{
+pub(crate) fn test_placeholder_spine() -> (lpc_source::SrcNodeConfig, crate::artifact::ArtifactId) {
     use alloc::string::String;
     (
         lpc_source::SrcNodeConfig::new(lpc_source::SrcArtifactSpec(String::from("__test__.vis"))),
-        crate::artifact::ArtifactRef::from_raw(0),
+        crate::artifact::ArtifactId::from_raw(0),
     )
 }

@@ -29,7 +29,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
 
-    use crate::artifact::ArtifactRef;
+    use crate::artifact::ArtifactId;
     use crate::bus::Bus;
     use crate::resolver::ResolverCache;
     use lpc_model::prop::prop_path::parse_path;
@@ -171,7 +171,7 @@ mod tests {
             FrameId::new(0),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(0),
             &bus,
             &resolver,

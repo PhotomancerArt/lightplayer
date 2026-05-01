@@ -8,9 +8,10 @@ types and the M4.3a/M4.3b crate cleanup:
 - `lpc-engine::Node` trait and runtime contexts.
 - `TickContext` access to resolver cache, bus, artifact/version state, and
   read-only tree metadata.
-- Runtime node entry fields for `SrcNodeConfig`, artifact ref/state, and
+- Runtime node entry fields for `SrcNodeConfig`, artifact id/state, and
   resolver cache.
-- `ArtifactManager` / `ArtifactRef` state machine in `lpc-engine`.
+- `ArtifactManager` / `ArtifactLocation` / `ArtifactId` state machine in
+  `lpc-engine`.
 - Binding resolver for consumed slots (`params` / `inputs`), producing
   `LpsValueF32` into `ResolverCache`.
 - Slot-view helpers for reading resolved values across the consumed
@@ -48,8 +49,9 @@ M4.4.
   to design docs.
 - `design/02-node.md` defines the intended `Node` trait:
   `tick`, `destroy`, `handle_memory_pressure`, and `props`.
-- `design/03-artifact.md` defines the aspirational
-  `ArtifactManager` / `ArtifactRef` states and refcounting.
+- `design/03-artifact.md` defines the aspirational artifact manager states
+  and refcounting; the M4.3 implementation uses `ArtifactLocation` as the
+  resolved cache key and `ArtifactId` as the dense runtime handle.
 - `design/04-config.md` defines `NodeConfig` conceptually; after
   M4.3a/M4.3b this maps to `lpc_source::SrcNodeConfig` and
   `SrcArtifactSpec`.
@@ -66,6 +68,7 @@ post-M4.3b names:
 - `LpsValueF32`
 - `ModelValue` / `ModelType`
 - `SrcArtifact` / `SrcArtifactSpec` / `SrcNodeConfig` / `SrcBinding`
+- `ArtifactLocation` / `ArtifactId`
 - `WireNodeSpecifier` / `WireSlotIndex`
 - `ProjectView` / `PropAccessView`
 
@@ -126,9 +129,9 @@ The following were scope for phases 01–07 and are implemented in
 
 - `node`: `Node`, `TickContext`, `DestroyCtx`, `MemPressureCtx`,
   `PressureLevel`, `NodeError`.
-- `tree::NodeEntry`: `SrcNodeConfig`, `ArtifactRef`, `ResolverCache`.
-- `artifact`: manager/ref/state machine; `load_source_artifact` delegating
-  to `lpc_source::load_artifact`.
+- `tree::NodeEntry`: `SrcNodeConfig`, `ArtifactId`, `ResolverCache`.
+- `artifact`: manager/location/id/state machine; `load_source_artifact`
+  delegating file-backed locations to `lpc_source::load_artifact`.
 - `resolver`: cascade (`resolve_slot`), `ResolverContext`, `ResolveError`.
 
 Still intentionally **not** done in M4.3 (later milestones):

@@ -4,11 +4,11 @@
 ///
 /// Dropping a reference does **not** decrement refcount; call [`super::ArtifactManager::release`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ArtifactRef {
+pub struct ArtifactId {
     handle: u32,
 }
 
-impl ArtifactRef {
+impl ArtifactId {
     pub(crate) const fn from_raw(handle: u32) -> Self {
         Self { handle }
     }

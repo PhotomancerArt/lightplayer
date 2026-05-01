@@ -2,7 +2,7 @@
 //!
 //! Phase 5 wires resolver, bus, and artifact access to [`TickContext`].
 
-use crate::artifact::ArtifactRef;
+use crate::artifact::ArtifactId;
 use crate::bus::Bus;
 use crate::resolver::{ResolveError, ResolvedSlot, ResolverCache, ResolverContext, resolve_slot};
 use lpc_model::{FrameId, NodeId, bus::ChannelName, prop::prop_path::PropPath};
@@ -19,7 +19,7 @@ pub struct TickContext<'a> {
     frame_id: FrameId,
     config: &'a SrcNodeConfig,
     resolver_cache: &'a mut ResolverCache,
-    artifact_ref: ArtifactRef,
+    artifact_ref: ArtifactId,
     artifact_content_frame: FrameId,
     bus: &'a Bus,
     resolver: &'a dyn ResolverContext,
@@ -32,7 +32,7 @@ impl<'a> TickContext<'a> {
         frame_id: FrameId,
         config: &'a SrcNodeConfig,
         resolver_cache: &'a mut ResolverCache,
-        artifact_ref: ArtifactRef,
+        artifact_ref: ArtifactId,
         artifact_content_frame: FrameId,
         bus: &'a Bus,
         resolver: &'a dyn ResolverContext,
@@ -104,7 +104,7 @@ impl<'a> TickContext<'a> {
     }
 
     /// Get the artifact reference for this node.
-    pub fn artifact_ref(&self) -> ArtifactRef {
+    pub fn artifact_ref(&self) -> ArtifactId {
         self.artifact_ref
     }
 
@@ -261,7 +261,7 @@ mod tests {
         let bus = Bus::new();
         let config = SrcNodeConfig::new(SrcArtifactSpec(String::from("./test.lp")));
         let mut cache = ResolverCache::new();
-        let artifact_ref = ArtifactRef::from_raw(1);
+        let artifact_ref = ArtifactId::from_raw(1);
         let resolver = TestResolverContext::new(FrameId::new(10));
 
         let ctx = TickContext::new(
@@ -300,7 +300,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -335,7 +335,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -368,7 +368,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -413,7 +413,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -463,7 +463,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache_ref,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -489,7 +489,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -511,7 +511,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(5), // artifact content frame
             &bus,
             &resolver,
@@ -548,7 +548,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -570,7 +570,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -603,7 +603,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -744,7 +744,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,
@@ -778,7 +778,7 @@ mod tests {
             FrameId::new(10),
             &config,
             &mut cache,
-            ArtifactRef::from_raw(1),
+            ArtifactId::from_raw(1),
             FrameId::new(1),
             &bus,
             &resolver,

@@ -8,7 +8,7 @@ use lpc_model::{FrameId, NodeId, NodeName, NodePathSegment, TreePath};
 use lpc_source::SrcNodeConfig;
 use lpc_wire::WireChildKind;
 
-use crate::artifact::ArtifactRef;
+use crate::artifact::ArtifactId;
 
 use super::{NodeEntry, TreeError};
 
@@ -94,7 +94,7 @@ impl<N> NodeTree<N> {
         ty: NodeName,
         child_kind: WireChildKind,
         config: SrcNodeConfig,
-        artifact: ArtifactRef,
+        artifact: ArtifactId,
         frame: FrameId,
     ) -> Result<NodeId, TreeError> {
         // Validate parent exists and is in the tree
@@ -218,7 +218,7 @@ impl<N> NodeTree<N> {
 #[cfg(test)]
 mod tests {
     use super::NodeTree;
-    use crate::artifact::ArtifactRef;
+    use crate::artifact::ArtifactId;
     use crate::tree::test_placeholder_spine;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
@@ -229,7 +229,7 @@ mod tests {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
     }
 
-    fn spine_placeholder() -> (SrcNodeConfig, ArtifactRef) {
+    fn spine_placeholder() -> (SrcNodeConfig, ArtifactId) {
         test_placeholder_spine()
     }
 
@@ -238,7 +238,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
         let cfg = SrcNodeConfig::new(SrcArtifactSpec(alloc::string::String::from("child.lp")));
-        let art = ArtifactRef::from_raw(9);
+        let art = ArtifactId::from_raw(9);
         let child = tree
             .add_child(
                 root,
