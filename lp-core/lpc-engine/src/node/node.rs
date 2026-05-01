@@ -29,13 +29,27 @@ mod tests {
     use alloc::vec::Vec;
 
     use crate::artifact::ArtifactId;
-    use crate::bus::Bus;
-    use crate::resolver::ResolverCache;
+    use crate::resolver::{
+        ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
+        resolve_trace::ResolveLogLevel,
+    };
     use lpc_model::prop::prop_path::parse_path;
     use lpc_model::{FrameId, NodeId, PropPath};
-    use lpc_source::artifact::src_artifact_spec::SrcArtifactSpec;
-    use lpc_source::node::src_node_config::SrcNodeConfig;
     use lps_shared::LpsValueF32;
+
+    struct EmptyResolveHost;
+
+    impl ResolveHost for EmptyResolveHost {
+        fn produce(
+            &mut self,
+            _query: &crate::resolver::QueryKey,
+            _session: &mut ResolveSession<'_>,
+        ) -> Result<crate::resolver::ProducedValue, crate::resolver::SessionResolveError> {
+            Err(crate::resolver::SessionResolveError::other(
+                "EmptyResolveHost: unexpected produce",
+            ))
+        }
+    }
 
     struct DummyProps {
         values: Vec<(PropPath, LpsValueF32, FrameId)>,
@@ -129,51 +143,27 @@ mod tests {
         assert!(got.is_some());
         assert!(got.unwrap().0.eq(&LpsValueF32::F32(0.25)));
 
-        // Set up context dependencies
-        let bus = Bus::new();
-        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"));
-        let mut cache = ResolverCache::new();
+        let registry = crate::binding::BindingRegistry::new();
+        let mut res = Resolver::new();
+        let frame = FrameId::new(0);
+        let mut session = ResolveSession::new(
+            frame,
+            &mut res,
+            &registry,
+            ResolveTrace::new(ResolveLogLevel::Off),
+        );
+        let mut host = EmptyResolveHost;
 
-        // Create a test resolver context
-        struct TestResolver;
-        impl crate::resolver::ResolverContext for TestResolver {
-            fn frame_id(&self) -> FrameId {
-                FrameId::new(0)
-            }
-            fn bus_value(
-                &self,
-                _channel: &lpc_model::bus::ChannelName,
-            ) -> Option<(&LpsValueF32, FrameId)> {
-                None
-            }
-            fn target_prop(
-                &self,
-                _node: &lpc_model::tree::tree_path::TreePath,
-                _prop: &PropPath,
-            ) -> Option<(LpsValueF32, FrameId)> {
-                None
-            }
-            fn artifact_binding(
-                &self,
-                _prop: &PropPath,
-            ) -> Option<lpc_source::prop::src_binding::SrcBinding> {
-                None
-            }
-            fn artifact_default(&self, _prop: &PropPath) -> Option<LpsValueF32> {
-                None
-            }
-        }
-        let resolver = TestResolver;
-
+        let mut bridge = SessionHostResolver {
+            session: &mut session,
+            host: &mut host,
+        };
         let mut tick = TickContext::new(
             NodeId::new(0),
-            FrameId::new(0),
-            &config,
-            &mut cache,
+            frame,
             ArtifactId::from_raw(1),
             FrameId::new(0),
-            &bus,
-            &resolver,
+            &mut bridge as &mut dyn TickResolver,
         );
         let mut dyn_node: Box<dyn Node> = Box::new(DummyNode::new());
         dyn_node.tick(&mut tick).expect("tick");

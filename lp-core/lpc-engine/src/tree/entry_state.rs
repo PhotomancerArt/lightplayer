@@ -9,7 +9,7 @@ use alloc::string::String;
 /// Generic over `N` — the payload type when the entry is `Alive`. In M3 this
 /// is `()` (no Node trait yet). When the Node trait lands, this becomes
 /// `Box<dyn Node>`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub enum EntryState<N> {
     /// Artifact handle resolved + refcounted; node not yet instantiated.
     Pending,

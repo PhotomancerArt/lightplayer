@@ -1,22 +1,22 @@
 use alloc::{string::String, vec::Vec};
-use lpc_model::PropValue;
+use lpc_model::Versioned;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 /// Test state struct for validating `Prop<T>` serialization
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestState {
-    pub field1: PropValue<String>,
-    pub field2: PropValue<u32>,
-    pub field3: PropValue<Vec<u8>>,
+    pub field1: Versioned<String>,
+    pub field2: Versioned<u32>,
+    pub field3: Versioned<Vec<u8>>,
 }
 
 impl TestState {
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            field1: PropValue::new(frame_id, String::from("default")),
-            field2: PropValue::new(frame_id, 0),
-            field3: PropValue::new(frame_id, Vec::new()),
+            field1: Versioned::new(frame_id, String::from("default")),
+            field2: Versioned::new(frame_id, 0),
+            field3: Versioned::new(frame_id, Vec::new()),
         }
     }
 }

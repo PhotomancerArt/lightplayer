@@ -1,7 +1,72 @@
 //! ResolveError — focused error type for slot resolution failures.
+//!
+//! [`SessionResolveError`] is the structured error for [`super::ResolveSession`]
+//! and [`super::ResolveHost`] (engine demand path).
 
 use alloc::format;
 use alloc::string::String;
+
+use lpc_model::ChannelName;
+use lpc_model::NodeId;
+
+use super::query_key::QueryKey;
+use super::resolve_trace::ResolveTraceError;
+
+/// Error during demand-driven resolution in [`super::ResolveSession`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionResolveError {
+    Cycle {
+        query: QueryKey,
+    },
+    NoBusProvider {
+        channel: ChannelName,
+    },
+    AmbiguousBusBinding {
+        channel: ChannelName,
+    },
+    UnresolvedNodeInput {
+        node: NodeId,
+        input: lpc_model::PropPath,
+    },
+    Trace(ResolveTraceError),
+    Other(String),
+}
+
+impl SessionResolveError {
+    pub fn other(message: impl Into<String>) -> Self {
+        Self::Other(message.into())
+    }
+}
+
+impl From<ResolveTraceError> for SessionResolveError {
+    fn from(value: ResolveTraceError) -> Self {
+        match value {
+            ResolveTraceError::Cycle { query } => Self::Cycle { query },
+        }
+    }
+}
+
+impl core::fmt::Display for SessionResolveError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Cycle { query } => write!(f, "resolve cycle at {query:?}"),
+            Self::NoBusProvider { channel } => {
+                write!(f, "no bus provider for channel {channel:?}")
+            }
+            Self::AmbiguousBusBinding { channel } => write!(
+                f,
+                "ambiguous bus binding (equal top priority) for channel {channel:?}",
+            ),
+            Self::UnresolvedNodeInput { node, input } => {
+                write!(f, "unresolved node input node={node:?} input={input:?}",)
+            }
+            Self::Trace(e) => write!(f, "{e:?}"),
+            Self::Other(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl core::error::Error for SessionResolveError {}
 
 /// Error during slot resolution in the binding cascade.
 ///

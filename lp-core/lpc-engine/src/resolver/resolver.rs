@@ -4,6 +4,9 @@
 //! 1. `SrcNodeConfig.overrides[prop]`
 //! 2. artifact slot `bind`
 //! 3. artifact slot `default`
+//!
+//! [`Resolver`] (cache owner) supports the engine demand path; slot cascade functions below are
+//! unchanged.
 
 use crate::resolver::binding_kind::BindingKind;
 use crate::resolver::resolve_error::ResolveError;
@@ -11,11 +14,51 @@ use crate::resolver::resolve_source::ResolveSource;
 use crate::resolver::resolved_slot::ResolvedSlot;
 use crate::resolver::resolver_cache::ResolverCache;
 use crate::resolver::resolver_context::ResolverContext;
+use crate::resolver::slot_resolver_cache::SlotResolverCache;
+use lpc_model::FrameId;
+use lpc_model::Versioned;
 use lpc_model::prop::prop_namespace::PropNamespace;
 use lpc_model::prop::prop_path::PropPath;
 use lpc_source::node::src_node_config::SrcNodeConfig;
 use lpc_source::prop::src_binding::SrcBinding;
+use lpc_source::prop::src_value_spec::{LoadCtx, SrcValueSpec};
 use lps_shared::LpsValueF32;
+
+/// Owns the same-frame [`ResolverCache`] for engine demand resolution.
+#[derive(Clone, Debug, Default)]
+pub struct Resolver {
+    cache: ResolverCache,
+}
+
+impl Resolver {
+    pub fn new() -> Self {
+        Self {
+            cache: ResolverCache::new(),
+        }
+    }
+
+    pub fn cache(&self) -> &ResolverCache {
+        &self.cache
+    }
+
+    pub fn cache_mut(&mut self) -> &mut ResolverCache {
+        &mut self.cache
+    }
+
+    pub fn clear_frame_cache(&mut self) {
+        self.cache.clear();
+    }
+}
+
+pub(crate) fn materialize_src_value_literal(
+    spec: &SrcValueSpec,
+    frame: FrameId,
+) -> Result<Versioned<LpsValueF32>, ResolveError> {
+    let mut load_ctx = LoadCtx::default();
+    let model_value = spec.default_model_value(&mut load_ctx);
+    let lps_value = model_value_to_lps_value_f32(&model_value)?;
+    Ok(Versioned::new(frame, lps_value))
+}
 
 /// Resolve a slot value using the binding cascade.
 ///
@@ -29,7 +72,7 @@ use lps_shared::LpsValueF32;
 /// previous `changed_frame` is retained.
 /// Returns an error only for unrecoverable failures (not for fall-through to default).
 pub fn resolve_slot<'a, C: ResolverContext + ?Sized>(
-    cache: &'a mut ResolverCache,
+    cache: &'a mut SlotResolverCache,
     config: &SrcNodeConfig,
     prop: &PropPath,
     ctx: &C,
@@ -358,7 +401,7 @@ mod tests {
 
     #[test]
     fn override_literal_beats_artifact_binding() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config_with_override(
             "params.speed",
             SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(5.5))),
@@ -383,7 +426,7 @@ mod tests {
 
     #[test]
     fn artifact_binding_beats_default() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let ctx = TestContext::new(FrameId::new(10))
@@ -405,7 +448,7 @@ mod tests {
 
     #[test]
     fn missing_bus_falls_through_to_default() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let ctx = TestContext::new(FrameId::new(10))
@@ -424,7 +467,7 @@ mod tests {
 
     #[test]
     fn bus_read_uses_bus_value_and_frame() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let ctx = TestContext::new(FrameId::new(10))
@@ -448,7 +491,7 @@ mod tests {
 
     #[test]
     fn node_prop_reads_target_runtime_prop_access() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let spec = NodePropSpec::parse("/show.source/node1.thing#outputs[0]").unwrap();
@@ -475,7 +518,7 @@ mod tests {
 
     #[test]
     fn node_prop_rejects_non_outputs_namespace() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         // params is not outputs namespace
@@ -494,7 +537,7 @@ mod tests {
 
     #[test]
     fn node_prop_rejects_state_namespace() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         // state is also not outputs namespace
@@ -511,7 +554,7 @@ mod tests {
 
     #[test]
     fn node_prop_missing_target_falls_to_default() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         // Target doesn't exist, should fall through to default
@@ -529,7 +572,7 @@ mod tests {
 
     #[test]
     fn cache_is_populated_with_expected_value_source_frame() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let ctx =
@@ -547,7 +590,7 @@ mod tests {
 
     #[test]
     fn cache_recomputes_but_preserves_frame_when_value_unchanged() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let mut ctx =
@@ -567,7 +610,7 @@ mod tests {
 
     #[test]
     fn cache_recomputes_and_updates_frame_when_value_changes() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let mut ctx =
@@ -585,7 +628,7 @@ mod tests {
 
     #[test]
     fn default_materialization_to_lps_value_f32() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         let config = make_config();
 
         let ctx = TestContext::new(FrameId::new(10));
@@ -600,7 +643,7 @@ mod tests {
 
     #[test]
     fn override_beats_all() {
-        let mut cache = ResolverCache::new();
+        let mut cache = SlotResolverCache::new();
         // Override with bus
         let config = make_config_with_override(
             "inputs.level",

@@ -8,7 +8,6 @@ use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
-use crate::resolver::ResolverCache;
 
 use super::EntryState;
 
@@ -18,8 +17,7 @@ use super::EntryState;
 /// is `()` (no Node trait yet). When the Node trait lands, this becomes
 /// `Box<dyn Node>`.
 ///
-/// Note: `Clone` is derived for testing; production usage doesn't require it.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct NodeEntry<N> {
     pub id: NodeId,
     pub path: TreePath,
@@ -40,8 +38,6 @@ pub struct NodeEntry<N> {
     pub config: SrcNodeConfig,
     /// Runtime handle into [`crate::artifact::ArtifactManager`].
     pub artifact: ArtifactId,
-    /// Resolved values for consumed slots (`params` / `inputs`).
-    pub resolver_cache: ResolverCache,
 }
 
 impl<N> NodeEntry<N> {
@@ -52,7 +48,7 @@ impl<N> NodeEntry<N> {
 
     /// Create a new entry. Sets `created_frame = change_frame = children_ver = frame`.
     ///
-    /// Fills spine fields with placeholders: root-normalized artifact path (`/`), handle `0`, empty resolver cache.
+    /// Fills spine fields with placeholders: root-normalized artifact path (`/`), handle `0`.
     pub fn new(
         id: NodeId,
         path: TreePath,
@@ -94,7 +90,6 @@ impl<N> NodeEntry<N> {
             children_ver: frame,
             config,
             artifact,
-            resolver_cache: ResolverCache::new(),
         }
     }
 
@@ -121,12 +116,9 @@ impl<N> NodeEntry<N> {
 #[cfg(test)]
 mod tests {
     use super::NodeEntry;
-    use crate::resolver::{ResolveSource, ResolvedSlot};
-    use lpc_model::prop::prop_path::parse_path;
     use lpc_model::{FrameId, NodeId, TreePath};
     use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
-    use lps_shared::LpsValueF32;
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
@@ -214,45 +206,5 @@ mod tests {
         );
         assert_eq!(entry.config, config);
         assert_eq!(entry.artifact, artifact);
-    }
-
-    #[test]
-    fn node_entry_starts_with_empty_resolver_cache() {
-        let entry: NodeEntry<()> = NodeEntry::new(
-            NodeId::new(1),
-            TreePath::parse("/main.show").unwrap(),
-            None,
-            None,
-            FrameId::new(0),
-        );
-        assert!(entry.resolver_cache.is_empty());
-    }
-
-    #[test]
-    fn node_entry_resolver_cache_is_independent_per_entry() {
-        let path = parse_path("params.speed").unwrap();
-        let slot = ResolvedSlot::new(
-            LpsValueF32::F32(1.0),
-            FrameId::new(3),
-            ResolveSource::Default,
-        );
-        let mut a: NodeEntry<()> = NodeEntry::new(
-            NodeId::new(1),
-            TreePath::parse("/main.show/a.vis").unwrap(),
-            None,
-            None,
-            FrameId::new(0),
-        );
-        let b: NodeEntry<()> = NodeEntry::new(
-            NodeId::new(2),
-            TreePath::parse("/main.show/b.vis").unwrap(),
-            None,
-            None,
-            FrameId::new(0),
-        );
-        a.resolver_cache.insert(path.clone(), slot);
-        assert_eq!(a.resolver_cache.len(), 1);
-        assert!(b.resolver_cache.is_empty());
-        assert!(b.resolver_cache.get(&path).is_none());
     }
 }

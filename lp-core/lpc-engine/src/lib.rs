@@ -12,7 +12,9 @@
 extern crate alloc;
 
 pub mod artifact;
+pub mod binding;
 pub mod bus;
+pub mod engine;
 pub mod error;
 pub mod gfx;
 pub mod legacy;
@@ -30,7 +32,12 @@ pub mod wire_bridge;
 pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactManager, ArtifactState,
 };
+pub use binding::{
+    BindingDraft, BindingEntry, BindingError, BindingId, BindingPriority, BindingRegistry,
+    BindingSource, BindingTarget,
+};
 pub use bus::{Bus, BusError, ChannelEntry};
+pub use engine::{Engine, EngineError};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use legacy::nodes::{FixtureRuntime, OutputRuntime, ShaderRuntime, TextureRuntime};
@@ -39,7 +46,12 @@ pub use legacy_project::{LegacyProjectRuntime, MemoryStatsFn};
 pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
 pub use nodes::LegacyNodeRuntime;
 pub use prop::RuntimePropAccess;
-pub use resolver::{BindingKind, ResolveSource, ResolvedSlot, ResolverCache};
+pub use resolver::{
+    BindingKind, ProducedValue, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
+    ResolveSession, ResolveSource, ResolveTrace, ResolveTraceError, ResolveTraceEvent,
+    ResolvedSlot, Resolver, ResolverCache, SessionHostResolver, SessionResolveError,
+    SlotResolverCache, TickResolver, TraceGuard,
+};
 pub use runtime::{NodeInitContext, RenderContext};
 pub use tree::{EntryState, NodeEntry, NodeTree, TreeError, tree_deltas_since};
 pub use wire_bridge::{lps_value_f32_to_model_value, model_type_to_lps_type};

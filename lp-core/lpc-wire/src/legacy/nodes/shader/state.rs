@@ -1,5 +1,5 @@
 use alloc::string::String;
-use lpc_model::PropValue;
+use lpc_model::Versioned;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
@@ -9,17 +9,17 @@ use crate::impl_state_serialization;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShaderState {
     /// Actual GLSL code loaded from file
-    pub glsl_code: PropValue<String>,
+    pub glsl_code: Versioned<String>,
     /// Compilation/runtime errors
-    pub error: PropValue<Option<String>>,
+    pub error: Versioned<Option<String>>,
 }
 
 impl ShaderState {
     /// Create a new ShaderState with default values
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            glsl_code: PropValue::new(frame_id, String::new()),
-            error: PropValue::new(frame_id, None),
+            glsl_code: Versioned::new(frame_id, String::new()),
+            error: Versioned::new(frame_id, None),
         }
     }
 

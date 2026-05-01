@@ -37,12 +37,15 @@ large plan.
 Working sequence:
 
 1. Reorganize around an update-in-place strategy.
-2. Use the legacy shader -> fixture -> output path as the first validation
-   slice under the new spine.
-3. Define the core engine/runtime owner around that working slice.
-4. Revisit queryable visual outputs once ordinary value resolution and demand
+2. Define the core engine/runtime owner and prove demand-driven scheduling.
+3. Define the runtime value/domain envelope before render-like products are
+   forced through scalar values.
+4. Migrate the legacy shader -> fixture -> output source shape to TOML and
+   `lpc-source`.
+5. Port the legacy MVP runtime behavior onto the core engine.
+6. Cut over to the core engine and retire the old runtime.
+7. Revisit queryable render products once ordinary value resolution and demand
    scheduling are concrete.
-5. Add new node types after the old flow works in the new paradigm.
 
 The first milestone should undo the parts of the prior direction that pulled
 legacy too far away from `lp-core`. Instead of maintaining separate legacy,
@@ -53,6 +56,16 @@ This is not final forever. It is the next step because it reduces indirection
 while the core runtime contract is still being discovered.
 
 See [`m1-update-in-place.md`](m1-update-in-place.md).
+
+## Milestones
+
+- [M1: Update-in-place runtime reorganization](m1-update-in-place.md)
+- [M2: Core engine](m2-core-engine.md)
+- [M2.1: Runtime value domains](m2.1-runtime-value-domains.md)
+- [M3: Legacy source migration](m3-legacy-source-migration.md)
+- [M4: Legacy node runtime port](m4-legacy-node-runtime-port.md)
+- [M5: Core engine cutover](m5-core-engine-cutover.md)
+- [M6: Render products (speculative)](m6-render-products.md)
 
 ## Current legacy flow
 
@@ -207,6 +220,187 @@ Important rule:
 Channel existence or binding existence does not imply producer work. Work runs
 only when the active graph demands a value for the current frame.
 
+## Concrete demand example
+
+Sketch, using `$id` to indicate runtime node ids:
+
+```text
+fixture($fixture)
+    input <- /bus/video_out
+input($mode_selector) output -> /bus/mode
+input($color_selector) output -> /bus/color
+visual($playlist)
+    output -> /bus/video_out
+    param.activeInput <- /bus/mode
+    child[0]: pattern($solid)
+      param.color <- /bus/color
+    child[1]: pattern($perlin)
+```
+
+Possible frame flow:
+
+```text
+engine.tick()
+$fixture.tick()
+ctx.resolve($fixture.input)
+bus.resolve("video_out")
+$playlist.tick()
+ctx.resolve($playlist.activeInput)
+bus.resolve("mode")
+$mode_selector.tick()
+// $playlist.activeInput -> 0
+ctx.resolve($solid.output)
+$solid.tick()
+ctx.resolve($solid.param.color)
+bus.resolve("color")
+$color_selector.tick()
+```
+
+This is intentionally imperative. The runtime should not require node authors
+to write a declarative mini build system. Nodes ask for values; the engine
+ensures each demanded producer runs at most once per frame.
+
+Caching layers:
+
+1. **Engine per-frame cache:** mandatory. If a bus channel or node output has
+   already been produced for frame N, return it. This prevents duplicate work
+   within one tick.
+2. **Cross-frame dependency cache:** optional and conservative. It should not
+   require modeling every read in `tick` up front.
+3. **Node-internal cache:** encouraged. Nodes can remember expensive internal
+   products and decide whether to reuse them based on the values they care
+   about.
+
+Initial lean:
+
+- Keep the core imperative: call `tick`, use `ctx.resolve`, produce outputs.
+- Make same-frame caching an engine invariant.
+- Add a small opt-in helper for cross-frame reuse, not a whole query language.
+
+Possible opt-in shape:
+
+```text
+let active = ctx.resolve(active_input)?;
+if ctx.unchanged_since_last_tick(&[active]) && self.cached_output.is_some() {
+    ctx.publish_output(self.cached_output.clone());
+    return Ok(());
+}
+```
+
+The exact API should be better than this sketch, but the idea is that nodes can
+ask for "did these resolved values change since my last successful output?" and
+then choose a fast path. Complex nodes can manage their own staged caches.
+
+This avoids forcing all nodes into a dynamic-dependency query system while
+still giving common nodes an ergonomic way to skip expensive work.
+
+## Engine-owned resolution
+
+Emerging decision: all system-level value queries should route through the
+engine.
+
+Nodes should not directly ask child nodes for values and should not own the
+main resolver cache. Instead, a node asks its context/engine for a produced
+value:
+
+```text
+ctx.resolve_node_output(child_id, "outputs[0]")
+ctx.resolve_bus("video_out")
+ctx.resolve_input("inputs[0]")
+```
+
+The engine owns the per-frame cache of resolved bus values, node outputs, and
+render products. This makes scheduling and duplicate-work avoidance a single
+runtime concern:
+
+- if a node output was already produced for this frame, return it;
+- if it is currently being produced, detect re-entrant/cyclic demand;
+- if it is stale or missing, tick/evaluate the producer;
+- if it failed this frame, return the recorded failure/default behavior.
+
+This direction likely replaces the M4.3 shape where `NodeEntry` owns
+`resolver_cache: ResolverCache`. Node entries can still hold authored config,
+artifact handles, status, lifecycle state, and node-owned private caches, but
+the cross-node/system resolution cache belongs to the engine.
+
+Node-owned caches remain valid for private implementation details such as
+compiled shaders, selected child bookkeeping, texture buffers, render products,
+or fixture sampling plans. The distinction is:
+
+```text
+engine caches resolved system values and scheduling state
+nodes cache private implementation products
+```
+
+## Versioned values and stale checks
+
+The simple internal caching story should be based on `Versioned<T>` from
+`lpc-model`.
+
+Working model:
+
+- Every resolved input is represented as, or can be reduced to, a
+  `Versioned<T>` value.
+- `Versioned<T>` stores the current value plus the `FrameId` version from the
+  last time the value was created or changed.
+- Every cached private product records the version from the last time it was
+  created.
+- A node that wants to reuse a cached internal product compares the newest input
+  version it used with the cached product's version.
+- If any input version is newer than the product version, recreate the product.
+- Otherwise, reuse the old product.
+
+In pseudocode:
+
+```text
+let mode = ctx.resolve(mode_input)?      // Versioned<T>
+let color = ctx.resolve(color_input)?    // Versioned<T>
+
+let newest_input_version = max(mode.changed_frame(), color.changed_frame())
+if self.cached_product.changed_frame() < newest_input_version {
+    self.cached_product.set(frame_id, render(mode.value(), color.value()))
+}
+
+return self.cached_product.value()
+```
+
+The codebase now has the core primitive in
+`lp-core/lpc-model/src/versioned.rs`:
+
+```rust
+pub struct Versioned<T> {
+    value: T,
+    version: FrameId,
+}
+```
+
+Current API shape:
+
+- `Versioned::new(frame_id, value)`
+- `get`, `get_mut`, `set`, `mark_updated`
+- `changed_frame`
+- `value`, `into_value`
+
+Conceptually, runtime-core design should use "version" language. The current
+`changed_frame()` method remains an older compatibility/transition name for
+reading the stored version; a future `version()` alias may make the API match
+the concept more directly.
+
+Other parts of the codebase still carry related frame/version concepts:
+
+- `ResolvedSlot { value, changed_frame, source }`
+- `RuntimePropAccess::get(...) -> Option<(LpsValueF32, FrameId)>`
+- `NodeEntry` frame counters: `created_frame`, `change_frame`, `children_ver`
+- artifact `content_frame`
+- bus `last_writer_frame`
+
+The key is to keep this simple and local. The engine owns system-level
+resolution and provides versioned values through that path. Nodes decide which
+versions matter for their own private caches, including compiled shaders,
+selected child bookkeeping, texture buffers, render products, and fixture
+sampling plans. We should not require node authors to model a full dependency
+graph just to skip expensive work.
+
 ## Bus and providers
 
 The bus should be a registry/cache plus producer lookup, not a background work
@@ -350,17 +544,20 @@ Suggested M2 target:
 
 - introduce the new runtime owner shape (`Engine` / `EngineRuntime`);
 - make it own `NodeTree`, `Bus`, artifacts, frame id, and output provider;
-- drive a tiny legacy-compatible shader -> fixture -> output slice;
+- prove demand-root scheduling and engine-owned resolution with a tiny slice;
 - keep texture as the only render product for that slice;
 - name the resolved output concept as a render product even if the only first
   implementation is texture-backed.
 
-Then M3 can make render products real:
+Then later milestones make the old flow real on the new engine before render
+products become a primary focus:
 
-- texture-backed product;
-- point/batch-sampled product;
-- fixture-aware sampling path;
-- debug/full-texture fallback.
+- M3 migrates legacy source/config to TOML and `lpc-source`;
+- M4 ports legacy shader -> fixture -> output behavior to the core engine;
+- M5 cuts over and retires the old runtime path;
+- M6 revisits render products, likely including texture-backed products,
+  point/batch-sampled products, fixture-aware sampling, and debug/full-texture
+  fallback.
 
 ## Major questions to resolve
 

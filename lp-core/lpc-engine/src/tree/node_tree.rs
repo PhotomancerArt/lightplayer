@@ -255,7 +255,6 @@ mod tests {
         let entry = tree.get(child).unwrap();
         assert_eq!(entry.config, cfg);
         assert_eq!(entry.artifact, art);
-        assert!(entry.resolver_cache.is_empty());
     }
 
     #[test]

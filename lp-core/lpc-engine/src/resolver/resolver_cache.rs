@@ -1,17 +1,13 @@
-//! ResolverCache — per-NodeEntry cache of resolved slot values.
+//! Engine-level same-frame resolver cache keyed by [`super::QueryKey`].
 
-use crate::resolver::resolved_slot::ResolvedSlot;
+use crate::resolver::produced_value::ProducedValue;
+use crate::resolver::query_key::QueryKey;
 use alloc::collections::BTreeMap;
-use lpc_model::PropPath;
 
-/// Per-`NodeEntry` cache of resolved slot values.
-///
-/// Keyed by `PropPath` (e.g. `params.speed`, `outputs[0]`). M4.2
-/// provides only the data shape and trivial CRUD; the M4.3
-/// resolver populates and invalidates it.
+/// Per-frame cache of [`ProducedValue`] entries addressed by [`QueryKey`].
 #[derive(Clone, Debug, Default)]
 pub struct ResolverCache {
-    entries: BTreeMap<PropPath, ResolvedSlot>,
+    entries: BTreeMap<QueryKey, ProducedValue>,
 }
 
 impl ResolverCache {
@@ -21,20 +17,24 @@ impl ResolverCache {
         }
     }
 
-    pub fn get(&self, path: &PropPath) -> Option<&ResolvedSlot> {
-        self.entries.get(path)
+    pub fn get(&self, key: &QueryKey) -> Option<&ProducedValue> {
+        self.entries.get(key)
     }
 
-    pub fn insert(&mut self, path: PropPath, slot: ResolvedSlot) -> Option<ResolvedSlot> {
-        self.entries.insert(path, slot)
+    pub fn insert(&mut self, key: QueryKey, value: ProducedValue) -> Option<ProducedValue> {
+        self.entries.insert(key, value)
     }
 
-    pub fn remove(&mut self, path: &PropPath) -> Option<ResolvedSlot> {
-        self.entries.remove(path)
+    pub fn remove(&mut self, key: &QueryKey) -> Option<ProducedValue> {
+        self.entries.remove(key)
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, QueryKey, ProducedValue> {
+        self.entries.iter()
     }
 
     pub fn len(&self) -> usize {
@@ -44,123 +44,82 @@ impl ResolverCache {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-
-    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, PropPath, ResolvedSlot> {
-        self.entries.iter()
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PropPath, ResolvedSlot, ResolverCache};
-    use crate::resolver::resolve_source::ResolveSource;
-    use alloc::vec::Vec;
+    use super::{ProducedValue, QueryKey, ResolverCache};
+    use crate::binding::BindingId;
+    use crate::resolver::produced_value::ProductionSource;
+    use crate::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
+    use lpc_model::ChannelName;
     use lpc_model::FrameId;
-    use lpc_model::prop::prop_path::Segment;
+    use lpc_model::NodeId;
+    use lpc_model::Versioned;
+    use lpc_model::prop::prop_path::parse_path;
     use lps_shared::LpsValueF32;
 
-    fn make_slot(value: f32, frame: i64) -> ResolvedSlot {
-        ResolvedSlot::new(
-            LpsValueF32::F32(value),
-            FrameId::new(frame),
-            ResolveSource::Default,
-        )
+    fn sample_bus_key(name: &str) -> QueryKey {
+        QueryKey::Bus(ChannelName(alloc::string::String::from(name)))
     }
 
-    fn make_path(s: &str) -> PropPath {
-        lpc_model::prop::prop_path::parse_path(s).unwrap()
-    }
-
-    fn first_seg_is_field(path: &PropPath, expected: &str) -> bool {
-        matches!(
-            path.first(),
-            Some(Segment::Field(s)) if s == expected
+    fn make_produced(frame: i64, source: ProductionSource) -> ProducedValue {
+        ProducedValue::new(
+            Versioned::new(FrameId::new(frame), LpsValueF32::F32(1.0)),
+            source,
         )
     }
 
     #[test]
-    fn resolver_cache_insert_get_round_trip() {
+    fn resolver_cache_insert_get_and_cache_hit_trace() {
         let mut cache = ResolverCache::new();
-        let path = make_path("params.speed");
-        let slot = make_slot(1.5, 10);
+        let key = sample_bus_key("video");
+        let pv = make_produced(
+            1,
+            ProductionSource::BusBinding {
+                binding: BindingId::new(0),
+            },
+        );
 
-        assert!(cache.insert(path.clone(), slot).is_none());
-        let got = cache.get(&path).unwrap();
-        assert_eq!(got.changed_frame.as_i64(), 10);
+        assert!(cache.insert(key.clone(), pv.clone()).is_none());
+        let got = cache.get(&key).unwrap();
+        assert!(got.value.get().eq(&LpsValueF32::F32(1.0)));
+        assert_eq!(
+            got.source,
+            ProductionSource::BusBinding {
+                binding: BindingId::new(0),
+            }
+        );
+
+        let trace = ResolveTrace::new(ResolveLogLevel::Basic);
+        {
+            let _g = trace.enter(key.clone()).unwrap();
+            let _hit = cache.get(&key);
+            assert!(_hit.is_some());
+            trace.record_event(ResolveTraceEvent::CacheHit(key.clone()));
+        }
+
+        assert!(trace.events().iter().any(|e| matches!(
+            e,
+            ResolveTraceEvent::CacheHit(k) if k == &sample_bus_key("video")
+        )));
     }
 
     #[test]
-    fn resolver_cache_insert_returns_old() {
+    fn resolver_cache_remove_clear_len() {
         let mut cache = ResolverCache::new();
-        let path = make_path("params.value");
-
-        let slot1 = make_slot(1.0, 1);
-        let slot2 = make_slot(2.0, 2);
-
-        assert!(cache.insert(path.clone(), slot1).is_none());
-        let old = cache.insert(path.clone(), slot2).unwrap();
-        assert_eq!(old.changed_frame.as_i64(), 1);
-
-        let got = cache.get(&path).unwrap();
-        assert_eq!(got.changed_frame.as_i64(), 2);
-    }
-
-    #[test]
-    fn resolver_cache_remove() {
-        let mut cache = ResolverCache::new();
-        let path = make_path("outputs[0]");
-
-        cache.insert(path.clone(), make_slot(3.0, 5));
+        let k = QueryKey::NodeOutput {
+            node: NodeId::new(2),
+            output: parse_path("color").unwrap(),
+        };
+        cache.insert(k.clone(), make_produced(3, ProductionSource::Literal));
         assert_eq!(cache.len(), 1);
 
-        let removed = cache.remove(&path).unwrap();
-        assert_eq!(removed.changed_frame.as_i64(), 5);
-        assert!(cache.get(&path).is_none());
+        cache.remove(&k);
         assert!(cache.is_empty());
-    }
 
-    #[test]
-    fn resolver_cache_clear() {
-        let mut cache = ResolverCache::new();
-        cache.insert(make_path("a"), make_slot(1.0, 1));
-        cache.insert(make_path("b"), make_slot(2.0, 2));
-        assert_eq!(cache.len(), 2);
-
+        cache.insert(k.clone(), make_produced(4, ProductionSource::Default));
         cache.clear();
-        assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
-    }
-
-    #[test]
-    fn resolver_cache_iteration_order_is_sorted() {
-        let mut cache = ResolverCache::new();
-        // Insert in non-sorted order
-        cache.insert(make_path("z"), make_slot(1.0, 1));
-        cache.insert(make_path("a"), make_slot(2.0, 2));
-        cache.insert(make_path("m"), make_slot(3.0, 3));
-
-        let keys: Vec<_> = cache.iter().map(|(k, _)| k.clone()).collect();
-        // BTreeMap iterates in sorted order
-        assert_eq!(keys.len(), 3);
-        // First should be "a" (comes before "m" and "z")
-        assert!(first_seg_is_field(&keys[0], "a"));
-    }
-
-    #[test]
-    fn resolver_cache_default_is_empty() {
-        let cache: ResolverCache = Default::default();
-        assert!(cache.is_empty());
-        assert_eq!(cache.len(), 0);
-    }
-
-    #[test]
-    fn resolver_cache_clone_preserves_entries() {
-        let mut cache = ResolverCache::new();
-        cache.insert(make_path("x"), make_slot(5.0, 7));
-
-        let cloned = cache.clone();
-        assert_eq!(cloned.len(), 1);
-        let got = cloned.get(&make_path("x")).unwrap();
-        assert_eq!(got.changed_frame.as_i64(), 7);
     }
 }

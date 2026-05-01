@@ -26,7 +26,7 @@ pub mod serial;
 pub mod tree;
 
 pub mod project;
-
+mod versioned;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 pub use prop::constraint;
@@ -38,7 +38,7 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 pub use error::DomainError;
 pub use kind::Kind;
 pub use prop::PropNamespace;
-pub use prop::PropValue;
+pub use prop::Versioned;
 pub use prop::{ModelStructMember, ModelType, ModelValue};
 
 pub use lp_config::LightplayerConfig;

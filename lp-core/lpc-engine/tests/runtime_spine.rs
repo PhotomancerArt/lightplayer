@@ -11,8 +11,10 @@ use alloc::vec::Vec;
 use lpc_engine::node::NodeError;
 use lpc_engine::resolver::{ResolverContext, resolve_slot};
 use lpc_engine::{
-    ArtifactLocation, ArtifactManager, ArtifactState, BindingKind, Bus, LegacyNodeRuntime, Node,
-    ResolveSource, ResolverCache, TickContext,
+    ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingKind, BindingPriority,
+    BindingRegistry, BindingSource, BindingTarget, Bus, LegacyNodeRuntime, Node, ProducedValue,
+    QueryKey, ResolveHost, ResolveLogLevel, ResolveSession, ResolveSource, ResolveTrace, Resolver,
+    SessionHostResolver, SessionResolveError, SlotResolverCache, TickContext, TickResolver,
 };
 use lpc_model::{
     FrameId, Kind, ModelValue, NodeId, NodePropSpec, PropPath, bus::ChannelName,
@@ -55,7 +57,7 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
 
 #[test]
 fn runtime_spine_literal_override_and_artifact_default_resolution() {
-    let mut cache = ResolverCache::new();
+    let mut cache = SlotResolverCache::new();
     let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("a.lp"));
     let prop_lit = parse_path("params.gain").unwrap();
     config.overrides.push((
@@ -88,7 +90,7 @@ fn runtime_spine_bus_claim_publish_resolver_sees_value_in_resolved_slot() {
         .unwrap();
     bus.publish(&channel, LpsValueF32::F32(9.0), FrameId::new(11));
 
-    let mut cache = ResolverCache::new();
+    let mut cache = SlotResolverCache::new();
     let config = SrcNodeConfig::new(SrcArtifactSpec::path("b.lp"));
 
     let ctx = SyntheticResolverContext::new(FrameId::new(100))
@@ -117,7 +119,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
     let mut targets: BTreeMap<TreePath, MapRuntimeProps> = BTreeMap::new();
     targets.insert(target_path, target_props);
 
-    let mut cache = ResolverCache::new();
+    let mut cache = SlotResolverCache::new();
     let config = SrcNodeConfig::new(SrcArtifactSpec::path("c.lp"));
 
     let spec =
@@ -138,7 +140,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
 
 #[test]
 fn runtime_spine_node_prop_non_outputs_returns_resolve_error() {
-    let mut cache = ResolverCache::new();
+    let mut cache = SlotResolverCache::new();
     let config = SrcNodeConfig::new(SrcArtifactSpec::path("d.lp"));
 
     let spec = NodePropSpec::parse("/show.demo/node_a.demo#params.k").expect("params spec");
@@ -155,20 +157,24 @@ fn runtime_spine_node_prop_non_outputs_returns_resolve_error() {
 }
 
 #[test]
-fn runtime_spine_tick_context_resolve_changed_since_and_artifact_frames() {
-    let mut bus = Bus::new();
+fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let channel = ChannelName(String::from("live"));
-    bus.claim_writer(
-        &channel,
-        NodeId::new(1),
-        parse_path("outputs[0]").unwrap(),
-        Kind::Ratio,
-    )
-    .unwrap();
-    bus.publish(&channel, LpsValueF32::F32(2.0), FrameId::new(15));
+    let mut registry = BindingRegistry::new();
+    let frame = FrameId::new(99);
+    registry
+        .register(
+            BindingDraft {
+                source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(2.0))),
+                target: BindingTarget::BusChannel(channel.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Ratio,
+                owner: NodeId::new(1),
+            },
+            frame,
+        )
+        .unwrap();
 
     let config = SrcNodeConfig::new(SrcArtifactSpec::path("e.lp"));
-    let mut cache = ResolverCache::new();
 
     let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
     let ar = mgr.acquire_location(
@@ -179,31 +185,46 @@ fn runtime_spine_tick_context_resolve_changed_since_and_artifact_frames() {
         .unwrap();
     let content_frame = mgr.content_frame(&ar).expect("content_frame");
 
-    let resolver = SyntheticResolverContext::new(FrameId::new(99))
-        .with_bus(&bus)
-        .with_binding("params.bus_in", SrcBinding::Bus(channel));
+    let mut resolver = Resolver::new();
+    let mut session = ResolveSession::new(
+        frame,
+        &mut resolver,
+        &registry,
+        ResolveTrace::new(ResolveLogLevel::Off),
+    );
 
+    struct NoProduceHost;
+
+    impl ResolveHost for NoProduceHost {
+        fn produce(
+            &mut self,
+            _query: &QueryKey,
+            _session: &mut ResolveSession<'_>,
+        ) -> Result<ProducedValue, SessionResolveError> {
+            Err(SessionResolveError::other("unexpected produce"))
+        }
+    }
+
+    let mut host = NoProduceHost;
     let mut node = TickProbeNode {
-        target: parse_path("params.bus_in").unwrap(),
+        query: QueryKey::Bus(channel),
         last: None,
     };
 
+    let mut bridge = SessionHostResolver {
+        session: &mut session,
+        host: &mut host,
+    };
     let mut ctx = TickContext::new(
         NodeId::new(5),
-        FrameId::new(99),
-        &config,
-        &mut cache,
+        frame,
         ar,
         content_frame,
-        &bus,
-        &resolver,
+        &mut bridge as &mut dyn TickResolver,
     );
 
     node.tick(&mut ctx).unwrap();
     assert_eq!(node.last, Some(2.0));
-
-    assert!(ctx.changed_since(&parse_path("params.bus_in").unwrap(), FrameId::new(14)));
-    assert!(!ctx.changed_since(&parse_path("params.bus_in").unwrap(), FrameId::new(15)));
 
     assert!(ctx.artifact_changed_since(FrameId::new(39)));
     assert!(!ctx.artifact_changed_since(FrameId::new(40)));
@@ -339,16 +360,16 @@ impl RuntimePropAccessShim<'_> {
 }
 
 struct TickProbeNode {
-    target: PropPath,
+    query: QueryKey,
     last: Option<f32>,
 }
 
 impl Node for TickProbeNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let slot = ctx
-            .resolve(&self.target)
+        let pv = ctx
+            .resolve(self.query.clone())
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
-        if let LpsValueF32::F32(v) = slot.value {
+        if let LpsValueF32::F32(v) = *pv.value.get() {
             self.last = Some(v);
         }
         Ok(())
