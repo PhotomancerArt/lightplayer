@@ -32,6 +32,11 @@ Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
 `lps-shared` because it is responsible for converting between `LpsValue` /
 `LpsType` and `ModelValue` / `ModelType`.
 
+**Produced values:** demand-driven resolution caches
+[`resolver::production::Production`]: a versioned [`runtime_product::RuntimeProduct`]
+(`Value` = carried `LpsValueF32`, `Render` = engine product handle). That is
+separate from [`prop::RuntimePropAccess`] and the per-node [`resolver::resolved_slot::ResolvedSlot`] slot cascade, which stay on `LpsValueF32` for shader/wire compatibility and legacy binding.
+
 **Naming:** Prefer plain engine/runtime nouns when the crate already owns the
 concept (`Engine`, `ProjectRuntime`, `NodeTree`, `BindingRegistry`, `Resolver`).
 Use an `Engine*` prefix only when ambiguity with another layer remains high.

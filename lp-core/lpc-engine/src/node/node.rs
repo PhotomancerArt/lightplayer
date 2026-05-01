@@ -44,7 +44,7 @@ mod tests {
             &mut self,
             _query: &crate::resolver::QueryKey,
             _session: &mut ResolveSession<'_>,
-        ) -> Result<crate::resolver::ProducedValue, crate::resolver::SessionResolveError> {
+        ) -> Result<crate::resolver::Production, crate::resolver::SessionResolveError> {
             Err(crate::resolver::SessionResolveError::other(
                 "EmptyResolveHost: unexpected produce",
             ))

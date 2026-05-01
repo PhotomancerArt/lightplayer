@@ -1,7 +1,14 @@
 //! Author-time **default** description: what to put in a slot before the
 //! loader/runtime has real resources.
 //!
-//! Some [`Kind`][`lpc_model::kind::Kind`]s need more than a plain **runtime value**
+//! These specs are **authored** data and recipes, not engine-owned production
+//! envelopes (`Production` / `RuntimeProduct` in the `lpc-engine` crate).
+//! They materialize into portable [`ModelValue`] (and, downstream, into
+//! shader-runtime [`lps_shared::LpsValueF32`] or into runtime product domains in
+//! the engine) **through** loader and engine resolution—there is no single
+//! universal “param equals one final runtime value” mapping for every domain.
+//!
+//! Some [`Kind`][`lpc_model::kind::Kind`]s need more than a plain **scalar literal**
 //! at author time: **opaque handles** (e.g. [`Kind::Texture`][`lpc_model::kind::Kind::Texture`])
 //! are produced from a small **recipe** ([`SrcTextureSpec`]) that the loader
 //! materializes into a handle-shaped value (`docs/design/lightplayer/quantity.md`
@@ -88,8 +95,10 @@ impl From<SrcValueSpecWire> for SrcValueSpec {
     }
 }
 
-/// Either a portable [`ModelValue`] for value-typed kinds, or a handle recipe
-/// for opaque kinds (`docs/design/lightplayer/quantity.md` §7).
+/// Either a portable [`ModelValue`] for value-typed kinds, or a texture handle
+/// **recipe** for opaque kinds (`docs/design/lightplayer/quantity.md` §7)—not a
+/// sampled render product; those are engine runtime domains separate from source
+/// authoring.
 #[derive(Clone, Debug)]
 pub enum SrcValueSpec {
     /// Portable literal or texture recipe; see [`SrcValueSpec::default_model_value`].

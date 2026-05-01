@@ -1,14 +1,14 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
-use crate::resolver::produced_value::ProducedValue;
+use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::{ResolveError, SessionResolveError};
 use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_session::ResolveSession;
 
-/// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`ProducedValue`]).
+/// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
 pub trait TickResolver {
-    fn resolve(&mut self, query: QueryKey) -> Result<ProducedValue, ResolveError>;
+    fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError>;
 }
 
 /// Bridges [`ResolveSession`] + [`ResolveHost`] into a [`TickResolver`].
@@ -22,7 +22,7 @@ pub struct SessionHostResolver<'sess, 'resolver, 'host> {
 }
 
 impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resolver, 'host> {
-    fn resolve(&mut self, query: QueryKey) -> Result<ProducedValue, ResolveError> {
+    fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError> {
         self.session
             .resolve(self.host, query)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))

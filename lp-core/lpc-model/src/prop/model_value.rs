@@ -28,13 +28,6 @@ pub enum ModelValue {
     Mat2x2([[f32; 2]; 2]),
     Mat3x3([[f32; 3]; 3]),
     Mat4x4([[f32; 4]; 4]),
-    /// Texture buffer layout on the wire (width, height, row stride; `ptr` is an opaque id / handle).
-    Texture2D {
-        ptr: u32,
-        width: u32,
-        height: u32,
-        row_stride: u32,
-    },
     Array(Vec<ModelValue>),
     Struct {
         name: Option<String>,
@@ -61,19 +54,6 @@ mod tests {
             let back: ModelValue = serde_json::from_str(&json).unwrap();
             assert_eq!(v, back);
         }
-    }
-
-    #[test]
-    fn model_value_serde_roundtrip_texture2d_descriptor() {
-        let v = ModelValue::Texture2D {
-            ptr: 0x1000,
-            width: 64,
-            height: 32,
-            row_stride: 256,
-        };
-        let json = serde_json::to_string(&v).unwrap();
-        let back: ModelValue = serde_json::from_str(&json).unwrap();
-        assert_eq!(v, back);
     }
 
     #[test]

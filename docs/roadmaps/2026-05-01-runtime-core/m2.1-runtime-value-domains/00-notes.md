@@ -35,44 +35,46 @@ Out of scope:
 The M2 core engine path has an engine-owned resolution stack:
 
 - `lpc-engine/src/engine/engine.rs` owns `Engine`, `Resolver`,
-  `BindingRegistry`, `NodeTree`, frame state, artifacts, and demand roots.
+  `BindingRegistry`, `NodeTree`, frame state, artifacts, demand roots, and the
+  render-product store used for sampling tests.
 - `lpc-engine/src/resolver/query_key.rs` defines `QueryKey::{Bus, NodeOutput,
   NodeInput}`.
-- `lpc-engine/src/resolver/produced_value.rs` defines `ProducedValue` as
-  `Versioned<LpsValueF32>` plus `ProductionSource`.
+- `lpc-engine/src/resolver/production.rs` defines `Production` as
+  `Versioned<RuntimeProduct>` plus `ProductionSource`.
 - `lpc-engine/src/resolver/resolve_session.rs` resolves bus, node input, and
-  node output queries, caches `ProducedValue`, and records trace/provenance
-  events.
+  node output queries, caches `Production`, and records trace/provenance events.
 - `lpc-engine/src/node/contexts.rs` exposes `TickContext::resolve(...) ->
-  ProducedValue`.
+  Production`.
 
-The value shape is still scalar/shader-value centric:
+The engine-owned production envelope is domain-aware:
 
-- `ProducedValue.value` is currently `Versioned<LpsValueF32>`.
-- `ResolvedSlot` and several legacy/resolver cache paths still store
-  `LpsValueF32` directly.
-- Node runtime property access still returns `Option<(LpsValueF32, FrameId)>`.
-- Literal materialization converts `ModelValue` into `LpsValueF32`.
+- `Production.product` is `Versioned<RuntimeProduct>` (`Value(LpsValueF32)` or
+  `Render(RenderProductId)`).
+- `ResolvedSlot` and several legacy/resolver cache paths still store `LpsValueF32`
+  directly.
+- `RuntimePropAccess` still returns `LpsValueF32`-shaped outputs (legacy/sync
+  bridge); domain-shaped resolution uses `Production` above.
+- Literal materialization still converts `ModelValue` into `LpsValueF32` where
+  values are shader-portable.
 
-There is already pressure from render-like data:
+Render-like data no longer crosses the portable model surface as structured
+pixels:
 
-- `lpc-model/src/prop/model_value.rs` has `ModelValue::Texture2D { ptr, width,
-  height, row_stride }`.
-- `lpc-model/src/prop/model_type.rs` has `ModelType::Texture2D`.
-- `lps-shared/src/lps_value_f32.rs` has `LpsValueF32::Texture2D`.
-- `lpc-engine/src/wire_bridge/lps_value_to_model_value.rs` documents that
-  converting `LpsValueF32::Texture2D` to `ModelValue::Texture2D` drops host
-  metadata.
+- `ModelValue` and `ModelType` no longer include `Texture2D` variants (source
+  still authors textures via `SrcValueSpec::Texture`).
+- `lps-shared/src/lps_value_f32.rs` still has `LpsValueF32::Texture2D` as shader ABI
+  / runtime compatibility state.
+- `lpc-engine/src/wire_bridge/lps_value_to_model_value.rs` rejects
+  `LpsValueF32::Texture2D` with `Texture2dNotPortable` (no `ModelValue` mapping).
 
-That texture descriptor path is useful compatibility evidence, but it should
-not become the long-term representation for render products. The new engine
-value envelope should make it possible for resolver/cache/provenance code to
-handle multiple value domains while large or capability-backed products remain
-owned by engine/node/product registries.
+`LpsValueF32::Texture2D` remains useful for shader/fixture ABI, but it should not
+drive the render-product abstraction. Resolver/cache/provenance code can carry
+`RuntimeProduct::Render` handles while large or capability-backed products stay
+outside the resolver cache in engine-managed storage.
 
 # Downstream Impact Areas
 
-The domain/value split is likely to affect more than `ProducedValue`.
+The domain/value split is likely to affect more than the `Production` envelope.
 
 ## Runtime property access
 
@@ -80,7 +82,7 @@ The domain/value split is likely to affect more than `ProducedValue`.
 node-produced fields as `LpsValueF32`. That is acceptable for legacy or
 shader-compatible props, but the core engine should not assume every node output
 or state field is directly an `LpsValueF32` forever. M2.1 should either update
-the new engine-facing access path to `RuntimeValue` or clearly leave
+the new engine-facing access path to `RuntimeProduct` or clearly leave
 `RuntimePropAccess` as a legacy/data-only bridge and introduce the new path
 elsewhere.
 
@@ -99,17 +101,15 @@ directly into a single universal shader value.
 `lpc-model/src/prop/kind.rs` currently describes `Kind::Texture` as an opaque
 handle with a `ModelType::Struct` storage recipe. That already points toward
 domain separation: `Kind` is semantic meaning, `ModelType` is portable storage,
-and `RuntimeValue` is the engine-time domain payload. M2.1 should preserve that
+and `RuntimeProduct` is the engine-time domain product. M2.1 should preserve that
 separation rather than turning `ModelType` into runtime resource identity.
 
 ## Wire bridge conversion
 
-`lpc-engine/src/wire_bridge/lps_value_to_model_value.rs` currently converts
-`LpsValueF32::Texture2D` to `ModelValue::Texture2D` while dropping host metadata.
-If `ModelValue::Texture2D` is removed, the bridge needs to either stop exposing
-texture descriptors through `ModelValue` or map them to an explicit compatibility
-shape. M2.1 should treat this as cleanup of the old workaround, not as the new
-render-product inspection API.
+`lpc-engine/src/wire_bridge/lps_value_to_model_value.rs` rejects
+`LpsValueF32::Texture2D` (and aggregates containing textures) rather than stuffing
+pixels or descriptors into `ModelValue`. Future wire transport should use
+explicit reference/payload channels, not this conversion.
 
 The new runtime-domain shape gives the wire protocol a better future path:
 send texture/render-product references as identity-bearing references, while
@@ -133,7 +133,7 @@ instead of hiding it behind `ModelValue` or `LpsValueF32`.
 
 # Questions
 
-## Q1: What should the runtime payload enum be called?
+## Q1: What should the runtime payload enum be called? (superseded)
 
 Context: The milestone needs a name for the payload inside `ProducedValue`, such
 as `RuntimeValue`, `ProducedData`, `EngineValue`, or `CoreValue`.
@@ -142,7 +142,8 @@ Suggested answer: Use `RuntimeValue`. It is clear that this is an in-engine
 runtime payload, not a portable model/wire value and not the whole
 `ProducedValue` envelope.
 
-Answer: Yes. Use `RuntimeValue`.
+Answer: Initially yes, but this was superseded by Q9. Use
+`RuntimeProduct::{Value, Render}` instead of `RuntimeValue`.
 
 ## Q2: Where should the value-domain descriptors live?
 
@@ -234,7 +235,7 @@ values plus the ability to request sampled values from an engine-managed product
 in tests. Keep concrete shader rendering, texture products, GPU storage, and
 optimization policies out of M2.1.
 
-## Q8: What should the non-render runtime value variant be called?
+## Q8: What should the non-render runtime value variant be called? (superseded)
 
 Context: `RuntimeValue::Simple(...)` describes complexity, not shape. The value
 can be any ordinary GLSL/shader-compatible value: scalar, vector, matrix, array,
@@ -246,10 +247,8 @@ Suggested answer: Use `RuntimeValue::Data(LpsValueF32)` or
 bus value, animated input, or default can all produce the same payload shape.
 `Literal` should remain a production/source concept, not a value-domain name.
 
-Answer: Use `RuntimeValue::Data(LpsValueF32)` for now. It is a little broad,
-but less jargony than `Immediate`. In this milestone, "data" means directly
-carried GLSL-compatible runtime data, as opposed to an engine-managed
-capability/handle such as a render product.
+Answer: Initially `RuntimeValue::Data(LpsValueF32)`, but this was superseded by
+Q9. Use `RuntimeProduct::Value(LpsValueF32)`.
 
 Follow-up: Consider using the singular `Datum` instead of `Data`, and possibly
 renaming `ModelValue` to `ModelDatum`. `Datum` makes the variant/type distinct
@@ -257,15 +256,18 @@ from generic "data" domains such as future audio buffers, though it is not a
 perfect natural-language fit for compound values like vectors, arrays, or
 structs.
 
-## Q9: Should the direct payload be named Datum, and should ModelValue become ModelDatum?
+## Q9: What should the runtime domain envelope and direct value variant be called?
 
 Context: `Value` is becoming overloaded: the engine has `ProducedValue`,
 `RuntimeValue`, source literals, model/wire values, and future render products.
-`Data` is broad; `Datum` is more distinct and could make the direct carried
-payload feel like one runtime datum, even if it is structurally compound.
+`RuntimeValue` sounds too much like another `LpsValue`-style scalar enum, but
+the new type is actually the product of runtime resolution/cooking: sometimes a
+direct value, sometimes a render-product handle, and later possibly other
+domains.
 
-Suggested answer: Use `RuntimeValue::Datum(LpsValueF32)` if the wording feels
-acceptable, because it better distinguishes the direct payload variant from
-future domains. Treat `ModelValue -> ModelDatum` as a separate, possibly same-
-milestone rename only if the mechanical churn is acceptable; otherwise record it
-as follow-up and avoid expanding M2.1 too far.
+Suggested answer: Use `RuntimeProduct::{Value, Render}` for the produced domain
+enum. Consider renaming `ProducedValue` to `Production`: it is generic, but it
+fits the envelope role of "one resolved production plus provenance."
+
+Answer: Use `RuntimeProduct::{Value, Render}`. Prefer renaming the envelope from
+`ProducedValue` to `Production` if the code reads well during phase planning.

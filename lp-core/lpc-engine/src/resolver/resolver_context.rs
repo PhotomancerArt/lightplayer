@@ -1,8 +1,9 @@
 //! ResolverContext — narrow facade for resolver access to runtime state.
 //!
-//! This trait provides the minimal access the resolver needs to:
+//! This trait provides the minimal access the **slot** resolver needs to:
 //! - Read bus values and their frames
-//! - Access target node produced props via RuntimePropAccess
+//! - Read target node produced props as [`lps_shared::LpsValueF32`] (same shape as
+//!   [`crate::prop::RuntimePropAccess`], not [`crate::resolver::production::Production`])
 //! - Look up artifact slot bindings and defaults
 //! - Know the current frame
 
@@ -30,6 +31,9 @@ pub trait ResolverContext {
     /// Read a target node's produced property (outputs or state namespace).
     ///
     /// Returns `None` if the node doesn't exist or the property isn't found.
+    ///
+    /// Values are shader-runtime [`LpsValueF32`] for this cascade; render-product
+    /// handles use the `ResolveSession` / [`crate::resolver::production::Production`] path instead.
     fn target_prop(&self, node: &TreePath, prop: &PropPath) -> Option<(LpsValueF32, FrameId)>;
 
     /// Get the artifact's binding for a property path, if any.

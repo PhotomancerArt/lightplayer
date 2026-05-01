@@ -144,7 +144,10 @@ pub enum Kind {
     /// 3D position as `ModelType::Vec3` (`quantity.md` §3).
     Position3d,
 
-    /// Opaque **GPU** texture: handle/width/height/format struct; pixel data lives in runtime texture storage (`quantity.md` §3, storage table). Default bus: `"video/in/0"` when no explicit bind (`quantity.md` §8).
+    /// Opaque **texture** semantic kind: portable struct storage (`width` /
+    /// `height` / `handle` / …) describes serialization and GPU-oriented
+    /// layout intent—not the same thing as a full-frame
+    /// engine-managed visual product (`RuntimeProduct::Render` in `lpc-engine`).
     Texture,
 
     /// Audio frequency-band levels (low / mid / high) as F32 RMS values.

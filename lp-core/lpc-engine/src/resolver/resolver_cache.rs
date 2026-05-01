@@ -1,13 +1,13 @@
 //! Engine-level same-frame resolver cache keyed by [`super::QueryKey`].
 
-use crate::resolver::produced_value::ProducedValue;
+use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use alloc::collections::BTreeMap;
 
-/// Per-frame cache of [`ProducedValue`] entries addressed by [`QueryKey`].
+/// Per-frame cache of [`Production`] entries addressed by [`QueryKey`].
 #[derive(Clone, Debug, Default)]
 pub struct ResolverCache {
-    entries: BTreeMap<QueryKey, ProducedValue>,
+    entries: BTreeMap<QueryKey, Production>,
 }
 
 impl ResolverCache {
@@ -17,15 +17,15 @@ impl ResolverCache {
         }
     }
 
-    pub fn get(&self, key: &QueryKey) -> Option<&ProducedValue> {
+    pub fn get(&self, key: &QueryKey) -> Option<&Production> {
         self.entries.get(key)
     }
 
-    pub fn insert(&mut self, key: QueryKey, value: ProducedValue) -> Option<ProducedValue> {
+    pub fn insert(&mut self, key: QueryKey, value: Production) -> Option<Production> {
         self.entries.insert(key, value)
     }
 
-    pub fn remove(&mut self, key: &QueryKey) -> Option<ProducedValue> {
+    pub fn remove(&mut self, key: &QueryKey) -> Option<Production> {
         self.entries.remove(key)
     }
 
@@ -33,7 +33,7 @@ impl ResolverCache {
         self.entries.clear();
     }
 
-    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, QueryKey, ProducedValue> {
+    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, QueryKey, Production> {
         self.entries.iter()
     }
 
@@ -48,9 +48,9 @@ impl ResolverCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProducedValue, QueryKey, ResolverCache};
+    use super::{Production, QueryKey, ResolverCache};
     use crate::binding::BindingId;
-    use crate::resolver::produced_value::ProductionSource;
+    use crate::resolver::production::ProductionSource;
     use crate::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
     use lpc_model::ChannelName;
     use lpc_model::FrameId;
@@ -63,8 +63,8 @@ mod tests {
         QueryKey::Bus(ChannelName(alloc::string::String::from(name)))
     }
 
-    fn make_produced(frame: i64, source: ProductionSource) -> ProducedValue {
-        ProducedValue::new(
+    fn make_produced(frame: i64, source: ProductionSource) -> Production {
+        Production::value(
             Versioned::new(FrameId::new(frame), LpsValueF32::F32(1.0)),
             source,
         )
@@ -83,7 +83,7 @@ mod tests {
 
         assert!(cache.insert(key.clone(), pv.clone()).is_none());
         let got = cache.get(&key).unwrap();
-        assert!(got.value.get().eq(&LpsValueF32::F32(1.0)));
+        assert!(got.as_value().expect("value").eq(&LpsValueF32::F32(1.0)));
         assert_eq!(
             got.source,
             ProductionSource::BusBinding {

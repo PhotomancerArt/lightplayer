@@ -29,7 +29,6 @@ pub fn model_type_to_lps_type(ty: &ModelType) -> LpsType {
         ModelType::Mat2x2 => LpsType::Mat2,
         ModelType::Mat3x3 => LpsType::Mat3,
         ModelType::Mat4x4 => LpsType::Mat4,
-        ModelType::Texture2D => LpsType::Texture2D,
         ModelType::Array(element, len) => LpsType::Array {
             element: Box::new(model_type_to_lps_type(element)),
             len: u32::try_from(*len)
@@ -84,8 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_gpu_texture2d_and_arrays() {
-        assert_eq!(model_type_to_lps_type(&Mt::Texture2D), LpsType::Texture2D);
+    fn maps_arrays() {
         let arr = Mt::Array(Box::new(Mt::F32), 8);
         match model_type_to_lps_type(&arr) {
             LpsType::Array { element, len } => {

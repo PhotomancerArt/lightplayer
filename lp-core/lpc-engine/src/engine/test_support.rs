@@ -17,7 +17,7 @@ use crate::engine::Engine;
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
 use crate::prop::RuntimePropAccess;
 use crate::resolver::{
-    ProducedValue, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
+    Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
 };
 use crate::tree::test_placeholder_spine;
 
@@ -242,24 +242,18 @@ impl EngineTestHarness {
             .last_f32()
     }
 
-    pub(crate) fn resolve_bus(
-        &mut self,
-        channel: &str,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    pub(crate) fn resolve_bus(&mut self, channel: &str) -> Result<Production, SessionResolveError> {
         self.resolve(QueryKey::Bus(channel_name(channel)))
     }
 
-    pub(crate) fn resolve(
-        &mut self,
-        query: QueryKey,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    pub(crate) fn resolve(&mut self, query: QueryKey) -> Result<Production, SessionResolveError> {
         resolve_with_engine_host(&mut self.engine, query, ResolveLogLevel::Off).map(|(pv, _)| pv)
     }
 
     pub(crate) fn resolve_with_trace(
         &mut self,
         query: QueryKey,
-    ) -> Result<(ProducedValue, ResolveTrace), SessionResolveError> {
+    ) -> Result<(Production, ResolveTrace), SessionResolveError> {
         resolve_with_engine_host(&mut self.engine, query, ResolveLogLevel::Basic)
     }
 }
@@ -424,7 +418,7 @@ impl Node for DummyFixtureNode {
                 input: self.input.clone(),
             })
             .map_err(|e| NodeError::msg(format!("fixture resolve failed: {}", e.message)))?;
-        self.record.record(pv.value.get());
+        self.record.record(pv.as_value().expect("value"));
         Ok(())
     }
 
@@ -469,7 +463,7 @@ impl Node for DummyOutputNode {
                 input: self.input.clone(),
             })
             .map_err(|e| NodeError::msg(format!("output resolve failed: {}", e.message)))?;
-        self.record.record(pv.value.get());
+        self.record.record(pv.as_value().expect("value"));
         Ok(())
     }
 

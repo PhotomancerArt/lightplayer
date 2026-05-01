@@ -1,7 +1,7 @@
 //! Resolver module — runtime data types and binding cascade resolution.
 //!
 //! This module provides:
-//! - Engine cache types (`ResolverCache` / [`QueryKey`] / [`ProducedValue`])
+//! - Engine cache types (`ResolverCache` / [`QueryKey`] / [`Production`])
 //! - Per-node slot cache ([`SlotResolverCache`], [`ResolvedSlot`]) for [`resolve_slot`]
 //! - Binding cascade resolution (`resolve_slot`)
 //! - Context facade for resolver access (`ResolverContext`)
@@ -9,7 +9,7 @@
 //! - Demand session ([`ResolveSession`], [`ResolveHost`]) and [`TickResolver`] bridge ([`SessionHostResolver`])
 
 pub mod binding_kind;
-pub mod produced_value;
+pub mod production;
 pub mod query_key;
 pub mod resolve_error;
 pub mod resolve_host;
@@ -24,7 +24,7 @@ pub mod slot_resolver_cache;
 pub mod tick_resolver;
 
 pub use binding_kind::BindingKind;
-pub use produced_value::{ProducedValue, ProductionSource};
+pub use production::{Production, ProductionSource};
 pub use query_key::QueryKey;
 pub use resolve_error::{ResolveError, SessionResolveError};
 pub use resolve_host::ResolveHost;

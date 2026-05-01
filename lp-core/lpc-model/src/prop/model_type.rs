@@ -30,7 +30,6 @@ pub enum ModelType {
     Mat2x2,
     Mat3x3,
     Mat4x4,
-    Texture2D,
     Array(Box<ModelType>, usize),
     Struct {
         name: Option<String>,

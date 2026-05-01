@@ -1,6 +1,14 @@
 //! Object-safe reflection over a node's *produced* fields (outputs and state)
-//! at engine runtime. Payloads use [`lps_shared::LpsValueF32`]; sync/wire paths
-//! use [`lpc_model::ModelValue`] via [`crate::wire_bridge`].
+//! at engine runtime.
+//!
+//! Payloads here are **shader- and wire-compatible** [`lps_shared::LpsValueF32`];
+//! sync paths use [`lpc_model::ModelValue`] via [`crate::wire_bridge`]. This trait
+//! is a **data / legacy bridge**: it does not carry the engine's
+//! [`crate::runtime_product::RuntimeProduct`] envelope. Demand-driven resolution
+//! that can return [`crate::runtime_product::RuntimeProduct::Render`] (and other
+//! domains) lives on [`crate::resolver::production::Production`] via
+//! `ResolveSession` / [`crate::node::contexts::TickContext::resolve`], not on
+//! this API.
 
 use alloc::boxed::Box;
 
@@ -10,8 +18,12 @@ use lps_shared::LpsValueF32;
 
 /// Object-safe reflection over a node's *produced* fields (outputs and state).
 ///
-/// Implemented by runtime `*Props` structs; consumed by sync and tooling on the
-/// engine side before values cross the wire as [`lpc_model::ModelValue`].
+/// Implemented by runtime `*Props` structs; consumed by sync, the slot
+/// resolver cascade ([`crate::resolver::resolver_context::ResolverContext`]), and
+/// tooling before values cross the wire as [`lpc_model::ModelValue`].
+///
+/// For the versioned **production** envelope (`Value` vs `Render` domains), use
+/// the resolver session path instead of this trait.
 pub trait RuntimePropAccess {
     /// Get the current value at `path`, if any.
     fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)>;

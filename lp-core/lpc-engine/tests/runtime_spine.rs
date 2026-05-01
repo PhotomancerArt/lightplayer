@@ -12,7 +12,7 @@ use lpc_engine::node::NodeError;
 use lpc_engine::resolver::{ResolverContext, resolve_slot};
 use lpc_engine::{
     ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingKind, BindingPriority,
-    BindingRegistry, BindingSource, BindingTarget, Bus, LegacyNodeRuntime, Node, ProducedValue,
+    BindingRegistry, BindingSource, BindingTarget, Bus, LegacyNodeRuntime, Node, Production,
     QueryKey, ResolveHost, ResolveLogLevel, ResolveSession, ResolveSource, ResolveTrace, Resolver,
     SessionHostResolver, SessionResolveError, SlotResolverCache, TickContext, TickResolver,
 };
@@ -200,7 +200,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
             &mut self,
             _query: &QueryKey,
             _session: &mut ResolveSession<'_>,
-        ) -> Result<ProducedValue, SessionResolveError> {
+        ) -> Result<Production, SessionResolveError> {
             Err(SessionResolveError::other("unexpected produce"))
         }
     }
@@ -369,7 +369,7 @@ impl Node for TickProbeNode {
         let pv = ctx
             .resolve(self.query.clone())
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
-        if let LpsValueF32::F32(v) = *pv.value.get() {
+        if let LpsValueF32::F32(v) = *pv.as_value().expect("value") {
             self.last = Some(v);
         }
         Ok(())

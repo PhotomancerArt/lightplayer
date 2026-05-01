@@ -1,12 +1,20 @@
 //! Resolver — binding cascade implementation for consumed slots.
 //!
-//! Resolution priority:
+//! This module implements **artifact slot** resolution (overrides → bind →
+//! default) into cached [`ResolvedSlot`] values holding [`lps_shared::LpsValueF32`].
+//! That path stays shader- and wire-oriented for legacy binding and tests.
+//!
+//! Separately, `ResolveSession` resolves [`crate::resolver::query_key::QueryKey`]s
+//! into [`crate::resolver::production::Production`] (versioned
+//! [`crate::runtime_product::RuntimeProduct`]). Do not conflate the two caches.
+//!
+//! Resolution priority (slot cascade):
 //! 1. `SrcNodeConfig.overrides[prop]`
 //! 2. artifact slot `bind`
 //! 3. artifact slot `default`
 //!
-//! [`Resolver`] (cache owner) supports the engine demand path; slot cascade functions below are
-//! unchanged.
+//! [`Resolver`] (same-frame cache owner) supports the engine alongside this cascade;
+//! the struct and functions below implement the slot path only.
 
 use crate::resolver::binding_kind::BindingKind;
 use crate::resolver::resolve_error::ResolveError;
@@ -50,6 +58,10 @@ impl Resolver {
     }
 }
 
+/// Materialize an authored [`SrcValueSpec`] to a versioned [`LpsValueF32`] for
+/// call sites that still need the shader-value shape (e.g. some session
+/// literals). Authored specs are not [`RuntimeProduct`](crate::runtime_product::RuntimeProduct)s;
+/// domain products are built in [`Production`](crate::resolver::production::Production) on cache hits / host resolve.
 pub(crate) fn materialize_src_value_literal(
     spec: &SrcValueSpec,
     frame: FrameId,
@@ -229,10 +241,10 @@ fn resolve_default<C: ResolverContext + ?Sized>(
     }
 }
 
-/// Convert ModelValue to LpsValueF32.
+/// Convert [`ModelValue`] to [`LpsValueF32`] for the slot cascade and wire bridge.
 ///
-/// This is the inverse of the wire_bridge conversion. For M4.3, we support
-/// the common scalar/vector variants used by tests.
+/// Not every future runtime domain maps 1:1 into `LpsValueF32`; engine demand
+/// resolution may represent other domains as [`RuntimeProduct`](crate::runtime_product::RuntimeProduct).
 fn model_value_to_lps_value_f32(
     value: &lpc_model::ModelValue,
 ) -> Result<LpsValueF32, ResolveError> {
@@ -274,22 +286,6 @@ fn model_value_to_lps_value_f32(
                 name: name.clone(),
                 fields: result_fields,
             })
-        }
-        ModelValue::Texture2D {
-            ptr,
-            width,
-            height,
-            row_stride,
-        } => {
-            use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue};
-            Ok(LpsValueF32::Texture2D(
-                LpsTexture2DValue::from_guest_descriptor(LpsTexture2DDescriptor {
-                    ptr: *ptr,
-                    width: *width,
-                    height: *height,
-                    row_stride: *row_stride,
-                }),
-            ))
         }
     }
 }

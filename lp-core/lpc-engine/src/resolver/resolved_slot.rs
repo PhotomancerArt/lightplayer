@@ -1,14 +1,22 @@
-//! ResolvedSlot — one entry in the per-node resolver cache.
+//! ResolvedSlot — one entry in the per-node **slot** resolver cache (legacy /
+//! transitional data path storing [`lps_shared::LpsValueF32`] directly).
+//!
+//! The M2 demand-driven engine path caches [`crate::resolver::production::Production`]
+//! (versioned [`crate::runtime_product::RuntimeProduct`]) instead. Do not assume
+//! every resolved runtime value is representable only as `LpsValueF32`.
 
 use crate::resolver::resolve_source::ResolveSource;
 use lpc_model::FrameId;
 use lps_shared::LpsValueF32;
 
-/// One entry in the per-node resolver cache.
+/// One entry in the per-node **slot** resolver cache.
 ///
-/// `value` is the LpsValueF32 produced by resolution; `changed_frame`
-/// is the frame at which this cached value last differed from its
-/// previous resolution; `source` records provenance.
+/// `value` is shader-runtime [`LpsValueF32`] from this cascade; `changed_frame`
+/// is the frame at which this cached value last differed from its previous
+/// resolution; `source` records provenance.
+///
+/// This remains the slot-/binding-resolution shape. It is **not** the M2
+/// `Production` cache used by `ResolveSession`.
 ///
 /// Constructed by the M4.3 resolver; M4.2 only ships the data
 /// shape so `NodeEntry`'s commented `prop_cache` stub can resolve

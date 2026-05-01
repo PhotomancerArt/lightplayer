@@ -12,8 +12,9 @@ use lpc_model::{FrameId, NodeId, TreePath, Versioned};
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
 use crate::node::{Node, TickContext};
+use crate::render_product::RenderProductStore;
 use crate::resolver::{
-    ProducedValue, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
+    Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::runtime::frame_time::FrameTime;
@@ -35,6 +36,7 @@ pub struct Engine {
     tree: NodeTree<Box<dyn Node>>,
     bindings: BindingRegistry,
     resolver: Resolver,
+    render_products: RenderProductStore,
     artifacts: ArtifactManager<()>,
     demand_roots: Vec<NodeId>,
 }
@@ -48,6 +50,7 @@ impl Engine {
             tree: NodeTree::new(root_path, frame),
             bindings: BindingRegistry::new(),
             resolver: Resolver::new(),
+            render_products: RenderProductStore::new(),
             artifacts: ArtifactManager::new(),
             demand_roots: Vec::new(),
         }
@@ -83,6 +86,14 @@ impl Engine {
 
     pub fn resolver_mut(&mut self) -> &mut Resolver {
         &mut self.resolver
+    }
+
+    pub fn render_products(&self) -> &RenderProductStore {
+        &self.render_products
+    }
+
+    pub fn render_products_mut(&mut self) -> &mut RenderProductStore {
+        &mut self.render_products
     }
 
     pub fn artifacts(&self) -> &ArtifactManager<()> {
@@ -247,7 +258,7 @@ impl ResolveHost for EngineResolveHost<'_> {
         &mut self,
         query: &QueryKey,
         session: &mut ResolveSession<'_>,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    ) -> Result<Production, SessionResolveError> {
         match query {
             QueryKey::NodeOutput { node, output } => {
                 self.tick_node_once_for_output(*node, session)?;
@@ -263,7 +274,7 @@ impl ResolveHost for EngineResolveHost<'_> {
                     }
                 };
                 match n.props().get(output) {
-                    Some((v, frame)) => Ok(ProducedValue::new(
+                    Some((v, frame)) => Ok(Production::value(
                         Versioned::new(frame, v),
                         ProductionSource::NodeOutput {
                             node: *node,
@@ -293,7 +304,7 @@ impl ResolveHost for EngineResolveHost<'_> {
                     }
                 };
                 match n.props().get(input) {
-                    Some((v, frame)) => Ok(ProducedValue::new(
+                    Some((v, frame)) => Ok(Production::value(
                         Versioned::new(frame, v),
                         ProductionSource::Default,
                     )),
@@ -364,7 +375,7 @@ pub(super) fn resolve_with_engine_host(
     eng: &mut Engine,
     key: QueryKey,
     log_level: ResolveLogLevel,
-) -> Result<(ProducedValue, ResolveTrace), SessionResolveError> {
+) -> Result<(Production, ResolveTrace), SessionResolveError> {
     let fid = eng.frame_id;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
@@ -391,7 +402,7 @@ pub(super) fn resolve_with_engine_host(
 pub(super) fn resolve_twice_same_frame_with_engine_host(
     eng: &mut Engine,
     key: QueryKey,
-) -> Result<(ProducedValue, ProducedValue), SessionResolveError> {
+) -> Result<(Production, Production), SessionResolveError> {
     let fid = eng.frame_id;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
@@ -426,6 +437,8 @@ mod tests {
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, node_output, output, path, trace_has_value_origin_path,
     };
+    use crate::render_product::{RenderSampleBatch, RenderSamplePoint, SolidColorProduct};
+    use crate::runtime_product::RuntimeProduct;
 
     #[test]
     fn engine_new_has_frame_state_and_empty_registry_resolver_tree_root() {
@@ -499,7 +512,7 @@ mod tests {
                 output: out,
             })
             .expect("resolve");
-        assert!(a.value.get().eq(&LpsValueF32::F32(2.0)));
+        assert!(a.as_value().expect("value").eq(&LpsValueF32::F32(2.0)));
     }
 
     #[test]
@@ -514,7 +527,18 @@ mod tests {
             output: out,
         };
 
-        super::resolve_twice_same_frame_with_engine_host(&mut h.engine, key).expect("resolve pair");
+        let (first, second) = super::resolve_twice_same_frame_with_engine_host(&mut h.engine, key)
+            .expect("resolve pair");
+        assert!(
+            first
+                .as_value()
+                .expect("value")
+                .eq(second.as_value().expect("value"))
+        );
+        assert_eq!(
+            first.product.changed_frame(),
+            second.product.changed_frame()
+        );
 
         assert_eq!(h.shader_ticks("shader"), 1);
     }
@@ -530,7 +554,7 @@ mod tests {
 
         let pv = h.resolve_bus("video").expect("resolve bus");
 
-        assert!(pv.value.get().eq(&LpsValueF32::F32(0.9)));
+        assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(0.9)));
     }
 
     #[test]
@@ -593,5 +617,25 @@ mod tests {
         let versions: Vec<_> = h.engine.bindings().iter().map(|e| e.version).collect();
 
         assert_eq!(versions, alloc::vec![FrameId::new(1), FrameId::new(1)]);
+    }
+
+    #[test]
+    fn runtime_product_render_handle_can_be_sampled_via_engine_store() {
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let id = engine
+            .render_products_mut()
+            .insert(Box::new(SolidColorProduct {
+                color: [1.0, 0.5, 0.25, 1.0],
+            }));
+        let product = RuntimeProduct::render(id);
+        let id = product.as_render().expect("render product");
+        let request = RenderSampleBatch {
+            points: alloc::vec![RenderSamplePoint { x: 0.0, y: 0.0 }],
+        };
+        let result = engine
+            .render_products()
+            .sample_batch(id, &request)
+            .expect("sample");
+        assert_eq!(result.samples[0].color, [1.0, 0.5, 0.25, 1.0]);
     }
 }

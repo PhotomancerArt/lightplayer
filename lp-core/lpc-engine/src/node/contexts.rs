@@ -5,7 +5,7 @@
 
 use crate::artifact::ArtifactId;
 use crate::bus::Bus;
-use crate::resolver::{ProducedValue, QueryKey, ResolveError, TickResolver};
+use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use lpc_model::{FrameId, NodeId, bus::ChannelName};
 use lps_shared::LpsValueF32;
 
@@ -46,7 +46,7 @@ impl<'r> TickContext<'r> {
     }
 
     /// Resolve a [`QueryKey`] for this frame (cache, bindings, optional host production).
-    pub fn resolve(&mut self, query: QueryKey) -> Result<ProducedValue, ResolveError> {
+    pub fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError> {
         self.resolver.resolve(query)
     }
 
@@ -138,7 +138,7 @@ mod tests {
     use crate::node::Node;
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use crate::resolver::{
-        ProducedValue, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
+        Production, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
         SessionHostResolver, TickResolver,
     };
     use alloc::string::String;
@@ -153,7 +153,7 @@ mod tests {
             &mut self,
             _query: &QueryKey,
             _session: &mut ResolveSession<'_>,
-        ) -> Result<ProducedValue, crate::resolver::SessionResolveError> {
+        ) -> Result<Production, crate::resolver::SessionResolveError> {
             Err(crate::resolver::SessionResolveError::other(
                 "unexpected produce in TickContext test",
             ))
@@ -237,7 +237,7 @@ mod tests {
         let pv = ctx
             .resolve(QueryKey::Bus(channel.clone()))
             .expect("resolve bus");
-        assert!(pv.value.get().eq(&LpsValueF32::F32(7.8)));
+        assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(7.8)));
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod tests {
                 input: input.clone(),
             })
             .expect("resolve node input");
-        assert!(pv.value.get().eq(&LpsValueF32::F32(4.25)));
+        assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(4.25)));
     }
 
     #[test]
@@ -323,12 +323,12 @@ mod tests {
             &mut self,
             query: &QueryKey,
             session: &mut ResolveSession<'_>,
-        ) -> Result<ProducedValue, crate::resolver::SessionResolveError> {
+        ) -> Result<Production, crate::resolver::SessionResolveError> {
             match query {
                 QueryKey::NodeInput { node, input }
                     if *node == self.node && *input == self.out_path =>
                 {
-                    Ok(ProducedValue::new(
+                    Ok(Production::value(
                         lpc_model::Versioned::new(session.frame_id(), LpsValueF32::F32(11.0)),
                         crate::resolver::ProductionSource::Default,
                     ))
@@ -351,7 +351,7 @@ mod tests {
             let pv = ctx.resolve(self.query.clone()).map_err(|e| {
                 crate::node::NodeError::msg(alloc::format!("resolve failed: {}", e.message))
             })?;
-            if let LpsValueF32::F32(v) = *pv.value.get() {
+            if let LpsValueF32::F32(v) = *pv.as_value().expect("value") {
                 self.resolved_value = Some(v);
             }
             Ok(())

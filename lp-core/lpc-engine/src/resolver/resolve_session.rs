@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::vec::Vec;
 
 use crate::binding::{BindingEntry, BindingRegistry, BindingSource, BindingTarget};
-use crate::resolver::produced_value::{ProducedValue, ProductionSource};
+use crate::resolver::production::{Production, ProductionSource};
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::SessionResolveError;
 use crate::resolver::resolve_host::ResolveHost;
@@ -51,7 +51,7 @@ impl<'a> ResolveSession<'a> {
         &mut self,
         host: &mut H,
         query: QueryKey,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    ) -> Result<Production, SessionResolveError> {
         if let Some(pv) = self.resolver.cache().get(&query) {
             self.trace
                 .record_event(ResolveTraceEvent::CacheHit(query.clone()));
@@ -72,7 +72,7 @@ impl<'a> ResolveSession<'a> {
         &mut self,
         host: &mut H,
         query: QueryKey,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    ) -> Result<Production, SessionResolveError> {
         match &query {
             QueryKey::Bus(channel) => self.resolve_bus(host, channel, &query),
             QueryKey::NodeInput { node, input } => {
@@ -100,7 +100,7 @@ impl<'a> ResolveSession<'a> {
         host: &mut (impl ResolveHost + ?Sized),
         channel: &ChannelName,
         query: &QueryKey,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    ) -> Result<Production, SessionResolveError> {
         let candidates: Vec<&BindingEntry> = self.registry.providers_for_bus(channel).collect();
         let entry = select_highest_priority_bus_provider(channel, &candidates)?;
         self.trace.record_event(ResolveTraceEvent::SelectBinding {
@@ -116,7 +116,7 @@ impl<'a> ResolveSession<'a> {
         node: NodeId,
         input: PropPath,
         query: &QueryKey,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    ) -> Result<Production, SessionResolveError> {
         if let Some(entry) = find_binding_for_node_input(self.registry, node, &input) {
             self.trace.record_event(ResolveTraceEvent::SelectBinding {
                 query: query.clone(),
@@ -143,7 +143,7 @@ impl<'a> ResolveSession<'a> {
         host: &mut (impl ResolveHost + ?Sized),
         binding_id: crate::binding::BindingId,
         source: &BindingSource,
-    ) -> Result<ProducedValue, SessionResolveError> {
+    ) -> Result<Production, SessionResolveError> {
         match source {
             BindingSource::Literal(spec) => {
                 let versioned =
@@ -153,7 +153,7 @@ impl<'a> ResolveSession<'a> {
                             e.message
                         ))
                     })?;
-                Ok(ProducedValue::new(versioned, ProductionSource::Literal))
+                Ok(Production::value(versioned, ProductionSource::Literal))
             }
             BindingSource::NodeOutput { node, output } => {
                 let key = QueryKey::NodeOutput {
@@ -261,13 +261,13 @@ mod tests {
             &mut self,
             query: &QueryKey,
             session: &mut ResolveSession<'_>,
-        ) -> Result<ProducedValue, SessionResolveError> {
+        ) -> Result<Production, SessionResolveError> {
             self.produce_calls += 1;
             match query {
                 QueryKey::NodeOutput { node, output }
                     if *node == self.node && *output == self.out_path =>
                 {
-                    Ok(ProducedValue::new(
+                    Ok(Production::value(
                         Versioned::new(session.frame_id(), LpsValueF32::F32(42.0)),
                         ProductionSource::NodeOutput {
                             node: *node,
@@ -300,8 +300,16 @@ mod tests {
         );
         let a = session.resolve(&mut host, key.clone()).unwrap();
         let b = session.resolve(&mut host, key).unwrap();
-        assert!(a.value.get().eq(&LpsValueF32::F32(42.0)));
-        assert!(b.value.get().eq(&LpsValueF32::F32(42.0)));
+        assert!(a.as_value().expect("value").eq(&LpsValueF32::F32(42.0)));
+        assert!(b.as_value().expect("value").eq(&LpsValueF32::F32(42.0)));
+        assert!(
+            a.product.get().as_value().expect("value").eq(b
+                .product
+                .get()
+                .as_value()
+                .expect("value"))
+        );
+        assert_eq!(a.product.changed_frame(), b.product.changed_frame());
         assert_eq!(host.produce_calls, 1);
     }
 
@@ -352,7 +360,7 @@ mod tests {
         let pv = session
             .resolve(&mut host, QueryKey::Bus(c))
             .expect("resolve bus");
-        assert!(pv.value.get().eq(&LpsValueF32::F32(9.0)));
+        assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(9.0)));
         assert_eq!(host.produce_calls, 0);
     }
 
@@ -428,7 +436,7 @@ mod tests {
         let pv = session
             .resolve(&mut host, QueryKey::Bus(outer))
             .expect("bus chain");
-        assert!(pv.value.get().eq(&LpsValueF32::F32(3.25)));
+        assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(3.25)));
     }
 
     struct NoProduceHost;
@@ -438,7 +446,7 @@ mod tests {
             &mut self,
             _query: &QueryKey,
             _session: &mut ResolveSession<'_>,
-        ) -> Result<ProducedValue, SessionResolveError> {
+        ) -> Result<Production, SessionResolveError> {
             Err(SessionResolveError::other(
                 "produce should not run in bus-only cycle test",
             ))
@@ -499,10 +507,10 @@ mod tests {
             &mut self,
             query: &QueryKey,
             session: &mut ResolveSession<'_>,
-        ) -> Result<ProducedValue, SessionResolveError> {
+        ) -> Result<Production, SessionResolveError> {
             match query {
                 QueryKey::NodeOutput { node, output } if *node == self.node => {
-                    Ok(ProducedValue::new(
+                    Ok(Production::value(
                         Versioned::new(session.frame_id(), LpsValueF32::F32(0.5)),
                         ProductionSource::NodeOutput {
                             node: *node,

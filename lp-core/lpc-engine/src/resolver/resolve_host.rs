@@ -1,7 +1,7 @@
 //! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::NodeOutput`] (and
 //! unbound [`crate::resolver::QueryKey::NodeInput`]) production.
 
-use crate::resolver::produced_value::ProducedValue;
+use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::SessionResolveError;
 use crate::resolver::resolve_session::ResolveSession;
@@ -12,5 +12,5 @@ pub trait ResolveHost {
         &mut self,
         query: &QueryKey,
         session: &mut ResolveSession<'_>,
-    ) -> Result<ProducedValue, SessionResolveError>;
+    ) -> Result<Production, SessionResolveError>;
 }
