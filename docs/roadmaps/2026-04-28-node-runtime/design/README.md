@@ -33,13 +33,13 @@ M4.3a split crates; M4.3b aligned public names to those roles:
   `PropPath`, `FrameId`, `Kind`, `ModelType`, `ModelValue`).
 - `lpc-source`: authored/on-disk source model (`SrcArtifact`,
   `SrcBinding`, `SrcShape`, `SrcValueSpec`).
-- `lpc-wire`: engine-client wire model (`Message`, `ClientMessage`,
+- `lpc-wire`: view wire model (`Message`, `ClientMessage`,
   `WireTreeDelta`, `WireProjectHandle`, state serialization helpers).
 - `lpc-engine`: runtime spine and shader/runtime conversion boundary.
 - `lpc-view`: client-side engine view/cache (`ProjectView`, tree/prop mirrors).
 
 Older design files may still use pre-split names such as
-`lpc-runtime`, `TreeDelta`, or legacy `ValueSpec` in explanatory text. Read
+`lpc-engine`, `TreeDelta`, or legacy `ValueSpec` in explanatory text. Read
 those as **`lpc-engine`**, **`lpc-wire::WireTreeDelta`**, and
 **`SrcValueSpec`/`ModelValue` payloads** respectively, unless the text is explicitly describing
 runtime-only **`LpsValueF32`** behavior.

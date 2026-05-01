@@ -38,7 +38,7 @@ Update `Cargo.toml` dependencies and Rust imports across known consumers.
 Known crates to inspect:
 
 - `lp-core/lpc-engine`
-- `lp-core/lp-engine-client`
+- `lp-core/lp-view`
 - `lp-core/lp-server`
 - `lp-core/lp-client`
 - `lp-legacy/lpl-model`
@@ -57,13 +57,13 @@ Use these dependency rules:
 - Authored source/on-disk concepts (`SrcArtifact`, `ArtifactSpec`,
   `SrcBinding`, `SrcShape`, `SrcSlot`, `SrcValueSpec`, `SrcNodeConfig`,
   schema/migration/load helpers) come from `lpc-source`.
-- Engine-client wire concepts (`WireMessage`, `WireTreeDelta`,
+- view wire concepts (`WireMessage`, `WireTreeDelta`,
   `WireEntryState`, `WireProjectHandle`, transport/json helpers, legacy state
   serialization helpers) come from `lpc-wire`.
 - Runtime/engine concepts (`Bus`, `ResolverCache`, `RuntimePropAccess`,
   conversion helpers) come from `lpc-engine`.
 - Client-side view/cache helpers (`WirePropAccess`) come from
-  `lp-engine-client`.
+  `lp-view`.
 
 Use `rg` rather than shell `grep` if searching. Look specifically for stale
 references such as:

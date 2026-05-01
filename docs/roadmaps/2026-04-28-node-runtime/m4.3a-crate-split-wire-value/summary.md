@@ -1,10 +1,10 @@
 ### What was built
 
 - Added `lpc-source` for authored/on-disk source model types and moved artifacts, source bindings, source shapes, source node config, value specs, presentation, schema, and TOML helpers into it.
-- Added `lpc-wire` for engine-client wire types and moved messages, project wire requests/handles, tree deltas/views, transport/json helpers, server wire shapes, and legacy partial state serialization into it.
+- Added `lpc-wire` for view wire types and moved messages, project wire requests/handles, tree deltas/views, transport/json helpers, server wire shapes, and legacy partial state serialization into it.
 - Slimmed `lpc-model` to shared concepts and added `WireValue` / `WireType` while removing `lps-shared` from the model crate.
 - Added `lpc-engine` conversion boundaries for `LpsValueF32 -> WireValue` and `WireType -> LpsType`, plus `RuntimePropAccess`.
-- Added `lp-engine-client::WirePropAccess` and updated client/server/firmware/legacy/visual dependents to import the split crates.
+- Added `lp-view::WirePropAccess` and updated client/server/firmware/legacy/visual dependents to import the split crates.
 - Updated crate READMEs and active M4.3/M4.4 roadmap docs to use the new crate vocabulary.
 
 ### Decisions for future reference
@@ -17,7 +17,7 @@
 
 #### Wire crate naming
 
-- **Decision:** Use `lpc-wire` for engine-client wire contract types, with `Wire*` names.
+- **Decision:** Use `lpc-wire` for view wire contract types, with `Wire*` names.
 - **Why:** The crate is the wire surface of `lp-core`, and the shorter name is clearer than protocol for this layer.
 - **Rejected alternatives:** `lpc-protocol` (too broad/formal); `lp-wire` (wrong crate family prefix).
 
@@ -29,7 +29,7 @@
 
 #### Runtime vs client prop access
 
-- **Decision:** Split produced-property iteration into `RuntimePropAccess` in `lpc-engine` and `WirePropAccess` in `lp-engine-client`.
+- **Decision:** Split produced-property iteration into `RuntimePropAccess` in `lpc-engine` and `WirePropAccess` in `lp-view`.
 - **Why:** Runtime reflection sees `LpsValueF32`; client views see `WireValue` cached from wire updates.
 - **Rejected alternatives:** One shared `PropAccess` in `lpc-model` (ambiguous and value-type confused); wire-facing `PropAccess` only (would force runtime to convert before sync needs it).
 

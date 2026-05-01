@@ -1,7 +1,7 @@
 
 ---
 
-> **Naming (planning onward):** `lpc-runtime` answers in this M4.2 doc denote
+> **Naming (planning onward):** `lpc-engine` answers in this M4.2 doc denote
 > **`lpc-engine`**. Authored literals / wire payloads align with **`ModelValue` /
 > `SrcValueSpec`** per M4.3a–M4.3b (was `WireValue` before rename).
 
@@ -40,14 +40,14 @@ Historical notes from plan development — kept for context.
 | --- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
 | Q1  | Directory name `m4.2-schema-types`?                                                       | Matches `m4.1-tree-spine-impl` style.                                | Yes.                                                          |
 | Q2  | Put `Binding` expansion + `NodePropRef` + `NodeConfig` struct in `lpc-model`?             | They're wire-shared (project files, sync).                           | Yes — `lpc-model/src/prop/binding.rs` + `node/node_config.rs`. |
-| Q3  | Put `ResolvedSlot` / `ResolveSource` / `ResolverCache` / `Bus` in `lpc-runtime`?          | Server-only data; no client mirror in M4.2.                          | Yes — under `lpc-runtime/src/resolver/` and `bus/`.            |
+| Q3  | Put `ResolvedSlot` / `ResolveSource` / `ResolverCache` / `Bus` in `lpc-engine`?          | Server-only data; no client mirror in M4.2.                          | Yes — under `lpc-engine/src/resolver/` and `bus/`.            |
 | Q4  | `BTreeMap` (not `hashbrown`) for `overrides`, `Bus.channels`, `ResolverCache`?            | M3 standardised on `BTreeMap`; consistency wins.                     | Yes.                                                          |
 | Q5  | `Binding` serde uses per-variant rename so on-disk keys are `bus` / `literal` / `node`?   | Design 04 §Authoring shorthand shows `bind = { node = { ... } }`.    | Yes — `#[serde(rename = "node")]` on `NodeProp`.              |
 | Q6  | `NodeConfig` skips `overrides` field on serialize when empty?                             | Most legacy nodes have empty overrides; keeps TOML clean.            | Yes — `#[serde(skip_serializing_if = "BTreeMap::is_empty")]`. |
 | Q7  | Keep the existing `BindingResolver` trait stub in `binding.rs`?                           | Stub for compose-time channel-kind lookup. Real resolver is M4.3.    | Yes — leave as-is, M4.3 either fills it in or replaces it.    |
 | Q8  | Leave `prop_cache: ResolverCache` and `prop_cache_ver: FrameId` on `NodeEntry` *commented*? | M4.1 left them as stubs; M4.3 wakes them up with the resolver.       | Yes — types now exist, but no field activation in M4.2.       |
 | Q9  | `PropAccess` trait lives in `lpc-model/src/prop/prop_access.rs`?                          | Sibling to `prop_value.rs`; trait is used by sync layer (wire-side). | Yes.                                                          |
-| Q10 | `Bus` lives in `lpc-runtime/src/bus/bus.rs` + `channel_entry.rs`?                         | Server runtime only; `ChannelName` is in `lpc-model::bus`.           | Yes — small files per type per repo style.                    |
+| Q10 | `Bus` lives in `lpc-engine/src/bus/bus.rs` + `channel_entry.rs`?                         | Server runtime only; `ChannelName` is in `lpc-model::bus`.           | Yes — small files per type per repo style.                    |
 | Q11 | Don't add `Slot.bind` Kind-validation in M4.2 (defer to resolver in M4.3)?                | Design 06 says lenient at first-use; resolver does the validation.   | Yes — defer.                                                  |
 | Q12 | Skip `serde` for `Bus` / `ChannelEntry` (runtime-only, never on the wire)?                | M4.4 sync deltas don't ship bus state — they ship `PropsChanged`.    | Yes — pure runtime types, no serde derive.                    |
 | Q13 | Skip `serde` for `ResolvedSlot` / `ResolverCache` (runtime cache, not wire)?              | Cache is rebuilt per-tick; clients see resolved values via sync.     | Yes — no serde.                                               |
@@ -64,14 +64,14 @@ Historical notes from plan development — kept for context.
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | Q1  | Directory name `m4.2-schema-types`. ✓                                                                                                     |
 | Q2  | `Binding` expansion, `NodePropRef`, `NodeConfig` struct land in `lpc-model` (`prop/binding.rs` + `node/node_config.rs`).                  |
-| Q3  | `ResolvedSlot` / `ResolveSource` / `ResolverCache` / `Bus` land in `lpc-runtime` (`resolver/` and `bus/`).                                 |
+| Q3  | `ResolvedSlot` / `ResolveSource` / `ResolverCache` / `Bus` land in `lpc-engine` (`resolver/` and `bus/`).                                 |
 | Q4  | `BTreeMap` (not `hashbrown`) for `overrides`, `Bus.channels`, `ResolverCache`. Consistent with M4.1.                                       |
 | Q5  | `Binding` serde uses per-variant rename: `bus` / `literal` / `node` (TOML form: `bind = { node = { ... } }`).                              |
 | Q6  | `NodeConfig.overrides` skipped on serialize when empty (`#[serde(skip_serializing_if = "BTreeMap::is_empty")]`).                          |
 | Q7  | Existing `BindingResolver` trait stub in `binding.rs` stays as-is. M4.3 either fills it in or replaces it.                                 |
 | Q8  | `prop_cache: ResolverCache` and `prop_cache_ver: FrameId` on `NodeEntry` stay commented in M4.2; M4.3 wakes them up. Types exist now.     |
 | Q9  | `PropAccess` trait lives in `lpc-model/src/prop/prop_access.rs`.                                                                          |
-| Q10 | `Bus` lives in `lpc-runtime/src/bus/{bus.rs,channel_entry.rs}` (one type per file).                                                        |
+| Q10 | `Bus` lives in `lpc-engine/src/bus/{bus.rs,channel_entry.rs}` (one type per file).                                                        |
 | Q11 | `Slot.bind` Kind-validation deferred to the resolver in M4.3 (lenient at first-use; warn + fall through to default).                      |
 | Q12 | `Bus` / `ChannelEntry` are runtime-only types — no serde derive.                                                                          |
 | Q13 | `ResolvedSlot` / `ResolverCache` are runtime cache — no serde derive.                                                                      |

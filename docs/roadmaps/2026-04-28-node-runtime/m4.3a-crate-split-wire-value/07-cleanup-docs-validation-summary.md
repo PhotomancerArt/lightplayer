@@ -36,7 +36,7 @@ Search the full diff and repository for stale names and temporary code:
 - `lpc_protocol`
 - `lpc-artifact`
 - `lpc_artifact`
-- `lpc-runtime`
+- `lpc-engine`
 - `lpc_runtime`
 - `lp-wire`
 - `lp-source`

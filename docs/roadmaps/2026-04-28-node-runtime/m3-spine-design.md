@@ -27,7 +27,7 @@ sub-docs).
 **In scope:**
 
 - **`Node` trait surface.** The new tree-aware trait that lands
-  in `lpc-runtime`:
+  in `lpc-engine`:
   - Identity accessors (`uid`, `path`, `parent`).
   - Slot view accessors for the four namespaces
     (`params`, `inputs`, `outputs`, `state`).
@@ -65,10 +65,10 @@ sub-docs).
   end up as ordered `Vec<Uid>` on the parent. Design pass
   decides how that's expressed without two parallel
   pathways.
-- **Sync layer surface.** What `lpc-runtime` exposes to
+- **Sync layer surface.** What `lpc-engine` exposes to
   `lp-server` / `lp-client`: change events, message schema,
   protocol versioning, the boundary between generic
-  (`lpc-runtime`) and per-domain (legacy or future
+  (`lpc-engine`) and per-domain (legacy or future
   `lp-vis`) shape.
 - **Reconcile design with M2's reality.** The strawman in
   `notes.md` was written before any types moved. M3 walks
@@ -125,7 +125,7 @@ sub-docs).
   9. Mapping table: legacy node behaviour → new trait
      surface.
   10. Open questions deferred to M4 / M5 (with rationale).
-- Optional: stub trait definitions in `lpc-runtime` (no
+- Optional: stub trait definitions in `lpc-engine` (no
   impls) if they help readers verify the design.
 
 ## Dependencies

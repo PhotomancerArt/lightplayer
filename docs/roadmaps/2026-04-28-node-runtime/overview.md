@@ -38,7 +38,7 @@ This roadmap takes the opposite path: **refactor `lp-core` in
 place** to absorb the new domain ideas. The client / server
 architecture stays load-bearing throughout. The new spine
 (node tree, artifact manager, slot views, lifecycle) lands
-inside `lpc-runtime`. Legacy `Texture` / `Shader` / `Output` /
+inside `lpc-engine`. Legacy `Texture` / `Shader` / `Output` /
 `Fixture` nodes are re-shaped into the new model — porting them,
 not bridging them — and that porting is what *validates* the
 spine. The next roadmap (lpfx + lp-vis) builds the visual
@@ -56,7 +56,7 @@ lp-core/                          # foundation; no domain knowledge
                                   # Constraint, ValueSpec, Binding, Presentation,
                                   # Artifact + Migration traits, NodeProperties
                                   # (renamed from lp-domain::node::Node).
-  lpc-runtime/                    # NEW (was: lp-engine spine code)
+  lpc-engine/                    # NEW (was: lp-engine spine code)
                                   # Node trait (tree + lifecycle + slot views),
                                   # NodeTree, ArtifactManager,
                                   # NodeStatus + frame versioning,
@@ -69,7 +69,7 @@ lp-legacy/                        # NEW container (existing legacy nodes)
                                   # Texture / Shader / Output / Fixture configs.
   lpl-runtime/                    # NEW (was: lp-engine::nodes/*)
                                   # TextureRuntime / ShaderRuntime / OutputRuntime /
-                                  # FixtureRuntime, each impl lpc-runtime::Node.
+                                  # FixtureRuntime, each impl lpc-engine::Node.
 
 lp-vis/                           # NEW container (visual subsystem)
   lpv-model/                      # RENAMED from lp-domain after foundation moves out.
@@ -78,8 +78,8 @@ lp-vis/                           # NEW container (visual subsystem)
                                   # The next roadmap adds lpv-runtime here.
 
 # Hosts / clients (mostly renames)
-lp-server                         # consumes lpc-runtime + lpl-* impls.
-lp-client / lp-engine-client      # consumes lpc-runtime protocol; generic.
+lp-server                         # consumes lpc-engine + lpl-* impls.
+lp-client / lp-view      # consumes lpc-engine protocol; generic.
 lp-cli                            # consumes lp-client; unchanged in shape.
 
 # Untouched in this roadmap
@@ -132,12 +132,12 @@ Node
 Today                      M1            M2                       M3 → M5                  M6
 ─────                      ──            ──                       ──────                   ──
 lp-domain {foundation}     untouched     → lpc-model              spine concepts in        cleanup
-lp-domain {visual types}   untouched     → lpv-model (renamed)    lpc-runtime              validation
+lp-domain {visual types}   untouched     → lpv-model (renamed)    lpc-engine              validation
                                                                                            summary.md
-lp-model {generic}         untouched     → lpc-model              impl in lpc-runtime
+lp-model {generic}         untouched     → lpc-model              impl in lpc-engine
 lp-model {nodes/*}         untouched     → lpl-model
 
-lp-engine {spine}          untouched     → lpc-runtime            Node trait, NodeTree,
+lp-engine {spine}          untouched     → lpc-engine            Node trait, NodeTree,
                                                                   ArtifactManager,
                                                                   ProjectRuntime cutover.
 

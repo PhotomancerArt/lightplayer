@@ -270,7 +270,7 @@ on host. ESP32 single-thread justifies the simple impl.
   belong in **`lpc-source`** (plus shared primitives in **`lpc-model`**). See the
   M4.3a banner at top.
 - **`lpc-engine`** hosts **`ArtifactManager`**, refcounting, and **`ArtifactRef`**
-  transitions — this replaces older **`lpc-runtime::artifact_manager`** wording.
+  transitions — this replaces older **`lpc-engine::artifact_manager`** wording.
 
 Keeping managers in the spine crate preserves `LpFs`, fs-watch, and tick access
 without dragging them into **`lpc-view`**.

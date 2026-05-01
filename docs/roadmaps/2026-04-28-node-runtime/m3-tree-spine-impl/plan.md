@@ -1,13 +1,13 @@
 # M3 — Tree spine implementation
 
-> **Naming (planning onward):** `lpc-runtime` in this M3 plan denotes
+> **Naming (planning onward):** `lpc-engine` in this M3 plan denotes
 > **`lpc-engine`** after M4.3a. Structural delta types migrated to **`lpc-wire`**
 > as `WireTreeDelta` (conceptually aligned with `TreeDelta` here).
 
 Stand up the new node-tree types — `NodeTree`, `NodeEntry`,
 `EntryState`, `ChildKind`, the wire-side mirror, and the structural
-delta protocol — across `lpc-model`, `lpc-engine` (still called `lpc-runtime` when M3 was written),
-and `lp-engine-client`. The new types **coexist** with the legacy
+delta protocol — across `lpc-model`, `lpc-engine` (still called `lpc-engine` when M3 was written),
+and `lp-view`. The new types **coexist** with the legacy
 `ProjectRuntime` flat-map; cutover lands in a later plan.
 
 Reference: [`../design/01-tree.md`](../design/01-tree.md) and
@@ -31,7 +31,7 @@ Reference: [`../design/01-tree.md`](../design/01-tree.md) and
     children list against their mirror.
   - Existing `NodeId`, `NodePath`, `NodePathSegment`, `NodeStatus`,
     `FrameId`, `PropPath` reused as-is (already shipped in M2).
-- `lpc-runtime`:
+- `lpc-engine`:
   - `NodeTree<N>` container — `Vec<Option<NodeEntry<N>>>` indexed by
     `NodeId.0`, `BTreeMap<NodePath, NodeId>` path index,
     `BTreeMap<(NodeId, NodeName), NodeId>` sibling-uniqueness index,
@@ -50,7 +50,7 @@ Reference: [`../design/01-tree.md`](../design/01-tree.md) and
     Result<NodeId, TreeError>`, `remove_subtree(id)`, `lookup_path`,
     `lookup_sibling`, `get`, `get_mut`, `entries()`, frame-versioned
     `tree_deltas_since(since: FrameId) -> Vec<TreeDelta>`.
-- `lp-engine-client`:
+- `lp-view`:
   - `ClientNodeTree` — mirror with `BTreeMap<NodeId, ClientTreeEntry>`
     + `BTreeMap<NodePath, NodeId>` index.
   - `ClientTreeEntry` (named distinctly to avoid collision with
@@ -98,15 +98,15 @@ Reference: [`../design/01-tree.md`](../design/01-tree.md) and
 - M2 ships `FrameId` in `lpc-model::project`.
 - `Prop<T>` lives in `lpc-model::prop::prop` (renamed from
   StateField).
-- Legacy `ProjectRuntime` (`lpc-runtime::project::project_runtime`)
+- Legacy `ProjectRuntime` (`lpc-engine::project::project_runtime`)
   has a flat `BTreeMap<NodeId, NodeEntry>` where `NodeEntry`
   carries `path, kind, config, config_ver, status, status_ver,
   runtime, state_ver`. **No tree. No EntryState. No ChildKind.**
-- Legacy `ClientProjectView` (`lp-engine-client::project::view`)
+- Legacy `ClientProjectView` (`lp-view::project::view`)
   is the legacy mirror; flat-map, hard-coded to legacy NodeKind.
   **Does not get touched in this plan** — the new
   `ClientNodeTree` lives alongside.
-- `lpc-runtime::nodes::NodeRuntime` is the *legacy* per-node trait
+- `lpc-engine::nodes::NodeRuntime` is the *legacy* per-node trait
   (`init`, `update_config`, `render`, `destroy`, etc.). The new
   `Node` trait lands in a later plan.
 
@@ -116,7 +116,7 @@ Reference: [`../design/01-tree.md`](../design/01-tree.md) and
 |-----|-------------------------------------------------------------------------------------------------------------------------|
 | Q1  | **Plan lives in roadmap.** `docs/roadmaps/2026-04-28-node-runtime/m3-tree-spine-impl/plan.md`. Stays in place when done. |
 | Q2  | **`EntryState<N>` is generic; `N = ()` in this plan.** Node-trait plan later swaps to `N = Box<dyn Node>`.              |
-| Q3  | **`NodeTree` is NOT wired into legacy `ProjectRuntime`.** New `lpc-runtime::tree` module; coexists.                     |
+| Q3  | **`NodeTree` is NOT wired into legacy `ProjectRuntime`.** New `lpc-engine::tree` module; coexists.                     |
 | Q4  | **Skip `config` / `artifact` / `resolver_cache` on `NodeEntry`.** TODO pinpoints; separate plans.                        |
 | Q5  | **Tree wire deltas are domain-agnostic.** No `kind` / `config` payload on `Created`.                                    |
 | Q6  | **`Vec<Option<NodeEntry>>` indexed by `NodeId.0`.** Tombstones; no id reuse.                                            |
@@ -125,10 +125,10 @@ Reference: [`../design/01-tree.md`](../design/01-tree.md) and
 | Q9  | **`ChildKind::Inline { source: PropPath }`** reuses existing `lpc-model::PropPath`.                                     |
 | Q10 | **Tests in each crate's existing test layout.** No integration crate.                                                    |
 | Q11 | **`TreeDelta` lives in `lpc-model::tree::*`.** Not in `project::api` (legacy-flavoured).                                |
-| Q12 | **`ClientNodeTree` lives in `lp-engine-client::tree`.** Legacy `project::view` is left alone.                            |
+| Q12 | **`ClientNodeTree` lives in `lp-view::tree`.** Legacy `project::view` is left alone.                            |
 | Q13 | **(c) — coexistence.** `NodeTree::tree_deltas_since` exists and is unit-tested. Legacy `ProjectRuntime` keeps shipping  |
-|     | its existing `ProjectResponse`. End-to-end "server tree → wire → client tree mirror" is exercised inside `lpc-runtime` + |
-|     | `lp-engine-client` without touching `ProjectRuntime` or `lp-server`. Cutover is later work.                              |
+|     | its existing `ProjectResponse`. End-to-end "server tree → wire → client tree mirror" is exercised inside `lpc-engine` + |
+|     | `lp-view` without touching `ProjectRuntime` or `lp-server`. Cutover is later work.                              |
 | Q14 | **`child_kind` on the child entry, not parallel arrays on the parent.** `NodeEntry::child_kind: Option<ChildKind>`;     |
 |     | `None` for root, immutable for the entry's lifetime. Cleaner invariants, simpler `Created` delta payload.                |
 | Q15 | **Three frame counters per entry.** `created_frame` (set on insert; never bumped), `change_frame` (status / state /     |
@@ -171,53 +171,53 @@ populates it. New files:
 `lpc-model::lib.rs` re-exports `tree::{ChildKind, SlotIdx,
 EntryStateView, TreeDelta}` at the crate root.
 
-### `lpc-runtime` (server-side tree)
+### `lpc-engine` (server-side tree)
 
 New module `tree` next to `project`:
 
-- `lp-core/lpc-runtime/src/tree/mod.rs` — re-exports + module
+- `lp-core/lpc-engine/src/tree/mod.rs` — re-exports + module
   doc tying back to `design/01-tree.md`.
-- `lp-core/lpc-runtime/src/tree/node_entry.rs` — `NodeEntry<N>`
+- `lp-core/lpc-engine/src/tree/node_entry.rs` — `NodeEntry<N>`
   with `child_kind: Option<ChildKind>` + the three frame
   counters. Commented-out stubs for `config`, `artifact`,
   `prop_cache`, `prop_cache_ver`.
-- `lp-core/lpc-runtime/src/tree/entry_state.rs` — server-side
+- `lp-core/lpc-engine/src/tree/entry_state.rs` — server-side
   `EntryState<N>` with `Pending | Alive(N) | Failed(reason)`.
   Comment notes future `N = Box<dyn Node>` substitution.
-- `lp-core/lpc-runtime/src/tree/node_tree.rs` — `NodeTree<N>`
+- `lp-core/lpc-engine/src/tree/node_tree.rs` — `NodeTree<N>`
   container: `Vec<Option<NodeEntry<N>>>`, two `BTreeMap`
   indices, mutation API.
-- `lp-core/lpc-runtime/src/tree/tree_error.rs` — `TreeError`
+- `lp-core/lpc-engine/src/tree/tree_error.rs` — `TreeError`
   enum (`SiblingNameCollision { parent, name }`,
   `UnknownNode(NodeId)`, `UnknownPath(NodePath)`,
   `RootMutation`, etc.).
-- `lp-core/lpc-runtime/src/tree/sync.rs` — `tree_deltas_since`
+- `lp-core/lpc-engine/src/tree/sync.rs` — `tree_deltas_since`
   walker (server-side delta generation).
 
-`lpc-runtime::lib.rs` adds `pub mod tree;` and re-exports
+`lpc-engine::lib.rs` adds `pub mod tree;` and re-exports
 `tree::{NodeTree, NodeEntry, EntryState, TreeError}`.
 
 `ProjectRuntime` is **not** modified.
 
-### `lp-engine-client` (client-side mirror)
+### `lp-view` (client-side mirror)
 
 New module alongside the existing `project::view`:
 
-- `lp-core/lp-engine-client/src/tree/mod.rs` — re-exports.
-- `lp-core/lp-engine-client/src/tree/client_node_tree.rs` —
+- `lp-core/lp-view/src/tree/mod.rs` — re-exports.
+- `lp-core/lp-view/src/tree/client_node_tree.rs` —
   `ClientNodeTree` with `BTreeMap<NodeId, ClientTreeEntry>` +
   `BTreeMap<NodePath, NodeId>` index + `last_synced_frame`.
-- `lp-core/lp-engine-client/src/tree/client_tree_entry.rs` —
+- `lp-core/lp-view/src/tree/client_tree_entry.rs` —
   `ClientTreeEntry` (named distinctly to avoid collision with
   the existing legacy `ClientNodeEntry` in
   `project::view`). Mirror of `NodeEntry<()>` minus impl
   payload.
-- `lp-core/lp-engine-client/src/tree/apply.rs` —
+- `lp-core/lp-view/src/tree/apply.rs` —
   `apply_tree_delta(&mut ClientNodeTree, &TreeDelta)`,
   including the inferred-removal logic on
   `ChildrenChanged`.
 
-`lp-engine-client::lib.rs` adds `pub mod tree;` and re-exports
+`lp-view::lib.rs` adds `pub mod tree;` and re-exports
 `tree::{ClientNodeTree, ClientTreeEntry}`.
 
 `ClientProjectView` and the legacy `ClientNodeEntry` stay
@@ -233,7 +233,7 @@ untouched.
                  │                                 │
                  │ shared types                    │ shared types
                  ▼                                 ▼
-┌────────────── lpc-runtime ─────────────┐  ┌── lp-engine-client ───┐
+┌────────────── lpc-engine ─────────────┐  ┌── lp-view ───┐
 │ tree::NodeTree<N> (server, N = ())     │  │ tree::ClientNodeTree   │
 │ tree::NodeEntry<N>                     │  │ tree::ClientTreeEntry  │
 │ tree::EntryState<N>                    │  │ tree::apply_tree_delta │
@@ -246,7 +246,7 @@ untouched.
 ```
 
 The server-tree → wire → client-tree round-trip is exercised in
-test code that lives in `lpc-runtime` and `lp-engine-client`. No
+test code that lives in `lpc-engine` and `lp-view`. No
 production wire path consumes `TreeDelta` yet; that's a future
 plan.
 
@@ -308,7 +308,7 @@ pub enum TreeDelta {
 ```
 
 ```rust
-// lpc-runtime::tree::node_entry
+// lpc-engine::tree::node_entry
 pub struct NodeEntry<N> {
     pub id: NodeId,
     pub path: NodePath,
@@ -334,7 +334,7 @@ pub struct NodeEntry<N> {
 ```
 
 ```rust
-// lpc-runtime::tree::entry_state
+// lpc-engine::tree::entry_state
 pub enum EntryState<N> {
     Pending,
     Alive(N),               // M3: N = (). Later: N = Box<dyn Node>.
@@ -396,12 +396,12 @@ behaviour, just data definitions and serde.
 
 Validation: `cargo test -p lpc-model`.
 
-## P2 — Server-side `NodeTree` in `lpc-runtime`
+## P2 — Server-side `NodeTree` in `lpc-engine`
 
 Stand up the container with mutation API + path/sibling
 indexing. No deltas yet (that's P3).
 
-- Add files under `lpc-runtime::tree::*` per Design §file-structure.
+- Add files under `lpc-engine::tree::*` per Design §file-structure.
 - `NodeEntry<N>` — fields per Design §concrete-shapes.
   Commented-out future fields land verbatim. Constructor
   `NodeEntry::new(id, path, parent, child_kind, frame)` sets
@@ -444,9 +444,9 @@ indexing. No deltas yet (that's P3).
     `get_mut` is allowed but tests assert that engine-side
     callers always go through the helpers. (The Node-trait plan
     will tighten this further.)
-- Update `lpc-runtime::lib.rs` to add `pub mod tree;` and
+- Update `lpc-engine::lib.rs` to add `pub mod tree;` and
   re-export the four public types.
-- Tests in `lpc-runtime/src/tree/node_tree.rs` (or sibling test
+- Tests in `lpc-engine/src/tree/node_tree.rs` (or sibling test
   module): root creation, `add_child` happy path, sibling-name
   collision returns `Err`, depth-first `remove_subtree` covers
   grandchildren, tombstone behaviour (slot stays `None`,
@@ -455,7 +455,7 @@ indexing. No deltas yet (that's P3).
   `change_frame`, parent's `children_ver` bumped on add/remove,
   `created_frame` is set on insert and not touched after.
 
-Validation: `cargo test -p lpc-runtime`. Run the legacy
+Validation: `cargo test -p lpc-engine`. Run the legacy
 `ProjectRuntime` tests too — they stay green because nothing
 about `ProjectRuntime` changed.
 
@@ -464,7 +464,7 @@ about `ProjectRuntime` changed.
 Translate the server tree's frame-versioning into `TreeDelta`
 sequences.
 
-- Add `lpc-runtime::tree::sync::tree_deltas_since` taking
+- Add `lpc-engine::tree::sync::tree_deltas_since` taking
   `&self, since: FrameId` and returning `Vec<TreeDelta>`.
 - Algorithm:
   1. For every live entry whose `created_frame > since`: emit
@@ -482,20 +482,20 @@ sequences.
 - Add a `pub fn entry_state_view(&NodeEntry<N>) -> EntryStateView`
   helper (or a `From<&EntryState<N>> for EntryStateView` impl)
   so callers don't repeat the `match`.
-- Tests in `lpc-runtime/src/tree/sync.rs` (or sibling test
+- Tests in `lpc-engine/src/tree/sync.rs` (or sibling test
   module): bulk export at `since=0`; no-op at
   `since=current_frame`; status change → single `EntryChanged`;
   add child → `Created` + parent's `ChildrenChanged`; remove
   subtree → no `Destroyed`, parent's `ChildrenChanged` only;
   consecutive frames each produce a tight diff.
 
-Validation: `cargo test -p lpc-runtime`.
+Validation: `cargo test -p lpc-engine`.
 
-## P4 — `ClientNodeTree` mirror in `lp-engine-client`
+## P4 — `ClientNodeTree` mirror in `lp-view`
 
 The downstream consumer. Shows the wire round-trip works.
 
-- Add files under `lp-engine-client::tree::*` per Design §file-structure.
+- Add files under `lp-view::tree::*` per Design §file-structure.
 - `ClientTreeEntry` per Design.
 - `ClientNodeTree`:
   ```rust
@@ -522,7 +522,7 @@ The downstream consumer. Shows the wire round-trip works.
     new list: any id missing in the new list gets evicted
     (and its descendants, recursively). This is the inferred-
     removal step.
-- Tests in `lp-engine-client/src/tree/apply.rs` (or sibling
+- Tests in `lp-view/src/tree/apply.rs` (or sibling
   test module):
   - Bulk `apply_tree_delta` from `tree_deltas_since(0)` over a
     server tree with N nodes; assert client mirror matches.
@@ -534,7 +534,7 @@ The downstream consumer. Shows the wire round-trip works.
   - Inferred removal recursion: server removes a subtree;
     client drops every entry transitively.
 
-Validation: `cargo test -p lp-engine-client`.
+Validation: `cargo test -p lp-view`.
 
 ## Cross-cutting
 

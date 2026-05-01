@@ -2,7 +2,7 @@
 
 > **M4.3a update:** The generic spine crate is `lpc-engine`, the
 > wire crate is `lpc-wire`, and authored source types live in
-> `lpc-source`. Older references to `lpc-runtime` in this document
+> `lpc-source`. Older references to `lpc-engine` in this document
 > should be read as `lpc-engine`.
 
 The spine is generic over a `ProjectDomain` trait that pins the

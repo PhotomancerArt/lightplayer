@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement the **class** half of the new spine in `lpc-runtime`
+Implement the **class** half of the new spine in `lpc-engine`
 (plus supporting types in `lpc-model`):
 
 - `ArtifactManager` — load / cache / refcount / shed.
@@ -34,7 +34,7 @@ the plan defines.
 
 **In scope:**
 
-- `ArtifactManager` trait + default impl in `lpc-runtime`:
+- `ArtifactManager` trait + default impl in `lpc-engine`:
   - `load(spec) -> ArtifactRef` with refcount semantics.
   - `release(spec)` with shed-on-zero behaviour.
   - Cache shape (probably `BTreeMap<ArtifactSpec,
@@ -115,8 +115,8 @@ the plan defines.
 
 ## Deliverables
 
-- `lpc-runtime::ArtifactManager` + impl.
-- `lpc-runtime::SlotsView` (and per-namespace wrappers).
+- `lpc-engine::ArtifactManager` + impl.
+- `lpc-engine::SlotsView` (and per-namespace wrappers).
 - Generalised TOML loader (replaces the `std`-only one-shot
   loader that came from `lp-domain` / now `lpv-model`).
 - Test suite covering load / refcount / shed / migrate /

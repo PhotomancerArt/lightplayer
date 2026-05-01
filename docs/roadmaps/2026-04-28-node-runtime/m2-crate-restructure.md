@@ -3,7 +3,7 @@
 ## Goal
 
 Mechanically split `lp-core/lp-engine` and `lp-core/lp-model` into
-the four-crate end-state: `lpc-model`, `lpc-runtime`, `lpl-model`,
+the four-crate end-state: `lpc-model`, `lpc-engine`, `lpl-model`,
 `lpl-runtime`. Move the foundation half of `lp-domain` into
 `lpc-model`, then rename what remains of `lp-domain` to
 `lpv-model` (under a new `lp-vis/` parent). ESP32 + emulator +
@@ -28,7 +28,7 @@ file.
 **In scope:**
 
 - Type relocations (no semantic changes).
-- Crate creation: `lpc-model`, `lpc-runtime`, `lpl-model`,
+- Crate creation: `lpc-model`, `lpc-engine`, `lpl-model`,
   `lpl-runtime`, `lpv-model` (the last via rename of
   `lp-domain` after foundation moves out).
 - `Cargo.toml` workspace updates; per-crate `Cargo.toml`
@@ -51,7 +51,7 @@ file.
 - Touching `lpfx`, `lp-shader`, `lp-riscv`, firmware crates,
   emu-guest crates beyond updating their imports.
 - Renaming or restructuring `lp-server` / `lp-client` /
-  `lp-engine-client` / `lp-cli` (only their imports change).
+  `lp-view` / `lp-cli` (only their imports change).
 - Adding new types to `lpv-model`. M2 only moves what's
   already in `lp-domain` into its new home; refining the
   visual types is the next roadmap.
@@ -81,12 +81,12 @@ Agent action after C1:
 - Update `Cargo.toml` deps.
 - Verify `cargo check -p lp-server` + ESP32 + emulator.
 
-### C2 — split `lp-engine` into `lpc-runtime` + `lpl-runtime`
+### C2 — split `lp-engine` into `lpc-engine` + `lpl-runtime`
 
 User action:
 
-- Create `lp-core/lpc-runtime/` and `lp-legacy/lpl-runtime/`.
-- Move spine code into `lpc-runtime`:
+- Create `lp-core/lpc-engine/` and `lp-legacy/lpl-runtime/`.
+- Move spine code into `lpc-engine`:
   `ProjectRuntime`, change events, `NodeStatus`, `FrameId`,
   fs-watch routing, panic recovery, shed plumbing,
   client / server protocol surface.
@@ -96,9 +96,9 @@ User action:
 Agent action after C2:
 
 - Fix imports.
-- Update `Cargo.toml` deps. `lpc-runtime` deps on
+- Update `Cargo.toml` deps. `lpc-engine` deps on
   `lpc-model`. `lpl-runtime` deps on `lpl-model` +
-  `lpc-runtime` (for the trait it still implements via the
+  `lpc-engine` (for the trait it still implements via the
   *old* shape).
 - Verify `cargo check -p lp-server` + ESP32 + emulator +
   `lp-cli`.
@@ -203,7 +203,7 @@ Agent action after C5:
 
 ## Deliverables
 
-- `lpc-model`, `lpc-runtime`, `lpl-model`, `lpl-runtime`,
+- `lpc-model`, `lpc-engine`, `lpl-model`, `lpl-runtime`,
   `lpv-model` crates exist and are workspace members.
 - `lp-domain` no longer exists; `lp-vis/lpv-model/` is its
   successor (visual types only).

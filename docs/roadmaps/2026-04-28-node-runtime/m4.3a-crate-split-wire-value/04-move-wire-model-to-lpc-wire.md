@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Move engine-client wire contract types out of `lpc-model` into `lpc-wire`,
+Move view wire contract types out of `lpc-model` into `lpc-wire`,
 using `Wire*` names for ambiguous wire-facing types.
 
 Out of scope:

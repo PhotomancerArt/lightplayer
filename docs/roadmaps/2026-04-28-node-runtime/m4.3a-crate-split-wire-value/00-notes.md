@@ -13,10 +13,10 @@ lpc-model      (foundation primitives, no lps-shared dep)
   ├──► lpc-source     (on-disk authored source model)
   ├──► lpc-wire       (engine↔client wire shapes)
   ├──► lpc-engine     (engine runtime — boundary owner: LpsValueF32 → WireValue)
-  └──► lp-engine-client (client-side engine view/cache)
+  └──► lp-view (client-side engine view/cache)
 ```
 
-`lp-engine-client` should not transitively depend on `lp-shader`. That
+`lp-view` should not transitively depend on `lp-shader`. That
 is the success criterion.
 
 [`./plan.md`](./plan.md) is the short index into this folder.
@@ -57,7 +57,7 @@ it shows the conceptual boundary already exists in someone's head.
 | `prop/constraint.rs`                   | foundation (uses `lps-shared`) | **see Q-A** |
 | `prop/binding.rs`                      | misplaced            | `lpc-source`      |
 | `prop/shape.rs` (Slot, Shape)          | misplaced            | `lpc-source`      |
-| `prop/prop_access.rs`                  | misplaced (sync trait) | `lpc-engine` / `lp-engine-client` split (see Q-B) |
+| `prop/prop_access.rs`                  | misplaced (sync trait) | `lpc-engine` / `lp-view` split (see Q-B) |
 | `value_spec.rs` (uses `LpsValue`)      | misplaced            | `lpc-source`      |
 | `artifact/`                            | misplaced            | `lpc-source`      |
 | `presentation.rs`                      | misplaced            | `lpc-source`      |
@@ -106,7 +106,7 @@ value/type bits are GLSL-coupled.
 ## Consumers of `lpc-model`
 
 14 crates depend on `lpc-model` (per `Cargo.toml` grep). After the
-split, `lp-engine-client` should depend only on `lpc-model + lpc-wire`
+split, `lp-view` should depend only on `lpc-model + lpc-wire`
 (no `lp-shader`, no `lpc-source`). Other clients (`lpl-model`,
 `lpl-runtime`, `lpc-engine`, `lp-server`, etc.) get their dependencies
 adjusted to whatever subset they need.
@@ -220,7 +220,7 @@ adjusted to whatever subset they need.
   code. Use `Src*` type prefixes for persisted authored model types.
 - Crate naming update: use `lpc-wire`, not `lp-wire`; this is the
   wire crate of `lp-core`. Use `Wire*` type prefixes there.
-- Crate naming update: use `lpc-engine`, not `lpc-runtime`; the user
+- Crate naming update: use `lpc-engine`, not `lpc-engine`; the user
   renamed runtime because engine is clearer for this crate's role.
 - Q-D accepted with naming update: authored project/source config
   belongs in `lpc-source`; wire-visible project summaries/views belong

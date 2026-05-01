@@ -4,7 +4,7 @@ Working notes for the `node-runtime` roadmap: refactor `lp-core` in
 place to absorb the new domain ideas (node tree, slots, artifact
 manager, TOML), split the existing crates along a model/runtime
 boundary, and fold `lp-domain`'s foundational types into the new
-`lp-core` core. End-state of this roadmap: `lpc-model`, `lpc-runtime`,
+`lp-core` core. End-state of this roadmap: `lpc-model`, `lpc-engine`,
 `lpl-model`, `lpl-runtime` exist; legacy `Texture`/`Shader`/`Output`/
 `Fixture` nodes run on the new spine; ESP32 / emulator / lp-cli all
 green; a filetest harness hosts a legacy node end-to-end. lpfx and
@@ -71,7 +71,7 @@ Build the runtime spine inside `lp-core` (refactor-in-place):
      vocabulary (Uid, Name, NodePath, PropPath, Slot, Kind,
      Constraint, ValueSpec, Binding, Presentation, Artifact +
      Migration traits). Absorbs `lp-domain`'s foundational types.
-   - `lp-core/lpc-runtime` — the spine: Node trait, NodeTree,
+   - `lp-core/lpc-engine` — the spine: Node trait, NodeTree,
      ArtifactManager, lifecycle, status, frame-versioned change
      tracking, fs-watch routing, panic recovery, shed.
    - `lp-legacy/lpl-model` — current `lp-model::nodes/*` configs
@@ -79,8 +79,8 @@ Build the runtime spine inside `lp-core` (refactor-in-place):
    - `lp-legacy/lpl-runtime` — current `lp-engine::nodes/*`
      impls (TextureRuntime / ShaderRuntime / OutputRuntime /
      FixtureRuntime), each implementing the new
-     `lpc-runtime::Node` trait.
-2. **New core concepts in `lpc-runtime`:**
+     `lpc-engine::Node` trait.
+2. **New core concepts in `lpc-engine`:**
    - `Node` trait (tree-aware, lifecycle, slot views, sidecar
      state).
    - `NodeTree` container (Uid → Node, NodePath ↔ Uid index,
@@ -204,7 +204,7 @@ lp-core/                          # foundation; no domain knowledge
                                   # ArtifactSpec, ChannelName, Slot, Shape, Kind,
                                   # Constraint, ValueSpec, Binding, Presentation,
                                   # Artifact + Migration traits.
-  lpc-runtime/                    # NEW (carved out of lp-engine)
+  lpc-engine/                    # NEW (carved out of lp-engine)
                                   # Node trait (tree + lifecycle + slot views),
                                   # NodeTree, ArtifactManager,
                                   # NodeStatus + frame versioning,
@@ -217,7 +217,7 @@ lp-legacy/                        # NEW container (current legacy nodes)
                                   # Texture / Shader / Output / Fixture configs.
   lpl-runtime/                    # NEW (= lp-engine::nodes/*)
                                   # TextureRuntime / ShaderRuntime / OutputRuntime
-                                  # / FixtureRuntime, each impl lpc-runtime::Node.
+                                  # / FixtureRuntime, each impl lpc-engine::Node.
 
 lp-vis/                           # NEW container (visual subsystem)
   lpv-model/                      # RENAMED from lp-domain after foundation moves out.
@@ -226,8 +226,8 @@ lp-vis/                           # NEW container (visual subsystem)
                                   # Next roadmap adds lpv-runtime here.
 
 # Hosts / clients (mostly just renaming if needed)
-lp-server                         # consumes lpc-runtime + lpl-* impls
-lp-client / lp-engine-client      # consumes lpc-runtime protocol; generic
+lp-server                         # consumes lpc-engine + lpl-* impls
+lp-client / lp-view      # consumes lpc-engine protocol; generic
 lp-cli                            # consumes lp-client; unchanged in shape
 
 lpfx/                             # UNCHANGED in this roadmap
@@ -249,7 +249,7 @@ questions (Q1–Q3, Q6, Q7 from the previous draft) are resolved.
 Two paths during the transition phase of the refactor:
 
 - **Bridge (preferred).** `lpl-runtime` impls implement
-  `lpc-runtime::Node` immediately. The flat-map `ProjectRuntime`
+  `lpc-engine::Node` immediately. The flat-map `ProjectRuntime`
   cuts over to a `NodeTree`-backed engine in one motion. Cost:
   the new trait surface has to absorb everything legacy needs
   before legacy can run on it. Benefit: ESP32 validates the
@@ -419,7 +419,7 @@ to be torn between locations. M2 finishes the rename in C4
   details when M2 is actually planned:
   1. C1: split `lp-model` into `lpc-model` (generic /
      foundation) + `lpl-model` (legacy node configs).
-  2. C2: split `lp-engine` into `lpc-runtime` (spine code:
+  2. C2: split `lp-engine` into `lpc-engine` (spine code:
      `ProjectRuntime`, change events, fs-watch, status,
      versioning) + `lpl-runtime` (legacy node runtimes).
   3. C3: move `lp-domain` foundation into `lpc-model`
@@ -533,7 +533,7 @@ Specific changes that landed:
 - `pub enum NoDomain {}` (uninhabited) added in `message.rs`,
   re-exported from `lp-model/lib.rs`.
 - All consumers (lp-server, lp-client, lp-cli, lp-shared,
-  fw-core, fw-emu, fw-esp32, lp-engine-client) updated.
+  fw-core, fw-emu, fw-esp32, lp-view) updated.
 - One incidental fix: `lp-engine/src/project/mod.rs` was
   re-exporting from a deleted `runtime` module on this
   branch; redirected to `project_runtime`. Unrelated to the
@@ -543,7 +543,7 @@ Specific changes that landed:
   cleaner post-unbake C1 split.
 
 Verification (all green): `cargo check` on `lp-model`,
-`lp-engine`, `lp-engine-client`, `lp-client`, `lp-server`,
+`lp-engine`, `lp-view`, `lp-client`, `lp-server`,
 `lp-cli`, `fw-emu` (RV32 release-emu), `fw-esp32` (RV32
 release-esp32 with `esp32c6,server`). `cargo test -p lp-model`
 passes (round-trip serialization).
@@ -553,7 +553,7 @@ passes (round-trip serialization).
 All five checkpoints landed. End-state crate map matches the post-roadmap
 target in this file's earlier section:
 
-- `lp-core/lpc-model/`, `lp-core/lpc-runtime/`,
+- `lp-core/lpc-model/`, `lp-core/lpc-engine/`,
 - `lp-legacy/lpl-model/`, `lp-legacy/lpl-runtime/`,
 - `lp-vis/lpv-model/`.
 
@@ -576,9 +576,9 @@ Commits (in order):
 f9a49014 refactor(lp-vis): rename lp-domain to lpv-model and move to lp-vis/lpv-model
 116f7f04 refactor(lpc-model/lpl-model): split lp-model into foundation + legacy crates
 cf442ab0 refactor(lpc-model/lpv-model): move foundation types from lpv-model to lpc-model
-da2f0a51 refactor(lpc-runtime/lpl-runtime): split lp-engine into spine + legacy runtimes
+da2f0a51 refactor(lpc-engine/lpl-runtime): split lp-engine into spine + legacy runtimes
 21cdc288 fix(style): address clippy lints and formatting from M2 C1-C4
-0214948a fix(test): correct imports in lp-engine-client tests after C1 split
+0214948a fix(test): correct imports in lp-view tests after C1 split
 f6b73e29 docs(roadmap): update M2 progress in move-map and notes
 ```
 
@@ -590,28 +590,28 @@ invariants the move-map promised are not actually delivered. These are
 "reconcile design with M2's reality" deliverable is for. Flagging them
 here so M3 picks them up explicitly:
 
-- **F-M2-1: `lpc-runtime` depends on `lpl-model`.** Per `cargo tree`,
+- **F-M2-1: `lpc-engine` depends on `lpl-model`.** Per `cargo tree`,
   the dep is a regular runtime dep (not dev-only). The leaks:
-  - `lpc-runtime/src/project/loader.rs` imports `lpl_model::{NodeConfig,
+  - `lpc-engine/src/project/loader.rs` imports `lpl_model::{NodeConfig,
     NodeKind}` and hardcodes the four legacy suffixes (`texture`,
     `shader`, `output`, `fixture`) in `node_kind_from_path` /
     `is_node_directory`.
-  - `lpc-runtime/src/project/hooks.rs::ProjectHooks::get_changes`
+  - `lpc-engine/src/project/hooks.rs::ProjectHooks::get_changes`
     returns `lpl_model::ProjectResponse`.
-  Any future `lpc-runtime` consumer (e.g. an `lpv-runtime`) transitively
+  Any future `lpc-engine` consumer (e.g. an `lpv-runtime`) transitively
   inherits `lpl-model`. The "lpc is domain-agnostic spine" property is
   not actually delivered. M3 must decide between (a) accepting this and
   documenting it, or (b) abstracting it (probably a generic
   `ProjectRuntime<H>` + associated `Response` type, or trait-objected
   response).
 - **F-M2-2: `ProjectHooks` is process-wide global state.** To break
-  the otherwise-cyclic `lpc-runtime ↔ lpl-runtime` dep,
-  `lpc-runtime/src/project/hooks.rs` introduces a singleton
+  the otherwise-cyclic `lpc-engine ↔ lpl-runtime` dep,
+  `lpc-engine/src/project/hooks.rs` introduces a singleton
   `static HOOKS: Mutex<Option<Arc<dyn ProjectHooks>>>`. Consumers must
   call `lpl_runtime::install()` before using `ProjectRuntime` or get a
   runtime error. This is the M5 cutover idea ("ProjectRuntime is
   generic; legacy nodes plug in") landing in M2 as a stopgap. It works
-  (lp-server + lpc-runtime tests use it correctly) but it's a new
+  (lp-server + lpc-engine tests use it correctly) but it's a new
   piece of design surface that wasn't in the M2 plan. M3 decides
   whether this is the long-term shape or a transitional bridge.
 - **F-M2-3: Hardcoded legacy kind list in `loader.rs`.** Even after M3
@@ -625,7 +625,7 @@ here so M3 picks them up explicitly:
 During a backgrounded `just test` run mid-C5, Activity Monitor showed
 an `lp-cli` process at 108GB resident memory. After fixing two
 lingering import bugs from the C1 split (`ProjectResponse` and
-`NodeState` paths in `lp-engine-client/tests/client_view.rs` and
+`NodeState` paths in `lp-view/tests/client_view.rs` and
 `lp-fw/fw-tests/src/lib.rs`), `just test` is reproducibly green and
 the spike does not recur. Most likely explanation is parallel-build
 pressure (cargo + filetests racing on disk + multiple linker

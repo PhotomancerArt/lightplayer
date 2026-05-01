@@ -26,10 +26,10 @@ changes.
   not imply wire-only or runtime-only ownership.
 - `lpc-source`: authored/on-disk source model. Primary ambiguous names
   mostly use `Src*`, but short aliases remain.
-- `lpc-wire`: engine-client wire contract. Some types use `Wire*`,
+- `lpc-wire`: view wire contract. Some types use `Wire*`,
   but many public names still say `Client*`, `Server*`, or `Api*`.
 - `lpc-view`: client-side view/cache for one engine. It still uses
-  `Client*` names inherited from `lp-engine-client`.
+  `Client*` names inherited from `lp-view`.
 - `lpc-engine`: runtime engine internals. It uses a mix of `Runtime*`,
   `NodeRuntime`, `ProjectRuntime`, and unprefixed engine-owned types.
 

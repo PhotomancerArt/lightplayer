@@ -12,7 +12,7 @@ Out of scope:
   phase.
 - Do not implement new sync behavior beyond view/access traits and conversion
   helpers.
-- Do not make `lpc-model`, `lpc-source`, `lpc-wire`, or `lp-engine-client`
+- Do not make `lpc-model`, `lpc-source`, `lpc-wire`, or `lp-view`
   depend on `lps-shared`.
 - Do not commit.
 
@@ -70,13 +70,13 @@ Use the project's canonical import for **`LpsValueF32`** from `lps-shared` /
 
 ### Client property access
 
-Add client-side property view iteration to `lp-engine-client` as
+Add client-side property view iteration to `lp-view` as
 `WirePropAccess`.
 
 Target:
 
 ```text
-lp-core/lp-engine-client/src/prop/
+lp-core/lp-view/src/prop/
 ├── mod.rs
 └── wire_prop_access.rs
 ```
@@ -141,7 +141,7 @@ After this phase:
 - `lpc-model` must not depend on `lps-shared`.
 - `lpc-source` must not depend on `lps-shared`.
 - `lpc-wire` must not depend on `lps-shared`.
-- `lp-engine-client` must not depend on `lps-shared`.
+- `lp-view` must not depend on `lps-shared`.
 - `lpc-engine` may depend on `lps-shared`.
 
 ## Tests to preserve/add

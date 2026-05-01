@@ -16,12 +16,12 @@ The intended dependency boundary:
   must not depend on `lps-shared`.
 - `lpc-source`: authored/on-disk source model, using `Src*` names where
   a prefix is needed; must not depend on `lps-shared`.
-- `lpc-wire`: engine-client wire model, using `Wire*` names; must not
+- `lpc-wire`: view wire model, using `Wire*` names; must not
   depend on `lps-shared`.
 - `lpc-engine`: engine runtime model and execution support; may depend
   on `lps-shared`, and owns conversion between shader/runtime values and
   model/wire values.
-- `lp-engine-client`: client-side engine view/cache; should depend on
+- `lp-view`: client-side engine view/cache; should depend on
   `lpc-model + lpc-wire`, not `lps-shared`.
 
 Out of scope:
@@ -136,7 +136,7 @@ lp-core/
 │           ├── lps_value_to_wire_value.rs
 │           └── wire_type_to_lps_type.rs
 │
-└── lp-engine-client/                  # UPDATE: client cache/view, no lps-shared
+└── lp-view/                  # UPDATE: client cache/view, no lps-shared
     └── src/
         ├── lib.rs
         └── prop/
@@ -163,7 +163,7 @@ lp-core/
         WireMessage / WireTreeDelta / WireProjectHandle
                │
                ▼
-      lp-engine-client (Client*)
+      lp-view (Client*)
         client cache / WirePropAccess / UI views
 
 lpc-model sits underneath all of them:
@@ -196,7 +196,7 @@ texture spec, TOML parsing, and materialization support.
 
 ## `lpc-wire`
 
-`lpc-wire` owns the engine-client wire contract. This includes messages,
+`lpc-wire` owns the view wire contract. This includes messages,
 tree deltas, project request/view types, transport errors, JSON helpers,
 and legacy partial state serialization helpers.
 
@@ -217,9 +217,9 @@ The existing `PropAccess` semantics move here as `RuntimePropAccess` and
 continue to expose `LpsValueF32` (shader/runtime union type from
 `lps-shared`).
 
-## `lp-engine-client`
+## `lp-view`
 
-`lp-engine-client` owns the client-side cache and UI view helpers for
+`lp-view` owns the client-side cache and UI view helpers for
 engine state. It should not depend on `lps-shared`.
 
 Client-side property iteration is separate from runtime property

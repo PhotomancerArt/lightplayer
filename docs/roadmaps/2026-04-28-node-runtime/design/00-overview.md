@@ -3,7 +3,7 @@
 ## M4.3a crate split update
 
 The roadmap originally described a broader `lpc-model` plus
-`lpc-runtime` split. M4.3a tightened that into five roles:
+`lpc-engine` split. M4.3a tightened that into five roles:
 
 ```text
 lp-core/
@@ -11,13 +11,13 @@ lp-core/
                     FrameId, Kind, ModelType, ModelValue.
   lpc-source/       authored/on-disk source model: SrcArtifact,
                     SrcBinding, SrcShape, SrcValueSpec, TOML/schema.
-  lpc-wire/         engine-client wire model: Message, ClientMessage,
+  lpc-wire/         view wire model: Message, ClientMessage,
                     WireTreeDelta, WireProjectHandle, state serialization.
   lpc-engine/       runtime spine and LpsValueF32 / LpsType conversions.
   lpc-view/         client-side tree/prop view cache.
 ```
 
-When older sections below say `lpc-runtime`, read that as
+When older sections below say `lpc-engine`, read that as
 `lpc-engine`. When they say wire/client values use `LpsValue`, read
 that as `ModelValue` on the wire and `LpsValueF32` only inside
 `lpc-engine`.
@@ -32,7 +32,7 @@ lp-core/
                   ModelType, ModelValue, ChannelName, FrameId, …
   lpc-source/     authored source: SrcArtifactSpec, SrcShape,
                   SrcValueSpec, SrcBinding, schema/TOML loading.
-  lpc-wire/       engine-client messages, tree deltas, project views.
+  lpc-wire/       view messages, tree deltas, project views.
   lpc-engine/     spine in progress: ProjectRuntime, flat NodeEntry map,
                   fs-watch, frame versioning, panic recovery — but no
                   tree, no artifacts, no slot resolution.
@@ -113,7 +113,7 @@ writes during `tick`. (Detail in [05](05-slots-and-props.md).)
 lp-core/
   lpc-model/        shared model concepts, no domain knowledge.
   lpc-source/       authored source model.
-  lpc-wire/         engine-client wire contract.
+  lpc-wire/         view wire contract.
   lpc-engine/       generic spine: ProjectRuntime<D: ProjectDomain>,
                     NodeTree, ArtifactManager, sync, panic recovery.
 

@@ -11,11 +11,11 @@ End-state crate layout:
 ```
 lp-core/
   lpc-model/        (foundation, on-wire types that don't reference legacy nodes)
-  lpc-runtime/      (spine: ProjectRuntime, change events, gfx abstraction, output channels)
+  lpc-engine/      (spine: ProjectRuntime, change events, gfx abstraction, output channels)
   lp-shared/        (unchanged — already exists)
   lp-server/        (unchanged location)
   lp-client/        (unchanged location)
-  lp-engine-client/ (unchanged location)
+  lp-view/ (unchanged location)
 lp-legacy/
   lpl-model/        (legacy node configs + node-aware on-wire types)
   lpl-runtime/      (TextureRuntime / ShaderRuntime / OutputRuntime / FixtureRuntime)
@@ -46,7 +46,7 @@ After M2: `lp-core/lp-model/`, `lp-core/lp-engine/`, and
   to `lpl-model`. lp-server / lp-client / fw-* depend on
   `lpc-model` for the envelope and `lpl-model` only when they
   touch the legacy aliases or the response payload.
-- **`lp-engine-client`** uses the same protocol surface as
+- **`lp-view`** uses the same protocol surface as
   `lp-server` and is a *runtime* (it holds a remote view) but
   its only changes for M2 are import updates — don't try to
   split it.
@@ -364,19 +364,19 @@ Per `rg "lp_model::"` results, these crates need either
 `use lpl_model::...` (or both):
 
 `lp-core/lp-server/`, `lp-core/lp-client/`, `lp-core/lp-engine/`,
-`lp-core/lp-engine-client/`, `lp-core/lp-shared/`, `lp-cli/`,
+`lp-core/lp-view/`, `lp-core/lp-shared/`, `lp-cli/`,
 `lp-fw/fw-core/`, `lp-fw/fw-emu/`, `lp-fw/fw-esp32/`,
 `lp-fw/fw-tests/`, `lp-base/lpfs/`, `lp-domain/lp-domain/` (one
 test file). Plus their `Cargo.toml` deps.
 
 The agent does this sweep after C1.
 
-## C2 — split `lp-engine` into `lpc-runtime` + `lpl-runtime`
+## C2 — split `lp-engine` into `lpc-engine` + `lpl-runtime`
 
-### lpc-runtime — spine + graphics abstraction + output channels
+### lpc-engine — spine + graphics abstraction + output channels
 
 Move these files from `lp-core/lp-engine/src/` into
-`lp-core/lpc-runtime/src/`:
+`lp-core/lpc-engine/src/`:
 
 - `error.rs` — `Error` enum.
 - `runtime/` (whole) — `contexts.rs` (`NodeInitContext`,
@@ -394,9 +394,9 @@ Move these files from `lp-core/lp-engine/src/` into
   (`ProjectRuntime`, `NodeStatus`, `NodeEntry`,
   `MemoryStatsFn`), `mod.rs`.
 - `nodes/node_runtime.rs` — the `NodeRuntime` trait. Keep it in
-  lpc-runtime; lpl-runtime implements it but doesn't define it.
+  lpc-engine; lpl-runtime implements it but doesn't define it.
 
-Slim `nodes/mod.rs` for lpc-runtime (just the trait — move the
+Slim `nodes/mod.rs` for lpc-engine (just the trait — move the
 per-kind submodules to lpl-runtime):
 
 ```rust
@@ -405,10 +405,10 @@ mod node_runtime;
 pub use node_runtime::NodeRuntime;
 ```
 
-Slim `lib.rs` for lpc-runtime:
+Slim `lib.rs` for lpc-engine:
 
 ```rust
-//! lpc-runtime: LightPlayer spine — ProjectRuntime,
+//! lpc-engine: LightPlayer spine — ProjectRuntime,
 //! NodeRuntime trait, change events, frame versioning,
 //! graphics abstraction, output channels.
 
@@ -440,7 +440,7 @@ Move these files from `lp-core/lp-engine/src/` into
   - `fixture/` includes `mapping/` (sampling, overlap,
     structure, etc.) and `gamma.rs`.
 - `nodes/mod.rs` — strip `mod node_runtime;` and `pub use
-  node_runtime::NodeRuntime;` (those moved to lpc-runtime).
+  node_runtime::NodeRuntime;` (those moved to lpc-engine).
   Also strip `pub use lp_model::NodeConfig;`. The remainder
   is the per-kind submodule list:
 
@@ -489,20 +489,20 @@ become:
 - `crate::gfx::...` → `lpc_runtime::gfx::...`
 - `lp_model::nodes::shader::ShaderConfig` → `lpl_model::nodes::shader::ShaderConfig` (unchanged structure, crate name change after C1).
 
-`lpc-runtime`'s own internal references to `lp_model::...` are
+`lpc-engine`'s own internal references to `lp_model::...` are
 all to lpc-model items per C1's split (paths, frame ids,
 state machinery). RustRover should rename these.
 
-`lpc-runtime/project/mod.rs` currently re-exports
+`lpc-engine/project/mod.rs` currently re-exports
 `lp_model::project::api::{...}` — those types are in lpl-model
 post-C1, so this re-export needs to move to lpl-runtime (or
 just be deleted; consumers can `use lpl_model::...` directly).
 
-### Cargo.toml — lpc-runtime
+### Cargo.toml — lpc-engine
 
 ```toml
 [package]
-name = "lpc-runtime"
+name = "lpc-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -547,7 +547,7 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
 ```
 
-(Note: `lpc-runtime` currently still depends on the shader
+(Note: `lpc-engine` currently still depends on the shader
 stack because `gfx/*` lives here. The lpfx roadmap moves that
 out; for M2 it stays.)
 
@@ -566,7 +566,7 @@ workspace = true
 [features]
 default = ["std"]
 std = [
-    "lpc-runtime/std",
+    "lpc-engine/std",
     "lpl-model/std",
 ]
 
@@ -576,7 +576,7 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
-lpc-runtime = { path = "../../lp-core/lpc-runtime", default-features = false }
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpl-model = { path = "../lpl-model", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
@@ -591,7 +591,7 @@ Replace `"lp-core/lp-engine"` in `members` and `default-members`
 with:
 
 ```
-"lp-core/lpc-runtime",
+"lp-core/lpc-engine",
 "lp-legacy/lpl-runtime",
 ```
 
@@ -604,10 +604,10 @@ Per `rg "lp_engine::"` results:
 
 `lp-core/lp-server/` (project_manager, server, handlers,
 template), `lp-core/lp-engine/tests/*.rs` (these tests move
-into lpc-runtime or lpl-runtime — agent decides during cleanup),
+into lpc-engine or lpl-runtime — agent decides during cleanup),
 `lp-core/lp-server/tests/*.rs`, plus the `Cargo.toml`s.
 
-`lp-engine-client` doesn't import `lp_engine::` directly (per
+`lp-view` doesn't import `lp_engine::` directly (per
 grep), but its `Cargo.toml` references `lp-engine` as a
 dev-dependency only.
 
@@ -697,7 +697,7 @@ Agent actions (final gate):
    skeletons in this file (or are intentionally different).
 6. `cargo check -p lpc-model` (after C1).
 7. `cargo check -p lpl-model` (after C1).
-8. `cargo check -p lpc-runtime` (after C2).
+8. `cargo check -p lpc-engine` (after C2).
 9. `cargo check -p lpl-runtime` (after C2).
 10. `cargo check -p lp-server` — the load-bearing host
     consumer; if this passes, the M2 split is sound for the
