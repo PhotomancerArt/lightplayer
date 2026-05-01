@@ -11,9 +11,11 @@
 
 extern crate alloc;
 
+pub mod artifact;
 pub mod bus;
 pub mod error;
 pub mod gfx;
+pub mod node;
 pub mod nodes;
 pub mod output;
 pub mod panic_node;
@@ -24,9 +26,11 @@ pub mod runtime;
 pub mod tree;
 pub mod wire_bridge;
 
+pub use artifact::{ArtifactEntry, ArtifactError, ArtifactManager, ArtifactRef, ArtifactState};
 pub use bus::{Bus, BusError, ChannelEntry};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
+pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
 pub use nodes::LegacyNodeRuntime;
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project::{MemoryStatsFn, ProjectRuntime};

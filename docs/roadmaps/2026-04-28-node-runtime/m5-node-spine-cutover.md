@@ -2,19 +2,30 @@
 
 ## Goal
 
-Implement the **instance** half of the new spine in
-`lpc-runtime` and port the legacy nodes onto it in one
-milestone — no parallel-runtime bridge:
+Cut the legacy runtime over to the engine spine established by
+M4.3. M4.3 intentionally leaves the new `lpc-engine::node`
+contracts, artifact manager, resolver, and `NodeTree` spine
+side-by-side with the current legacy `ProjectRuntime` /
+`LegacyNodeRuntime` path. M5 is where that parallelism ends:
+legacy nodes are ported onto the new spine and `ProjectRuntime`
+becomes `NodeTree`-backed.
+
+Historical wording below may still say `lpc-engine`; read it as
+`lpc-engine` after the M4.3a crate rename.
+
+Implement the **instance** half of the new spine in `lpc-engine`
+and port the legacy nodes onto it in one milestone — no
+long-lived parallel-runtime bridge:
 
 - New `Node` trait (tree-aware, with lifecycle, slot views,
   status / frame-versioning hooks).
 - `NodeTree` container.
 - Lifecycle / status / frame-versioning machinery lifted from
   the existing `lp-engine` `ProjectRuntime` into
-  `lpc-runtime`.
+  `lpc-engine`.
 - Filesystem change routing, panic recovery, shed plumbing,
   client / server protocol surface — all moved into
-  `lpc-runtime` as generic concerns.
+  `lpc-engine` as generic concerns.
 - `lpl-runtime`'s legacy nodes (`Texture` / `Shader` /
   `Output` / `Fixture`) ported to implement the new `Node`
   trait directly.
@@ -25,7 +36,7 @@ The cutover *is* the validation. If a legacy node can't be
 expressed cleanly under the new shape, the trait surface
 changes (or M3's `design.md` is updated and the plan
 re-iterated). No "bridge" intermediate where old and new
-runtimes coexist.
+runtimes coexist beyond the intentional M4.3 staging period.
 
 ## Suggested plan location
 
@@ -40,7 +51,7 @@ trait + tree first, then per-legacy-node port, then
 
 **In scope:**
 
-- `lpc-runtime::Node` trait — final shape from M3:
+- `lpc-engine::Node` trait — final shape from M3:
   - Identity (`uid`, `path`, `parent`).
   - Slot views (`params`, `inputs`, `outputs`, `state`).
   - Lifecycle (`init`, `render`, `destroy`,
@@ -48,7 +59,7 @@ trait + tree first, then per-legacy-node port, then
     `handle_fs_change`).
   - Children enumeration.
   - Object-safe, `no_std + alloc`.
-- `lpc-runtime::NodeTree`:
+- `lpc-engine::NodeTree`:
   - `BTreeMap<Uid, Node>` (or whatever M3 picked).
   - `BTreeMap<NodePath, Uid>` index.
   - Parent / child relationships, ordered children.
@@ -56,7 +67,7 @@ trait + tree first, then per-legacy-node port, then
     descendants).
   - Status enum + frame-versioned change events at the tree
     level.
-- Lifecycle machinery in `lpc-runtime`:
+- Lifecycle machinery in `lpc-engine`:
   - `NodeStatus` (Created / InitError / Ok / Warn / Error).
   - `FrameId` and frame-versioned change events.
   - Panic recovery wrapping (lifted from current
@@ -66,10 +77,10 @@ trait + tree first, then per-legacy-node port, then
     `ProjectRuntime`'s `handle_fs_changes`).
   - Lazy / demand-driven render (lifted from current texture
     rendering).
-- Sync layer surface in `lpc-runtime`:
+- Sync layer surface in `lpc-engine`:
   - Change events flow to clients via the existing
     protocol.
-  - Protocol stays compatible with `lp-engine-client` /
+  - Protocol stays compatible with `lp-view` /
     `lp-client` / `lp-cli` (the wire shape may evolve, but
     consumers don't break in a way that needs new code in
     those crates beyond import fixes).
@@ -82,7 +93,7 @@ trait + tree first, then per-legacy-node port, then
     shed-before-recompile, panic-recovery wrapping, status
     transitions, fs-change handling) preserved.
 - `ProjectRuntime` cutover:
-  - Replaced by a `NodeTree`-backed engine in `lpc-runtime`.
+  - Replaced by a `NodeTree`-backed engine in `lpc-engine`.
   - Legacy nodes register via the new path; loaded artifacts
     instantiate via M4's `ArtifactManager`.
   - The existing `lp-server` / `lp-client` / `lp-cli`
@@ -111,6 +122,10 @@ trait + tree first, then per-legacy-node port, then
 
 ## Key decisions
 
+- **M4.3 stages; M5 cuts over.** M4.3 creates the engine-side
+  runtime spine alongside the current legacy runtime. M5 replaces
+  the legacy `ProjectRuntime` storage with the new `NodeTree`
+  spine and retires `LegacyNodeRuntime`.
 - **No bridge.** Validating the shape *is* the point of
   porting legacy. Running old and new runtimes in parallel
   defers the validation and adds risk. The cutover is
@@ -119,7 +134,7 @@ trait + tree first, then per-legacy-node port, then
   legacy node behaviour as a regression suite *first*, then
   port + cut over. The suite is the safety net.
 - **Lifecycle / status / fs-watch / panic recovery / shed
-  are all generic.** They live on `lpc-runtime` (the spine),
+  are all generic.** They live on `lpc-engine` (the spine),
   not on each per-domain runtime. `lpl-runtime` only
   provides the per-node behaviour; the container manages the
   rest.
@@ -131,7 +146,7 @@ trait + tree first, then per-legacy-node port, then
   it.
 - **Sync layer wire compatibility is preserved.** ESP32
   firmware in the field doesn't need to be updated to talk
-  to a re-architected server. `lp-engine-client` keeps
+  to a re-architected server. `lp-view` keeps
   following. If wire format must evolve, it's behind a
   protocol version gate, not a hard break.
 - **Behavioural parity is the success criterion.** Not
@@ -140,10 +155,10 @@ trait + tree first, then per-legacy-node port, then
 
 ## Deliverables
 
-- `lpc-runtime::Node` trait + impl support.
-- `lpc-runtime::NodeTree` + lifecycle / status /
+- `lpc-engine::Node` trait + impl support.
+- `lpc-engine::NodeTree` + lifecycle / status /
   versioning / fs-watch / panic recovery / shed.
-- Sync layer in `lpc-runtime` consumed by `lp-server` /
+- Sync layer in `lpc-engine` consumed by `lp-server` /
   `lp-client` unchanged externally.
 - `lpl-runtime` nodes implement `Node` directly; old
   `NodeRuntime` trait retired.
@@ -157,8 +172,9 @@ trait + tree first, then per-legacy-node port, then
 
 - M3 (spine design pass) — implements `design.md`'s `Node`
   trait + `NodeTree` shape.
-- M4 (artifact spine) — `NodeTree` instantiation calls
-  `ArtifactManager`.
+- M4.3 (runtime spine) — `ArtifactManager`, resolver, and spine
+  `NodeEntry` types land in `lpc-engine` alongside legacy runtime;
+  M5 performs cutover onto that spine.
 - Blocks: M6 (cleanup + validation + summary).
 
 ## Execution strategy

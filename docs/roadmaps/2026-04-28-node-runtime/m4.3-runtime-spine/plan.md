@@ -1,57 +1,43 @@
 # M4.3 — Runtime spine
 
-Planning stub for phased work once M4.3 is expanded.
+**Status:** Phases 01–07 landed. The engine-side spine lives **next to** the
+legacy `ProjectRuntime` / `LegacyNodeRuntime` path; storage and node cutover
+are **M5** ([`../m5-node-spine-cutover.md`](../m5-node-spine-cutover.md)).
 
-Land the **runtime contract** for nodes on top of the M4.2 schema layer:
-the `Node` trait, `TickContext`, the `ArtifactManager` state machine,
-the binding resolver, slot view wrappers, and the generalised TOML
-artifact loader.
+## What landed (by phase)
 
-References:
+| Phase | Focus |
+| --- | --- |
+| [01](01-add-node-contracts.md) | `node`: `Node`, contexts, `NodeError`, `PressureLevel` |
+| [02](02-add-artifact-manager.md) | `artifact`: `ArtifactManager`, `ArtifactRef`, state machine |
+| [03](03-extend-spine-node-entry.md) | `tree::NodeEntry`: `SrcNodeConfig`, `ArtifactRef`, `ResolverCache` |
+| [04](04-implement-resolver-context-and-cascade.md) | Resolver cascade, `ResolverContext`, `ResolveError` |
+| [05](05-wire-tick-context.md) | `TickContext` wired to resolver, bus, artifact frame |
+| [06](06-source-artifact-loader-orchestration.md) | `load_source_artifact` → `lpc_source::load_artifact` |
+| [07](07-runtime-spine-integration-tests.md) | Integration tests (`runtime_spine`, module tests) |
 
-- [`../design/02-node.md`](../design/02-node.md)
-- [`../design/03-artifact.md`](../design/03-artifact.md)
-- [`../design/04-config.md`](../design/04-config.md)
-- [`../design/06-bindings-and-resolution.md`](../design/06-bindings-and-resolution.md)
+References: [`00-design.md`](00-design.md), [`00-notes.md`](00-notes.md),
+[`summary.md`](summary.md),
+[`../design/02-node.md`](../design/02-node.md),
+[`../design/03-artifact.md`](../design/03-artifact.md),
+[`../design/04-config.md`](../design/04-config.md),
+[`../design/06-bindings-and-resolution.md`](../design/06-bindings-and-resolution.md).
 
-## Status
+## Naming
 
-**M4.3 detailed phases:** not expanded yet — replace this stub via
-`/plan-small` (or `/plan`) when execution starts.
+- New contracts: `lpc-engine::node` (`src/node/`). Legacy runtimes:
+  `LegacyNodeRuntime` in `src/nodes/`.
+- Use `RuntimePropAccess`, `SrcNodeConfig`, `SrcArtifactSpec`, `LpsValueF32`.
+  No `PropAccess` compatibility alias.
+- `#[derive(RuntimePropAccess)]` / `lpc-derive` remain future work.
 
-**M4.3a (crate split + `ModelValue`):** tracked in
-[`../m4.3a-crate-split-wire-value/`](../m4.3a-crate-split-wire-value/); not
-future work relative to this milestone. The runtime spine should assume the
-five-crate roles below from the start.
+## Follow-on
 
-## Tentative scope (subject to plan iteration)
+- **M4.4:** produced-prop wire deltas, `lpc-view` mirror — [`../m4.4-domain-sync/plan.md`](../m4.4-domain-sync/plan.md).
+- **M5:** port legacy nodes and cut `ProjectRuntime` to the spine tree.
 
-- `lpc-engine::Node` trait — minimal shape from
-  [`design/02-node.md`](../design/02-node.md):
-  `tick(&mut self, &mut TickContext)`, `destroy`,
-  `handle_memory_pressure`, `props() -> &dyn RuntimePropAccess` (or
-  temporary `PropAccess` alias during transition; see M4.3a phase 5).
-- `lpc-engine::TickContext` — bus access, resolver-cache access,
-  tree access (read-only), frame counters.
-- `lpc-engine::ArtifactManager` — load / cache / refcount / shed
-  with the `Resolved | Loaded | Prepared | Idle | Error` state
-  machine ([`design/03-artifact.md`](../design/03-artifact.md)).
-- Binding resolver — pull-based three-layer cascade (overrides →
-  artifact `bind` → slot default), populating the resolver cache
-  from M4.2.
-- Slot view wrappers — read API across the four namespaces
-  (params / inputs / outputs / state).
-- Generalised TOML artifact loader — replaces the `std`-only
-  one-shot loader in `lpv-model`. `no_std`-compatible.
-- `PropAccess` derive macro (if not already shipped in M4.2) —
-  lives in a new `lpc-derive` proc-macro crate (or temporarily in
-  `lpc-engine` until split).
+## Still out of scope for M4.3
 
-## Out of scope here
-
-- `ProjectDomain` trait + `ProjectRuntime<D>` cutover (M4.4).
-- Per-prop sync deltas + extended wire (M4.4).
-- Legacy node port (M5).
-- Visual subsystem changes (next roadmap).
-- Crate split / portable model values (`ModelValue`, …) — **M4.3a owns this** (see sibling folder).
-  M4.3 assumes the crate split is done or underway; no "split after M4.3".
+- `ProjectRuntime` map → `NodeTree` cutover; retiring `LegacyNodeRuntime`.
+- Wire/view `PropsChanged` and client prop caches (M4.4).
+- `ProjectDomain` generic runtime (unless a later milestone introduces it).

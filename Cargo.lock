@@ -4126,6 +4126,7 @@ dependencies = [
  "lp-shader",
  "lpc-model",
  "lpc-shared",
+ "lpc-source",
  "lpc-view",
  "lpc-wire",
  "lpfs",

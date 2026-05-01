@@ -13,6 +13,7 @@ default = ["std"]
 panic-recovery = ["dep:unwinding"]
 std = [
     "lpc-shared/std",
+    "lpc-source/std",
     "lpfs/std",
     "lpl-model/std",
 ]
@@ -31,6 +32,7 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
 lpc-model = { path = "../lpc-model", default-features = false }
+lpc-source = { path = "../lpc-source", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
 lpl-model = { path = "../lpl-model", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }

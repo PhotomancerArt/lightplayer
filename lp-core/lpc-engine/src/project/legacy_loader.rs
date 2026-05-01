@@ -100,7 +100,10 @@ pub fn discover_nodes(fs: &dyn LpFs) -> Result<Vec<LpPathBuf>, Error> {
 }
 
 /// Load a node's config from filesystem
-pub fn legacy_load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn NodeConfig>), Error> {
+pub fn legacy_load_node(
+    fs: &dyn LpFs,
+    path: &LpPath,
+) -> Result<(LpPathBuf, Box<dyn NodeConfig>), Error> {
     let node_json_path = path.to_path_buf().join("node.json");
 
     let data = fs

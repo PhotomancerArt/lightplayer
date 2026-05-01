@@ -19,3 +19,13 @@ pub use node_entry::NodeEntry;
 pub use node_tree::NodeTree;
 pub use sync::tree_deltas_since;
 pub use tree_error::TreeError;
+
+#[cfg(test)]
+pub(crate) fn test_placeholder_spine() -> (lpc_source::SrcNodeConfig, crate::artifact::ArtifactRef)
+{
+    use alloc::string::String;
+    (
+        lpc_source::SrcNodeConfig::new(lpc_source::SrcArtifactSpec(String::from("__test__.vis"))),
+        crate::artifact::ArtifactRef::from_raw(0),
+    )
+}

@@ -27,7 +27,8 @@ impl ProjectRuntime {
     ) -> Result<Self, Error> {
         lp_perf::emit_begin!(EVENT_PROJECT_LOAD);
         let result = (|| -> Result<Self, Error> {
-            let _config = crate::project::legacy_loader::legacy_load_from_filesystem(&*fs.borrow())?;
+            let _config =
+                crate::project::legacy_loader::legacy_load_from_filesystem(&*fs.borrow())?;
 
             Ok(Self {
                 frame_id: FrameId::default(),
@@ -89,10 +90,11 @@ impl ProjectRuntime {
                     self.next_handle += 1;
 
                     // Try to determine kind from path
-                    let kind = match crate::project::legacy_loader::legacy_node_kind_from_path(&path) {
-                        Ok(k) => k,
-                        Err(_) => continue, // Skip unknown types
-                    };
+                    let kind =
+                        match crate::project::legacy_loader::legacy_node_kind_from_path(&path) {
+                            Ok(k) => k,
+                            Err(_) => continue, // Skip unknown types
+                        };
 
                     // Create a dummy config based on kind
                     // This is a temporary solution until we have a better way
