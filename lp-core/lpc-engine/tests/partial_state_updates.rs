@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
+use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, LegacyProjectRuntime};
 use lpc_model::AsLpPath;
 use lpc_model::NodeSpec;
 use lpc_shared::ProjectBuilder;
@@ -59,7 +59,7 @@ fn test_partial_state_updates() {
 
     // Start runtime
     let mut runtime =
-        ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
+        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();

@@ -17,7 +17,7 @@ use lpl_model::{NodeConfig, NodeKind};
 pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
 
 /// Project runtime - manages nodes and rendering
-pub struct ProjectRuntime {
+pub struct LegacyProjectRuntime {
     /// Current frame ID
     pub frame_id: FrameId,
     /// Frame timing information

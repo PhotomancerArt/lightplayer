@@ -22,8 +22,8 @@ use lpc_engine::error::Error;
 use lpc_engine::nodes::LegacyNodeRuntime;
 use lpc_engine::output::OutputProvider;
 use lpc_engine::panic_node::catch_node_panic;
-use lpc_engine::project::ProjectRuntime;
-use lpc_engine::project::project_runtime::{NodeEntry, NodeStatus};
+use lpc_engine::legacy_project::LegacyProjectRuntime;
+use lpc_engine::legacy_project::project_runtime::{NodeEntry, NodeStatus};
 use lpc_engine::runtime::frame_time::FrameTime;
 use lpc_model::AsLpPath;
 use lpc_model::{FrameId, LpPathBuf, NodeId};
@@ -31,7 +31,7 @@ use lpc_wire::{WireNodeSpecifier, WireNodeStatus as ApiNodeStatus};
 use lpfs::{FsChange, LpFs};
 use lpl_model::{NodeChange, NodeConfig, NodeDetail, NodeKind, NodeState, ProjectResponse};
 
-pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
+pub fn init_nodes(rt: &mut LegacyProjectRuntime) -> Result<(), Error> {
     // Initialize in order: textures → shaders → fixtures → outputs
     let init_order = [
         NodeKind::Texture,
@@ -236,7 +236,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
 
     Ok(())
 }
-pub fn tick(rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
+pub fn tick(rt: &mut LegacyProjectRuntime, delta_ms: u32) -> Result<(), Error> {
     lp_perf::emit_begin!(EVENT_FRAME);
     // Update frame ID and time
     let old_frame_id = rt.frame_id;
@@ -364,7 +364,7 @@ pub fn tick(rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
 ///
 /// Processes filesystem change events and updates affected nodes.
 /// Should be called before tick() when filesystem changes occur.
-pub fn handle_fs_changes(rt: &mut ProjectRuntime, changes: &[FsChange]) -> Result<(), Error> {
+pub fn handle_fs_changes(rt: &mut LegacyProjectRuntime, changes: &[FsChange]) -> Result<(), Error> {
     // Process deletions first
     for change in changes {
         if matches!(change.change_type, lpfs::ChangeType::Delete) {
@@ -390,7 +390,7 @@ pub fn handle_fs_changes(rt: &mut ProjectRuntime, changes: &[FsChange]) -> Resul
 }
 
 /// Handle a modify change
-fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<(), Error> {
+fn handle_modify_change(rt: &mut LegacyProjectRuntime, change: &FsChange) -> Result<(), Error> {
     // Find which node this file belongs to - collect handle, path, and kind
     let mut target_handle: Option<NodeId> = None;
     let mut target_path: Option<LpPathBuf> = None;
@@ -410,9 +410,9 @@ fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<()
         if change.path.has_suffix("/node.json") {
             // Reload config
             let (_, config_for_update) =
-                lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
+                lpc_engine::legacy_project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
             let (_, new_config) =
-                lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
+                lpc_engine::legacy_project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
 
             // Update node entry config
             let has_runtime = {
@@ -553,7 +553,7 @@ fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<()
     Ok(())
 }
 pub fn get_changes(
-    rt: &ProjectRuntime,
+    rt: &LegacyProjectRuntime,
     since_frame: FrameId,
     detail_specifier: &WireNodeSpecifier,
     theoretical_fps: Option<f32>,
@@ -853,7 +853,7 @@ pub fn get_changes(
 }
 
 struct InitContext<'a> {
-    runtime: &'a lpc_engine::project::ProjectRuntime,
+    runtime: &'a lpc_engine::legacy_project::LegacyProjectRuntime,
     #[allow(
         dead_code,
         reason = "Used for chroot filesystem creation, may be needed for future features"
@@ -864,7 +864,7 @@ struct InitContext<'a> {
 
 impl<'a> InitContext<'a> {
     pub fn new(
-        runtime: &'a lpc_engine::project::ProjectRuntime,
+        runtime: &'a lpc_engine::legacy_project::LegacyProjectRuntime,
         node_path: &'a LpPathBuf,
     ) -> Result<Self, Error> {
         let node_dir = node_path.as_str();
@@ -1044,7 +1044,7 @@ impl<'a> lpc_engine::runtime::contexts::NodeInitContext for InitContext<'a> {
 
 /// Shader node that owns the shared CPU buffer for a texture target (see [`texture_output_owner_handle`]).
 fn texture_output_owner_handle(
-    nodes: &BTreeMap<lpc_model::NodeId, lpc_engine::project::project_runtime::NodeEntry>,
+    nodes: &BTreeMap<lpc_model::NodeId, lpc_engine::legacy_project::project_runtime::NodeEntry>,
     texture_handle: lpc_engine::runtime::contexts::TextureHandle,
 ) -> Option<NodeId> {
     let mut best: Option<(i32, NodeId)> = None;

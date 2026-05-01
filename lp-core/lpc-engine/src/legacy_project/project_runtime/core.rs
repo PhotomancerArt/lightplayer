@@ -1,4 +1,4 @@
-use super::types::{MemoryStatsFn, NodeEntry, NodeStatus, ProjectRuntime};
+use super::types::{MemoryStatsFn, NodeEntry, NodeStatus, LegacyProjectRuntime};
 use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::frame_time::FrameTime;
@@ -16,7 +16,7 @@ use lpc_wire::WireNodeSpecifier;
 use lpfs::FsChange;
 use lpl_model::{NodeConfig, NodeKind, ProjectResponse};
 
-impl ProjectRuntime {
+impl LegacyProjectRuntime {
     /// Create new project runtime
     pub fn new(
         fs: Rc<RefCell<dyn lpfs::LpFs>>,
@@ -28,7 +28,7 @@ impl ProjectRuntime {
         lp_perf::emit_begin!(EVENT_PROJECT_LOAD);
         let result = (|| -> Result<Self, Error> {
             let _config =
-                crate::project::legacy_loader::legacy_load_from_filesystem(&*fs.borrow())?;
+                crate::legacy_project::legacy_loader::legacy_load_from_filesystem(&*fs.borrow())?;
 
             Ok(Self {
                 frame_id: FrameId::default(),
@@ -62,10 +62,10 @@ impl ProjectRuntime {
 
     /// Load nodes from filesystem (doesn't initialize them)
     pub fn load_nodes(&mut self) -> Result<(), Error> {
-        let node_paths = crate::project::legacy_loader::discover_nodes(&*self.fs.borrow())?;
+        let node_paths = crate::legacy_project::legacy_loader::discover_nodes(&*self.fs.borrow())?;
 
         for path in node_paths {
-            match crate::project::legacy_loader::legacy_load_node(&*self.fs.borrow(), &path) {
+            match crate::legacy_project::legacy_loader::legacy_load_node(&*self.fs.borrow(), &path) {
                 Ok((path, config)) => {
                     let handle = NodeId::new(self.next_handle);
                     self.next_handle += 1;
@@ -91,7 +91,7 @@ impl ProjectRuntime {
 
                     // Try to determine kind from path
                     let kind =
-                        match crate::project::legacy_loader::legacy_node_kind_from_path(&path) {
+                        match crate::legacy_project::legacy_loader::legacy_node_kind_from_path(&path) {
                             Ok(k) => k,
                             Err(_) => continue, // Skip unknown types
                         };
@@ -283,7 +283,7 @@ impl ProjectRuntime {
 
     /// Load a single node by path
     pub fn load_node_by_path(&mut self, path: &LpPath) -> Result<NodeId, Error> {
-        match crate::project::legacy_loader::legacy_load_node(&*self.fs.borrow(), path) {
+        match crate::legacy_project::legacy_loader::legacy_load_node(&*self.fs.borrow(), path) {
             Ok((path, config)) => {
                 let handle = NodeId::new(self.next_handle);
                 self.next_handle += 1;
@@ -309,17 +309,17 @@ impl ProjectRuntime {
 
     /// Initialize all nodes in dependency order
     pub fn init_nodes(&mut self) -> Result<(), Error> {
-        crate::project::hooks::with_hooks(|h| h.init_nodes(self))
+        crate::legacy_project::hooks::with_hooks(|h| h.init_nodes(self))
     }
 
     /// Advance to next frame and render
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), Error> {
-        crate::project::hooks::with_hooks(|h| h.tick(self, delta_ms))
+        crate::legacy_project::hooks::with_hooks(|h| h.tick(self, delta_ms))
     }
 
     /// Handle filesystem changes
     pub fn handle_fs_changes(&mut self, changes: &[FsChange]) -> Result<(), Error> {
-        crate::project::hooks::with_hooks(|h| h.handle_fs_changes(self, changes))
+        crate::legacy_project::hooks::with_hooks(|h| h.handle_fs_changes(self, changes))
     }
 
     /// Get changes since a frame (for client sync)
@@ -329,7 +329,7 @@ impl ProjectRuntime {
         detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error> {
-        crate::project::hooks::with_hooks(|h| {
+        crate::legacy_project::hooks::with_hooks(|h| {
             h.get_changes(self, since_frame, detail_specifier, theoretical_fps)
         })
     }

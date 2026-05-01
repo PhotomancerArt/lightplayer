@@ -2,8 +2,8 @@
 
 use alloc::sync::Arc;
 use lpc_engine::error::Error;
-use lpc_engine::project::ProjectRuntime;
-use lpc_engine::project::hooks::{ProjectHooks, set_project_hooks};
+use lpc_engine::legacy_project::LegacyProjectRuntime;
+use lpc_engine::legacy_project::hooks::{LegacyProjectHooks, set_project_hooks};
 use lpc_model::FrameId;
 use lpc_wire::WireNodeSpecifier;
 use lpfs::FsChange;
@@ -16,18 +16,18 @@ pub fn install() {
 
 struct DefaultProjectHooks;
 
-impl ProjectHooks for DefaultProjectHooks {
-    fn init_nodes(&self, rt: &mut ProjectRuntime) -> Result<(), Error> {
+impl LegacyProjectHooks for DefaultProjectHooks {
+    fn init_nodes(&self, rt: &mut LegacyProjectRuntime) -> Result<(), Error> {
         crate::legacy_hooks::init_nodes(rt)
     }
 
-    fn tick(&self, rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
+    fn tick(&self, rt: &mut LegacyProjectRuntime, delta_ms: u32) -> Result<(), Error> {
         crate::legacy_hooks::tick(rt, delta_ms)
     }
 
     fn handle_fs_changes(
         &self,
-        rt: &mut ProjectRuntime,
+        rt: &mut LegacyProjectRuntime,
         changes: &[FsChange],
     ) -> Result<(), Error> {
         crate::legacy_hooks::handle_fs_changes(rt, changes)
@@ -35,7 +35,7 @@ impl ProjectHooks for DefaultProjectHooks {
 
     fn get_changes(
         &self,
-        rt: &ProjectRuntime,
+        rt: &LegacyProjectRuntime,
         since_frame: FrameId,
         detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,

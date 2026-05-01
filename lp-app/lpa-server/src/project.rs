@@ -5,7 +5,7 @@ extern crate alloc;
 use crate::error::ServerError;
 use alloc::{format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lpc_engine::{LpGraphics, MemoryStatsFn, ProjectRuntime};
+use lpc_engine::{LpGraphics, MemoryStatsFn, LegacyProjectRuntime};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
@@ -18,7 +18,7 @@ pub struct Project {
     /// Project filesystem path
     path: LpPathBuf,
     /// The underlying ProjectRuntime instance
-    runtime: ProjectRuntime,
+    runtime: LegacyProjectRuntime,
     /// Last filesystem version processed by this project
     last_fs_version: FsVersion,
 }
@@ -39,7 +39,7 @@ impl Project {
     ) -> Result<Self, ServerError> {
         lpl_runtime::install();
         let runtime =
-            ProjectRuntime::new(fs, output_provider, memory_stats, time_provider, graphics)
+            LegacyProjectRuntime::new(fs, output_provider, memory_stats, time_provider, graphics)
                 .map_err(|e| ServerError::Core(format!("{e}")))?;
 
         Ok(Self {
@@ -61,12 +61,12 @@ impl Project {
     }
 
     /// Get mutable access to the underlying ProjectRuntime
-    pub fn runtime_mut(&mut self) -> &mut ProjectRuntime {
+    pub fn runtime_mut(&mut self) -> &mut LegacyProjectRuntime {
         &mut self.runtime
     }
 
     /// Get immutable access to the underlying ProjectRuntime
-    pub fn runtime(&self) -> &ProjectRuntime {
+    pub fn runtime(&self) -> &LegacyProjectRuntime {
         &self.runtime
     }
 

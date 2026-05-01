@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
+use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, LegacyProjectRuntime};
 use lpc_shared::ProjectBuilder;
 use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
@@ -40,7 +40,7 @@ fn test_scene_render() {
 
     // Start runtime with a shared filesystem (Rc<RefCell<>> so changes are visible)
     let mut runtime =
-        ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
+        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -115,7 +115,7 @@ fn assert_memory_output_red(
 }
 
 /// Sync the client view with the runtime
-fn sync_client_view(runtime: &ProjectRuntime, client_view: &mut ProjectView) {
+fn sync_client_view(runtime: &LegacyProjectRuntime, client_view: &mut ProjectView) {
     let response = runtime
         .get_changes(client_view.frame_id, &client_view.detail_specifier(), None)
         .unwrap();

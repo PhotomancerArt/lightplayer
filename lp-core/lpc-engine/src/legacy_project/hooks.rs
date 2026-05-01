@@ -2,7 +2,7 @@
 //! (`lpc-runtime` ↔ `lpl-runtime`).
 
 use crate::error::Error;
-use crate::project::project_runtime::ProjectRuntime;
+use crate::legacy_project::project_runtime::LegacyProjectRuntime;
 use alloc::string::String;
 use alloc::sync::Arc;
 use lpc_model::FrameId;
@@ -12,27 +12,27 @@ use lpl_model::ProjectResponse;
 use spin::Mutex;
 
 /// Snapshot of the legacy node integration (init, tick, filesystem sync, client protocol).
-pub trait ProjectHooks: Send + Sync {
-    fn init_nodes(&self, rt: &mut ProjectRuntime) -> Result<(), Error>;
+pub trait LegacyProjectHooks: Send + Sync {
+    fn init_nodes(&self, rt: &mut LegacyProjectRuntime) -> Result<(), Error>;
 
-    fn tick(&self, rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error>;
+    fn tick(&self, rt: &mut LegacyProjectRuntime, delta_ms: u32) -> Result<(), Error>;
 
-    fn handle_fs_changes(&self, rt: &mut ProjectRuntime, changes: &[FsChange])
-    -> Result<(), Error>;
+    fn handle_fs_changes(&self, rt: &mut LegacyProjectRuntime, changes: &[FsChange])
+                         -> Result<(), Error>;
 
     fn get_changes(
         &self,
-        rt: &ProjectRuntime,
+        rt: &LegacyProjectRuntime,
         since_frame: FrameId,
         detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error>;
 }
 
-static HOOKS: Mutex<Option<Arc<dyn ProjectHooks>>> = Mutex::new(None);
+static HOOKS: Mutex<Option<Arc<dyn LegacyProjectHooks>>> = Mutex::new(None);
 
 /// Install legacy project hooks (idempotent). Normally invoked from `lpl_runtime::project_hooks::install`.
-pub fn set_project_hooks(hooks: Arc<dyn ProjectHooks>) {
+pub fn set_project_hooks(hooks: Arc<dyn LegacyProjectHooks>) {
     let mut guard = HOOKS.lock();
     if guard.is_none() {
         *guard = Some(hooks);
@@ -40,7 +40,7 @@ pub fn set_project_hooks(hooks: Arc<dyn ProjectHooks>) {
 }
 
 pub(crate) fn with_hooks<T>(
-    f: impl FnOnce(&dyn ProjectHooks) -> Result<T, Error>,
+    f: impl FnOnce(&dyn LegacyProjectHooks) -> Result<T, Error>,
 ) -> Result<T, Error> {
     let guard = HOOKS.lock();
     let hooks = guard.as_ref().ok_or_else(|| Error::Other {

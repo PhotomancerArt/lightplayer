@@ -23,6 +23,33 @@ use crate::prop::src_value_spec::LoadCtx;
 use lpc_model::error::DomainError;
 use lpc_model::lp_path::LpPath;
 
+/// Load a TOML artifact through [`ArtifactReadRoot`] and validate its `schema_version`
+/// against `T::CURRENT_VERSION`. Materializes embedded default values via a
+/// throwaway [`LoadCtx`].
+pub fn load_artifact<T, R>(fs: &R, path: &LpPath) -> Result<T, LoadError<R::Err>>
+where
+    T: SrcArtifact + serde::de::DeserializeOwned,
+    R: ArtifactReadRoot,
+{
+    let bytes = fs.read_file(path).map_err(LoadError::Io)?;
+    let text = core::str::from_utf8(&bytes)?;
+    let loaded: T = toml::from_str(text)?;
+
+    let found = loaded.schema_version();
+    if found != T::CURRENT_VERSION {
+        return Err(LoadError::SchemaVersion {
+            artifact_kind: T::KIND,
+            expected: T::CURRENT_VERSION,
+            found,
+        });
+    }
+
+    let mut ctx = LoadCtx::default();
+    walk_and_materialize(&loaded, &mut ctx);
+
+    Ok(loaded)
+}
+
 /// Narrow filesystem surface for [`load_artifact`].
 ///
 /// Implemented for [`lpfs::LpFs`] in the `lpfs` crate so `lpc-source`
@@ -70,33 +97,6 @@ impl<E> From<DomainError> for LoadError<E> {
     fn from(e: DomainError) -> Self {
         LoadError::Domain(e)
     }
-}
-
-/// Load a TOML artifact through [`ArtifactReadRoot`] and validate its `schema_version`
-/// against `T::CURRENT_VERSION`. Materializes embedded default values via a
-/// throwaway [`LoadCtx`].
-pub fn load_artifact<T, R>(fs: &R, path: &LpPath) -> Result<T, LoadError<R::Err>>
-where
-    T: SrcArtifact + serde::de::DeserializeOwned,
-    R: ArtifactReadRoot,
-{
-    let bytes = fs.read_file(path).map_err(LoadError::Io)?;
-    let text = core::str::from_utf8(&bytes)?;
-    let loaded: T = toml::from_str(text)?;
-
-    let found = loaded.schema_version();
-    if found != T::CURRENT_VERSION {
-        return Err(LoadError::SchemaVersion {
-            artifact_kind: T::KIND,
-            expected: T::CURRENT_VERSION,
-            found,
-        });
-    }
-
-    let mut ctx = LoadCtx::default();
-    walk_and_materialize(&loaded, &mut ctx);
-
-    Ok(loaded)
 }
 
 fn walk_and_materialize<T: SrcArtifact>(artifact: &T, ctx: &mut LoadCtx) {
