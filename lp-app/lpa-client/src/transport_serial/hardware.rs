@@ -4,8 +4,8 @@
 //! The serial I/O runs on a separate thread that loops continuously.
 
 use log;
+use lpc_wire::legacy::LegacyServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
-use lpl_model::LegacyServerMessage;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};

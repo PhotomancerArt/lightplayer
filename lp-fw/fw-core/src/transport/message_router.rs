@@ -9,8 +9,8 @@ use alloc::format;
 
 use crate::message_router::MessageRouter;
 use lpc_shared::transport::ServerTransport;
+use lpc_wire::legacy::LegacyServerMessage;
 use lpc_wire::{TransportError, json, message::ClientMessage};
-use lpl_model::LegacyServerMessage;
 
 /// Transport implementation using MessageRouter
 ///

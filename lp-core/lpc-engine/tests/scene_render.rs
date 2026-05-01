@@ -3,14 +3,13 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, LegacyProjectRuntime};
+use lpc_engine::{Graphics, LegacyProjectRuntime, LpGraphics, MemoryOutputProvider};
 use lpc_shared::ProjectBuilder;
 use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
 
 #[test]
 fn test_scene_render() {
-    lpl_runtime::install();
     // ---------------------------------------------------------------------------------------------
     // Arrange
     //
@@ -40,7 +39,8 @@ fn test_scene_render() {
 
     // Start runtime with a shared filesystem (Rc<RefCell<>> so changes are visible)
     let mut runtime =
-        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
+        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics)
+            .unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();

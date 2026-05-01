@@ -5,8 +5,8 @@
 
 use crate::transport::ClientTransport;
 use lpc_shared::transport::ServerTransport;
+use lpc_wire::legacy::LegacyServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
-use lpl_model::LegacyServerMessage;
 use tokio::sync::mpsc;
 
 /// Async local client transport
@@ -178,7 +178,7 @@ pub fn create_local_transport_pair() -> (AsyncLocalClientTransport, AsyncLocalSe
 mod tests {
     use super::*;
     use lpc_wire::ClientRequest;
-    use lpl_model::LegacyServerMessage;
+    use lpc_wire::legacy::LegacyServerMessage;
 
     #[tokio::test]
     async fn test_create_transport_pair() {

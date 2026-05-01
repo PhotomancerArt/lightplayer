@@ -13,7 +13,7 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, featu
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
-lpl-model = { path = "../../lp-core/lpl-model", default-features = false }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false }
 lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"] }

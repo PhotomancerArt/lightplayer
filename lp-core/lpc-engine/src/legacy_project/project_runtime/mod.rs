@@ -1,4 +1,4 @@
 mod core;
 mod types;
 
-pub use types::{MemoryStatsFn, NodeEntry, NodeStatus, LegacyProjectRuntime};
+pub use types::{LegacyProjectRuntime, MemoryStatsFn, NodeEntry, NodeStatus};

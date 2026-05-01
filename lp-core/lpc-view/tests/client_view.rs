@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use lpc_model::{FrameId, NodeId};
 use lpc_view::ProjectView;
-use lpl_model::ProjectResponse;
+use lpc_wire::legacy::ProjectResponse;
 
 #[test]
 fn test_client_view_creation() {
@@ -61,10 +61,10 @@ fn test_sync_with_changes() {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lpl_model::NodeChange::Created {
+        node_changes: vec![lpc_wire::legacy::NodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.texture"),
-            kind: lpl_model::NodeKind::Texture,
+            kind: lpc_source::legacy::nodes::NodeKind::Texture,
         }],
         node_details: BTreeMap::new(),
         theoretical_fps: None,
@@ -83,8 +83,8 @@ fn test_sync_with_changes() {
 fn test_detail_only_entry_uses_pending_status_changed() {
     use alloc::boxed::Box;
     use lpc_wire::WireNodeStatus;
-    use lpl_model::nodes::shader::ShaderState;
-    use lpl_model::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::nodes::shader::ShaderState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
@@ -96,7 +96,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
         handle,
         NodeDetail {
             path: path.clone(),
-            config: Box::new(lpl_model::nodes::shader::ShaderConfig::default()),
+            config: Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default()),
             state: NodeState::Shader(ShaderState::new(frame)),
         },
     );
@@ -121,8 +121,9 @@ fn test_detail_only_entry_uses_pending_status_changed() {
 #[test]
 fn test_partial_state_merge_texture() {
     use alloc::boxed::Box;
-    use lpl_model::NodeState;
-    use lpl_model::nodes::texture::{TextureConfig, TextureState};
+    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_wire::legacy::NodeState;
+    use lpc_wire::legacy::nodes::texture::TextureState;
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
@@ -136,23 +137,23 @@ fn test_partial_state_merge_texture() {
     initial_state.height.set(FrameId::new(1), 200);
     initial_state.format.set(
         FrameId::new(1),
-        lpl_model::nodes::texture::TextureFormat::Rgb8,
+        lpc_source::legacy::nodes::texture::TextureFormat::Rgb8,
     );
 
     let initial_response = ProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lpl_model::NodeChange::Created {
+        node_changes: vec![lpc_wire::legacy::NodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.texture"),
-            kind: lpl_model::NodeKind::Texture,
+            kind: lpc_source::legacy::nodes::NodeKind::Texture,
         }],
         node_details: {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpl_model::NodeDetail {
+                lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
                     config: Box::new(TextureConfig {
                         width: 100,
@@ -178,7 +179,7 @@ fn test_partial_state_merge_texture() {
             assert_eq!(state.height.value(), &200);
             assert_eq!(
                 state.format.value(),
-                &lpl_model::nodes::texture::TextureFormat::Rgb8
+                &lpc_source::legacy::nodes::texture::TextureFormat::Rgb8
             );
         }
         _ => panic!("Expected Texture state"),
@@ -194,7 +195,7 @@ fn test_partial_state_merge_texture() {
         current_frame: FrameId::new(2),
         since_frame: FrameId::new(1),
         node_handles: vec![handle],
-        node_changes: vec![lpl_model::NodeChange::StateUpdated {
+        node_changes: vec![lpc_wire::legacy::NodeChange::StateUpdated {
             handle,
             state_ver: FrameId::new(2),
         }],
@@ -202,7 +203,7 @@ fn test_partial_state_merge_texture() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpl_model::NodeDetail {
+                lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
                     config: Box::new(TextureConfig {
                         width: 150,
@@ -233,7 +234,7 @@ fn test_partial_state_merge_texture() {
             );
             assert_eq!(
                 state.format.value(),
-                &lpl_model::nodes::texture::TextureFormat::Rgb8,
+                &lpc_source::legacy::nodes::texture::TextureFormat::Rgb8,
                 "format should be preserved"
             );
         }
@@ -244,8 +245,9 @@ fn test_partial_state_merge_texture() {
 #[test]
 fn test_partial_state_merge_output() {
     use alloc::boxed::Box;
-    use lpl_model::NodeState;
-    use lpl_model::nodes::output::{OutputConfig, OutputState};
+    use lpc_source::legacy::nodes::output::OutputConfig;
+    use lpc_wire::legacy::NodeState;
+    use lpc_wire::legacy::nodes::output::OutputState;
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
@@ -260,16 +262,16 @@ fn test_partial_state_merge_output() {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lpl_model::NodeChange::Created {
+        node_changes: vec![lpc_wire::legacy::NodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.output"),
-            kind: lpl_model::NodeKind::Output,
+            kind: lpc_source::legacy::nodes::NodeKind::Output,
         }],
         node_details: {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpl_model::NodeDetail {
+                lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
                     config: Box::new(OutputConfig::GpioStrip {
                         pin: 0,
@@ -308,7 +310,7 @@ fn test_partial_state_merge_output() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpl_model::NodeDetail {
+                lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
                     config: Box::new(OutputConfig::GpioStrip {
                         pin: 0,

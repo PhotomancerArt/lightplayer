@@ -1,4 +1,4 @@
-use super::types::{MemoryStatsFn, NodeEntry, NodeStatus, LegacyProjectRuntime};
+use super::types::{LegacyProjectRuntime, MemoryStatsFn, NodeEntry, NodeStatus};
 use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::frame_time::FrameTime;
@@ -12,9 +12,13 @@ use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use lp_perf::EVENT_PROJECT_LOAD;
 use lpc_model::{FrameId, LpPath, LpPathBuf, NodeId};
+use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
+use lpc_source::legacy::nodes::{
+    fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig, texture::TextureConfig,
+};
 use lpc_wire::WireNodeSpecifier;
+use lpc_wire::legacy::ProjectResponse;
 use lpfs::FsChange;
-use lpl_model::{NodeConfig, NodeKind, ProjectResponse};
 
 impl LegacyProjectRuntime {
     /// Create new project runtime
@@ -65,7 +69,8 @@ impl LegacyProjectRuntime {
         let node_paths = crate::legacy_project::legacy_loader::discover_nodes(&*self.fs.borrow())?;
 
         for path in node_paths {
-            match crate::legacy_project::legacy_loader::legacy_load_node(&*self.fs.borrow(), &path) {
+            match crate::legacy_project::legacy_loader::legacy_load_node(&*self.fs.borrow(), &path)
+            {
                 Ok((path, config)) => {
                     let handle = NodeId::new(self.next_handle);
                     self.next_handle += 1;
@@ -91,7 +96,9 @@ impl LegacyProjectRuntime {
 
                     // Try to determine kind from path
                     let kind =
-                        match crate::legacy_project::legacy_loader::legacy_node_kind_from_path(&path) {
+                        match crate::legacy_project::legacy_loader::legacy_node_kind_from_path(
+                            &path,
+                        ) {
                             Ok(k) => k,
                             Err(_) => continue, // Skip unknown types
                         };
@@ -99,27 +106,24 @@ impl LegacyProjectRuntime {
                     // Create a dummy config based on kind
                     // This is a temporary solution until we have a better way
                     let config: Box<dyn NodeConfig> = match kind {
-                        NodeKind::Texture => Box::new(lpl_model::nodes::texture::TextureConfig {
+                        NodeKind::Texture => Box::new(TextureConfig {
                             width: 0,
                             height: 0,
                         }),
-                        NodeKind::Shader => {
-                            Box::new(lpl_model::nodes::shader::ShaderConfig::default())
-                        }
-                        NodeKind::Output => {
-                            Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
-                                pin: 0,
-                                options: None,
-                            })
-                        }
-                        NodeKind::Fixture => Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                        NodeKind::Shader => Box::new(ShaderConfig::default()),
+                        NodeKind::Output => Box::new(OutputConfig::GpioStrip {
+                            pin: 0,
+                            options: None,
+                        }),
+                        NodeKind::Fixture => Box::new(FixtureConfig {
                             output_spec: lpc_model::NodeSpec::from(""),
                             texture_spec: lpc_model::NodeSpec::from(""),
-                            mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
-                                paths: vec![],
-                                sample_diameter: 2.0,
-                            },
-                            color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
+                            mapping:
+                                lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
+                                    paths: vec![],
+                                    sample_diameter: 2.0,
+                                },
+                            color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
                             transform: [[0.0; 4]; 4],
                             brightness: None,
                             gamma_correction: None,
@@ -309,17 +313,17 @@ impl LegacyProjectRuntime {
 
     /// Initialize all nodes in dependency order
     pub fn init_nodes(&mut self) -> Result<(), Error> {
-        crate::legacy_project::hooks::with_hooks(|h| h.init_nodes(self))
+        crate::legacy::project::init_nodes(self)
     }
 
     /// Advance to next frame and render
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), Error> {
-        crate::legacy_project::hooks::with_hooks(|h| h.tick(self, delta_ms))
+        crate::legacy::project::tick(self, delta_ms)
     }
 
     /// Handle filesystem changes
     pub fn handle_fs_changes(&mut self, changes: &[FsChange]) -> Result<(), Error> {
-        crate::legacy_project::hooks::with_hooks(|h| h.handle_fs_changes(self, changes))
+        crate::legacy::project::handle_fs_changes(self, changes)
     }
 
     /// Get changes since a frame (for client sync)
@@ -329,8 +333,6 @@ impl LegacyProjectRuntime {
         detail_specifier: &WireNodeSpecifier,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error> {
-        crate::legacy_project::hooks::with_hooks(|h| {
-            h.get_changes(self, since_frame, detail_specifier, theoretical_fps)
-        })
+        crate::legacy::project::get_changes(self, since_frame, detail_specifier, theoretical_fps)
     }
 }

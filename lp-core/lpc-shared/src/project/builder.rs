@@ -5,14 +5,14 @@ use core::cell::RefCell;
 use lpc_model::NodeSpec;
 use lpc_model::lp_path::LpPathBuf;
 use lpc_model::{AsLpPath, AsLpPathBuf};
-use lpfs::LpFs;
-use lpl_model::glsl_opts::GlslOpts;
-use lpl_model::nodes::{
+use lpc_source::legacy::glsl_opts::GlslOpts;
+use lpc_source::legacy::nodes::{
     fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder},
     output::{OutputConfig, OutputDriverOptionsConfig},
     shader::ShaderConfig,
     texture::TextureConfig,
 };
+use lpfs::LpFs;
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {

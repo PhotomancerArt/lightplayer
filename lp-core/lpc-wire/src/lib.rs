@@ -8,6 +8,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod json;
+pub mod legacy;
 pub mod message;
 pub mod project;
 pub mod serde_base64;

@@ -10,8 +10,8 @@ use alloc::sync::Arc;
 use core::cell::RefCell;
 use lpc_model::{FrameId, LpPathBuf, NodeId};
 use lpc_shared::time::TimeProvider;
+use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
 use lpfs::LpFs;
-use lpl_model::{NodeConfig, NodeKind};
 
 /// Optional callback for memory stats (free_bytes, used_bytes). Used for shed logging on ESP32.
 pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;

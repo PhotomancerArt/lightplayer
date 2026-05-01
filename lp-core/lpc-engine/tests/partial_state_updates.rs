@@ -3,12 +3,14 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpc_engine::{Graphics, LpGraphics, MemoryOutputProvider, LegacyProjectRuntime};
+use lpc_engine::{Graphics, LegacyProjectRuntime, LpGraphics, MemoryOutputProvider};
 use lpc_model::AsLpPath;
 use lpc_model::NodeSpec;
 use lpc_shared::ProjectBuilder;
+use lpc_source::legacy::nodes::fixture::{
+    ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder,
+};
 use lpfs::LpFsMemory;
-use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
 
 /// Integration test for partial state updates
 ///
@@ -23,7 +25,6 @@ use lpl_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSp
 /// - This test verifies the tracking logic works, which is the foundation for partial serialization
 #[test]
 fn test_partial_state_updates() {
-    lpl_runtime::install();
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
 
@@ -59,7 +60,8 @@ fn test_partial_state_updates() {
 
     // Start runtime
     let mut runtime =
-        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
+        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics)
+            .unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -83,12 +85,12 @@ fn test_partial_state_updates() {
         .unwrap();
 
     let (initial_lamp_colors, initial_mapping_cells) = match initial_response {
-        lpl_model::ProjectResponse::GetChanges { node_details, .. } => {
+        lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } => {
             let detail = node_details
                 .get(&fixture_handle)
                 .expect("Fixture detail should be present");
             match &detail.state {
-                lpl_model::NodeState::Fixture(state) => {
+                lpc_wire::legacy::NodeState::Fixture(state) => {
                     // Verify initial state has both fields
                     assert!(
                         !state.lamp_colors.value().is_empty(),
@@ -132,12 +134,12 @@ fn test_partial_state_updates() {
 
     // Get the state from the response
     let (lamp_colors_after, mapping_cells_after) = match lamp_colors_response {
-        lpl_model::ProjectResponse::GetChanges { node_details, .. } => {
+        lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } => {
             let detail = node_details
                 .get(&fixture_handle)
                 .expect("Fixture detail should be present");
             match &detail.state {
-                lpl_model::NodeState::Fixture(state) => (
+                lpc_wire::legacy::NodeState::Fixture(state) => (
                     state.lamp_colors.value().clone(),
                     state.mapping_cells.value().clone(),
                 ),
@@ -209,12 +211,12 @@ fn test_partial_state_updates() {
         .unwrap();
 
     let new_mapping_cells = match mapping_response {
-        lpl_model::ProjectResponse::GetChanges { node_details, .. } => {
+        lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } => {
             let detail = node_details
                 .get(&fixture_handle)
                 .expect("Fixture detail should be present");
             match &detail.state {
-                lpl_model::NodeState::Fixture(state) => state.mapping_cells.value().clone(),
+                lpc_wire::legacy::NodeState::Fixture(state) => state.mapping_cells.value().clone(),
                 _ => panic!("Expected Fixture state"),
             }
         }

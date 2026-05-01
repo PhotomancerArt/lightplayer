@@ -15,7 +15,6 @@ esp32 = []
 [dependencies]
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
-lpl-model = { path = "../../lp-core/lpl-model", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false }

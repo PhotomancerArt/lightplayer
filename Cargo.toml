@@ -18,8 +18,6 @@ members = [
     "lp-core/lpc-model",
     "lp-core/lpc-source",
     "lp-core/lpc-wire",
-    "lp-core/lpl-model",
-    "lp-core/lpl-runtime",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -71,8 +69,6 @@ default-members = [
     "lp-core/lpc-model",
     "lp-core/lpc-source",
     "lp-core/lpc-wire",
-    "lp-core/lpl-model",
-    "lp-core/lpl-runtime",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",

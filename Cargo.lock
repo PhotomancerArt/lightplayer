@@ -2761,7 +2761,6 @@ dependencies = [
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
- "lpl-model",
  "pollster",
  "ser-write-json",
  "serde",
@@ -2783,8 +2782,8 @@ dependencies = [
  "lpc-model",
  "lpc-shared",
  "lpc-view",
+ "lpc-wire",
  "lpfs",
- "lpl-model",
  "lps-builtins",
  "serde_json",
  "tokio",
@@ -2819,7 +2818,6 @@ dependencies = [
  "lpc-shared",
  "lpc-wire",
  "lpfs",
- "lpl-model",
  "lps-q32",
  "ser-write-json",
  "serde",
@@ -2842,10 +2840,10 @@ dependencies = [
  "lpa-client",
  "lpc-model",
  "lpc-shared",
+ "lpc-source",
  "lpc-view",
  "lpc-wire",
  "lpfs",
- "lpl-model",
  "serde_json",
  "serial_test",
  "serialport",
@@ -3955,11 +3953,11 @@ dependencies = [
  "lpa-server",
  "lpc-model",
  "lpc-shared",
+ "lpc-source",
  "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpir",
- "lpl-model",
  "lps-frontend",
  "lps-shared",
  "lpvm-cranelift",
@@ -4090,7 +4088,6 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
- "lpl-model",
  "serde",
  "serialport",
  "test-log",
@@ -4107,11 +4104,10 @@ dependencies = [
  "lpc-engine",
  "lpc-model",
  "lpc-shared",
+ "lpc-source",
  "lpc-view",
  "lpc-wire",
  "lpfs",
- "lpl-model",
- "lpl-runtime",
 ]
 
 [[package]]
@@ -4131,8 +4127,6 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lpir",
- "lpl-model",
- "lpl-runtime",
  "lps-builtins",
  "lps-frontend",
  "lps-q32",
@@ -4164,9 +4158,9 @@ dependencies = [
  "libm",
  "log",
  "lpc-model",
+ "lpc-source",
  "lpc-wire",
  "lpfs",
- "lpl-model",
  "lps-shared",
  "serde",
 ]
@@ -4188,8 +4182,8 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "lpc-model",
+ "lpc-source",
  "lpc-wire",
- "lpl-model",
 ]
 
 [[package]]
@@ -4198,6 +4192,7 @@ version = "40.0.0"
 dependencies = [
  "base64",
  "lpc-model",
+ "lpc-source",
  "schemars",
  "ser-write-json",
  "serde",
@@ -4255,45 +4250,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lps-q32",
-]
-
-[[package]]
-name = "lpl-model"
-version = "40.0.0"
-dependencies = [
- "base64",
- "hashbrown 0.15.5",
- "lpc-model",
- "lpc-wire",
- "serde",
- "tempfile",
-]
-
-[[package]]
-name = "lpl-runtime"
-version = "40.0.0"
-dependencies = [
- "hashbrown 0.15.5",
- "libm",
- "log",
- "lp-perf",
- "lp-shader",
- "lpc-engine",
- "lpc-model",
- "lpc-shared",
- "lpc-wire",
- "lpfs",
- "lpir",
- "lpl-model",
- "lps-builtins",
- "lps-frontend",
- "lps-q32",
- "lps-shared",
- "lpvm",
- "lpvm-native",
- "lpvm-wasm",
- "serde",
- "unwinding",
 ]
 
 [[package]]

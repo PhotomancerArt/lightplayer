@@ -11,12 +11,12 @@ use lpc_engine::LpGraphics;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
+use lpc_wire::legacy::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 use lpc_wire::{
     message::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
 use lpfs::LpFs;
-use lpl_model::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 
 /// Log memory stats if callback is provided and returns values
 fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
@@ -192,7 +192,9 @@ fn handle_project_request(
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
 
             let response_frame = match &response {
-                lpl_model::ProjectResponse::GetChanges { current_frame, .. } => *current_frame,
+                lpc_wire::legacy::ProjectResponse::GetChanges { current_frame, .. } => {
+                    *current_frame
+                }
             };
             log::debug!(
                 "handle_project_request: GetChanges response (current_frame: {})",

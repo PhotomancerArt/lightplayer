@@ -14,8 +14,8 @@ use core::cell::RefCell;
 use lpa_server::LpServer;
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
+use lpc_wire::legacy::LegacyMessage;
 use lpfs::{LpFs, LpFsMemory};
-use lpl_model::LegacyMessage;
 
 // Placeholder types for compilation - these tests are ignored
 type LpClient = ();

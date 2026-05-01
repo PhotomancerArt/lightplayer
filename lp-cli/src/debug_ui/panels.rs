@@ -4,9 +4,10 @@ use crate::debug_ui::nodes::shader;
 use crate::debug_ui::nodes::{fixture, output, texture};
 use eframe::egui::{self, Color32};
 use lpc_model::{NodeId, project::FrameId};
+use lpc_source::legacy::nodes::NodeKind;
 use lpc_view::project::ProjectView;
 use lpc_wire::WireNodeStatus;
-use lpl_model::NodeKind;
+use lpc_wire::legacy::NodeState;
 
 /// Render status panel
 pub fn render_status_panel(
@@ -121,7 +122,7 @@ pub fn render_all_nodes_panel(
         if checked {
             if let Some(state) = &entry.state {
                 match (entry.kind, state) {
-                    (NodeKind::Texture, lpl_model::NodeState::Texture(texture_state)) => {
+                    (NodeKind::Texture, NodeState::Texture(texture_state)) => {
                         texture::render_texture_panel(
                             ui,
                             entry,
@@ -131,10 +132,10 @@ pub fn render_all_nodes_panel(
                             *show_texture_strokes,
                         );
                     }
-                    (NodeKind::Shader, lpl_model::NodeState::Shader(shader_state)) => {
+                    (NodeKind::Shader, NodeState::Shader(shader_state)) => {
                         shader::render_shader_panel(ui, entry, shader_state);
                     }
-                    (NodeKind::Fixture, lpl_model::NodeState::Fixture(fixture_state)) => {
+                    (NodeKind::Fixture, NodeState::Fixture(fixture_state)) => {
                         fixture::render_fixture_panel(
                             ui,
                             view,
@@ -145,7 +146,7 @@ pub fn render_all_nodes_panel(
                             *show_texture_strokes,
                         );
                     }
-                    (NodeKind::Output, lpl_model::NodeState::Output(output_state)) => {
+                    (NodeKind::Output, NodeState::Output(output_state)) => {
                         output::render_output_panel(ui, entry, output_state);
                     }
                     _ => {

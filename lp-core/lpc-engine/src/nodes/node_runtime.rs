@@ -4,8 +4,8 @@ use core::any::Any;
 use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
+use lpc_source::legacy::nodes::NodeConfig;
 use lpfs::FsChange;
-use lpl_model::NodeConfig;
 
 /// Node runtime trait - all node runtimes implement this
 pub trait LegacyNodeRuntime: Send + Sync {

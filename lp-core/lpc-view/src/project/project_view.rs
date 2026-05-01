@@ -4,8 +4,9 @@ use alloc::format;
 use alloc::string::String;
 use alloc::{vec, vec::Vec};
 use lpc_model::{FrameId, LpPathBuf, NodeId};
+use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
+use lpc_wire::legacy::{NodeChange, NodeState, ProjectResponse};
 use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
-use lpl_model::{NodeChange, NodeConfig, NodeKind, NodeState};
 
 /// Status change information surfaced by [`ProjectView::apply_changes`].
 #[derive(Debug, Clone)]
@@ -80,11 +81,11 @@ impl ProjectView {
     /// Returns a list of all status changes that the caller can use for logging or other purposes.
     pub fn apply_changes(
         &mut self,
-        response: &lpl_model::ProjectResponse,
+        response: &ProjectResponse,
     ) -> Result<Vec<StatusChangeView>, String> {
         let mut status_changes = Vec::new();
         match response {
-            lpl_model::ProjectResponse::GetChanges {
+            ProjectResponse::GetChanges {
                 current_frame,
                 since_frame: _,
                 node_handles,
@@ -106,30 +107,30 @@ impl ProjectView {
                             // Create new entry with placeholder config
                             let config: Box<dyn NodeConfig> = match kind {
                                 NodeKind::Texture => {
-                                    Box::new(lpl_model::nodes::texture::TextureConfig {
+                                    Box::new(lpc_source::legacy::nodes::texture::TextureConfig {
                                         width: 0,
                                         height: 0,
                                     })
                                 }
                                 NodeKind::Shader => {
-                                    Box::new(lpl_model::nodes::shader::ShaderConfig::default())
+                                    Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default())
                                 }
                                 NodeKind::Output => {
-                                    Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
+                                    Box::new(lpc_source::legacy::nodes::output::OutputConfig::GpioStrip {
                                         pin: 0,
                                         options: None,
                                     })
                                 }
                                 NodeKind::Fixture => {
-                                    Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                                    Box::new(lpc_source::legacy::nodes::fixture::FixtureConfig {
                                         output_spec: lpc_model::NodeSpec::from(""),
                                         texture_spec: lpc_model::NodeSpec::from(""),
                                         mapping:
-                                            lpl_model::nodes::fixture::MappingConfig::PathPoints {
+                                            lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
                                                 paths: vec![],
                                                 sample_diameter: 2.0,
                                             },
-                                        color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
+                                        color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
                                         brightness: None,
                                         gamma_correction: None,
@@ -205,29 +206,29 @@ impl ProjectView {
                         // Use config from detail if available, otherwise keep existing config
                         let config: Box<dyn NodeConfig> = match entry.kind {
                             NodeKind::Texture => {
-                                Box::new(lpl_model::nodes::texture::TextureConfig {
+                                Box::new(lpc_source::legacy::nodes::texture::TextureConfig {
                                     width: 0,
                                     height: 0,
                                 })
                             }
                             NodeKind::Shader => {
-                                Box::new(lpl_model::nodes::shader::ShaderConfig::default())
+                                Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default())
                             }
                             NodeKind::Output => {
-                                Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
+                                Box::new(lpc_source::legacy::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
                                     options: None,
                                 })
                             }
                             NodeKind::Fixture => {
-                                Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                                Box::new(lpc_source::legacy::nodes::fixture::FixtureConfig {
                                     output_spec: lpc_model::NodeSpec::from(""),
                                     texture_spec: lpc_model::NodeSpec::from(""),
-                                    mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
+                                    mapping: lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
                                     },
-                                    color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
+                                    color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                     brightness: None,
                                     gamma_correction: None,
@@ -257,29 +258,29 @@ impl ProjectView {
 
                         let config: Box<dyn NodeConfig> = match kind {
                             NodeKind::Texture => {
-                                Box::new(lpl_model::nodes::texture::TextureConfig {
+                                Box::new(lpc_source::legacy::nodes::texture::TextureConfig {
                                     width: 0,
                                     height: 0,
                                 })
                             }
                             NodeKind::Shader => {
-                                Box::new(lpl_model::nodes::shader::ShaderConfig::default())
+                                Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default())
                             }
                             NodeKind::Output => {
-                                Box::new(lpl_model::nodes::output::OutputConfig::GpioStrip {
+                                Box::new(lpc_source::legacy::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
                                     options: None,
                                 })
                             }
                             NodeKind::Fixture => {
-                                Box::new(lpl_model::nodes::fixture::FixtureConfig {
+                                Box::new(lpc_source::legacy::nodes::fixture::FixtureConfig {
                                     output_spec: lpc_model::NodeSpec::from(""),
                                     texture_spec: lpc_model::NodeSpec::from(""),
-                                    mapping: lpl_model::nodes::fixture::MappingConfig::PathPoints {
+                                    mapping: lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
                                     },
-                                    color_order: lpl_model::nodes::fixture::ColorOrder::Rgb,
+                                    color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                     brightness: None,
                                     gamma_correction: None,

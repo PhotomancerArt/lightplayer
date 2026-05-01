@@ -15,7 +15,6 @@ std = [
     "lpc-shared/std",
     "lpc-source/std",
     "lpfs/std",
-    "lpl-model/std",
 ]
 
 [dependencies]
@@ -34,7 +33,6 @@ log = { workspace = true, default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-source = { path = "../lpc-source", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
-lpl-model = { path = "../lpl-model", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lpc-shared = { path = "../lpc-shared", default-features = false }
@@ -57,5 +55,4 @@ lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
 lpc-shared = { path = "../lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
 lpc-view = { path = "../lpc-view", default-features = false, features = ["std"] }
-lpl-runtime = { path = "../lpl-runtime", default-features = false, features = ["std"] }
 env_logger = { workspace = true }

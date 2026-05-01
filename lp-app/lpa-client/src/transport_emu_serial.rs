@@ -8,8 +8,8 @@ use hashbrown::HashMap;
 use log;
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
+use lpc_wire::legacy::LegacyServerMessage;
 use lpc_wire::{TransportError, json, message::ClientMessage};
-use lpl_model::LegacyServerMessage;
 use std::sync::{Arc, Mutex};
 
 /// Serial ClientTransport that communicates with firmware running in emulator

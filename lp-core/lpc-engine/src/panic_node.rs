@@ -1,4 +1,4 @@
-//! Panic boundary helpers for node render paths (shared with `lpl-runtime`).
+//! Panic boundary helpers for node render paths (legacy runtimes in `lpc_engine::legacy`).
 
 use crate::error::Error;
 

@@ -5,7 +5,7 @@ use crate::debug_ui::panels;
 use eframe::egui;
 use lpc_model::{NodeId, project::FrameId};
 use lpc_view::project::ProjectView;
-use lpc_wire::WireProjectHandle as ProjectHandle;
+use lpc_wire::{WireProjectHandle as ProjectHandle, legacy::SerializableProjectResponse};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -27,8 +27,7 @@ pub struct DebugUiState {
     sync_in_progress: bool,
     /// Pending sync result receiver (if sync is in progress)
     /// Contains SerializableProjectResponse which can be sent across threads
-    pending_sync:
-        Option<oneshot::Receiver<Result<lpl_model::SerializableProjectResponse, anyhow::Error>>>,
+    pending_sync: Option<oneshot::Receiver<Result<SerializableProjectResponse, anyhow::Error>>>,
     /// Track if tracked_nodes changed since last sync (to trigger immediate sync)
     tracked_nodes_changed: bool,
     /// Tokio runtime handle for spawning async tasks
@@ -92,7 +91,7 @@ impl DebugUiState {
             match receiver.try_recv() {
                 Ok(Ok(serializable_response)) => {
                     // Extract theoretical FPS from response before converting
-                    let lpl_model::SerializableProjectResponse::GetChanges {
+                    let SerializableProjectResponse::GetChanges {
                         theoretical_fps, ..
                     } = &serializable_response;
                     self.theoretical_fps = *theoretical_fps;

@@ -18,12 +18,11 @@ esp32c6 = [
 server = [
     "lpc-model",
     "lpc-wire",
-    "lpl-model",
     "lpa-server",
     "lpc-shared",
     "lpfs",
     "ser-write-json",
-]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpl-model, lpfs)
+]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
@@ -56,7 +55,6 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, opti
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
-lpl-model = { path = "../../lp-core/lpl-model", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }

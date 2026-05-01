@@ -4,12 +4,12 @@
 
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf, project::FrameId};
+use lpc_wire::legacy::{LegacyServerMessage, SerializableProjectResponse};
 use lpc_wire::{
     WireNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
-use lpl_model::{LegacyServerMessage, SerializableProjectResponse};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -514,7 +514,7 @@ impl LpClient {
 /// to the engine client's ProjectResponse type.
 pub fn serializable_response_to_project_response(
     response: SerializableProjectResponse,
-) -> Result<lpl_model::ProjectResponse, Error> {
+) -> Result<lpc_wire::legacy::ProjectResponse, Error> {
     match response {
         SerializableProjectResponse::GetChanges {
             current_frame,
@@ -524,14 +524,14 @@ pub fn serializable_response_to_project_response(
             node_details,
             theoretical_fps,
         } => {
-            use lpl_model::{NodeDetail, ProjectResponse};
+            use lpc_wire::legacy::{NodeDetail, ProjectResponse, SerializableNodeDetail};
             use std::collections::BTreeMap;
 
             // Convert Vec<(NodeHandle, SerializableNodeDetail)> to BTreeMap<NodeHandle, NodeDetail>
             let mut node_details_map = BTreeMap::new();
             for (handle, serializable_detail) in node_details {
                 let detail = match serializable_detail {
-                    lpl_model::SerializableNodeDetail::Texture {
+                    SerializableNodeDetail::Texture {
                         path,
                         config,
                         state,
@@ -540,7 +540,7 @@ pub fn serializable_response_to_project_response(
                         config: Box::new(config),
                         state,
                     },
-                    lpl_model::SerializableNodeDetail::Shader {
+                    SerializableNodeDetail::Shader {
                         path,
                         config,
                         state,
@@ -549,7 +549,7 @@ pub fn serializable_response_to_project_response(
                         config: Box::new(config),
                         state,
                     },
-                    lpl_model::SerializableNodeDetail::Output {
+                    SerializableNodeDetail::Output {
                         path,
                         config,
                         state,
@@ -558,7 +558,7 @@ pub fn serializable_response_to_project_response(
                         config: Box::new(config),
                         state,
                     },
-                    lpl_model::SerializableNodeDetail::Fixture {
+                    SerializableNodeDetail::Fixture {
                         path,
                         config,
                         state,

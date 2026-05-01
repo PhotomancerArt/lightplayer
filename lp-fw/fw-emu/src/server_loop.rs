@@ -14,7 +14,7 @@ use lp_riscv_emu_guest::sys_yield;
 use lpa_server::LpServer;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpl_model::LegacyMessage;
+use lpc_wire::legacy::LegacyMessage;
 
 /// Block on a future until completion. Uses sys_yield when pending.
 fn block_on<F: Future>(future: F) -> F::Output {

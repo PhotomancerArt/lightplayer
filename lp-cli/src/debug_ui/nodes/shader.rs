@@ -1,5 +1,5 @@
 use lpc_view::NodeEntryView;
-use lpl_model::nodes::shader::ShaderState;
+use lpc_wire::legacy::nodes::shader::ShaderState;
 
 /// Render shader panel
 pub fn render_shader_panel(ui: &mut egui::Ui, entry: &NodeEntryView, state: &ShaderState) {

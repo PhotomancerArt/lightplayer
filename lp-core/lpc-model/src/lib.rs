@@ -1,7 +1,7 @@
 //! LightPlayer **core model** crate: **foundation** types (identity, addressing,
 //! Quantity model). Wire/protocol shapes live in `lpc-wire`.
 //!
-//! Legacy node configs (Texture / Shader / Output / Fixture) live in `lpl-model`.
+//! Legacy node configs (Texture / Shader / Output / Fixture) live in `lpc_source::legacy`.
 
 #![no_std]
 

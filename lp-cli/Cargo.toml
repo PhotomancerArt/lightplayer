@@ -23,7 +23,7 @@ eframe = "0.30"
 notify = "6"
 lpc-model = { path = "../lp-core/lpc-model" }
 lpc-wire = { path = "../lp-core/lpc-wire" }
-lpl-model = { path = "../lp-core/lpl-model", default-features = false }
+lpc-source = { path = "../lp-core/lpc-source", default-features = false }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }

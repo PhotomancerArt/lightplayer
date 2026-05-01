@@ -4,8 +4,8 @@
 
 use crate::transport::ClientTransport;
 use futures_util::{SinkExt, StreamExt};
+use lpc_wire::legacy::LegacyServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
-use lpl_model::LegacyServerMessage;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 

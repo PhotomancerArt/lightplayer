@@ -5,7 +5,7 @@ extern crate alloc;
 use crate::error::ServerError;
 use alloc::{format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lpc_engine::{LpGraphics, MemoryStatsFn, LegacyProjectRuntime};
+use lpc_engine::{LegacyProjectRuntime, LpGraphics, MemoryStatsFn};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
@@ -37,7 +37,6 @@ impl Project {
         time_provider: Option<Rc<dyn TimeProvider>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, ServerError> {
-        lpl_runtime::install();
         let runtime =
             LegacyProjectRuntime::new(fs, output_provider, memory_stats, time_provider, graphics)
                 .map_err(|e| ServerError::Core(format!("{e}")))?;

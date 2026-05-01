@@ -13,8 +13,8 @@ use lpc_engine::LpGraphics;
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
+use lpc_wire::legacy::{LegacyMessage, LegacyServerMessage};
 use lpfs::{FsChange, LpFs};
-use lpl_model::{LegacyMessage, LegacyServerMessage};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
@@ -114,7 +114,7 @@ impl LpServer {
     /// ```rust,no_run
     /// extern crate alloc;
     /// use lpc_model::AsLpPath;
-    /// use lpl_model::LegacyMessage;
+    /// use lpc_wire::legacy::LegacyMessage;
     /// use lpa_server::LpServer;
     /// use lpfs::LpFsMemory;
     /// use lpc_shared::output::MemoryOutputProvider;

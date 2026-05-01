@@ -57,7 +57,7 @@ pub trait NodeInitContext {
     fn get_texture_config(
         &self,
         handle: TextureHandle,
-    ) -> Result<lpl_model::nodes::texture::TextureConfig, Error>;
+    ) -> Result<lpc_source::legacy::nodes::texture::TextureConfig, Error>;
 
     /// Node handle of the shader that owns the shared CPU output buffer for this texture target.
     ///

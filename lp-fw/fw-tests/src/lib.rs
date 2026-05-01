@@ -35,9 +35,10 @@ pub async fn sync_emu_project_view(
 pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
+    use lpc_source::legacy::nodes::NodeKind;
     use lpc_view::ProjectView;
     use lpc_wire::WireNodeStatus;
-    use lpl_model::{NodeKind, NodeState};
+    use lpc_wire::legacy::NodeState;
 
     pub fn assert_shader_compiled_ok(view: &ProjectView, shader_path: &str) {
         let handle = view

@@ -1,5 +1,5 @@
 use lpc_wire::WireProjectRequest;
-use lpl_model::ProjectResponse;
+use lpc_wire::legacy::ProjectResponse;
 
 /// Client API trait - implemented by server connection
 pub trait ClientApi {

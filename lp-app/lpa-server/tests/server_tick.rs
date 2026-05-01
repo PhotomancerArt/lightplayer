@@ -141,7 +141,7 @@ fn test_server_tick_propagates_to_projects() {
         .runtime()
         .nodes
         .iter()
-        .find(|(_, entry)| entry.kind == lpl_model::NodeKind::Output)
+        .find(|(_, entry)| entry.kind == lpc_source::legacy::nodes::NodeKind::Output)
         .map(|(handle, _)| *handle)
         .expect("Output node should exist");
 

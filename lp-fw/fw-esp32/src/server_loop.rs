@@ -31,7 +31,7 @@ use lpc_shared::fps::FpsTracker;
 use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpl_model::LegacyMessage;
+use lpc_wire::legacy::{LegacyMessage, LegacyServerMessage};
 
 use crate::time::Esp32TimeProvider;
 
@@ -152,7 +152,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             });
 
             // Create heartbeat message
-            let heartbeat_msg = lpl_model::LegacyServerMessage {
+            let heartbeat_msg = LegacyServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
                 msg: lpc_wire::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,

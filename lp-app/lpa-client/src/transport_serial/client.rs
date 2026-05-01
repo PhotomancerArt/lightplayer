@@ -4,8 +4,8 @@
 //! Works with both emulator and hardware serial (future) via factory functions.
 
 use crate::transport::ClientTransport;
+use lpc_wire::legacy::LegacyServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
-use lpl_model::LegacyServerMessage;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -42,6 +42,7 @@ impl AsyncSerialClientTransport {
     /// * `server_rx` - Receiver for server messages
     /// * `shutdown_tx` - Shutdown signal sender
     /// * `thread_handle` - Handle to the backend thread
+    #[cfg(any(feature = "serial", test))]
     pub(crate) fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
         server_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,

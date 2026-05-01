@@ -8,6 +8,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod artifact;
+pub mod legacy;
 pub mod node;
 pub mod presentation;
 pub mod prop;

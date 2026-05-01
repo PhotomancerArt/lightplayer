@@ -27,9 +27,9 @@ use lp_riscv_inst::Gpr;
 use lpa_client::LpClient;
 use lpc_model::{AsLpPath, FrameId};
 use lpc_shared::ProjectBuilder;
+use lpc_source::legacy::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 use lpc_view::ProjectView;
 use lpfs::LpFsMemory;
-use lpl_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 
 /// UV-gradient shader: red varies with x, green varies with y.
 ///

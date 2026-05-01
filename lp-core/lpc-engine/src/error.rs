@@ -1,6 +1,6 @@
 use alloc::format;
 use alloc::string::String;
-use lpl_model::NodeKind;
+use lpc_source::legacy::nodes::NodeKind;
 
 /// Engine error type
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["lpc-model/std"]
+std = ["lpc-model/std", "lpc-source/std"]
 schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
 # Experimental: ser-write-json for streaming serialization (ESP32)
 ser-write-json = ["dep:ser-write-json"]
@@ -16,6 +16,7 @@ ser-write-json = ["dep:ser-write-json"]
 [dependencies]
 base64 = { workspace = true }
 lpc-model = { path = "../lpc-model", default-features = false }
+lpc-source = { path = "../lpc-source", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde-json-core = { version = "0.6", default-features = false, features = ["custom-error-messages"] }
 schemars = { workspace = true, optional = true }

@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn resolve_static_symbol_is_demangled_and_shortened() {
-        // v0-mangled (symbol still encodes legacy crate `lp_engine`): FixtureRuntime in lpl_runtime, NodeRuntime in lpc_runtime
+        // v0-mangled (symbol still encodes legacy crate `lp_engine`): FixtureRuntime in lpc_engine::legacy, NodeRuntime in lpc_runtime
         let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
         let resolver = resolver_from_meta_json(&format!(
             r#"{{
