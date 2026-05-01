@@ -411,7 +411,8 @@ fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<()
             // Reload config
             let (_, config_for_update) =
                 lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
-            let (_, new_config) = lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
+            let (_, new_config) =
+                lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
 
             // Update node entry config
             let has_runtime = {
