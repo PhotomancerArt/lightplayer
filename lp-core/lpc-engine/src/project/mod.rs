@@ -1,9 +1,9 @@
 pub mod hooks;
-pub mod loader;
+pub mod legacy_loader;
 pub mod project_runtime;
 
 pub use hooks::ProjectHooks;
-pub use loader::{discover_nodes, load_from_filesystem, load_node};
+pub use legacy_loader::{discover_nodes, legacy_load_from_filesystem, legacy_load_node};
 pub use project_runtime::{MemoryStatsFn, NodeEntry, NodeStatus, ProjectRuntime};
 
 // Re-export API types for convenience

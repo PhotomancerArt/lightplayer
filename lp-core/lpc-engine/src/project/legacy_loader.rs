@@ -8,7 +8,7 @@ use lpfs::LpFs;
 use lpl_model::{NodeConfig, NodeKind};
 
 /// Determine node kind from path suffix
-pub(crate) fn node_kind_from_path(path: &LpPathBuf) -> Result<NodeKind, Error> {
+pub(crate) fn legacy_node_kind_from_path(path: &LpPathBuf) -> Result<NodeKind, Error> {
     let path_str = path.as_str();
 
     // Find the last dot after the last slash
@@ -40,7 +40,7 @@ pub(crate) fn node_kind_from_path(path: &LpPathBuf) -> Result<NodeKind, Error> {
 }
 
 /// Check if a path is a node directory
-pub(crate) fn is_node_directory(path: &LpPathBuf) -> bool {
+pub(crate) fn legacy_is_node_directory(path: &LpPathBuf) -> bool {
     let path_str = path.as_str();
     path_str.ends_with(".texture")
         || path_str.ends_with(".shader")
@@ -49,7 +49,7 @@ pub(crate) fn is_node_directory(path: &LpPathBuf) -> bool {
 }
 
 /// Load project config from filesystem
-pub fn load_from_filesystem(fs: &dyn LpFs) -> Result<ProjectConfig, Error> {
+pub fn legacy_load_from_filesystem(fs: &dyn LpFs) -> Result<ProjectConfig, Error> {
     let path = "/project.json";
     let data = fs.read_file(path.as_path()).map_err(|e| Error::Io {
         path: path.to_string(),
@@ -91,7 +91,7 @@ pub fn discover_nodes(fs: &dyn LpFs) -> Result<Vec<LpPathBuf>, Error> {
 
     let mut nodes = Vec::new();
     for entry in entries {
-        if is_node_directory(&entry) {
+        if legacy_is_node_directory(&entry) {
             nodes.push(entry);
         }
     }
@@ -100,7 +100,7 @@ pub fn discover_nodes(fs: &dyn LpFs) -> Result<Vec<LpPathBuf>, Error> {
 }
 
 /// Load a node's config from filesystem
-pub fn load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn NodeConfig>), Error> {
+pub fn legacy_load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn NodeConfig>), Error> {
     let node_json_path = path.to_path_buf().join("node.json");
 
     let data = fs
@@ -111,7 +111,7 @@ pub fn load_node(fs: &dyn LpFs, path: &LpPath) -> Result<(LpPathBuf, Box<dyn Nod
         })?;
 
     // Determine node kind from path suffix
-    let kind = node_kind_from_path(&path.to_path_buf())?;
+    let kind = legacy_node_kind_from_path(&path.to_path_buf())?;
 
     // Parse config based on kind
     let config: Box<dyn NodeConfig> = match kind {

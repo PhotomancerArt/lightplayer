@@ -8,7 +8,7 @@ use alloc::{
 use core::panic::AssertUnwindSafe;
 use log;
 use lp_perf::EVENT_SHADER_COMPILE;
-use lpc_engine::NodeRuntime;
+use lpc_engine::LegacyNodeRuntime;
 use lpc_engine::error::Error;
 use lpc_engine::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use lpc_engine::output::OutputProvider;
@@ -115,7 +115,7 @@ impl ShaderRuntime {
     }
 }
 
-impl NodeRuntime for ShaderRuntime {
+impl LegacyNodeRuntime for ShaderRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         let config = self.config.clone().ok_or_else(|| Error::InvalidConfig {
             node_path: format!("shader-{}", self.node_handle.as_u32()),
@@ -457,6 +457,6 @@ mod tests {
         let handle = lpc_model::NodeId::new(0);
         let graphics: Arc<dyn LpGraphics> = Arc::new(lpc_engine::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
-        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

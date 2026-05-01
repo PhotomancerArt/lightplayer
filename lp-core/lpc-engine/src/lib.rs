@@ -27,7 +27,7 @@ pub mod wire_bridge;
 pub use bus::{Bus, BusError, ChannelEntry};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
-pub use nodes::NodeRuntime;
+pub use nodes::LegacyNodeRuntime;
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project::{MemoryStatsFn, ProjectRuntime};
 pub use prop::RuntimePropAccess;

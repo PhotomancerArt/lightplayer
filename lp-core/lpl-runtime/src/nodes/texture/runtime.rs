@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, format, string::ToString};
-use lpc_engine::NodeRuntime;
+use lpc_engine::LegacyNodeRuntime;
 use lpc_engine::error::Error;
 use lpc_engine::output::OutputProvider;
 use lpc_engine::runtime::contexts::{NodeInitContext, RenderContext};
@@ -53,7 +53,7 @@ impl TextureRuntime {
     }
 }
 
-impl NodeRuntime for TextureRuntime {
+impl LegacyNodeRuntime for TextureRuntime {
     fn init(&mut self, _ctx: &dyn NodeInitContext) -> Result<(), Error> {
         self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
             node_path: format!("texture-{}", self.node_handle.as_u32()),
@@ -122,6 +122,6 @@ mod tests {
         use lpc_model::NodeId;
         let handle = NodeId::new(0);
         let runtime = TextureRuntime::new(handle);
-        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

@@ -27,7 +27,7 @@ impl ProjectRuntime {
     ) -> Result<Self, Error> {
         lp_perf::emit_begin!(EVENT_PROJECT_LOAD);
         let result = (|| -> Result<Self, Error> {
-            let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
+            let _config = crate::project::legacy_loader::legacy_load_from_filesystem(&*fs.borrow())?;
 
             Ok(Self {
                 frame_id: FrameId::default(),
@@ -61,10 +61,10 @@ impl ProjectRuntime {
 
     /// Load nodes from filesystem (doesn't initialize them)
     pub fn load_nodes(&mut self) -> Result<(), Error> {
-        let node_paths = crate::project::loader::discover_nodes(&*self.fs.borrow())?;
+        let node_paths = crate::project::legacy_loader::discover_nodes(&*self.fs.borrow())?;
 
         for path in node_paths {
-            match crate::project::loader::load_node(&*self.fs.borrow(), &path) {
+            match crate::project::legacy_loader::legacy_load_node(&*self.fs.borrow(), &path) {
                 Ok((path, config)) => {
                     let handle = NodeId::new(self.next_handle);
                     self.next_handle += 1;
@@ -89,7 +89,7 @@ impl ProjectRuntime {
                     self.next_handle += 1;
 
                     // Try to determine kind from path
-                    let kind = match crate::project::loader::node_kind_from_path(&path) {
+                    let kind = match crate::project::legacy_loader::legacy_node_kind_from_path(&path) {
                         Ok(k) => k,
                         Err(_) => continue, // Skip unknown types
                     };
@@ -281,7 +281,7 @@ impl ProjectRuntime {
 
     /// Load a single node by path
     pub fn load_node_by_path(&mut self, path: &LpPath) -> Result<NodeId, Error> {
-        match crate::project::loader::load_node(&*self.fs.borrow(), path) {
+        match crate::project::legacy_loader::legacy_load_node(&*self.fs.borrow(), path) {
             Ok((path, config)) => {
                 let handle = NodeId::new(self.next_handle);
                 self.next_handle += 1;

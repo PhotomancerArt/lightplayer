@@ -8,7 +8,7 @@ use lpfs::FsChange;
 use lpl_model::NodeConfig;
 
 /// Node runtime trait - all node runtimes implement this
-pub trait NodeRuntime: Send + Sync {
+pub trait LegacyNodeRuntime: Send + Sync {
     /// Initialize the node
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error>;
 

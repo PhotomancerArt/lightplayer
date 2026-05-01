@@ -4,7 +4,7 @@ use crate::nodes::fixture::mapping::{
     generate_mapping_points,
 };
 use alloc::{boxed::Box, format, string::String, vec::Vec};
-use lpc_engine::NodeRuntime;
+use lpc_engine::LegacyNodeRuntime;
 use lpc_engine::error::Error;
 use lpc_engine::output::OutputProvider;
 use lpc_engine::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
@@ -189,7 +189,7 @@ impl FixtureRuntime {
     }
 }
 
-impl NodeRuntime for FixtureRuntime {
+impl LegacyNodeRuntime for FixtureRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         // Get config
         let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn test_fixture_runtime_creation() {
         let runtime = FixtureRuntime::new();
-        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 
     #[test]

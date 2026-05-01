@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lpc_engine::NodeRuntime;
+use lpc_engine::LegacyNodeRuntime;
 use lpc_engine::error::Error;
 use lpc_engine::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 use lpc_engine::runtime::contexts::{NodeInitContext, RenderContext};
@@ -108,7 +108,7 @@ fn options_for_open(cfg: &OutputConfig) -> Option<DisplayPipelineOptions> {
     }
 }
 
-impl NodeRuntime for OutputRuntime {
+impl LegacyNodeRuntime for OutputRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         // Get config
         let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
@@ -263,6 +263,6 @@ mod tests {
     #[test]
     fn test_output_runtime_creation() {
         let runtime = OutputRuntime::new();
-        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

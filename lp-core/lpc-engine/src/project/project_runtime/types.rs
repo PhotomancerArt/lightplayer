@@ -1,5 +1,5 @@
 use crate::gfx::LpGraphics;
-use crate::nodes::NodeRuntime;
+use crate::nodes::LegacyNodeRuntime;
 use crate::output::OutputProvider;
 use crate::runtime::frame_time::FrameTime;
 use alloc::boxed::Box;
@@ -53,7 +53,7 @@ pub struct NodeEntry {
     /// Frame when status was last changed
     pub status_ver: FrameId,
     /// Node runtime (None until initialized)
-    pub runtime: Option<Box<dyn NodeRuntime>>,
+    pub runtime: Option<Box<dyn LegacyNodeRuntime>>,
     /// Last frame state updates occurred
     pub state_ver: FrameId,
 }

@@ -19,7 +19,7 @@ use core::cell::RefCell;
 use log;
 use lp_perf::EVENT_FRAME;
 use lpc_engine::error::Error;
-use lpc_engine::nodes::NodeRuntime;
+use lpc_engine::nodes::LegacyNodeRuntime;
 use lpc_engine::output::OutputProvider;
 use lpc_engine::panic_node::catch_node_panic;
 use lpc_engine::project::ProjectRuntime;
@@ -160,7 +160,7 @@ pub fn init_nodes(rt: &mut ProjectRuntime) -> Result<(), Error> {
             };
 
             // Create runtime based on kind
-            let mut runtime: Box<dyn NodeRuntime> = match node_kind {
+            let mut runtime: Box<dyn LegacyNodeRuntime> = match node_kind {
                 NodeKind::Texture => {
                     let mut tex_runtime = TextureRuntime::new(handle);
                     if let Some(config) = texture_config {
@@ -293,7 +293,7 @@ pub fn tick(rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
                     // Both need mutable access, but runtime is inside ctx.nodes
                     // This creates a borrowing conflict
                     // Workaround: use unsafe to get raw pointer (not ideal, but works)
-                    let runtime_ptr: *mut dyn NodeRuntime = runtime.as_mut();
+                    let runtime_ptr: *mut dyn LegacyNodeRuntime = runtime.as_mut();
                     // SAFETY: runtime_ptr is valid for the duration of this block
                     // We're not storing it or using it after the block
                     unsafe { (*runtime_ptr).render(&mut ctx) }
@@ -338,7 +338,7 @@ pub fn tick(rt: &mut ProjectRuntime, delta_ms: u32) -> Result<(), Error> {
 
             if let Some(entry) = ctx.nodes.get_mut(&handle) {
                 if let Some(runtime) = entry.runtime.as_mut() {
-                    let runtime_ptr: *mut dyn NodeRuntime = runtime.as_mut();
+                    let runtime_ptr: *mut dyn LegacyNodeRuntime = runtime.as_mut();
                     unsafe { (*runtime_ptr).render(&mut ctx) }
                 } else {
                     Ok(())
@@ -410,8 +410,8 @@ fn handle_modify_change(rt: &mut ProjectRuntime, change: &FsChange) -> Result<()
         if change.path.has_suffix("/node.json") {
             // Reload config
             let (_, config_for_update) =
-                lpc_engine::project::loader::load_node(&*rt.fs.borrow(), &path)?;
-            let (_, new_config) = lpc_engine::project::loader::load_node(&*rt.fs.borrow(), &path)?;
+                lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
+            let (_, new_config) = lpc_engine::project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;
 
             // Update node entry config
             let has_runtime = {
@@ -1301,7 +1301,7 @@ impl<'a> RenderContextImpl<'a> {
                         // render() needs &mut self (runtime) and &mut ctx
                         // Both need mutable access, but runtime is inside ctx.nodes
                         // Workaround: use unsafe to get raw pointer
-                        let runtime_ptr: *mut dyn NodeRuntime = runtime.as_mut();
+                        let runtime_ptr: *mut dyn LegacyNodeRuntime = runtime.as_mut();
                         // SAFETY: runtime_ptr is valid for the duration of this block
                         // We're not storing it or using it after the block
                         unsafe { (*runtime_ptr).render(&mut ctx) }
