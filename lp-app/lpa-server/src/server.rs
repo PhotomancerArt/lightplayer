@@ -256,7 +256,7 @@ impl LpServer {
                 log::debug!(
                     "LpServer::tick: Project {} frame_id: {}",
                     project.name(),
-                    project.runtime().frame_id.as_i64()
+                    project.runtime().frame_id().as_i64()
                 );
             }
         }

@@ -1,49 +1,38 @@
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpc_engine::{Graphics, LegacyProjectRuntime, LpGraphics, MemoryOutputProvider};
-use lpc_model::AsLpPath;
+use lpc_engine::{CoreProjectLoader, CoreProjectRuntime, Graphics, LpGraphics, RuntimeServices};
+use lpc_model::{AsLpPath, TreePath};
 use lpc_shared::ProjectBuilder;
+use lpc_shared::output::{
+    MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
+};
 use lpfs::LpFsMemory;
 
 #[test]
-fn test_node_toml_modification() {
+fn node_toml_modification_is_accepted_without_m4_reload() {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
 
-    // Add nodes
     let texture_path = builder.texture_basic();
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
-
-    // Build project
     builder.build();
     fs.borrow_mut().reset_changes();
 
-    // Create output provider
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
-
-    // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime =
-        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics)
-            .unwrap();
-    runtime.load_nodes().unwrap();
-    runtime.init_nodes().unwrap();
-    runtime.ensure_all_nodes_initialized().unwrap();
-
-    // Get shader handle
+    let output_provider = Rc::new(MemoryOutputProvider::new());
+    let mut runtime = load_core_runtime(&fs, output_provider);
     let shader_handle = runtime
-        .handle_for_path("/src/shader-1.shader".as_path())
-        .unwrap();
+        .legacy_src_node_id("/src/shader-1.shader".as_path())
+        .expect("shader handle");
 
-    // Render a frame to get baseline
     runtime.tick(4).unwrap();
+    let before_change = runtime.frame_id();
 
-    // Modify shader config (change render_order)
     let shader_config_path = "/src/shader-1.shader/node.toml";
     let new_config = r#"glsl_path = "main.glsl"
 texture_spec = "/src/texture-1.texture"
@@ -58,75 +47,59 @@ render_order = 10
     runtime.handle_fs_changes(&changes).unwrap();
     fs.borrow_mut().reset_changes();
 
-    // Advance frame to update frame_id
     runtime.tick(4).unwrap();
 
-    // Verify the change was applied by checking the node's config_ver was updated
-    // Get the frame ID before the change (2 frames ago)
-    let before_frame = lpc_model::FrameId::new((runtime.frame_id.as_i64() - 2).max(0));
     let response = runtime
         .get_changes(
-            before_frame,
+            before_change,
             &lpc_wire::WireNodeSpecifier::ByHandles(vec![shader_handle]),
             None,
         )
         .unwrap();
 
     match response {
-        lpc_wire::legacy::ProjectResponse::GetChanges { node_changes, .. } => {
-            // Should have a ConfigUpdated change
+        lpc_wire::legacy::ProjectResponse::GetChanges {
+            current_frame,
+            node_handles,
+            node_changes,
+            node_details,
+            ..
+        } => {
+            assert_eq!(current_frame, runtime.frame_id());
+            assert!(node_handles.contains(&shader_handle));
             assert!(
-                node_changes.iter().any(|change| matches!(
+                !node_changes.iter().any(|change| matches!(
                     change,
-                    lpc_wire::legacy::NodeChange::ConfigUpdated { .. }
+                    lpc_wire::legacy::NodeChange::ConfigUpdated { handle, .. } if *handle == shader_handle
                 )),
-                "Expected ConfigUpdated change after node.toml modification"
+                "M4 does not reload node.toml changes on the core runtime path"
+            );
+            assert!(
+                node_details.is_empty(),
+                "M4 compatibility projection is metadata-only"
             );
         }
     }
 }
 
 #[test]
-fn test_main_glsl_modification() {
+fn main_glsl_modification_keeps_existing_shader_until_reload_lands() {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
 
-    // Add nodes
     let texture_path = builder.texture_basic();
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
-
-    // Build project
     builder.build();
     fs.borrow_mut().reset_changes();
 
-    // Create output provider
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let output_provider = Rc::new(MemoryOutputProvider::new());
+    let mut runtime = load_core_runtime(&fs, output_provider.clone());
 
-    // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime =
-        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics)
-            .unwrap();
-    runtime.load_nodes().unwrap();
-    runtime.init_nodes().unwrap();
-    runtime.ensure_all_nodes_initialized().unwrap();
+    runtime.tick(40).unwrap();
+    let baseline_data = output_data(&output_provider, 0);
 
-    // Render a frame to get baseline output
-    runtime.tick(4).unwrap();
-    let baseline_data = output_provider
-        .borrow()
-        .get_data(
-            output_provider
-                .borrow()
-                .get_handle_for_pin(0)
-                .expect("Output channel should be open"),
-        )
-        .expect("Output channel should have data")
-        .to_vec();
-
-    // Modify shader GLSL (change the color)
     fs.borrow_mut()
         .write_file_mut(
             "/src/shader-1.shader/main.glsl".as_path(),
@@ -146,80 +119,101 @@ fn test_main_glsl_modification() {
     runtime.handle_fs_changes(&changes).unwrap();
     fs.borrow_mut().reset_changes();
 
-    // Render another frame to apply the shader changes
-    runtime.tick(4).unwrap();
+    runtime.tick(40).unwrap();
+    let new_data = output_data(&output_provider, 0);
 
-    // Verify the shader was recompiled and applied
-    let new_data = output_provider
-        .borrow()
-        .get_data(
-            output_provider
-                .borrow()
-                .get_handle_for_pin(0)
-                .expect("Output channel should be open"),
-        )
-        .expect("Output channel should have data");
-
-    // The output should now be green (G channel) instead of red (R channel)
-    // Baseline had red, new should have green
-    assert_ne!(
-        baseline_data[0], new_data[0],
-        "Red channel should change after GLSL modification"
+    assert!(
+        new_data[0] > baseline_data[0],
+        "existing red shader should continue advancing until source reload lands"
     );
-    assert_ne!(
-        baseline_data[1], new_data[1],
-        "Green channel should change after GLSL modification"
+    assert_eq!(
+        new_data[1], 0,
+        "M4 should not recompile to the green shader"
     );
 }
 
 #[test]
-fn test_node_deletion() {
+fn node_deletion_is_ignored_by_m4_core_runtime_reload_noop() {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
 
-    // Add nodes
     let texture_path = builder.texture_basic();
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
-
-    // Build project
     builder.build();
     fs.borrow_mut().reset_changes();
 
-    // Create output provider
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let output_provider = Rc::new(MemoryOutputProvider::new());
+    let mut runtime = load_core_runtime(&fs, output_provider);
+    let shader_handle = runtime
+        .legacy_src_node_id("/src/shader-1.shader".as_path())
+        .expect("shader handle");
 
-    // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime =
-        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics)
-            .unwrap();
-    runtime.load_nodes().unwrap();
-    runtime.init_nodes().unwrap();
-    runtime.ensure_all_nodes_initialized().unwrap();
-
-    // Get shader handle
-    let _shader_handle = runtime
-        .handle_for_path("/src/shader-1.shader".as_path())
-        .unwrap();
-
-    // Delete node.toml
     let shader_config_path = "/src/shader-1.shader/node.toml";
     fs.borrow_mut()
         .delete_file_mut(shader_config_path.as_path())
         .unwrap();
 
-    // Get filesystem changes
     let changes = fs.borrow().get_changes();
     runtime.handle_fs_changes(&changes).unwrap();
     fs.borrow_mut().reset_changes();
 
-    // Verify the node was removed
-    assert!(
-        runtime
-            .handle_for_path("/src/shader-1.shader".as_path())
-            .is_err(),
-        "Node should be removed after node.toml deletion"
+    assert_eq!(
+        runtime.legacy_src_node_id("/src/shader-1.shader".as_path()),
+        Some(shader_handle),
+        "M4 keeps the loaded core node until source reload/deletion lands"
     );
+    runtime.tick(4).expect("loaded runtime should still tick");
+}
+
+#[derive(Clone)]
+struct RcMemoryOutput(Rc<MemoryOutputProvider>);
+
+impl OutputProvider for RcMemoryOutput {
+    fn open(
+        &self,
+        pin: u32,
+        byte_count: u32,
+        format: OutputFormat,
+        options: Option<OutputDriverOptions>,
+    ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
+        self.0.open(pin, byte_count, format, options)
+    }
+
+    fn write(
+        &self,
+        handle: OutputChannelHandle,
+        data: &[u16],
+    ) -> Result<(), lpc_shared::error::OutputError> {
+        self.0.write(handle, data)
+    }
+
+    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
+        self.0.close(handle)
+    }
+}
+
+fn load_core_runtime(
+    fs: &Rc<RefCell<LpFsMemory>>,
+    output_provider: Rc<MemoryOutputProvider>,
+) -> CoreProjectRuntime {
+    let root_path = TreePath::parse("/test.show").expect("root path");
+    let mut services = RuntimeServices::new(root_path);
+    services.set_output_provider(Some(Box::new(RcMemoryOutput(output_provider))));
+
+    let fs_ref = fs.borrow();
+    let mut runtime = CoreProjectLoader::load_from_root(&*fs_ref, services).expect("load core");
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    runtime.engine_mut().set_graphics(Some(graphics));
+    runtime
+}
+
+fn output_data(provider: &MemoryOutputProvider, pin: u32) -> Vec<u16> {
+    let handle = provider
+        .get_handle_for_pin(pin)
+        .expect("Output channel should be open");
+    provider
+        .get_data(handle)
+        .expect("Output channel should have data")
 }

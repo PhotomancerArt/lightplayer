@@ -50,9 +50,10 @@ impl ProjectManager {
     /// Create a new project
     ///
     /// Creates the project directory structure using the provided filesystem.
-    /// todo!("Refactor to use new ProjectRuntime API")
-    pub fn create_project(&mut self, _name: String, _fs: Box<dyn LpFs>) -> Result<(), ServerError> {
-        todo!("Refactor to use new ProjectRuntime API")
+    pub fn create_project(&mut self, name: String, _fs: Box<dyn LpFs>) -> Result<(), ServerError> {
+        Err(ServerError::Core(format!(
+            "Project creation is not implemented for the core runtime path: {name}"
+        )))
     }
 
     /// Load a project from the filesystem
@@ -98,8 +99,8 @@ impl ProjectManager {
             .chroot(project_path.as_path())
             .map_err(|e| ServerError::Filesystem(format!("Failed to chroot to project: {e}")))?;
 
-        // Create a new project instance
-        let mut project = Project::new(
+        // Create and load a core project runtime from the project-scoped filesystem.
+        let project = Project::new(
             name.clone(),
             project_path.as_path(),
             project_fs,
@@ -108,24 +109,6 @@ impl ProjectManager {
             time_provider,
             graphics,
         )?;
-
-        // Auto-initialize the project runtime
-        project.runtime_mut().load_nodes().map_err(|e| {
-            ServerError::Core(format!("Failed to load nodes for project {name}: {e}"))
-        })?;
-        project.runtime_mut().init_nodes().map_err(|e| {
-            ServerError::Core(format!(
-                "Failed to initialize nodes for project {name}: {e}"
-            ))
-        })?;
-        project
-            .runtime_mut()
-            .ensure_all_nodes_initialized()
-            .map_err(|e| {
-                ServerError::Core(format!(
-                    "Failed to ensure all nodes initialized for project {name}: {e}"
-                ))
-            })?;
 
         // Store mappings
         self.projects.insert(handle, project);
@@ -164,15 +147,10 @@ impl ProjectManager {
     /// Removes the project from memory but doesn't delete it from the filesystem.
     /// Output channels and other resources are freed before removal.
     pub fn unload_project(&mut self, handle: ProjectHandle) -> Result<(), ServerError> {
-        let mut project = self
+        let project = self
             .projects
             .remove(&handle)
             .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
-
-        project
-            .runtime_mut()
-            .destroy_all_nodes()
-            .map_err(|e| ServerError::Core(format!("Failed to destroy project nodes: {e}")))?;
 
         let name = project.name();
         self.name_to_handle.remove(name);
@@ -186,12 +164,7 @@ impl ProjectManager {
     /// Output channels and other resources are freed before removal.
     /// Note: next_handle_id is not reset - handles continue incrementing.
     pub fn unload_all_projects(&mut self) -> Result<(), ServerError> {
-        for (_, mut project) in self.projects.drain() {
-            project
-                .runtime_mut()
-                .destroy_all_nodes()
-                .map_err(|e| ServerError::Core(format!("Failed to destroy project nodes: {e}")))?;
-        }
+        self.projects.clear();
         self.name_to_handle.clear();
         Ok(())
     }

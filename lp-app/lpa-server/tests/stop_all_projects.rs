@@ -18,9 +18,9 @@ fn test_stop_all_projects() {
 
     // Add nodes
     let texture_path = builder.texture_basic();
-    builder.shader_basic(&texture_path);
+    let shader_path = builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
-    builder.fixture_basic(&output_path, &texture_path);
+    let fixture_path = builder.fixture_basic(&output_path, &texture_path);
 
     // Build project (creates files at root of temp_fs)
     builder.build();
@@ -44,9 +44,9 @@ fn test_stop_all_projects() {
     // Copy all node files
     let node_paths = vec![
         texture_path.to_path_buf(),
-        "/src/shader-0.shader".as_path_buf(),
+        shader_path.to_path_buf(),
         output_path.to_path_buf(),
-        "/src/fixture-0.fixture".as_path_buf(),
+        fixture_path.to_path_buf(),
     ];
 
     for node_path in &node_paths {

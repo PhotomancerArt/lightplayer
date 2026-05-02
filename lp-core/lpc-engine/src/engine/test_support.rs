@@ -21,7 +21,8 @@ use crate::resolver::{
 };
 use crate::tree::test_placeholder_spine;
 
-use super::engine::{default_demand_input_path, resolve_with_engine_host};
+use super::engine::default_demand_input_path;
+use super::resolve_with_engine_host;
 
 pub(crate) struct EngineTestBuilder {
     engine: Engine,

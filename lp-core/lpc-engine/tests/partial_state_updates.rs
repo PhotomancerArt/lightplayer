@@ -1,39 +1,26 @@
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpc_engine::{Graphics, LegacyProjectRuntime, LpGraphics, MemoryOutputProvider};
-use lpc_model::AsLpPath;
-use lpc_model::NodeSpec;
+use lpc_engine::{CoreProjectLoader, CoreProjectRuntime, Graphics, LpGraphics, RuntimeServices};
+use lpc_model::{AsLpPath, TreePath};
 use lpc_shared::ProjectBuilder;
-use lpc_source::legacy::nodes::fixture::{
-    ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder,
+use lpc_shared::output::{
+    MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
+use lpc_source::legacy::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 use lpfs::LpFsMemory;
 
-/// Integration test for partial state updates
-///
-/// This test verifies that field-level state tracking works correctly:
-/// 1. Initial sync includes all fields (lamp_colors and mapping_cells)
-/// 2. After rendering another frame, only lamp_colors change (mapping_cells unchanged)
-/// 3. After updating config and rendering, mapping_cells change
-///
-/// The partial serialization (omitting unchanged fields) is tested implicitly:
-/// - Field-level tracking ensures only changed fields have updated changed_frame
-/// - Custom serialization uses changed_frame to determine which fields to include
-/// - This test verifies the tracking logic works, which is the foundation for partial serialization
 #[test]
 fn test_partial_state_updates() {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
 
-    // Add nodes
     let texture_path = builder.texture_basic();
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
-
-    // Create fixture with initial mapping
     builder
         .fixture(&output_path, &texture_path)
         .mapping(MappingConfig::PathPoints {
@@ -50,32 +37,17 @@ fn test_partial_state_updates() {
         })
         .add(&mut builder);
 
-    // Build project
     builder.build();
     fs.borrow_mut().reset_changes();
 
-    // Create output provider
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
-
-    // Start runtime
-    let mut runtime =
-        LegacyProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics)
-            .unwrap();
-    runtime.load_nodes().unwrap();
-    runtime.init_nodes().unwrap();
-    runtime.ensure_all_nodes_initialized().unwrap();
-
-    // Get fixture handle
+    let output_provider = Rc::new(MemoryOutputProvider::new());
+    let mut runtime = load_core_runtime(&fs, output_provider);
     let fixture_handle = runtime
-        .handle_for_path("/src/fixture-1.fixture".as_path())
-        .unwrap();
+        .legacy_src_node_id("/src/fixture-1.fixture".as_path())
+        .expect("fixture handle");
 
-    // Render initial frame - this sets both lamp_colors and mapping_cells
     runtime.tick(4).unwrap();
-    let initial_frame = runtime.frame_id;
-
-    // Get initial sync (all fields should be present)
+    let initial_frame = runtime.frame_id();
     let initial_response = runtime
         .get_changes(
             lpc_model::FrameId::default(),
@@ -84,37 +56,9 @@ fn test_partial_state_updates() {
         )
         .unwrap();
 
-    let (initial_lamp_colors, initial_mapping_cells) = match initial_response {
-        lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } => {
-            let detail = node_details
-                .get(&fixture_handle)
-                .expect("Fixture detail should be present");
-            match &detail.state {
-                lpc_wire::legacy::NodeState::Fixture(state) => {
-                    // Verify initial state has both fields
-                    assert!(
-                        !state.lamp_colors.value().is_empty(),
-                        "Initial state should have lamp_colors"
-                    );
-                    assert!(
-                        !state.mapping_cells.value().is_empty(),
-                        "Initial state should have mapping_cells"
-                    );
-                    (
-                        state.lamp_colors.value().clone(),
-                        state.mapping_cells.value().clone(),
-                    )
-                }
-                _ => panic!("Expected Fixture state"),
-            }
-        }
-    };
+    assert_metadata_only_fixture_projection(&initial_response, fixture_handle);
 
-    // Render another frame - only lamp_colors should change
     runtime.tick(4).unwrap();
-    let after_lamp_colors_frame = runtime.frame_id;
-
-    // Get changes since initial_frame - should only include lamp_colors
     let lamp_colors_response = runtime
         .get_changes(
             initial_frame,
@@ -123,125 +67,71 @@ fn test_partial_state_updates() {
         )
         .unwrap();
 
-    // Verify that partial updates work by checking state values
-    // When we request changes since initial_frame, only lamp_colors should have changed
-    // (mapping_cells should remain the same since config didn't change)
-    //
-    // Note: The partial serialization (omitting unchanged fields from JSON) is tested implicitly:
-    // - Field-level tracking ensures only changed fields have updated changed_frame
-    // - Custom serialization uses changed_frame to determine which fields to include
-    // - This test verifies the tracking logic works, which is the foundation for partial serialization
+    assert_metadata_only_fixture_projection(&lamp_colors_response, fixture_handle);
+}
 
-    // Get the state from the response
-    let (lamp_colors_after, mapping_cells_after) = match lamp_colors_response {
-        lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } => {
-            let detail = node_details
-                .get(&fixture_handle)
-                .expect("Fixture detail should be present");
-            match &detail.state {
-                lpc_wire::legacy::NodeState::Fixture(state) => (
-                    state.lamp_colors.value().clone(),
-                    state.mapping_cells.value().clone(),
-                ),
-                _ => panic!("Expected Fixture state"),
-            }
-        }
-    };
+#[derive(Clone)]
+struct RcMemoryOutput(Rc<MemoryOutputProvider>);
 
-    // Verify lamp_colors changed (different from initial)
-    assert_ne!(
-        lamp_colors_after, initial_lamp_colors,
-        "lamp_colors should have changed"
-    );
+impl OutputProvider for RcMemoryOutput {
+    fn open(
+        &self,
+        pin: u32,
+        byte_count: u32,
+        format: OutputFormat,
+        options: Option<OutputDriverOptions>,
+    ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
+        self.0.open(pin, byte_count, format, options)
+    }
 
-    // Verify mapping_cells are the same (shouldn't have changed)
-    assert_eq!(
-        mapping_cells_after, initial_mapping_cells,
-        "mapping_cells should not have changed"
-    );
+    fn write(
+        &self,
+        handle: OutputChannelHandle,
+        data: &[u16],
+    ) -> Result<(), lpc_shared::error::OutputError> {
+        self.0.write(handle, data)
+    }
 
-    // Now update the fixture config with new mapping
-    let fixture_config_path = "/src/fixture-1.fixture/node.toml";
-    let new_config = FixtureConfig {
-        output_spec: NodeSpec::from("/src/output-1.output"),
-        texture_spec: NodeSpec::from("/src/texture-1.texture"),
-        mapping: MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.7, 0.7),
-                diameter: 0.15,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 3,
-                ring_lamp_counts: vec![1, 4, 8],
-                offset_angle: 0.5,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 3.0,
-        },
-        color_order: ColorOrder::Rgb,
-        transform: [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        brightness: None,
-        gamma_correction: None,
-    };
-    let config_toml =
-        toml::to_string(&new_config).expect("Failed to serialize fixture config to TOML");
-    fs.borrow_mut()
-        .write_file_mut(fixture_config_path.as_path(), config_toml.as_bytes())
-        .unwrap();
+    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
+        self.0.close(handle)
+    }
+}
 
-    // Get filesystem changes and apply them
-    let changes = fs.borrow().get_changes();
-    runtime.handle_fs_changes(&changes).unwrap();
-    fs.borrow_mut().reset_changes();
+fn load_core_runtime(
+    fs: &Rc<RefCell<LpFsMemory>>,
+    output_provider: Rc<MemoryOutputProvider>,
+) -> CoreProjectRuntime {
+    let root_path = TreePath::parse("/test.show").expect("root path");
+    let mut services = RuntimeServices::new(root_path);
+    services.set_output_provider(Some(Box::new(RcMemoryOutput(output_provider))));
 
-    // Render another frame - this should regenerate mapping and update mapping_cells
-    runtime.tick(4).unwrap();
+    let fs_ref = fs.borrow();
+    let mut runtime = CoreProjectLoader::load_from_root(&*fs_ref, services).expect("load core");
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    runtime.engine_mut().set_graphics(Some(graphics));
+    runtime
+}
 
-    // Get changes since after_lamp_colors_frame - should include mapping_cells
-    let mapping_response = runtime
-        .get_changes(
-            after_lamp_colors_frame,
-            &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
-            None,
-        )
-        .unwrap();
-
-    let new_mapping_cells = match mapping_response {
-        lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } => {
-            let detail = node_details
-                .get(&fixture_handle)
-                .expect("Fixture detail should be present");
-            match &detail.state {
-                lpc_wire::legacy::NodeState::Fixture(state) => state.mapping_cells.value().clone(),
-                _ => panic!("Expected Fixture state"),
-            }
-        }
-    };
-
-    // Verify mapping_cells changed (different from before)
-    assert_ne!(
-        new_mapping_cells, initial_mapping_cells,
-        "mapping_cells should have changed after config update"
-    );
-
-    // Verify the new mapping_cells have the expected values (different points)
+fn assert_metadata_only_fixture_projection(
+    response: &lpc_wire::legacy::ProjectResponse,
+    fixture_handle: lpc_model::NodeId,
+) {
+    let lpc_wire::legacy::ProjectResponse::GetChanges {
+        node_handles,
+        node_changes,
+        node_details,
+        ..
+    } = response;
+    assert!(node_handles.contains(&fixture_handle));
     assert!(
-        !new_mapping_cells.is_empty(),
-        "New mapping_cells should not be empty"
+        node_changes.iter().any(|change| matches!(
+            change,
+            lpc_wire::legacy::NodeChange::StateUpdated { handle, .. } if *handle == fixture_handle
+        )),
+        "M4 should still project fixture state metadata"
     );
-
-    // The new mapping should have different center coordinates
-    // (we changed from center (0.2, 0.2) to (0.7, 0.7))
-    let first_cell = &new_mapping_cells[0];
-    // The center should be different (transformed coordinates will differ)
-    // We can't easily compare exact values, but we can verify it's not the same as initial
-    let initial_first_cell = &initial_mapping_cells[0];
-    assert_ne!(
-        first_cell.center, initial_first_cell.center,
-        "Mapping cell centers should differ after config change"
+    assert!(
+        node_details.is_empty(),
+        "M4 defers fixture lamp_colors/mapping_cells detail sync to M4.1"
     );
 }

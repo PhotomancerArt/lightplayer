@@ -1,14 +1,13 @@
-//! Object-safe reflection over a node's *produced* fields (outputs and state)
-//! at engine runtime.
+//! Temporary **scalar** reflection for bridge/sync: [`lps_shared::LpsValueF32`] fields only.
 //!
 //! Payloads here are **shader- and wire-compatible** [`lps_shared::LpsValueF32`];
-//! sync paths use [`lpc_model::ModelValue`] via [`crate::wire_bridge`]. This trait
-//! is a **data / legacy bridge**: it does not carry the engine's
-//! [`crate::runtime_product::RuntimeProduct`] envelope. Demand-driven resolution
-//! that can return [`crate::runtime_product::RuntimeProduct::Render`] (and other
-//! domains) lives on [`crate::resolver::production::Production`] via
-//! `ResolveSession` / [`crate::node::contexts::TickContext::resolve`], not on
-//! this API.
+//! sync paths use [`lpc_model::ModelValue`] via [`crate::wire_bridge`].
+//!
+//! This is legacy-shaped node “props” introspection, not the authoritative
+//! output model. Non-scalar node products (e.g. [`crate::runtime_product::RuntimeProduct::Render`])
+//! are exposed through [`crate::prop::RuntimeOutputAccess`] on [`crate::node::Node`].
+//! Demand-driven resolution still flows through [`crate::resolver::production::Production`]
+//! / [`crate::node::contexts::TickContext::resolve`].
 
 use alloc::boxed::Box;
 
@@ -16,14 +15,13 @@ use lpc_model::project::FrameId;
 use lpc_model::prop::PropPath;
 use lps_shared::LpsValueF32;
 
-/// Object-safe reflection over a node's *produced* fields (outputs and state).
+/// Scalar / legacy reflection over fields exposed for wire and slot resolvers.
 ///
 /// Implemented by runtime `*Props` structs; consumed by sync, the slot
 /// resolver cascade ([`crate::resolver::resolver_context::ResolverContext`]), and
 /// tooling before values cross the wire as [`lpc_model::ModelValue`].
 ///
-/// For the versioned **production** envelope (`Value` vs `Render` domains), use
-/// the resolver session path instead of this trait.
+/// See [`crate::prop::RuntimeOutputAccess`] for node-owned non-scalar products.
 pub trait RuntimePropAccess {
     /// Get the current value at `path`, if any.
     fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)>;

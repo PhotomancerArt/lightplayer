@@ -180,7 +180,7 @@ fn handle_project_request(
             since_frame,
             detail_specifier,
         } => {
-            let current_frame_before = project.runtime_mut().frame_id;
+            let current_frame_before = project.runtime().frame_id();
             log::debug!(
                 "handle_project_request: GetChanges request (since_frame: {}, current_frame: {})",
                 since_frame.as_i64(),

@@ -4,6 +4,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lpc_model::prop::prop_path::{PropPath, Segment};
@@ -11,8 +12,11 @@ use lpc_model::{FrameId, NodeId, TreePath, Versioned};
 
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
+use crate::gfx::LpGraphics;
 use crate::node::{Node, TickContext};
-use crate::render_product::RenderProductStore;
+use crate::render_product::{
+    RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch, RenderSampleBatchResult,
+};
 use crate::resolver::{
     Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -24,7 +28,7 @@ use crate::tree::{EntryState, NodeTree};
 use super::EngineError;
 
 /// Conventional demand input used by the M2 engine slice.
-pub(super) fn default_demand_input_path() -> PropPath {
+pub(crate) fn default_demand_input_path() -> PropPath {
     let mut path = Vec::new();
     path.push(Segment::Field(String::from("in")));
     path
@@ -41,6 +45,7 @@ pub struct Engine {
     runtime_buffers: RuntimeBufferStore,
     artifacts: ArtifactManager<()>,
     demand_roots: Vec<NodeId>,
+    graphics: Option<Arc<dyn LpGraphics>>,
 }
 
 impl Engine {
@@ -56,6 +61,7 @@ impl Engine {
             runtime_buffers: RuntimeBufferStore::new(),
             artifacts: ArtifactManager::new(),
             demand_roots: Vec::new(),
+            graphics: None,
         }
     }
 
@@ -123,6 +129,15 @@ impl Engine {
         self.demand_roots.push(node);
     }
 
+    /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
+    pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
+        self.graphics = graphics;
+    }
+
+    pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {
+        self.graphics.as_ref()
+    }
+
     /// Attach a runtime [`Node`] to an existing tree entry (typically `Pending`).
     pub fn attach_runtime_node(
         &mut self,
@@ -153,10 +168,15 @@ impl Engine {
         let mut session = ResolveSession::new(self.frame_id, &mut resolver, &self.bindings, trace);
 
         let mut producers_ticked = BTreeSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
             producers_ticked: &mut producers_ticked,
+            render_products: &mut self.render_products,
+            runtime_buffers: &mut self.runtime_buffers,
+            graphics: self.graphics.clone(),
+            frame_time_seconds: time_s,
         };
 
         {
@@ -194,11 +214,27 @@ impl Engine {
     }
 }
 
+fn apply_deferred_render_replaces(
+    store: &mut RenderProductStore,
+    pending: Vec<(RenderProductId, Box<dyn RenderProduct>)>,
+) -> Result<(), SessionResolveError> {
+    for (id, product) in pending {
+        store
+            .replace(id, product)
+            .map_err(|e| SessionResolveError::other(format!("render product replace: {e:?}")))?;
+    }
+    Ok(())
+}
+
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`ResolveSession`].
 struct EngineResolveHost<'a> {
     tree: &'a mut NodeTree<Box<dyn Node>>,
     artifacts: &'a ArtifactManager<()>,
     producers_ticked: &'a mut BTreeSet<NodeId>,
+    render_products: &'a mut RenderProductStore,
+    runtime_buffers: &'a mut RuntimeBufferStore,
+    graphics: Option<Arc<dyn LpGraphics>>,
+    frame_time_seconds: f32,
 }
 
 impl EngineResolveHost<'_> {
@@ -236,14 +272,25 @@ impl EngineResolveHost<'_> {
             (artifact_id, content_frame, node_runtime)
         };
 
+        let gfx = self.graphics.clone();
+        let time_s = self.frame_time_seconds;
+        let mut pending_replaces = Vec::new();
         let tick_result = {
             let mut bridge = SessionHostResolver {
                 session,
                 host: self as &mut dyn ResolveHost,
             };
             let resolver_dyn: &mut dyn TickResolver = &mut bridge;
-            let mut tick_ctx =
-                TickContext::new(node_id, frame, artifact_id, content_frame, resolver_dyn);
+            let mut tick_ctx = TickContext::with_render_services(
+                node_id,
+                frame,
+                artifact_id,
+                content_frame,
+                resolver_dyn,
+                Some(&mut pending_replaces),
+                gfx,
+                time_s,
+            );
             node_runtime.tick(&mut tick_ctx)
         };
 
@@ -254,6 +301,7 @@ impl EngineResolveHost<'_> {
 
         match tick_result {
             Ok(()) => {
+                apply_deferred_render_replaces(self.render_products, pending_replaces)?;
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
@@ -284,6 +332,15 @@ impl ResolveHost for EngineResolveHost<'_> {
                         )));
                     }
                 };
+                if let Some((product, frame)) = n.outputs().get(output) {
+                    return Ok(Production::new(
+                        Versioned::new(frame, product),
+                        ProductionSource::NodeOutput {
+                            node: *node,
+                            output: output.clone(),
+                        },
+                    ));
+                }
                 match n.props().get(output) {
                     Some((v, frame)) => Ok(Production::value(
                         Versioned::new(frame, v),
@@ -314,6 +371,12 @@ impl ResolveHost for EngineResolveHost<'_> {
                         });
                     }
                 };
+                if let Some((product, frame)) = n.outputs().get(input) {
+                    return Ok(Production::new(
+                        Versioned::new(frame, product),
+                        ProductionSource::Default,
+                    ));
+                }
                 match n.props().get(input) {
                     Some((v, frame)) => Ok(Production::value(
                         Versioned::new(frame, v),
@@ -329,6 +392,26 @@ impl ResolveHost for EngineResolveHost<'_> {
                 "engine host cannot satisfy bus query",
             )),
         }
+    }
+
+    fn sample_render_product(
+        &mut self,
+        id: RenderProductId,
+        batch: &RenderSampleBatch,
+    ) -> Result<RenderSampleBatchResult, SessionResolveError> {
+        self.render_products
+            .sample_batch(id, batch)
+            .map_err(SessionResolveError::from)
+    }
+
+    fn runtime_buffer_mut(
+        &mut self,
+        id: crate::runtime_buffer::RuntimeBufferId,
+        frame: FrameId,
+    ) -> Result<&mut crate::runtime_buffer::RuntimeBuffer, SessionResolveError> {
+        self.runtime_buffers
+            .get_mut_mark_updated(id, frame)
+            .map_err(|e| SessionResolveError::other(format!("runtime buffer mut: {e:?}")))
     }
 }
 
@@ -361,14 +444,25 @@ fn tick_tree_node(
         (artifact_id, content_frame, node_runtime)
     };
 
+    let gfx = host.graphics.clone();
+    let time_s = host.frame_time_seconds;
+    let mut pending_replaces = Vec::new();
     let tick_result = {
         let mut bridge = SessionHostResolver {
             session,
             host: host as &mut dyn ResolveHost,
         };
         let resolver_dyn: &mut dyn TickResolver = &mut bridge;
-        let mut tick_ctx =
-            TickContext::new(node_id, frame, artifact_id, content_frame, resolver_dyn);
+        let mut tick_ctx = TickContext::with_render_services(
+            node_id,
+            frame,
+            artifact_id,
+            content_frame,
+            resolver_dyn,
+            Some(&mut pending_replaces),
+            gfx,
+            time_s,
+        );
         node_runtime.tick(&mut tick_ctx)
     };
 
@@ -378,11 +472,17 @@ fn tick_tree_node(
         .ok_or(EngineError::UnknownNode(node_id))?;
     entry.set_state(EntryState::Alive(node_runtime), restore_frame);
 
-    tick_result.map_err(|e| EngineError::node(node_id, e))
+    match tick_result {
+        Ok(()) => {
+            apply_deferred_render_replaces(host.render_products, pending_replaces)?;
+            Ok(())
+        }
+        Err(e) => Err(EngineError::node(node_id, e)),
+    }
 }
 
 #[cfg(test)]
-pub(super) fn resolve_with_engine_host(
+pub(crate) fn resolve_with_engine_host(
     eng: &mut Engine,
     key: QueryKey,
     log_level: ResolveLogLevel,
@@ -397,10 +497,15 @@ pub(super) fn resolve_with_engine_host(
         ResolveTrace::new(log_level),
     );
     let mut producers_ticked = BTreeSet::new();
+    let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
         producers_ticked: &mut producers_ticked,
+        render_products: &mut eng.render_products,
+        runtime_buffers: &mut eng.runtime_buffers,
+        graphics: eng.graphics.clone(),
+        frame_time_seconds: time_s,
     };
     let result = session
         .resolve(&mut host, key)
@@ -424,10 +529,15 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         ResolveTrace::new(ResolveLogLevel::Off),
     );
     let mut producers_ticked = BTreeSet::new();
+    let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
         producers_ticked: &mut producers_ticked,
+        render_products: &mut eng.render_products,
+        runtime_buffers: &mut eng.runtime_buffers,
+        graphics: eng.graphics.clone(),
+        frame_time_seconds: time_s,
     };
     let result = session.resolve(&mut host, key.clone()).and_then(|first| {
         session
@@ -511,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn node_output_host_reads_runtime_prop_access() {
+    fn node_output_scalar_resolves_via_runtime_prop_access_after_empty_outputs() {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 2.0))
             .build();
@@ -659,7 +769,8 @@ mod tests {
         let id = engine
             .runtime_buffers_mut()
             .insert(Versioned::new(frame, payload.clone()));
-        let got = engine.runtime_buffers().get(id).expect("inserted buffer");
+        let buffers = engine.runtime_buffers();
+        let got = buffers.get(id).expect("inserted buffer");
         assert_eq!(got.changed_frame(), frame);
         assert_eq!(got.value(), &payload);
     }

@@ -318,8 +318,7 @@ fn clone_node_config_for_kind(
     let actual_kind = config.kind();
     if actual_kind != expected_kind {
         return Err(format!(
-            "node detail config kind mismatch: expected {:?}, got {:?}",
-            expected_kind, actual_kind
+            "node detail config kind mismatch: expected {expected_kind:?}, got {actual_kind:?}"
         ));
     }
 

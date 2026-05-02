@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::Versioned;
+use lpc_model::{FrameId, Versioned};
 
 use super::{RuntimeBuffer, RuntimeBufferId};
 
@@ -47,6 +47,19 @@ impl RuntimeBufferStore {
 
     pub fn get_mut(&mut self, id: RuntimeBufferId) -> Option<&mut Versioned<RuntimeBuffer>> {
         self.buffers.get_mut(&id)
+    }
+
+    pub fn get_mut_mark_updated(
+        &mut self,
+        id: RuntimeBufferId,
+        frame: FrameId,
+    ) -> Result<&mut RuntimeBuffer, RuntimeBufferError> {
+        let buffer = self
+            .buffers
+            .get_mut(&id)
+            .ok_or_else(|| RuntimeBufferError::unknown_buffer(id))?;
+        buffer.mark_updated(frame);
+        Ok(buffer.get_mut())
     }
 
     pub fn replace(
@@ -118,6 +131,21 @@ mod tests {
         let got = store.get(id).expect("still present");
         assert_eq!(got.changed_frame(), new_frame);
         assert_eq!(got.value(), &replacement);
+    }
+
+    #[test]
+    fn store_mut_marks_updated_frame() {
+        let mut store = RuntimeBufferStore::new();
+        let id = store.insert(Versioned::new(FrameId::new(1), RuntimeBuffer::raw(vec![1])));
+
+        let buffer = store
+            .get_mut_mark_updated(id, FrameId::new(7))
+            .expect("existing buffer");
+        buffer.bytes.push(2);
+
+        let got = store.get(id).expect("still present");
+        assert_eq!(got.changed_frame(), FrameId::new(7));
+        assert_eq!(got.value().bytes, vec![1, 2]);
     }
 
     #[test]

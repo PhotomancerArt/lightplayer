@@ -48,6 +48,19 @@ impl RenderProductStore {
         id
     }
 
+    /// Replace an existing product id, e.g. after re-rendering into a texture-backed product.
+    pub fn replace(
+        &mut self,
+        id: RenderProductId,
+        product: Box<dyn RenderProduct>,
+    ) -> Result<(), RenderProductError> {
+        if !self.products.contains_key(&id) {
+            return Err(RenderProductError::unknown_product(id));
+        }
+        self.products.insert(id, product);
+        Ok(())
+    }
+
     pub fn sample_batch(
         &self,
         id: RenderProductId,
@@ -167,6 +180,27 @@ mod tests {
             .sample_batch(missing, &request)
             .expect_err("unknown id");
         assert_eq!(err, RenderProductError::UnknownProduct { id: missing });
+    }
+
+    #[test]
+    fn store_replace_keeps_id_and_updates_sampling() {
+        let mut store = RenderProductStore::new();
+        let id = store.insert(Box::new(SolidColorProduct {
+            color: [0.0, 0.0, 0.0, 1.0],
+        }));
+        store
+            .replace(
+                id,
+                Box::new(SolidColorProduct {
+                    color: [1.0, 0.0, 0.0, 1.0],
+                }),
+            )
+            .expect("replace");
+        let request = RenderSampleBatch {
+            points: vec![RenderSamplePoint { x: 0.0, y: 0.0 }],
+        };
+        let result = store.sample_batch(id, &request).expect("sample");
+        assert_eq!(result.samples[0].color, [1.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]

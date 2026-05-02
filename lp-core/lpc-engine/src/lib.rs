@@ -23,6 +23,7 @@ pub mod node;
 pub mod nodes;
 pub mod output;
 pub mod panic_node;
+pub mod project_runtime;
 pub mod prop;
 pub mod render_product;
 pub mod resolver;
@@ -48,10 +49,15 @@ pub use legacy::output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat
 pub use legacy_project::{LegacyProjectRuntime, MemoryStatsFn};
 pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
 pub use nodes::LegacyNodeRuntime;
-pub use prop::RuntimePropAccess;
+pub use project_runtime::{
+    CompatibilityProjection, CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime,
+    OutputFlushError, RuntimeServices,
+};
+pub use prop::{RuntimeOutputAccess, RuntimePropAccess, RuntimeStateAccess};
 pub use render_product::{
     RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
-    RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint,
+    RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, TextureRenderProduct,
+    TextureRenderProductError,
 };
 pub use resolver::{
     BindingKind, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,

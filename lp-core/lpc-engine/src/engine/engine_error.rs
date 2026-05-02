@@ -11,10 +11,17 @@ use lpc_model::NodeId;
 #[derive(Debug)]
 pub enum EngineError {
     Tree(TreeError),
-    Node { node: NodeId, message: String },
+    Node {
+        node: NodeId,
+        message: String,
+    },
     Resolve(SessionResolveError),
     UnknownNode(NodeId),
     NotAlive(NodeId),
+    /// Failed while flushing dirty output sinks after [`crate::engine::Engine::tick`].
+    OutputFlush {
+        message: String,
+    },
 }
 
 impl From<TreeError> for EngineError {
@@ -37,6 +44,7 @@ impl core::fmt::Display for EngineError {
             Self::Resolve(e) => write!(f, "{e}"),
             Self::UnknownNode(id) => write!(f, "unknown node {id:?}"),
             Self::NotAlive(id) => write!(f, "node {id:?} is not alive"),
+            Self::OutputFlush { message } => write!(f, "output flush: {message}"),
         }
     }
 }

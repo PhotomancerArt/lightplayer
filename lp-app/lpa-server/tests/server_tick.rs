@@ -18,9 +18,9 @@ fn test_server_tick_propagates_to_projects() {
 
     // Add nodes
     let texture_path = builder.texture_basic();
-    builder.shader_basic(&texture_path);
+    let shader_path = builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
-    builder.fixture_basic(&output_path, &texture_path);
+    let fixture_path = builder.fixture_basic(&output_path, &texture_path);
 
     // Build project (creates files at root of temp_fs)
     builder.build();
@@ -44,9 +44,9 @@ fn test_server_tick_propagates_to_projects() {
     // Copy all node files
     let node_paths = vec![
         texture_path.to_path_buf(),
-        "/src/shader-0.shader".as_path_buf(),
+        shader_path.to_path_buf(),
         output_path.to_path_buf(),
-        "/src/fixture-0.fixture".as_path_buf(),
+        fixture_path.to_path_buf(),
     ];
 
     for node_path in &node_paths {
@@ -117,36 +117,12 @@ fn test_server_tick_propagates_to_projects() {
     // Create client view
     let mut client_view = ProjectView::new();
 
-    // Get output handle from server project
+    // Verify the server loaded the authored project into the core runtime tree.
     let project = server
         .project_manager()
         .get_project(project_handle)
         .expect("Project should be loaded");
-
-    // Debug: print all nodes
-    println!("Loaded nodes:");
-    for (handle, entry) in &project.runtime().nodes {
-        println!(
-            "  Handle: {:?}, Kind: {:?}, Path: {}",
-            handle,
-            entry.kind,
-            entry.path.as_str()
-        );
-    }
-
-    // Find output node - use the path from ProjectBuilder but relative to project root
-    // ProjectBuilder creates paths like "/src/output-0.output", but after loading into server
-    // they should still be accessible via the same path (project runtime uses chrooted fs)
-    let output_handle = project
-        .runtime()
-        .nodes
-        .iter()
-        .find(|(_, entry)| entry.kind == lpc_source::legacy::nodes::NodeKind::Output)
-        .map(|(handle, _)| *handle)
-        .expect("Output node should exist");
-
-    // Watch output for detail changes
-    client_view.watch_detail(output_handle);
+    assert!(project.runtime().engine().tree().len() > 1);
 
     // Initial sync
     sync_client_view_from_server(&server, project_handle, &mut client_view);
@@ -158,7 +134,7 @@ fn test_server_tick_propagates_to_projects() {
         .get_project(project_handle)
         .unwrap()
         .runtime()
-        .frame_id;
+        .frame_id();
     assert_eq!(initial_frame_id, project_runtime_frame_id);
 
     // Frame 1: Tick server
@@ -172,7 +148,7 @@ fn test_server_tick_propagates_to_projects() {
         .get_project(project_handle)
         .unwrap()
         .runtime()
-        .frame_id;
+        .frame_id();
     assert_eq!(frame_1_id, project_runtime_frame_id_1);
     assert!(frame_1_id.as_i64() > initial_frame_id.as_i64());
 
@@ -187,7 +163,7 @@ fn test_server_tick_propagates_to_projects() {
         .get_project(project_handle)
         .unwrap()
         .runtime()
-        .frame_id;
+        .frame_id();
     assert_eq!(frame_2_id, project_runtime_frame_id_2);
     assert!(frame_2_id.as_i64() > frame_1_id.as_i64());
 
@@ -202,7 +178,7 @@ fn test_server_tick_propagates_to_projects() {
         .get_project(project_handle)
         .unwrap()
         .runtime()
-        .frame_id;
+        .frame_id();
     assert_eq!(frame_3_id, project_runtime_frame_id_3);
     assert!(frame_3_id.as_i64() > frame_2_id.as_i64());
 

@@ -3,11 +3,26 @@
 //! [`TickContext`] resolves through the active [`ResolveSession`] and [`ResolveHost`] using
 //! [`QueryKey`] (not the legacy slot resolver cache).
 
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+
 use crate::artifact::ArtifactId;
 use crate::bus::Bus;
+use crate::gfx::LpGraphics;
+use crate::render_product::{
+    RenderProduct, RenderProductId, RenderSampleBatch, RenderSampleBatchResult,
+};
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
+use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
 use lpc_model::{FrameId, NodeId, bus::ChannelName};
 use lps_shared::LpsValueF32;
+
+use super::node_error::NodeError;
+
+/// Pending uploads to [`crate::render_product::RenderProductStore`] applied after the current
+/// node's [`super::Node::tick`](super::Node::tick) returns (see [`TickContext::defer_render_product_replace`]).
+pub type PendingRenderProductReplaces<'r> = &'r mut Vec<(RenderProductId, Box<dyn RenderProduct>)>;
 
 /// Context for [`super::Node::tick`](super::Node::tick).
 ///
@@ -18,6 +33,9 @@ pub struct TickContext<'r> {
     artifact_ref: ArtifactId,
     artifact_content_frame: FrameId,
     resolver: &'r mut dyn TickResolver,
+    deferred_render_replaces: Option<PendingRenderProductReplaces<'r>>,
+    graphics: Option<Arc<dyn LpGraphics>>,
+    frame_time_seconds: f32,
 }
 
 impl<'r> TickContext<'r> {
@@ -28,12 +46,38 @@ impl<'r> TickContext<'r> {
         artifact_content_frame: FrameId,
         resolver: &'r mut dyn TickResolver,
     ) -> Self {
+        Self::with_render_services(
+            node_id,
+            frame_id,
+            artifact_ref,
+            artifact_content_frame,
+            resolver,
+            None,
+            None,
+            0.0,
+        )
+    }
+
+    /// [`TickContext`] with graphics, frame time, and optional deferred render-product replaces.
+    pub fn with_render_services(
+        node_id: NodeId,
+        frame_id: FrameId,
+        artifact_ref: ArtifactId,
+        artifact_content_frame: FrameId,
+        resolver: &'r mut dyn TickResolver,
+        deferred_render_replaces: Option<PendingRenderProductReplaces<'r>>,
+        graphics: Option<Arc<dyn LpGraphics>>,
+        frame_time_seconds: f32,
+    ) -> Self {
         Self {
             node_id,
             frame_id,
             artifact_ref,
             artifact_content_frame,
             resolver,
+            deferred_render_replaces,
+            graphics,
+            frame_time_seconds,
         }
     }
 
@@ -60,6 +104,59 @@ impl<'r> TickContext<'r> {
 
     pub fn artifact_changed_since(&self, since: FrameId) -> bool {
         self.artifact_content_frame.0 > since.0
+    }
+
+    /// Monotonic shader time in seconds for the current engine frame.
+    pub fn time_seconds(&self) -> f32 {
+        self.frame_time_seconds
+    }
+
+    /// Graphics backend for shader compile and output buffers, when the engine has one installed.
+    pub fn graphics(&self) -> Option<&dyn LpGraphics> {
+        self.graphics.as_ref().map(|g| g.as_ref())
+    }
+
+    /// Stage a texture (or other) render product to replace `id` after this tick returns.
+    pub fn defer_render_product_replace(
+        &mut self,
+        id: RenderProductId,
+        product: Box<dyn RenderProduct>,
+    ) -> Result<(), NodeError> {
+        let Some(buf) = self.deferred_render_replaces.as_deref_mut() else {
+            return Err(NodeError::msg(
+                "tick context cannot defer render products (internal engine bug)",
+            ));
+        };
+        buf.push((id, product));
+        Ok(())
+    }
+
+    /// Samples a [`RenderProductId`] via the engine-owned store (immutable borrow only).
+    pub fn sample_render_product(
+        &mut self,
+        id: RenderProductId,
+        batch: &RenderSampleBatch,
+    ) -> Result<RenderSampleBatchResult, NodeError> {
+        self.resolver.sample_render_product(id, batch).map_err(|e| {
+            NodeError::msg(alloc::format!("render product sample_batch: {}", e.message))
+        })
+    }
+
+    /// Mutates a single existing runtime buffer in place and marks it changed for `frame`.
+    pub fn with_runtime_buffer_mut<F>(
+        &mut self,
+        id: RuntimeBufferId,
+        frame: FrameId,
+        write: F,
+    ) -> Result<(), NodeError>
+    where
+        F: FnOnce(&mut RuntimeBuffer) -> Result<(), NodeError>,
+    {
+        let buffer = self
+            .resolver
+            .runtime_buffer_mut(id, frame)
+            .map_err(|e| NodeError::msg(alloc::format!("runtime buffer mut: {}", e.message)))?;
+        write(buffer)
     }
 }
 

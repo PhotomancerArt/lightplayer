@@ -1,6 +1,9 @@
 //! Engine spine [`Node`] trait: tick, destroy, memory pressure, and produced props.
 
-use crate::prop::RuntimePropAccess;
+use crate::prop::{
+    EMPTY_RUNTIME_OUTPUTS, EMPTY_RUNTIME_STATE, RuntimeOutputAccess, RuntimePropAccess,
+    RuntimeStateAccess,
+};
 
 use super::contexts::{DestroyCtx, MemPressureCtx, TickContext};
 use super::node_error::NodeError;
@@ -20,6 +23,16 @@ pub trait Node {
     ) -> Result<(), NodeError>;
 
     fn props(&self) -> &dyn RuntimePropAccess;
+
+    /// Node-owned non-scalar products (e.g. render handles). Default: none.
+    fn outputs(&self) -> &dyn RuntimeOutputAccess {
+        &EMPTY_RUNTIME_OUTPUTS
+    }
+
+    /// Reserved for sync/debug state snapshots. Default: empty [`RuntimeStateAccess`].
+    fn runtime_state(&self) -> &dyn RuntimeStateAccess {
+        &EMPTY_RUNTIME_STATE
+    }
 }
 
 #[cfg(test)]
