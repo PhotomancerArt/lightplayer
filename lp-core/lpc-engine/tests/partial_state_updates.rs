@@ -161,7 +161,7 @@ fn test_partial_state_updates() {
     );
 
     // Now update the fixture config with new mapping
-    let fixture_config_path = "/src/fixture-1.fixture/node.json";
+    let fixture_config_path = "/src/fixture-1.fixture/node.toml";
     let new_config = FixtureConfig {
         output_spec: NodeSpec::from("/src/output-1.output"),
         texture_spec: NodeSpec::from("/src/texture-1.texture"),
@@ -187,10 +187,10 @@ fn test_partial_state_updates() {
         brightness: None,
         gamma_correction: None,
     };
-    let config_json =
-        lpc_wire::json::to_string(&new_config).expect("Failed to serialize fixture config");
+    let config_toml =
+        toml::to_string(&new_config).expect("Failed to serialize fixture config to TOML");
     fs.borrow_mut()
-        .write_file_mut(fixture_config_path.as_path(), config_json.as_bytes())
+        .write_file_mut(fixture_config_path.as_path(), config_toml.as_bytes())
         .unwrap();
 
     // Get filesystem changes and apply them

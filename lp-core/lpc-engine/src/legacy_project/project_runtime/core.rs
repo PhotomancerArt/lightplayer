@@ -214,8 +214,8 @@ impl LegacyProjectRuntime {
 
     /// Handle a delete change
     pub fn handle_delete_change(&mut self, change: &FsChange) -> Result<(), Error> {
-        // Check if node.json was deleted
-        if change.path.has_suffix("/node.json") {
+        // Check if node.toml was deleted
+        if change.path.has_suffix("/node.toml") {
             // Extract node path from file path
             if let Some(node_path) = self.extract_node_path_from_file_path(change.path.as_path()) {
                 if let Ok(handle) = self.handle_for_path(node_path.as_path()) {
@@ -271,7 +271,7 @@ impl LegacyProjectRuntime {
 
     /// Extract node path from a file path
     ///
-    /// Given a file path like "/src/my-shader.shader/node.json" or "/src/my-shader.shader/main.glsl",
+    /// Given a file path like "/src/my-shader.shader/node.toml" or "/src/my-shader.shader/main.glsl",
     /// returns the node path "/src/my-shader.shader".
     pub fn extract_node_path_from_file_path(&self, file_path: &LpPath) -> Option<LpPathBuf> {
         file_path.parent().map(|p| p.to_path_buf())

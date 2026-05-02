@@ -656,7 +656,7 @@ mod tests {
         let mut fs = LpFsMemory::new();
         fs.write_file_mut("/src/test.shader/main.glsl".as_path(), b"shader code")
             .unwrap();
-        fs.write_file_mut("/src/test.shader/node.json".as_path(), b"{}")
+        fs.write_file_mut("/src/test.shader/node.toml".as_path(), b"")
             .unwrap();
 
         // Chroot to node directory
@@ -769,7 +769,7 @@ mod tests {
         let mut fs = LpFsMemory::new();
         fs.write_file_mut("/src/shader/main.glsl".as_path(), b"code")
             .unwrap();
-        fs.write_file_mut("/src/shader/node.json".as_path(), b"{}")
+        fs.write_file_mut("/src/shader/node.toml".as_path(), b"")
             .unwrap();
         fs.write_file_mut("/src/shader/util.glsl".as_path(), b"util")
             .unwrap();
@@ -779,7 +779,7 @@ mod tests {
         // List root directory
         let entries = chrooted.borrow().list_dir("/".as_path(), false).unwrap();
         assert!(entries.contains(&LpPathBuf::from("/main.glsl")));
-        assert!(entries.contains(&LpPathBuf::from("/node.json")));
+        assert!(entries.contains(&LpPathBuf::from("/node.toml")));
         assert!(entries.contains(&LpPathBuf::from("/util.glsl")));
 
         // List with relative path - caller must convert to absolute first

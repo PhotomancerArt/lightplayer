@@ -14,6 +14,7 @@ extern crate alloc;
 extern crate std;
 
 mod lpc_model_artifact;
+mod lpc_source_legacy;
 
 pub mod error;
 pub mod fs_event;

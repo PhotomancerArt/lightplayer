@@ -2,7 +2,7 @@
 //! concentric rings centered at (0.5, 0.5), diameter 1.0, InnerFirst
 //! order. Generated once at startup; held in a `[(f32, f32); LAMP_COUNT]`.
 //!
-//! Mirrors `examples/basic/src/fixture.fixture/node.json`. If that
+//! Mirrors `examples/basic/src/fixture.fixture/node.toml`. If that
 //! fixture changes, this table must be regenerated.
 
 use libm::{cosf, sinf};

@@ -9,7 +9,7 @@ use lpc_shared::ProjectBuilder;
 use lpfs::LpFsMemory;
 
 #[test]
-fn test_node_json_modification() {
+fn test_node_toml_modification() {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
 
@@ -44,12 +44,11 @@ fn test_node_json_modification() {
     runtime.tick(4).unwrap();
 
     // Modify shader config (change render_order)
-    let shader_config_path = "/src/shader-1.shader/node.json";
-    let new_config = r#"{
-        "glsl_path": "main.glsl",
-        "texture_spec": "/src/texture-1.texture",
-        "render_order": 10
-    }"#;
+    let shader_config_path = "/src/shader-1.shader/node.toml";
+    let new_config = r#"glsl_path = "main.glsl"
+texture_spec = "/src/texture-1.texture"
+render_order = 10
+"#;
     fs.borrow_mut()
         .write_file_mut(shader_config_path.as_path(), new_config.as_bytes())
         .unwrap();
@@ -81,7 +80,7 @@ fn test_node_json_modification() {
                     change,
                     lpc_wire::legacy::NodeChange::ConfigUpdated { .. }
                 )),
-                "Expected ConfigUpdated change after node.json modification"
+                "Expected ConfigUpdated change after node.toml modification"
             );
         }
     }
@@ -205,8 +204,8 @@ fn test_node_deletion() {
         .handle_for_path("/src/shader-1.shader".as_path())
         .unwrap();
 
-    // Delete node.json
-    let shader_config_path = "/src/shader-1.shader/node.json";
+    // Delete node.toml
+    let shader_config_path = "/src/shader-1.shader/node.toml";
     fs.borrow_mut()
         .delete_file_mut(shader_config_path.as_path())
         .unwrap();
@@ -221,6 +220,6 @@ fn test_node_deletion() {
         runtime
             .handle_for_path("/src/shader-1.shader".as_path())
             .is_err(),
-        "Node should be removed after node.json deletion"
+        "Node should be removed after node.toml deletion"
     );
 }

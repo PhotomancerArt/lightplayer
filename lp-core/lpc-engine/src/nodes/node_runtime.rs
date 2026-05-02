@@ -43,7 +43,7 @@ pub trait LegacyNodeRuntime: Send + Sync {
 
     /// Update the node's configuration
     ///
-    /// Called when node.json changes. Nodes can choose to reinit or update in place.
+    /// Called when node.toml changes. Nodes can choose to reinit or update in place.
     fn update_config(
         &mut self,
         new_config: Box<dyn NodeConfig>,
@@ -52,7 +52,7 @@ pub trait LegacyNodeRuntime: Send + Sync {
 
     /// Handle filesystem changes to non-config files
     ///
-    /// Called when files other than node.json change (e.g., main.glsl for shaders).
+    /// Called when files other than node.toml change (e.g., main.glsl for shaders).
     fn handle_fs_change(
         &mut self,
         change: &FsChange,

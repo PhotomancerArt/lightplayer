@@ -50,14 +50,14 @@ fn test_server_tick_propagates_to_projects() {
     ];
 
     for node_path in &node_paths {
-        // Copy node.json
-        let node_json_path = node_path.join("node.json");
-        if let Ok(data) = temp_fs.borrow().read_file(node_json_path.as_path()) {
+        // Copy node.toml
+        let node_toml_path = node_path.join("node.toml");
+        if let Ok(data) = temp_fs.borrow().read_file(node_toml_path.as_path()) {
             // Strip leading '/' to make it relative for joining
-            let relative_path = node_json_path
+            let relative_path = node_toml_path
                 .as_str()
                 .strip_prefix('/')
-                .unwrap_or(node_json_path.as_str());
+                .unwrap_or(node_toml_path.as_str());
             base_fs
                 .write_file(project_prefix.join(relative_path).as_path(), &data)
                 .unwrap();

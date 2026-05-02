@@ -146,13 +146,13 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         width: 64,
         height: 64,
     };
-    let texture_json = serde_json::to_string_pretty(&texture_config)
-        .context("Failed to serialize texture config")?;
+    let texture_toml =
+        toml::to_string(&texture_config).context("Failed to serialize texture config to TOML")?;
     fs.write_file(
-        "/src/main.texture/node.json".as_path(),
-        texture_json.as_bytes(),
+        "/src/main.texture/node.toml".as_path(),
+        texture_toml.as_bytes(),
     )
-    .map_err(|e| anyhow::anyhow!("Failed to write texture node.json: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("Failed to write texture node.toml: {e}"))?;
 
     // Create shader node
     let shader_config = ShaderConfig {
@@ -161,13 +161,13 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         render_order: 0,
         glsl_opts: lpc_source::legacy::glsl_opts::GlslOpts::default(),
     };
-    let shader_json = serde_json::to_string_pretty(&shader_config)
-        .context("Failed to serialize shader config")?;
+    let shader_toml =
+        toml::to_string(&shader_config).context("Failed to serialize shader config to TOML")?;
     fs.write_file(
-        "/src/rainbow.shader/node.json".as_path(),
-        shader_json.as_bytes(),
+        "/src/rainbow.shader/node.toml".as_path(),
+        shader_toml.as_bytes(),
     )
-    .map_err(|e| anyhow::anyhow!("Failed to write shader node.json: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("Failed to write shader node.toml: {e}"))?;
 
     // Create shader GLSL
     fs.write_file(
@@ -242,13 +242,13 @@ vec4 render(vec2 pos) {
         pin: 4,
         options: None,
     };
-    let output_json = serde_json::to_string_pretty(&output_config)
-        .context("Failed to serialize output config")?;
+    let output_toml =
+        toml::to_string(&output_config).context("Failed to serialize output config to TOML")?;
     fs.write_file(
-        "/src/strip.output/node.json".as_path(),
-        output_json.as_bytes(),
+        "/src/strip.output/node.toml".as_path(),
+        output_toml.as_bytes(),
     )
-    .map_err(|e| anyhow::anyhow!("Failed to write output node.json: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("Failed to write output node.toml: {e}"))?;
 
     // Create fixture node
     let fixture_config = FixtureConfig {
@@ -268,13 +268,13 @@ vec4 render(vec2 pos) {
         brightness: None,
         gamma_correction: None,
     };
-    let fixture_json = serde_json::to_string_pretty(&fixture_config)
-        .context("Failed to serialize fixture config")?;
+    let fixture_toml =
+        toml::to_string(&fixture_config).context("Failed to serialize fixture config to TOML")?;
     fs.write_file(
-        "/src/fixture.fixture/node.json".as_path(),
-        fixture_json.as_bytes(),
+        "/src/fixture.fixture/node.toml".as_path(),
+        fixture_toml.as_bytes(),
     )
-    .map_err(|e| anyhow::anyhow!("Failed to write fixture node.json: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("Failed to write fixture node.toml: {e}"))?;
 
     Ok(())
 }
@@ -374,11 +374,11 @@ mod tests {
 
         // Verify all nodes exist
         assert!(
-            fs.file_exists("/src/main.texture/node.json".as_path())
+            fs.file_exists("/src/main.texture/node.toml".as_path())
                 .unwrap()
         );
         assert!(
-            fs.file_exists("/src/rainbow.shader/node.json".as_path())
+            fs.file_exists("/src/rainbow.shader/node.toml".as_path())
                 .unwrap()
         );
         assert!(
@@ -386,11 +386,11 @@ mod tests {
                 .unwrap()
         );
         assert!(
-            fs.file_exists("/src/strip.output/node.json".as_path())
+            fs.file_exists("/src/strip.output/node.toml".as_path())
                 .unwrap()
         );
         assert!(
-            fs.file_exists("/src/strip.fixture/node.json".as_path())
+            fs.file_exists("/src/fixture.fixture/node.toml".as_path())
                 .unwrap()
         );
     }
@@ -402,18 +402,22 @@ mod tests {
         create_default_template_mut(&mut fs).unwrap();
 
         // Verify texture node content
-        let texture_json = fs
-            .read_file("/src/main.texture/node.json".as_path())
+        let texture_toml = fs
+            .read_file("/src/main.texture/node.toml".as_path())
             .unwrap();
-        let texture_config: TextureConfig = serde_json::from_slice(&texture_json).unwrap();
+        let texture_config: TextureConfig =
+            toml::from_str(std::str::from_utf8(&texture_toml).expect("UTF-8"))
+                .expect("texture node TOML");
         assert_eq!(texture_config.width, 64);
         assert_eq!(texture_config.height, 64);
 
         // Verify shader node content
-        let shader_json = fs
-            .read_file("/src/rainbow.shader/node.json".as_path())
+        let shader_toml = fs
+            .read_file("/src/rainbow.shader/node.toml".as_path())
             .unwrap();
-        let shader_config: ShaderConfig = serde_json::from_slice(&shader_json).unwrap();
+        let shader_config: ShaderConfig =
+            toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
+                .expect("shader node TOML");
         assert_eq!(shader_config.glsl_path, "main.glsl".as_path_buf());
         assert_eq!(shader_config.texture_spec.as_str(), "/src/main.texture");
 
@@ -433,13 +437,13 @@ mod tests {
             width: 64,
             height: 64,
         };
-        let texture_json = serde_json::to_string_pretty(&texture_config)
-            .context("Failed to serialize texture config")?;
+        let texture_toml = toml::to_string(&texture_config)
+            .context("Failed to serialize texture config to TOML")?;
         fs.write_file_mut(
-            "/src/main.texture/node.json".as_path(),
-            texture_json.as_bytes(),
+            "/src/main.texture/node.toml".as_path(),
+            texture_toml.as_bytes(),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to write texture node.json: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to write texture node.toml: {e}"))?;
 
         // Create shader node
         let shader_config = ShaderConfig {
@@ -448,13 +452,13 @@ mod tests {
             render_order: 0,
             glsl_opts: lpc_source::legacy::glsl_opts::GlslOpts::default(),
         };
-        let shader_json = serde_json::to_string_pretty(&shader_config)
-            .context("Failed to serialize shader config")?;
+        let shader_toml =
+            toml::to_string(&shader_config).context("Failed to serialize shader config to TOML")?;
         fs.write_file_mut(
-            "/src/rainbow.shader/node.json".as_path(),
-            shader_json.as_bytes(),
+            "/src/rainbow.shader/node.toml".as_path(),
+            shader_toml.as_bytes(),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to write shader node.json: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to write shader node.toml: {e}"))?;
 
         // Create shader GLSL
         fs.write_file_mut(
@@ -529,13 +533,13 @@ vec4 render(vec2 pos) {
             pin: 4,
             options: None,
         };
-        let output_json = serde_json::to_string_pretty(&output_config)
-            .context("Failed to serialize output config")?;
+        let output_toml =
+            toml::to_string(&output_config).context("Failed to serialize output config to TOML")?;
         fs.write_file_mut(
-            "/src/strip.output/node.json".as_path(),
-            output_json.as_bytes(),
+            "/src/strip.output/node.toml".as_path(),
+            output_toml.as_bytes(),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to write output node.json: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to write output node.toml: {e}"))?;
 
         // Create fixture node
         let fixture_config = FixtureConfig {
@@ -555,13 +559,13 @@ vec4 render(vec2 pos) {
             brightness: None,
             gamma_correction: None,
         };
-        let fixture_json = serde_json::to_string_pretty(&fixture_config)
-            .context("Failed to serialize fixture config")?;
+        let fixture_toml = toml::to_string(&fixture_config)
+            .context("Failed to serialize fixture config to TOML")?;
         fs.write_file_mut(
-            "/src/strip.fixture/node.json".as_path(),
-            fixture_json.as_bytes(),
+            "/src/fixture.fixture/node.toml".as_path(),
+            fixture_toml.as_bytes(),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to write fixture node.json: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to write fixture node.toml: {e}"))?;
 
         Ok(())
     }

@@ -1,0 +1,49 @@
+output_spec = "/src/strip.output"
+texture_spec = "/src/main.texture"
+color_order = "Rgb"
+transform = [
+    [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+],
+]
+brightness = 64
+gamma_correction = true
+
+[mapping.PathPoints]
+sample_diameter = 2.0
+
+[[mapping.PathPoints.paths]]
+
+[mapping.PathPoints.paths.RingArray]
+center = [
+    0.5,
+    0.5,
+]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 1
+ring_lamp_counts = [1]
+offset_angle = 0.0
+order = "InnerFirst"
+

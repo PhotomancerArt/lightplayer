@@ -1,6 +1,10 @@
 //! Project template creation
 //!
 //! Provides functions to create default project templates that work with any LpFs implementation.
+//!
+//! Node configs are authored as static TOML matching legacy [`lpc_source::legacy::nodes`] serde
+//! shape (same bytes as `toml::to_string` on the host). `toml` is not used here so `lpa-server`
+//! stays compatible with `no_std` firmware builds where unified `toml` features can pull `std`.
 
 extern crate alloc;
 
@@ -9,24 +13,51 @@ use alloc::format;
 use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
+/// TOML for a 64×64 texture node (see `TextureConfig`).
+const TEXTURE_NODE_TOML: &[u8] = br#"width = 64
+height = 64
+"#;
+
+/// TOML for the default shader node (see `ShaderConfig`).
+const SHADER_NODE_TOML: &[u8] = br#"glsl_path = "main.glsl"
+texture_spec = "/src/texture.texture"
+render_order = 0
+
+[glsl_opts]
+add_sub = "saturating"
+mul = "saturating"
+div = "saturating"
+"#;
+
+/// TOML for GPIO strip output (see `OutputConfig::GpioStrip`).
+const OUTPUT_NODE_TOML: &[u8] = br#"[GpioStrip]
+pin = 4
+"#;
+
+/// TOML for the default fixture (see `FixtureConfig`).
+const FIXTURE_NODE_TOML: &[u8] = br#"output_spec = "/src/output.output"
+texture_spec = "/src/texture.texture"
+color_order = "Rgb"
+transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+[mapping.PathPoints]
+paths = []
+sample_diameter = 2.0
+"#;
+
 /// Create a default project template
 ///
 /// Creates the default project structure with a rainbow rotating color wheel shader.
 /// The filesystem should already be chrooted to the project directory (paths like "/project.json" are relative to project root).
 pub fn create_default_project_template(fs: &dyn LpFs) -> Result<(), ServerError> {
-    // Create texture node
     fs.write_file(
-        "/src/texture.texture/node.json".as_path(),
-        br#"{"$type":"Memory","size":[64,64],"format":"RGB8"}"#,
+        "/src/texture.texture/node.toml".as_path(),
+        TEXTURE_NODE_TOML,
     )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write texture node.json: {e}")))?;
+    .map_err(|e| ServerError::Filesystem(format!("Failed to write texture node.toml: {e}")))?;
 
-    // Create shader node
-    fs.write_file(
-        "/src/shader.shader/node.json".as_path(),
-        br#"{"$type":"Single","texture_id":"/src/texture.texture"}"#,
-    )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write shader node.json: {e}")))?;
+    fs.write_file("/src/shader.shader/node.toml".as_path(), SHADER_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write shader node.toml: {e}")))?;
 
     fs.write_file(
         "/src/shader.shader/main.glsl".as_path(),
@@ -95,19 +126,14 @@ vec4 render(vec2 pos) {
     )
     .map_err(|e| ServerError::Filesystem(format!("Failed to write shader main.glsl: {e}")))?;
 
-    // Create output node
-    fs.write_file(
-        "/src/output.output/node.json".as_path(),
-        br#"{"$type":"gpio_strip","chip":"ws2812","gpio_pin":4,"count":128}"#,
-    )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write output node.json: {e}")))?;
+    fs.write_file("/src/output.output/node.toml".as_path(), OUTPUT_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write output node.toml: {e}")))?;
 
-    // Create fixture node
     fs.write_file(
-        "/src/fixture.fixture/node.json".as_path(),
-        br#"{"$type":"circle-list","output_id":"/src/output.output","texture_id":"/src/texture.texture","channel_order":"rgb","mapping":[{"channel":0,"center":[0.03125,0.0625],"radius":0.05},{"channel":1,"center":[0.09375,0.0625],"radius":0.05},{"channel":2,"center":[0.15625,0.0625],"radius":0.05},{"channel":3,"center":[0.21875,0.0625],"radius":0.05},{"channel":4,"center":[0.28125,0.0625],"radius":0.05},{"channel":5,"center":[0.34375,0.0625],"radius":0.05},{"channel":6,"center":[0.40625,0.0625],"radius":0.05},{"channel":7,"center":[0.46875,0.0625],"radius":0.05},{"channel":8,"center":[0.53125,0.0625],"radius":0.05},{"channel":9,"center":[0.59375,0.0625],"radius":0.05},{"channel":10,"center":[0.65625,0.0625],"radius":0.05},{"channel":11,"center":[0.71875,0.0625],"radius":0.05}]}"#,
+        "/src/fixture.fixture/node.toml".as_path(),
+        FIXTURE_NODE_TOML,
     )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write fixture node.json: {e}")))?;
+    .map_err(|e| ServerError::Filesystem(format!("Failed to write fixture node.toml: {e}")))?;
 
     Ok(())
 }

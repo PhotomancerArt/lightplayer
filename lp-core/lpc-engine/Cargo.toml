@@ -38,6 +38,7 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lpc-shared = { path = "../lpc-shared", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 libm = "0.2"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 
 # Backend selection: exactly one LPVM engine is wired into `gfx::Graphics`,
 # chosen by target architecture rather than a Cargo feature.

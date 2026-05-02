@@ -209,18 +209,18 @@ impl TextureBuilder {
         builder.texture_id += 1;
 
         let path_str = format!("/src/texture-{id}.texture");
-        let node_path = format!("{path_str}/node.json");
+        let node_path = format!("{path_str}/node.toml");
 
         let config = TextureConfig {
             width: self.width,
             height: self.height,
         };
 
-        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize texture config");
+        let toml = toml::to_string(&config).expect("Failed to serialize texture config to TOML");
 
         builder
-            .write_file_helper(&node_path, json.as_bytes())
-            .expect("Failed to write texture node.json");
+            .write_file_helper(&node_path, toml.as_bytes())
+            .expect("Failed to write texture node.toml");
 
         LpPathBuf::from(path_str)
     }
@@ -245,7 +245,7 @@ impl ShaderBuilder {
         builder.shader_id += 1;
 
         let path_str = format!("/src/shader-{id}.shader");
-        let node_path = format!("{path_str}/node.json");
+        let node_path = format!("{path_str}/node.toml");
         let glsl_path = format!("{path_str}/main.glsl");
 
         let config = ShaderConfig {
@@ -255,11 +255,11 @@ impl ShaderBuilder {
             glsl_opts: GlslOpts::default(),
         };
 
-        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize shader config");
+        let toml = toml::to_string(&config).expect("Failed to serialize shader config to TOML");
 
         builder
-            .write_file_helper(&node_path, json.as_bytes())
-            .expect("Failed to write shader node.json");
+            .write_file_helper(&node_path, toml.as_bytes())
+            .expect("Failed to write shader node.toml");
 
         builder
             .write_file_helper(&glsl_path, self.glsl_source.as_bytes())
@@ -282,18 +282,18 @@ impl OutputBuilder {
         builder.output_id += 1;
 
         let path_str = format!("/src/output-{id}.output");
-        let node_path = format!("{path_str}/node.json");
+        let node_path = format!("{path_str}/node.toml");
 
         let config = OutputConfig::GpioStrip {
             pin: self.pin,
             options: Some(self.options),
         };
 
-        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize output config");
+        let toml = toml::to_string(&config).expect("Failed to serialize output config to TOML");
 
         builder
-            .write_file_helper(&node_path, json.as_bytes())
-            .expect("Failed to write output node.json");
+            .write_file_helper(&node_path, toml.as_bytes())
+            .expect("Failed to write output node.toml");
 
         LpPathBuf::from(path_str)
     }
@@ -336,7 +336,7 @@ impl FixtureBuilder {
         builder.fixture_id += 1;
 
         let path_str = format!("/src/fixture-{id}.fixture");
-        let node_path = format!("{path_str}/node.json");
+        let node_path = format!("{path_str}/node.toml");
 
         let config = FixtureConfig {
             output_spec: NodeSpec::from(self.output_path.as_str()),
@@ -348,11 +348,11 @@ impl FixtureBuilder {
             gamma_correction: self.gamma_correction,
         };
 
-        let json = lpc_wire::json::to_string(&config).expect("Failed to serialize fixture config");
+        let toml = toml::to_string(&config).expect("Failed to serialize fixture config to TOML");
 
         builder
-            .write_file_helper(&node_path, json.as_bytes())
-            .expect("Failed to write fixture node.json");
+            .write_file_helper(&node_path, toml.as_bytes())
+            .expect("Failed to write fixture node.toml");
 
         LpPathBuf::from(path_str)
     }

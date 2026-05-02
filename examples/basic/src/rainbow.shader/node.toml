@@ -1,0 +1,9 @@
+glsl_path = "main.glsl"
+texture_spec = "/src/main.texture"
+render_order = 0
+
+[glsl_opts]
+add_sub = "wrapping"
+mul = "wrapping"
+div = "reciprocal"
+

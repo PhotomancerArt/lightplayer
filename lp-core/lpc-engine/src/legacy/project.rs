@@ -27,6 +27,7 @@ use log;
 use lp_perf::EVENT_FRAME;
 use lpc_model::AsLpPath;
 use lpc_model::{FrameId, LpPathBuf, NodeId};
+use lpc_source::legacy::legacy_node_config_path;
 use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
 use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState, ProjectResponse};
 use lpc_wire::{WireNodeSpecifier, WireNodeStatus as ApiNodeStatus};
@@ -65,21 +66,25 @@ pub fn init_nodes(rt: &mut LegacyProjectRuntime) -> Result<(), Error> {
                     message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
-                let node_json_path = entry.path.join("node.json");
+                let node_config_path = legacy_node_config_path(entry.path.as_path());
                 let data = rt
                     .fs
                     .borrow()
-                    .read_file(node_json_path.as_path())
+                    .read_file(node_config_path.as_path())
                     .map_err(|e| Error::Io {
-                        path: node_json_path.as_str().to_string(),
+                        path: node_config_path.as_str().to_string(),
                         details: format!("Failed to read: {e:?}"),
                     })?;
+                let text = core::str::from_utf8(&data).map_err(|_| Error::Parse {
+                    file: node_config_path.as_str().to_string(),
+                    error: String::from("node.toml is not valid UTF-8"),
+                })?;
                 Some(
-                    lpc_wire::json::from_slice::<lpc_source::legacy::nodes::texture::TextureConfig>(&data)
+                    toml::from_str::<lpc_source::legacy::nodes::texture::TextureConfig>(text)
                         .map_err(|e| Error::Parse {
-                        file: node_json_path.as_str().to_string(),
-                        error: format!("Failed to parse texture config: {e}"),
-                    })?,
+                            file: node_config_path.as_str().to_string(),
+                            error: format!("Failed to parse texture config: {e}"),
+                        })?,
                 )
             } else {
                 None
@@ -90,21 +95,25 @@ pub fn init_nodes(rt: &mut LegacyProjectRuntime) -> Result<(), Error> {
                     message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
-                let node_json_path = entry.path.join("node.json");
+                let node_config_path = legacy_node_config_path(entry.path.as_path());
                 let data = rt
                     .fs
                     .borrow()
-                    .read_file(node_json_path.as_path())
+                    .read_file(node_config_path.as_path())
                     .map_err(|e| Error::Io {
-                        path: node_json_path.as_str().to_string(),
+                        path: node_config_path.as_str().to_string(),
                         details: format!("Failed to read: {e:?}"),
                     })?;
+                let text = core::str::from_utf8(&data).map_err(|_| Error::Parse {
+                    file: node_config_path.as_str().to_string(),
+                    error: String::from("node.toml is not valid UTF-8"),
+                })?;
                 Some(
-                    lpc_wire::json::from_slice::<lpc_source::legacy::nodes::fixture::FixtureConfig>(&data)
+                    toml::from_str::<lpc_source::legacy::nodes::fixture::FixtureConfig>(text)
                         .map_err(|e| Error::Parse {
-                        file: node_json_path.as_str().to_string(),
-                        error: format!("Failed to parse fixture config: {e}"),
-                    })?,
+                            file: node_config_path.as_str().to_string(),
+                            error: format!("Failed to parse fixture config: {e}"),
+                        })?,
                 )
             } else {
                 None
@@ -115,23 +124,25 @@ pub fn init_nodes(rt: &mut LegacyProjectRuntime) -> Result<(), Error> {
                     message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
-                let node_json_path = entry.path.join("node.json");
+                let node_config_path = legacy_node_config_path(entry.path.as_path());
                 let data = rt
                     .fs
                     .borrow()
-                    .read_file(node_json_path.as_path())
+                    .read_file(node_config_path.as_path())
                     .map_err(|e| Error::Io {
-                        path: node_json_path.as_str().to_string(),
+                        path: node_config_path.as_str().to_string(),
                         details: format!("Failed to read: {e:?}"),
                     })?;
+                let text = core::str::from_utf8(&data).map_err(|_| Error::Parse {
+                    file: node_config_path.as_str().to_string(),
+                    error: String::from("node.toml is not valid UTF-8"),
+                })?;
                 Some(
-                    lpc_wire::json::from_slice::<lpc_source::legacy::nodes::shader::ShaderConfig>(
-                        &data,
-                    )
-                    .map_err(|e| Error::Parse {
-                        file: node_json_path.as_str().to_string(),
-                        error: format!("Failed to parse shader config: {e}"),
-                    })?,
+                    toml::from_str::<lpc_source::legacy::nodes::shader::ShaderConfig>(text)
+                        .map_err(|e| Error::Parse {
+                            file: node_config_path.as_str().to_string(),
+                            error: format!("Failed to parse shader config: {e}"),
+                        })?,
                 )
             } else {
                 None
@@ -142,23 +153,25 @@ pub fn init_nodes(rt: &mut LegacyProjectRuntime) -> Result<(), Error> {
                     message: format!("Node handle {} not found", handle.as_u32()),
                 })?;
                 // Reload config from filesystem (workaround for trait object limitation)
-                let node_json_path = entry.path.join("node.json");
+                let node_config_path = legacy_node_config_path(entry.path.as_path());
                 let data = rt
                     .fs
                     .borrow()
-                    .read_file(node_json_path.as_path())
+                    .read_file(node_config_path.as_path())
                     .map_err(|e| Error::Io {
-                        path: node_json_path.as_str().to_string(),
+                        path: node_config_path.as_str().to_string(),
                         details: format!("Failed to read: {e:?}"),
                     })?;
+                let text = core::str::from_utf8(&data).map_err(|_| Error::Parse {
+                    file: node_config_path.as_str().to_string(),
+                    error: String::from("node.toml is not valid UTF-8"),
+                })?;
                 Some(
-                    lpc_wire::json::from_slice::<lpc_source::legacy::nodes::output::OutputConfig>(
-                        &data,
-                    )
-                    .map_err(|e| Error::Parse {
-                        file: node_json_path.as_str().to_string(),
-                        error: format!("Failed to parse output config: {e}"),
-                    })?,
+                    toml::from_str::<lpc_source::legacy::nodes::output::OutputConfig>(text)
+                        .map_err(|e| Error::Parse {
+                            file: node_config_path.as_str().to_string(),
+                            error: format!("Failed to parse output config: {e}"),
+                        })?,
                 )
             } else {
                 None
@@ -411,8 +424,8 @@ fn handle_modify_change(rt: &mut LegacyProjectRuntime, change: &FsChange) -> Res
     }
 
     if let (Some(handle), Some(path), Some(kind)) = (target_handle, target_path, target_kind) {
-        // Check if it's node.json
-        if change.path.has_suffix("/node.json") {
+        // Check if it's node.toml
+        if change.path.has_suffix("/node.toml") {
             // Reload config
             let (_, config_for_update) =
                 crate::legacy_project::legacy_loader::legacy_load_node(&*rt.fs.borrow(), &path)?;

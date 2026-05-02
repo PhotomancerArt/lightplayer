@@ -274,9 +274,9 @@ impl LpPath {
     /// assert!(path.has_suffix(".shader"));
     /// assert!(path.has_suffix("shader"));
     ///
-    /// let file_path = LpPath::new("/src/my-shader.shader/node.json");
-    /// assert!(file_path.has_suffix("/node.json"));
-    /// assert!(file_path.has_suffix("node.json"));
+    /// let file_path = LpPath::new("/src/my-shader.shader/node.toml");
+    /// assert!(file_path.has_suffix("/node.toml"));
+    /// assert!(file_path.has_suffix("node.toml"));
     /// ```
     pub fn has_suffix<S: AsRef<str>>(&self, suffix: S) -> bool {
         self.as_str().ends_with(suffix.as_ref())

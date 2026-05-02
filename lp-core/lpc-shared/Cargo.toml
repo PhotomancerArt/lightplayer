@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["lpfs/std"]
+std = ["lpfs/std", "toml/std"]
 
 [dependencies]
 libm = "0.2"
@@ -19,6 +19,7 @@ lpc-source = { path = "../lpc-source", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 serde = { workspace = true, features = ["derive"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 
 [lints]
 workspace = true

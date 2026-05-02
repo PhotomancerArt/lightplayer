@@ -1,54 +1,49 @@
 use crate::error::Error;
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf, ProjectConfig};
-use lpc_source::legacy::nodes::{
-    NodeConfig, NodeKind, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
-    texture::TextureConfig,
+use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
+use lpc_source::legacy::{
+    LegacyNodeLoadError, LegacyNodePathError, discover_legacy_node_dirs,
+    legacy_node_kind_from_path as source_legacy_node_kind_from_path, load_legacy_node_config,
 };
 use lpfs::LpFs;
 
-/// Determine node kind from path suffix
-pub(crate) fn legacy_node_kind_from_path(path: &LpPathBuf) -> Result<NodeKind, Error> {
-    let path_str = path.as_str();
-
-    // Find the last dot after the last slash
-    let last_slash = path_str.rfind('/').unwrap_or(0);
-    let after_slash = &path_str[last_slash..];
-
-    // Extract suffix (part after last dot)
-    let suffix = if let Some(dot_pos) = after_slash.rfind('.') {
-        &after_slash[dot_pos + 1..]
-    } else {
-        // No type suffix found
-        return Err(Error::InvalidConfig {
-            node_path: path_str.to_string(),
-            reason: "No type suffix on node path".to_string(),
-        });
-    };
-
-    // Match suffix to node kind
-    match suffix {
-        "texture" => Ok(NodeKind::Texture),
-        "shader" => Ok(NodeKind::Shader),
-        "output" => Ok(NodeKind::Output),
-        "fixture" => Ok(NodeKind::Fixture),
-        _ => Err(Error::InvalidConfig {
-            node_path: path_str.to_string(),
+fn map_legacy_load_error<E: core::fmt::Debug>(err: LegacyNodeLoadError<E>) -> Error {
+    match err {
+        LegacyNodeLoadError::Io { path, error } => Error::Io {
+            path: path.as_str().to_string(),
+            details: format!("Failed to read or list: {error:?}"),
+        },
+        LegacyNodeLoadError::InvalidPath { path, reason } => Error::InvalidConfig {
+            node_path: path.as_str().to_string(),
+            reason: reason.to_string(),
+        },
+        LegacyNodeLoadError::UnknownKind { path, suffix } => Error::InvalidConfig {
+            node_path: path.as_str().to_string(),
             reason: format!("Unknown node kind: {suffix}"),
-        }),
+        },
+        LegacyNodeLoadError::Parse { path, error } => Error::Parse {
+            file: path.as_str().to_string(),
+            error: format!("Failed to parse node config: {error}"),
+        },
     }
 }
 
-/// Check if a path is a node directory
-pub(crate) fn legacy_is_node_directory(path: &LpPathBuf) -> bool {
-    let path_str = path.as_str();
-    path_str.ends_with(".texture")
-        || path_str.ends_with(".shader")
-        || path_str.ends_with(".output")
-        || path_str.ends_with(".fixture")
+/// Determine node kind from path suffix
+pub(crate) fn legacy_node_kind_from_path(path: &LpPathBuf) -> Result<NodeKind, Error> {
+    source_legacy_node_kind_from_path(path).map_err(|e| match e {
+        LegacyNodePathError::NoTypeSuffix { path } => Error::InvalidConfig {
+            node_path: path.as_str().to_string(),
+            reason: String::from("No type suffix on node path"),
+        },
+        LegacyNodePathError::UnknownKind { path, suffix } => Error::InvalidConfig {
+            node_path: path.as_str().to_string(),
+            reason: format!("Unknown node kind: {suffix}"),
+        },
+    })
 }
 
 /// Load project config from filesystem
@@ -87,73 +82,13 @@ pub fn legacy_load_from_filesystem(fs: &dyn LpFs) -> Result<ProjectConfig, Error
 /// Discover all node directories in /src/
 pub fn discover_nodes(fs: &dyn LpFs) -> Result<Vec<LpPathBuf>, Error> {
     let path = "/src";
-    let entries = fs.list_dir(path.as_path(), false).map_err(|e| Error::Io {
-        path: path.to_string(),
-        details: format!("Failed to list directory: {e:?}"),
-    })?;
-
-    let mut nodes = Vec::new();
-    for entry in entries {
-        if legacy_is_node_directory(&entry) {
-            nodes.push(entry);
-        }
-    }
-
-    Ok(nodes)
+    discover_legacy_node_dirs(&fs, path.as_path()).map_err(map_legacy_load_error)
 }
 
-/// Load a node's config from filesystem
+/// Load a node's config from filesystem (`node.toml`)
 pub fn legacy_load_node(
     fs: &dyn LpFs,
     path: &LpPath,
 ) -> Result<(LpPathBuf, Box<dyn NodeConfig>), Error> {
-    let node_json_path = path.to_path_buf().join("node.json");
-
-    let data = fs
-        .read_file(node_json_path.as_path())
-        .map_err(|e| Error::Io {
-            path: node_json_path.as_str().to_string(),
-            details: format!("Failed to read: {e:?}"),
-        })?;
-
-    // Determine node kind from path suffix
-    let kind = legacy_node_kind_from_path(&path.to_path_buf())?;
-
-    // Parse config based on kind
-    let config: Box<dyn NodeConfig> = match kind {
-        NodeKind::Texture => {
-            let cfg: TextureConfig =
-                lpc_wire::json::from_slice(&data).map_err(|e| Error::Parse {
-                    file: node_json_path.as_str().to_string(),
-                    error: format!("Failed to parse texture config: {e}"),
-                })?;
-            Box::new(cfg)
-        }
-        NodeKind::Shader => {
-            let cfg: ShaderConfig =
-                lpc_wire::json::from_slice(&data).map_err(|e| Error::Parse {
-                    file: node_json_path.as_str().to_string(),
-                    error: format!("Failed to parse shader config: {e}"),
-                })?;
-            Box::new(cfg)
-        }
-        NodeKind::Output => {
-            let cfg: OutputConfig =
-                lpc_wire::json::from_slice(&data).map_err(|e| Error::Parse {
-                    file: node_json_path.as_str().to_string(),
-                    error: format!("Failed to parse output config: {e}"),
-                })?;
-            Box::new(cfg)
-        }
-        NodeKind::Fixture => {
-            let cfg: FixtureConfig =
-                lpc_wire::json::from_slice(&data).map_err(|e| Error::Parse {
-                    file: node_json_path.as_str().to_string(),
-                    error: format!("Failed to parse fixture config: {e}"),
-                })?;
-            Box::new(cfg)
-        }
-    };
-
-    Ok((path.to_path_buf(), config))
+    load_legacy_node_config(&fs, path).map_err(map_legacy_load_error)
 }
