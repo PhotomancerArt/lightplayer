@@ -263,8 +263,7 @@ mod tests {
         assert!(json.contains("\"name\":\"Test Project\""));
         assert!(
             !json.contains("\\\\\""),
-            "JSON should not be double-escaped: {}",
-            json
+            "JSON should not be double-escaped: {json}"
         );
 
         // Verify round-trip deserialization

@@ -167,7 +167,7 @@ mod tests {
         use base64::Engine;
         let bytes = vec![1u8, 2, 3];
         let enc = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let j = format!(r#"{{"lamp_colors":"{}"}}"#, enc);
+        let j = format!(r#"{{"lamp_colors":"{enc}"}}"#);
         let s: FixtureState = json::from_str(&j).unwrap();
         assert_eq!(s.lamp_colors.inline_bytes(), bytes.as_slice());
     }

@@ -370,8 +370,7 @@ mod tests {
         // Verify the JSON contains escaped quotes (this is correct JSON!)
         assert!(
             request_json.contains(r#""data":"{\"uid\""#),
-            "JSON should contain escaped quotes in the data field. Actual JSON: {}",
-            request_json
+            "JSON should contain escaped quotes in the data field. Actual JSON: {request_json}"
         );
 
         // Verify round-trip works

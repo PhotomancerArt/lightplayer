@@ -152,7 +152,7 @@ mod tests {
         use base64::Engine;
         let channel_bytes = vec![50, 100, 150, 200];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&channel_bytes);
-        let json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
+        let json = format!(r#"{{"channel_data": "{encoded}"}}"#);
 
         let state: OutputState = json::from_str(&json).unwrap();
         assert_eq!(state.channel_data.inline_bytes(), channel_bytes.as_slice());
@@ -163,7 +163,7 @@ mod tests {
         use base64::Engine;
         let channel_bytes = vec![1, 2, 3, 4, 5];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&channel_bytes);
-        let json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
+        let json = format!(r#"{{"channel_data": "{encoded}"}}"#);
 
         let state: OutputState = json::from_str(&json).unwrap();
         assert_eq!(state.channel_data.inline_bytes(), channel_bytes.as_slice());
@@ -174,7 +174,7 @@ mod tests {
         use base64::Engine;
         let initial_bytes = vec![10, 20, 30, 40];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&initial_bytes);
-        let initial_json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
+        let initial_json = format!(r#"{{"channel_data": "{encoded}"}}"#);
         let mut existing_state: OutputState = json::from_str(&initial_json).unwrap();
         existing_state
             .channel_data

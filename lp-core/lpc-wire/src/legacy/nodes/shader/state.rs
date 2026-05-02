@@ -46,7 +46,7 @@ impl ShaderState {
         }
         if other.render_product.value().is_some() {
             self.render_product
-                .set(frame_id, other.render_product.value().clone());
+                .set(frame_id, *other.render_product.value());
         }
     }
 }

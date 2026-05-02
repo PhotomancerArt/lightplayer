@@ -224,7 +224,7 @@ mod tests {
         use base64::Engine;
         let texture_bytes = vec![100, 200, 255, 128];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&texture_bytes);
-        let json = format!(r#"{{"texture_data": "{}"}}"#, encoded);
+        let json = format!(r#"{{"texture_data": "{encoded}"}}"#);
 
         let state: TextureState = json::from_str(&json).unwrap();
         assert_eq!(state.texture_data.inline_bytes(), texture_bytes.as_slice());
@@ -238,8 +238,7 @@ mod tests {
         let texture_bytes = vec![1, 2, 3, 4];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&texture_bytes);
         let json = format!(
-            r#"{{"texture_data": "{}", "width": 100, "height": 200, "format": "RGB8"}}"#,
-            encoded
+            r#"{{"texture_data": "{encoded}", "width": 100, "height": 200, "format": "RGB8"}}"#
         );
 
         let state: TextureState = json::from_str(&json).unwrap();
