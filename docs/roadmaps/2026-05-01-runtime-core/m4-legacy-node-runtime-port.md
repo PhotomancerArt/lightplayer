@@ -27,10 +27,10 @@ fixture sampling or invent the final render-product family.
 - Make fixtures demand roots in the core engine.
 - Route child/output/bus reads through engine-owned resolution.
 - Use the engine per-frame cache so demanded producers run at most once per
-  frame.
+frame.
 - Use `Versioned<T>` versions for node-private cache decisions where helpful.
 - Preserve existing shader compile/execute behavior, including embedded JIT
-  requirements.
+requirements.
 - Add parity tests against current legacy behavior where practical.
 
 ## Out of scope
@@ -44,11 +44,11 @@ fixture sampling or invent the final render-product family.
 ## Key decisions
 
 - **Behavior parity before optimization:** keep the old flow working in the new
-  engine before changing its render model.
+engine before changing its render model.
 - **Texture-backed is acceptable here:** render products can be named in the
-  contract, but the concrete first product may still be a texture.
+contract, but the concrete first product may still be a texture.
 - **Demand-root fixture flow:** fixtures drive the frame; outputs flush after
-  fixture-side mutation.
+fixture-side mutation.
 
 ## Suggested plan location
 
@@ -60,7 +60,6 @@ When ready, expand this milestone with `/plan` or `/plan-small` at:
 
 - The core engine can run the legacy MVP flow.
 - Shader/fixture/output behavior matches the old runtime closely enough for
-  comparison tests.
+comparison tests.
 - Producer work is demand-driven and same-frame cached.
 - The old engine remains available until M5 cutover.
-
