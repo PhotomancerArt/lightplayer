@@ -27,7 +27,7 @@ pub fn render_texture_panel(
         ui.label(format!("Format: {}", state.format.value()));
         ui.label(format!(
             "Data size: {} bytes",
-            state.texture_data.value().len()
+            state.texture_data.inline_bytes().len()
         ));
     });
 
@@ -35,12 +35,12 @@ pub fn render_texture_panel(
 
     // Display texture image
     if show_background
-        && !state.texture_data.value().is_empty()
+        && !state.texture_data.inline_bytes().is_empty()
         && *state.width.value() > 0
         && *state.height.value() > 0
     {
         let color_image = texture_data_to_color_image(
-            state.texture_data.value(),
+            state.texture_data.inline_bytes(),
             *state.width.value(),
             *state.height.value(),
             *state.format.value(),

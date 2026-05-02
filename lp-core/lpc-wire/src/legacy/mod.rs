@@ -1,5 +1,6 @@
 //! Legacy runtime state and client/server protocol payloads.
 
+pub mod compatibility;
 pub mod nodes;
 pub mod project;
 

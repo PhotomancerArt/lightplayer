@@ -26,6 +26,7 @@ pub mod serial;
 pub mod tree;
 
 pub mod project;
+pub mod resource;
 mod versioned;
 // --- Foundation re-exports ------------------------------------------------------------------
 
@@ -47,5 +48,6 @@ pub use node::node_prop_spec::NodePropSpec;
 pub use node::{NodeId, NodeName, NodeNameError, NodeSpec};
 pub use project::{FrameId, ProjectConfig};
 pub use prop::prop_path::PropPath;
+pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

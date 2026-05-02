@@ -4,7 +4,10 @@ use alloc::string::String;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Serialize};
 
-use super::WireNodeSpecifier;
+use super::{
+    RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+    WireNodeSpecifier,
+};
 
 /// Project-scoped request from client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,6 +18,15 @@ pub enum WireProjectRequest {
         since_frame: FrameId,
         /// Which nodes need full detail.
         detail_specifier: WireNodeSpecifier,
+        /// Which resource summary domains to include (per-request; no server-side subscription state).
+        #[serde(default)]
+        resource_summary_specifier: ResourceSummarySpecifier,
+        /// Which runtime-buffer payloads to include.
+        #[serde(default)]
+        runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier,
+        /// Which render-product payloads to materialize (plus reserved future options).
+        #[serde(default)]
+        render_product_payload_request: RenderProductPayloadRequest,
     },
 }
 
@@ -62,14 +74,29 @@ mod tests {
         let request = WireProjectRequest::GetChanges {
             since_frame: FrameId::default(),
             detail_specifier: WireNodeSpecifier::All,
+            resource_summary_specifier: ResourceSummarySpecifier::default(),
+            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
+            render_product_payload_request: RenderProductPayloadRequest::default(),
         };
         match request {
             WireProjectRequest::GetChanges {
                 since_frame,
                 detail_specifier,
+                resource_summary_specifier,
+                runtime_buffer_payload_specifier,
+                render_product_payload_request,
             } => {
                 assert_eq!(since_frame, FrameId::default());
                 assert_eq!(detail_specifier, WireNodeSpecifier::All);
+                assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::None);
+                assert_eq!(
+                    runtime_buffer_payload_specifier,
+                    RuntimeBufferPayloadSpecifier::None
+                );
+                assert_eq!(
+                    render_product_payload_request,
+                    RenderProductPayloadRequest::default()
+                );
             }
         }
     }

@@ -1,6 +1,5 @@
 //! [`CoreProjectRuntime`] — owns [`crate::engine::Engine`] plus project services.
 
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -8,14 +7,26 @@ use hashbrown::HashMap;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{FrameId, NodeId, TreePath};
-use lpc_source::legacy::nodes::NodeKind;
-use lpc_wire::legacy::{NodeChange, ProjectResponse};
-use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
 use lpfs::FsChange;
+
+use lpc_wire::legacy::{NodeChange, ProjectResponse};
+use lpc_wire::{
+    RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+    WireNodeSpecifier, WireNodeStatus,
+};
 
 use crate::engine::{Engine, EngineError};
 
-use super::{CompatibilityProjection, RuntimeServices};
+use super::{
+    CompatibilityProjection, RuntimeServices,
+    detail_projection::build_node_detail_map,
+    kind::legacy_node_kind_from_tree_path,
+    resource_projection::{
+        buffer_payload_interest, render_payload_interest, render_product_payloads_for_request,
+        runtime_buffer_payloads_for_request, summarize_render_products_if_requested,
+        summarize_runtime_buffers_if_requested,
+    },
+};
 
 /// Project-level owner: core [`Engine`] plus [`RuntimeServices`] and compatibility
 /// projection for the M4 stack.
@@ -60,6 +71,10 @@ impl CoreProjectRuntime {
         &self.compatibility
     }
 
+    pub(crate) fn compatibility_mut(&mut self) -> &mut CompatibilityProjection {
+        &mut self.compatibility
+    }
+
     pub fn frame_id(&self) -> FrameId {
         self.engine.frame_id()
     }
@@ -93,14 +108,15 @@ impl CoreProjectRuntime {
         Ok(())
     }
 
-    /// Minimal legacy-wire projection for M4 server/demo cutover.
-    ///
-    /// M4.1 owns buffer/render-product-aware details. Until then, this projects tree membership,
-    /// status, and frame identity so existing clients can load and tick the core runtime path.
+    /// M4.1+: projects tree membership, statuses, incremental changes, compatibility node details,
+    /// and optionally resource summaries plus buffer/render-product payloads per request specifiers.
     pub fn get_changes(
         &self,
         since_frame: FrameId,
-        _detail_specifier: &WireNodeSpecifier,
+        detail_specifier: &WireNodeSpecifier,
+        resource_summary_specifier: ResourceSummarySpecifier,
+        runtime_buffer_payload_specifier: &RuntimeBufferPayloadSpecifier,
+        render_product_payload_request: &RenderProductPayloadRequest,
         theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, EngineError> {
         let mut node_handles = Vec::new();
@@ -111,7 +127,7 @@ impl CoreProjectRuntime {
                 continue;
             }
 
-            let Some(kind) = kind_from_tree_path(&entry.path) else {
+            let Some(kind) = legacy_node_kind_from_tree_path(&entry.path) else {
                 continue;
             };
 
@@ -146,25 +162,58 @@ impl CoreProjectRuntime {
             }
         }
 
+        let node_details = build_node_detail_map(
+            self.engine(),
+            self.compatibility(),
+            detail_specifier,
+            self.frame_id(),
+        );
+
+        let mut resource_summaries = alloc::vec::Vec::new();
+        summarize_runtime_buffers_if_requested(
+            since_frame,
+            resource_summary_specifier,
+            self.engine.runtime_buffers(),
+            &mut resource_summaries,
+        );
+        summarize_render_products_if_requested(
+            since_frame,
+            resource_summary_specifier,
+            self.engine.render_products(),
+            &mut resource_summaries,
+        );
+
+        let mut runtime_buffer_payloads = alloc::vec::Vec::new();
+        if let Some(ref interest) = buffer_payload_interest(runtime_buffer_payload_specifier) {
+            runtime_buffer_payloads_for_request(
+                since_frame,
+                interest,
+                self.engine.runtime_buffers(),
+                &mut runtime_buffer_payloads,
+            );
+        }
+
+        let mut render_product_payloads = alloc::vec::Vec::new();
+        if let Some(ref interest) = render_payload_interest(render_product_payload_request) {
+            render_product_payloads_for_request(
+                since_frame,
+                interest,
+                self.engine.render_products(),
+                &mut render_product_payloads,
+            );
+        }
+
         Ok(ProjectResponse::GetChanges {
             current_frame: self.frame_id(),
             since_frame,
             node_handles,
             node_changes,
-            node_details: BTreeMap::new(),
+            node_details,
             theoretical_fps,
+            resource_summaries,
+            runtime_buffer_payloads,
+            render_product_payloads,
         })
-    }
-}
-
-fn kind_from_tree_path(path: &TreePath) -> Option<NodeKind> {
-    let ty = path.0.last()?.ty.to_string();
-    match ty.as_str() {
-        "texture" => Some(NodeKind::Texture),
-        "shader" => Some(NodeKind::Shader),
-        "output" => Some(NodeKind::Output),
-        "fixture" => Some(NodeKind::Fixture),
-        _ => None,
     }
 }
 

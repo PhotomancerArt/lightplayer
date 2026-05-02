@@ -18,7 +18,15 @@ pub mod transport_error;
 pub mod tree;
 
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
-pub use project::{WireNodeSpecifier, WireNodeStatus, WireProjectHandle, WireProjectRequest};
+pub use project::{
+    RenderProductPayloadOptions, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireChannelSampleFormat,
+    WireColorLayout, WireNodeSpecifier, WireNodeStatus, WireProjectHandle, WireProjectRequest,
+    WireRenderProductKind, WireRenderProductPayload, WireResourceAvailability,
+    WireResourceKindSummary, WireResourceMetadataSummary, WireResourceSummary,
+    WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
+    WireTextureFormat,
+};
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,

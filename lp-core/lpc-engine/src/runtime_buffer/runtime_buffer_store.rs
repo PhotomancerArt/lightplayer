@@ -20,6 +20,9 @@ impl RuntimeBufferError {
 }
 
 /// Maps [`RuntimeBufferId`] to [`Versioned`] buffer payloads for [`crate::engine::Engine`].
+///
+/// [`insert`](RuntimeBufferStore::insert) allocates ids monotonically; ids are not reused for
+/// the lifetime of this store.
 pub struct RuntimeBufferStore {
     next_id: u32,
     buffers: BTreeMap<RuntimeBufferId, Versioned<RuntimeBuffer>>,
@@ -34,6 +37,7 @@ impl RuntimeBufferStore {
         }
     }
 
+    /// Allocates a new id. Ids increase monotonically and are never reused after allocation.
     pub fn insert(&mut self, buffer: Versioned<RuntimeBuffer>) -> RuntimeBufferId {
         let id = RuntimeBufferId::new(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
@@ -47,6 +51,11 @@ impl RuntimeBufferStore {
 
     pub fn get_mut(&mut self, id: RuntimeBufferId) -> Option<&mut Versioned<RuntimeBuffer>> {
         self.buffers.get_mut(&id)
+    }
+
+    /// Iterate all buffers in deterministic id order (for M4.1 resource summaries).
+    pub fn iter(&self) -> impl Iterator<Item = (RuntimeBufferId, &Versioned<RuntimeBuffer>)> + '_ {
+        self.buffers.iter().map(|(&id, buf)| (id, buf))
     }
 
     pub fn get_mut_mark_updated(

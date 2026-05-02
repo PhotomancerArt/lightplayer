@@ -3,6 +3,7 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec;
 
 use lp_shader::LpsTextureBuf;
 use lpc_model::FrameId;
@@ -15,7 +16,10 @@ use lps_shared::LpsValueF32;
 use lps_shared::TextureBuffer;
 
 use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
-use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
+    ShaderProjectionWire, TickContext,
+};
 use crate::prop::{RuntimeOutputAccess, RuntimePropAccess};
 use crate::render_product::{RenderProductId, TextureRenderProduct};
 use crate::resolver::QueryKey;
@@ -71,13 +75,17 @@ impl RuntimeOutputAccess for ShaderRuntimeOutputs {
     }
 }
 
-/// Shader producer wired to the core engine: renders into a pre-allocated [`RenderProductId`] slot.
+/// Shader producer wired to the core engine; allocates a [`RenderProductId`] during [`Node::init_resources`].
 pub struct ShaderNode {
     node_id: NodeId,
     texture_node_id: NodeId,
     config: ShaderConfig,
     glsl_source: String,
+    /// Placeholder texture dimensions used until the first shader render read real texture props.
+    placeholder_texture_width: u32,
+    placeholder_texture_height: u32,
     render_product_id: RenderProductId,
+    resources_initialized: bool,
     scalar_props: ShaderScalarProps,
     outputs: ShaderRuntimeOutputs,
     shader: Option<Box<dyn LpShader>>,
@@ -91,18 +99,23 @@ impl ShaderNode {
         texture_node_id: NodeId,
         config: ShaderConfig,
         glsl_source: String,
-        render_product_id: RenderProductId,
+        placeholder_texture_width: u32,
+        placeholder_texture_height: u32,
     ) -> Self {
+        let dummy_id = RenderProductId::new(0);
         Self {
             node_id,
             texture_node_id,
             config,
             glsl_source,
-            render_product_id,
+            placeholder_texture_width,
+            placeholder_texture_height,
+            render_product_id: dummy_id,
+            resources_initialized: false,
             scalar_props: ShaderScalarProps,
             outputs: ShaderRuntimeOutputs {
                 path: shader_texture_output_path(),
-                render_product_id,
+                render_product_id: dummy_id,
                 last_frame: FrameId::default(),
             },
             shader: None,
@@ -122,9 +135,37 @@ impl ShaderNode {
     pub fn compilation_error(&self) -> Option<&str> {
         self.compilation_error.as_deref()
     }
+
+    fn build_placeholder_texture_product(&self) -> Result<TextureRenderProduct, NodeError> {
+        let len = rgba16_placeholder_byte_len(
+            self.placeholder_texture_width,
+            self.placeholder_texture_height,
+        )?;
+        TextureRenderProduct::rgba16_unorm(
+            self.placeholder_texture_width,
+            self.placeholder_texture_height,
+            vec![0u8; len],
+        )
+        .map_err(|e| NodeError::msg(format!("create placeholder texture product: {e}")))
+    }
 }
 
 impl Node for ShaderNode {
+    fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
+        if self.resources_initialized {
+            return Ok(());
+        }
+        let tex = Box::new(self.build_placeholder_texture_product()?);
+        let rid = ctx.insert_render_product(tex);
+        self.render_product_id = rid;
+        self.outputs = ShaderRuntimeOutputs {
+            path: shader_texture_output_path(),
+            render_product_id: rid,
+            last_frame: FrameId::default(),
+        };
+        self.resources_initialized = true;
+        Ok(())
+    }
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         if self.shader.is_none() && self.compilation_error.is_none() {
             let g = ctx
@@ -232,6 +273,18 @@ impl Node for ShaderNode {
     fn outputs(&self) -> &dyn RuntimeOutputAccess {
         &self.outputs
     }
+
+    fn primary_render_product_id(&self) -> Option<RenderProductId> {
+        self.resources_initialized.then_some(self.render_product_id)
+    }
+
+    fn shader_projection_wire(&self) -> Option<ShaderProjectionWire<'_>> {
+        Some(ShaderProjectionWire {
+            glsl_source: self.glsl_source.as_str(),
+            compilation_error: self.compilation_error.as_deref(),
+            render_product_id: self.resources_initialized.then_some(self.render_product_id),
+        })
+    }
 }
 
 impl ShaderNode {
@@ -292,6 +345,18 @@ fn map_model_q32_options(
     }
 }
 
+fn rgba16_placeholder_byte_len(width: u32, height: u32) -> Result<usize, NodeError> {
+    usize::try_from(width)
+        .ok()
+        .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
+        .and_then(|px| px.checked_mul(8))
+        .ok_or_else(|| {
+            NodeError::msg(format!(
+                "shader placeholder texture dimensions {width}x{height} overflow usize"
+            ))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::sync::Arc;
@@ -301,8 +366,10 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
-    use crate::render_product::{RenderSampleBatch, RenderSamplePoint};
+    use crate::node::NodeResourceInitContext;
+    use crate::render_product::{RenderProductStore, RenderSampleBatch, RenderSamplePoint};
     use crate::resolver::ResolveLogLevel;
+    use crate::runtime_buffer::RuntimeBufferStore;
     use crate::tree::test_placeholder_spine;
     use lpc_model::TreePath;
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -342,10 +409,6 @@ mod tests {
             .attach_runtime_node(tex_id, Box::new(tex), frame)
             .expect("attach tex");
 
-        let rid = engine.render_products_mut().insert(Box::new(
-            TextureRenderProduct::rgba16_unorm(8, 8, vec![0u8; 8 * 8 * 8]).expect("dummy"),
-        ));
-
         let sh_id = engine
             .tree_mut()
             .add_child(
@@ -368,10 +431,14 @@ mod tests {
             glsl_opts: Default::default(),
         };
 
-        let sh = ShaderNode::new(sh_id, tex_id, cfg, String::from(DEMO_GLSL), rid);
+        let sh = ShaderNode::new(sh_id, tex_id, cfg, String::from(DEMO_GLSL), 8, 8);
         engine
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
+
+        let rid = engine
+            .primary_render_product_id_for_node(sh_id)
+            .expect("shader render product id");
 
         (engine, tex_id, sh_id, rid)
     }
@@ -384,8 +451,12 @@ mod tests {
             render_order: 0,
             glsl_opts: Default::default(),
         };
-        let rid = RenderProductId::new(7);
-        let node = ShaderNode::new(NodeId::new(1), NodeId::new(2), cfg, String::new(), rid);
+        let mut render_products = RenderProductStore::new();
+        let mut runtime_buffers = RuntimeBufferStore::new();
+        let mut ctx = NodeResourceInitContext::new(&mut render_products, &mut runtime_buffers);
+        let mut node = ShaderNode::new(NodeId::new(1), NodeId::new(2), cfg, String::new(), 8, 8);
+        node.init_resources(&mut ctx).expect("init resources");
+        let rid = node.render_product_id();
         let p = shader_texture_output_path();
         assert!(node.props().get(&p).is_none());
         let (prod, _) = node.outputs().get(&p).expect("render output");

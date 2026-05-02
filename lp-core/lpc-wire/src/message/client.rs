@@ -35,7 +35,10 @@ pub enum ClientRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::WireNodeSpecifier;
+    use crate::project::{
+        RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+        WireNodeSpecifier, WireProjectRequest,
+    };
     use lpc_model::lp_path::AsLpPathBuf;
     use lpc_model::project::FrameId;
 
@@ -94,6 +97,9 @@ mod tests {
             request: WireProjectRequest::GetChanges {
                 since_frame: FrameId::default(),
                 detail_specifier: WireNodeSpecifier::All,
+                resource_summary_specifier: ResourceSummarySpecifier::default(),
+                runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
+                render_product_payload_request: RenderProductPayloadRequest::default(),
             },
         };
         let json = crate::json::to_string(&req).unwrap();
@@ -105,9 +111,21 @@ mod tests {
                     WireProjectRequest::GetChanges {
                         since_frame,
                         detail_specifier,
+                        resource_summary_specifier,
+                        runtime_buffer_payload_specifier,
+                        render_product_payload_request,
                     } => {
                         assert_eq!(since_frame, FrameId::default());
                         assert_eq!(detail_specifier, WireNodeSpecifier::All);
+                        assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::None);
+                        assert_eq!(
+                            runtime_buffer_payload_specifier,
+                            RuntimeBufferPayloadSpecifier::None
+                        );
+                        assert_eq!(
+                            render_product_payload_request,
+                            RenderProductPayloadRequest::default()
+                        );
                     }
                 }
             }

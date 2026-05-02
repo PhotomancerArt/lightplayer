@@ -3,7 +3,10 @@
 
 mod compatibility_projection;
 mod core_project_runtime;
+mod detail_projection;
+mod kind;
 mod project_loader;
+mod resource_projection;
 mod runtime_services;
 
 pub use compatibility_projection::CompatibilityProjection;

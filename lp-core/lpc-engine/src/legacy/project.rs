@@ -697,7 +697,7 @@ pub fn get_changes(
                             // Update channel_data from current buffer
                             state
                                 .channel_data
-                                .set(rt.frame_id, output_runtime.get_channel_data());
+                                .set_inline(rt.frame_id, output_runtime.get_channel_data());
                             NodeState::Output(state)
                         } else {
                             NodeState::Output(lpc_wire::legacy::nodes::output::OutputState::new(
@@ -875,6 +875,9 @@ pub fn get_changes(
         node_changes,
         node_details,
         theoretical_fps,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     })
 }
 

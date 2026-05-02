@@ -179,6 +179,9 @@ fn handle_project_request(
         lpc_wire::WireProjectRequest::GetChanges {
             since_frame,
             detail_specifier,
+            resource_summary_specifier,
+            runtime_buffer_payload_specifier,
+            render_product_payload_request,
         } => {
             let current_frame_before = project.runtime().frame_id();
             log::debug!(
@@ -188,7 +191,14 @@ fn handle_project_request(
             );
             let response = project
                 .runtime_mut()
-                .get_changes(since_frame, &detail_specifier, theoretical_fps)
+                .get_changes(
+                    since_frame,
+                    &detail_specifier,
+                    resource_summary_specifier,
+                    &runtime_buffer_payload_specifier,
+                    &render_product_payload_request,
+                    theoretical_fps,
+                )
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
 
             let response_frame = match &response {

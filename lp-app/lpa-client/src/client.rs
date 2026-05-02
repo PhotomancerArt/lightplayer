@@ -6,7 +6,9 @@ use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf, project::FrameId};
 use lpc_wire::legacy::{LegacyServerMessage, SerializableProjectResponse};
 use lpc_wire::{
-    WireNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
+    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
+    RuntimeBufferPayloadSpecifier, WireNodeSpecifier, WireProjectHandle as ProjectHandle,
+    WireProjectRequest,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
@@ -16,6 +18,40 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 use crate::transport::ClientTransport;
+
+/// Extra `GetChanges` fields beyond node detail selection (`WireProjectRequest::GetChanges`).
+///
+/// Sent on every sync request; the server does not retain subscription state between calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectGetChangesOptions {
+    pub resource_summary_specifier: ResourceSummarySpecifier,
+    pub runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier,
+    pub render_product_payload_request: RenderProductPayloadRequest,
+}
+
+impl Default for ProjectGetChangesOptions {
+    fn default() -> Self {
+        Self {
+            resource_summary_specifier: ResourceSummarySpecifier::default(),
+            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
+            render_product_payload_request: RenderProductPayloadRequest::default(),
+        }
+    }
+}
+
+impl ProjectGetChangesOptions {
+    /// Local dev UI (`just demo`): summaries plus full buffer and render-product payloads.
+    pub fn dev_demo_full_resources() -> Self {
+        Self {
+            resource_summary_specifier: ResourceSummarySpecifier::All,
+            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::All,
+            render_product_payload_request: RenderProductPayloadRequest {
+                specifier: RenderProductPayloadSpecifier::All,
+                ..Default::default()
+            },
+        }
+    }
+}
 
 /// Standalone client for communicating with LpServer
 ///
@@ -412,6 +448,7 @@ impl LpClient {
     /// * `handle` - Project handle
     /// * `since_frame` - Frame ID to get changes since (None for all changes)
     /// * `detail_specifier` - Which nodes to include in the response
+    /// * `resource_options` - Resource summary / payload specifiers for `GetChanges`
     ///
     /// # Returns
     ///
@@ -422,15 +459,25 @@ impl LpClient {
         handle: ProjectHandle,
         since_frame: Option<FrameId>,
         detail_specifier: WireNodeSpecifier,
+        resource_options: ProjectGetChangesOptions,
     ) -> Result<SerializableProjectResponse> {
         // Use FrameId::default() if since_frame is None (get all changes)
         let since_frame = since_frame.unwrap_or_default();
+
+        let ProjectGetChangesOptions {
+            resource_summary_specifier,
+            runtime_buffer_payload_specifier,
+            render_product_payload_request,
+        } = resource_options;
 
         let request = ClientRequest::ProjectRequest {
             handle,
             request: WireProjectRequest::GetChanges {
                 since_frame,
                 detail_specifier,
+                resource_summary_specifier,
+                runtime_buffer_payload_specifier,
+                render_product_payload_request,
             },
         };
 
@@ -523,6 +570,9 @@ pub fn serializable_response_to_project_response(
             node_changes,
             node_details,
             theoretical_fps,
+            resource_summaries,
+            runtime_buffer_payloads,
+            render_product_payloads,
         } => {
             use lpc_wire::legacy::{NodeDetail, ProjectResponse, SerializableNodeDetail};
             use std::collections::BTreeMap;
@@ -578,6 +628,9 @@ pub fn serializable_response_to_project_response(
                 node_changes,
                 node_details: node_details_map,
                 theoretical_fps,
+                resource_summaries,
+                runtime_buffer_payloads,
+                render_product_payloads,
             })
         }
     }
@@ -587,10 +640,11 @@ pub fn serializable_response_to_project_response(
 mod tests {
     use super::*;
     use crate::local::create_local_transport_pair;
-    use lpc_model::LpPathBuf;
+    use lpc_model::{LpPathBuf, project::FrameId};
     use lpc_shared::transport::ServerTransport;
     use lpc_wire::{
-        WireProjectHandle as ProjectHandle,
+        RenderProductPayloadSpecifier, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+        WireNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
         server::{LoadedProject, SampleStats, ServerMsgBody},
     };
     use tokio::task;
@@ -785,5 +839,35 @@ mod tests {
         assert!(result.is_ok());
 
         server_task.await.unwrap();
+    }
+
+    #[test]
+    fn dev_demo_full_resources_matches_demo_wire_shape() {
+        let opts = ProjectGetChangesOptions::dev_demo_full_resources();
+        let req = WireProjectRequest::GetChanges {
+            since_frame: FrameId::default(),
+            detail_specifier: WireNodeSpecifier::All,
+            resource_summary_specifier: opts.resource_summary_specifier,
+            runtime_buffer_payload_specifier: opts.runtime_buffer_payload_specifier,
+            render_product_payload_request: opts.render_product_payload_request,
+        };
+        match req {
+            WireProjectRequest::GetChanges {
+                resource_summary_specifier,
+                runtime_buffer_payload_specifier,
+                render_product_payload_request,
+                ..
+            } => {
+                assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::All);
+                assert_eq!(
+                    runtime_buffer_payload_specifier,
+                    RuntimeBufferPayloadSpecifier::All
+                );
+                assert_eq!(
+                    render_product_payload_request.specifier,
+                    RenderProductPayloadSpecifier::All
+                );
+            }
+        }
     }
 }

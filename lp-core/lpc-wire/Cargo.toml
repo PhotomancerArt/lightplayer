@@ -23,6 +23,7 @@ schemars = { workspace = true, optional = true }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
+lpc-model = { path = "../lpc-model", default-features = false }
 serde_json = { workspace = true }
 
 [lints]

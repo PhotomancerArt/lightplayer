@@ -29,7 +29,7 @@ pub fn render_fixture_panel(
         ));
         ui.label(format!(
             "Lamp colors: {} bytes",
-            state.lamp_colors.value().len()
+            state.lamp_colors.inline_bytes().len()
         ));
     });
 
@@ -45,12 +45,12 @@ pub fn render_fixture_panel(
     if let Some(texture_entry) = texture_entry {
         if let Some(NodeState::Texture(texture_state)) = &texture_entry.state {
             // Display texture with mapping overlay
-            if !texture_state.texture_data.value().is_empty()
+            if !texture_state.texture_data.inline_bytes().is_empty()
                 && *texture_state.width.value() > 0
                 && *texture_state.height.value() > 0
             {
                 let color_image = texture::texture_data_to_color_image(
-                    texture_state.texture_data.value(),
+                    texture_state.texture_data.inline_bytes(),
                     *texture_state.width.value(),
                     *texture_state.height.value(),
                     *texture_state.format.value(),
@@ -95,7 +95,7 @@ pub fn render_fixture_panel(
                     *texture_state.width.value(),
                     *texture_state.height.value(),
                     state.mapping_cells.value(),
-                    state.lamp_colors.value(),
+                    state.lamp_colors.inline_bytes(),
                     show_labels,
                     show_strokes,
                 );

@@ -12,6 +12,8 @@ use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
 use lpc_wire::legacy::{NodeChange, NodeState, ProjectResponse};
 use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
 
+use super::resource_cache::{self, ClientResourceCache};
+
 /// Status change information surfaced by [`ProjectView::apply_changes`].
 #[derive(Debug, Clone)]
 pub struct StatusChangeView {
@@ -33,6 +35,8 @@ pub struct ProjectView {
     pub detail_tracking: BTreeSet<NodeId>,
     /// Previous status for each node (for detecting status changes)
     previous_status: BTreeMap<NodeId, WireNodeStatus>,
+    /// Cached resource summaries and payloads from `GetChanges`.
+    pub resource_cache: ClientResourceCache,
 }
 
 pub struct NodeEntryView {
@@ -54,6 +58,7 @@ impl ProjectView {
             nodes: BTreeMap::new(),
             detail_tracking: BTreeSet::new(),
             previous_status: BTreeMap::new(),
+            resource_cache: ClientResourceCache::new(),
         }
     }
 
@@ -96,9 +101,18 @@ impl ProjectView {
                 node_changes,
                 node_details,
                 theoretical_fps: _,
+                resource_summaries,
+                runtime_buffer_payloads,
+                render_product_payloads,
             } => {
                 // Update frame ID
                 self.frame_id = *current_frame;
+
+                self.resource_cache.apply_summaries(resource_summaries);
+                self.resource_cache
+                    .apply_runtime_buffer_payloads(runtime_buffer_payloads);
+                self.resource_cache
+                    .apply_render_product_payloads(render_product_payloads);
 
                 // Prune removed nodes
                 let handles_set: BTreeSet<NodeId> = node_handles.iter().copied().collect();
@@ -265,7 +279,10 @@ impl ProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Texture(tex_state)) => Ok(tex_state.texture_data.value().clone()),
+            Some(NodeState::Texture(tex_state)) => resource_cache::resolve_legacy_compat_bytes(
+                &tex_state.texture_data,
+                &self.resource_cache,
+            ),
             Some(_) => Err(format!(
                 "Node {} has wrong state type (expected Texture)",
                 entry.path.as_str()
@@ -298,7 +315,10 @@ impl ProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Output(output_state)) => Ok(output_state.channel_data.value().clone()),
+            Some(NodeState::Output(output_state)) => resource_cache::resolve_legacy_compat_bytes(
+                &output_state.channel_data,
+                &self.resource_cache,
+            ),
             Some(_) => Err(format!(
                 "Node {} has wrong state type (expected Output)",
                 entry.path.as_str()

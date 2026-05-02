@@ -3,6 +3,7 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use lpc_model::{FrameId, NodeId};
 use lpc_view::ProjectView;
+use lpc_wire::WireResourceSummary;
 use lpc_wire::legacy::ProjectResponse;
 
 #[test]
@@ -68,6 +69,9 @@ fn test_sync_with_changes() {
         }],
         node_details: BTreeMap::new(),
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     // Sync
@@ -111,6 +115,9 @@ fn test_detail_only_entry_uses_pending_status_changed() {
         }],
         node_details: details,
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.apply_changes(&response).unwrap();
@@ -132,7 +139,7 @@ fn test_partial_state_merge_texture() {
     let mut initial_state = TextureState::new(FrameId::new(1));
     initial_state
         .texture_data
-        .set(FrameId::new(1), vec![10, 20, 30, 40]);
+        .set_inline(FrameId::new(1), vec![10, 20, 30, 40]);
     initial_state.width.set(FrameId::new(1), 100);
     initial_state.height.set(FrameId::new(1), 200);
     initial_state.format.set(
@@ -165,6 +172,9 @@ fn test_partial_state_merge_texture() {
             map
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.watch_detail(handle);
@@ -174,7 +184,7 @@ fn test_partial_state_merge_texture() {
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
         Some(NodeState::Texture(state)) => {
-            assert_eq!(state.texture_data.value(), &vec![10, 20, 30, 40]);
+            assert_eq!(state.texture_data.inline_bytes(), &[10, 20, 30, 40][..]);
             assert_eq!(state.width.value(), &100);
             assert_eq!(state.height.value(), &200);
             assert_eq!(
@@ -215,6 +225,9 @@ fn test_partial_state_merge_texture() {
             map
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.apply_changes(&partial_response).unwrap();
@@ -228,8 +241,8 @@ fn test_partial_state_merge_texture() {
             assert_eq!(state.height.value(), &250);
             // These should be preserved from initial state
             assert_eq!(
-                state.texture_data.value(),
-                &vec![10, 20, 30, 40],
+                state.texture_data.inline_bytes(),
+                &[10, 20, 30, 40][..],
                 "texture_data should be preserved"
             );
             assert_eq!(
@@ -256,7 +269,7 @@ fn test_partial_state_merge_output() {
     let mut initial_state = OutputState::new(FrameId::new(1));
     initial_state
         .channel_data
-        .set(FrameId::new(1), vec![100, 200, 255]);
+        .set_inline(FrameId::new(1), vec![100, 200, 255]);
 
     let initial_response = ProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
@@ -283,6 +296,9 @@ fn test_partial_state_merge_output() {
             map
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.watch_detail(handle);
@@ -292,7 +308,7 @@ fn test_partial_state_merge_output() {
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
         Some(NodeState::Output(state)) => {
-            assert_eq!(state.channel_data.value(), &vec![100, 200, 255]);
+            assert_eq!(state.channel_data.inline_bytes(), &[100, 200, 255][..]);
         }
         _ => panic!("Expected Output state"),
     }
@@ -322,6 +338,9 @@ fn test_partial_state_merge_output() {
             map
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.apply_changes(&partial_response).unwrap();
@@ -331,8 +350,8 @@ fn test_partial_state_merge_output() {
     match &entry.state {
         Some(NodeState::Output(state)) => {
             assert_eq!(
-                state.channel_data.value(),
-                &vec![100, 200, 255],
+                state.channel_data.inline_bytes(),
+                &[100, 200, 255][..],
                 "channel_data should be preserved"
             );
         }
@@ -381,6 +400,9 @@ fn detail_applies_real_texture_config() {
             m
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.watch_detail(handle);
@@ -438,6 +460,9 @@ fn detail_applies_real_output_config() {
             m
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.watch_detail(handle);
@@ -498,6 +523,9 @@ fn detail_after_config_updated_replaces_stored_config() {
             m
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     })
     .unwrap();
 
@@ -529,6 +557,9 @@ fn detail_after_config_updated_replaces_stored_config() {
             m
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     })
     .unwrap();
 
@@ -583,6 +614,9 @@ fn detail_only_entry_stores_real_texture_config() {
             m
         },
         theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
     };
 
     view.apply_changes(&response).unwrap();
@@ -595,4 +629,306 @@ fn detail_only_entry_stores_real_texture_config() {
     assert_eq!(cfg.width, 128);
     assert_eq!(cfg.height, 96);
     assert!(matches!(entry.status, WireNodeStatus::Ok));
+}
+
+#[test]
+fn project_watched_detail_entry_has_state_after_sync() {
+    use alloc::boxed::Box;
+    use alloc::collections::BTreeMap;
+    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_wire::legacy::nodes::texture::TextureState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(9);
+    let path = lpc_model::LpPathBuf::from("/src/w.texture");
+    let frame = FrameId::new(1);
+
+    let mut state = TextureState::new(frame);
+    state.width.set(frame, 4);
+    state.height.set(frame, 4);
+
+    view.watch_detail(handle);
+    view.apply_changes(&ProjectResponse::GetChanges {
+        current_frame: frame,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path,
+                    config: Box::new(TextureConfig {
+                        width: 4,
+                        height: 4,
+                    }),
+                    state: NodeState::Texture(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+        resource_summaries: Vec::new(),
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: Vec::new(),
+    })
+    .unwrap();
+
+    let entry = view.nodes.get(&handle).expect("entry");
+    assert!(
+        entry.state.is_some(),
+        "watched detail sync should populate node state"
+    );
+    assert!(view.detail_tracking.contains(&handle));
+}
+
+#[test]
+fn project_view_resolves_output_bytes_from_resource_cache() {
+    use alloc::boxed::Box;
+    use alloc::collections::BTreeMap;
+    use lpc_model::resource::{ResourceRef, RuntimeBufferId};
+    use lpc_source::legacy::nodes::output::OutputConfig;
+    use lpc_wire::legacy::nodes::output::OutputState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::{
+        WireChannelSampleFormat, WireResourceAvailability, WireResourceKindSummary,
+        WireResourceMetadataSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
+        WireRuntimeBufferPayload,
+    };
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(3);
+    let path = lpc_model::LpPathBuf::from("/src/o.output");
+    let frame = FrameId::new(1);
+    let buf_ref = ResourceRef::runtime_buffer(RuntimeBufferId::new(11));
+
+    let mut state = OutputState::new(frame);
+    state.channel_data.set_resource(frame, buf_ref);
+
+    view.watch_detail(handle);
+    view.apply_changes(&ProjectResponse::GetChanges {
+        current_frame: frame,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Output,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path: path.clone(),
+                    config: Box::new(OutputConfig::GpioStrip {
+                        pin: 0,
+                        options: None,
+                    }),
+                    state: NodeState::Output(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+        resource_summaries: vec![WireResourceSummary {
+            resource_ref: buf_ref,
+            changed_frame: frame,
+            kind: WireResourceKindSummary::RuntimeBuffer(WireRuntimeBufferKind::OutputChannels),
+            metadata: WireResourceMetadataSummary::OutputChannels {
+                channels: 1,
+                sample_format: WireChannelSampleFormat::U8,
+            },
+            byte_length_hint: Some(2),
+            availability: WireResourceAvailability::Available,
+        }],
+        runtime_buffer_payloads: vec![WireRuntimeBufferPayload {
+            resource_ref: buf_ref,
+            changed_frame: frame,
+            metadata: WireRuntimeBufferMetadataPayload::OutputChannels {
+                channels: 1,
+                sample_format: WireChannelSampleFormat::U8,
+            },
+            bytes: vec![0xAB, 0xCD],
+        }],
+        render_product_payloads: Vec::new(),
+    })
+    .unwrap();
+
+    assert_eq!(view.get_output_data(handle).unwrap(), vec![0xAB, 0xCD]);
+}
+
+#[test]
+fn project_view_resolves_texture_bytes_from_render_product_cache() {
+    use alloc::boxed::Box;
+    use alloc::collections::BTreeMap;
+    use lpc_model::resource::{RenderProductId, ResourceRef};
+    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_wire::legacy::nodes::texture::TextureState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::{
+        WireRenderProductKind, WireRenderProductPayload, WireResourceAvailability,
+        WireResourceKindSummary, WireResourceMetadataSummary, WireTextureFormat,
+    };
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(8);
+    let path = lpc_model::LpPathBuf::from("/src/t.texture");
+    let frame = FrameId::new(1);
+    let prod_ref = ResourceRef::render_product(RenderProductId::new(5));
+
+    let mut state = TextureState::new(frame);
+    state.texture_data.set_resource(frame, prod_ref);
+    state.width.set(frame, 1);
+    state.height.set(frame, 1);
+
+    view.watch_detail(handle);
+    view.apply_changes(&ProjectResponse::GetChanges {
+        current_frame: frame,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path: path.clone(),
+                    config: Box::new(TextureConfig {
+                        width: 1,
+                        height: 1,
+                    }),
+                    state: NodeState::Texture(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+        resource_summaries: vec![WireResourceSummary {
+            resource_ref: prod_ref,
+            changed_frame: frame,
+            kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
+            metadata: WireResourceMetadataSummary::Texture {
+                width: 1,
+                height: 1,
+                format: WireTextureFormat::Rgb8,
+            },
+            byte_length_hint: Some(3),
+            availability: WireResourceAvailability::Available,
+        }],
+        runtime_buffer_payloads: Vec::new(),
+        render_product_payloads: vec![WireRenderProductPayload {
+            resource_ref: prod_ref,
+            changed_frame: frame,
+            width: 1,
+            height: 1,
+            format: WireTextureFormat::Rgb8,
+            bytes: vec![1, 2, 3],
+        }],
+    })
+    .unwrap();
+
+    assert_eq!(view.get_texture_data(handle).unwrap(), vec![1, 2, 3]);
+}
+
+#[test]
+fn project_view_resolves_fixture_lamp_colors_from_cache() {
+    use alloc::boxed::Box;
+    use alloc::collections::BTreeMap;
+    use lpc_model::resource::{ResourceRef, RuntimeBufferId};
+    use lpc_source::legacy::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig};
+    use lpc_view::project::resource_cache::resolve_legacy_compat_bytes;
+    use lpc_wire::legacy::nodes::fixture::FixtureState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::{
+        WireColorLayout, WireResourceAvailability, WireResourceKindSummary,
+        WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
+        WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
+    };
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(4);
+    let path = lpc_model::LpPathBuf::from("/src/fixture.fixture");
+    let frame = FrameId::new(1);
+    let buf_ref = ResourceRef::runtime_buffer(RuntimeBufferId::new(3));
+
+    let mut state = FixtureState::new(frame);
+    state.lamp_colors.set_resource(frame, buf_ref);
+
+    view.watch_detail(handle);
+    view.apply_changes(&ProjectResponse::GetChanges {
+        current_frame: frame,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Fixture,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path: path.clone(),
+                    config: Box::new(FixtureConfig {
+                        output_spec: lpc_model::NodeSpec::from("/out"),
+                        texture_spec: lpc_model::NodeSpec::from("/tex"),
+                        mapping: MappingConfig::PathPoints {
+                            paths: vec![],
+                            sample_diameter: 2.0,
+                        },
+                        color_order: ColorOrder::Rgb,
+                        transform: [[0.0; 4]; 4],
+                        brightness: None,
+                        gamma_correction: None,
+                    }),
+                    state: NodeState::Fixture(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+        resource_summaries: vec![WireResourceSummary {
+            resource_ref: buf_ref,
+            changed_frame: frame,
+            kind: WireResourceKindSummary::RuntimeBuffer(WireRuntimeBufferKind::FixtureColors),
+            metadata: WireResourceMetadataSummary::FixtureColors {
+                channels: 3,
+                layout: WireColorLayout::Rgb8,
+            },
+            byte_length_hint: Some(6),
+            availability: WireResourceAvailability::Available,
+        }],
+        runtime_buffer_payloads: vec![WireRuntimeBufferPayload {
+            resource_ref: buf_ref,
+            changed_frame: frame,
+            metadata: WireRuntimeBufferMetadataPayload::FixtureColors {
+                channels: 3,
+                layout: WireColorLayout::Rgb8,
+            },
+            bytes: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06],
+        }],
+        render_product_payloads: Vec::new(),
+    })
+    .unwrap();
+
+    let entry = view.nodes.get(&handle).expect("fixture entry");
+    let NodeState::Fixture(st) = entry.state.as_ref().expect("fixture detail state") else {
+        panic!("fixture state");
+    };
+    assert_eq!(
+        resolve_legacy_compat_bytes(&st.lamp_colors, &view.resource_cache).unwrap(),
+        vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06]
+    );
 }

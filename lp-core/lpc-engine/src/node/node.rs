@@ -5,13 +5,42 @@ use crate::prop::{
     RuntimeStateAccess,
 };
 
-use super::contexts::{DestroyCtx, MemPressureCtx, TickContext};
+use crate::render_product::RenderProductId;
+use crate::runtime_buffer::RuntimeBufferId;
+
+use lpc_model::NodeId;
+
+use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
 use super::pressure_level::PressureLevel;
+
+/// M4.1 client sync: identifiers needed to wire [`lpc_wire::legacy::FixtureState`] refs.
+#[derive(Clone, Copy, Debug)]
+pub struct FixtureProjectionInfo {
+    pub lamp_colors_buffer_id: Option<RuntimeBufferId>,
+    pub output_sink_buffer_id: RuntimeBufferId,
+    pub texture_node_id: NodeId,
+}
+
+/// M4.1 shader detail projection (`glsl_code`, error text, semantic render-product ref).
+#[derive(Clone, Copy, Debug)]
+pub struct ShaderProjectionWire<'a> {
+    pub glsl_source: &'a str,
+    pub compilation_error: Option<&'a str>,
+    pub render_product_id: Option<RenderProductId>,
+}
 
 /// Runtime node instance for the new spine (`node/`). Distinct from legacy
 /// [`crate::nodes::LegacyNodeRuntime`].
 pub trait Node {
+    /// Allocate [`RenderProductId`] / [`RuntimeBufferId`] slots owned by this node before first tick.
+    ///
+    /// Default: no-op. [`crate::engine::Engine::attach_runtime_node`] invokes this immediately
+    /// before storing the alive node.
+    fn init_resources(&mut self, _ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
+        Ok(())
+    }
+
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError>;
 
     fn destroy(&mut self, ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError>;
@@ -32,6 +61,28 @@ pub trait Node {
     /// Reserved for sync/debug state snapshots. Default: empty [`RuntimeStateAccess`].
     fn runtime_state(&self) -> &dyn RuntimeStateAccess {
         &EMPTY_RUNTIME_STATE
+    }
+
+    /// Sink buffer backing an [`crate::nodes::OutputNode`] after [`Self::init_resources`] runs.
+    fn runtime_output_sink_buffer_id(&self) -> Option<RuntimeBufferId> {
+        None
+    }
+
+    /// Primary render product allocated for shader output (shader nodes only).
+    fn primary_render_product_id(&self) -> Option<RenderProductId> {
+        None
+    }
+
+    /// Fixture-only: lamp-colors buffer handle, fixture output sink buffer, sampled texture node.
+    ///
+    /// Default `None`; [`crate::nodes::FixtureNode`] supplies values for legacy detail projection.
+    fn fixture_projection_info(&self) -> Option<FixtureProjectionInfo> {
+        None
+    }
+
+    /// Shader-only: textual source/error plus optional initialized render-product id for wire sync.
+    fn shader_projection_wire(&self) -> Option<ShaderProjectionWire<'_>> {
+        None
     }
 }
 

@@ -8,6 +8,10 @@ use lpc_engine::MemoryOutputProvider;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_shared::ProjectBuilder;
 use lpc_view::ProjectView;
+use lpc_wire::{
+    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
+    RuntimeBufferPayloadSpecifier,
+};
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]
@@ -199,7 +203,17 @@ fn sync_client_view_from_server(
 
     let response = project
         .runtime()
-        .get_changes(client_view.frame_id, &client_view.detail_specifier(), None)
+        .get_changes(
+            client_view.frame_id,
+            &client_view.detail_specifier(),
+            ResourceSummarySpecifier::All,
+            &RuntimeBufferPayloadSpecifier::All,
+            &RenderProductPayloadRequest {
+                specifier: RenderProductPayloadSpecifier::All,
+                ..Default::default()
+            },
+            None,
+        )
         .expect("get_changes should succeed");
     client_view
         .apply_changes(&response)

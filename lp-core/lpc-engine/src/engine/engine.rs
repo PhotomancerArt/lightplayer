@@ -13,7 +13,7 @@ use lpc_model::{FrameId, NodeId, TreePath, Versioned};
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
 use crate::gfx::LpGraphics;
-use crate::node::{Node, TickContext};
+use crate::node::{Node, NodeResourceInitContext, TickContext};
 use crate::render_product::{
     RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch, RenderSampleBatchResult,
 };
@@ -22,7 +22,7 @@ use crate::resolver::{
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::runtime::frame_time::FrameTime;
-use crate::runtime_buffer::RuntimeBufferStore;
+use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 use crate::tree::{EntryState, NodeTree};
 
 use super::EngineError;
@@ -139,15 +139,39 @@ impl Engine {
     }
 
     /// Attach a runtime [`Node`] to an existing tree entry (typically `Pending`).
+    ///
+    /// Runs [`Node::init_resources`] on `runtime` first so nodes can allocate store-backed ids before
+    /// becoming [`EntryState::Alive`].
     pub fn attach_runtime_node(
         &mut self,
         id: NodeId,
-        runtime: Box<dyn Node>,
+        mut runtime: Box<dyn Node>,
         frame: FrameId,
     ) -> Result<(), EngineError> {
+        let mut ctx =
+            NodeResourceInitContext::new(&mut self.render_products, &mut self.runtime_buffers);
+        runtime
+            .init_resources(&mut ctx)
+            .map_err(|e| EngineError::node(id, e))?;
         let entry = self.tree.get_mut(id).ok_or(EngineError::UnknownNode(id))?;
         entry.set_state(EntryState::Alive(runtime), frame);
         Ok(())
+    }
+
+    pub fn runtime_output_sink_buffer_id(&self, node_id: NodeId) -> Option<RuntimeBufferId> {
+        let entry = self.tree.get(node_id)?;
+        match &entry.state {
+            EntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
+            _ => None,
+        }
+    }
+
+    pub fn primary_render_product_id_for_node(&self, node_id: NodeId) -> Option<RenderProductId> {
+        let entry = self.tree.get(node_id)?;
+        match &entry.state {
+            EntryState::Alive(node) => node.primary_render_product_id(),
+            _ => None,
+        }
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
@@ -217,10 +241,11 @@ impl Engine {
 fn apply_deferred_render_replaces(
     store: &mut RenderProductStore,
     pending: Vec<(RenderProductId, Box<dyn RenderProduct>)>,
+    frame: FrameId,
 ) -> Result<(), SessionResolveError> {
     for (id, product) in pending {
         store
-            .replace(id, product)
+            .replace(id, product, frame)
             .map_err(|e| SessionResolveError::other(format!("render product replace: {e:?}")))?;
     }
     Ok(())
@@ -301,7 +326,7 @@ impl EngineResolveHost<'_> {
 
         match tick_result {
             Ok(()) => {
-                apply_deferred_render_replaces(self.render_products, pending_replaces)?;
+                apply_deferred_render_replaces(self.render_products, pending_replaces, frame)?;
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
@@ -474,7 +499,7 @@ fn tick_tree_node(
 
     match tick_result {
         Ok(()) => {
-            apply_deferred_render_replaces(host.render_products, pending_replaces)?;
+            apply_deferred_render_replaces(host.render_products, pending_replaces, frame)?;
             Ok(())
         }
         Err(e) => Err(EngineError::node(node_id, e)),

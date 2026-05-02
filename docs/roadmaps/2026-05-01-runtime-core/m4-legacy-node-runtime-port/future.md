@@ -24,11 +24,10 @@ nodes.
 
 ## Core `ShaderNode` (phase 4)
 
-- **Pre-registered render product id**: The node does not create its
-`RenderProductId` itself; the engine (or tests) must `insert` a placeholder
-`TextureRenderProduct` first and pass that id into `ShaderNode::new`. This
-keeps render output keyed under a stable id for fixtures/bindings without
-teaching the node about `RenderProductStore` construction order.
+- **Render product id (M4.1):** `ShaderNode` allocates its `RenderProductId` in
+`Node::init_resources` via `NodeResourceInitContext`. Tests that construct nodes
+without a full loader call `init_resources` on a scratch context so the product
+exists before tick.
 - **CPU copy (M4 scaffold):** Each tick, `ShaderNode` copies pixels out of
 `LpsTextureBuf` into `TextureRenderProduct(Vec<u8>)` for the store. Acceptable
 for the port; consider zero-copy or mapped storage where the product can own
@@ -82,10 +81,12 @@ sync/debug state snapshots.
 - `lpa-server::Project` now owns `CoreProjectRuntime` on the active load/tick
 path. The server no longer calls legacy runtime load/init/tick for loaded
 projects.
-- `CoreProjectRuntime::get_changes` currently projects only frame identity,
-current core tree handles, created/config/state/status changes, and no
-`node_details`. This keeps existing wire clients alive for load/tick requests
-while M4.1 owns proper buffer/render-product detail snapshots.
+- `CoreProjectRuntime::get_changes` (M4.1) still projects frame identity, tree
+handles, and created/config/state/status changes, and now fills `node_details`
+with legacy-shaped compatibility state plus semantic resource refs. Parallel
+resource summary and buffer/render-product payload fields are included when the
+client request asks for them (per-request specifiers; no server-side
+subscriptions).
 - `CoreProjectRuntime::handle_fs_changes` is a no-op for now so server
 filesystem version tracking can advance without keeping the legacy runtime
 active. Source reload belongs with the later scene update/runtime sync work.
@@ -107,16 +108,14 @@ project creation semantics would expand the milestone beyond validation.
 - **Useful context:** `lp-app/lpa-server/src/project_manager.rs`,
 `lp-cli/src/commands/create/project.rs`
 
-## Compatibility detail sync (phase 8)
+## Compatibility detail sync (phase 8 + M4.1)
 
-- `scene_render` now exercises the authored project through
-`CoreProjectLoader`/`CoreProjectRuntime` and still verifies real shader ->
-fixture -> output bytes.
-- `partial_state_updates` is reduced to the M4 metadata contract:
-`GetChanges` reports handles/state metadata, while `node_details` remains
-empty. Fixture `lamp_colors`/`mapping_cells` detail deltas move to M4.1's
-buffer/render-product-aware sync.
-- **Observed demo behavior:** `just demo` starts, loads the example project, and
-messages pass through the server/core runtime path, but the client shows nodes as
-`(Waiting for state data...)` and no visible data flows because M4 does not yet
-project node detail/state payloads or runtime buffer/render-product refs.
+- `scene_render` exercises the authored project through
+`CoreProjectLoader`/`CoreProjectRuntime` and verifies shader -> fixture -> output
+bytes.
+- `partial_state_updates` and client view tests assert real detail merges and
+resource-cache resolution for buffer- and render-product-backed fields (M4.1).
+- **`just demo` (manual):** The dev UI is still visual/temporary; after M4.1 the
+wire path carries details and resources when the client requests them. Confirm
+locally that node panels show state and that buffer/texture inspection still
+behaves as expected.

@@ -11,14 +11,42 @@ use crate::artifact::ArtifactId;
 use crate::bus::Bus;
 use crate::gfx::LpGraphics;
 use crate::render_product::{
-    RenderProduct, RenderProductId, RenderSampleBatch, RenderSampleBatchResult,
+    RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch, RenderSampleBatchResult,
 };
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
-use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
-use lpc_model::{FrameId, NodeId, bus::ChannelName};
+use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
+use lpc_model::{FrameId, NodeId, Versioned, bus::ChannelName};
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
+
+/// Narrow store access for allocating node-owned render products and runtime buffers at attach time.
+///
+/// Passed to [`super::super::Node::init_resources`] before the node payload is [`crate::tree::EntryState::Alive`].
+pub struct NodeResourceInitContext<'a> {
+    render_products: &'a mut RenderProductStore,
+    runtime_buffers: &'a mut RuntimeBufferStore,
+}
+
+impl<'a> NodeResourceInitContext<'a> {
+    pub fn new(
+        render_products: &'a mut RenderProductStore,
+        runtime_buffers: &'a mut RuntimeBufferStore,
+    ) -> Self {
+        Self {
+            render_products,
+            runtime_buffers,
+        }
+    }
+
+    pub fn insert_render_product(&mut self, product: Box<dyn RenderProduct>) -> RenderProductId {
+        self.render_products.insert(product)
+    }
+
+    pub fn insert_runtime_buffer(&mut self, buffer: Versioned<RuntimeBuffer>) -> RuntimeBufferId {
+        self.runtime_buffers.insert(buffer)
+    }
+}
 
 /// Pending uploads to [`crate::render_product::RenderProductStore`] applied after the current
 /// node's [`super::Node::tick`](super::Node::tick) returns (see [`TickContext::defer_render_product_replace`]).

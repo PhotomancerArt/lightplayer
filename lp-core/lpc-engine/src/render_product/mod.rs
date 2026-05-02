@@ -7,14 +7,15 @@ mod sample_result;
 mod texture_product;
 
 pub use render_product_id::RenderProductId;
-pub use render_product_store::{RenderProduct, RenderProductError, RenderProductStore};
+pub use render_product_store::{
+    RenderProduct, RenderProductError, RenderProductMaterializeError, RenderProductStore,
+};
 pub use sample_request::{RenderSampleBatch, RenderSamplePoint};
 pub use sample_result::{RenderSample, RenderSampleBatchResult};
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 
 #[cfg(test)]
 pub use render_product_store::{CoordinateProduct, SolidColorProduct};
-
 #[cfg(test)]
 mod tests {
     use alloc::vec;

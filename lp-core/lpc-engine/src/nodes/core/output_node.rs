@@ -3,13 +3,18 @@
 
 use alloc::boxed::Box;
 
-use lpc_model::FrameId;
+use alloc::vec::Vec;
+
 use lpc_model::prop::PropPath;
+use lpc_model::{FrameId, Versioned};
 use lps_shared::LpsValueF32;
 
-use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
+    TickContext,
+};
 use crate::prop::RuntimePropAccess;
-use crate::runtime_buffer::RuntimeBufferId;
+use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
 
 #[derive(Default)]
 struct EmptyProps;
@@ -33,24 +38,40 @@ impl RuntimePropAccess for EmptyProps {
 
 /// Pushed sink node (not a demand root): flushing runs after engine tick from project runtime services.
 pub struct OutputNode {
-    channel_buffer_id: RuntimeBufferId,
+    channel_buffer_id: Option<RuntimeBufferId>,
     props: EmptyProps,
 }
 
 impl OutputNode {
-    pub fn new(channel_buffer_id: RuntimeBufferId) -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
-            channel_buffer_id,
+            channel_buffer_id: None,
             props: EmptyProps,
         }
     }
 
-    pub fn channel_buffer_id(&self) -> RuntimeBufferId {
+    pub fn channel_buffer_id(&self) -> Option<RuntimeBufferId> {
         self.channel_buffer_id
     }
 }
 
 impl Node for OutputNode {
+    fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
+        if self.channel_buffer_id.is_some() {
+            return Ok(());
+        }
+        let id = ctx.insert_runtime_buffer(Versioned::new(
+            FrameId::default(),
+            RuntimeBuffer::raw(Vec::new()),
+        ));
+        self.channel_buffer_id = Some(id);
+        Ok(())
+    }
+
+    fn runtime_output_sink_buffer_id(&self) -> Option<RuntimeBufferId> {
+        self.channel_buffer_id
+    }
     fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         Ok(())
     }

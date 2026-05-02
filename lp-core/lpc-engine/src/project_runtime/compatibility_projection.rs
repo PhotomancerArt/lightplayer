@@ -1,17 +1,42 @@
-//! Compatibility snapshot state for legacy wire and view clients during M4.
+//! Compatibility authoring snapshots for M4.1 wire/detail projection.
 //!
-//! M4 keeps compatibility through snapshot-style state where needed. M4.1
-//! replaces this with buffer- and render-product-aware sync, refs, and client
-//! cache behavior.
+//! The core engine tree stores runtime nodes as [`crate::node::Node`] trait objects without a
+//! stable way to recover legacy [`lpc_source::legacy::nodes::NodeConfig`] clones. The loader
+//! captures the typed configs it read from disk and indexes them here keyed by [`lpc_model::NodeId`].
 
-/// Placeholder for projected compatibility/wire state until M4.1 buffer sync.
-///
-/// Constructed with [`Self::new`]; behavior is added in later M4 work.
-#[derive(Debug, Default)]
-pub struct CompatibilityProjection;
+use alloc::boxed::Box;
+use hashbrown::HashMap;
+
+use lpc_model::NodeId;
+use lpc_source::legacy::nodes::NodeConfig;
+
+use super::project_loader::LoadedNodeConfig;
+
+/// Authoring/config index for legacy-compatible [`lpc_wire::legacy::NodeDetail`] construction.
+pub struct CompatibilityProjection {
+    authoring_configs: HashMap<NodeId, LoadedNodeConfig>,
+}
 
 impl CompatibilityProjection {
     pub fn new() -> Self {
-        Self
+        Self {
+            authoring_configs: HashMap::new(),
+        }
+    }
+
+    pub(super) fn record_authoring_snapshot(&mut self, id: NodeId, cfg: LoadedNodeConfig) {
+        self.authoring_configs.insert(id, cfg);
+    }
+
+    pub fn node_config_box_for(&self, id: NodeId) -> Option<Box<dyn NodeConfig>> {
+        self.authoring_configs
+            .get(&id)
+            .map(LoadedNodeConfig::clone_as_node_config_box)
+    }
+}
+
+impl Default for CompatibilityProjection {
+    fn default() -> Self {
+        Self::new()
     }
 }

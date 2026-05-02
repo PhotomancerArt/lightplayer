@@ -151,7 +151,7 @@ impl LegacyNodeRuntime for OutputRuntime {
         let frame_id = ctx.frame_id();
         self.state
             .channel_data
-            .set(frame_id, self.get_channel_data());
+            .set_inline(frame_id, self.get_channel_data());
 
         // Flush buffer to provider if handle exists
         if let Some(handle) = self.channel_handle {

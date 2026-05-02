@@ -3,6 +3,7 @@ use crate::legacy::nodes::fixture::state::SerializableFixtureState;
 use crate::legacy::nodes::output::state::SerializableOutputState;
 use crate::legacy::nodes::shader::state::SerializableShaderState;
 use crate::legacy::nodes::texture::state::SerializableTextureState;
+use crate::project::{WireRenderProductPayload, WireResourceSummary, WireRuntimeBufferPayload};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -41,6 +42,12 @@ pub enum ProjectResponse {
         node_details: BTreeMap<NodeId, NodeDetail>,
         /// Theoretical FPS based on frame processing time (None if not available)
         theoretical_fps: Option<f32>,
+        /// Resource summaries for domains requested by the client.
+        resource_summaries: Vec<WireResourceSummary>,
+        /// Runtime-buffer payloads the client opted into.
+        runtime_buffer_payloads: Vec<WireRuntimeBufferPayload>,
+        /// Render-product payloads materialized per client request (full/native in M4.1).
+        render_product_payloads: Vec<WireRenderProductPayload>,
     },
 }
 
@@ -212,6 +219,12 @@ pub enum SerializableProjectResponse {
         node_details: Vec<(NodeId, SerializableNodeDetail)>,
         /// Theoretical FPS based on frame processing time (None if not available)
         theoretical_fps: Option<f32>,
+        #[serde(default)]
+        resource_summaries: Vec<WireResourceSummary>,
+        #[serde(default)]
+        runtime_buffer_payloads: Vec<WireRuntimeBufferPayload>,
+        #[serde(default)]
+        render_product_payloads: Vec<WireRenderProductPayload>,
     },
 }
 
@@ -363,6 +376,9 @@ struct GetChangesSerializer<'a> {
     node_changes: &'a Vec<NodeChange>,
     node_details: &'a Vec<(NodeId, SerializableNodeDetail)>,
     theoretical_fps: &'a Option<f32>,
+    resource_summaries: &'a Vec<WireResourceSummary>,
+    runtime_buffer_payloads: &'a Vec<WireRuntimeBufferPayload>,
+    render_product_payloads: &'a Vec<WireRenderProductPayload>,
 }
 
 impl<'a> Serialize for GetChangesSerializer<'a> {
@@ -371,7 +387,7 @@ impl<'a> Serialize for GetChangesSerializer<'a> {
         S: Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("GetChanges", 6)?;
+        let mut state = serializer.serialize_struct("GetChanges", 9)?;
         state.serialize_field("current_frame", self.current_frame)?;
         state.serialize_field("since_frame", self.since_frame)?;
         state.serialize_field("node_handles", self.node_handles)?;
@@ -415,6 +431,9 @@ impl<'a> Serialize for GetChangesSerializer<'a> {
             .collect();
         state.serialize_field("node_details", &serializable_tuples)?;
         state.serialize_field("theoretical_fps", self.theoretical_fps)?;
+        state.serialize_field("resource_summaries", self.resource_summaries)?;
+        state.serialize_field("runtime_buffer_payloads", self.runtime_buffer_payloads)?;
+        state.serialize_field("render_product_payloads", self.render_product_payloads)?;
         state.end()
     }
 }
@@ -432,6 +451,9 @@ impl Serialize for SerializableProjectResponse {
                 node_changes,
                 node_details,
                 theoretical_fps,
+                resource_summaries,
+                runtime_buffer_payloads,
+                render_product_payloads,
             } => {
                 // Serialize as externally tagged enum: {"GetChanges": {...}}
                 // Use a helper struct that will be serialized as the enum variant content
@@ -442,6 +464,9 @@ impl Serialize for SerializableProjectResponse {
                     node_changes,
                     node_details,
                     theoretical_fps,
+                    resource_summaries,
+                    runtime_buffer_payloads,
+                    render_product_payloads,
                 };
                 // Serialize as map with single entry for enum variant
                 use serde::ser::SerializeMap;
@@ -527,6 +552,9 @@ impl ProjectResponse {
                 node_changes,
                 node_details,
                 theoretical_fps,
+                resource_summaries,
+                runtime_buffer_payloads,
+                render_product_payloads,
             } => {
                 let mut serializable_details = Vec::new();
                 for (handle, detail) in node_details {
@@ -540,6 +568,9 @@ impl ProjectResponse {
                     node_changes: node_changes.clone(),
                     node_details: serializable_details,
                     theoretical_fps: *theoretical_fps,
+                    resource_summaries: resource_summaries.clone(),
+                    runtime_buffer_payloads: runtime_buffer_payloads.clone(),
+                    render_product_payloads: render_product_payloads.clone(),
                 })
             }
         }
@@ -559,7 +590,7 @@ mod tests {
         let mut tex_state = crate::legacy::nodes::texture::TextureState::new(FrameId::default());
         tex_state
             .texture_data
-            .set(FrameId::default(), vec![0, 1, 2, 3]);
+            .set_inline(FrameId::default(), vec![0, 1, 2, 3]);
         tex_state.width.set(FrameId::default(), 2);
         tex_state.height.set(FrameId::default(), 2);
         tex_state
@@ -568,7 +599,7 @@ mod tests {
         let state = NodeState::Texture(tex_state);
         match state {
             NodeState::Texture(tex_state) => {
-                assert_eq!(tex_state.texture_data.value().len(), 4);
+                assert_eq!(tex_state.texture_data.inline_bytes().len(), 4);
             }
             _ => panic!("Expected Texture state"),
         }
@@ -580,7 +611,7 @@ mod tests {
         let mut tex_state = crate::legacy::nodes::texture::TextureState::new(FrameId::default());
         tex_state
             .texture_data
-            .set(FrameId::default(), vec![0, 1, 2, 3]);
+            .set_inline(FrameId::default(), vec![0, 1, 2, 3]);
         tex_state.width.set(FrameId::default(), 2);
         tex_state.height.set(FrameId::default(), 2);
         tex_state
@@ -650,7 +681,7 @@ mod tests {
                         crate::legacy::nodes::texture::TextureState::new(FrameId::default());
                     tex_state
                         .texture_data
-                        .set(FrameId::default(), vec![0, 1, 2, 3]);
+                        .set_inline(FrameId::default(), vec![0, 1, 2, 3]);
                     tex_state.width.set(FrameId::default(), 2);
                     tex_state.height.set(FrameId::default(), 2);
                     tex_state
@@ -668,6 +699,9 @@ mod tests {
             node_changes: vec![],
             node_details,
             theoretical_fps: None,
+            resource_summaries: Vec::new(),
+            runtime_buffer_payloads: Vec::new(),
+            render_product_payloads: Vec::new(),
         };
 
         let serializable = response.to_serializable().unwrap();
@@ -679,11 +713,17 @@ mod tests {
                 node_changes,
                 node_details,
                 theoretical_fps: _,
+                resource_summaries,
+                runtime_buffer_payloads,
+                render_product_payloads,
             } => {
                 assert_eq!(current_frame, FrameId::default());
                 assert_eq!(node_handles.len(), 1);
                 assert_eq!(node_changes.len(), 0);
                 assert_eq!(node_details.len(), 1);
+                assert!(resource_summaries.is_empty());
+                assert!(runtime_buffer_payloads.is_empty());
+                assert!(render_product_payloads.is_empty());
                 assert!(
                     node_details
                         .iter()
@@ -699,7 +739,7 @@ mod tests {
         let mut tex_state = crate::legacy::nodes::texture::TextureState::new(FrameId::default());
         tex_state
             .texture_data
-            .set(FrameId::default(), vec![0, 1, 2, 3]);
+            .set_inline(FrameId::default(), vec![0, 1, 2, 3]);
         tex_state.width.set(FrameId::default(), 2);
         tex_state.height.set(FrameId::default(), 2);
         tex_state
@@ -765,7 +805,7 @@ mod tests {
                     panic!("expected Texture detail");
                 };
                 // Deserialized omitted fields use defaults at frame 0; merge_from repairs client view.
-                assert_eq!(tex.texture_data.value(), &Vec::<u8>::new());
+                assert!(tex.texture_data.inline_bytes().is_empty());
                 assert_eq!(tex.format.value(), &TextureFormat::Rgba16);
                 assert_eq!(tex.width.value(), &150);
                 assert_eq!(tex.height.value(), &250);
@@ -785,6 +825,9 @@ mod tests {
                 node_changes: nc_a,
                 node_details: nd_a,
                 theoretical_fps: fps_a,
+                resource_summaries: rs_a,
+                runtime_buffer_payloads: rbp_a,
+                render_product_payloads: rpp_a,
             },
             SerializableProjectResponse::GetChanges {
                 current_frame: cf_b,
@@ -793,6 +836,9 @@ mod tests {
                 node_changes: nc_b,
                 node_details: nd_b,
                 theoretical_fps: fps_b,
+                resource_summaries: rs_b,
+                runtime_buffer_payloads: rbp_b,
+                render_product_payloads: rpp_b,
             },
         ) = (original, decoded);
         assert_eq!(cf_a, cf_b);
@@ -800,6 +846,9 @@ mod tests {
         assert_eq!(nh_a, nh_b);
         assert_eq!(nc_a, nc_b);
         assert_eq!(fps_a, fps_b);
+        assert_eq!(rs_a, rs_b);
+        assert_eq!(rbp_a, rbp_b);
+        assert_eq!(rpp_a, rpp_b);
         assert_eq!(nd_a.len(), nd_b.len());
         for ((ha, da), (hb, db)) in nd_a.iter().zip(nd_b.iter()) {
             assert_eq!(ha, hb);
@@ -836,7 +885,8 @@ mod tests {
         a: &crate::legacy::nodes::texture::TextureState,
         b: &crate::legacy::nodes::texture::TextureState,
     ) {
-        assert_eq!(a.texture_data.value(), b.texture_data.value());
+        assert_eq!(a.texture_data.inline_bytes(), b.texture_data.inline_bytes());
+        assert_eq!(a.texture_data.resource_ref(), b.texture_data.resource_ref());
         assert_eq!(a.width.value(), b.width.value());
         assert_eq!(a.height.value(), b.height.value());
         assert_eq!(a.format.value(), b.format.value());
@@ -884,6 +934,9 @@ mod tests {
         assert!(gc.contains_key("node_changes"));
         assert!(gc.contains_key("node_details"));
         assert!(gc.contains_key("theoretical_fps"));
+        assert!(gc.contains_key("resource_summaries"));
+        assert!(gc.contains_key("runtime_buffer_payloads"));
+        assert!(gc.contains_key("render_product_payloads"));
 
         let inner = texture_state_json(gc);
         match expect {
@@ -915,7 +968,7 @@ mod tests {
         let mut tex_state = crate::legacy::nodes::texture::TextureState::new(FrameId::new(1));
         tex_state
             .texture_data
-            .set(FrameId::new(1), vec![1, 2, 3, 4]);
+            .set_inline(FrameId::new(1), vec![1, 2, 3, 4]);
         tex_state.width.set(FrameId::new(1), 100);
         tex_state.height.set(FrameId::new(1), 200);
         tex_state.format.set(FrameId::new(1), TextureFormat::Rgb8);
@@ -942,6 +995,163 @@ mod tests {
                 },
             )],
             theoretical_fps: Some(60.0),
+            resource_summaries: Vec::new(),
+            runtime_buffer_payloads: Vec::new(),
+            render_product_payloads: Vec::new(),
         }
+    }
+
+    #[test]
+    fn get_changes_empty_resource_arrays_round_trip_via_json() {
+        let resp = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
+        let json = crate::json::to_string(&resp).unwrap();
+        let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        match deserialized {
+            SerializableProjectResponse::GetChanges {
+                resource_summaries,
+                runtime_buffer_payloads,
+                render_product_payloads,
+                ..
+            } => {
+                assert!(resource_summaries.is_empty());
+                assert!(runtime_buffer_payloads.is_empty());
+                assert!(render_product_payloads.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn get_changes_all_domains_resource_summaries_round_trip() {
+        use crate::project::{
+            WireChannelSampleFormat, WireRenderProductKind, WireResourceAvailability,
+            WireResourceKindSummary, WireResourceMetadataSummary, WireRuntimeBufferKind,
+            WireTextureFormat,
+        };
+        use lpc_model::resource::{RenderProductId, ResourceRef, RuntimeBufferId};
+
+        let summaries = vec![
+            WireResourceSummary {
+                resource_ref: ResourceRef::runtime_buffer(RuntimeBufferId::new(1)),
+                changed_frame: FrameId::new(3),
+                kind: WireResourceKindSummary::RuntimeBuffer(WireRuntimeBufferKind::OutputChannels),
+                metadata: WireResourceMetadataSummary::OutputChannels {
+                    channels: 900,
+                    sample_format: WireChannelSampleFormat::U8,
+                },
+                byte_length_hint: Some(2700),
+                availability: WireResourceAvailability::Available,
+            },
+            WireResourceSummary {
+                resource_ref: ResourceRef::render_product(RenderProductId::new(42)),
+                changed_frame: FrameId::new(4),
+                kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
+                metadata: WireResourceMetadataSummary::Texture {
+                    width: 64,
+                    height: 48,
+                    format: WireTextureFormat::Rgb8,
+                },
+                byte_length_hint: Some(9216),
+                availability: WireResourceAvailability::Pending,
+            },
+        ];
+
+        let mut base = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
+        {
+            let SerializableProjectResponse::GetChanges {
+                resource_summaries, ..
+            } = &mut base;
+            *resource_summaries = summaries.clone();
+        }
+
+        let json = crate::json::to_string(&base).unwrap();
+        let decoded: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        match decoded {
+            SerializableProjectResponse::GetChanges {
+                resource_summaries, ..
+            } => assert_eq!(resource_summaries, summaries),
+        }
+    }
+
+    #[test]
+    fn wire_project_request_by_id_runtime_buffer_payload_round_trip() {
+        use crate::{
+            RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+            WireNodeSpecifier, WireProjectRequest,
+        };
+        use lpc_model::resource::RuntimeBufferId;
+
+        let req = WireProjectRequest::GetChanges {
+            since_frame: FrameId::new(99),
+            detail_specifier: WireNodeSpecifier::None,
+            resource_summary_specifier: ResourceSummarySpecifier::None,
+            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::ByIds(vec![
+                RuntimeBufferId::new(7),
+            ]),
+            render_product_payload_request: RenderProductPayloadRequest::default(),
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        let decoded: WireProjectRequest = crate::json::from_str(&json).unwrap();
+        assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn wire_project_request_render_product_payload_by_ids_round_trip() {
+        use crate::{
+            RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
+            RuntimeBufferPayloadSpecifier, WireNodeSpecifier, WireProjectRequest,
+        };
+        use lpc_model::resource::RenderProductId;
+
+        let req = WireProjectRequest::GetChanges {
+            since_frame: FrameId::new(100),
+            detail_specifier: WireNodeSpecifier::All,
+            resource_summary_specifier: ResourceSummarySpecifier::All,
+            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::None,
+            render_product_payload_request: RenderProductPayloadRequest {
+                specifier: RenderProductPayloadSpecifier::ByIds(vec![RenderProductId::new(2)]),
+                options: crate::RenderProductPayloadOptions::default(),
+            },
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        let decoded: WireProjectRequest = crate::json::from_str(&json).unwrap();
+        assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn get_changes_runtime_buffer_and_render_payloads_round_trip() {
+        use crate::project::{
+            WireRenderProductPayload, WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
+            WireTextureFormat,
+        };
+        use lpc_model::resource::{RenderProductId, ResourceRef, RuntimeBufferId};
+
+        let mut base = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
+        let buf_payload = WireRuntimeBufferPayload {
+            resource_ref: ResourceRef::runtime_buffer(RuntimeBufferId::new(11)),
+            changed_frame: FrameId::new(2),
+            metadata: WireRuntimeBufferMetadataPayload::Raw,
+            bytes: vec![0xaa, 0xbb],
+        };
+        let rp_payload = WireRenderProductPayload {
+            resource_ref: ResourceRef::render_product(RenderProductId::new(5)),
+            changed_frame: FrameId::new(3),
+            width: 2,
+            height: 2,
+            format: WireTextureFormat::Rgba16,
+            bytes: vec![0u8; 32],
+        };
+        {
+            let SerializableProjectResponse::GetChanges {
+                runtime_buffer_payloads,
+                render_product_payloads,
+                ..
+            } = &mut base;
+            runtime_buffer_payloads.push(buf_payload.clone());
+            render_product_payloads.push(rp_payload.clone());
+        }
+
+        let json = crate::json::to_string(&base).unwrap();
+        let decoded: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        assert_serializable_project_response_semantically_equal(&base, &decoded);
     }
 }

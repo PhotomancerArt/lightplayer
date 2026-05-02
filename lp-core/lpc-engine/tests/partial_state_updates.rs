@@ -5,12 +5,16 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lpc_engine::{CoreProjectLoader, CoreProjectRuntime, Graphics, LpGraphics, RuntimeServices};
+use lpc_model::resource::ResourceDomain;
 use lpc_model::{AsLpPath, TreePath};
 use lpc_shared::ProjectBuilder;
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
 use lpc_source::legacy::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+use lpc_wire::{
+    RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+};
 use lpfs::LpFsMemory;
 
 #[test]
@@ -52,22 +56,49 @@ fn test_partial_state_updates() {
         .get_changes(
             lpc_model::FrameId::default(),
             &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
+            ResourceSummarySpecifier::All,
+            &RuntimeBufferPayloadSpecifier::default(),
+            &RenderProductPayloadRequest::default(),
             None,
         )
         .unwrap();
 
-    assert_metadata_only_fixture_projection(&initial_response, fixture_handle);
+    assert_fixture_projection_includes_lamp_colors_ref(&initial_response, fixture_handle);
+    let resource_refs_before = resource_ref_set(&initial_response);
 
     runtime.tick(4).unwrap();
+
+    let lamp_colors_buf = lamp_colors_runtime_buffer(&initial_response, fixture_handle);
+
     let lamp_colors_response = runtime
         .get_changes(
             initial_frame,
             &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
+            ResourceSummarySpecifier::All,
+            &RuntimeBufferPayloadSpecifier::ByIds(alloc::vec![lamp_colors_buf]),
+            &RenderProductPayloadRequest::default(),
             None,
         )
         .unwrap();
 
-    assert_metadata_only_fixture_projection(&lamp_colors_response, fixture_handle);
+    assert_fixture_projection_includes_lamp_colors_ref(&lamp_colors_response, fixture_handle);
+    assert_fixture_lamp_colors_buffer_payload_nonempty(&lamp_colors_response, lamp_colors_buf);
+
+    let summaries_refresh = runtime
+        .get_changes(
+            lpc_model::FrameId::default(),
+            &lpc_wire::WireNodeSpecifier::ByHandles(alloc::vec![fixture_handle]),
+            ResourceSummarySpecifier::All,
+            &RuntimeBufferPayloadSpecifier::default(),
+            &RenderProductPayloadRequest::default(),
+            None,
+        )
+        .unwrap();
+
+    assert_resource_summary_membership_stable(
+        resource_refs_before,
+        resource_ref_set(&summaries_refresh),
+    );
 }
 
 #[derive(Clone)]
@@ -112,26 +143,95 @@ fn load_core_runtime(
     runtime
 }
 
-fn assert_metadata_only_fixture_projection(
+fn resource_ref_set(
+    response: &lpc_wire::legacy::ProjectResponse,
+) -> alloc::collections::BTreeSet<lpc_model::resource::ResourceRef> {
+    use alloc::collections::BTreeSet;
+    let lpc_wire::legacy::ProjectResponse::GetChanges {
+        resource_summaries, ..
+    } = response;
+    resource_summaries
+        .iter()
+        .map(|s| s.resource_ref)
+        .collect::<BTreeSet<_>>()
+}
+
+fn assert_resource_summary_membership_stable(
+    before: alloc::collections::BTreeSet<lpc_model::resource::ResourceRef>,
+    after: alloc::collections::BTreeSet<lpc_model::resource::ResourceRef>,
+) {
+    assert_eq!(
+        before, after,
+        "resource summary ids should remain stable across ticks (versions may advance separately)"
+    );
+}
+
+fn lamp_colors_runtime_buffer(
+    response: &lpc_wire::legacy::ProjectResponse,
+    fixture_handle: lpc_model::NodeId,
+) -> lpc_model::resource::RuntimeBufferId {
+    use lpc_model::resource::RuntimeBufferId;
+
+    let lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } = response;
+    let detail = node_details
+        .get(&fixture_handle)
+        .expect("fixture detail projects lamp_colors ref source");
+    let lpc_wire::legacy::NodeState::Fixture(st) = &detail.state else {
+        panic!("expected fixture state");
+    };
+    let lamp = st.lamp_colors.resource_ref().expect("lamp buffer ref");
+    assert_eq!(lamp.domain, ResourceDomain::RuntimeBuffer);
+    RuntimeBufferId::new(lamp.id)
+}
+
+fn assert_fixture_projection_includes_lamp_colors_ref(
     response: &lpc_wire::legacy::ProjectResponse,
     fixture_handle: lpc_model::NodeId,
 ) {
     let lpc_wire::legacy::ProjectResponse::GetChanges {
         node_handles,
-        node_changes,
         node_details,
         ..
     } = response;
     assert!(node_handles.contains(&fixture_handle));
+    let detail = node_details
+        .get(&fixture_handle)
+        .expect("M4.1 projects fixture detail when requested");
+    let lpc_wire::legacy::NodeState::Fixture(st) = &detail.state else {
+        panic!("expected fixture state");
+    };
+    let lamp = st.lamp_colors.resource_ref();
     assert!(
-        node_changes.iter().any(|change| matches!(
-            change,
-            lpc_wire::legacy::NodeChange::StateUpdated { handle, .. } if *handle == fixture_handle
-        )),
-        "M4 should still project fixture state metadata"
+        lamp.is_some(),
+        "lamp_colors should reference the fixture-colors runtime buffer"
+    );
+    assert_eq!(
+        lamp.expect("lamp ref").domain,
+        lpc_model::ResourceDomain::RuntimeBuffer
+    );
+}
+
+fn assert_fixture_lamp_colors_buffer_payload_nonempty(
+    response: &lpc_wire::legacy::ProjectResponse,
+    lamp_buf: lpc_model::resource::RuntimeBufferId,
+) {
+    use lpc_model::resource::ResourceRef;
+
+    let lpc_wire::legacy::ProjectResponse::GetChanges {
+        runtime_buffer_payloads,
+        ..
+    } = response;
+    assert_eq!(
+        runtime_buffer_payloads.len(),
+        1,
+        "single buffer payload watched by id"
+    );
+    assert_eq!(
+        runtime_buffer_payloads[0].resource_ref,
+        ResourceRef::runtime_buffer(lamp_buf)
     );
     assert!(
-        node_details.is_empty(),
-        "M4 defers fixture lamp_colors/mapping_cells detail sync to M4.1"
+        !runtime_buffer_payloads[0].bytes.is_empty(),
+        "fixture colors runtime buffer carries visualization bytes",
     );
 }

@@ -120,6 +120,10 @@ impl RenderProduct for TextureRenderProduct {
         }
         Ok(RenderSampleBatchResult { samples })
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 fn uv_to_texel(u: f32, v: f32, width: u32, height: u32) -> (u32, u32) {

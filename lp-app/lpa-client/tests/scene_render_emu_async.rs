@@ -235,7 +235,12 @@ async fn sync_client_view(
     };
 
     let response = client
-        .project_sync_internal(handle, Some(view.frame_id), detail_spec)
+        .project_sync_internal(
+            handle,
+            Some(view.frame_id),
+            detail_spec,
+            lpa_client::ProjectGetChangesOptions::dev_demo_full_resources(),
+        )
         .await
         .expect("Failed to sync project");
 

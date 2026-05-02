@@ -47,7 +47,7 @@ impl TextureRuntime {
         // TODO(M4a): texture_data state should come from upstream shader's buffer
         self.state
             .texture_data
-            .set(frame_id, alloc::vec::Vec::new());
+            .set_inline(frame_id, alloc::vec::Vec::new());
         self.state.width.set(frame_id, config.width);
         self.state.height.set(frame_id, config.height);
         self.state.format.set(frame_id, format);
@@ -74,7 +74,7 @@ impl LegacyNodeRuntime for TextureRuntime {
     ) -> Result<(), Error> {
         self.state
             .texture_data
-            .set(FrameId::default(), alloc::vec::Vec::new());
+            .set_inline(FrameId::default(), alloc::vec::Vec::new());
         Ok(())
     }
 

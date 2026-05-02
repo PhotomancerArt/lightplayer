@@ -23,7 +23,7 @@ path and validates that the new runtime is durable.
 - Remove or quarantine old JSON/runtime compatibility code no longer needed.
 - Remove remaining compatibility projection/wiring that M4/M4.1 no longer need.
 - Add explicit destroy/unregister/close traversal for runtime teardown as part
-  of retiring legacy lifecycle assumptions.
+of retiring legacy lifecycle assumptions.
 - Run broad parity and integration validation.
 - Preserve embedded shader compilation and execution.
 - Update documentation to reflect the new default runtime architecture.
@@ -31,7 +31,7 @@ path and validates that the new runtime is durable.
 ## Out of scope
 
 - Queryable/sampled render products, unless required to preserve current
-  behavior.
+behavior.
 - New visual node types.
 - Async/parallel scheduler execution.
 - Large unrelated cleanup outside runtime cutover.
@@ -39,11 +39,11 @@ path and validates that the new runtime is durable.
 ## Key decisions
 
 - **Cleanup after demo cutover:** do not spend M5 designing the active runtime
-  path; M4 owns the demo switch, and M5 removes what is left behind.
+path; M4 owns the demo switch, and M5 removes what is left behind.
 - **One default runtime:** avoid keeping old and new runtimes as long-lived
-  peers.
+peers.
 - **Validation is the work:** this milestone is expected to spend most of its
-  risk budget on tests, firmware checks, and integration fallout.
+risk budget on tests, firmware checks, and integration fallout.
 
 ## Suggested plan location
 
@@ -54,8 +54,7 @@ When ready, expand this milestone with `/plan` or `/plan-small` at:
 ## Success criteria
 
 - `LegacyProjectRuntime` is retired or quarantined and unused by main runtime
-  paths.
+paths.
 - The core engine remains the default path for server/CLI/test runtime behavior.
 - Existing legacy MVP scenarios still render correctly.
 - Required host, emulator, and ESP32 validation commands pass.
-

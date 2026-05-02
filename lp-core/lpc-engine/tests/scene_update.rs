@@ -10,6 +10,9 @@ use lpc_shared::ProjectBuilder;
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
+use lpc_wire::{
+    RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
+};
 use lpfs::LpFsMemory;
 
 #[test]
@@ -53,6 +56,9 @@ render_order = 10
         .get_changes(
             before_change,
             &lpc_wire::WireNodeSpecifier::ByHandles(vec![shader_handle]),
+            ResourceSummarySpecifier::default(),
+            &RuntimeBufferPayloadSpecifier::default(),
+            &RenderProductPayloadRequest::default(),
             None,
         )
         .unwrap();
@@ -74,9 +80,21 @@ render_order = 10
                 )),
                 "M4 does not reload node.toml changes on the core runtime path"
             );
-            assert!(
-                node_details.is_empty(),
-                "M4 compatibility projection is metadata-only"
+            let detail = node_details
+                .get(&shader_handle)
+                .expect("M4.1 projects shader detail when the client specifies the handle");
+            let lpc_wire::legacy::NodeState::Shader(st) = &detail.state else {
+                panic!("shader node state")
+            };
+            assert_eq!(
+                st.render_product.value(),
+                &Some(lpc_model::resource::ResourceRef::render_product(
+                    runtime
+                        .engine()
+                        .primary_render_product_id_for_node(shader_handle)
+                        .expect("shader render product"),
+                )),
+                "detail refs track the shader's live render product id without config reload",
             );
         }
     }
@@ -165,6 +183,58 @@ fn node_deletion_is_ignored_by_m4_core_runtime_reload_noop() {
         "M4 keeps the loaded core node until source reload/deletion lands"
     );
     runtime.tick(4).expect("loaded runtime should still tick");
+}
+
+#[test]
+fn resource_summary_membership_is_stable_after_ticks() {
+    let fs = Rc::new(RefCell::new(LpFsMemory::new()));
+    let mut builder = ProjectBuilder::new(fs.clone());
+
+    let texture_path = builder.texture_basic();
+    builder.shader_basic(&texture_path);
+    let output_path = builder.output_basic();
+    builder.fixture_basic(&output_path, &texture_path);
+    builder.build();
+    fs.borrow_mut().reset_changes();
+
+    let output_provider = Rc::new(MemoryOutputProvider::new());
+    let mut runtime = load_core_runtime(&fs, output_provider);
+    let fixture_handle = runtime
+        .legacy_src_node_id("/src/fixture-1.fixture".as_path())
+        .expect("fixture");
+
+    runtime.tick(4).unwrap();
+
+    fn resource_ref_snapshot(
+        runtime: &CoreProjectRuntime,
+        fixture_handle: lpc_model::NodeId,
+    ) -> alloc::collections::BTreeSet<lpc_model::resource::ResourceRef> {
+        let r = runtime
+            .get_changes(
+                lpc_model::FrameId::default(),
+                &lpc_wire::WireNodeSpecifier::ByHandles(alloc::vec![fixture_handle]),
+                lpc_wire::ResourceSummarySpecifier::All,
+                &lpc_wire::RuntimeBufferPayloadSpecifier::default(),
+                &lpc_wire::RenderProductPayloadRequest::default(),
+                None,
+            )
+            .unwrap();
+        let lpc_wire::legacy::ProjectResponse::GetChanges {
+            resource_summaries, ..
+        } = r;
+        resource_summaries.iter().map(|s| s.resource_ref).collect()
+    }
+
+    let before = resource_ref_snapshot(&runtime, fixture_handle);
+
+    runtime.tick(4).unwrap();
+
+    let after = resource_ref_snapshot(&runtime, fixture_handle);
+
+    assert_eq!(
+        before, after,
+        "summary identity set should not churn across ticks while the graph is unchanged"
+    );
 }
 
 #[derive(Clone)]

@@ -1,22 +1,20 @@
-use alloc::{string::String, vec::Vec};
-use lpc_model::Versioned;
 use lpc_model::project::FrameId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
-use crate::impl_state_serialization;
+use crate::legacy::compatibility::LegacyCompatBytesField;
 
 /// Output node state - runtime values
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputState {
-    /// Channel data: high byte per channel, 3 bytes per LED (RGB). Serialized as base64.
-    pub channel_data: Versioned<Vec<u8>>,
+    /// Channel data: inline high byte per channel (RGB) or a runtime-buffer [`ResourceRef`](lpc_model::ResourceRef).
+    pub channel_data: LegacyCompatBytesField,
 }
 
 impl OutputState {
     /// Create a new OutputState with default values
     pub fn new(frame_id: FrameId) -> Self {
         Self {
-            channel_data: Versioned::new(frame_id, Vec::new()),
+            channel_data: LegacyCompatBytesField::new(frame_id),
         }
     }
 
@@ -25,17 +23,67 @@ impl OutputState {
     /// Only fields that are present in `other` (non-default values) are merged.
     /// Fields not present in the partial update are preserved from `self`.
     pub fn merge_from(&mut self, other: &Self, frame_id: FrameId) {
-        // Merge channel_data if present (not empty)
-        if !other.channel_data.value().is_empty() {
-            self.channel_data
-                .set(frame_id, other.channel_data.value().clone());
-        }
+        self.channel_data.merge_from(&other.channel_data, frame_id);
     }
 }
 
-impl_state_serialization! {
-    OutputState => SerializableOutputState {
-        #[base64] channel_data: Vec<u8>,
+/// Wrapper for serializing [`OutputState`] with a since_frame context
+pub struct SerializableOutputState<'a> {
+    state: &'a OutputState,
+    since_frame: FrameId,
+}
+
+impl<'a> SerializableOutputState<'a> {
+    pub fn new(state: &'a OutputState, since_frame: FrameId) -> Self {
+        Self { state, since_frame }
+    }
+}
+
+impl Serialize for SerializableOutputState<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let is_initial_sync = self.since_frame == FrameId::default();
+        let include_channel =
+            is_initial_sync || self.state.channel_data.changed_frame() > self.since_frame;
+        let count = usize::from(include_channel);
+        let mut st = serializer.serialize_struct("OutputState", count)?;
+        if include_channel {
+            st.serialize_field("channel_data", &self.state.channel_data)?;
+        }
+        st.end()
+    }
+}
+
+impl Serialize for OutputState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut st = serializer.serialize_struct("OutputState", 1)?;
+        st.serialize_field("channel_data", &self.channel_data)?;
+        st.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct OutputStateHelper {
+    channel_data: Option<LegacyCompatBytesField>,
+}
+
+impl<'de> Deserialize<'de> for OutputState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let helper = OutputStateHelper::deserialize(deserializer)?;
+        let frame_id = FrameId::default();
+        let mut state = OutputState::new(frame_id);
+        if let Some(v) = helper.channel_data {
+            state.channel_data = v;
+        }
+        Ok(state)
     }
 }
 
@@ -44,28 +92,31 @@ mod tests {
     use super::*;
     use crate::json;
     use alloc::{format, vec};
+    use lpc_model::{ResourceDomain, ResourceRef, RuntimeBufferId};
 
     #[test]
     fn test_serialize_all_fields_initial_sync() {
         let mut state = OutputState::new(FrameId::new(1));
-        state.channel_data.set(FrameId::new(1), vec![10, 20, 30]);
+        state
+            .channel_data
+            .set_inline(FrameId::new(1), vec![10, 20, 30]);
 
         let serializable = SerializableOutputState::new(&state, FrameId::default());
         let json = json::to_string(&serializable).unwrap();
-        // Should contain channel_data for initial sync
         assert!(json.contains("channel_data"));
     }
 
     #[test]
     fn test_serialize_partial_fields() {
         let mut state = OutputState::new(FrameId::new(1));
-        state.channel_data.set(FrameId::new(1), vec![10, 20, 30]);
+        state
+            .channel_data
+            .set_inline(FrameId::new(1), vec![10, 20, 30]);
 
-        // Update channel_data
-        state.channel_data.set(FrameId::new(5), vec![40, 50, 60]);
+        state
+            .channel_data
+            .set_inline(FrameId::new(5), vec![40, 50, 60]);
 
-        // Serialize with since_frame = FrameId::new(2)
-        // Should include channel_data (changed at frame 5 > 2)
         let serializable = SerializableOutputState::new(&state, FrameId::new(2));
         let json = json::to_string(&serializable).unwrap();
         assert!(json.contains("channel_data"));
@@ -74,44 +125,37 @@ mod tests {
     #[test]
     fn test_serialize_no_changes() {
         let mut state = OutputState::new(FrameId::new(1));
-        state.channel_data.set(FrameId::new(1), vec![10, 20, 30]);
+        state
+            .channel_data
+            .set_inline(FrameId::new(1), vec![10, 20, 30]);
 
-        // Serialize with since_frame = FrameId::new(5)
-        // No fields should be included (changed before frame 5)
         let serializable = SerializableOutputState::new(&state, FrameId::new(5));
         let json = json::to_string(&serializable).unwrap();
-        // Should be empty object or minimal
         assert!(!json.contains("channel_data"));
     }
 
     #[test]
     fn test_deserialize_partial_json_preserves_missing_fields() {
-        // Simulate client-side merge: existing state has channel_data, partial update is empty
         let mut existing_state = OutputState::new(FrameId::new(1));
         existing_state
             .channel_data
-            .set(FrameId::new(1), vec![100, 200, 255]);
+            .set_inline(FrameId::new(1), vec![100, 200, 255]);
 
-        // Partial update JSON (empty - no fields changed)
         let _partial_json = r#"{}"#;
         let _partial_state: OutputState = json::from_str(_partial_json).unwrap();
 
-        // Merge: only update fields that are present in partial update
-        // Since partial_json is empty, no fields should be updated
-        // channel_data should be preserved
-        assert_eq!(existing_state.channel_data.value(), &vec![100, 200, 255]);
+        assert_eq!(existing_state.channel_data.inline_bytes(), &[100, 200, 255]);
     }
 
     #[test]
     fn test_deserialize_partial_json_base64_field() {
-        // Test that base64-encoded channel_data can be deserialized
         use base64::Engine;
         let channel_bytes = vec![50, 100, 150, 200];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&channel_bytes);
         let json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
 
         let state: OutputState = json::from_str(&json).unwrap();
-        assert_eq!(state.channel_data.value(), &channel_bytes);
+        assert_eq!(state.channel_data.inline_bytes(), channel_bytes.as_slice());
     }
 
     #[test]
@@ -122,17 +166,11 @@ mod tests {
         let json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
 
         let state: OutputState = json::from_str(&json).unwrap();
-        assert_eq!(state.channel_data.value(), &channel_bytes);
+        assert_eq!(state.channel_data.inline_bytes(), channel_bytes.as_slice());
     }
 
     #[test]
     fn test_merge_partial_update_with_existing_state() {
-        // Simulate the client-side merge scenario:
-        // 1. Initial sync: receive full state with channel_data
-        // 2. Partial update: receive empty JSON (no changes)
-        // 3. Verify channel_data is preserved
-
-        // Step 1: Initial sync - deserialize full state
         use base64::Engine;
         let initial_bytes = vec![10, 20, 30, 40];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&initial_bytes);
@@ -140,18 +178,54 @@ mod tests {
         let mut existing_state: OutputState = json::from_str(&initial_json).unwrap();
         existing_state
             .channel_data
-            .set(FrameId::new(1), initial_bytes.clone());
+            .set_inline(FrameId::new(1), initial_bytes.clone());
 
-        // Step 2: Partial update - empty JSON (no fields changed)
         let _partial_json = r#"{}"#;
         let _partial_state: OutputState = json::from_str(_partial_json).unwrap();
 
-        // Step 3: Merge logic (simulating client behavior)
-        // Only update fields that are present in partial update
-        // Since partial_json is empty, existing_state should remain unchanged
-        // In real client code, we'd check if fields are present before merging
+        assert_eq!(
+            existing_state.channel_data.inline_bytes(),
+            initial_bytes.as_slice()
+        );
+    }
 
-        // Verify channel_data is preserved
-        assert_eq!(existing_state.channel_data.value(), &initial_bytes);
+    #[test]
+    fn test_channel_data_resource_ref_roundtrip() {
+        let mut state = OutputState::new(FrameId::new(1));
+        let rid = ResourceRef::runtime_buffer(RuntimeBufferId::new(7));
+        state.channel_data.set_resource(FrameId::new(3), rid);
+
+        let json = json::to_string(&state).unwrap();
+        assert!(json.contains("channel_data"));
+        assert!(json.contains("$lp:res/runtime_buffer/7"));
+
+        let back: OutputState = json::from_str(&json).unwrap();
+        assert_eq!(back.channel_data.resource_ref(), Some(rid));
+        assert!(back.channel_data.inline_bytes().is_empty());
+    }
+
+    #[test]
+    fn merge_omitted_channel_data_preserves_existing() {
+        let f = FrameId::new(10);
+        let mut existing = OutputState::new(f);
+        existing.channel_data.set_inline(f, vec![1, 2, 3]);
+        let partial = OutputState::new(FrameId::default());
+        existing.merge_from(&partial, FrameId::new(11));
+        assert_eq!(existing.channel_data.inline_bytes(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn merge_resource_ref_over_inline() {
+        let f = FrameId::new(1);
+        let mut existing = OutputState::new(f);
+        existing.channel_data.set_inline(f, vec![9, 9, 9]);
+        let rid = ResourceRef {
+            domain: ResourceDomain::RuntimeBuffer,
+            id: 42,
+        };
+        let mut partial = OutputState::new(f);
+        partial.channel_data.set_resource(FrameId::new(2), rid);
+        existing.merge_from(&partial, FrameId::new(3));
+        assert_eq!(existing.channel_data.resource_ref(), Some(rid));
     }
 }

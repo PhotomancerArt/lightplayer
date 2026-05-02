@@ -4,12 +4,13 @@
 
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::FrameId;
 use lpc_model::NodeId;
 use lpc_model::prop::PropPath;
-use lpc_source::legacy::nodes::fixture::{ColorOrder, MappingConfig};
+use lpc_source::legacy::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
 use super::shader_node::shader_texture_output_path;
@@ -18,11 +19,16 @@ use crate::legacy::nodes::fixture::gamma::apply_gamma;
 use crate::legacy::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, compute_mapping, initialize_channel_accumulators,
 };
-use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+use lpc_model::Versioned;
+
+use crate::node::{
+    DestroyCtx, FixtureProjectionInfo, MemPressureCtx, Node, NodeError, NodeResourceInitContext,
+    PressureLevel, TickContext,
+};
 use crate::prop::RuntimePropAccess;
 use crate::render_product::{RenderSample, RenderSampleBatch, RenderSamplePoint};
 use crate::resolver::QueryKey;
-use crate::runtime_buffer::RuntimeBufferId;
+use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
 
 use lps_shared::LpsValueF32;
 
@@ -53,6 +59,7 @@ pub struct FixtureNode {
     shader_node_id: NodeId,
     mapping: MappingConfig,
     output_sink: RuntimeBufferId,
+    lamp_colors_buffer_id: Option<RuntimeBufferId>,
     scalar_props: FixtureScalarProps,
     color_order: ColorOrder,
     brightness: u8,
@@ -77,6 +84,7 @@ impl FixtureNode {
             shader_node_id,
             mapping,
             output_sink,
+            lamp_colors_buffer_id: None,
             scalar_props: FixtureScalarProps,
             color_order,
             brightness,
@@ -87,6 +95,28 @@ impl FixtureNode {
 }
 
 impl Node for FixtureNode {
+    fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
+        if self.lamp_colors_buffer_id.is_some() {
+            return Ok(());
+        }
+        let channels = fixture_lamp_channel_count(&self.mapping);
+        let byte_len = (channels as usize).saturating_mul(3);
+        let id = ctx.insert_runtime_buffer(Versioned::new(
+            FrameId::default(),
+            RuntimeBuffer::fixture_colors_rgb8(channels, vec![0u8; byte_len]),
+        ));
+        self.lamp_colors_buffer_id = Some(id);
+        Ok(())
+    }
+
+    fn fixture_projection_info(&self) -> Option<FixtureProjectionInfo> {
+        Some(FixtureProjectionInfo {
+            lamp_colors_buffer_id: self.lamp_colors_buffer_id,
+            output_sink_buffer_id: self.output_sink,
+            texture_node_id: self.texture_node_id,
+        })
+    }
+
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let (tn, wpath, hpath) = texture_dimension_query_targets(self.texture_node_id);
         let w_prod = ctx
@@ -165,6 +195,11 @@ impl Node for FixtureNode {
         push_fixture_output(
             ctx,
             self.output_sink,
+            self.lamp_colors_buffer_id.ok_or_else(|| {
+                NodeError::msg(
+                    "fixture lamp colors buffer not initialized (missing init_resources)",
+                )
+            })?,
             ver,
             &accumulators,
             self.color_order,
@@ -286,6 +321,7 @@ fn legacy_u8_from_unorm_render_sample(c: f32) -> u8 {
 fn push_fixture_output(
     ctx: &mut TickContext<'_>,
     output_sink: RuntimeBufferId,
+    lamp_colors: RuntimeBufferId,
     frame: FrameId,
     accumulators: &ChannelAccumulators,
     color_order: ColorOrder,
@@ -293,27 +329,32 @@ fn push_fixture_output(
     gamma_correction: bool,
 ) -> Result<(), NodeError> {
     let max_channel = accumulators.max_channel as usize;
-    let byte_len = (max_channel + 1).saturating_mul(3).saturating_mul(2);
     let brightness = brightness_u8.to_q32() / 255.to_q32();
 
+    let mut logical_rgb16 = Vec::with_capacity(max_channel.saturating_add(1));
+    for channel_idx in 0usize..=max_channel {
+        let r_q = accumulators.r[channel_idx] * brightness;
+        let g_q = accumulators.g[channel_idx] * brightness;
+        let b_q = accumulators.b[channel_idx] * brightness;
+
+        let mut r = r_q.to_u16_saturating();
+        let mut g = g_q.to_u16_saturating();
+        let mut b = b_q.to_u16_saturating();
+
+        if gamma_correction {
+            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
+            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
+            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
+        }
+
+        logical_rgb16.push((r, g, b));
+    }
+
     ctx.with_runtime_buffer_mut(output_sink, frame, |buffer| {
+        let byte_len = (max_channel + 1).saturating_mul(3).saturating_mul(2);
         buffer.bytes.resize(byte_len, 0);
 
-        for channel_idx in 0usize..=max_channel {
-            let r_q = accumulators.r[channel_idx] * brightness;
-            let g_q = accumulators.g[channel_idx] * brightness;
-            let b_q = accumulators.b[channel_idx] * brightness;
-
-            let mut r = r_q.to_u16_saturating();
-            let mut g = g_q.to_u16_saturating();
-            let mut b = b_q.to_u16_saturating();
-
-            if gamma_correction {
-                r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-                g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-                b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-            }
-
+        for (channel_idx, (r, g, b)) in logical_rgb16.iter().copied().enumerate() {
             write_ordered_rgb_u16_le(
                 &mut buffer.bytes,
                 channel_idx.saturating_mul(6),
@@ -325,7 +366,24 @@ fn push_fixture_output(
         }
 
         Ok(())
-    })
+    })?;
+
+    ctx.with_runtime_buffer_mut(lamp_colors, frame, |buffer| {
+        let byte_len = (max_channel + 1).saturating_mul(3);
+        buffer.bytes.resize(byte_len, 0);
+
+        for (channel_idx, (r, g, b)) in logical_rgb16.iter().copied().enumerate() {
+            let off = channel_idx.saturating_mul(3);
+            if off + 3 <= buffer.bytes.len() {
+                buffer.bytes[off] = (r >> 8) as u8;
+                buffer.bytes[off + 1] = (g >> 8) as u8;
+                buffer.bytes[off + 2] = (b >> 8) as u8;
+            }
+        }
+
+        Ok(())
+    })?;
+    Ok(())
 }
 
 fn write_ordered_rgb_u16_le(
@@ -349,6 +407,40 @@ fn write_ordered_rgb_u16_le(
         let start = offset.saturating_add(i.saturating_mul(2));
         if start + 2 <= bytes.len() {
             bytes[start..start + 2].copy_from_slice(&word.to_le_bytes());
+        }
+    }
+}
+
+fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
+    match config {
+        MappingConfig::PathPoints { paths, .. } => {
+            let mut total = 0u32;
+            for path in paths {
+                let PathSpec::RingArray {
+                    start_ring_inclusive,
+                    end_ring_exclusive,
+                    ring_lamp_counts,
+                    order,
+                    ..
+                } = path;
+
+                let ring_indices: Vec<u32> = match order {
+                    RingOrder::InnerFirst => (*start_ring_inclusive..*end_ring_exclusive).collect(),
+                    RingOrder::OuterFirst => {
+                        (*start_ring_inclusive..*end_ring_exclusive).rev().collect()
+                    }
+                };
+
+                for ring_index in ring_indices {
+                    total = total.saturating_add(
+                        ring_lamp_counts
+                            .get(ring_index as usize)
+                            .copied()
+                            .unwrap_or(0),
+                    );
+                }
+            }
+            total
         }
     }
 }

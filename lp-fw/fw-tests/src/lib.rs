@@ -1,6 +1,6 @@
 //! Firmware integration tests
 
-use lpa_client::{LpClient, serializable_response_to_project_response};
+use lpa_client::{LpClient, ProjectGetChangesOptions, serializable_response_to_project_response};
 use lpc_view::ProjectView;
 use lpc_wire::WireProjectHandle as ProjectHandle;
 
@@ -22,7 +22,12 @@ pub async fn sync_emu_project_view(
     };
 
     let response = client
-        .project_sync_internal(handle, Some(view.frame_id), detail_spec)
+        .project_sync_internal(
+            handle,
+            Some(view.frame_id),
+            detail_spec,
+            ProjectGetChangesOptions::dev_demo_full_resources(),
+        )
         .await
         .expect("Failed to sync project");
 

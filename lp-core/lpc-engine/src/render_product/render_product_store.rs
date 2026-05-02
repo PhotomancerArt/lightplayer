@@ -3,13 +3,27 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 
-use super::{RenderProductId, RenderSampleBatch, RenderSampleBatchResult};
+use core::any::Any;
+
+use lpc_model::FrameId;
+
+use super::{RenderProductId, RenderSampleBatch, RenderSampleBatchResult, TextureRenderProduct};
+
+pub type NativeTexturePayload<'a> = (u32, u32, &'a [u8], lps_shared::TextureStorageFormat);
 
 /// Failure when sampling a render product through [`RenderProductStore`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenderProductError {
     UnknownProduct { id: RenderProductId },
     SampleCountMismatch,
+}
+
+/// Full/native RGBA payload materialization failed for wire sync (M4.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenderProductMaterializeError {
+    UnknownProduct { id: RenderProductId },
+    NotCpuTextureProduct,
+    UnsupportedTextureFormatForWire,
 }
 
 impl RenderProductError {
@@ -24,12 +38,20 @@ pub trait RenderProduct {
         &self,
         request: &RenderSampleBatch,
     ) -> Result<RenderSampleBatchResult, RenderProductError>;
+
+    /// For downcasting to concrete products (texture materialization, diagnostics).
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Maps [`RenderProductId`] to product implementations for [`crate::engine::Engine`].
+///
+/// [`insert`](RenderProductStore::insert) allocates ids monotonically; ids are not reused for
+/// the lifetime of this store.
 pub struct RenderProductStore {
     next_id: u32,
     products: BTreeMap<RenderProductId, Box<dyn RenderProduct>>,
+    /// Last engine frame where this id's backing product contents were replaced.
+    changed_at: BTreeMap<RenderProductId, FrameId>,
 }
 
 impl RenderProductStore {
@@ -38,14 +60,33 @@ impl RenderProductStore {
         Self {
             next_id: 0,
             products: BTreeMap::new(),
+            changed_at: BTreeMap::new(),
         }
     }
 
+    /// Allocates a new id. Ids increase monotonically and are never reused after allocation.
     pub fn insert(&mut self, product: Box<dyn RenderProduct>) -> RenderProductId {
         let id = RenderProductId::new(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.products.insert(id, product);
+        self.changed_at.insert(id, FrameId::default());
         id
+    }
+
+    pub fn get(&self, id: RenderProductId) -> Option<&dyn RenderProduct> {
+        self.products.get(&id).map(|b| b.as_ref())
+    }
+
+    /// Iterate active ids ordered by allocation (matches internal map order).
+    pub fn ids(&self) -> impl Iterator<Item = RenderProductId> + '_ {
+        self.products.keys().copied()
+    }
+
+    pub fn changed_frame(&self, id: RenderProductId) -> FrameId {
+        self.changed_at
+            .get(&id)
+            .copied()
+            .unwrap_or(FrameId::default())
     }
 
     /// Replace an existing product id, e.g. after re-rendering into a texture-backed product.
@@ -53,11 +94,13 @@ impl RenderProductStore {
         &mut self,
         id: RenderProductId,
         product: Box<dyn RenderProduct>,
+        changed_frame: FrameId,
     ) -> Result<(), RenderProductError> {
         if !self.products.contains_key(&id) {
             return Err(RenderProductError::unknown_product(id));
         }
         self.products.insert(id, product);
+        self.changed_at.insert(id, changed_frame);
         Ok(())
     }
 
@@ -75,6 +118,30 @@ impl RenderProductStore {
             return Err(RenderProductError::SampleCountMismatch);
         }
         Ok(result)
+    }
+
+    /// Full/native RGBA16 wire payload when the backing product is [`TextureRenderProduct`] in RGBA16.
+    pub fn try_materialize_native_texture_payload(
+        &self,
+        id: RenderProductId,
+    ) -> Result<NativeTexturePayload<'_>, RenderProductMaterializeError> {
+        let product = self
+            .products
+            .get(&id)
+            .ok_or(RenderProductMaterializeError::UnknownProduct { id })?;
+        let tex = product
+            .as_any()
+            .downcast_ref::<TextureRenderProduct>()
+            .ok_or(RenderProductMaterializeError::NotCpuTextureProduct)?;
+        use lps_shared::TextureStorageFormat;
+        let fmt = tex.storage_format();
+        if fmt != TextureStorageFormat::Rgba16Unorm {
+            return Err(RenderProductMaterializeError::UnsupportedTextureFormatForWire);
+        }
+        let bytes = tex
+            .try_raw_bytes()
+            .ok_or(RenderProductMaterializeError::UnsupportedTextureFormatForWire)?;
+        Ok((tex.width(), tex.height(), bytes, fmt))
     }
 }
 
@@ -106,6 +173,10 @@ impl RenderProduct for SolidColorProduct {
             .collect();
         Ok(RenderSampleBatchResult { samples })
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 /// Test double that returns `[x, y, 0.0, 1.0]` from each [`RenderSamplePoint`].
@@ -127,12 +198,18 @@ impl RenderProduct for CoordinateProduct {
             .collect();
         Ok(RenderSampleBatchResult { samples })
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::boxed::Box;
     use alloc::vec;
+
+    use lpc_model::FrameId;
 
     use super::{
         CoordinateProduct, RenderProduct, RenderProductError, RenderProductStore,
@@ -194,6 +271,7 @@ mod tests {
                 Box::new(SolidColorProduct {
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
+                FrameId::new(1),
             )
             .expect("replace");
         let request = RenderSampleBatch {
@@ -215,6 +293,10 @@ mod tests {
                 Ok(super::RenderSampleBatchResult {
                     samples: vec![super::RenderSample { color: [0.0; 4] }],
                 })
+            }
+
+            fn as_any(&self) -> &dyn core::any::Any {
+                self
             }
         }
 

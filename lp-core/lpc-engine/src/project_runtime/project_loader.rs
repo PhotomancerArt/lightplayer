@@ -9,7 +9,7 @@ use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::prop::prop_path::parse_path;
 use lpc_model::{
     FrameId, Kind, ModelValue, NodeId, NodeName, NodeNameError, NodePathSegment, ProjectConfig,
-    TreePath, Versioned,
+    TreePath,
 };
 use lpc_source::legacy::nodes::{
     NodeConfig, NodeKind, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
@@ -25,8 +25,7 @@ use crate::artifact::ArtifactId;
 use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
-use crate::render_product::TextureRenderProduct;
-use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
+use crate::runtime_buffer::RuntimeBufferId;
 use crate::tree::TreeError;
 
 use super::{CoreProjectRuntime, RuntimeServices};
@@ -90,7 +89,8 @@ struct LoadedNode {
     config: LoadedNodeConfig,
 }
 
-enum LoadedNodeConfig {
+#[derive(Clone)]
+pub(super) enum LoadedNodeConfig {
     Texture(TextureConfig),
     Shader(ShaderConfig),
     Output(OutputConfig),
@@ -125,6 +125,15 @@ impl LoadedNodeConfig {
             path: path.as_str().to_string(),
             reason: String::from("node config kind did not match concrete config type"),
         })
+    }
+
+    pub(super) fn clone_as_node_config_box(&self) -> Box<dyn NodeConfig> {
+        match self {
+            LoadedNodeConfig::Texture(c) => Box::new(c.clone()),
+            LoadedNodeConfig::Shader(c) => Box::new(c.clone()),
+            LoadedNodeConfig::Output(c) => Box::new(c.clone()),
+            LoadedNodeConfig::Fixture(c) => Box::new(c.clone()),
+        }
     }
 }
 
@@ -231,6 +240,12 @@ impl CoreProjectLoader {
 
         Self::attach_loaded_nodes(root, &mut runtime, &loaded_nodes, frame)?;
 
+        for node in &loaded_nodes {
+            runtime
+                .compatibility_mut()
+                .record_authoring_snapshot(node.id, node.config.clone());
+        }
+
         Ok(runtime)
     }
 
@@ -244,8 +259,6 @@ impl CoreProjectLoader {
         R: LegacyNodeReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
-        let mut output_sinks = Vec::new();
-
         for node in loaded_nodes {
             if let LoadedNodeConfig::Texture(config) = &node.config {
                 runtime
@@ -264,22 +277,21 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let LoadedNodeConfig::Output(config) = &node.config {
-                let sink_id = runtime
-                    .engine_mut()
-                    .runtime_buffers_mut()
-                    .insert(Versioned::new(
-                        FrameId::default(),
-                        RuntimeBuffer::raw(Vec::new()),
-                    ));
-                runtime.services_mut().register_output_sink(sink_id, config);
-                output_sinks.push((node.id, sink_id));
                 runtime
                     .engine_mut()
-                    .attach_runtime_node(node.id, Box::new(OutputNode::new(sink_id)), frame)
+                    .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
                         path: node.dir.as_str().to_string(),
                         reason: format!("attach output runtime: {e}"),
                     })?;
+                let sink_id = runtime
+                    .engine()
+                    .runtime_output_sink_buffer_id(node.id)
+                    .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
+                        path: node.dir.as_str().to_string(),
+                        reason: String::from("output runtime node produced no sink buffer"),
+                    })?;
+                runtime.services_mut().register_output_sink(sink_id, config);
             }
         }
 
@@ -292,12 +304,7 @@ impl CoreProjectLoader {
                     })?;
                 let shader_path = node.dir.join(config.glsl_path.as_str());
                 let glsl_source = read_utf8_file(root, shader_path.as_path())?;
-                let placeholder = empty_texture_product_for(texture_node, loaded_nodes)?;
-                let product_id = runtime
-                    .engine_mut()
-                    .render_products_mut()
-                    .insert(placeholder);
-
+                let placeholder_dims = placeholder_texture_dimensions_for_shader(texture_node)?;
                 runtime
                     .engine_mut()
                     .attach_runtime_node(
@@ -307,7 +314,8 @@ impl CoreProjectLoader {
                             texture_node.id,
                             config.clone(),
                             glsl_source,
-                            product_id,
+                            placeholder_dims.0,
+                            placeholder_dims.1,
                         )),
                         frame,
                     )
@@ -339,7 +347,7 @@ impl CoreProjectLoader {
                         path: node.dir.as_str().to_string(),
                         reason: format!("unknown output spec `{}`", config.output_spec.as_str()),
                     })?;
-                let sink_id = output_sink_for(&output_sinks, output_node.id, &output_node.dir)?;
+                let sink_id = output_sink_for(runtime.engine(), output_node.id, &output_node.dir)?;
 
                 runtime
                     .engine_mut()
@@ -605,53 +613,28 @@ fn find_shader_for_texture<'a>(
         })
 }
 
+fn placeholder_texture_dimensions_for_shader(
+    texture_node: &LoadedNode,
+) -> Result<(u32, u32), CoreProjectLoadError> {
+    let LoadedNodeConfig::Texture(config) = &texture_node.config else {
+        return Err(CoreProjectLoadError::InvalidSourcePath {
+            path: texture_node.dir.as_str().to_string(),
+            reason: String::from("shader texture spec did not reference a texture node"),
+        });
+    };
+    Ok((config.width, config.height))
+}
+
 fn output_sink_for(
-    output_sinks: &[(NodeId, RuntimeBufferId)],
+    engine: &Engine,
     output_node_id: NodeId,
     output_dir: &LpPath,
 ) -> Result<RuntimeBufferId, CoreProjectLoadError> {
-    output_sinks
-        .iter()
-        .find_map(|(node_id, sink_id)| (*node_id == output_node_id).then_some(*sink_id))
+    engine
+        .runtime_output_sink_buffer_id(output_node_id)
         .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
             path: output_dir.as_str().to_string(),
-            reason: String::from("output node has no registered sink"),
-        })
-}
-
-fn empty_texture_product_for(
-    texture_node: &LoadedNode,
-    loaded_nodes: &[LoadedNode],
-) -> Result<Box<dyn crate::render_product::RenderProduct>, CoreProjectLoadError> {
-    let config = loaded_nodes
-        .iter()
-        .find(|node| node.id == texture_node.id)
-        .and_then(|node| match &node.config {
-            LoadedNodeConfig::Texture(config) => Some(config),
-            _ => None,
-        })
-        .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-            path: texture_node.dir.as_str().to_string(),
-            reason: String::from("shader texture spec did not reference a texture node"),
-        })?;
-    let len = rgba16_byte_len(config.width, config.height)?;
-    let product =
-        TextureRenderProduct::rgba16_unorm(config.width, config.height, alloc::vec![0u8; len])
-            .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                path: texture_node.dir.as_str().to_string(),
-                reason: format!("create placeholder texture product: {e}"),
-            })?;
-    Ok(Box::new(product))
-}
-
-fn rgba16_byte_len(width: u32, height: u32) -> Result<usize, CoreProjectLoadError> {
-    usize::try_from(width)
-        .ok()
-        .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
-        .and_then(|px| px.checked_mul(8))
-        .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-            path: String::from("<texture>"),
-            reason: format!("texture dimensions {width}x{height} overflow host usize"),
+            reason: String::from("output node has no sink buffer"),
         })
 }
 

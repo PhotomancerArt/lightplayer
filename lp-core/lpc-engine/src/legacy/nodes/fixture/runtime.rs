@@ -90,7 +90,7 @@ impl FixtureRuntime {
     /// Get lamp colors (for state extraction)
     /// Returns RGB values per lamp, ordered by channel index (3 bytes per lamp)
     pub fn get_lamp_colors(&self) -> &[u8] {
-        self.state.lamp_colors.get()
+        self.state.lamp_colors.inline_bytes()
     }
 
     /// Convert mapping points to mapping cells with post-transform coordinates
@@ -354,7 +354,7 @@ impl LegacyNodeRuntime for FixtureRuntime {
         }
 
         // Update state with lamp colors
-        self.state.lamp_colors.set(frame_id, lamp_colors);
+        self.state.lamp_colors.set_inline(frame_id, lamp_colors);
 
         Ok(())
     }
