@@ -71,7 +71,10 @@ pub(crate) fn build_node_detail_map(
         out.insert(
             entry.id,
             NodeDetail {
-                path: LpPathBuf::from(entry.path.to_string()),
+                path: compatibility
+                    .node_path_for(entry.id)
+                    .cloned()
+                    .unwrap_or_else(|| LpPathBuf::from(entry.path.to_string())),
                 config,
                 state,
             },

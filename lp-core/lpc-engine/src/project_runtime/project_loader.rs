@@ -241,9 +241,11 @@ impl CoreProjectLoader {
         Self::attach_loaded_nodes(root, &mut runtime, &loaded_nodes, frame)?;
 
         for node in &loaded_nodes {
-            runtime
-                .compatibility_mut()
-                .record_authoring_snapshot(node.id, node.config.clone());
+            runtime.compatibility_mut().record_authoring_snapshot(
+                node.id,
+                node.dir.clone(),
+                node.config.clone(),
+            );
         }
 
         Ok(runtime)

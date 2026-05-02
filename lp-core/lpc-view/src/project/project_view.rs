@@ -315,7 +315,7 @@ impl ProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Output(output_state)) => resource_cache::resolve_legacy_compat_bytes(
+            Some(NodeState::Output(output_state)) => resource_cache::resolve_output_channel_bytes(
                 &output_state.channel_data,
                 &self.resource_cache,
             ),

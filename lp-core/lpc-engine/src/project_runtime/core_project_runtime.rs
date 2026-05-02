@@ -136,7 +136,11 @@ impl CoreProjectRuntime {
             if entry.created_frame.as_i64() > since_frame.as_i64() {
                 node_changes.push(NodeChange::Created {
                     handle: entry.id,
-                    path: LpPathBuf::from(entry.path.to_string()),
+                    path: self
+                        .compatibility
+                        .node_path_for(entry.id)
+                        .cloned()
+                        .unwrap_or_else(|| LpPathBuf::from(entry.path.to_string())),
                     kind,
                 });
                 node_changes.push(NodeChange::ConfigUpdated {

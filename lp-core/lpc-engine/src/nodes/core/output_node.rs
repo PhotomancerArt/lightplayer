@@ -63,7 +63,7 @@ impl Node for OutputNode {
         }
         let id = ctx.insert_runtime_buffer(Versioned::new(
             FrameId::default(),
-            RuntimeBuffer::raw(Vec::new()),
+            RuntimeBuffer::output_channels_u16(0, Vec::new()),
         ));
         self.channel_buffer_id = Some(id);
         Ok(())

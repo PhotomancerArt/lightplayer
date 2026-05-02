@@ -97,6 +97,18 @@ impl RuntimeBuffer {
     }
 
     #[must_use]
+    pub fn output_channels_u16(channels: u32, bytes: Vec<u8>) -> Self {
+        Self {
+            kind: RuntimeBufferKind::OutputChannels,
+            metadata: RuntimeBufferMetadata::OutputChannels {
+                channels,
+                sample_format: RuntimeChannelSampleFormat::U16,
+            },
+            bytes,
+        }
+    }
+
+    #[must_use]
     pub fn raw(bytes: Vec<u8>) -> Self {
         Self {
             kind: RuntimeBufferKind::Raw,
@@ -138,6 +150,19 @@ mod tests {
             RuntimeBufferMetadata::OutputChannels {
                 channels: 4,
                 sample_format: RuntimeChannelSampleFormat::U8,
+            }
+        );
+    }
+
+    #[test]
+    fn output_channels_u16_helper_sets_kind_and_metadata() {
+        let b = RuntimeBuffer::output_channels_u16(4, vec![10, 20]);
+        assert_eq!(b.kind, RuntimeBufferKind::OutputChannels);
+        assert_eq!(
+            b.metadata,
+            RuntimeBufferMetadata::OutputChannels {
+                channels: 4,
+                sample_format: RuntimeChannelSampleFormat::U16,
             }
         );
     }

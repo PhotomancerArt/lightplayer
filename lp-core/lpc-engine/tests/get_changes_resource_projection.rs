@@ -87,6 +87,7 @@ fn watched_nodes_receive_node_details() {
 
     let lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } = r;
     let detail = node_details.get(&out_id).expect("output detail");
+    assert_eq!(detail.path.as_str(), "/src/output-1.output");
     assert!(matches!(&detail.state, NodeState::Output(_)));
     let NodeState::Output(st) = &detail.state else {
         unreachable!();

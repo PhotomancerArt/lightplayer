@@ -5,13 +5,17 @@ use alloc::vec::Vec;
 
 use lpc_model::{ResourceDomain, ResourceRef};
 use lpc_wire::legacy::compatibility::LegacyCompatBytesField;
-use lpc_wire::{WireRenderProductPayload, WireResourceSummary, WireRuntimeBufferPayload};
+use lpc_wire::{
+    WireChannelSampleFormat, WireRenderProductPayload, WireResourceSummary,
+    WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
+};
 
 /// Cached resource summaries and payload bytes from `GetChanges`.
 #[derive(Debug, Default)]
 pub struct ClientResourceCache {
     summaries: BTreeMap<ResourceRef, WireResourceSummary>,
     runtime_buffer_bytes: BTreeMap<ResourceRef, Vec<u8>>,
+    runtime_buffer_metadata: BTreeMap<ResourceRef, WireRuntimeBufferMetadataPayload>,
     render_product_bytes: BTreeMap<ResourceRef, Vec<u8>>,
 }
 
@@ -58,6 +62,15 @@ impl ClientResourceCache {
             }
             refs.contains(r)
         });
+        self.runtime_buffer_metadata.retain(|r, _| {
+            if r.domain != ResourceDomain::RuntimeBuffer {
+                return true;
+            }
+            if !domains.contains(&ResourceDomain::RuntimeBuffer) {
+                return true;
+            }
+            refs.contains(r)
+        });
 
         self.render_product_bytes.retain(|r, _| {
             if r.domain != ResourceDomain::RenderProduct {
@@ -74,6 +87,8 @@ impl ClientResourceCache {
         for p in payloads {
             self.runtime_buffer_bytes
                 .insert(p.resource_ref, p.bytes.clone());
+            self.runtime_buffer_metadata
+                .insert(p.resource_ref, p.metadata.clone());
         }
     }
 
@@ -82,6 +97,55 @@ impl ClientResourceCache {
             self.render_product_bytes
                 .insert(p.resource_ref, p.bytes.clone());
         }
+    }
+}
+
+/// Resolve output-channel data as legacy UI RGB bytes.
+///
+/// Runtime output buffers are stored as native payloads. For `U16` output channels this helper
+/// returns the high byte per sample to preserve the historic `ProjectView::get_output_data`
+/// contract used by the debug UI and firmware tests.
+pub fn resolve_output_channel_bytes(
+    field: &LegacyCompatBytesField,
+    cache: &ClientResourceCache,
+) -> Result<Vec<u8>, alloc::string::String> {
+    let inline = field.inline_bytes();
+    if !inline.is_empty() {
+        return Ok(inline.to_vec());
+    }
+
+    let Some(resource_ref) = field.resource_ref() else {
+        return Ok(Vec::new());
+    };
+
+    if resource_ref.domain != ResourceDomain::RuntimeBuffer {
+        return resolve_legacy_compat_bytes(field, cache);
+    }
+
+    let bytes = cache
+        .runtime_buffer_bytes
+        .get(&resource_ref)
+        .ok_or_else(|| {
+            alloc::format!(
+                "no cached runtime-buffer payload for ref {:?}/{}",
+                resource_ref.domain,
+                resource_ref.id
+            )
+        })?;
+    match cache.runtime_buffer_metadata.get(&resource_ref) {
+        Some(WireRuntimeBufferMetadataPayload::OutputChannels {
+            sample_format: WireChannelSampleFormat::U16,
+            ..
+        }) => Ok(bytes
+            .chunks_exact(2)
+            .map(|chunk| chunk[1])
+            .collect::<Vec<_>>()),
+        Some(WireRuntimeBufferMetadataPayload::OutputChannels {
+            sample_format: WireChannelSampleFormat::U8,
+            ..
+        })
+        | None => Ok(bytes.clone()),
+        Some(_) => Ok(bytes.clone()),
     }
 }
 
@@ -243,5 +307,28 @@ mod tests {
 
         cache.apply_summaries(&[sample_buffer_summary(1, 2)]);
         assert!(resolve_legacy_compat_bytes(&field, &cache).is_err());
+    }
+
+    #[test]
+    fn project_resource_cache_resolves_output_u16_payload_as_high_bytes() {
+        let mut cache = ClientResourceCache::new();
+        let r = ResourceRef::runtime_buffer(RuntimeBufferId::new(5));
+        cache.apply_summaries(&[sample_buffer_summary(5, 1)]);
+        cache.apply_runtime_buffer_payloads(&[WireRuntimeBufferPayload {
+            resource_ref: r,
+            changed_frame: FrameId::new(1),
+            metadata: WireRuntimeBufferMetadataPayload::OutputChannels {
+                channels: 2,
+                sample_format: WireChannelSampleFormat::U16,
+            },
+            bytes: Vec::from([7u8, 10, 0, 20]),
+        }]);
+
+        let mut field = LegacyCompatBytesField::new(FrameId::default());
+        field.set_resource(FrameId::new(1), r);
+        assert_eq!(
+            resolve_output_channel_bytes(&field, &cache).unwrap(),
+            Vec::from([10u8, 20])
+        );
     }
 }

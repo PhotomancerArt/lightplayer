@@ -753,7 +753,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
             changed_frame: frame,
             metadata: WireRuntimeBufferMetadataPayload::OutputChannels {
                 channels: 1,
-                sample_format: WireChannelSampleFormat::U8,
+                sample_format: WireChannelSampleFormat::U16,
             },
             bytes: vec![0xAB, 0xCD],
         }],
@@ -761,7 +761,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
     })
     .unwrap();
 
-    assert_eq!(view.get_output_data(handle).unwrap(), vec![0xAB, 0xCD]);
+    assert_eq!(view.get_output_data(handle).unwrap(), vec![0xCD]);
 }
 
 #[test]

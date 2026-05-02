@@ -28,7 +28,9 @@ use crate::node::{
 use crate::prop::RuntimePropAccess;
 use crate::render_product::{RenderSample, RenderSampleBatch, RenderSamplePoint};
 use crate::resolver::QueryKey;
-use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
+use crate::runtime_buffer::{
+    RuntimeBuffer, RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat,
+};
 
 use lps_shared::LpsValueF32;
 
@@ -351,6 +353,11 @@ fn push_fixture_output(
     }
 
     ctx.with_runtime_buffer_mut(output_sink, frame, |buffer| {
+        buffer.kind = crate::runtime_buffer::RuntimeBufferKind::OutputChannels;
+        buffer.metadata = RuntimeBufferMetadata::OutputChannels {
+            channels: (max_channel + 1) as u32,
+            sample_format: RuntimeChannelSampleFormat::U16,
+        };
         let byte_len = (max_channel + 1).saturating_mul(3).saturating_mul(2);
         buffer.bytes.resize(byte_len, 0);
 
