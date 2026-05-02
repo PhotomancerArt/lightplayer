@@ -296,6 +296,10 @@ fn assert_m4_demo_client_view_materialized(
         .resource_ref()
         .expect("fixture lamp_colors buffer ref");
     assert_eq!(lamp_ref.domain, ResourceDomain::RuntimeBuffer);
+    assert!(
+        !fx_st.mapping_cells.value().is_empty(),
+        "fixture detail should include mapping cells for debug overlay"
+    );
     resolve_legacy_compat_bytes(&fx_st.lamp_colors, &client_view.resource_cache)
         .expect("fixture lamp colors payload should populate cache");
 

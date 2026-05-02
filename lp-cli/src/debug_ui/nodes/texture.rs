@@ -1,12 +1,14 @@
 use eframe::epaint::{Color32, ColorImage, TextureHandle};
 use egui::Image;
 use lpc_source::legacy::nodes::texture::TextureFormat;
-use lpc_view::NodeEntryView;
+use lpc_view::project::resource_cache;
+use lpc_view::{NodeEntryView, ProjectView};
 use lpc_wire::legacy::nodes::texture::TextureState;
 
 /// Render texture panel
 pub fn render_texture_panel(
     ui: &mut egui::Ui,
+    view: &ProjectView,
     entry: &NodeEntryView,
     state: &TextureState,
     show_background: bool,
@@ -15,6 +17,10 @@ pub fn render_texture_panel(
 ) {
     ui.heading("Texture");
     ui.separator();
+
+    let texture_data =
+        resource_cache::resolve_legacy_compat_bytes(&state.texture_data, &view.resource_cache);
+    let texture_bytes = texture_data.as_deref().unwrap_or(&[]);
 
     // Display metadata
     ui.group(|ui| {
@@ -25,22 +31,25 @@ pub fn render_texture_panel(
             state.height.value()
         ));
         ui.label(format!("Format: {}", state.format.value()));
-        ui.label(format!(
-            "Data size: {} bytes",
-            state.texture_data.inline_bytes().len()
-        ));
+        let texture_len = texture_bytes.len();
+        ui.label(format!("Data size: {texture_len} bytes"));
+        if let Some(resource_ref) = state.texture_data.resource_ref() {
+            let domain = resource_ref.domain;
+            let id = resource_ref.id;
+            ui.label(format!("Texture resource: {domain:?}/{id}"));
+        }
     });
 
     ui.separator();
 
     // Display texture image
     if show_background
-        && !state.texture_data.inline_bytes().is_empty()
+        && !texture_bytes.is_empty()
         && *state.width.value() > 0
         && *state.height.value() > 0
     {
         let color_image = texture_data_to_color_image(
-            state.texture_data.inline_bytes(),
+            texture_bytes,
             *state.width.value(),
             *state.height.value(),
             *state.format.value(),
@@ -67,6 +76,8 @@ pub fn render_texture_panel(
         );
     } else if !show_background {
         ui.label("Texture background hidden (enable in Texture Display Options)");
+    } else if let Err(error) = texture_data {
+        ui.label(format!("Texture data unavailable: {error}"));
     } else {
         ui.label("No texture data available");
     }

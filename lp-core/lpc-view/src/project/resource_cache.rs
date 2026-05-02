@@ -98,6 +98,14 @@ impl ClientResourceCache {
                 .insert(p.resource_ref, p.bytes.clone());
         }
     }
+
+    /// Cached bytes for a materialized render product, if the client requested its payload.
+    #[must_use]
+    pub fn render_product_bytes(&self, resource_ref: ResourceRef) -> Option<&[u8]> {
+        self.render_product_bytes
+            .get(&resource_ref)
+            .map(Vec::as_slice)
+    }
 }
 
 /// Resolve output-channel data as legacy UI RGB bytes.

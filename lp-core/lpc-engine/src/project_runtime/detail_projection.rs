@@ -9,15 +9,17 @@ use lpc_model::lp_path::LpPathBuf;
 use lpc_model::resource::ResourceRef;
 use lpc_model::{FrameId, NodeId};
 use lpc_source::legacy::nodes::NodeKind;
+use lpc_source::legacy::nodes::fixture::FixtureConfig;
 use lpc_source::legacy::nodes::texture::{TextureConfig, TextureFormat};
 use lpc_wire::WireNodeSpecifier;
-use lpc_wire::legacy::nodes::fixture::FixtureState;
+use lpc_wire::legacy::nodes::fixture::{FixtureState, MappingCell};
 use lpc_wire::legacy::nodes::output::OutputState;
 use lpc_wire::legacy::nodes::shader::ShaderState;
 use lpc_wire::legacy::nodes::texture::TextureState;
 use lpc_wire::legacy::{NodeDetail, NodeState};
 
 use crate::engine::Engine;
+use crate::legacy::nodes::fixture::mapping::generate_mapping_points;
 use crate::tree::{EntryState, NodeEntry};
 
 use super::compatibility_projection::CompatibilityProjection;
@@ -63,9 +65,13 @@ pub(crate) fn build_node_detail_map(
             )),
             NodeKind::Shader => NodeState::Shader(build_shader_state(entry, ver_frame)),
             NodeKind::Output => NodeState::Output(build_output_state(entry, ver_frame)),
-            NodeKind::Fixture => {
-                NodeState::Fixture(build_fixture_state(engine, entry, ver_frame, current_frame))
-            }
+            NodeKind::Fixture => NodeState::Fixture(build_fixture_state(
+                engine,
+                compatibility,
+                entry,
+                ver_frame,
+                current_frame,
+            )),
         };
 
         out.insert(
@@ -205,6 +211,7 @@ fn build_output_state(
 
 fn build_fixture_state(
     engine: &Engine,
+    compatibility: &CompatibilityProjection,
     entry: &NodeEntry<Box<dyn crate::node::Node>>,
     ver_frame: FrameId,
     current_frame: FrameId,
@@ -222,7 +229,63 @@ fn build_fixture_state(
             }
         }
     }
-    st.mapping_cells.set(ver_frame, Vec::new());
+    st.mapping_cells.set(
+        ver_frame,
+        fixture_mapping_cells(compatibility, entry, &st).unwrap_or_default(),
+    );
     let _ = current_frame;
     st
+}
+
+fn fixture_mapping_cells(
+    compatibility: &CompatibilityProjection,
+    entry: &NodeEntry<Box<dyn crate::node::Node>>,
+    state: &FixtureState,
+) -> Option<Vec<MappingCell>> {
+    let fixture_config_box = compatibility.node_config_box_for(entry.id)?;
+    let fixture_config = fixture_config_box
+        .as_any()
+        .downcast_ref::<FixtureConfig>()?;
+    let texture_id = (*state.texture_handle.value())?;
+    let texture_config_box = compatibility.node_config_box_for(texture_id)?;
+    let texture_config = texture_config_box
+        .as_any()
+        .downcast_ref::<TextureConfig>()?;
+
+    let points = generate_mapping_points(
+        &fixture_config.mapping,
+        texture_config.width,
+        texture_config.height,
+    );
+    Some(
+        points
+            .into_iter()
+            .map(|point| {
+                let transformed = apply_transform_2d(point.center, fixture_config.transform);
+                MappingCell {
+                    channel: point.channel,
+                    center: [
+                        transformed[0].clamp(0.0, 1.0),
+                        transformed[1].clamp(0.0, 1.0),
+                    ],
+                    radius: point.radius,
+                }
+            })
+            .collect(),
+    )
+}
+
+fn apply_transform_2d(point: [f32; 2], transform: [[f32; 4]; 4]) -> [f32; 2] {
+    let x = point[0];
+    let y = point[1];
+
+    let x_prime = transform[0][0] * x + transform[0][1] * y + transform[0][3];
+    let y_prime = transform[1][0] * x + transform[1][1] * y + transform[1][3];
+    let w_prime = transform[3][0] * x + transform[3][1] * y + transform[3][3];
+
+    if w_prime.abs() > 1e-6 {
+        [x_prime / w_prime, y_prime / w_prime]
+    } else {
+        [x_prime, y_prime]
+    }
 }

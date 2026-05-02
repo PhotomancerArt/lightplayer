@@ -125,6 +125,7 @@ pub fn render_all_nodes_panel(
                     (NodeKind::Texture, NodeState::Texture(texture_state)) => {
                         texture::render_texture_panel(
                             ui,
+                            view,
                             entry,
                             texture_state,
                             *show_texture_background,
@@ -133,7 +134,7 @@ pub fn render_all_nodes_panel(
                         );
                     }
                     (NodeKind::Shader, NodeState::Shader(shader_state)) => {
-                        shader::render_shader_panel(ui, entry, shader_state);
+                        shader::render_shader_panel(ui, view, entry, shader_state);
                     }
                     (NodeKind::Fixture, NodeState::Fixture(fixture_state)) => {
                         fixture::render_fixture_panel(
@@ -147,7 +148,7 @@ pub fn render_all_nodes_panel(
                         );
                     }
                     (NodeKind::Output, NodeState::Output(output_state)) => {
-                        output::render_output_panel(ui, entry, output_state);
+                        output::render_output_panel(ui, view, *handle, entry, output_state);
                     }
                     _ => {
                         // Mismatch between kind and state - shouldn't happen but handle gracefully
