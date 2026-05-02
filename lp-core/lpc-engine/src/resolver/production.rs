@@ -1,7 +1,7 @@
 //! Resolved value plus production provenance for the engine cache.
 
 use crate::binding::BindingId;
-use crate::runtime_product::RuntimeProduct;
+use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
 use lpc_model::{NodeId, PropPath, Versioned};
 use lps_shared::LpsValueF32;
 
@@ -17,12 +17,13 @@ impl Production {
         Self { product, source }
     }
 
-    pub fn value(value: Versioned<LpsValueF32>, source: ProductionSource) -> Self {
+    pub fn value(
+        value: Versioned<LpsValueF32>,
+        source: ProductionSource,
+    ) -> Result<Self, RuntimeProductError> {
         let frame = value.changed_frame();
-        Self::new(
-            Versioned::new(frame, RuntimeProduct::value(value.into_value())),
-            source,
-        )
+        let product = RuntimeProduct::try_value(value.into_value())?;
+        Ok(Self::new(Versioned::new(frame, product), source))
     }
 
     pub fn as_value(&self) -> Option<&LpsValueF32> {
@@ -43,12 +44,29 @@ pub enum ProductionSource {
 mod tests {
     use super::{Production, ProductionSource};
     use crate::binding::BindingId;
-    use crate::runtime_product::RuntimeProduct;
+    use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
     use lpc_model::FrameId;
     use lpc_model::NodeId;
     use lpc_model::Versioned;
     use lpc_model::prop::prop_path::parse_path;
-    use lps_shared::LpsValueF32;
+    use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32};
+
+    #[test]
+    fn production_value_rejects_texture2d() {
+        let tv = LpsTexture2DValue::from_guest_descriptor(LpsTexture2DDescriptor {
+            ptr: 0,
+            width: 1,
+            height: 1,
+            row_stride: 4,
+        });
+        assert!(matches!(
+            Production::value(
+                Versioned::new(FrameId::new(1), LpsValueF32::Texture2D(tv)),
+                ProductionSource::Literal,
+            ),
+            Err(RuntimeProductError::Texture2dValueNotRuntimeProduct),
+        ));
+    }
 
     #[test]
     fn production_holds_versioned_runtime_product_and_source() {
@@ -59,7 +77,8 @@ mod tests {
                 node: NodeId::new(9),
                 output: parse_path("result").unwrap(),
             },
-        );
+        )
+        .expect("production");
         assert!(matches!(
             pv.product.get(),
             RuntimeProduct::Value(inner) if inner.eq(&LpsValueF32::F32(1.25))
@@ -79,7 +98,8 @@ mod tests {
             ProductionSource::BusBinding {
                 binding: BindingId::new(4),
             },
-        );
+        )
+        .expect("production");
         assert_eq!(
             pv2.source,
             ProductionSource::BusBinding {
@@ -93,7 +113,7 @@ mod tests {
     fn production_value_preserves_changed_frame() {
         let frame = FrameId::new(42);
         let v = Versioned::new(frame, LpsValueF32::F32(-0.5));
-        let pv = Production::value(v, ProductionSource::Literal);
+        let pv = Production::value(v, ProductionSource::Literal).expect("production");
         assert_eq!(pv.product.changed_frame(), frame);
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(-0.5)));
     }

@@ -18,6 +18,7 @@ use crate::resolver::{
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::runtime::frame_time::FrameTime;
+use crate::runtime_buffer::RuntimeBufferStore;
 use crate::tree::{EntryState, NodeTree};
 
 use super::EngineError;
@@ -37,6 +38,7 @@ pub struct Engine {
     bindings: BindingRegistry,
     resolver: Resolver,
     render_products: RenderProductStore,
+    runtime_buffers: RuntimeBufferStore,
     artifacts: ArtifactManager<()>,
     demand_roots: Vec<NodeId>,
 }
@@ -51,6 +53,7 @@ impl Engine {
             bindings: BindingRegistry::new(),
             resolver: Resolver::new(),
             render_products: RenderProductStore::new(),
+            runtime_buffers: RuntimeBufferStore::new(),
             artifacts: ArtifactManager::new(),
             demand_roots: Vec::new(),
         }
@@ -94,6 +97,14 @@ impl Engine {
 
     pub fn render_products_mut(&mut self) -> &mut RenderProductStore {
         &mut self.render_products
+    }
+
+    pub fn runtime_buffers(&self) -> &RuntimeBufferStore {
+        &self.runtime_buffers
+    }
+
+    pub fn runtime_buffers_mut(&mut self) -> &mut RuntimeBufferStore {
+        &mut self.runtime_buffers
     }
 
     pub fn artifacts(&self) -> &ArtifactManager<()> {
@@ -280,7 +291,7 @@ impl ResolveHost for EngineResolveHost<'_> {
                             node: *node,
                             output: output.clone(),
                         },
-                    )),
+                    )?),
                     None => Err(SessionResolveError::other(format!(
                         "missing node output {output:?} on {node:?}"
                     ))),
@@ -307,7 +318,7 @@ impl ResolveHost for EngineResolveHost<'_> {
                     Some((v, frame)) => Ok(Production::value(
                         Versioned::new(frame, v),
                         ProductionSource::Default,
-                    )),
+                    )?),
                     None => Err(SessionResolveError::UnresolvedNodeInput {
                         node: *node,
                         input: input.clone(),
@@ -438,6 +449,7 @@ mod tests {
         EngineTestBuilder, bus, literal, node_output, output, path, trace_has_value_origin_path,
     };
     use crate::render_product::{RenderSampleBatch, RenderSamplePoint, SolidColorProduct};
+    use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct;
 
     #[test]
@@ -637,5 +649,18 @@ mod tests {
             .sample_batch(id, &request)
             .expect("sample");
         assert_eq!(result.samples[0].color, [1.0, 0.5, 0.25, 1.0]);
+    }
+
+    #[test]
+    fn runtime_buffer_inserted_via_engine_store_round_trips() {
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let payload = RuntimeBuffer::raw(alloc::vec![0xaa, 0xbb]);
+        let frame = FrameId::new(4);
+        let id = engine
+            .runtime_buffers_mut()
+            .insert(Versioned::new(frame, payload.clone()));
+        let got = engine.runtime_buffers().get(id).expect("inserted buffer");
+        assert_eq!(got.changed_frame(), frame);
+        assert_eq!(got.value(), &payload);
     }
 }

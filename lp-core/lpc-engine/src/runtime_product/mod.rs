@@ -2,4 +2,4 @@
 
 mod runtime_product;
 
-pub use runtime_product::RuntimeProduct;
+pub use runtime_product::{RuntimeProduct, RuntimeProductError};

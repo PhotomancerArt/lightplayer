@@ -68,6 +68,7 @@ mod tests {
             Versioned::new(FrameId::new(frame), LpsValueF32::F32(1.0)),
             source,
         )
+        .expect("scalar production")
     }
 
     #[test]

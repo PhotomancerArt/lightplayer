@@ -331,7 +331,7 @@ mod tests {
                     Ok(Production::value(
                         lpc_model::Versioned::new(session.frame_id(), LpsValueF32::F32(11.0)),
                         crate::resolver::ProductionSource::Default,
-                    ))
+                    )?)
                 }
                 _ => Err(crate::resolver::SessionResolveError::other(
                     "fixture produce mismatch",

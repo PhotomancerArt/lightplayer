@@ -9,6 +9,8 @@ use alloc::string::String;
 use lpc_model::ChannelName;
 use lpc_model::NodeId;
 
+use crate::runtime_product::RuntimeProductError;
+
 use super::query_key::QueryKey;
 use super::resolve_trace::ResolveTraceError;
 
@@ -43,6 +45,12 @@ impl From<ResolveTraceError> for SessionResolveError {
         match value {
             ResolveTraceError::Cycle { query } => Self::Cycle { query },
         }
+    }
+}
+
+impl From<RuntimeProductError> for SessionResolveError {
+    fn from(err: RuntimeProductError) -> Self {
+        Self::Other(format!("{err}"))
     }
 }
 

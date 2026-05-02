@@ -153,7 +153,7 @@ impl<'a> ResolveSession<'a> {
                             e.message
                         ))
                     })?;
-                Ok(Production::value(versioned, ProductionSource::Literal))
+                Ok(Production::value(versioned, ProductionSource::Literal)?)
             }
             BindingSource::NodeOutput { node, output } => {
                 let key = QueryKey::NodeOutput {
@@ -273,7 +273,7 @@ mod tests {
                             node: *node,
                             output: output.clone(),
                         },
-                    ))
+                    )?)
                 }
                 _ => Err(SessionResolveError::other("unexpected produce query")),
             }
@@ -516,7 +516,7 @@ mod tests {
                             node: *node,
                             output: output.clone(),
                         },
-                    ))
+                    )?)
                 }
                 _ => Err(SessionResolveError::other("trace host")),
             }
