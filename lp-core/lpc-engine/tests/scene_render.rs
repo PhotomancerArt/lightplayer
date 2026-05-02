@@ -254,8 +254,7 @@ fn assert_m4_demo_client_view_materialized(
     fn assert_watched_detail_state(entry_state: Option<&NodeState>, label: &'static str) {
         assert!(
             entry_state.is_some(),
-            "{label}: watched nodes should receive detail state during M4.1 sync, not stall waiting",
-            label = label,
+            "{label}: watched nodes should receive detail state during M4.1 sync, not stall waiting"
         );
     }
 

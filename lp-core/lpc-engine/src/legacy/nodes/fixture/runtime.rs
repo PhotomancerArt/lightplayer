@@ -584,8 +584,7 @@ mod tests {
         // the total contribution to each channel should sum to approximately 1.0
         assert!(
             (total_contribution_ch0 - 1.0).abs() < 0.1,
-            "Total contribution to channel 0 should be ~1.0 (normalized per-channel), got {}",
-            total_contribution_ch0
+            "Total contribution to channel 0 should be ~1.0 (normalized per-channel), got {total_contribution_ch0}"
         );
     }
 

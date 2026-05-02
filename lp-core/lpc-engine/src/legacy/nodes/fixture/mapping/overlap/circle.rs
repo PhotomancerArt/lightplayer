@@ -67,8 +67,7 @@ mod tests {
         let weight = circle_pixel_overlap(0.5, 0.5, 1.0, 0, 0);
         assert!(
             weight >= 0.95,
-            "Full overlap should be close to 1.0, got {}",
-            weight
+            "Full overlap should be close to 1.0, got {weight}"
         );
     }
 
@@ -78,8 +77,7 @@ mod tests {
         let weight = circle_pixel_overlap(10.0, 10.0, 0.5, 0, 0);
         assert!(
             weight < 0.01,
-            "No overlap should be close to 0.0, got {}",
-            weight
+            "No overlap should be close to 0.0, got {weight}"
         );
     }
 
@@ -89,8 +87,7 @@ mod tests {
         let weight = circle_pixel_overlap(0.0, 0.5, 0.5, 0, 0);
         assert!(
             weight > 0.0 && weight < 1.0,
-            "Partial overlap should be between 0 and 1, got {}",
-            weight
+            "Partial overlap should be between 0 and 1, got {weight}"
         );
     }
 
@@ -128,11 +125,6 @@ mod tests {
         let w1 = circle_pixel_overlap(1.5, 0.5, 0.5, 1, 0);
         let w2 = circle_pixel_overlap(0.5, 1.5, 0.5, 0, 1);
         // Should be similar (not necessarily equal due to discretization)
-        assert!(
-            (w1 - w2).abs() < 0.1,
-            "Symmetry check failed: {} vs {}",
-            w1,
-            w2
-        );
+        assert!((w1 - w2).abs() < 0.1, "Symmetry check failed: {w1} vs {w2}");
     }
 }

@@ -519,7 +519,7 @@ impl CoreProjectLoader {
             if full_path.0.get(i) != Some(seg) {
                 return Err(CoreProjectLoadError::InvalidSourcePath {
                     path: full_path.to_string(),
-                    reason: format!("path prefix must match project root {}", project_root),
+                    reason: format!("path prefix must match project root {project_root}"),
                 });
             }
         }

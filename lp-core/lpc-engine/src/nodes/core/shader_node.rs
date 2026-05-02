@@ -228,7 +228,7 @@ impl Node for ShaderNode {
             self.output_buf = Some(
                 graphics
                     .alloc_output_buffer(width, height)
-                    .map_err(|e| NodeError::msg(format!("alloc_output_buffer: {}", e)))?,
+                    .map_err(|e| NodeError::msg(format!("alloc_output_buffer: {e}")))?,
             );
         }
 
@@ -239,11 +239,11 @@ impl Node for ShaderNode {
 
         shader
             .render(buf, ctx.time_seconds())
-            .map_err(|e| NodeError::msg(format!("shader render: {}", e)))?;
+            .map_err(|e| NodeError::msg(format!("shader render: {e}")))?;
 
         let pixels = buf.data().to_vec();
         let tex = TextureRenderProduct::new(width, height, buf.format(), pixels)
-            .map_err(|e| NodeError::msg(format!("texture product: {}", e)))?;
+            .map_err(|e| NodeError::msg(format!("texture product: {e}")))?;
 
         ctx.defer_render_product_replace(self.render_product_id, Box::new(tex))?;
         self.outputs.last_frame = ctx.frame_id();
