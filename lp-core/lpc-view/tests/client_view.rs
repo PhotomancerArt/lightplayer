@@ -339,3 +339,260 @@ fn test_partial_state_merge_output() {
         _ => panic!("Expected Output state"),
     }
 }
+
+#[test]
+fn detail_applies_real_texture_config() {
+    use alloc::boxed::Box;
+    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_wire::legacy::nodes::texture::TextureState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(1);
+    let path = lpc_model::LpPathBuf::from("/src/t.texture");
+    let f1 = FrameId::new(1);
+
+    let mut state = TextureState::new(f1);
+    state.width.set(f1, 80);
+    state.height.set(f1, 60);
+
+    let response = ProjectResponse::GetChanges {
+        current_frame: f1,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path,
+                    config: Box::new(TextureConfig {
+                        width: 320,
+                        height: 240,
+                    }),
+                    state: NodeState::Texture(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+    };
+
+    view.watch_detail(handle);
+    view.apply_changes(&response).unwrap();
+
+    let cfg = view.nodes[&handle]
+        .config
+        .as_any()
+        .downcast_ref::<TextureConfig>()
+        .expect("texture config");
+    assert_eq!(cfg.width, 320);
+    assert_eq!(cfg.height, 240);
+}
+
+#[test]
+fn detail_applies_real_output_config() {
+    use alloc::boxed::Box;
+    use lpc_source::legacy::nodes::output::{OutputConfig, OutputDriverOptionsConfig};
+    use lpc_wire::legacy::nodes::output::OutputState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(2);
+    let path = lpc_model::LpPathBuf::from("/src/out.output");
+    let f1 = FrameId::new(1);
+
+    let state = OutputState::new(f1);
+    let opts = OutputDriverOptionsConfig {
+        brightness: 0.75,
+        ..OutputDriverOptionsConfig::default()
+    };
+
+    let response = ProjectResponse::GetChanges {
+        current_frame: f1,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Output,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path,
+                    config: Box::new(OutputConfig::GpioStrip {
+                        pin: 42,
+                        options: Some(opts.clone()),
+                    }),
+                    state: NodeState::Output(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+    };
+
+    view.watch_detail(handle);
+    view.apply_changes(&response).unwrap();
+
+    let cfg = view.nodes[&handle]
+        .config
+        .as_any()
+        .downcast_ref::<OutputConfig>()
+        .expect("output config");
+    assert_eq!(
+        cfg,
+        &OutputConfig::GpioStrip {
+            pin: 42,
+            options: Some(opts),
+        }
+    );
+}
+
+#[test]
+fn detail_after_config_updated_replaces_stored_config() {
+    use alloc::boxed::Box;
+    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_wire::legacy::nodes::texture::TextureState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(1);
+    let path = lpc_model::LpPathBuf::from("/src/t.texture");
+
+    let mut s1 = TextureState::new(FrameId::new(1));
+    s1.width.set(FrameId::new(1), 10);
+    s1.height.set(FrameId::new(1), 10);
+
+    view.watch_detail(handle);
+    view.apply_changes(&ProjectResponse::GetChanges {
+        current_frame: FrameId::new(1),
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::Created {
+            handle,
+            path: path.clone(),
+            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path: path.clone(),
+                    config: Box::new(TextureConfig {
+                        width: 100,
+                        height: 200,
+                    }),
+                    state: NodeState::Texture(s1),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+    })
+    .unwrap();
+
+    let mut s2 = TextureState::new(FrameId::new(2));
+    s2.width.set(FrameId::new(2), 10);
+    s2.height.set(FrameId::new(2), 10);
+
+    view.apply_changes(&ProjectResponse::GetChanges {
+        current_frame: FrameId::new(2),
+        since_frame: FrameId::new(1),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::ConfigUpdated {
+            handle,
+            config_ver: FrameId::new(2),
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path: path.clone(),
+                    config: Box::new(TextureConfig {
+                        width: 640,
+                        height: 480,
+                    }),
+                    state: NodeState::Texture(s2),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+    })
+    .unwrap();
+
+    let cfg = view.nodes[&handle]
+        .config
+        .as_any()
+        .downcast_ref::<TextureConfig>()
+        .expect("texture config");
+    assert_eq!(cfg.width, 640);
+    assert_eq!(cfg.height, 480);
+    assert_eq!(view.nodes[&handle].config_ver, FrameId::new(2));
+}
+
+#[test]
+fn detail_only_entry_stores_real_texture_config() {
+    use alloc::boxed::Box;
+    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_wire::WireNodeStatus;
+    use lpc_wire::legacy::nodes::texture::TextureState;
+    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+
+    let mut view = ProjectView::new();
+    let handle = NodeId::new(5);
+    let path = lpc_model::LpPathBuf::from("/src/only.texture");
+    let frame = FrameId::new(1);
+
+    let mut state = TextureState::new(frame);
+    state.width.set(frame, 1);
+    state.height.set(frame, 1);
+
+    let response = ProjectResponse::GetChanges {
+        current_frame: frame,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::StatusChanged {
+            handle,
+            status: WireNodeStatus::Ok,
+        }],
+        node_details: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                handle,
+                NodeDetail {
+                    path: path.clone(),
+                    config: Box::new(TextureConfig {
+                        width: 128,
+                        height: 96,
+                    }),
+                    state: NodeState::Texture(state),
+                },
+            );
+            m
+        },
+        theoretical_fps: None,
+    };
+
+    view.apply_changes(&response).unwrap();
+    let entry = view.nodes.get(&handle).expect("detail-only node");
+    let cfg = entry
+        .config
+        .as_any()
+        .downcast_ref::<TextureConfig>()
+        .expect("real texture config, not placeholder zeros");
+    assert_eq!(cfg.width, 128);
+    assert_eq!(cfg.height, 96);
+    assert!(matches!(entry.status, WireNodeStatus::Ok));
+}

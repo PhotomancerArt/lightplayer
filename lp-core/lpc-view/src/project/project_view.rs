@@ -4,6 +4,10 @@ use alloc::format;
 use alloc::string::String;
 use alloc::{vec, vec::Vec};
 use lpc_model::{FrameId, LpPathBuf, NodeId};
+use lpc_source::legacy::nodes::fixture::FixtureConfig;
+use lpc_source::legacy::nodes::output::OutputConfig;
+use lpc_source::legacy::nodes::shader::ShaderConfig;
+use lpc_source::legacy::nodes::texture::TextureConfig;
 use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
 use lpc_wire::legacy::{NodeChange, NodeState, ProjectResponse};
 use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
@@ -34,7 +38,7 @@ pub struct ProjectView {
 pub struct NodeEntryView {
     pub path: LpPathBuf,
     pub kind: NodeKind,
-    pub config: Box<dyn NodeConfig>, // todo!("Proper config storage/cloning")
+    pub config: Box<dyn NodeConfig>,
     pub config_ver: FrameId,
     pub state: Option<NodeState>, // Only present if in detail_tracking
     pub state_ver: FrameId,
@@ -106,36 +110,24 @@ impl ProjectView {
                         NodeChange::Created { handle, path, kind } => {
                             // Create new entry with placeholder config
                             let config: Box<dyn NodeConfig> = match kind {
-                                NodeKind::Texture => {
-                                    Box::new(lpc_source::legacy::nodes::texture::TextureConfig {
-                                        width: 0,
-                                        height: 0,
-                                    })
-                                }
-                                NodeKind::Shader => {
-                                    Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default())
-                                }
-                                NodeKind::Output => {
-                                    Box::new(lpc_source::legacy::nodes::output::OutputConfig::GpioStrip {
-                                        pin: 0,
-                                        options: None,
-                                    })
-                                }
-                                NodeKind::Fixture => {
-                                    Box::new(lpc_source::legacy::nodes::fixture::FixtureConfig {
-                                        output_spec: lpc_model::NodeSpec::from(""),
-                                        texture_spec: lpc_model::NodeSpec::from(""),
-                                        mapping:
-                                            lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
-                                                paths: vec![],
-                                                sample_diameter: 2.0,
-                                            },
-                                        color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
-                                        transform: [[0.0; 4]; 4],
-                                        brightness: None,
-                                        gamma_correction: None,
-                                    })
-                                }
+                                NodeKind::Texture => Box::new(TextureConfig { width: 0, height: 0 }),
+                                NodeKind::Shader => Box::new(ShaderConfig::default()),
+                                NodeKind::Output => Box::new(OutputConfig::GpioStrip {
+                                    pin: 0,
+                                    options: None,
+                                }),
+                                NodeKind::Fixture => Box::new(FixtureConfig {
+                                    output_spec: lpc_model::NodeSpec::from(""),
+                                    texture_spec: lpc_model::NodeSpec::from(""),
+                                    mapping: lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
+                                        paths: vec![],
+                                        sample_diameter: 2.0,
+                                    },
+                                    color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
+                                    transform: [[0.0; 4]; 4],
+                                    brightness: None,
+                                    gamma_correction: None,
+                                }),
                             };
 
                             let initial_status = WireNodeStatus::Created;
@@ -158,13 +150,11 @@ impl ProjectView {
                         NodeChange::ConfigUpdated { handle, config_ver } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
                                 entry.config_ver = *config_ver;
-                                // todo!("Update config from details if available")
                             }
                         }
                         NodeChange::StateUpdated { handle, state_ver } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
                                 entry.state_ver = *state_ver;
-                                // todo!("Update state from details if tracking")
                             }
                         }
                         NodeChange::StatusChanged { handle, status } => {
@@ -202,41 +192,8 @@ impl ProjectView {
                 // Update details (create entries if they don't exist)
                 for (handle, detail) in node_details {
                     if let Some(entry) = self.nodes.get_mut(handle) {
-                        // Update existing entry
-                        // Use config from detail if available, otherwise keep existing config
-                        let config: Box<dyn NodeConfig> = match entry.kind {
-                            NodeKind::Texture => {
-                                Box::new(lpc_source::legacy::nodes::texture::TextureConfig {
-                                    width: 0,
-                                    height: 0,
-                                })
-                            }
-                            NodeKind::Shader => {
-                                Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default())
-                            }
-                            NodeKind::Output => {
-                                Box::new(lpc_source::legacy::nodes::output::OutputConfig::GpioStrip {
-                                    pin: 0,
-                                    options: None,
-                                })
-                            }
-                            NodeKind::Fixture => {
-                                Box::new(lpc_source::legacy::nodes::fixture::FixtureConfig {
-                                    output_spec: lpc_model::NodeSpec::from(""),
-                                    texture_spec: lpc_model::NodeSpec::from(""),
-                                    mapping: lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
-                                        paths: vec![],
-                                        sample_diameter: 2.0,
-                                    },
-                                    color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
-                                    transform: [[0.0; 4]; 4],
-                                    brightness: None,
-                                    gamma_correction: None,
-                                })
-                            }
-                        };
-
-                        entry.config = config;
+                        entry.config =
+                            clone_node_config_for_kind(detail.config.as_ref(), entry.kind)?;
                         // Merge partial update into existing state
                         if let Some(existing_state) = &mut entry.state {
                             // Merge fields from partial update into existing state
@@ -256,37 +213,7 @@ impl ProjectView {
                             NodeState::Fixture(_) => NodeKind::Fixture,
                         };
 
-                        let config: Box<dyn NodeConfig> = match kind {
-                            NodeKind::Texture => {
-                                Box::new(lpc_source::legacy::nodes::texture::TextureConfig {
-                                    width: 0,
-                                    height: 0,
-                                })
-                            }
-                            NodeKind::Shader => {
-                                Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default())
-                            }
-                            NodeKind::Output => {
-                                Box::new(lpc_source::legacy::nodes::output::OutputConfig::GpioStrip {
-                                    pin: 0,
-                                    options: None,
-                                })
-                            }
-                            NodeKind::Fixture => {
-                                Box::new(lpc_source::legacy::nodes::fixture::FixtureConfig {
-                                    output_spec: lpc_model::NodeSpec::from(""),
-                                    texture_spec: lpc_model::NodeSpec::from(""),
-                                    mapping: lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
-                                        paths: vec![],
-                                        sample_diameter: 2.0,
-                                    },
-                                    color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
-                                    transform: [[0.0; 4]; 4],
-                                    brightness: None,
-                                    gamma_correction: None,
-                                })
-                            }
-                        };
+                        let config = clone_node_config_for_kind(detail.config.as_ref(), kind)?;
 
                         // `StatusChanged` may run before any entry exists (no `Created` in this batch
                         // when `config_ver != state_ver` on the server). Honor that pending status here.
@@ -380,6 +307,50 @@ impl ProjectView {
                 "Node {} does not have state (not being tracked for detail)",
                 entry.path.as_str()
             )),
+        }
+    }
+}
+
+fn clone_node_config_for_kind(
+    config: &dyn NodeConfig,
+    expected_kind: NodeKind,
+) -> Result<Box<dyn NodeConfig>, String> {
+    let actual_kind = config.kind();
+    if actual_kind != expected_kind {
+        return Err(format!(
+            "node detail config kind mismatch: expected {:?}, got {:?}",
+            expected_kind, actual_kind
+        ));
+    }
+
+    match expected_kind {
+        NodeKind::Texture => {
+            let config = config
+                .as_any()
+                .downcast_ref::<TextureConfig>()
+                .ok_or_else(|| String::from("failed to downcast TextureConfig"))?;
+            Ok(Box::new(config.clone()))
+        }
+        NodeKind::Shader => {
+            let config = config
+                .as_any()
+                .downcast_ref::<ShaderConfig>()
+                .ok_or_else(|| String::from("failed to downcast ShaderConfig"))?;
+            Ok(Box::new(config.clone()))
+        }
+        NodeKind::Output => {
+            let config = config
+                .as_any()
+                .downcast_ref::<OutputConfig>()
+                .ok_or_else(|| String::from("failed to downcast OutputConfig"))?;
+            Ok(Box::new(config.clone()))
+        }
+        NodeKind::Fixture => {
+            let config = config
+                .as_any()
+                .downcast_ref::<FixtureConfig>()
+                .ok_or_else(|| String::from("failed to downcast FixtureConfig"))?;
+            Ok(Box::new(config.clone()))
         }
     }
 }

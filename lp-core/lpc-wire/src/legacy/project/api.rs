@@ -186,11 +186,15 @@ pub enum SerializableNodeDetail {
 /// Note: node_details uses Vec instead of BTreeMap because JSON map keys must be strings,
 /// and tuple structs don't deserialize correctly from string keys.
 ///
-/// Uses custom Serialize implementation to enable context-aware state serialization
-/// that only includes fields changed since since_frame.
+/// Uses custom [`Serialize`] so nested [`NodeState`] uses [`SerializableTextureState`] /
+/// shader/output/fixture wrappers and omits unchanged fields when `since_frame` is not initial.
 ///
-/// Note: Deserialization uses default externally tagged enum format.
-/// The custom serialization creates the same format, so default deserialization works.
+/// JSON round-trip preserves scalar snapshot fields on initial sync (`since_frame`
+/// [`FrameId::default()`]). [`Versioned`] metadata uses [`FrameId::default()`] on deserialize
+/// because the wire omits provenance; compare `.value()` when testing payloads.
+///
+/// [`Deserialize`] matches this wire shape (externally tagged [`SerializableNodeDetail`] and
+/// [`NodeState`] variants).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub enum SerializableProjectResponse {
     /// Changes response
@@ -547,6 +551,7 @@ mod tests {
     use alloc::vec;
     use lpc_source::legacy::nodes::shader::ShaderConfig;
     use lpc_source::legacy::nodes::texture::{TextureConfig, TextureFormat};
+    use serde_json::Value;
 
     #[test]
     fn test_node_state() {
@@ -725,59 +730,218 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix deserialization to match custom serialization format
-    fn test_serializable_project_response_serialization() {
-        let mut node_details = Vec::new();
-        node_details.push((
-            NodeId::new(1),
-            SerializableNodeDetail::Texture {
-                path: LpPathBuf::from("/src/texture.texture"),
-                config: TextureConfig {
-                    width: 100,
-                    height: 200,
-                },
-                state: {
-                    use lpc_model::project::FrameId;
-                    let mut tex_state =
-                        crate::legacy::nodes::texture::TextureState::new(FrameId::default());
-                    tex_state
-                        .texture_data
-                        .set(FrameId::default(), vec![0, 1, 2, 3]);
-                    tex_state.width.set(FrameId::default(), 2);
-                    tex_state.height.set(FrameId::default(), 2);
-                    tex_state
-                        .format
-                        .set(FrameId::default(), TextureFormat::Rgba16);
-                    NodeState::Texture(tex_state)
-                },
-            },
-        ));
-
-        let response = SerializableProjectResponse::GetChanges {
-            current_frame: FrameId::default(),
-            since_frame: FrameId::default(),
-            node_handles: vec![NodeId::new(1)],
-            node_changes: vec![],
-            node_details,
-            theoretical_fps: None,
-        };
-
+    fn serializable_project_response_initial_sync_round_trip_and_wire_shape() {
+        let response = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
         let json = crate::json::to_string(&response).unwrap();
+        assert_serializable_project_response_wire_shape(&json, WireShapeExpect::InitialSyncTexture);
+        let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        assert_serializable_project_response_semantically_equal(&response, &deserialized);
+    }
+
+    #[test]
+    fn serializable_project_response_partial_texture_omits_stale_fields() {
+        let since_frame = FrameId::new(2);
+        let response = sample_get_changes_texture_response(FrameId::new(10), since_frame);
+        let json = crate::json::to_string(&response).unwrap();
+        assert_serializable_project_response_wire_shape(&json, WireShapeExpect::PartialTexture);
+
         let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
         match deserialized {
             SerializableProjectResponse::GetChanges {
-                current_frame,
-                since_frame: _,
-                node_handles,
-                node_changes,
+                since_frame: sf,
                 node_details,
-                theoretical_fps: _,
+                ..
             } => {
-                assert_eq!(current_frame, FrameId::default());
-                assert_eq!(node_handles.len(), 1);
-                assert_eq!(node_changes.len(), 0);
+                assert_eq!(sf, since_frame);
                 assert_eq!(node_details.len(), 1);
+                let (
+                    _,
+                    SerializableNodeDetail::Texture {
+                        state: NodeState::Texture(tex),
+                        ..
+                    },
+                ) = &node_details[0]
+                else {
+                    panic!("expected Texture detail");
+                };
+                // Deserialized omitted fields use defaults at frame 0; merge_from repairs client view.
+                assert_eq!(tex.texture_data.value(), &Vec::<u8>::new());
+                assert_eq!(tex.format.value(), &TextureFormat::Rgba16);
+                assert_eq!(tex.width.value(), &150);
+                assert_eq!(tex.height.value(), &250);
             }
+        }
+    }
+
+    fn assert_serializable_project_response_semantically_equal(
+        original: &SerializableProjectResponse,
+        decoded: &SerializableProjectResponse,
+    ) {
+        let (
+            SerializableProjectResponse::GetChanges {
+                current_frame: cf_a,
+                since_frame: sf_a,
+                node_handles: nh_a,
+                node_changes: nc_a,
+                node_details: nd_a,
+                theoretical_fps: fps_a,
+            },
+            SerializableProjectResponse::GetChanges {
+                current_frame: cf_b,
+                since_frame: sf_b,
+                node_handles: nh_b,
+                node_changes: nc_b,
+                node_details: nd_b,
+                theoretical_fps: fps_b,
+            },
+        ) = (original, decoded);
+        assert_eq!(cf_a, cf_b);
+        assert_eq!(sf_a, sf_b);
+        assert_eq!(nh_a, nh_b);
+        assert_eq!(nc_a, nc_b);
+        assert_eq!(fps_a, fps_b);
+        assert_eq!(nd_a.len(), nd_b.len());
+        for ((ha, da), (hb, db)) in nd_a.iter().zip(nd_b.iter()) {
+            assert_eq!(ha, hb);
+            assert_serializable_node_detail_semantically_equal(da, db);
+        }
+    }
+
+    fn assert_serializable_node_detail_semantically_equal(
+        a: &SerializableNodeDetail,
+        b: &SerializableNodeDetail,
+    ) {
+        match (a, b) {
+            (
+                SerializableNodeDetail::Texture {
+                    path: pa,
+                    config: ca,
+                    state: NodeState::Texture(sa),
+                },
+                SerializableNodeDetail::Texture {
+                    path: pb,
+                    config: cb,
+                    state: NodeState::Texture(sb),
+                },
+            ) => {
+                assert_eq!(pa, pb);
+                assert_eq!(ca, cb);
+                assert_texture_snapshot_equal(sa, sb);
+            }
+            _ => panic!("fixture uses Texture detail only"),
+        }
+    }
+
+    fn assert_texture_snapshot_equal(
+        a: &crate::legacy::nodes::texture::TextureState,
+        b: &crate::legacy::nodes::texture::TextureState,
+    ) {
+        assert_eq!(a.texture_data.value(), b.texture_data.value());
+        assert_eq!(a.width.value(), b.width.value());
+        assert_eq!(a.height.value(), b.height.value());
+        assert_eq!(a.format.value(), b.format.value());
+    }
+
+    enum WireShapeExpect {
+        InitialSyncTexture,
+        PartialTexture,
+    }
+
+    fn get_changes_object<'a>(v: &'a Value) -> &'a serde_json::Map<String, Value> {
+        v.as_object()
+            .expect("root JSON object")
+            .get("GetChanges")
+            .expect("externally tagged GetChanges")
+            .as_object()
+            .expect("GetChanges payload object")
+    }
+
+    fn texture_state_json<'a>(gc: &'a serde_json::Map<String, Value>) -> &'a Value {
+        let details = gc
+            .get("node_details")
+            .expect("node_details")
+            .as_array()
+            .expect("node_details array");
+        let pair = details.first().expect("one detail tuple");
+        pair.get(1)
+            .expect("detail entry")
+            .get("Texture")
+            .expect("SerializableNodeDetail.Texture")
+            .get("state")
+            .expect("detail.state")
+            .get("Texture")
+            .expect("NodeState.Texture externally tagged")
+    }
+
+    fn assert_serializable_project_response_wire_shape(json: &str, expect: WireShapeExpect) {
+        let v: Value = serde_json::from_str(json).expect("valid JSON");
+        let gc = get_changes_object(&v);
+        assert!(
+            gc.contains_key("current_frame") && gc.contains_key("since_frame"),
+            "GetChanges must carry frame ids"
+        );
+        assert!(gc.contains_key("node_handles"));
+        assert!(gc.contains_key("node_changes"));
+        assert!(gc.contains_key("node_details"));
+        assert!(gc.contains_key("theoretical_fps"));
+
+        let inner = texture_state_json(gc);
+        match expect {
+            WireShapeExpect::InitialSyncTexture => {
+                for key in ["texture_data", "width", "height", "format"] {
+                    assert!(
+                        inner.get(key).is_some(),
+                        "initial sync must include `{key}`, got {inner:?}"
+                    );
+                }
+            }
+            WireShapeExpect::PartialTexture => {
+                assert!(
+                    inner.get("width").is_some() && inner.get("height").is_some(),
+                    "partial payload should include updated fields: {inner:?}"
+                );
+                assert!(
+                    inner.get("texture_data").is_none() && inner.get("format").is_none(),
+                    "fields unchanged since since_frame must be omitted: {inner:?}"
+                );
+            }
+        }
+    }
+
+    fn sample_get_changes_texture_response(
+        current_frame: FrameId,
+        since_frame: FrameId,
+    ) -> SerializableProjectResponse {
+        let mut tex_state = crate::legacy::nodes::texture::TextureState::new(FrameId::new(1));
+        tex_state
+            .texture_data
+            .set(FrameId::new(1), vec![1, 2, 3, 4]);
+        tex_state.width.set(FrameId::new(1), 100);
+        tex_state.height.set(FrameId::new(1), 200);
+        tex_state.format.set(FrameId::new(1), TextureFormat::Rgb8);
+
+        if since_frame != FrameId::default() {
+            tex_state.width.set(FrameId::new(5), 150);
+            tex_state.height.set(FrameId::new(5), 250);
+        }
+
+        SerializableProjectResponse::GetChanges {
+            current_frame,
+            since_frame,
+            node_handles: vec![NodeId::new(1)],
+            node_changes: vec![],
+            node_details: vec![(
+                NodeId::new(1),
+                SerializableNodeDetail::Texture {
+                    path: LpPathBuf::from("/src/texture.texture"),
+                    config: TextureConfig {
+                        width: 100,
+                        height: 200,
+                    },
+                    state: NodeState::Texture(tex_state),
+                },
+            )],
+            theoretical_fps: Some(60.0),
         }
     }
 }

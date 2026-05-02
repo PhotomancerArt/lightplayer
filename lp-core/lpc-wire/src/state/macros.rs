@@ -116,7 +116,9 @@ macro_rules! impl_state_serialization {
             }
         }
 
-        // Temporary: Simple Serialize implementation for NodeState compatibility
+        // Direct `Serialize` on `$state_name`: legacy compatibility shape used when `NodeState`
+        // is serialized without `since_frame` (unit tests and standalone payloads). For sync,
+        // `Serializable*State::new(_, since_frame)` omits unchanged fields on the wire.
         impl Serialize for $state_name {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
