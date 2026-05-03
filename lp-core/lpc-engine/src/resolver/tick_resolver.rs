@@ -1,6 +1,8 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
-use crate::render_product::{RenderProductId, RenderSampleBatch, RenderSampleBatchResult};
+use crate::render_product::{
+    NativeTexturePayload, RenderProductId, RenderSampleBatch, RenderSampleBatchResult,
+};
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::{ResolveError, SessionResolveError};
@@ -18,6 +20,12 @@ pub trait TickResolver {
         id: RenderProductId,
         batch: &RenderSampleBatch,
     ) -> Result<RenderSampleBatchResult, ResolveError>;
+
+    fn with_native_texture_payload(
+        &mut self,
+        id: RenderProductId,
+        visitor: &mut dyn FnMut(NativeTexturePayload<'_>),
+    ) -> Result<(), ResolveError>;
 
     fn runtime_buffer_mut(
         &mut self,
@@ -50,6 +58,16 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<RenderSampleBatchResult, ResolveError> {
         self.host
             .sample_render_product(id, batch)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn with_native_texture_payload(
+        &mut self,
+        id: RenderProductId,
+        visitor: &mut dyn FnMut(NativeTexturePayload<'_>),
+    ) -> Result<(), ResolveError> {
+        self.host
+            .with_native_texture_payload(id, visitor)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 

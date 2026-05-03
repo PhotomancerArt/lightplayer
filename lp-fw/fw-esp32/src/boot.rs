@@ -90,9 +90,22 @@ pub fn auto_load_project(server: &mut LpServer) {
     };
 
     log::info!("Boot: auto-loading {}", project_path.as_str());
+    log_memory(server, "boot auto_load before");
     if let Err(e) = server.load_project(project_path.as_path()) {
         log::warn!("Boot: auto-load failed for {}: {e}", project_path.as_str());
     } else {
+        log_memory(server, "boot auto_load after");
         log::info!("Boot: auto-loaded project {}", project_path.as_str());
+    }
+}
+
+fn log_memory(server: &LpServer, label: &str) {
+    if let Some(stats) = server.memory_stats().and_then(|f| f()) {
+        let (free, used) = stats;
+        log::info!(
+            "[mem] {label}: {}k free / {}k used",
+            free / 1024,
+            used / 1024
+        );
     }
 }

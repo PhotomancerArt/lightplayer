@@ -429,6 +429,19 @@ impl ResolveHost for EngineResolveHost<'_> {
             .map_err(SessionResolveError::from)
     }
 
+    fn with_native_texture_payload(
+        &mut self,
+        id: RenderProductId,
+        visitor: &mut dyn FnMut(crate::render_product::NativeTexturePayload<'_>),
+    ) -> Result<(), SessionResolveError> {
+        let payload = self
+            .render_products
+            .try_materialize_native_texture_payload(id)
+            .map_err(|e| SessionResolveError::other(format!("render product payload: {e:?}")))?;
+        visitor(payload);
+        Ok(())
+    }
+
     fn runtime_buffer_mut(
         &mut self,
         id: crate::runtime_buffer::RuntimeBufferId,

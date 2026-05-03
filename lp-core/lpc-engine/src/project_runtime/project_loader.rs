@@ -360,6 +360,7 @@ impl CoreProjectLoader {
                             texture_node.id,
                             shader_node.id,
                             config.mapping.clone(),
+                            frame,
                             sink_id,
                             config.color_order,
                             config.brightness.unwrap_or(64),

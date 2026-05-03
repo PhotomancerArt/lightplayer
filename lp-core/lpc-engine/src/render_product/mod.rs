@@ -8,7 +8,8 @@ mod texture_product;
 
 pub use render_product_id::RenderProductId;
 pub use render_product_store::{
-    RenderProduct, RenderProductError, RenderProductMaterializeError, RenderProductStore,
+    NativeTexturePayload, RenderProduct, RenderProductError, RenderProductMaterializeError,
+    RenderProductStore,
 };
 pub use sample_request::{RenderSampleBatch, RenderSamplePoint};
 pub use sample_result::{RenderSample, RenderSampleBatchResult};

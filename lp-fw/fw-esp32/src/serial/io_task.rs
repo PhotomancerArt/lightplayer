@@ -178,7 +178,11 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
     buf.extend_from_slice(b"M!");
     if ser_write_json::ser::to_writer(&mut VecWriter(&mut buf), &msg).is_ok() {
         buf.push(b'\n');
-        timed_write_all(tx, &buf).await;
+        if !timed_write_all(tx, &buf).await {
+            // If a timeout interrupts a JSON frame before the trailing newline, separate the
+            // next frame so host parsers can recover instead of concatenating two `M!` messages.
+            let _ = timed_write(tx, b"\n").await;
+        }
     }
 }
 

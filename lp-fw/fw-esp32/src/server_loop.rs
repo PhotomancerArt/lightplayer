@@ -71,6 +71,7 @@ pub async fn run_server_loop<T: ServerTransport>(
         let frame_start = time_provider.now_ms();
 
         // Collect incoming messages (non-blocking)
+        let receive_start = time_provider.now_ms();
         let mut incoming_messages = Vec::new();
         loop {
             match transport.receive().await {
@@ -88,14 +89,18 @@ pub async fn run_server_loop<T: ServerTransport>(
                 }
             }
         }
+        let receive_done = time_provider.now_ms();
 
         // Calculate delta time since last tick
         let delta_time = time_provider.elapsed_ms(last_tick);
         let delta_ms = delta_time.min(u32::MAX as u64) as u32;
 
         // Tick server (synchronous)
+        let tick_start = time_provider.now_ms();
         match server.tick(delta_ms.max(1), incoming_messages) {
             Ok(responses) => {
+                let response_count = responses.len();
+                let tick_done = time_provider.now_ms();
                 // Send responses
                 for response in responses {
                     if let LegacyMessage::Server(server_msg) = response {
@@ -105,8 +110,32 @@ pub async fn run_server_loop<T: ServerTransport>(
                         }
                     }
                 }
+                let send_done = time_provider.now_ms();
+                server.set_last_frame_time(send_done.saturating_sub(frame_start) * 1000);
+                if frame_count % FPS_LOG_INTERVAL == 0 {
+                    log::info!(
+                        "[perf] frame={} recv={}ms tick={}ms send={}ms total={}ms responses={}",
+                        frame_count,
+                        receive_done.saturating_sub(receive_start),
+                        tick_done.saturating_sub(tick_start),
+                        send_done.saturating_sub(tick_done),
+                        send_done.saturating_sub(frame_start),
+                        response_count,
+                    );
+                }
             }
             Err(e) => {
+                let tick_done = time_provider.now_ms();
+                server.set_last_frame_time(tick_done.saturating_sub(frame_start) * 1000);
+                if frame_count % FPS_LOG_INTERVAL == 0 {
+                    log::info!(
+                        "[perf] frame={} recv={}ms tick={}ms send=0ms total={}ms responses=0",
+                        frame_count,
+                        receive_done.saturating_sub(receive_start),
+                        tick_done.saturating_sub(tick_start),
+                        tick_done.saturating_sub(frame_start),
+                    );
+                }
                 log::warn!("run_server_loop: Server tick error: {e:?}");
                 // Server error - continue
             }

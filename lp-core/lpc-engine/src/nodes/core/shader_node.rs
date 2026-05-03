@@ -225,6 +225,12 @@ impl Node for ShaderNode {
             Some(buf) => buf.width() != width || buf.height() != height,
         };
         if need_alloc {
+            log::info!(
+                "[shader] node={} allocating output buffer {}x{}",
+                self.node_id.as_u32(),
+                width,
+                height
+            );
             self.output_buf = Some(
                 graphics
                     .alloc_output_buffer(width, height)
@@ -240,6 +246,19 @@ impl Node for ShaderNode {
         shader
             .render(buf, ctx.time_seconds())
             .map_err(|e| NodeError::msg(format!("shader render: {e}")))?;
+
+        let frame = ctx.frame_id();
+        if frame.as_i64() % 60 == 0 {
+            let byte_len = buf.data().len();
+            log::info!(
+                "[shader] node={} frame={} rendered {}x{} ({} bytes)",
+                self.node_id.as_u32(),
+                frame.as_i64(),
+                width,
+                height,
+                byte_len
+            );
+        }
 
         let pixels = buf.data().to_vec();
         let tex = TextureRenderProduct::new(width, height, buf.format(), pixels)
@@ -289,6 +308,12 @@ impl Node for ShaderNode {
 
 impl ShaderNode {
     fn compile(&mut self, graphics: &dyn LpGraphics) -> Result<(), NodeError> {
+        log::info!(
+            "[shader] node={} compilation starting ({} bytes)",
+            self.node_id.as_u32(),
+            self.glsl_source.len()
+        );
+        lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
         let q32_options = map_model_q32_options(&self.config.glsl_opts);
         let compile_opts = ShaderCompileOptions {
@@ -311,15 +336,24 @@ impl ShaderNode {
         let compile_result: Result<Box<dyn LpShader>, String> = graphics
             .compile_shader(self.glsl_source.as_str(), &compile_opts)
             .map_err(|e| format!("{e}"));
+        lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
 
         match compile_result {
             Ok(s) => {
                 self.shader = Some(s);
+                log::info!(
+                    "[shader] node={} compilation succeeded",
+                    self.node_id.as_u32()
+                );
                 Ok(())
             }
             Err(e) => {
                 self.compilation_error = Some(e.clone());
                 self.shader = None;
+                log::warn!(
+                    "[shader] node={} compilation failed: {e}",
+                    self.node_id.as_u32()
+                );
                 Err(NodeError::msg(format!("shader compile: {e}")))
             }
         }

@@ -89,15 +89,20 @@ impl CoreProjectRuntime {
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
-        self.engine.tick(delta_ms)?;
-        let frame_id = self.engine.frame_id();
-        let buffers = self.engine.runtime_buffers();
-        self.services
-            .flush_dirty_output_sinks(frame_id, buffers)
-            .map_err(|e| EngineError::OutputFlush {
-                message: alloc::format!("{e}"),
-            })?;
-        Ok(())
+        lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
+        let result = (|| {
+            self.engine.tick(delta_ms)?;
+            let frame_id = self.engine.frame_id();
+            let buffers = self.engine.runtime_buffers();
+            self.services
+                .flush_dirty_output_sinks(frame_id, buffers)
+                .map_err(|e| EngineError::OutputFlush {
+                    message: alloc::format!("{e}"),
+                })?;
+            Ok(())
+        })();
+        lp_perf::emit_end!(lp_perf::EVENT_FRAME);
+        result
     }
 
     /// Accept filesystem changes on the M4 core server path.
@@ -531,6 +536,7 @@ mod output_sink_flush_tests {
                     tex_id,
                     sh_id,
                     mapping,
+                    frame,
                     sink,
                     ColorOrder::Rgb,
                     255,
@@ -717,6 +723,7 @@ mod output_sink_flush_tests {
                     tex_id,
                     sh_id,
                     mapping,
+                    frame,
                     sink_written,
                     ColorOrder::Rgb,
                     255,
@@ -889,6 +896,7 @@ mod output_sink_flush_tests {
                     tex_id,
                     sh_id,
                     mapping,
+                    frame,
                     sink,
                     ColorOrder::Rgb,
                     255,

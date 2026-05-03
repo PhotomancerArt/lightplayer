@@ -64,7 +64,6 @@ pub async fn run_workload(
             if cycle >= max_cycles {
                 eprintln!();
                 eprintln!("warning: --max-cycles ({max_cycles}) reached");
-                try_stop_projects(client).await;
                 return Ok(WorkloadOutcome::MaxCyclesReached);
             }
             if cycle.saturating_sub(last_print_cycle) >= 5_000_000 {

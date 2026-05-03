@@ -17,9 +17,11 @@ use super::shader_node::shader_texture_output_path;
 use super::texture_node::texture_dimension_query_targets;
 use crate::legacy::nodes::fixture::gamma::apply_gamma;
 use crate::legacy::nodes::fixture::mapping::{
-    ChannelAccumulators, PixelMappingEntry, compute_mapping, initialize_channel_accumulators,
+    ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
+    initialize_channel_accumulators,
 };
 use lpc_model::Versioned;
+use lpc_source::legacy::nodes::texture::TextureFormat;
 
 use crate::node::{
     DestroyCtx, FixtureProjectionInfo, MemPressureCtx, Node, NodeError, NodeResourceInitContext,
@@ -60,6 +62,7 @@ pub struct FixtureNode {
     texture_node_id: NodeId,
     shader_node_id: NodeId,
     mapping: MappingConfig,
+    mapping_version: FrameId,
     output_sink: RuntimeBufferId,
     lamp_colors_buffer_id: Option<RuntimeBufferId>,
     scalar_props: FixtureScalarProps,
@@ -76,6 +79,7 @@ impl FixtureNode {
         texture_node_id: NodeId,
         shader_node_id: NodeId,
         mapping: MappingConfig,
+        mapping_version: FrameId,
         output_sink: RuntimeBufferId,
         color_order: ColorOrder,
         brightness: u8,
@@ -85,6 +89,7 @@ impl FixtureNode {
             texture_node_id,
             shader_node_id,
             mapping,
+            mapping_version,
             output_sink,
             lamp_colors_buffer_id: None,
             scalar_props: FixtureScalarProps,
@@ -161,38 +166,41 @@ impl Node for FixtureNode {
             })
             .map_err(|e| NodeError::msg(format!("resolve shader render product: {}", e.message)))?;
 
-        let frame = prod.product.changed_frame();
         let rid =
             prod.product.get().as_render().ok_or_else(|| {
                 NodeError::msg("fixture expected RuntimeProduct::Render from shader")
             })?;
 
         let ver = ctx.frame_id();
-        let mapping_ver = FrameId::new(ver.0.max(frame.0));
+        let mapping_ver = self.mapping_version;
         let stale = match &self.precomputed {
             None => true,
-            Some((w, h, mv, _)) => *w != width || *h != height || *mv < mapping_ver,
+            Some((w, h, mv, _)) => *w != width || *h != height || *mv != mapping_ver,
         };
 
-        let mapping_entries: alloc::vec::Vec<PixelMappingEntry> = if stale {
+        if stale {
+            log::info!(
+                "[fixture] frame={} recomputing mapping {}x{} (mapping_ver={})",
+                ver.as_i64(),
+                width,
+                height,
+                mapping_ver.as_i64()
+            );
             let m = compute_mapping(&self.mapping, width, height, mapping_ver);
-            let entries = m.entries.clone();
-            self.precomputed = Some((width, height, mapping_ver, entries.clone()));
-            entries
-        } else {
-            self.precomputed
-                .as_ref()
-                .map(|p| p.3.clone())
-                .ok_or_else(|| NodeError::msg("fixture internal: missing cached mapping"))?
-        };
+            log::info!(
+                "[fixture] frame={} mapping entries={}",
+                ver.as_i64(),
+                m.entries.len()
+            );
+            self.precomputed = Some((width, height, mapping_ver, m.entries));
+        }
+        let mapping_entries = &self
+            .precomputed
+            .as_ref()
+            .ok_or_else(|| NodeError::msg("fixture internal: missing cached mapping"))?
+            .3;
 
-        let batch = uv_batch_for_fixture_entries(&mapping_entries, width, height);
-        let sample_result = ctx.sample_render_product(rid, &batch)?;
-
-        let accumulators = accumulate_fixture_channels_from_texture_samples(
-            &mapping_entries,
-            &sample_result.samples,
-        )?;
+        let accumulators = accumulate_fixture_channels(ctx, rid, mapping_entries, width, height)?;
 
         push_fixture_output(
             ctx,
@@ -226,6 +234,49 @@ impl Node for FixtureNode {
     fn props(&self) -> &dyn RuntimePropAccess {
         &self.scalar_props
     }
+}
+
+fn accumulate_fixture_channels(
+    ctx: &mut TickContext<'_>,
+    rid: crate::render_product::RenderProductId,
+    mapping_entries: &[PixelMappingEntry],
+    width: u32,
+    height: u32,
+) -> Result<ChannelAccumulators, NodeError> {
+    let mut native_accumulators = None;
+    let mut visit_native =
+        |(texture_width, texture_height, texture_data, texture_format): crate::render_product::NativeTexturePayload<
+            '_,
+        >| {
+            if texture_format == lps_shared::TextureStorageFormat::Rgba16Unorm
+                && texture_width == width
+                && texture_height == height
+            {
+                native_accumulators = Some(accumulate_from_mapping(
+                    mapping_entries,
+                    texture_data,
+                    TextureFormat::Rgba16,
+                    texture_width,
+                    texture_height,
+                ));
+            }
+        };
+    let _ = ctx.with_native_texture_payload(rid, &mut visit_native);
+    if let Some(accumulators) = native_accumulators {
+        return Ok(accumulators);
+    }
+
+    let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
+    if ctx.frame_id().as_i64() % 60 == 0 {
+        log::info!(
+            "[fixture] frame={} sampling {} points from {} mapping entries via generic render product path",
+            ctx.frame_id().as_i64(),
+            batch.points.len(),
+            mapping_entries.len()
+        );
+    }
+    let sample_result = ctx.sample_render_product(rid, &batch)?;
+    accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
 
 fn uv_batch_for_fixture_entries(
@@ -661,6 +712,7 @@ mod tests {
                     tex_id,
                     sh_id,
                     mapping,
+                    frame,
                     sink,
                     ColorOrder::Rgb,
                     255,
@@ -810,6 +862,7 @@ mod tests {
                     tex_id,
                     sh_id,
                     mapping,
+                    frame,
                     sink,
                     ColorOrder::Rgb,
                     255,
