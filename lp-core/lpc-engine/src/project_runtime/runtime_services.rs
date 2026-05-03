@@ -70,6 +70,7 @@ impl RuntimeServices {
 
     /// Replace the optional [`OutputProvider`] used when flushing sinks after each tick.
     pub fn set_output_provider(&mut self, provider: Option<Box<dyn OutputProvider>>) {
+        self.close_output_sinks();
         self.output_provider = provider;
     }
 
@@ -82,6 +83,9 @@ impl RuntimeServices {
     pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputConfig) {
         let pin = pin_from_output_config(config);
         let display_options = display_options_from_output_config(config);
+        if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
+            self.close_output_sink(&mut existing);
+        }
         self.output_sinks.insert(
             buffer_id,
             OutputSinkBinding {
@@ -109,6 +113,39 @@ impl RuntimeServices {
             flush_registered_sinks(boxed.as_mut(), frame_id, buffers, &mut self.output_sinks);
         self.output_provider = Some(boxed);
         result
+    }
+
+    fn close_output_sinks(&mut self) {
+        let Some(provider) = self.output_provider.as_deref() else {
+            return;
+        };
+
+        for sink in self.output_sinks.values_mut() {
+            if let Some(handle) = sink.channel_handle.take() {
+                if let Err(error) = provider.close(handle) {
+                    log::warn!(
+                        "RuntimeServices: failed to close output handle {handle:?}: {error}"
+                    );
+                }
+            }
+        }
+    }
+
+    fn close_output_sink(&self, sink: &mut OutputSinkBinding) {
+        let Some(provider) = self.output_provider.as_deref() else {
+            return;
+        };
+        if let Some(handle) = sink.channel_handle.take() {
+            if let Err(error) = provider.close(handle) {
+                log::warn!("RuntimeServices: failed to close output handle {handle:?}: {error}");
+            }
+        }
+    }
+}
+
+impl Drop for RuntimeServices {
+    fn drop(&mut self) {
+        self.close_output_sinks();
     }
 }
 
@@ -213,4 +250,78 @@ fn ensure_channel_open(
     sink.channel_handle = Some(handle);
     sink.last_byte_count = Some(bc);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::boxed::Box;
+    use alloc::rc::Rc;
+    use alloc::vec;
+
+    use lpc_model::{FrameId, TreePath, Versioned};
+    use lpc_shared::error::OutputError;
+    use lpc_shared::output::{
+        MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
+        OutputProvider,
+    };
+    use lpc_source::legacy::nodes::output::OutputConfig;
+
+    use super::RuntimeServices;
+    use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferStore};
+
+    #[test]
+    fn runtime_services_drop_closes_open_output_channels() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = RuntimeServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = buffers.insert(Versioned::new(
+            FrameId::new(1),
+            RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
+        ));
+        services.register_output_sink(
+            buffer_id,
+            &OutputConfig::GpioStrip {
+                pin: 4,
+                options: None,
+            },
+        );
+
+        services
+            .flush_dirty_output_sinks(FrameId::new(1), &buffers)
+            .expect("flush opens output channel");
+        assert!(provider.is_pin_open(4));
+
+        drop(services);
+
+        assert!(
+            !provider.is_pin_open(4),
+            "dropping runtime services should release output pins"
+        );
+    }
+
+    struct SharedMemoryOutputProvider(Rc<MemoryOutputProvider>);
+
+    impl OutputProvider for SharedMemoryOutputProvider {
+        fn open(
+            &self,
+            pin: u32,
+            byte_count: u32,
+            format: OutputFormat,
+            options: Option<OutputDriverOptions>,
+        ) -> Result<OutputChannelHandle, OutputError> {
+            self.0.open(pin, byte_count, format, options)
+        }
+
+        fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+            self.0.write(handle, data)
+        }
+
+        fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
+            self.0.close(handle)
+        }
+    }
 }
