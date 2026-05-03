@@ -1,0 +1,15 @@
+[GpioStrip]
+pin = 4
+
+[GpioStrip.options]
+lum_power = 2.0
+white_point = [
+    0.9,
+    1.0,
+    1.0,
+]
+brightness = 0.125
+interpolation_enabled = true
+dithering_enabled = false
+lut_enabled = true
+
