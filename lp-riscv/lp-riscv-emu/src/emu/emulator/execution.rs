@@ -12,7 +12,7 @@ use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use log;
-use lp_riscv_emu_shared::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_PERF_EVENT};
+use lp_riscv_emu_shared::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_JIT_MAP_LOAD, SYSCALL_PERF_EVENT};
 use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {
@@ -383,6 +383,17 @@ impl Riscv32Emulator {
                 {
                     Ok(StepResult::Syscall(syscall_info))
                 }
+            } else if syscall_info.number == SYSCALL_JIT_MAP_LOAD {
+                #[cfg(feature = "std")]
+                {
+                    self.handle_jit_map_load_syscall(&syscall_info);
+                    self.regs[Gpr::A0.num() as usize] = 0;
+                    Ok(StepResult::Continue)
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    Ok(StepResult::Syscall(syscall_info))
+                }
             } else {
                 Ok(StepResult::Syscall(syscall_info))
             }
@@ -402,6 +413,49 @@ impl Riscv32Emulator {
             return Ok(StepResult::ProfileStop);
         }
         Ok(result)
+    }
+
+    #[cfg(feature = "std")]
+    fn handle_jit_map_load_syscall(&mut self, syscall_info: &SyscallInfo) {
+        let Some(session) = self.profile_session.as_mut() else {
+            return;
+        };
+
+        let base = syscall_info.args[0] as u32;
+        let count = (syscall_info.args[2] as u32).min(4096);
+        let entries_ptr = syscall_info.args[3] as u32;
+
+        let mut decoded = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let entry_addr = entries_ptr.wrapping_add(i.wrapping_mul(16));
+            let Ok(offset) = self.memory.read_word(entry_addr) else {
+                log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].offset failed");
+                return;
+            };
+            let Ok(size) = self.memory.read_word(entry_addr.wrapping_add(4)) else {
+                log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].size failed");
+                return;
+            };
+            let Ok(name_ptr) = self.memory.read_word(entry_addr.wrapping_add(8)) else {
+                log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].name_ptr failed");
+                return;
+            };
+            let Ok(name_len) = self.memory.read_word(entry_addr.wrapping_add(12)) else {
+                log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}].name_len failed");
+                return;
+            };
+
+            let name = match read_memory_string(&self.memory, name_ptr as u32, name_len as usize) {
+                Ok(name) => name,
+                Err(_) => {
+                    log::warn!("SYSCALL_JIT_MAP_LOAD: read entry[{i}] name failed");
+                    continue;
+                }
+            };
+            decoded.push((offset as u32, size as u32, name));
+        }
+
+        session.on_jit_map_load(base, &decoded, self.cycle_count);
     }
 }
 
