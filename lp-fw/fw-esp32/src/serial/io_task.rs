@@ -37,7 +37,7 @@ static OUTGOING_SERVER_MSG: Channel<
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
 /// is likely gone. Short enough to detect disconnects, long enough for USB.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
+const WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Chunk size for large writes. Small enough to avoid timeout on slow USB,
 /// large enough to avoid excessive syscalls. GetChanges can be 10KB+.
