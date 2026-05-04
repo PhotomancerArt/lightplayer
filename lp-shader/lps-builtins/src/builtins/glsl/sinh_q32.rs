@@ -1,10 +1,6 @@
 //! Fixed-point 16.16 hyperbolic sine function.
 
 use crate::builtins::glsl::exp_q32::__lps_exp_q32;
-use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
-
-/// Fixed-point value of 2.0 (Q16.16 format)
-const FIX16_TWO: i32 = 0x00020000; // 131072
 
 /// Compute sinh(x) using: sinh(x) = (exp(x) - exp(-x)) / 2
 ///
@@ -18,11 +14,14 @@ pub extern "C" fn __lps_sinh_q32(x: i32) -> i32 {
 
     // Compute exp(x) and exp(-x)
     let exp_x = __lps_exp_q32(x);
-    let exp_neg_x = __lps_exp_q32(-x);
+    let exp_neg_x = __lps_exp_q32(x.saturating_neg());
 
     // sinh(x) = (exp(x) - exp(-x)) / 2
-    let numerator = exp_x - exp_neg_x;
-    __lp_lpir_fdiv_q32(numerator, FIX16_TWO)
+    half_i64_to_i32(exp_x as i64 - exp_neg_x as i64)
+}
+
+fn half_i64_to_i32(value: i64) -> i32 {
+    (value / 2).clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
 #[cfg(test)]
@@ -43,5 +42,11 @@ mod tests {
 
         // Use 5% tolerance for hyperbolic functions (uses exp internally)
         test_q32_function_relative(|x| __lps_sinh_q32(x), &tests, 0.05, 0.01);
+    }
+
+    #[test]
+    fn test_sinh_extreme_inputs_do_not_panic() {
+        assert!(__lps_sinh_q32(i32::MAX) >= 0);
+        assert!(__lps_sinh_q32(i32::MIN) <= 0);
     }
 }

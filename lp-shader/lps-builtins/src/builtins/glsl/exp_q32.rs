@@ -35,7 +35,10 @@ pub extern "C" fn __lps_exp_q32(x: i32) -> i32 {
     // The power-series converges much faster on positive values
     // and exp(-x) = 1/exp(x).
     let neg = x < 0;
-    let in_value = if neg { -x } else { x };
+    if neg && x <= -FIX16_MAX_EXP {
+        return __lp_lpir_fdiv_q32(FIX16_ONE, i32::MAX);
+    }
+    let in_value = if neg { x.saturating_neg() } else { x };
 
     let mut result = in_value + FIX16_ONE;
     let mut term = in_value;
@@ -45,7 +48,7 @@ pub extern "C" fn __lps_exp_q32(x: i32) -> i32 {
         // Convert i to fixed point for division
         let i_fixed = i << 16;
         term = __lp_lpir_fmul_q32(term, __lp_lpir_fdiv_q32(in_value, i_fixed));
-        result += term;
+        result = result.saturating_add(term);
 
         // Early termination if term becomes small enough
         if (term < 500) && ((i > 15) || (term < 20)) {
@@ -66,7 +69,7 @@ mod tests {
     #[cfg(test)]
     extern crate std;
     use super::*;
-    use crate::util::test_helpers::test_q32_function_relative;
+    use crate::util::test_helpers::{fixed_to_float, float_to_fixed, test_q32_function_relative};
 
     #[test]
     fn test_exp_basic() {
@@ -80,5 +83,16 @@ mod tests {
 
         // Use 3% tolerance for exponential functions
         test_q32_function_relative(|x| __lps_exp_q32(x), &tests, 0.03, 0.01);
+    }
+
+    #[test]
+    fn test_exp_large_negative_does_not_panic() {
+        assert_eq!(__lps_exp_q32(FIX16_MIN_EXP), 0);
+        assert!(fixed_to_float(__lps_exp_q32(float_to_fixed(-11.0))) <= 0.001);
+    }
+
+    #[test]
+    fn test_exp_large_positive_saturates() {
+        assert_eq!(__lps_exp_q32(float_to_fixed(11.0)), i32::MAX);
     }
 }

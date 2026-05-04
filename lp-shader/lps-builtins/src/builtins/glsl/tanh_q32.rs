@@ -42,4 +42,11 @@ mod tests {
         // Use 5% tolerance for hyperbolic functions
         test_q32_function_relative(|x| __lps_tanh_q32(x), &tests, 0.05, 0.01);
     }
+
+    #[test]
+    fn test_tanh_large_inputs_do_not_panic() {
+        assert!(__lps_tanh_q32(681_391) >= 0);
+        assert!(__lps_tanh_q32(i32::MAX) >= 0);
+        assert!(__lps_tanh_q32(i32::MIN) <= 0);
+    }
 }

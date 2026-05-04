@@ -31,6 +31,8 @@ struct RenderTextureEntry {
     func: wasmtime::Func,
 }
 
+const DEFAULT_WASMTIME_EXECUTION_FUEL: u64 = DEFAULT_VMCTX_FUEL * 64;
+
 /// Runnable WASM instance (fuel, shadow stack, linked memory, globals lifecycle).
 pub struct WasmLpvmInstance {
     runtime: Arc<WasmLpvmSharedRuntime>,
@@ -159,8 +161,8 @@ impl WasmLpvmInstance {
         linear_memory: wasmtime::Memory,
     ) -> Result<(), WasmError> {
         // `__lp_get_fuel` reads `VmContext::fuel` as the first u64 in guest linear memory at the
-        // vmctx pointer we pass as WASM param 0 (see `marshal` — currently 0). Keep that word in
-        // sync with wasmtime execution fuel for filetests and host runs.
+        // vmctx pointer we pass as WASM param 0 (see `marshal` — currently 0). Wasmtime uses a
+        // larger host-side budget because render-texture now executes an entire frame per call.
         let fuel_le = DEFAULT_VMCTX_FUEL.to_le_bytes();
         linear_memory
             .write(&mut *store, 0, &fuel_le)
@@ -175,7 +177,7 @@ impl WasmLpvmInstance {
             })?;
         }
         (*store)
-            .set_fuel(DEFAULT_VMCTX_FUEL)
+            .set_fuel(DEFAULT_WASMTIME_EXECUTION_FUEL)
             .map_err(|e| WasmError::runtime(format!("failed to set fuel: {e}")))
     }
 
@@ -226,6 +228,19 @@ impl WasmLpvmInstance {
         });
         Ok(func_ret)
     }
+}
+
+fn format_wasm_call_error(context: &str, error: wasmtime::Error) -> WasmError {
+    if error
+        .downcast_ref::<wasmtime::Trap>()
+        .is_some_and(|trap| *trap == wasmtime::Trap::OutOfFuel)
+    {
+        return WasmError::runtime(format!(
+            "WASM trap: execution fuel exhausted after {DEFAULT_WASMTIME_EXECUTION_FUEL} units while {context}: {error}"
+        ));
+    }
+
+    WasmError::runtime(format!("WASM trap while {context}: {error}"))
 }
 
 impl LpvmInstance for WasmLpvmInstance {
@@ -313,7 +328,7 @@ impl LpvmInstance for WasmLpvmInstance {
         };
 
         func.call(&mut *store, &wasm_args, &mut results)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+            .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
 
         if let Some(frame) = shadow_frame {
             shadow_stack_frame_close(&self.instance, store, frame)?;
@@ -402,7 +417,7 @@ impl LpvmInstance for WasmLpvmInstance {
         if matches!(return_ty, LpsType::Void) {
             let mut results: Vec<Val> = Vec::new();
             func.call(&mut *store, &wasm_args, &mut results)
-                .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+                .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
             if let Some(frame) = shadow_frame {
                 shadow_stack_frame_close(&self.instance, store, frame)?;
             }
@@ -415,7 +430,7 @@ impl LpvmInstance for WasmLpvmInstance {
             zero_results_for_type(&return_ty, self.float_mode)
         };
         func.call(&mut *store, &wasm_args, &mut results)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+            .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
 
         if let Some(frame) = shadow_frame {
             shadow_stack_frame_close(&self.instance, store, frame)?;
@@ -465,8 +480,9 @@ impl LpvmInstance for WasmLpvmInstance {
         let mem = guard.memory;
         let store = &mut guard.store;
         self.prepare_call(store, mem)?;
-        func.call(&mut *store, &wasm_args, &mut [])
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+        func.call(&mut *store, &wasm_args, &mut []).map_err(|e| {
+            format_wasm_call_error(&format!("rendering texture via `{fn_name}`"), e)
+        })?;
         Ok(())
     }
 
