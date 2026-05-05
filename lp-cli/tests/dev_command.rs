@@ -10,21 +10,17 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-/// Create a test project directory with project.json
+/// Create a test project directory with project.toml
 fn create_test_project_dir() -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().unwrap();
     let project_dir = temp_dir.path().join("test-project");
     fs::create_dir_all(&project_dir).unwrap();
 
-    // Create project.json
-    let project_json = r#"{
-  "uid": "2025.01.20-12.00.00-test-project",
-  "name": "test-project"
-}"#;
-    fs::write(project_dir.join("project.json"), project_json).unwrap();
-
-    // Create src directory
-    fs::create_dir_all(project_dir.join("src")).unwrap();
+    let project_toml = r#"kind = "project"
+uid = "2025.01.20-12.00.00-test-project"
+name = "test-project"
+"#;
+    fs::write(project_dir.join("project.toml"), project_toml).unwrap();
 
     (temp_dir, project_dir)
 }
@@ -55,7 +51,7 @@ async fn test_dev_command_resolves_relative_paths() {
 }
 
 #[tokio::test]
-async fn test_dev_command_validates_project_json() {
+async fn test_dev_command_validates_project_toml() {
     // Create a test project
     let (_temp_dir, _) = create_test_project_dir();
 
@@ -63,12 +59,12 @@ async fn test_dev_command_validates_project_json() {
 
     // We can't directly test validate_local_project since it's private,
     // but we can test that handle_dev validates correctly by checking
-    // that it fails with invalid project.json
+    // that it fails with invalid project.toml
 
-    // Create an invalid project.json
+    // Create an invalid project.toml
     let invalid_project_dir = TempDir::new().unwrap().path().to_path_buf();
     fs::create_dir_all(&invalid_project_dir).unwrap();
-    fs::write(invalid_project_dir.join("project.json"), "invalid json").unwrap();
+    fs::write(invalid_project_dir.join("project.toml"), "invalid toml").unwrap();
 
     // Try to run dev command with invalid project
     let _args = DevArgs {

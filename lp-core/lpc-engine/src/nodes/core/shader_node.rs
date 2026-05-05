@@ -11,7 +11,7 @@ use lpc_model::NodeId;
 use lpc_model::prop::PropPath;
 use lpc_model::prop::prop_path::parse_path;
 use lpc_source::legacy::glsl_opts::{AddSubMode, DivMode, MulMode};
-use lpc_source::legacy::nodes::shader::ShaderConfig;
+use lpc_source::node::shader::ShaderDef;
 use lps_shared::LpsValueF32;
 use lps_shared::TextureBuffer;
 
@@ -79,7 +79,7 @@ impl RuntimeOutputAccess for ShaderRuntimeOutputs {
 pub struct ShaderNode {
     node_id: NodeId,
     texture_node_id: NodeId,
-    config: ShaderConfig,
+    config: ShaderDef,
     glsl_source: String,
     /// Placeholder texture dimensions used until the first shader render read real texture props.
     placeholder_texture_width: u32,
@@ -97,7 +97,7 @@ impl ShaderNode {
     pub fn new(
         node_id: NodeId,
         texture_node_id: NodeId,
-        config: ShaderConfig,
+        config: ShaderDef,
         glsl_source: String,
         placeholder_texture_width: u32,
         placeholder_texture_height: u32,
@@ -434,7 +434,7 @@ mod tests {
 
         let tex = TextureNode::new(
             tex_id,
-            lpc_source::legacy::nodes::texture::TextureConfig {
+            lpc_source::node::texture::TextureDef {
                 width: 8,
                 height: 8,
             },
@@ -458,9 +458,9 @@ mod tests {
             )
             .expect("shader");
 
-        let cfg = ShaderConfig {
+        let cfg = ShaderDef {
             glsl_path: lpc_model::LpPathBuf::from("main.glsl"),
-            texture_spec: lpc_model::NodeSpec::from(""),
+            texture_loc: lpc_model::NodeLoc::from(""),
             render_order: 0,
             glsl_opts: Default::default(),
         };
@@ -479,9 +479,9 @@ mod tests {
 
     #[test]
     fn shader_render_output_is_on_runtime_output_access_only() {
-        let cfg = ShaderConfig {
+        let cfg = ShaderDef {
             glsl_path: lpc_model::LpPathBuf::from("main.glsl"),
-            texture_spec: lpc_model::NodeSpec::from(""),
+            texture_loc: lpc_model::NodeLoc::from(""),
             render_order: 0,
             glsl_opts: Default::default(),
         };

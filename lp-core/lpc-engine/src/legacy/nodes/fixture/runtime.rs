@@ -1,4 +1,4 @@
-use crate::LegacyNodeRuntime;
+use crate::NodeRuntime;
 use crate::error::Error;
 use crate::legacy::nodes::fixture::gamma::apply_gamma;
 use crate::legacy::nodes::fixture::mapping::{
@@ -9,8 +9,8 @@ use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 use lpc_model::FrameId;
-use lpc_source::legacy::nodes::NodeConfig;
-use lpc_source::legacy::nodes::fixture::{ColorOrder, FixtureConfig};
+use lpc_source::node::fixture::{ColorOrder, FixtureDef};
+use lpc_source::node::node_def::NodeDef;
 use lpc_wire::legacy::nodes::fixture::{FixtureState, MappingCell};
 use lpfs::FsChange;
 use lps_q32::q32::ToQ32;
@@ -18,7 +18,7 @@ use lps_shared::TextureStorageFormat;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
-    config: Option<FixtureConfig>,
+    config: Option<FixtureDef>,
     pub state: FixtureState, // State stored directly
     texture_handle: Option<TextureHandle>,
     output_handle: Option<OutputHandle>,
@@ -58,12 +58,12 @@ impl FixtureRuntime {
         }
     }
 
-    pub fn set_config(&mut self, config: FixtureConfig) {
+    pub fn set_config(&mut self, config: FixtureDef) {
         self.config = Some(config);
     }
 
     /// Get the fixture config (for state extraction)
-    pub fn get_config(&self) -> Option<&FixtureConfig> {
+    pub fn get_config(&self) -> Option<&FixtureDef> {
         self.config.as_ref()
     }
 
@@ -190,7 +190,7 @@ impl FixtureRuntime {
     }
 }
 
-impl LegacyNodeRuntime for FixtureRuntime {
+impl NodeRuntime for FixtureRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         // Get config
         let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
@@ -199,7 +199,7 @@ impl LegacyNodeRuntime for FixtureRuntime {
         })?;
 
         // Resolve texture handle
-        let texture_handle = ctx.resolve_texture(&config.texture_spec)?;
+        let texture_handle = ctx.resolve_texture(&config.texture_loc)?;
         self.texture_handle = Some(texture_handle);
         // Update state (using default frame_id since init doesn't have frame_id)
         self.state
@@ -207,7 +207,7 @@ impl LegacyNodeRuntime for FixtureRuntime {
             .set(FrameId::default(), Some(texture_handle.as_node_handle()));
 
         // Resolve output handle
-        let output_handle = ctx.resolve_output(&config.output_spec)?;
+        let output_handle = ctx.resolve_output(&config.output_loc)?;
         self.output_handle = Some(output_handle);
         // Update state (using default frame_id since init doesn't have frame_id)
         self.state
@@ -270,9 +270,7 @@ impl LegacyNodeRuntime for FixtureRuntime {
         // Accumulate channel values using format-specific sampling
         let texture_data = texture.data();
         let texture_format = match texture.format() {
-            TextureStorageFormat::Rgba16Unorm => {
-                lpc_source::legacy::nodes::texture::TextureFormat::Rgba16
-            }
+            TextureStorageFormat::Rgba16Unorm => lpc_source::node::texture::TextureFormat::Rgba16,
             other => {
                 return Err(Error::Other {
                     message: format!("Fixture unsupported texture storage format: {other:?}"),
@@ -379,13 +377,13 @@ impl LegacyNodeRuntime for FixtureRuntime {
 
     fn update_config(
         &mut self,
-        new_config: Box<dyn NodeConfig>,
+        new_config: Box<dyn NodeDef>,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         // Downcast to FixtureConfig
         let fixture_config = new_config
             .as_any()
-            .downcast_ref::<FixtureConfig>()
+            .downcast_ref::<FixtureDef>()
             .ok_or_else(|| Error::InvalidConfig {
                 node_path: String::from("fixture"),
                 reason: String::from("Config is not a FixtureConfig"),
@@ -393,10 +391,10 @@ impl LegacyNodeRuntime for FixtureRuntime {
 
         let old_config = self.config.as_ref();
         let texture_changed = old_config
-            .map(|old| old.texture_spec != fixture_config.texture_spec)
+            .map(|old| old.texture_loc != fixture_config.texture_loc)
             .unwrap_or(true);
         let output_changed = old_config
-            .map(|old| old.output_spec != fixture_config.output_spec)
+            .map(|old| old.output_loc != fixture_config.output_loc)
             .unwrap_or(true);
         let mapping_changed = old_config
             .map(|old| old.mapping != fixture_config.mapping)
@@ -410,7 +408,7 @@ impl LegacyNodeRuntime for FixtureRuntime {
 
         // Re-resolve handles if they changed
         if texture_changed {
-            let texture_handle = ctx.resolve_texture(&fixture_config.texture_spec)?;
+            let texture_handle = ctx.resolve_texture(&fixture_config.texture_loc)?;
             self.texture_handle = Some(texture_handle);
             // Update state (using default frame_id since update_config doesn't have frame_id)
             self.state
@@ -419,7 +417,7 @@ impl LegacyNodeRuntime for FixtureRuntime {
         }
 
         if output_changed {
-            let output_handle = ctx.resolve_output(&fixture_config.output_spec)?;
+            let output_handle = ctx.resolve_output(&fixture_config.output_loc)?;
             self.output_handle = Some(output_handle);
             // Update state (using default frame_id since update_config doesn't have frame_id)
             self.state
@@ -460,12 +458,12 @@ impl LegacyNodeRuntime for FixtureRuntime {
 mod tests {
     use super::*;
     use alloc::vec;
-    use lpc_source::legacy::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+    use lpc_source::node::fixture::{MappingConfig, PathSpec, RingOrder};
 
     #[test]
     fn test_fixture_runtime_creation() {
         let runtime = FixtureRuntime::new();
-        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 
     #[test]
@@ -537,7 +535,7 @@ mod tests {
         // Create a simple mapping: one circle (one channel) that covers some pixels
         use crate::legacy::nodes::fixture::mapping::compute_mapping;
         use lpc_model::FrameId;
-        use lpc_source::legacy::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+        use lpc_source::node::fixture::{MappingConfig, PathSpec, RingOrder};
 
         // Create a simple config: one ring with 1 lamp at center
         let config = MappingConfig::PathPoints {

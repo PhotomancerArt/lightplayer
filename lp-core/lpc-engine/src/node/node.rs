@@ -31,7 +31,7 @@ pub struct ShaderProjectionWire<'a> {
 }
 
 /// Runtime node instance for the new spine (`node/`). Distinct from legacy
-/// [`crate::nodes::LegacyNodeRuntime`].
+/// [`crate::nodes::NodeRuntime`].
 pub trait Node {
     /// Allocate [`RenderProductId`] / [`RuntimeBufferId`] slots owned by this node before first tick.
     ///

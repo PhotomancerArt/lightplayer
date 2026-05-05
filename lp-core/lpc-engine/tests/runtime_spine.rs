@@ -12,17 +12,17 @@ use lpc_engine::node::NodeError;
 use lpc_engine::resolver::{ResolverContext, resolve_slot};
 use lpc_engine::{
     ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingKind, BindingPriority,
-    BindingRegistry, BindingSource, BindingTarget, Bus, LegacyNodeRuntime, Node, Production,
-    QueryKey, ResolveHost, ResolveLogLevel, ResolveSession, ResolveSource, ResolveTrace, Resolver,
+    BindingRegistry, BindingSource, BindingTarget, Bus, Node, NodeRuntime, Production, QueryKey,
+    ResolveHost, ResolveLogLevel, ResolveSession, ResolveSource, ResolveTrace, Resolver,
     SessionHostResolver, SessionResolveError, SlotResolverCache, TickContext, TickResolver,
 };
 use lpc_model::{
     FrameId, Kind, ModelValue, NodeId, NodePropSpec, PropPath, bus::ChannelName,
     prop::prop_path::parse_path, tree::tree_path::TreePath,
 };
-use lpc_source::node::src_node_config::SrcNodeConfig;
+use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::{
-    SrcArtifactSpec, prop::src_binding::SrcBinding, prop::src_value_spec::SrcValueSpec,
+    ArtifactLocator, prop::src_binding::SrcBinding, prop::src_value_spec::SrcValueSpec,
 };
 use lps_shared::LpsValueF32;
 
@@ -58,7 +58,7 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
 #[test]
 fn runtime_spine_literal_override_and_artifact_default_resolution() {
     let mut cache = SlotResolverCache::new();
-    let mut config = SrcNodeConfig::new(SrcArtifactSpec::path("a.lp"));
+    let mut config = NodeInvocation::new(ArtifactLocator::path("a.lp"));
     let prop_lit = parse_path("params.gain").unwrap();
     config.overrides.push((
         prop_lit.clone(),
@@ -91,7 +91,7 @@ fn runtime_spine_bus_claim_publish_resolver_sees_value_in_resolved_slot() {
     bus.publish(&channel, LpsValueF32::F32(9.0), FrameId::new(11));
 
     let mut cache = SlotResolverCache::new();
-    let config = SrcNodeConfig::new(SrcArtifactSpec::path("b.lp"));
+    let config = NodeInvocation::new(ArtifactLocator::path("b.lp"));
 
     let ctx = SyntheticResolverContext::new(FrameId::new(100))
         .with_bus(&bus)
@@ -120,7 +120,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
     targets.insert(target_path, target_props);
 
     let mut cache = SlotResolverCache::new();
-    let config = SrcNodeConfig::new(SrcArtifactSpec::path("c.lp"));
+    let config = NodeInvocation::new(ArtifactLocator::path("c.lp"));
 
     let spec =
         NodePropSpec::parse("/show.demo/node_a.demo#outputs[0]").expect("outputs NodePropSpec");
@@ -141,7 +141,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
 #[test]
 fn runtime_spine_node_prop_non_outputs_returns_resolve_error() {
     let mut cache = SlotResolverCache::new();
-    let config = SrcNodeConfig::new(SrcArtifactSpec::path("d.lp"));
+    let config = NodeInvocation::new(ArtifactLocator::path("d.lp"));
 
     let spec = NodePropSpec::parse("/show.demo/node_a.demo#params.k").expect("params spec");
     let ctx = SyntheticResolverContext::new(FrameId::new(1))
@@ -174,7 +174,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         )
         .unwrap();
 
-    let config = SrcNodeConfig::new(SrcArtifactSpec::path("e.lp"));
+    let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
 
     let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
     let ar = mgr.acquire_location(
@@ -232,13 +232,13 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
 #[test]
 fn runtime_spine_legacy_and_node_exports_are_reachable() {
-    fn assert_legacy_ptr(_: Option<&dyn LegacyNodeRuntime>) {}
+    fn assert_legacy_ptr(_: Option<&dyn NodeRuntime>) {}
     fn assert_spine_ptr(_: Option<&dyn Node>) {}
 
     assert_legacy_ptr(None);
     assert_spine_ptr(None);
 
-    let _: Option<fn(&dyn lpc_engine::nodes::LegacyNodeRuntime)> = None;
+    let _: Option<fn(&dyn lpc_engine::nodes::NodeRuntime)> = None;
     let _: Option<fn(&dyn lpc_engine::node::Node)> = None;
 }
 

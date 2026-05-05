@@ -30,6 +30,10 @@ impl NodeName {
         }
         Ok(NodeName(String::from(s)))
     }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
 }
 /// Parse failure for [`NodeName::parse`]: empty string, disallowed first character, or a character outside the allowed set.
 #[derive(Clone, Debug, PartialEq, Eq)]

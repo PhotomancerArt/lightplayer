@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 
 use lpc_model::FrameId;
 use lpc_model::prop::PropPath;
-use lpc_source::legacy::nodes::NodeKind;
+use lpc_source::node::NodeKind;
 use lps_shared::LpsValueF32;
 
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};

@@ -65,7 +65,7 @@ fn test_sync_with_changes() {
         node_changes: vec![lpc_wire::legacy::NodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.texture"),
-            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+            kind: lpc_source::node::NodeKind::Texture,
         }],
         node_details: BTreeMap::new(),
         theoretical_fps: None,
@@ -100,7 +100,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
         handle,
         NodeDetail {
             path: path.clone(),
-            config: Box::new(lpc_source::legacy::nodes::shader::ShaderConfig::default()),
+            config: Box::new(lpc_source::node::shader::ShaderDef::default()),
             state: NodeState::Shader(ShaderState::new(frame)),
         },
     );
@@ -128,7 +128,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
 #[test]
 fn test_partial_state_merge_texture() {
     use alloc::boxed::Box;
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::NodeState;
     use lpc_wire::legacy::nodes::texture::TextureState;
 
@@ -144,7 +144,7 @@ fn test_partial_state_merge_texture() {
     initial_state.height.set(FrameId::new(1), 200);
     initial_state.format.set(
         FrameId::new(1),
-        lpc_source::legacy::nodes::texture::TextureFormat::Rgb8,
+        lpc_source::node::texture::TextureFormat::Rgb8,
     );
 
     let initial_response = ProjectResponse::GetChanges {
@@ -154,7 +154,7 @@ fn test_partial_state_merge_texture() {
         node_changes: vec![lpc_wire::legacy::NodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.texture"),
-            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+            kind: lpc_source::node::NodeKind::Texture,
         }],
         node_details: {
             let mut map = BTreeMap::new();
@@ -162,7 +162,7 @@ fn test_partial_state_merge_texture() {
                 handle,
                 lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 100,
                         height: 200,
                     }),
@@ -189,7 +189,7 @@ fn test_partial_state_merge_texture() {
             assert_eq!(state.height.value(), &200);
             assert_eq!(
                 state.format.value(),
-                &lpc_source::legacy::nodes::texture::TextureFormat::Rgb8
+                &lpc_source::node::texture::TextureFormat::Rgb8
             );
         }
         _ => panic!("Expected Texture state"),
@@ -215,7 +215,7 @@ fn test_partial_state_merge_texture() {
                 handle,
                 lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 150,
                         height: 250,
                     }),
@@ -247,7 +247,7 @@ fn test_partial_state_merge_texture() {
             );
             assert_eq!(
                 state.format.value(),
-                &lpc_source::legacy::nodes::texture::TextureFormat::Rgb8,
+                &lpc_source::node::texture::TextureFormat::Rgb8,
                 "format should be preserved"
             );
         }
@@ -258,7 +258,7 @@ fn test_partial_state_merge_texture() {
 #[test]
 fn test_partial_state_merge_output() {
     use alloc::boxed::Box;
-    use lpc_source::legacy::nodes::output::OutputConfig;
+    use lpc_source::node::output::OutputDef;
     use lpc_wire::legacy::NodeState;
     use lpc_wire::legacy::nodes::output::OutputState;
 
@@ -278,7 +278,7 @@ fn test_partial_state_merge_output() {
         node_changes: vec![lpc_wire::legacy::NodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.output"),
-            kind: lpc_source::legacy::nodes::NodeKind::Output,
+            kind: lpc_source::node::NodeKind::Output,
         }],
         node_details: {
             let mut map = BTreeMap::new();
@@ -286,7 +286,7 @@ fn test_partial_state_merge_output() {
                 handle,
                 lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
-                    config: Box::new(OutputConfig::GpioStrip {
+                    config: Box::new(OutputDef::GpioStrip {
                         pin: 0,
                         options: None,
                     }),
@@ -328,7 +328,7 @@ fn test_partial_state_merge_output() {
                 handle,
                 lpc_wire::legacy::NodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
-                    config: Box::new(OutputConfig::GpioStrip {
+                    config: Box::new(OutputDef::GpioStrip {
                         pin: 0,
                         options: None,
                     }),
@@ -362,7 +362,7 @@ fn test_partial_state_merge_output() {
 #[test]
 fn detail_applies_real_texture_config() {
     use alloc::boxed::Box;
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
 
@@ -382,7 +382,7 @@ fn detail_applies_real_texture_config() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+            kind: lpc_source::node::NodeKind::Texture,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -390,7 +390,7 @@ fn detail_applies_real_texture_config() {
                 handle,
                 NodeDetail {
                     path,
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 320,
                         height: 240,
                     }),
@@ -411,7 +411,7 @@ fn detail_applies_real_texture_config() {
     let cfg = view.nodes[&handle]
         .config
         .as_any()
-        .downcast_ref::<TextureConfig>()
+        .downcast_ref::<TextureDef>()
         .expect("texture config");
     assert_eq!(cfg.width, 320);
     assert_eq!(cfg.height, 240);
@@ -420,7 +420,7 @@ fn detail_applies_real_texture_config() {
 #[test]
 fn detail_applies_real_output_config() {
     use alloc::boxed::Box;
-    use lpc_source::legacy::nodes::output::{OutputConfig, OutputDriverOptionsConfig};
+    use lpc_source::node::output::{OutputDef, OutputDriverOptionsConfig};
     use lpc_wire::legacy::nodes::output::OutputState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
 
@@ -442,7 +442,7 @@ fn detail_applies_real_output_config() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Output,
+            kind: lpc_source::node::NodeKind::Output,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -450,7 +450,7 @@ fn detail_applies_real_output_config() {
                 handle,
                 NodeDetail {
                     path,
-                    config: Box::new(OutputConfig::GpioStrip {
+                    config: Box::new(OutputDef::GpioStrip {
                         pin: 42,
                         options: Some(opts.clone()),
                     }),
@@ -471,11 +471,11 @@ fn detail_applies_real_output_config() {
     let cfg = view.nodes[&handle]
         .config
         .as_any()
-        .downcast_ref::<OutputConfig>()
+        .downcast_ref::<OutputDef>()
         .expect("output config");
     assert_eq!(
         cfg,
-        &OutputConfig::GpioStrip {
+        &OutputDef::GpioStrip {
             pin: 42,
             options: Some(opts),
         }
@@ -485,7 +485,7 @@ fn detail_applies_real_output_config() {
 #[test]
 fn detail_after_config_updated_replaces_stored_config() {
     use alloc::boxed::Box;
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
 
@@ -505,7 +505,7 @@ fn detail_after_config_updated_replaces_stored_config() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+            kind: lpc_source::node::NodeKind::Texture,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -513,7 +513,7 @@ fn detail_after_config_updated_replaces_stored_config() {
                 handle,
                 NodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 100,
                         height: 200,
                     }),
@@ -547,7 +547,7 @@ fn detail_after_config_updated_replaces_stored_config() {
                 handle,
                 NodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 640,
                         height: 480,
                     }),
@@ -566,7 +566,7 @@ fn detail_after_config_updated_replaces_stored_config() {
     let cfg = view.nodes[&handle]
         .config
         .as_any()
-        .downcast_ref::<TextureConfig>()
+        .downcast_ref::<TextureDef>()
         .expect("texture config");
     assert_eq!(cfg.width, 640);
     assert_eq!(cfg.height, 480);
@@ -576,7 +576,7 @@ fn detail_after_config_updated_replaces_stored_config() {
 #[test]
 fn detail_only_entry_stores_real_texture_config() {
     use alloc::boxed::Box;
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::WireNodeStatus;
     use lpc_wire::legacy::nodes::texture::TextureState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
@@ -604,7 +604,7 @@ fn detail_only_entry_stores_real_texture_config() {
                 handle,
                 NodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 128,
                         height: 96,
                     }),
@@ -624,7 +624,7 @@ fn detail_only_entry_stores_real_texture_config() {
     let cfg = entry
         .config
         .as_any()
-        .downcast_ref::<TextureConfig>()
+        .downcast_ref::<TextureDef>()
         .expect("real texture config, not placeholder zeros");
     assert_eq!(cfg.width, 128);
     assert_eq!(cfg.height, 96);
@@ -635,7 +635,7 @@ fn detail_only_entry_stores_real_texture_config() {
 fn project_watched_detail_entry_has_state_after_sync() {
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
 
@@ -656,7 +656,7 @@ fn project_watched_detail_entry_has_state_after_sync() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+            kind: lpc_source::node::NodeKind::Texture,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -664,7 +664,7 @@ fn project_watched_detail_entry_has_state_after_sync() {
                 handle,
                 NodeDetail {
                     path,
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 4,
                         height: 4,
                     }),
@@ -693,7 +693,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
     use lpc_model::resource::{ResourceRef, RuntimeBufferId};
-    use lpc_source::legacy::nodes::output::OutputConfig;
+    use lpc_source::node::output::OutputDef;
     use lpc_wire::legacy::nodes::output::OutputState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
     use lpc_wire::{
@@ -719,7 +719,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Output,
+            kind: lpc_source::node::NodeKind::Output,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -727,7 +727,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
                 handle,
                 NodeDetail {
                     path: path.clone(),
-                    config: Box::new(OutputConfig::GpioStrip {
+                    config: Box::new(OutputDef::GpioStrip {
                         pin: 0,
                         options: None,
                     }),
@@ -769,7 +769,7 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
     use lpc_model::resource::{RenderProductId, ResourceRef};
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
     use lpc_wire::{
@@ -796,7 +796,7 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Texture,
+            kind: lpc_source::node::NodeKind::Texture,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -804,7 +804,7 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
                 handle,
                 NodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureConfig {
+                    config: Box::new(TextureDef {
                         width: 1,
                         height: 1,
                     }),
@@ -846,7 +846,7 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
     use lpc_model::resource::{ResourceRef, RuntimeBufferId};
-    use lpc_source::legacy::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig};
+    use lpc_source::node::fixture::{ColorOrder, FixtureDef, MappingConfig};
     use lpc_view::project::resource_cache::resolve_legacy_compat_bytes;
     use lpc_wire::legacy::nodes::fixture::FixtureState;
     use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
@@ -873,7 +873,7 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
         node_changes: vec![NodeChange::Created {
             handle,
             path: path.clone(),
-            kind: lpc_source::legacy::nodes::NodeKind::Fixture,
+            kind: lpc_source::node::NodeKind::Fixture,
         }],
         node_details: {
             let mut m = BTreeMap::new();
@@ -881,9 +881,9 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
                 handle,
                 NodeDetail {
                     path: path.clone(),
-                    config: Box::new(FixtureConfig {
-                        output_spec: lpc_model::NodeSpec::from("/out"),
-                        texture_spec: lpc_model::NodeSpec::from("/tex"),
+                    config: Box::new(FixtureDef {
+                        output_loc: lpc_model::NodeLoc::from("/out"),
+                        texture_loc: lpc_model::NodeLoc::from("/tex"),
                         mapping: MappingConfig::PathPoints {
                             paths: vec![],
                             sample_diameter: 2.0,

@@ -4,6 +4,7 @@ extern crate alloc;
 
 use crate::error::ServerError;
 use crate::project::Project;
+use crate::server::MemoryStatsFn;
 use alloc::{
     boxed::Box,
     format,
@@ -14,7 +15,7 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_engine::{LpGraphics, MemoryStatsFn};
+use lpc_engine::LpGraphics;
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
@@ -216,9 +217,9 @@ impl ProjectManager {
 
         let mut projects = Vec::new();
         for entry in entries {
-            // Check if this entry is a project directory (has project.json)
-            let project_json_path = entry.join("project.json");
-            if fs.file_exists(project_json_path.as_path()).unwrap_or(false) {
+            // Check if this entry is a project directory (has project.toml)
+            let project_toml_path = entry.join("project.toml");
+            if fs.file_exists(project_toml_path.as_path()).unwrap_or(false) {
                 // Extract project name from path
                 // Entry format: "/base/project-name" or "/base/project-name/"
                 let entry_str = entry.as_str();

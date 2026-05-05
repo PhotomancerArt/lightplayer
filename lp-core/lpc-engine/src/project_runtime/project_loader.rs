@@ -1,4 +1,4 @@
-//! Load authored `/project.json` + `/src/*.kind` layout into [`super::CoreProjectRuntime`].
+//! Load authored `project.toml` node-artifact trees into [`super::CoreProjectRuntime`].
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -7,21 +7,16 @@ use alloc::vec::Vec;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::prop::prop_path::parse_path;
-use lpc_model::{
-    FrameId, Kind, ModelValue, NodeId, NodeName, NodeNameError, NodePathSegment, ProjectConfig,
-    TreePath,
+use lpc_model::{FrameId, Kind, ModelValue, NodeId, NodeName};
+use lpc_source::ArtifactReadRoot;
+use lpc_source::node::node_def::NodeDef;
+use lpc_source::node::{
+    NodeKind, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
 };
-use lpc_source::legacy::nodes::{
-    NodeConfig, NodeKind, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
-    texture::TextureConfig,
-};
-use lpc_source::legacy::{
-    LegacyNodeLoadError, LegacyNodeReadRoot, discover_legacy_node_dirs, load_legacy_node_config,
-};
-use lpc_source::{SrcArtifactSpec, SrcNodeConfig, SrcValueSpec};
+use lpc_source::{ArtifactLocator, NodeInvocation, ProjectDef, SrcValueSpec};
 use lpc_wire::{WireChildKind, WireSlotIndex};
 
-use crate::artifact::ArtifactId;
+use crate::artifact::ArtifactLocation;
 use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
@@ -34,7 +29,7 @@ use super::{CoreProjectRuntime, RuntimeServices};
 #[derive(Debug)]
 pub enum CoreProjectLoadError {
     Io { path: String, details: String },
-    ProjectJson { file: String, error: String },
+    ProjectToml { file: String, error: String },
     UnknownKind { path: String, suffix: String },
     InvalidSourcePath { path: String, reason: String },
     TomlParse { path: String, error: String },
@@ -46,7 +41,7 @@ impl core::fmt::Display for CoreProjectLoadError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Io { path, details } => write!(f, "io error at {path}: {details}"),
-            Self::ProjectJson { file, error } => write!(f, "parse {file}: {error}"),
+            Self::ProjectToml { file, error } => write!(f, "parse {file}: {error}"),
             Self::UnknownKind { path, suffix } => write!(f, "{path}: unknown node kind `{suffix}`"),
             Self::InvalidSourcePath { path, reason } => {
                 write!(f, "source path {path}: {reason}")
@@ -60,74 +55,23 @@ impl core::fmt::Display for CoreProjectLoadError {
 
 impl core::error::Error for CoreProjectLoadError {}
 
-fn map_legacy_err<E: core::fmt::Debug>(err: LegacyNodeLoadError<E>) -> CoreProjectLoadError {
-    match err {
-        LegacyNodeLoadError::Io { path, error } => CoreProjectLoadError::Io {
-            path: path.as_str().to_string(),
-            details: format!("{error:?}"),
-        },
-        LegacyNodeLoadError::InvalidPath { path, reason } => {
-            CoreProjectLoadError::InvalidSourcePath {
-                path: path.as_str().to_string(),
-                reason: reason.to_string(),
-            }
-        }
-        LegacyNodeLoadError::UnknownKind { path, suffix } => CoreProjectLoadError::UnknownKind {
-            path: path.as_str().to_string(),
-            suffix,
-        },
-        LegacyNodeLoadError::Parse { path, error } => CoreProjectLoadError::TomlParse {
-            path: path.as_str().to_string(),
-            error: format!("{error}"),
-        },
-    }
-}
-
 struct LoadedNode {
-    dir: LpPathBuf,
+    name: NodeName,
+    artifact_path: LpPathBuf,
     id: NodeId,
     config: LoadedNodeConfig,
 }
 
 #[derive(Clone)]
 pub(super) enum LoadedNodeConfig {
-    Texture(TextureConfig),
-    Shader(ShaderConfig),
-    Output(OutputConfig),
-    Fixture(FixtureConfig),
+    Texture(TextureDef),
+    Shader(ShaderDef),
+    Output(OutputDef),
+    Fixture(FixtureDef),
 }
 
 impl LoadedNodeConfig {
-    fn from_boxed(path: &LpPath, cfg: &dyn NodeConfig) -> Result<Self, CoreProjectLoadError> {
-        match cfg.kind() {
-            NodeKind::Texture => cfg
-                .as_any()
-                .downcast_ref::<TextureConfig>()
-                .cloned()
-                .map(Self::Texture),
-            NodeKind::Shader => cfg
-                .as_any()
-                .downcast_ref::<ShaderConfig>()
-                .cloned()
-                .map(Self::Shader),
-            NodeKind::Output => cfg
-                .as_any()
-                .downcast_ref::<OutputConfig>()
-                .cloned()
-                .map(Self::Output),
-            NodeKind::Fixture => cfg
-                .as_any()
-                .downcast_ref::<FixtureConfig>()
-                .cloned()
-                .map(Self::Fixture),
-        }
-        .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-            path: path.as_str().to_string(),
-            reason: String::from("node config kind did not match concrete config type"),
-        })
-    }
-
-    pub(super) fn clone_as_node_config_box(&self) -> Box<dyn NodeConfig> {
+    pub(super) fn clone_as_node_config_box(&self) -> Box<dyn NodeDef> {
         match self {
             LoadedNodeConfig::Texture(c) => Box::new(c.clone()),
             LoadedNodeConfig::Shader(c) => Box::new(c.clone()),
@@ -135,104 +79,105 @@ impl LoadedNodeConfig {
             LoadedNodeConfig::Fixture(c) => Box::new(c.clone()),
         }
     }
+
+    fn kind_name(&self) -> &'static str {
+        match self {
+            LoadedNodeConfig::Texture(_) => "texture",
+            LoadedNodeConfig::Shader(_) => "shader",
+            LoadedNodeConfig::Output(_) => "output",
+            LoadedNodeConfig::Fixture(_) => "fixture",
+        }
+    }
 }
 
-/// Loads the current authored legacy layout into a core engine-backed runtime.
+/// Loads the authored project artifact tree into a core engine-backed runtime.
 pub struct CoreProjectLoader;
 
 impl CoreProjectLoader {
-    /// Tree path for a legacy node directory under [`RuntimeServices::project_root`].
-    pub fn tree_path_for_legacy_src_dir(
-        project_root: &TreePath,
-        node_dir: &LpPathBuf,
-    ) -> Result<TreePath, CoreProjectLoadError> {
-        let rel = Self::src_dir_relative_parts(node_dir.as_path())?;
-        let segments = Self::segments_from_src_parts(node_dir.as_str(), &rel)?;
-        Ok(Self::extend_path(project_root, &segments))
-    }
-
     pub fn load_from_root<R>(
         root: &R,
         services: RuntimeServices,
     ) -> Result<CoreProjectRuntime, CoreProjectLoadError>
     where
-        R: LegacyNodeReadRoot + ?Sized,
+        R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
-        let project_path = "/project.json";
-        let data =
-            root.read_file(LpPath::new(project_path))
-                .map_err(|e| CoreProjectLoadError::Io {
-                    path: project_path.to_string(),
-                    details: format!("{e:?}"),
-                })?;
+        Self::load_project_artifact(root, services, ArtifactLocator::path("/project.toml"))
+    }
 
-        let _config: ProjectConfig =
-            lpc_wire::json::from_slice(&data).map_err(|e| CoreProjectLoadError::ProjectJson {
-                file: project_path.to_string(),
-                error: format!("{e}"),
-            })?;
-
-        let mut node_dirs =
-            discover_legacy_node_dirs(root, LpPath::new("/src")).map_err(map_legacy_err)?;
-
-        node_dirs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    pub fn load_project_artifact<R>(
+        root: &R,
+        services: RuntimeServices,
+        project_locator: ArtifactLocator,
+    ) -> Result<CoreProjectRuntime, CoreProjectLoadError>
+    where
+        R: ArtifactReadRoot + ?Sized,
+        R::Err: core::fmt::Debug,
+    {
+        let project_path = resolve_project_locator(&project_locator)?;
+        let project_def = load_project_def(root, &project_path)?;
 
         let project_root = services.project_root().clone();
         let mut runtime = CoreProjectRuntime::new(project_root.clone(), services);
         let frame = FrameId::new(1);
-        let spine_cfg = SrcNodeConfig::new(SrcArtifactSpec::path("/"));
-        let artifact = ArtifactId::from_raw(0);
         let root_id = runtime.engine().tree().root();
-        let mut loaded_nodes = Vec::new();
+        let project_artifact = runtime
+            .engine_mut()
+            .artifacts_mut()
+            .acquire_location(ArtifactLocation::file(project_path.clone()), frame);
+        let project_invocation = NodeInvocation::new(project_locator);
 
-        for dir in node_dirs {
-            let (_path, cfg) =
-                load_legacy_node_config(root, dir.as_path()).map_err(map_legacy_err)?;
-            let config = LoadedNodeConfig::from_boxed(dir.as_path(), cfg.as_ref())?;
-
-            let tree_path = Self::tree_path_for_legacy_src_dir(&project_root, &dir)?;
-            let leaf_parent = Self::ensure_interior_path(
-                runtime.engine_mut(),
+        {
+            let root_entry = runtime
+                .engine_mut()
+                .tree_mut()
+                .get_mut(root_id)
+                .ok_or(CoreProjectLoadError::Tree(TreeError::UnknownNode(root_id)))?;
+            root_entry.config = project_invocation;
+            root_entry.artifact = project_artifact;
+        }
+        runtime
+            .engine_mut()
+            .attach_runtime_node(
                 root_id,
-                &project_root,
-                &tree_path,
+                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
                 frame,
-                &spine_cfg,
-                artifact,
-            )?;
+            )
+            .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+                path: project_path.as_str().to_string(),
+                reason: format!("attach project runtime: {e}"),
+            })?;
 
-            let child_seg =
-                tree_path
-                    .0
-                    .last()
-                    .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                        path: dir.as_str().to_string(),
-                        reason: String::from("empty tree path"),
-                    })?;
-
-            let leaf_ty = child_seg.ty.clone();
-            let leaf_name = child_seg.name.clone();
-
+        let mut loaded_nodes = Vec::new();
+        for (name, invocation) in project_def.nodes {
+            let artifact_path =
+                resolve_child_artifact_locator(&project_path, &invocation.artifact)?;
+            let config = load_node_def(root, artifact_path.as_path())?;
+            let artifact_id = runtime
+                .engine_mut()
+                .artifacts_mut()
+                .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+            let ty = node_kind_name(&config, artifact_path.as_path())?;
             let leaf_id = runtime
                 .engine_mut()
                 .tree_mut()
                 .add_child(
-                    leaf_parent,
-                    leaf_name,
-                    leaf_ty,
+                    root_id,
+                    name.clone(),
+                    ty,
                     WireChildKind::Input {
                         source: WireSlotIndex(0),
                     },
-                    spine_cfg.clone(),
-                    artifact,
+                    invocation,
+                    artifact_id,
                     frame,
                 )
                 .map_err(CoreProjectLoadError::Tree)?;
 
-            runtime.insert_legacy_src_dir(dir.clone(), leaf_id);
+            runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
             loaded_nodes.push(LoadedNode {
-                dir,
+                name,
+                artifact_path,
                 id: leaf_id,
                 config,
             });
@@ -243,7 +188,7 @@ impl CoreProjectLoader {
         for node in &loaded_nodes {
             runtime.compatibility_mut().record_authoring_snapshot(
                 node.id,
-                node.dir.clone(),
+                node.artifact_path.clone(),
                 node.config.clone(),
             );
         }
@@ -258,7 +203,7 @@ impl CoreProjectLoader {
         frame: FrameId,
     ) -> Result<(), CoreProjectLoadError>
     where
-        R: LegacyNodeReadRoot + ?Sized,
+        R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
         for node in loaded_nodes {
@@ -271,7 +216,7 @@ impl CoreProjectLoader {
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
+                        path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach texture runtime: {e}"),
                     })?;
             }
@@ -283,14 +228,14 @@ impl CoreProjectLoader {
                     .engine_mut()
                     .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
+                        path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach output runtime: {e}"),
                     })?;
                 let sink_id = runtime
                     .engine()
                     .runtime_output_sink_buffer_id(node.id)
                     .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
+                        path: node.artifact_path.as_str().to_string(),
                         reason: String::from("output runtime node produced no sink buffer"),
                     })?;
                 runtime.services_mut().register_output_sink(sink_id, config);
@@ -299,12 +244,10 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let LoadedNodeConfig::Shader(config) = &node.config {
-                let texture_node = find_node_by_spec(loaded_nodes, config.texture_spec.as_str())
-                    .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
-                        reason: format!("unknown texture spec `{}`", config.texture_spec.as_str()),
-                    })?;
-                let shader_path = node.dir.join(config.glsl_path.as_str());
+                let texture_node =
+                    resolve_node_loc(loaded_nodes, node, &config.texture_loc, "texture")?;
+                let shader_path =
+                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path)?;
                 let glsl_source = read_utf8_file(root, shader_path.as_path())?;
                 let placeholder_dims = placeholder_texture_dimensions_for_shader(texture_node)?;
                 runtime
@@ -322,7 +265,7 @@ impl CoreProjectLoader {
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
+                        path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach shader runtime: {e}"),
                     })?;
             }
@@ -330,26 +273,23 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let LoadedNodeConfig::Fixture(config) = &node.config {
-                let texture_node = find_node_by_spec(loaded_nodes, config.texture_spec.as_str())
+                let texture_node =
+                    resolve_node_loc(loaded_nodes, node, &config.texture_loc, "texture")?;
+                let shader_node = find_shader_for_texture(loaded_nodes, texture_node.id)
                     .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
-                        reason: format!("unknown texture spec `{}`", config.texture_spec.as_str()),
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!(
+                            "no shader targets texture loc `{}`",
+                            config.texture_loc.as_str()
+                        ),
                     })?;
-                let shader_node =
-                    find_shader_for_texture(loaded_nodes, config.texture_spec.as_str())
-                        .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                            path: node.dir.as_str().to_string(),
-                            reason: format!(
-                                "no shader targets texture `{}`",
-                                config.texture_spec.as_str()
-                            ),
-                        })?;
-                let output_node = find_node_by_spec(loaded_nodes, config.output_spec.as_str())
-                    .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
-                        reason: format!("unknown output spec `{}`", config.output_spec.as_str()),
-                    })?;
-                let sink_id = output_sink_for(runtime.engine(), output_node.id, &output_node.dir)?;
+                let output_node =
+                    resolve_node_loc(loaded_nodes, node, &config.output_loc, "output")?;
+                let sink_id = output_sink_for(
+                    runtime.engine(),
+                    output_node.id,
+                    output_node.artifact_path.as_path(),
+                )?;
 
                 runtime
                     .engine_mut()
@@ -369,7 +309,7 @@ impl CoreProjectLoader {
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
+                        path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach fixture runtime: {e}"),
                     })?;
                 runtime
@@ -391,7 +331,7 @@ impl CoreProjectLoader {
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.dir.as_str().to_string(),
+                        path: node.artifact_path.as_str().to_string(),
                         reason: format!("bind fixture demand input: {e}"),
                     })?;
                 runtime.engine_mut().add_demand_root(node.id);
@@ -400,191 +340,178 @@ impl CoreProjectLoader {
 
         Ok(())
     }
+}
 
-    fn extend_path(root: &TreePath, segments: &[NodePathSegment]) -> TreePath {
-        let mut v = root.0.clone();
-        v.extend_from_slice(segments);
-        TreePath(v)
+fn load_project_def<R>(root: &R, path: &LpPathBuf) -> Result<ProjectDef, CoreProjectLoadError>
+where
+    R: ArtifactReadRoot + ?Sized,
+    R::Err: core::fmt::Debug,
+{
+    let text = read_utf8_file(root, path.as_path())?;
+    let def: ProjectDef = toml::from_str(&text).map_err(|e| CoreProjectLoadError::ProjectToml {
+        file: path.as_str().to_string(),
+        error: format!("{e}"),
+    })?;
+    if !def.is_project_kind() {
+        return Err(CoreProjectLoadError::UnknownKind {
+            path: path.as_str().to_string(),
+            suffix: def.kind,
+        });
     }
+    Ok(def)
+}
 
-    fn src_dir_relative_parts(dir: &LpPath) -> Result<Vec<String>, CoreProjectLoadError> {
-        let s = dir.as_str();
-        let rest =
-            s.strip_prefix("/src")
-                .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                    path: s.to_string(),
-                    reason: String::from("expected path to start with /src"),
-                })?;
-        let rest = rest.strip_prefix('/').unwrap_or(rest);
-        if rest.is_empty() {
-            return Err(CoreProjectLoadError::InvalidSourcePath {
-                path: s.to_string(),
-                reason: String::from("missing path under /src"),
-            });
-        }
-        Ok(rest
-            .split('/')
-            .filter(|p| !p.is_empty())
-            .map(String::from)
-            .collect())
-    }
-
-    fn segments_from_src_parts(
-        display_path: &str,
-        parts: &[String],
-    ) -> Result<Vec<NodePathSegment>, CoreProjectLoadError> {
-        if parts.is_empty() {
-            return Err(CoreProjectLoadError::InvalidSourcePath {
-                path: display_path.to_string(),
-                reason: String::from("no /src components"),
-            });
-        }
-        let mut out = Vec::new();
-        for (i, part) in parts.iter().enumerate() {
-            let last = i + 1 == parts.len();
-            if last {
-                let (base, kind) = part.rsplit_once('.').ok_or_else(|| {
-                    CoreProjectLoadError::InvalidSourcePath {
-                        path: display_path.to_string(),
-                        reason: format!("final segment `{part}` has no .kind suffix"),
-                    }
-                })?;
-                let name = Self::sanitize_component(display_path, base)?;
-                let ty = NodeName::parse(kind).map_err(|e| Self::map_name_err(display_path, e))?;
-                out.push(NodePathSegment { name, ty });
-            } else if part.contains('.') {
-                return Err(CoreProjectLoadError::InvalidSourcePath {
-                    path: display_path.to_string(),
-                    reason: format!("intermediate segment `{part}` must not contain '.'"),
-                });
-            } else {
-                let name = Self::sanitize_component(display_path, part)?;
-                let ty =
-                    NodeName::parse("folder").map_err(|e| Self::map_name_err(display_path, e))?;
-                out.push(NodePathSegment { name, ty });
-            }
-        }
-        Ok(out)
-    }
-
-    fn sanitize_component(path: &str, raw: &str) -> Result<NodeName, CoreProjectLoadError> {
-        let mut s = String::new();
-        for c in raw.chars() {
-            match c {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => s.push(c),
-                '-' => s.push('_'),
-                _ => {
-                    return Err(CoreProjectLoadError::InvalidNodeName {
-                        path: path.to_string(),
-                        reason: format!("unsupported character in `{raw}`"),
-                    });
-                }
-            }
-        }
-        if s.is_empty() {
-            return Err(CoreProjectLoadError::InvalidNodeName {
-                path: path.to_string(),
-                reason: format!("empty name after sanitizing `{raw}`"),
-            });
-        }
-        NodeName::parse(&s).map_err(|e| Self::map_name_err(path, e))
-    }
-
-    fn map_name_err(path: &str, e: NodeNameError) -> CoreProjectLoadError {
-        CoreProjectLoadError::InvalidNodeName {
-            path: path.to_string(),
-            reason: format!("{e}"),
-        }
-    }
-
-    fn ensure_interior_path(
-        engine: &mut Engine,
-        tree_root: NodeId,
-        project_root: &TreePath,
-        full_path: &TreePath,
-        frame: FrameId,
-        spine_cfg: &SrcNodeConfig,
-        artifact: ArtifactId,
-    ) -> Result<NodeId, CoreProjectLoadError> {
-        if full_path.0.len() <= project_root.0.len() {
-            return Err(CoreProjectLoadError::InvalidSourcePath {
-                path: full_path.to_string(),
-                reason: String::from("tree path must extend project root"),
-            });
-        }
-        if full_path.0.len() < project_root.0.len() + 1 {
-            return Err(CoreProjectLoadError::InvalidSourcePath {
-                path: full_path.to_string(),
-                reason: String::from("expected at least one segment under project root"),
-            });
-        }
-        for (i, seg) in project_root.0.iter().enumerate() {
-            if full_path.0.get(i) != Some(seg) {
-                return Err(CoreProjectLoadError::InvalidSourcePath {
-                    path: full_path.to_string(),
-                    reason: format!("path prefix must match project root {project_root}"),
-                });
-            }
-        }
-
-        let mut parent = tree_root;
-        let interior_end = full_path.0.len() - 1;
-        for seg in &full_path.0[project_root.0.len()..interior_end] {
-            parent = Self::find_or_create_child(engine, parent, seg, frame, spine_cfg, artifact)?;
-        }
-        Ok(parent)
-    }
-
-    fn find_or_create_child(
-        engine: &mut Engine,
-        parent: NodeId,
-        seg: &NodePathSegment,
-        frame: FrameId,
-        spine_cfg: &SrcNodeConfig,
-        artifact: ArtifactId,
-    ) -> Result<NodeId, CoreProjectLoadError> {
-        let children = engine
-            .tree()
-            .get(parent)
-            .ok_or(TreeError::UnknownNode(parent))
-            .map_err(CoreProjectLoadError::Tree)?
-            .children
-            .clone();
-        for cid in children {
-            let entry = engine.tree().get(cid).expect("indexed child");
-            if entry.path.0.last() == Some(seg) {
-                return Ok(cid);
-            }
-        }
-
-        let id = engine
-            .tree_mut()
-            .add_child(
-                parent,
-                seg.name.clone(),
-                seg.ty.clone(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine_cfg.clone(),
-                artifact,
-                frame,
-            )
-            .map_err(CoreProjectLoadError::Tree)?;
-
-        let folder = Box::new(CorePlaceholderNode::new_folder());
-        engine.attach_runtime_node(id, folder, frame).map_err(|e| {
-            CoreProjectLoadError::InvalidSourcePath {
-                path: format!("{} (folder spine)", seg.name),
-                reason: format!("attach runtime: {e}"),
-            }
+fn load_node_def<R>(root: &R, path: &LpPath) -> Result<LoadedNodeConfig, CoreProjectLoadError>
+where
+    R: ArtifactReadRoot + ?Sized,
+    R::Err: core::fmt::Debug,
+{
+    let text = read_utf8_file(root, path)?;
+    let probe: NodeKindProbe =
+        toml::from_str(&text).map_err(|e| CoreProjectLoadError::TomlParse {
+            path: path.as_str().to_string(),
+            error: format!("{e}"),
         })?;
-        Ok(id)
+
+    match probe.kind.as_str() {
+        "texture" => parse_node_def(path, &text).map(LoadedNodeConfig::Texture),
+        "shader" => parse_node_def(path, &text).map(LoadedNodeConfig::Shader),
+        "output" => parse_node_def(path, &text).map(LoadedNodeConfig::Output),
+        "fixture" => parse_node_def(path, &text).map(LoadedNodeConfig::Fixture),
+        other => Err(CoreProjectLoadError::UnknownKind {
+            path: path.as_str().to_string(),
+            suffix: other.to_string(),
+        }),
     }
 }
 
-fn find_node_by_spec<'a>(loaded_nodes: &'a [LoadedNode], spec: &str) -> Option<&'a LoadedNode> {
-    loaded_nodes.iter().find(|node| node.dir.as_str() == spec)
+fn parse_node_def<T>(path: &LpPath, text: &str) -> Result<T, CoreProjectLoadError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    toml::from_str(text).map_err(|e| CoreProjectLoadError::TomlParse {
+        path: path.as_str().to_string(),
+        error: format!("{e}"),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct NodeKindProbe {
+    kind: String,
+}
+
+fn resolve_project_locator(locator: &ArtifactLocator) -> Result<LpPathBuf, CoreProjectLoadError> {
+    resolve_path_locator_from_dir(LpPath::new("/"), locator)
+}
+
+fn resolve_child_artifact_locator(
+    containing_file: &LpPathBuf,
+    locator: &ArtifactLocator,
+) -> Result<LpPathBuf, CoreProjectLoadError> {
+    let parent = containing_file
+        .as_path()
+        .parent()
+        .unwrap_or(LpPath::new("/"));
+    resolve_path_locator_from_dir(parent, locator)
+}
+
+fn resolve_path_locator_from_dir(
+    base_dir: &LpPath,
+    locator: &ArtifactLocator,
+) -> Result<LpPathBuf, CoreProjectLoadError> {
+    match locator {
+        ArtifactLocator::Path(path) => {
+            if path.is_absolute() {
+                Ok(path.clone())
+            } else {
+                base_dir
+                    .to_path_buf()
+                    .join_relative(path.as_str())
+                    .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
+                        path: path.as_str().to_string(),
+                        reason: format!("path cannot be resolved relative to {base_dir:?}"),
+                    })
+            }
+        }
+        ArtifactLocator::Lib(lib) => Err(CoreProjectLoadError::InvalidSourcePath {
+            path: lib.to_string(),
+            reason: String::from("library artifact locators are not supported for nodes yet"),
+        }),
+    }
+}
+
+fn resolve_path_relative_to_file(
+    containing_file: &LpPathBuf,
+    path: &LpPathBuf,
+) -> Result<LpPathBuf, CoreProjectLoadError> {
+    let parent = containing_file
+        .as_path()
+        .parent()
+        .unwrap_or(LpPath::new("/"));
+    parent
+        .to_path_buf()
+        .join_relative(path.as_str())
+        .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
+            path: path.as_str().to_string(),
+            reason: format!(
+                "path cannot be resolved relative to {}",
+                containing_file.as_str()
+            ),
+        })
+}
+
+fn node_kind_name(
+    config: &LoadedNodeConfig,
+    path: &LpPath,
+) -> Result<NodeName, CoreProjectLoadError> {
+    NodeName::parse(config.kind_name()).map_err(|e| CoreProjectLoadError::InvalidNodeName {
+        path: path.as_str().to_string(),
+        reason: format!("{e}"),
+    })
+}
+
+fn find_node_by_loc<'a>(
+    loaded_nodes: &'a [LoadedNode],
+    current: &'a LoadedNode,
+    loc: &lpc_model::NodeLoc,
+) -> Option<&'a LoadedNode> {
+    let parsed = loc.parse().ok()?;
+    resolve_parsed_node_loc(loaded_nodes, current, &parsed)
+}
+
+fn resolve_node_loc<'a>(
+    loaded_nodes: &'a [LoadedNode],
+    current: &'a LoadedNode,
+    loc: &lpc_model::NodeLoc,
+    expected: &str,
+) -> Result<&'a LoadedNode, CoreProjectLoadError> {
+    let parsed = loc
+        .parse()
+        .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("invalid {expected} node loc `{}`: {e}", loc.as_str()),
+        })?;
+    resolve_parsed_node_loc(loaded_nodes, current, &parsed).ok_or_else(|| {
+        CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("unknown {expected} node loc `{}`", loc.as_str()),
+        }
+    })
+}
+
+fn resolve_parsed_node_loc<'a>(
+    loaded_nodes: &'a [LoadedNode],
+    current: &'a LoadedNode,
+    parsed: &lpc_model::node::node_loc::ParsedNodeLoc,
+) -> Option<&'a LoadedNode> {
+    if parsed.parent_hops() == 0 && parsed.segments().is_empty() {
+        return Some(current);
+    }
+    if parsed.parent_hops() == 1 && parsed.segments().len() == 1 {
+        let target = &parsed.segments()[0];
+        return loaded_nodes.iter().find(|node| &node.name == target);
+    }
+    None
 }
 
 fn demand_input_path() -> lpc_model::PropPath {
@@ -593,15 +520,17 @@ fn demand_input_path() -> lpc_model::PropPath {
 
 fn find_shader_for_texture<'a>(
     loaded_nodes: &'a [LoadedNode],
-    texture_spec: &str,
+    texture_id: NodeId,
 ) -> Option<&'a LoadedNode> {
     loaded_nodes
         .iter()
         .filter(|node| {
-            matches!(
-                &node.config,
-                LoadedNodeConfig::Shader(config) if config.texture_spec.as_str() == texture_spec
-            )
+            let LoadedNodeConfig::Shader(config) = &node.config else {
+                return false;
+            };
+            find_node_by_loc(loaded_nodes, node, &config.texture_loc)
+                .map(|candidate| candidate.id == texture_id)
+                .unwrap_or(false)
         })
         .max_by(|a, b| {
             let ar = match &a.config {
@@ -612,7 +541,8 @@ fn find_shader_for_texture<'a>(
                 LoadedNodeConfig::Shader(config) => config.render_order,
                 _ => 0,
             };
-            ar.cmp(&br).then_with(|| a.dir.as_str().cmp(b.dir.as_str()))
+            ar.cmp(&br)
+                .then_with(|| a.artifact_path.as_str().cmp(b.artifact_path.as_str()))
         })
 }
 
@@ -621,8 +551,8 @@ fn placeholder_texture_dimensions_for_shader(
 ) -> Result<(u32, u32), CoreProjectLoadError> {
     let LoadedNodeConfig::Texture(config) = &texture_node.config else {
         return Err(CoreProjectLoadError::InvalidSourcePath {
-            path: texture_node.dir.as_str().to_string(),
-            reason: String::from("shader texture spec did not reference a texture node"),
+            path: texture_node.artifact_path.as_str().to_string(),
+            reason: String::from("shader texture loc did not reference a texture node"),
         });
     };
     Ok((config.width, config.height))
@@ -643,7 +573,7 @@ fn output_sink_for(
 
 fn read_utf8_file<R>(root: &R, path: &LpPath) -> Result<String, CoreProjectLoadError>
 where
-    R: LegacyNodeReadRoot + ?Sized,
+    R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
 {
     let data = root.read_file(path).map_err(|e| CoreProjectLoadError::Io {
@@ -658,90 +588,67 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloc::rc::Rc;
-    use core::cell::RefCell;
-
+    use lpc_model::NodeName;
+    use lpc_model::TreePath;
     use lpc_model::lp_path::AsLpPath;
-    use lpc_shared::project::ProjectBuilder;
     use lpfs::{LpFs, LpFsMemory};
 
     use super::*;
 
-    fn demo_project() -> Rc<RefCell<dyn lpfs::LpFs>> {
-        let fs = Rc::new(RefCell::new(LpFsMemory::new()));
-        let mut pb = ProjectBuilder::new(fs.clone());
-        let tex = pb.texture_basic();
-        pb.shader_basic(&tex);
-        let out = pb.output_basic();
-        let _fix = pb.fixture_basic(&out, &tex);
-        pb.build();
+    fn flat_project() -> LpFsMemory {
+        let fs = LpFsMemory::new();
+        write_flat_basic_files(&fs);
         fs
     }
 
     #[test]
-    fn project_builder_loads_into_runtime_with_expected_nodes() {
-        let fs = demo_project();
+    fn project_toml_loads_into_runtime_with_expected_nodes() {
+        let fs = flat_project();
         let root_path = TreePath::parse("/demo.show").expect("path");
         let services = RuntimeServices::new(root_path.clone());
-        let fs_ref = fs.borrow();
-        let rt = CoreProjectLoader::load_from_root(&*fs_ref, services).expect("load");
-
-        let tex_path = CoreProjectLoader::tree_path_for_legacy_src_dir(
-            &root_path,
-            &LpPathBuf::from("/src/texture-1.texture"),
-        )
-        .expect("tree path texture");
-        let sh_path = CoreProjectLoader::tree_path_for_legacy_src_dir(
-            &root_path,
-            &LpPathBuf::from("/src/shader-1.shader"),
-        )
-        .expect("tree path shader");
-        let out_path = CoreProjectLoader::tree_path_for_legacy_src_dir(
-            &root_path,
-            &LpPathBuf::from("/src/output-1.output"),
-        )
-        .expect("tree path output");
-        let fix_path = CoreProjectLoader::tree_path_for_legacy_src_dir(
-            &root_path,
-            &LpPathBuf::from("/src/fixture-1.fixture"),
-        )
-        .expect("tree path fixture");
+        let rt = CoreProjectLoader::load_from_root(&fs, services).expect("load");
+        let root = rt.engine().tree().root();
 
         let tex_id = rt
             .engine()
             .tree()
-            .lookup_path(&tex_path)
+            .lookup_sibling(root, NodeName::parse("texture").unwrap())
             .expect("texture id");
-        let sh_id = rt.engine().tree().lookup_path(&sh_path).expect("shader id");
+        let sh_id = rt
+            .engine()
+            .tree()
+            .lookup_sibling(root, NodeName::parse("shader").unwrap())
+            .expect("shader id");
         let out_id = rt
             .engine()
             .tree()
-            .lookup_path(&out_path)
+            .lookup_sibling(root, NodeName::parse("output").unwrap())
             .expect("output id");
         let fix_id = rt
             .engine()
             .tree()
-            .lookup_path(&fix_path)
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
             .expect("fixture id");
 
         assert_eq!(
-            rt.legacy_src_node_id(LpPath::new("/src/texture-1.texture")),
+            rt.artifact_node_id(LpPath::new("/texture.toml")),
             Some(tex_id)
         );
 
-        for (id, path) in [
-            (tex_id, &tex_path),
-            (sh_id, &sh_path),
-            (out_id, &out_path),
-            (fix_id, &fix_path),
-        ] {
+        for id in [tex_id, sh_id, out_id, fix_id] {
             let entry = rt.engine().tree().get(id).expect("entry");
-            assert_eq!(entry.path, *path);
             assert!(entry.state.is_alive(), "node {id:?} should be alive",);
         }
 
+        let root_entry = rt.engine().tree().get(root).expect("root entry");
+        assert!(root_entry.state.is_alive(), "project root should be alive");
         assert_eq!(
-            fix_path.0.last().map(|s| s.ty.to_string()).as_deref(),
+            rt.engine()
+                .tree()
+                .get(fix_id)
+                .and_then(|entry| entry.path.0.last())
+                .map(|s| s.ty.to_string())
+                .as_deref(),
             Some("fixture")
         );
 
@@ -757,20 +664,23 @@ mod tests {
 
     #[test]
     fn malformed_node_toml_returns_error() {
-        let fs = Rc::new(RefCell::new(LpFsMemory::new()));
-        fs.borrow_mut()
-            .write_file("/project.json".as_path(), br#"{"uid":"u","name":"n"}"#)
-            .expect("project.json");
-        fs.borrow_mut()
-            .write_file(
-                "/src/broken.shader/node.toml".as_path(),
-                b"not valid toml {{{",
-            )
-            .expect("node.toml");
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "project"
+
+[nodes.broken]
+artifact = "./broken.toml"
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file("/broken.toml".as_path(), b"not valid toml {{{")
+            .expect("broken.toml");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = RuntimeServices::new(root_path);
-        let err = match CoreProjectLoader::load_from_root(&*fs.borrow(), services) {
+        let err = match CoreProjectLoader::load_from_root(&fs, services) {
             Err(e) => e,
             Ok(_) => panic!("expected load error"),
         };
@@ -781,11 +691,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_project_json_returns_io_or_parse_flavored_error() {
-        let fs = Rc::new(RefCell::new(LpFsMemory::new()));
+    fn missing_project_toml_returns_io_error() {
+        let fs = LpFsMemory::new();
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = RuntimeServices::new(root_path);
-        let err = match CoreProjectLoader::load_from_root(&*fs.borrow(), services) {
+        let err = match CoreProjectLoader::load_from_root(&fs, services) {
             Err(e) => e,
             Ok(_) => panic!("expected load error"),
         };
@@ -793,5 +703,181 @@ mod tests {
             matches!(err, CoreProjectLoadError::Io { .. }),
             "expected Io, got {err:?}"
         );
+    }
+
+    #[test]
+    fn unknown_child_kind_returns_error() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "project"
+
+[nodes.weird]
+artifact = "./weird.toml"
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file("/weird.toml".as_path(), br#"kind = "banana""#)
+            .expect("weird.toml");
+
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = RuntimeServices::new(root_path);
+        let err = match CoreProjectLoader::load_from_root(&fs, services) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load error"),
+        };
+        assert!(
+            matches!(err, CoreProjectLoadError::UnknownKind { .. }),
+            "expected UnknownKind, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_sibling_node_loc_names_missing_ref() {
+        let fs = flat_project();
+        fs.write_file(
+            "/shader.toml".as_path(),
+            br#"
+kind = "shader"
+glsl_path = "shader.glsl"
+texture_loc = "..missing"
+render_order = 0
+"#,
+        )
+        .expect("shader.toml");
+
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = RuntimeServices::new(root_path);
+        let err = match CoreProjectLoader::load_from_root(&fs, services) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load error"),
+        };
+        assert!(
+            matches!(
+                err,
+                CoreProjectLoadError::InvalidSourcePath { ref reason, .. }
+                    if reason.contains("unknown texture node loc `..missing`")
+            ),
+            "expected missing texture loc, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn slash_node_loc_is_rejected_during_load() {
+        let fs = flat_project();
+        fs.write_file(
+            "/shader.toml".as_path(),
+            br#"
+kind = "shader"
+glsl_path = "shader.glsl"
+texture_loc = "/texture"
+render_order = 0
+"#,
+        )
+        .expect("shader.toml");
+
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = RuntimeServices::new(root_path);
+        let err = match CoreProjectLoader::load_from_root(&fs, services) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load error"),
+        };
+        assert!(
+            matches!(
+                err,
+                CoreProjectLoadError::InvalidSourcePath { ref reason, .. }
+                    if reason.contains("invalid texture node loc `/texture`")
+                        && reason.contains("slash syntax")
+            ),
+            "expected invalid slash node loc, got {err:?}"
+        );
+    }
+
+    fn write_flat_basic_files(fs: &LpFsMemory) {
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "project"
+name = "basic"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.texture]
+artifact = "./texture.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/texture.toml".as_path(),
+            br#"
+kind = "texture"
+width = 16
+height = 16
+"#,
+        )
+        .expect("texture.toml");
+        fs.write_file(
+            "/shader.toml".as_path(),
+            br#"
+kind = "shader"
+glsl_path = "shader.glsl"
+texture_loc = "..texture"
+render_order = 0
+"#,
+        )
+        .expect("shader.toml");
+        fs.write_file(
+            "/shader.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+        )
+        .expect("shader.glsl");
+        fs.write_file(
+            "/output.toml".as_path(),
+            br#"
+kind = "output"
+pin = 4
+"#,
+        )
+        .expect("output.toml");
+        fs.write_file(
+            "/fixture.toml".as_path(),
+            br#"
+kind = "fixture"
+output_loc = "..output"
+texture_loc = "..texture"
+color_order = "Rgb"
+transform = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+]
+brightness = 255
+gamma_correction = false
+
+[mapping.PathPoints]
+sample_diameter = 2.0
+
+[[mapping.PathPoints.paths]]
+
+[mapping.PathPoints.paths.RingArray]
+center = [0.5, 0.5]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 1
+ring_lamp_counts = [1]
+offset_angle = 0.0
+order = "InnerFirst"
+"#,
+        )
+        .expect("fixture.toml");
     }
 }

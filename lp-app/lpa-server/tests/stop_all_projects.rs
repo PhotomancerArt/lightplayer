@@ -32,16 +32,14 @@ fn test_stop_all_projects() {
     // Prepare base filesystem with project files
     let base_fs = Box::new(LpFsMemory::new());
 
-    // Copy project.json
-    let project_json = temp_fs
+    let project_toml = temp_fs
         .borrow()
-        .read_file("/project.json".as_path())
+        .read_file("/project.toml".as_path())
         .unwrap();
     base_fs
-        .write_file(project_prefix.join("project.json").as_path(), &project_json)
+        .write_file(project_prefix.join("project.toml").as_path(), &project_toml)
         .unwrap();
 
-    // Copy all node files
     let node_paths = vec![
         texture_path.to_path_buf(),
         shader_path.to_path_buf(),
@@ -50,21 +48,19 @@ fn test_stop_all_projects() {
     ];
 
     for node_path in &node_paths {
-        // Copy node.toml
-        let node_toml_path = node_path.join("node.toml");
-        if let Ok(data) = temp_fs.borrow().read_file(node_toml_path.as_path()) {
-            let relative_path = node_toml_path
+        if let Ok(data) = temp_fs.borrow().read_file(node_path.as_path()) {
+            let relative_path = node_path
                 .as_str()
                 .strip_prefix('/')
-                .unwrap_or(node_toml_path.as_str());
+                .unwrap_or(node_path.as_str());
             base_fs
                 .write_file(project_prefix.join(relative_path).as_path(), &data)
                 .unwrap();
         }
 
-        // Copy GLSL file if it's a shader
-        if node_path.as_str().contains(".shader") {
-            let glsl_path = node_path.join("main.glsl");
+        if node_path.as_str().contains("shader") {
+            let glsl_path =
+                lpc_model::LpPathBuf::from(node_path.as_str().replace(".toml", ".glsl"));
             if let Ok(data) = temp_fs.borrow().read_file(glsl_path.as_path()) {
                 let relative_path = glsl_path
                     .as_str()

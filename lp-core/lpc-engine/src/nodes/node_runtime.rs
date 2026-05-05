@@ -4,11 +4,11 @@ use core::any::Any;
 use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
-use lpc_source::legacy::nodes::NodeConfig;
+use lpc_source::node::node_def::NodeDef;
 use lpfs::FsChange;
 
 /// Node runtime trait - all node runtimes implement this
-pub trait LegacyNodeRuntime: Send + Sync {
+pub trait NodeRuntime: Send + Sync {
     /// Initialize the node
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error>;
 
@@ -46,7 +46,7 @@ pub trait LegacyNodeRuntime: Send + Sync {
     /// Called when node.toml changes. Nodes can choose to reinit or update in place.
     fn update_config(
         &mut self,
-        new_config: Box<dyn NodeConfig>,
+        new_config: Box<dyn NodeDef>,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error>;
 

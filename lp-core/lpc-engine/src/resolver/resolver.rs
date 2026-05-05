@@ -9,7 +9,7 @@
 //! [`crate::runtime_product::RuntimeProduct`]). Do not conflate the two caches.
 //!
 //! Resolution priority (slot cascade):
-//! 1. `SrcNodeConfig.overrides[prop]`
+//! 1. `NodeInvocation.overrides[prop]`
 //! 2. artifact slot `bind`
 //! 3. artifact slot `default`
 //!
@@ -27,7 +27,7 @@ use lpc_model::FrameId;
 use lpc_model::Versioned;
 use lpc_model::prop::prop_namespace::PropNamespace;
 use lpc_model::prop::prop_path::PropPath;
-use lpc_source::node::src_node_config::SrcNodeConfig;
+use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::prop::src_binding::SrcBinding;
 use lpc_source::prop::src_value_spec::{LoadCtx, SrcValueSpec};
 use lps_shared::LpsValueF32;
@@ -75,7 +75,7 @@ pub(crate) fn materialize_src_value_literal(
 /// Resolve a slot value using the binding cascade.
 ///
 /// Walks the resolution priority on each call:
-/// 1. Override from `config.overrides`
+/// 1. Override from the node invocation
 /// 2. Artifact binding
 /// 3. Artifact default
 ///
@@ -85,7 +85,7 @@ pub(crate) fn materialize_src_value_literal(
 /// Returns an error only for unrecoverable failures (not for fall-through to default).
 pub fn resolve_slot<'a, C: ResolverContext + ?Sized>(
     cache: &'a mut SlotResolverCache,
-    config: &SrcNodeConfig,
+    config: &NodeInvocation,
     prop: &PropPath,
     ctx: &C,
 ) -> Result<&'a ResolvedSlot, ResolveError> {
@@ -106,7 +106,7 @@ pub fn resolve_slot<'a, C: ResolverContext + ?Sized>(
 ///
 /// Use this when managing cache separately; `resolve_slot` is preferred.
 pub fn resolve_slot_owned<C: ResolverContext + ?Sized>(
-    config: &SrcNodeConfig,
+    config: &NodeInvocation,
     prop: &PropPath,
     ctx: &C,
 ) -> Result<ResolvedSlot, ResolveError> {
@@ -115,7 +115,7 @@ pub fn resolve_slot_owned<C: ResolverContext + ?Sized>(
 
 /// Internal cascade: override -> artifact bind -> default.
 fn try_resolve_cascade<C: ResolverContext + ?Sized>(
-    config: &SrcNodeConfig,
+    config: &NodeInvocation,
     prop: &PropPath,
     ctx: &C,
 ) -> Result<ResolvedSlot, ResolveError> {
@@ -302,7 +302,7 @@ mod tests {
     use lpc_model::bus::ChannelName;
     use lpc_model::prop::prop_path::parse_path;
     use lpc_model::tree::tree_path::TreePath;
-    use lpc_source::artifact::src_artifact_spec::SrcArtifactSpec;
+    use lpc_source::artifact::artifact_loc::ArtifactLocator;
     use lpc_source::prop::src_value_spec::SrcValueSpec;
 
     /// Test resolver context with programmable responses.
@@ -385,11 +385,11 @@ mod tests {
         }
     }
 
-    fn make_config() -> SrcNodeConfig {
-        SrcNodeConfig::new(SrcArtifactSpec::path("./test.lp"))
+    fn make_config() -> NodeInvocation {
+        NodeInvocation::new(ArtifactLocator::path("./test.lp"))
     }
 
-    fn make_config_with_override(prop: &str, binding: SrcBinding) -> SrcNodeConfig {
+    fn make_config_with_override(prop: &str, binding: SrcBinding) -> NodeInvocation {
         let mut config = make_config();
         config.overrides.push((parse_path(prop).unwrap(), binding));
         config

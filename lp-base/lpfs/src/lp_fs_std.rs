@@ -487,10 +487,10 @@ mod tests {
         let fs = LpFsStd::new(temp_dir.path().to_path_buf());
 
         // Valid paths should work
-        assert!(fs.get_path("/project.json".as_path()).is_ok());
+        assert!(fs.get_path("/project.toml".as_path()).is_ok());
         assert!(fs.get_path("/src/test.txt".as_path()).is_ok());
         // Relative paths must be converted to absolute before passing to LpFs
-        assert!(fs.get_path("/project.json".as_path()).is_ok());
+        assert!(fs.get_path("/project.toml".as_path()).is_ok());
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
 
         // Create test directory structure
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("project.json"), b"{}").unwrap();
+        fs::write(root.join("project.toml"), b"{}").unwrap();
         fs::write(root.join("src/file1.txt"), b"content1").unwrap();
         fs::write(root.join("src/file2.txt"), b"content2").unwrap();
         fs::create_dir_all(root.join("src/subdir")).unwrap();

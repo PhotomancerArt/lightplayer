@@ -1,16 +1,16 @@
-//! Project builder for creating test projects with a fluent API
+//! Project builder for creating artifact-authored test projects with a fluent API.
 
-use alloc::{format, rc::Rc, string::String, vec};
+use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
-use lpc_model::NodeSpec;
+use lpc_model::NodeLoc;
 use lpc_model::lp_path::LpPathBuf;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_source::legacy::glsl_opts::GlslOpts;
-use lpc_source::legacy::nodes::{
-    fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder},
-    output::{OutputConfig, OutputDriverOptionsConfig},
-    shader::ShaderConfig,
-    texture::TextureConfig,
+use lpc_source::node::{
+    fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder},
+    output::{OutputDef, OutputDriverOptionsConfig},
+    shader::ShaderDef,
+    texture::TextureDef,
 };
 use lpfs::LpFs;
 
@@ -23,6 +23,7 @@ pub struct ProjectBuilder {
     shader_id: u32,
     output_id: u32,
     fixture_id: u32,
+    nodes: Vec<(String, LpPathBuf)>,
 }
 
 /// Builder for texture nodes
@@ -80,6 +81,7 @@ impl ProjectBuilder {
             shader_id: 1,
             output_id: 1,
             fixture_id: 1,
+            nodes: Vec::new(),
         }
     }
 
@@ -187,19 +189,60 @@ impl ProjectBuilder {
         self.fixture(output_path, texture_path).add(self)
     }
 
-    /// Build completes - writes project.json and all node files
+    /// Build completes - writes project.toml and all node artifact files.
     pub fn build(self) {
-        // Write project.json using proper JSON serialization
-        let config = lpc_model::ProjectConfig {
-            uid: self.uid.clone(),
-            name: self.name.clone(),
-        };
-        let project_json =
-            lpc_wire::json::to_string(&config).expect("Failed to serialize project config");
-        self.write_file_helper("/project.json", project_json.as_bytes())
-            .expect("Failed to write project.json");
-        // Node files are already written by their respective add() methods
+        let mut project_toml = format!(
+            "kind = \"project\"\nuid = \"{}\"\nname = \"{}\"\n",
+            self.uid, self.name
+        );
+        for (name, path) in &self.nodes {
+            let relative_path = path.as_str().trim_start_matches('/');
+            project_toml.push_str(&format!(
+                "\n[nodes.{name}]\nartifact = \"./{relative_path}\"\n"
+            ));
+        }
+        self.write_file_helper("/project.toml", project_toml.as_bytes())
+            .expect("Failed to write project.toml");
     }
+
+    fn register_node(&mut self, name: String, path: LpPathBuf) {
+        self.nodes.push((name, path));
+    }
+
+    fn node_loc_for_path(&self, path: &LpPathBuf) -> NodeLoc {
+        let name = self
+            .nodes
+            .iter()
+            .find(|(_, p)| p == path)
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| artifact_stem_as_node_name(path));
+        NodeLoc::from(format!("..{name}"))
+    }
+}
+
+fn artifact_stem_as_node_name(path: &LpPathBuf) -> String {
+    path.as_path()
+        .file_stem()
+        .unwrap_or("node")
+        .chars()
+        .map(|c| if c == '-' { '_' } else { c })
+        .collect()
+}
+
+fn artifact_path_for_node(name: &str) -> LpPathBuf {
+    LpPathBuf::from(format!("/{name}.toml"))
+}
+
+fn numbered_node_name(kind: &str, id: u32) -> String {
+    if id == 1 {
+        String::from(kind)
+    } else {
+        format!("{kind}_{id}")
+    }
+}
+
+fn prepend_kind(kind: &str, body: String) -> String {
+    format!("kind = \"{kind}\"\n{body}")
 }
 
 impl TextureBuilder {
@@ -208,21 +251,25 @@ impl TextureBuilder {
         let id = builder.texture_id;
         builder.texture_id += 1;
 
-        let path_str = format!("/src/texture-{id}.texture");
-        let node_path = format!("{path_str}/node.toml");
+        let node_name = numbered_node_name("texture", id);
+        let path = artifact_path_for_node(&node_name);
 
-        let config = TextureConfig {
+        let config = TextureDef {
             width: self.width,
             height: self.height,
         };
 
-        let toml = toml::to_string(&config).expect("Failed to serialize texture config to TOML");
+        let toml = prepend_kind(
+            "texture",
+            toml::to_string(&config).expect("Failed to serialize texture def to TOML"),
+        );
 
         builder
-            .write_file_helper(&node_path, toml.as_bytes())
-            .expect("Failed to write texture node.toml");
+            .write_file_helper(path.as_str(), toml.as_bytes())
+            .expect("Failed to write texture artifact");
+        builder.register_node(node_name, path.clone());
 
-        LpPathBuf::from(path_str)
+        path
     }
 }
 
@@ -244,28 +291,34 @@ impl ShaderBuilder {
         let id = builder.shader_id;
         builder.shader_id += 1;
 
-        let path_str = format!("/src/shader-{id}.shader");
-        let node_path = format!("{path_str}/node.toml");
-        let glsl_path = format!("{path_str}/main.glsl");
+        let node_name = numbered_node_name("shader", id);
+        let path = artifact_path_for_node(&node_name);
+        let glsl_path = format!("/{node_name}.glsl");
+        let glsl_file = format!("{node_name}.glsl");
+        let texture_loc = builder.node_loc_for_path(&self.texture_path);
 
-        let config = ShaderConfig {
-            glsl_path: "main.glsl".as_path_buf(),
-            texture_spec: NodeSpec::from(self.texture_path.as_str()),
+        let config = ShaderDef {
+            glsl_path: glsl_file.as_path_buf(),
+            texture_loc,
             render_order: self.render_order,
             glsl_opts: GlslOpts::default(),
         };
 
-        let toml = toml::to_string(&config).expect("Failed to serialize shader config to TOML");
+        let toml = prepend_kind(
+            "shader",
+            toml::to_string(&config).expect("Failed to serialize shader def to TOML"),
+        );
 
         builder
-            .write_file_helper(&node_path, toml.as_bytes())
-            .expect("Failed to write shader node.toml");
+            .write_file_helper(path.as_str(), toml.as_bytes())
+            .expect("Failed to write shader artifact");
 
         builder
             .write_file_helper(&glsl_path, self.glsl_source.as_bytes())
             .expect("Failed to write shader GLSL file");
+        builder.register_node(node_name, path.clone());
 
-        LpPathBuf::from(path_str)
+        path
     }
 }
 
@@ -281,21 +334,25 @@ impl OutputBuilder {
         let id = builder.output_id;
         builder.output_id += 1;
 
-        let path_str = format!("/src/output-{id}.output");
-        let node_path = format!("{path_str}/node.toml");
+        let node_name = numbered_node_name("output", id);
+        let path = artifact_path_for_node(&node_name);
 
-        let config = OutputConfig::GpioStrip {
+        let config = OutputDef::GpioStrip {
             pin: self.pin,
             options: Some(self.options),
         };
 
-        let toml = toml::to_string(&config).expect("Failed to serialize output config to TOML");
+        let toml = prepend_kind(
+            "output",
+            toml::to_string(&config).expect("Failed to serialize output def to TOML"),
+        );
 
         builder
-            .write_file_helper(&node_path, toml.as_bytes())
-            .expect("Failed to write output node.toml");
+            .write_file_helper(path.as_str(), toml.as_bytes())
+            .expect("Failed to write output artifact");
+        builder.register_node(node_name, path.clone());
 
-        LpPathBuf::from(path_str)
+        path
     }
 }
 
@@ -335,12 +392,14 @@ impl FixtureBuilder {
         let id = builder.fixture_id;
         builder.fixture_id += 1;
 
-        let path_str = format!("/src/fixture-{id}.fixture");
-        let node_path = format!("{path_str}/node.toml");
+        let node_name = numbered_node_name("fixture", id);
+        let path = artifact_path_for_node(&node_name);
+        let output_loc = builder.node_loc_for_path(&self.output_path);
+        let texture_loc = builder.node_loc_for_path(&self.texture_path);
 
-        let config = FixtureConfig {
-            output_spec: NodeSpec::from(self.output_path.as_str()),
-            texture_spec: NodeSpec::from(self.texture_path.as_str()),
+        let config = FixtureDef {
+            output_loc,
+            texture_loc,
             mapping: self.mapping,
             color_order: self.color_order,
             transform: self.transform,
@@ -348,36 +407,42 @@ impl FixtureBuilder {
             gamma_correction: self.gamma_correction,
         };
 
-        let toml = toml::to_string(&config).expect("Failed to serialize fixture config to TOML");
+        let toml = prepend_kind(
+            "fixture",
+            toml::to_string(&config).expect("Failed to serialize fixture def to TOML"),
+        );
 
         builder
-            .write_file_helper(&node_path, toml.as_bytes())
-            .expect("Failed to write fixture node.toml");
+            .write_file_helper(path.as_str(), toml.as_bytes())
+            .expect("Failed to write fixture artifact");
+        builder.register_node(node_name, path.clone());
 
-        LpPathBuf::from(path_str)
+        path
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_wire::json;
+    use lpc_source::ProjectDef;
     use lpfs::LpFsMemory;
 
     #[test]
-    fn test_project_builder_creates_valid_json() {
+    fn test_project_builder_creates_valid_project_toml() {
         let fs = Rc::new(RefCell::new(LpFsMemory::new()));
         let mut builder = ProjectBuilder::new(fs.clone());
         builder.texture_basic();
         builder.build();
 
-        // Read and verify project.json
-        let project_json_bytes = fs.borrow().read_file("/project.json".as_path()).unwrap();
-        let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
+        let project_toml_bytes = fs.borrow().read_file("/project.toml".as_path()).unwrap();
+        let project_toml_str = core::str::from_utf8(&project_toml_bytes).unwrap();
 
-        // Verify it can be parsed
-        let config: lpc_model::ProjectConfig = json::from_str(project_json_str).unwrap();
-        assert_eq!(config.uid, "test");
-        assert_eq!(config.name, "Test Project");
+        let def: ProjectDef = toml::from_str(project_toml_str).unwrap();
+        assert_eq!(def.kind, ProjectDef::KIND);
+        assert_eq!(def.name.as_deref(), Some("Test Project"));
+        assert!(
+            def.nodes
+                .contains_key(&lpc_model::NodeName::parse("texture").unwrap())
+        );
     }
 }

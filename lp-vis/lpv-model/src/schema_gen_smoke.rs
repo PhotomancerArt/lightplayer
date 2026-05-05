@@ -10,10 +10,10 @@ mod tests {
     use crate::kind::{Colorspace, Dimension, InterpMethod, Kind, Unit};
     use crate::presentation::Presentation;
     use crate::{
-        ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId, NodeName, NodePropSpec,
-        ParamsTable, Pattern, Playlist, PlaylistBehavior, PlaylistEntry, ShaderRef,
-        SrcArtifactSpec, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec, SrcValueSpec, Stack,
-        Transition, TransitionRef, TreePath, VisualInput,
+        ArtifactLocator, ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId, NodeName,
+        NodePropSpec, ParamsTable, Pattern, Playlist, PlaylistBehavior, PlaylistEntry, ShaderRef,
+        SrcBinding, SrcShape, SrcSlot, SrcTextureSpec, SrcValueSpec, Stack, Transition,
+        TransitionRef, TreePath, VisualInput,
     };
     use lpc_model::tree::tree_path::NodePathSegment;
 

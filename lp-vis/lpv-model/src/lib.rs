@@ -27,7 +27,7 @@ pub use lpc_model::{
 };
 pub use lpc_source::prop::{binding, shape};
 pub use lpc_source::{
-    LoadError, Presentation, SrcArtifactSpec, SrcBinding, SrcNodeConfig, SrcShape, SrcSlot,
+    ArtifactLocator, LoadError, NodeInvocation, Presentation, SrcBinding, SrcShape, SrcSlot,
     SrcTextureSpec, SrcValueSpec, load_artifact,
 };
 pub use lps_shared::{LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat};

@@ -34,7 +34,7 @@ pub struct CoreProjectRuntime {
     engine: Engine,
     services: RuntimeServices,
     compatibility: CompatibilityProjection,
-    legacy_src_dirs: HashMap<String, NodeId>,
+    artifact_nodes: HashMap<String, NodeId>,
 }
 
 impl CoreProjectRuntime {
@@ -47,7 +47,7 @@ impl CoreProjectRuntime {
             engine: Engine::new(root_path),
             services,
             compatibility: CompatibilityProjection::new(),
-            legacy_src_dirs: HashMap::new(),
+            artifact_nodes: HashMap::new(),
         }
     }
 
@@ -79,13 +79,13 @@ impl CoreProjectRuntime {
         self.engine.frame_id()
     }
 
-    /// Engine [`NodeId`] for a legacy `/src/...<kind>` directory, if loaded.
-    pub fn legacy_src_node_id(&self, dir: &LpPath) -> Option<NodeId> {
-        self.legacy_src_dirs.get(dir.as_str()).copied()
+    /// Engine [`NodeId`] for a node artifact path, if loaded.
+    pub fn artifact_node_id(&self, path: &LpPath) -> Option<NodeId> {
+        self.artifact_nodes.get(path.as_str()).copied()
     }
 
-    pub(crate) fn insert_legacy_src_dir(&mut self, dir: LpPathBuf, id: NodeId) {
-        self.legacy_src_dirs.insert(String::from(dir.as_str()), id);
+    pub(crate) fn insert_artifact_node(&mut self, path: LpPathBuf, id: NodeId) {
+        self.artifact_nodes.insert(String::from(path.as_str()), id);
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
@@ -292,9 +292,9 @@ mod output_sink_flush_tests {
         OutputProvider,
     };
     use lpc_source::SrcValueSpec;
-    use lpc_source::legacy::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
-    use lpc_source::legacy::nodes::output::OutputConfig;
-    use lpc_source::legacy::nodes::texture::TextureConfig;
+    use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+    use lpc_source::node::output::OutputDef;
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
     use lps_shared::LpsValueF32;
 
@@ -443,7 +443,7 @@ mod output_sink_flush_tests {
                 tex_id,
                 Box::new(TextureNode::new(
                     tex_id,
-                    TextureConfig {
+                    TextureDef {
                         width: 4,
                         height: 4,
                     },
@@ -497,7 +497,7 @@ mod output_sink_flush_tests {
         ));
 
         rt.services_mut()
-            .register_output_sink(sink, &OutputConfig::GpioStrip { pin, options: None });
+            .register_output_sink(sink, &OutputDef::GpioStrip { pin, options: None });
 
         let mapping = MappingConfig::PathPoints {
             paths: vec![PathSpec::RingArray {
@@ -612,7 +612,7 @@ mod output_sink_flush_tests {
                 tex_id,
                 Box::new(TextureNode::new(
                     tex_id,
-                    TextureConfig {
+                    TextureDef {
                         width: 4,
                         height: 4,
                     },
@@ -672,7 +672,7 @@ mod output_sink_flush_tests {
 
         rt.services_mut().register_output_sink(
             sink_written,
-            &OutputConfig::GpioStrip {
+            &OutputDef::GpioStrip {
                 pin: pin_written,
                 options: None,
             },
@@ -680,7 +680,7 @@ mod output_sink_flush_tests {
 
         rt.services_mut().register_output_sink(
             _sink_idle,
-            &OutputConfig::GpioStrip {
+            &OutputDef::GpioStrip {
                 pin: pin_idle,
                 options: None,
             },
@@ -798,7 +798,7 @@ mod output_sink_flush_tests {
                 tex_id,
                 Box::new(TextureNode::new(
                     tex_id,
-                    TextureConfig {
+                    TextureDef {
                         width: 4,
                         height: 4,
                     },
@@ -853,7 +853,7 @@ mod output_sink_flush_tests {
 
         rt.services_mut().register_output_sink(
             sink,
-            &OutputConfig::GpioStrip {
+            &OutputDef::GpioStrip {
                 pin: 99,
                 options: None,
             },

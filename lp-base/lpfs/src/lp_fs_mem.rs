@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn test_chroot_basic() {
         let mut fs = LpFsMemory::new();
-        fs.write_file_mut("/projects/test/project.json".as_path(), b"{}")
+        fs.write_file_mut("/projects/test/project.toml".as_path(), b"{}")
             .unwrap();
         fs.write_file_mut("/projects/test/src/file.txt".as_path(), b"content")
             .unwrap();
@@ -575,7 +575,7 @@ mod tests {
         assert!(
             chrooted
                 .borrow()
-                .file_exists("/project.json".as_path())
+                .file_exists("/project.toml".as_path())
                 .unwrap()
         );
         assert!(
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn test_chroot_with_relative_path() {
         let mut fs = LpFsMemory::new();
-        fs.write_file_mut("/test-projects/test/project.json".as_path(), b"{}")
+        fs.write_file_mut("/test-projects/test/project.toml".as_path(), b"{}")
             .unwrap();
         fs.write_file_mut("/test-projects/test/src/file.txt".as_path(), b"content")
             .unwrap();
@@ -606,7 +606,7 @@ mod tests {
         assert!(
             chrooted
                 .borrow()
-                .file_exists("/project.json".as_path())
+                .file_exists("/project.toml".as_path())
                 .unwrap()
         );
         assert!(
@@ -812,18 +812,15 @@ mod tests {
     #[test]
     fn test_chroot_read_file() {
         let mut fs = LpFsMemory::new();
-        fs.write_file_mut(
-            "/projects/test/project.json".as_path(),
-            b"{\"name\":\"test\"}",
-        )
-        .unwrap();
+        fs.write_file_mut("/projects/test/project.toml".as_path(), b"name = \"test\"")
+            .unwrap();
 
         let chrooted = fs.chroot("/projects/test".as_path()).unwrap();
         let content = chrooted
             .borrow()
-            .read_file("/project.json".as_path())
+            .read_file("/project.toml".as_path())
             .unwrap();
-        assert_eq!(content, b"{\"name\":\"test\"}");
+        assert_eq!(content, b"name = \"test\"");
     }
 
     #[test]

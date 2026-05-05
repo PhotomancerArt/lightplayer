@@ -4,7 +4,7 @@
 
 use alloc::vec::Vec;
 use lpc_model::{FrameId, NodeId, TreePath};
-use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
+use lpc_source::{ArtifactLocator, NodeInvocation};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
@@ -35,7 +35,7 @@ pub struct NodeEntry<N> {
     pub children_ver: FrameId,  // bumped on children-list mutation
 
     /// Authored per-instance config (artifact spec + overrides).
-    pub config: SrcNodeConfig,
+    pub config: NodeInvocation,
     /// Runtime handle into [`crate::artifact::ArtifactManager`].
     pub artifact: ArtifactId,
 }
@@ -61,7 +61,7 @@ impl<N> NodeEntry<N> {
             path,
             parent,
             child_kind,
-            SrcNodeConfig::new(SrcArtifactSpec::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
+            NodeInvocation::new(ArtifactLocator::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
             ArtifactId::from_raw(0),
             frame,
         )
@@ -73,7 +73,7 @@ impl<N> NodeEntry<N> {
         path: TreePath,
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
-        config: SrcNodeConfig,
+        config: NodeInvocation,
         artifact: ArtifactId,
         frame: FrameId,
     ) -> Self {
@@ -117,7 +117,7 @@ impl<N> NodeEntry<N> {
 mod tests {
     use super::NodeEntry;
     use lpc_model::{FrameId, NodeId, TreePath};
-    use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
+    use lpc_source::{ArtifactLocator, NodeInvocation};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
     #[test]
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn node_entry_new_spine_stores_config_and_artifact() {
         let frame = FrameId::new(1);
-        let config = SrcNodeConfig::new(SrcArtifactSpec::path("./fluid.vis"));
+        let config = NodeInvocation::new(ArtifactLocator::path("./fluid.vis"));
         let artifact = crate::artifact::ArtifactId::from_raw(7);
         let entry: NodeEntry<()> = NodeEntry::new_spine(
             NodeId::new(1),

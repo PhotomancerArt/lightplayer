@@ -46,7 +46,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use lpc_model::{FrameId, LpPath, LpPathBuf};
-    use lpc_source::SrcArtifactSpec;
+    use lpc_source::ArtifactLocator;
     use lpc_source::SrcSlot;
 
     use crate::artifact::{ArtifactManager, ArtifactState};
@@ -107,7 +107,7 @@ title = "hi"
 "#,
         );
         let location =
-            ArtifactLocation::try_from_src_spec(&SrcArtifactSpec::path("/src/pattern.lp.toml"))
+            ArtifactLocation::try_from_src_spec(&ArtifactLocator::path("/src/pattern.lp.toml"))
                 .unwrap();
         let a: DummySrcArtifact = load_source_artifact(&fs, &location).unwrap();
         assert_eq!(a.title, "hi");
@@ -123,7 +123,7 @@ title = "x"
 "#,
         );
         let location =
-            ArtifactLocation::try_from_src_spec(&SrcArtifactSpec::path("/bad.toml")).unwrap();
+            ArtifactLocation::try_from_src_spec(&ArtifactLocator::path("/bad.toml")).unwrap();
         let err = load_source_artifact::<DummySrcArtifact, _>(&fs, &location).unwrap_err();
         match err {
             ArtifactError::Load(s) => {

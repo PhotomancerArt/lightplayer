@@ -11,14 +11,14 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use lpc_model::ChannelName;
-use lpc_source::SrcArtifactSpec;
+use lpc_source::ArtifactLocator;
 
 /// Child visual reference plus optional param overrides (TOML keys `visual`, `params`).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)] // Mutex flat keys; typos → hard errors per 00-design.md §Constraint.
 pub struct VisualInputVisual {
-    pub visual: SrcArtifactSpec,
+    pub visual: ArtifactLocator,
     /// `toml::Value` per key; schemars uses an open object so serde JSON and
     /// schema both allow `params` when present.
     #[cfg_attr(
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn visual_variant_round_trips() {
         let v = VisualInput::Visual(VisualInputVisual {
-            visual: SrcArtifactSpec::path("../patterns/fbm.pattern.toml"),
+            visual: ArtifactLocator::path("../patterns/fbm.pattern.toml"),
             params: BTreeMap::new(),
         });
         let toml_str = toml::to_string(&v).unwrap();
@@ -88,7 +88,7 @@ mod tests {
         let mut params = BTreeMap::new();
         params.insert("scale".into(), toml::Value::Float(6.0));
         let v = VisualInput::Visual(VisualInputVisual {
-            visual: SrcArtifactSpec::path("../patterns/fbm.pattern.toml"),
+            visual: ArtifactLocator::path("../patterns/fbm.pattern.toml"),
             params,
         });
         let toml_str = toml::to_string(&v).unwrap();

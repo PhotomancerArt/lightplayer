@@ -30,15 +30,16 @@ fn node_toml_modification_is_accepted_without_m4_reload() {
     let output_provider = Rc::new(MemoryOutputProvider::new());
     let mut runtime = load_core_runtime(&fs, output_provider);
     let shader_handle = runtime
-        .legacy_src_node_id("/src/shader-1.shader".as_path())
+        .artifact_node_id("/shader.toml".as_path())
         .expect("shader handle");
 
     runtime.tick(4).unwrap();
     let before_change = runtime.frame_id();
 
-    let shader_config_path = "/src/shader-1.shader/node.toml";
-    let new_config = r#"glsl_path = "main.glsl"
-texture_spec = "/src/texture-1.texture"
+    let shader_config_path = "/shader.toml";
+    let new_config = r#"kind = "shader"
+glsl_path = "shader.glsl"
+texture_loc = "..texture"
 render_order = 10
 "#;
     fs.borrow_mut()
@@ -120,7 +121,7 @@ fn main_glsl_modification_keeps_existing_shader_until_reload_lands() {
 
     fs.borrow_mut()
         .write_file_mut(
-            "/src/shader-1.shader/main.glsl".as_path(),
+            "/shader.glsl".as_path(),
             r#"
                 layout(binding = 0) uniform vec2 outputSize;
                 layout(binding = 1) uniform float time;
@@ -165,10 +166,10 @@ fn node_deletion_is_ignored_by_m4_core_runtime_reload_noop() {
     let output_provider = Rc::new(MemoryOutputProvider::new());
     let mut runtime = load_core_runtime(&fs, output_provider);
     let shader_handle = runtime
-        .legacy_src_node_id("/src/shader-1.shader".as_path())
+        .artifact_node_id("/shader.toml".as_path())
         .expect("shader handle");
 
-    let shader_config_path = "/src/shader-1.shader/node.toml";
+    let shader_config_path = "/shader.toml";
     fs.borrow_mut()
         .delete_file_mut(shader_config_path.as_path())
         .unwrap();
@@ -178,7 +179,7 @@ fn node_deletion_is_ignored_by_m4_core_runtime_reload_noop() {
     fs.borrow_mut().reset_changes();
 
     assert_eq!(
-        runtime.legacy_src_node_id("/src/shader-1.shader".as_path()),
+        runtime.artifact_node_id("/shader.toml".as_path()),
         Some(shader_handle),
         "M4 keeps the loaded core node until source reload/deletion lands"
     );
@@ -200,7 +201,7 @@ fn resource_summary_membership_is_stable_after_ticks() {
     let output_provider = Rc::new(MemoryOutputProvider::new());
     let mut runtime = load_core_runtime(&fs, output_provider);
     let fixture_handle = runtime
-        .legacy_src_node_id("/src/fixture-1.fixture".as_path())
+        .artifact_node_id("/fixture.toml".as_path())
         .expect("fixture");
 
     runtime.tick(4).unwrap();

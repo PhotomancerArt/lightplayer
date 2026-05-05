@@ -1,7 +1,8 @@
 //! LightPlayer **core model** crate: **foundation** types (identity, addressing,
 //! Quantity model). Wire/protocol shapes live in `lpc-wire`.
 //!
-//! Legacy node configs (Texture / Shader / Output / Fixture) live in `lpc_source::legacy`.
+//! Authored node definitions (Project / Texture / Shader / Output / Fixture)
+//! live in `lpc-source`.
 
 #![no_std]
 
@@ -45,7 +46,7 @@ pub use prop::{ModelStructMember, ModelType, ModelValue};
 pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
-pub use node::{NodeId, NodeName, NodeNameError, NodeSpec};
+pub use node::{NodeId, NodeLoc, NodeName, NodeNameError};
 pub use project::{FrameId, ProjectConfig};
 pub use prop::prop_path::PropPath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};

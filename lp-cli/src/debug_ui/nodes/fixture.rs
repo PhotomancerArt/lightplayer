@@ -1,9 +1,9 @@
 use crate::debug_ui::nodes::texture;
 use eframe::epaint::Color32;
 use egui::Painter;
-use lpc_source::legacy::nodes::NodeKind;
-use lpc_source::legacy::nodes::shader::ShaderConfig;
-use lpc_source::legacy::nodes::texture::TextureFormat;
+use lpc_source::node::NodeKind;
+use lpc_source::node::shader::ShaderDef;
+use lpc_source::node::texture::TextureFormat;
 use lpc_view::project::resource_cache;
 use lpc_view::{NodeEntryView, ProjectView};
 use lpc_wire::legacy::NodeState;
@@ -131,10 +131,10 @@ fn shader_render_product_for_texture<'a>(
             continue;
         }
 
-        let Some(shader_config) = entry.config.as_any().downcast_ref::<ShaderConfig>() else {
+        let Some(shader_config) = entry.config.as_any().downcast_ref::<ShaderDef>() else {
             continue;
         };
-        if shader_config.texture_spec.as_str() != texture_entry.path.as_str() {
+        if shader_config.texture_loc.as_str() != texture_entry.path.as_str() {
             continue;
         }
 

@@ -35,13 +35,13 @@ fn test_scene_render() {
     let mut runtime = load_core_runtime(&fs, output_provider.clone());
     let mut client_view = ProjectView::new();
     let output_handle = runtime
-        .legacy_src_node_id(output_path.as_path())
+        .artifact_node_id(output_path.as_path())
         .expect("output node handle");
     let fixture_handle = runtime
-        .legacy_src_node_id("/src/fixture-1.fixture".as_path())
+        .artifact_node_id("/fixture.toml".as_path())
         .expect("fixture node handle");
     let shader_handle = runtime
-        .legacy_src_node_id("/src/shader-1.shader".as_path())
+        .artifact_node_id("/shader.toml".as_path())
         .expect("shader node handle");
 
     client_view.watch_detail(output_handle);

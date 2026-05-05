@@ -1,0 +1,9 @@
+kind = "shader"
+glsl_path = "shader.glsl"
+texture_loc = "..texture"
+render_order = 0
+
+[glsl_opts]
+add_sub = "wrapping"
+mul = "wrapping"
+div = "reciprocal"

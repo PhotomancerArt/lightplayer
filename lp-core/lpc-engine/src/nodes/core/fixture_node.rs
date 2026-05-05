@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use lpc_model::FrameId;
 use lpc_model::NodeId;
 use lpc_model::prop::PropPath;
-use lpc_source::legacy::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
 use super::shader_node::shader_texture_output_path;
@@ -21,7 +21,7 @@ use crate::legacy::nodes::fixture::mapping::{
     initialize_channel_accumulators,
 };
 use lpc_model::Versioned;
-use lpc_source::legacy::nodes::texture::TextureFormat;
+use lpc_source::node::texture::TextureFormat;
 
 use crate::node::{
     DestroyCtx, FixtureProjectionInfo, MemPressureCtx, Node, NodeError, NodeResourceInitContext,
@@ -511,11 +511,9 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::{Kind, ModelValue, TreePath, Versioned};
-    use lpc_source::legacy::nodes::texture::TextureConfig;
-    use lpc_source::{
-        SrcValueSpec,
-        legacy::nodes::fixture::{PathSpec, RingOrder},
-    };
+    use lpc_source::SrcValueSpec;
+    use lpc_source::node::fixture::{PathSpec, RingOrder};
+    use lpc_source::node::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -625,7 +623,7 @@ mod tests {
                 tex_id,
                 Box::new(TextureNode::new(
                     tex_id,
-                    TextureConfig {
+                    TextureDef {
                         width: 4,
                         height: 4,
                     },
@@ -775,7 +773,7 @@ mod tests {
                 tex_id,
                 Box::new(TextureNode::new(
                     tex_id,
-                    TextureConfig {
+                    TextureDef {
                         width: 4,
                         height: 4,
                     },

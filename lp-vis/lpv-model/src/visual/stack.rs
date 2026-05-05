@@ -6,7 +6,7 @@ use crate::visual::{params_table::ParamsTable, visual_input::VisualInput};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_source::SrcArtifactSpec;
+use lpc_source::ArtifactLocator;
 use lpc_source::artifact::src_artifact::SrcArtifact;
 use lpc_source::prop::shape::SrcSlot;
 
@@ -15,7 +15,7 @@ use lpc_source::prop::shape::SrcSlot;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct EffectRef {
-    pub visual: SrcArtifactSpec,
+    pub visual: ArtifactLocator,
     #[cfg_attr(
         feature = "schema-gen",
         schemars(schema_with = "crate::visual::params_table::toml_value_btree_map_schema")

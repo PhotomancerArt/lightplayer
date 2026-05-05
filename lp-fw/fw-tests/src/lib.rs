@@ -40,7 +40,7 @@ pub async fn sync_emu_project_view(
 pub mod shader_emu_gate {
     //! Fail closed when firmware cannot compile GLSL (avoids false-green emu integration tests).
 
-    use lpc_source::legacy::nodes::NodeKind;
+    use lpc_source::node::NodeKind;
     use lpc_view::ProjectView;
     use lpc_wire::WireNodeStatus;
     use lpc_wire::legacy::NodeState;

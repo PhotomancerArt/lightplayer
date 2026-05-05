@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 use lpc_model::{FrameId, TreePath};
 use lpc_shared::error::OutputError;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
-use lpc_source::legacy::nodes::output::{OutputConfig, OutputDriverOptionsConfig};
+use lpc_source::node::output::{OutputDef, OutputDriverOptionsConfig};
 
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 
@@ -80,7 +80,7 @@ impl RuntimeServices {
     /// Insert the backing [`crate::runtime_buffer::RuntimeBuffer`] with
     /// [`Versioned::new`](lpc_model::Versioned::new)([`FrameId::default`](FrameId::default), …)
     /// so untouched sinks do not match the post-tick frame id until the fixture mutates them.
-    pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputConfig) {
+    pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
         let pin = pin_from_output_config(config);
         let display_options = display_options_from_output_config(config);
         if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
@@ -149,15 +149,15 @@ impl Drop for RuntimeServices {
     }
 }
 
-fn pin_from_output_config(config: &OutputConfig) -> u32 {
+fn pin_from_output_config(config: &OutputDef) -> u32 {
     match config {
-        OutputConfig::GpioStrip { pin, .. } => *pin,
+        OutputDef::GpioStrip { pin, .. } => *pin,
     }
 }
 
-fn display_options_from_output_config(cfg: &OutputConfig) -> Option<OutputDriverOptions> {
+fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOptions> {
     match cfg {
-        OutputConfig::GpioStrip {
+        OutputDef::GpioStrip {
             options: Some(opts),
             ..
         } => Some(driver_options_from_cfg(opts)),
@@ -264,7 +264,7 @@ mod tests {
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
     };
-    use lpc_source::legacy::nodes::output::OutputConfig;
+    use lpc_source::node::output::OutputDef;
 
     use super::RuntimeServices;
     use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferStore};
@@ -284,7 +284,7 @@ mod tests {
         ));
         services.register_output_sink(
             buffer_id,
-            &OutputConfig::GpioStrip {
+            &OutputDef::GpioStrip {
                 pin: 4,
                 options: None,
             },

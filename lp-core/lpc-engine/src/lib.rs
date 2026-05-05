@@ -18,7 +18,6 @@ pub mod engine;
 pub mod error;
 pub mod gfx;
 pub mod legacy;
-pub mod legacy_project;
 pub mod node;
 pub mod nodes;
 pub mod output;
@@ -46,9 +45,8 @@ pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use legacy::nodes::{FixtureRuntime, OutputRuntime, ShaderRuntime, TextureRuntime};
 pub use legacy::output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
-pub use legacy_project::{LegacyProjectRuntime, MemoryStatsFn};
 pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
-pub use nodes::LegacyNodeRuntime;
+pub use nodes::NodeRuntime;
 pub use project_runtime::{
     CompatibilityProjection, CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime,
     OutputFlushError, RuntimeServices,

@@ -1,6 +1,6 @@
 use lpc_model::Versioned;
 use lpc_model::project::FrameId;
-use lpc_source::legacy::nodes::texture::TextureFormat;
+use lpc_source::node::texture::TextureFormat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 use crate::legacy::compatibility::LegacyCompatBytesField;

@@ -117,14 +117,14 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_source::SrcNodeConfig;
+    use lpc_source::NodeInvocation;
     use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
     fn make_tree() -> NodeTree<()> {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
     }
 
-    fn spine_placeholder() -> (SrcNodeConfig, ArtifactId) {
+    fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
         test_placeholder_spine()
     }
 

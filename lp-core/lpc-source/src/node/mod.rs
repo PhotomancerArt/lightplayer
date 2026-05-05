@@ -1,3 +1,13 @@
-pub mod src_node_config;
+pub mod fixture;
+pub mod kind;
+pub mod node_def;
+pub mod node_invocation;
+pub mod output;
+pub mod project;
+pub mod shader;
+pub mod texture;
 
-pub use src_node_config::SrcNodeConfig;
+pub use kind::NodeKind;
+pub use node_def::NodeDef;
+pub use node_invocation::NodeInvocation;
+pub use project::ProjectDef;

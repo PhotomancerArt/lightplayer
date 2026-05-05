@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::output::OutputProvider;
-use lpc_model::{FrameId, NodeId, NodeSpec};
+use lpc_model::{FrameId, NodeId, NodeLoc};
 use lpfs::LpFs;
 
 /// Handle for resolved texture nodes
@@ -34,13 +34,13 @@ impl OutputHandle {
 /// Context for node initialization
 pub trait NodeInitContext {
     /// Resolve a node specifier to a node handle (common method)
-    fn resolve_node(&self, spec: &NodeSpec) -> Result<NodeId, Error>;
+    fn resolve_node(&self, spec: &NodeLoc) -> Result<NodeId, Error>;
 
     /// Resolve an output node specifier to a handle
-    fn resolve_output(&self, spec: &NodeSpec) -> Result<OutputHandle, Error>;
+    fn resolve_output(&self, spec: &NodeLoc) -> Result<OutputHandle, Error>;
 
     /// Resolve a texture node specifier to a handle
-    fn resolve_texture(&self, spec: &NodeSpec) -> Result<TextureHandle, Error>;
+    fn resolve_texture(&self, spec: &NodeLoc) -> Result<TextureHandle, Error>;
 
     /// Get filesystem for this node
     fn get_node_fs(&self) -> &dyn LpFs;
@@ -57,7 +57,7 @@ pub trait NodeInitContext {
     fn get_texture_config(
         &self,
         handle: TextureHandle,
-    ) -> Result<lpc_source::legacy::nodes::texture::TextureConfig, Error>;
+    ) -> Result<lpc_source::node::texture::TextureDef, Error>;
 
     /// Node handle of the shader that owns the shared CPU output buffer for this texture target.
     ///

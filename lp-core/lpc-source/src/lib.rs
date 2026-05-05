@@ -15,10 +15,10 @@ pub mod prop;
 pub mod schema;
 
 pub use artifact::{
-    ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact, SrcArtifactLibRef,
-    SrcArtifactSpec, load_artifact,
+    ArtifactLocator, ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact,
+    SrcArtifactLibRef, load_artifact,
 };
-pub use node::SrcNodeConfig;
+pub use node::{NodeDef, NodeInvocation, ProjectDef};
 pub use presentation::Presentation;
 pub use prop::{
     BindingResolver, FromTomlError, LoadCtx, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec,

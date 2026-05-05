@@ -1,17 +1,17 @@
-use crate::LegacyNodeRuntime;
+use crate::NodeRuntime;
 use crate::error::Error;
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::{boxed::Box, format, string::ToString};
 use lpc_model::{FrameId, NodeId};
-use lpc_source::legacy::nodes::NodeConfig;
-use lpc_source::legacy::nodes::texture::{TextureConfig, TextureFormat};
+use lpc_source::node::node_def::NodeDef;
+use lpc_source::node::texture::{TextureDef, TextureFormat};
 use lpc_wire::legacy::nodes::texture::TextureState;
 use lpfs::FsChange;
 
 /// Texture node runtime
 pub struct TextureRuntime {
-    config: Option<TextureConfig>,
+    config: Option<TextureDef>,
     pub state: TextureState,
     node_handle: NodeId,
 }
@@ -25,7 +25,7 @@ impl TextureRuntime {
         }
     }
 
-    pub fn set_config(&mut self, config: TextureConfig) {
+    pub fn set_config(&mut self, config: TextureDef) {
         self.config = Some(config);
     }
 
@@ -34,7 +34,7 @@ impl TextureRuntime {
     }
 
     /// Get the texture config (for state extraction)
-    pub fn get_config(&self) -> Option<&TextureConfig> {
+    pub fn get_config(&self) -> Option<&TextureDef> {
         self.config.as_ref()
     }
 
@@ -54,7 +54,7 @@ impl TextureRuntime {
     }
 }
 
-impl LegacyNodeRuntime for TextureRuntime {
+impl NodeRuntime for TextureRuntime {
     fn init(&mut self, _ctx: &dyn NodeInitContext) -> Result<(), Error> {
         self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
             node_path: format!("texture-{}", self.node_handle.as_u32()),
@@ -88,12 +88,12 @@ impl LegacyNodeRuntime for TextureRuntime {
 
     fn update_config(
         &mut self,
-        new_config: Box<dyn NodeConfig>,
+        new_config: Box<dyn NodeDef>,
         _ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let texture_config = new_config
             .as_any()
-            .downcast_ref::<TextureConfig>()
+            .downcast_ref::<TextureDef>()
             .ok_or_else(|| Error::InvalidConfig {
                 node_path: format!("texture-{}", self.node_handle.as_u32()),
                 reason: "Config is not a TextureConfig".to_string(),
@@ -123,6 +123,6 @@ mod tests {
         use lpc_model::NodeId;
         let handle = NodeId::new(0);
         let runtime = TextureRuntime::new(handle);
-        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

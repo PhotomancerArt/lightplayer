@@ -1,14 +1,14 @@
 //! Compatibility authoring snapshots for M4.1 wire/detail projection.
 //!
 //! The core engine tree stores runtime nodes as [`crate::node::Node`] trait objects without a
-//! stable way to recover legacy [`lpc_source::legacy::nodes::NodeConfig`] clones. The loader
+//! stable way to recover legacy [`lpc_source::node::node_def::NodeDef`] clones. The loader
 //! captures the typed configs it read from disk and indexes them here keyed by [`lpc_model::NodeId`].
 
 use alloc::boxed::Box;
 use hashbrown::HashMap;
 
 use lpc_model::{LpPathBuf, NodeId};
-use lpc_source::legacy::nodes::NodeConfig;
+use lpc_source::node::node_def::NodeDef;
 
 use super::project_loader::LoadedNodeConfig;
 
@@ -36,7 +36,7 @@ impl CompatibilityProjection {
         self.authoring_paths.insert(id, path);
     }
 
-    pub fn node_config_box_for(&self, id: NodeId) -> Option<Box<dyn NodeConfig>> {
+    pub fn node_config_box_for(&self, id: NodeId) -> Option<Box<dyn NodeDef>> {
         self.authoring_configs
             .get(&id)
             .map(LoadedNodeConfig::clone_as_node_config_box)

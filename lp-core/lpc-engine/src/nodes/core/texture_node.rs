@@ -7,7 +7,7 @@ use lpc_model::FrameId;
 use lpc_model::NodeId;
 use lpc_model::prop::PropPath;
 use lpc_model::prop::prop_path::parse_path;
-use lpc_source::legacy::nodes::texture::{TextureConfig, TextureFormat};
+use lpc_source::node::texture::{TextureDef, TextureFormat};
 use lps_shared::LpsValueF32;
 
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
@@ -41,10 +41,10 @@ fn texture_format_tag(f: TextureFormat) -> u32 {
     }
 }
 
-/// MVP texture node: preserves [`TextureConfig`] on the core engine tree.
+/// MVP texture node: preserves [`TextureDef`] on the core engine tree.
 pub struct TextureNode {
     node_id: NodeId,
-    config: TextureConfig,
+    config: TextureDef,
     pixel_format: TextureFormat,
     props: TextureProps,
 }
@@ -61,7 +61,7 @@ struct TextureProps {
 }
 
 impl TextureProps {
-    fn sync(&mut self, config: &TextureConfig, pixel_format: TextureFormat, frame: FrameId) {
+    fn sync(&mut self, config: &TextureDef, pixel_format: TextureFormat, frame: FrameId) {
         self.width = i32::try_from(config.width).unwrap_or(i32::MAX);
         self.height = i32::try_from(config.height).unwrap_or(i32::MAX);
         self.format_tag = texture_format_tag(pixel_format);
@@ -137,7 +137,7 @@ impl RuntimePropAccess for TextureProps {
 }
 
 impl TextureNode {
-    pub fn new(node_id: NodeId, config: TextureConfig) -> Self {
+    pub fn new(node_id: NodeId, config: TextureDef) -> Self {
         let pixel_format = TextureFormat::Rgba16;
         let mut props = TextureProps {
             width_path: width_path(),
@@ -161,7 +161,7 @@ impl TextureNode {
         self.node_id
     }
 
-    pub fn config(&self) -> &TextureConfig {
+    pub fn config(&self) -> &TextureDef {
         &self.config
     }
 
@@ -226,7 +226,7 @@ mod tests {
             .expect("add");
         let tex = TextureNode::new(
             tid,
-            TextureConfig {
+            TextureDef {
                 width: 64,
                 height: 48,
             },

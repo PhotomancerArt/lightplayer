@@ -1,4 +1,4 @@
-use crate::LegacyNodeRuntime;
+use crate::NodeRuntime;
 use crate::error::Error;
 use crate::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
@@ -7,8 +7,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use lpc_model::FrameId;
 use lpc_shared::DisplayPipelineOptions;
-use lpc_source::legacy::nodes::NodeConfig;
-use lpc_source::legacy::nodes::output::{OutputConfig, OutputDriverOptionsConfig};
+use lpc_source::node::node_def::NodeDef;
+use lpc_source::node::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_wire::legacy::nodes::output::OutputState;
 use lpfs::FsChange;
 
@@ -21,7 +21,7 @@ pub struct OutputRuntime {
     /// GPIO pin number
     pin: u32,
     /// Output config (None until set)
-    config: Option<OutputConfig>,
+    config: Option<OutputDef>,
     /// Last byte count before shed (for reopen after shed_optional_buffers)
     last_byte_count: Option<u32>,
     pub state: OutputState,
@@ -64,7 +64,7 @@ impl OutputRuntime {
     }
 
     /// Set the output config
-    pub fn set_config(&mut self, config: OutputConfig) {
+    pub fn set_config(&mut self, config: OutputDef) {
         self.config = Some(config);
     }
 
@@ -83,7 +83,7 @@ impl OutputRuntime {
     }
 
     /// Get the output config (for state extraction)
-    pub fn get_config(&self) -> Option<&OutputConfig> {
+    pub fn get_config(&self) -> Option<&OutputDef> {
         self.config.as_ref()
     }
 }
@@ -99,9 +99,9 @@ fn to_display_pipeline_options(cfg: &OutputDriverOptionsConfig) -> DisplayPipeli
     }
 }
 
-fn options_for_open(cfg: &OutputConfig) -> Option<DisplayPipelineOptions> {
+fn options_for_open(cfg: &OutputDef) -> Option<DisplayPipelineOptions> {
     match cfg {
-        OutputConfig::GpioStrip {
+        OutputDef::GpioStrip {
             options: Some(opts),
             ..
         } => Some(to_display_pipeline_options(opts)),
@@ -109,7 +109,7 @@ fn options_for_open(cfg: &OutputConfig) -> Option<DisplayPipelineOptions> {
     }
 }
 
-impl LegacyNodeRuntime for OutputRuntime {
+impl NodeRuntime for OutputRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         // Get config
         let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
@@ -119,7 +119,7 @@ impl LegacyNodeRuntime for OutputRuntime {
 
         // Extract pin and options from config
         match config {
-            OutputConfig::GpioStrip { pin, .. } => {
+            OutputDef::GpioStrip { pin, .. } => {
                 self.pin = *pin;
             }
         }
@@ -201,20 +201,20 @@ impl LegacyNodeRuntime for OutputRuntime {
 
     fn update_config(
         &mut self,
-        new_config: Box<dyn NodeConfig>,
+        new_config: Box<dyn NodeDef>,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         // Downcast to OutputConfig
         let output_config = new_config
             .as_any()
-            .downcast_ref::<OutputConfig>()
+            .downcast_ref::<OutputDef>()
             .ok_or_else(|| Error::InvalidConfig {
                 node_path: String::from("output"),
                 reason: "Config is not an OutputConfig".to_string(),
             })?;
 
         match output_config {
-            OutputConfig::GpioStrip { pin, .. } => {
+            OutputDef::GpioStrip { pin, .. } => {
                 // Close existing channel before reopen (update_config is only called when config changed)
                 if let Some(handle) = self.channel_handle {
                     ctx.output_provider()
@@ -264,6 +264,6 @@ mod tests {
     #[test]
     fn test_output_runtime_creation() {
         let runtime = OutputRuntime::new();
-        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

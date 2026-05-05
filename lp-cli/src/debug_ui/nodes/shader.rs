@@ -1,5 +1,5 @@
 use crate::debug_ui::nodes::texture;
-use lpc_source::legacy::nodes::texture::TextureFormat;
+use lpc_source::node::texture::TextureFormat;
 use lpc_view::{NodeEntryView, ProjectView};
 use lpc_wire::legacy::nodes::shader::ShaderState;
 use lpc_wire::{WireResourceMetadataSummary, WireTextureFormat};

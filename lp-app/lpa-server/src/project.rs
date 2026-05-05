@@ -3,11 +3,10 @@
 extern crate alloc;
 
 use crate::error::ServerError;
+use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lpc_engine::{
-    CoreProjectLoader, CoreProjectRuntime, LpGraphics, MemoryStatsFn, RuntimeServices,
-};
+use lpc_engine::{CoreProjectLoader, CoreProjectRuntime, LpGraphics, RuntimeServices};
 use lpc_model::{LpPath, LpPathBuf, TreePath};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;

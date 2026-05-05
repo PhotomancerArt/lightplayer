@@ -1,9 +1,9 @@
-//! Map tree path leaf type names to legacy [`lpc_source::legacy::nodes::NodeKind`].
+//! Map tree path leaf type names to legacy [`lpc_source::node::NodeKind`].
 
 use alloc::string::ToString;
 
 use lpc_model::TreePath;
-use lpc_source::legacy::nodes::NodeKind;
+use lpc_source::node::NodeKind;
 
 pub(crate) fn legacy_node_kind_from_tree_path(path: &TreePath) -> Option<NodeKind> {
     let ty = path.0.last()?.ty.to_string();

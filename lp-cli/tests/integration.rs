@@ -70,24 +70,19 @@ fn process_messages(
 
 /// Create a test project on a filesystem
 ///
-/// Creates a minimal project with project.json and returns the project UID.
+/// Creates a minimal project with project.toml and returns the project UID.
 #[allow(
     dead_code,
     reason = "async client integration tests are being rewritten"
 )]
 fn create_test_project(fs: &mut LpFsMemory, name: &str, uid: &str) -> Result<(), ClientError> {
-    // Create project.json
-    let project_json = format!(
-        r#"{{
-  "uid": "{uid}",
-  "name": "{name}"
-}}"#
+    let project_toml = format!(
+        r#"kind = "project"
+uid = "{uid}"
+name = "{name}"
+"#
     );
-    fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
-        .map_err(|_| todo!())?;
-
-    // Create src directory
-    fs.write_file_mut("/src/.gitkeep".as_path(), b"")
+    fs.write_file_mut("/project.toml".as_path(), project_toml.as_bytes())
         .map_err(|_| todo!())?;
 
     Ok(())
@@ -135,22 +130,26 @@ fn test_create_command_structure() {
     let project_name = "my-project";
     let project_uid = "2025.01.15-12.00.00-my-project";
 
-    // Create project.json
-    let project_json = format!(
-        r#"{{
-  "uid": "{project_uid}",
-  "name": "{project_name}"
-}}"#
+    let project_toml = format!(
+        r#"kind = "project"
+uid = "{project_uid}"
+name = "{project_name}"
+"#
     );
-    fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
+    fs.write_file_mut("/project.toml".as_path(), project_toml.as_bytes())
         .unwrap();
 
-    // Verify project.json exists and is valid
-    let content = fs.read_file("/project.json".as_path()).unwrap();
-    let config: lpc_model::project::config::ProjectConfig =
-        serde_json::from_slice(&content).unwrap();
-    assert_eq!(config.uid, project_uid);
-    assert_eq!(config.name, project_name);
+    // Verify project.toml exists and is valid
+    let content = fs.read_file("/project.toml".as_path()).unwrap();
+    let config: toml::Value = toml::from_slice(&content).unwrap();
+    assert_eq!(
+        config.get("uid").and_then(toml::Value::as_str),
+        Some(project_uid)
+    );
+    assert_eq!(
+        config.get("name").and_then(toml::Value::as_str),
+        Some(project_name)
+    );
 }
 
 // Note: A full async test for the dev command would require making the server,

@@ -71,7 +71,7 @@ fn demo_runtime() -> CoreProjectRuntime {
 fn watched_nodes_receive_node_details() {
     let rt = demo_runtime();
     let out_id = rt
-        .legacy_src_node_id("/src/output-1.output".as_path())
+        .artifact_node_id("/output.toml".as_path())
         .expect("output");
 
     let r = rt
@@ -87,7 +87,7 @@ fn watched_nodes_receive_node_details() {
 
     let lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } = r;
     let detail = node_details.get(&out_id).expect("output detail");
-    assert_eq!(detail.path.as_str(), "/src/output-1.output");
+    assert_eq!(detail.path.as_str(), "/output.toml");
     assert!(matches!(&detail.state, NodeState::Output(_)));
     let NodeState::Output(st) = &detail.state else {
         unreachable!();
@@ -139,7 +139,7 @@ fn summary_all_reports_runtime_buffer_and_render_product_rows() {
 fn fixture_lamp_colors_field_points_at_fixture_colors_buffer_via_resource_ref() {
     let mut rt = demo_runtime();
     let fid = rt
-        .legacy_src_node_id("/src/fixture-1.fixture".as_path())
+        .artifact_node_id("/fixture.toml".as_path())
         .expect("fixture");
 
     rt.tick(5).unwrap();
@@ -179,7 +179,7 @@ fn fixture_lamp_colors_field_points_at_fixture_colors_buffer_via_resource_ref() 
 fn runtime_buffer_payload_by_id_returns_bytes_after_fixture_writes() {
     let mut rt = demo_runtime();
     let out_id = rt
-        .legacy_src_node_id("/src/output-1.output".as_path())
+        .artifact_node_id("/output.toml".as_path())
         .expect("output id");
     let sink = rt
         .engine()
@@ -214,7 +214,7 @@ fn runtime_buffer_payload_by_id_returns_bytes_after_fixture_writes() {
 fn render_product_payload_by_id_returns_rgba16_unorm_pixels() {
     let mut rt = demo_runtime();
     let sh_id = rt
-        .legacy_src_node_id("/src/shader-1.shader".as_path())
+        .artifact_node_id("/shader.toml".as_path())
         .expect("shader");
     let rid = rt
         .engine()

@@ -1,0 +1,110 @@
+//! Parent-owned instruction to instantiate a child node.
+//!
+//! An invocation is currently artifact-only: the parent says "instantiate the
+//! node definition located at this [`ArtifactLocator`] here". Inline node
+//! definitions and artifact-plus-local-field merges are future extensions.
+
+use crate::artifact::artifact_loc::ArtifactLocator;
+use crate::prop::src_binding::SrcBinding;
+use alloc::vec::Vec;
+use lpc_model::prop::prop_path::PropPath;
+
+/// Parent-owned child node invocation.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct NodeInvocation {
+    /// Artifact to load for this child node definition.
+    pub artifact: ArtifactLocator,
+
+    /// Future use-site binding overrides.
+    ///
+    /// Kept during this transition because the resolver cache already consumes
+    /// it, but canonical `examples/basic` invocations are artifact-only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<(PropPath, SrcBinding)>,
+}
+
+impl NodeInvocation {
+    /// New artifact-only invocation with no overrides.
+    pub fn new(artifact: ArtifactLocator) -> Self {
+        Self {
+            artifact,
+            overrides: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prop::src_value_spec::SrcValueSpec;
+    use alloc::string::String;
+    use lpc_model::ModelValue;
+    use lpc_model::bus::ChannelName;
+    use lpc_model::prop::prop_path::parse_path;
+
+    #[test]
+    fn node_invocation_round_trips_empty_overrides() {
+        let config = NodeInvocation::new(ArtifactLocator::path("./fluid.vis"));
+        let json = serde_json::to_string(&config).unwrap();
+        let back: NodeInvocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, back);
+        assert!(back.overrides.is_empty());
+    }
+
+    #[test]
+    fn overrides_omitted_when_empty() {
+        let config = NodeInvocation::new(ArtifactLocator::path("./test.lp"));
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            !json.contains("overrides"),
+            "empty overrides should be skipped"
+        );
+    }
+
+    #[test]
+    fn node_invocation_round_trips_with_literal_override() {
+        let mut config = NodeInvocation::new(ArtifactLocator::path("./shader.lp"));
+        let path = parse_path("params.scale").unwrap();
+        let binding = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(6.0)));
+        config.overrides.push((path, binding));
+
+        let json = serde_json::to_string(&config).unwrap();
+        let back: NodeInvocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, back);
+    }
+
+    #[test]
+    fn node_invocation_round_trips_with_bus_override() {
+        let mut config = NodeInvocation::new(ArtifactLocator::path("./output.lp"));
+        let path = parse_path("inputs.level").unwrap();
+        let binding = SrcBinding::Bus(ChannelName(String::from("audio/in/0")));
+        config.overrides.push((path, binding));
+
+        let json = serde_json::to_string(&config).unwrap();
+        let back: NodeInvocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, back);
+    }
+
+    #[test]
+    fn node_invocation_toml_round_trips() {
+        let mut config = NodeInvocation::new(ArtifactLocator::path("./pattern.lp"));
+        let path = parse_path("params.speed").unwrap();
+        let binding = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(1.5)));
+        config.overrides.push((path, binding));
+
+        let toml_str = toml::to_string(&config).unwrap();
+        let back: NodeInvocation = toml::from_str(&toml_str).unwrap();
+        assert_eq!(config, back);
+    }
+
+    #[test]
+    fn node_invocation_toml_table_form_loads() {
+        let toml = r#"
+            artifact = "./texture.toml"
+        "#;
+        let invocation: NodeInvocation = toml::from_str(toml).unwrap();
+        assert_eq!(invocation.artifact, ArtifactLocator::path("./texture.toml"));
+        assert!(invocation.overrides.is_empty());
+    }
+}

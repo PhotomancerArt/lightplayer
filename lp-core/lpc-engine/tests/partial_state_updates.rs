@@ -11,7 +11,7 @@ use lpc_shared::ProjectBuilder;
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
-use lpc_source::legacy::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+use lpc_source::node::fixture::{MappingConfig, PathSpec, RingOrder};
 use lpc_wire::{
     RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
 };
@@ -47,7 +47,7 @@ fn test_partial_state_updates() {
     let output_provider = Rc::new(MemoryOutputProvider::new());
     let mut runtime = load_core_runtime(&fs, output_provider);
     let fixture_handle = runtime
-        .legacy_src_node_id("/src/fixture-1.fixture".as_path())
+        .artifact_node_id("/fixture.toml".as_path())
         .expect("fixture handle");
 
     runtime.tick(4).unwrap();

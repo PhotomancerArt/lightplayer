@@ -5,7 +5,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use lpc_model::{FrameId, NodeId, NodeName, NodePathSegment, TreePath};
-use lpc_source::SrcNodeConfig;
+use lpc_source::NodeInvocation;
 use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
@@ -93,7 +93,7 @@ impl<N> NodeTree<N> {
         name: NodeName,
         ty: NodeName,
         child_kind: WireChildKind,
-        config: SrcNodeConfig,
+        config: NodeInvocation,
         artifact: ArtifactId,
         frame: FrameId,
     ) -> Result<NodeId, TreeError> {
@@ -222,14 +222,14 @@ mod tests {
     use crate::tree::test_placeholder_spine;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_source::{SrcArtifactSpec, SrcNodeConfig};
+    use lpc_source::{ArtifactLocator, NodeInvocation};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     fn make_tree() -> NodeTree<()> {
         NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
     }
 
-    fn spine_placeholder() -> (SrcNodeConfig, ArtifactId) {
+    fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
         test_placeholder_spine()
     }
 
@@ -237,7 +237,7 @@ mod tests {
     fn tree_add_child_stores_config_and_artifact() {
         let mut tree = make_tree();
         let root = tree.root();
-        let cfg = SrcNodeConfig::new(SrcArtifactSpec::path("child.lp"));
+        let cfg = NodeInvocation::new(ArtifactLocator::path("child.lp"));
         let art = ArtifactId::from_raw(9);
         let child = tree
             .add_child(

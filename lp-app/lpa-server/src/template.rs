@@ -2,7 +2,7 @@
 //!
 //! Provides functions to create default project templates that work with any LpFs implementation.
 //!
-//! Node configs are authored as static TOML matching legacy [`lpc_source::legacy::nodes`] serde
+//! Node definitions are authored as static TOML matching [`lpc_source::node`] serde
 //! shape (same bytes as `toml::to_string` on the host). `toml` is not used here so `lpa-server`
 //! stays compatible with `no_std` firmware builds where unified `toml` features can pull `std`.
 
@@ -13,14 +13,31 @@ use alloc::format;
 use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
-/// TOML for a 64×64 texture node (see `TextureConfig`).
-const TEXTURE_NODE_TOML: &[u8] = br#"width = 64
+const PROJECT_TOML: &[u8] = br#"kind = "project"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.texture]
+artifact = "./texture.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"
+"#;
+
+/// TOML for a 64×64 texture node.
+const TEXTURE_NODE_TOML: &[u8] = br#"kind = "texture"
+width = 64
 height = 64
 "#;
 
-/// TOML for the default shader node (see `ShaderConfig`).
-const SHADER_NODE_TOML: &[u8] = br#"glsl_path = "main.glsl"
-texture_spec = "/src/texture.texture"
+/// TOML for the default shader node.
+const SHADER_NODE_TOML: &[u8] = br#"kind = "shader"
+glsl_path = "shader.glsl"
+texture_loc = "..texture"
 render_order = 0
 
 [glsl_opts]
@@ -29,14 +46,15 @@ mul = "saturating"
 div = "saturating"
 "#;
 
-/// TOML for GPIO strip output (see `OutputConfig::GpioStrip`).
-const OUTPUT_NODE_TOML: &[u8] = br#"[GpioStrip]
+/// TOML for GPIO strip output.
+const OUTPUT_NODE_TOML: &[u8] = br#"kind = "output"
 pin = 4
 "#;
 
-/// TOML for the default fixture (see `FixtureConfig`).
-const FIXTURE_NODE_TOML: &[u8] = br#"output_spec = "/src/output.output"
-texture_spec = "/src/texture.texture"
+/// TOML for the default fixture.
+const FIXTURE_NODE_TOML: &[u8] = br#"kind = "fixture"
+output_loc = "..output"
+texture_loc = "..texture"
 color_order = "Rgb"
 transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 
@@ -48,19 +66,19 @@ sample_diameter = 2.0
 /// Create a default project template
 ///
 /// Creates the default project structure with a rainbow rotating color wheel shader.
-/// The filesystem should already be chrooted to the project directory (paths like "/project.json" are relative to project root).
+/// The filesystem should already be chrooted to the project directory.
 pub fn create_default_project_template(fs: &dyn LpFs) -> Result<(), ServerError> {
-    fs.write_file(
-        "/src/texture.texture/node.toml".as_path(),
-        TEXTURE_NODE_TOML,
-    )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write texture node.toml: {e}")))?;
+    fs.write_file("/project.toml".as_path(), PROJECT_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write project.toml: {e}")))?;
 
-    fs.write_file("/src/shader.shader/node.toml".as_path(), SHADER_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write shader node.toml: {e}")))?;
+    fs.write_file("/texture.toml".as_path(), TEXTURE_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write texture.toml: {e}")))?;
+
+    fs.write_file("/shader.toml".as_path(), SHADER_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write shader.toml: {e}")))?;
 
     fs.write_file(
-        "/src/shader.shader/main.glsl".as_path(),
+        "/shader.glsl".as_path(),
         br#"// HSV to RGB conversion function
 vec3 hsv_to_rgb(float h, float s, float v) {
     // h in [0, 1], s in [0, 1], v in [0, 1]
@@ -124,16 +142,13 @@ vec4 render(vec2 pos) {
     return vec4(max(vec3(0.0), min(vec3(1.0), rgb)), 1.0);
 }"#,
     )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write shader main.glsl: {e}")))?;
+    .map_err(|e| ServerError::Filesystem(format!("Failed to write shader.glsl: {e}")))?;
 
-    fs.write_file("/src/output.output/node.toml".as_path(), OUTPUT_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write output node.toml: {e}")))?;
+    fs.write_file("/output.toml".as_path(), OUTPUT_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write output.toml: {e}")))?;
 
-    fs.write_file(
-        "/src/fixture.fixture/node.toml".as_path(),
-        FIXTURE_NODE_TOML,
-    )
-    .map_err(|e| ServerError::Filesystem(format!("Failed to write fixture node.toml: {e}")))?;
+    fs.write_file("/fixture.toml".as_path(), FIXTURE_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write fixture.toml: {e}")))?;
 
     Ok(())
 }

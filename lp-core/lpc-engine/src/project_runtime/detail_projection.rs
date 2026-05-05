@@ -8,9 +8,9 @@ use alloc::vec::Vec;
 use lpc_model::lp_path::LpPathBuf;
 use lpc_model::resource::ResourceRef;
 use lpc_model::{FrameId, NodeId};
-use lpc_source::legacy::nodes::NodeKind;
-use lpc_source::legacy::nodes::fixture::FixtureConfig;
-use lpc_source::legacy::nodes::texture::{TextureConfig, TextureFormat};
+use lpc_source::node::NodeKind;
+use lpc_source::node::fixture::FixtureDef;
+use lpc_source::node::texture::{TextureDef, TextureFormat};
 use lpc_wire::WireNodeSpecifier;
 use lpc_wire::legacy::nodes::fixture::{FixtureState, MappingCell};
 use lpc_wire::legacy::nodes::output::OutputState;
@@ -72,6 +72,7 @@ pub(crate) fn build_node_detail_map(
                 ver_frame,
                 current_frame,
             )),
+            NodeKind::Project => continue,
         };
 
         out.insert(
@@ -152,22 +153,14 @@ fn build_texture_state(
         ver_frame,
         compatibility
             .node_config_box_for(entry.id)
-            .and_then(|cfg| {
-                cfg.as_any()
-                    .downcast_ref::<TextureConfig>()
-                    .map(|c| c.width)
-            })
+            .and_then(|cfg| cfg.as_any().downcast_ref::<TextureDef>().map(|c| c.width))
             .unwrap_or(0),
     );
     state.height.set(
         ver_frame,
         compatibility
             .node_config_box_for(entry.id)
-            .and_then(|cfg| {
-                cfg.as_any()
-                    .downcast_ref::<TextureConfig>()
-                    .map(|c| c.height)
-            })
+            .and_then(|cfg| cfg.as_any().downcast_ref::<TextureDef>().map(|c| c.height))
             .unwrap_or(0),
     );
     state.format.set(ver_frame, TextureFormat::Rgba16);
@@ -243,14 +236,10 @@ fn fixture_mapping_cells(
     state: &FixtureState,
 ) -> Option<Vec<MappingCell>> {
     let fixture_config_box = compatibility.node_config_box_for(entry.id)?;
-    let fixture_config = fixture_config_box
-        .as_any()
-        .downcast_ref::<FixtureConfig>()?;
+    let fixture_config = fixture_config_box.as_any().downcast_ref::<FixtureDef>()?;
     let texture_id = (*state.texture_handle.value())?;
     let texture_config_box = compatibility.node_config_box_for(texture_id)?;
-    let texture_config = texture_config_box
-        .as_any()
-        .downcast_ref::<TextureConfig>()?;
+    let texture_config = texture_config_box.as_any().downcast_ref::<TextureDef>()?;
 
     let points = generate_mapping_points(
         &fixture_config.mapping,

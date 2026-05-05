@@ -4,11 +4,13 @@ use alloc::format;
 use alloc::string::String;
 use alloc::{vec, vec::Vec};
 use lpc_model::{FrameId, LpPathBuf, NodeId};
-use lpc_source::legacy::nodes::fixture::FixtureConfig;
-use lpc_source::legacy::nodes::output::OutputConfig;
-use lpc_source::legacy::nodes::shader::ShaderConfig;
-use lpc_source::legacy::nodes::texture::TextureConfig;
-use lpc_source::legacy::nodes::{NodeConfig, NodeKind};
+use lpc_source::ProjectDef;
+use lpc_source::node::NodeKind;
+use lpc_source::node::fixture::FixtureDef;
+use lpc_source::node::node_def::NodeDef;
+use lpc_source::node::output::OutputDef;
+use lpc_source::node::shader::ShaderDef;
+use lpc_source::node::texture::TextureDef;
 use lpc_wire::legacy::{NodeChange, NodeState, ProjectResponse};
 use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
 
@@ -42,7 +44,7 @@ pub struct ProjectView {
 pub struct NodeEntryView {
     pub path: LpPathBuf,
     pub kind: NodeKind,
-    pub config: Box<dyn NodeConfig>,
+    pub config: Box<dyn NodeDef>,
     pub config_ver: FrameId,
     pub state: Option<NodeState>, // Only present if in detail_tracking
     pub state_ver: FrameId,
@@ -123,24 +125,32 @@ impl ProjectView {
                     match change {
                         NodeChange::Created { handle, path, kind } => {
                             // Create new entry with placeholder config
-                            let config: Box<dyn NodeConfig> = match kind {
-                                NodeKind::Texture => Box::new(TextureConfig { width: 0, height: 0 }),
-                                NodeKind::Shader => Box::new(ShaderConfig::default()),
-                                NodeKind::Output => Box::new(OutputConfig::GpioStrip {
+                            let config: Box<dyn NodeDef> = match kind {
+                                NodeKind::Texture => Box::new(TextureDef {
+                                    width: 0,
+                                    height: 0,
+                                }),
+                                NodeKind::Shader => Box::new(ShaderDef::default()),
+                                NodeKind::Output => Box::new(OutputDef::GpioStrip {
                                     pin: 0,
                                     options: None,
                                 }),
-                                NodeKind::Fixture => Box::new(FixtureConfig {
-                                    output_spec: lpc_model::NodeSpec::from(""),
-                                    texture_spec: lpc_model::NodeSpec::from(""),
-                                    mapping: lpc_source::legacy::nodes::fixture::MappingConfig::PathPoints {
+                                NodeKind::Fixture => Box::new(FixtureDef {
+                                    output_loc: lpc_model::NodeLoc::from(""),
+                                    texture_loc: lpc_model::NodeLoc::from(""),
+                                    mapping: lpc_source::node::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,
                                     },
-                                    color_order: lpc_source::legacy::nodes::fixture::ColorOrder::Rgb,
+                                    color_order: lpc_source::node::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                     brightness: None,
                                     gamma_correction: None,
+                                }),
+                                NodeKind::Project => Box::new(ProjectDef {
+                                    kind: String::from(ProjectDef::KIND),
+                                    name: None,
+                                    nodes: BTreeMap::new(),
                                 }),
                             };
 
@@ -332,9 +342,9 @@ impl ProjectView {
 }
 
 fn clone_node_config_for_kind(
-    config: &dyn NodeConfig,
+    config: &dyn NodeDef,
     expected_kind: NodeKind,
-) -> Result<Box<dyn NodeConfig>, String> {
+) -> Result<Box<dyn NodeDef>, String> {
     let actual_kind = config.kind();
     if actual_kind != expected_kind {
         return Err(format!(
@@ -346,29 +356,36 @@ fn clone_node_config_for_kind(
         NodeKind::Texture => {
             let config = config
                 .as_any()
-                .downcast_ref::<TextureConfig>()
+                .downcast_ref::<TextureDef>()
                 .ok_or_else(|| String::from("failed to downcast TextureConfig"))?;
             Ok(Box::new(config.clone()))
         }
         NodeKind::Shader => {
             let config = config
                 .as_any()
-                .downcast_ref::<ShaderConfig>()
+                .downcast_ref::<ShaderDef>()
                 .ok_or_else(|| String::from("failed to downcast ShaderConfig"))?;
             Ok(Box::new(config.clone()))
         }
         NodeKind::Output => {
             let config = config
                 .as_any()
-                .downcast_ref::<OutputConfig>()
+                .downcast_ref::<OutputDef>()
                 .ok_or_else(|| String::from("failed to downcast OutputConfig"))?;
             Ok(Box::new(config.clone()))
         }
         NodeKind::Fixture => {
             let config = config
                 .as_any()
-                .downcast_ref::<FixtureConfig>()
+                .downcast_ref::<FixtureDef>()
                 .ok_or_else(|| String::from("failed to downcast FixtureConfig"))?;
+            Ok(Box::new(config.clone()))
+        }
+        NodeKind::Project => {
+            let config = config
+                .as_any()
+                .downcast_ref::<ProjectDef>()
+                .ok_or_else(|| String::from("failed to downcast ProjectDef"))?;
             Ok(Box::new(config.clone()))
         }
     }

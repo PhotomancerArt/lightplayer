@@ -10,7 +10,7 @@ use crate::visual::transition_ref::TransitionRef;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_source::SrcArtifactSpec;
+use lpc_source::ArtifactLocator;
 use lpc_source::artifact::src_artifact::SrcArtifact;
 use lpc_source::prop::binding::SrcBinding;
 
@@ -19,7 +19,7 @@ use lpc_source::prop::binding::SrcBinding;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct PlaylistEntry {
-    pub visual: SrcArtifactSpec,
+    pub visual: ArtifactLocator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<f32>,
     #[cfg_attr(

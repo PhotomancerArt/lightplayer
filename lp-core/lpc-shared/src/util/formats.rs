@@ -1,7 +1,7 @@
 //! Texture format constants and utilities
 
 // Re-export TextureFormat from legacy source specs
-pub use lpc_source::legacy::nodes::texture::TextureFormat;
+pub use lpc_source::node::texture::TextureFormat;
 
 // Backward compatibility: Keep constants for migration period
 /// RGB8 format constant (deprecated: use TextureFormat::Rgb8)

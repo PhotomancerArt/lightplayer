@@ -1,0 +1,15 @@
+kind = "project"
+uid = "perf-fastmath"
+name = "perf-fastmath"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.texture]
+artifact = "./texture.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"

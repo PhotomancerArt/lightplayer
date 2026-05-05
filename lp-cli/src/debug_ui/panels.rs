@@ -4,7 +4,7 @@ use crate::debug_ui::nodes::shader;
 use crate::debug_ui::nodes::{fixture, output, texture};
 use eframe::egui::{self, Color32};
 use lpc_model::{NodeId, project::FrameId};
-use lpc_source::legacy::nodes::NodeKind;
+use lpc_source::node::NodeKind;
 use lpc_view::project::ProjectView;
 use lpc_wire::WireNodeStatus;
 use lpc_wire::legacy::NodeState;

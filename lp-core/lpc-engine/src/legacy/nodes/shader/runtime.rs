@@ -1,4 +1,4 @@
-use crate::LegacyNodeRuntime;
+use crate::NodeRuntime;
 use crate::error::Error;
 use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::output::OutputProvider;
@@ -15,8 +15,8 @@ use log;
 use lp_perf::EVENT_SHADER_COMPILE;
 use lpc_model::{FrameId, LpPathBuf, NodeId};
 use lpc_source::legacy::glsl_opts::{AddSubMode, DivMode, MulMode};
-use lpc_source::legacy::nodes::NodeConfig;
-use lpc_source::legacy::nodes::shader::ShaderConfig;
+use lpc_source::node::node_def::NodeDef;
+use lpc_source::node::shader::ShaderDef;
 use lpc_wire::legacy::nodes::shader::ShaderState;
 use lpfs::{ChangeType, FsChange};
 #[cfg(feature = "panic-recovery")]
@@ -46,7 +46,7 @@ fn map_model_q32_options(
 
 /// Shader node runtime
 pub struct ShaderRuntime {
-    config: Option<ShaderConfig>,
+    config: Option<ShaderDef>,
     graphics: Arc<dyn LpGraphics>,
     shader: Option<Box<dyn LpShader>>,
     output_buffer: Option<lp_shader::LpsTextureBuf>,
@@ -72,7 +72,7 @@ impl ShaderRuntime {
         }
     }
 
-    pub fn set_config(&mut self, config: ShaderConfig) {
+    pub fn set_config(&mut self, config: ShaderDef) {
         self.render_order = config.render_order;
         self.config = Some(config);
     }
@@ -93,7 +93,7 @@ impl ShaderRuntime {
         self.texture_handle
     }
 
-    pub fn get_config(&self) -> Option<&ShaderConfig> {
+    pub fn get_config(&self) -> Option<&ShaderDef> {
         self.config.as_ref()
     }
 
@@ -116,7 +116,7 @@ impl ShaderRuntime {
     }
 }
 
-impl LegacyNodeRuntime for ShaderRuntime {
+impl NodeRuntime for ShaderRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         let config = self.config.clone().ok_or_else(|| Error::InvalidConfig {
             node_path: format!("shader-{}", self.node_handle.as_u32()),
@@ -170,12 +170,12 @@ impl LegacyNodeRuntime for ShaderRuntime {
 
     fn update_config(
         &mut self,
-        new_config: Box<dyn NodeConfig>,
+        new_config: Box<dyn NodeDef>,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let shader_config = new_config
             .as_any()
-            .downcast_ref::<ShaderConfig>()
+            .downcast_ref::<ShaderDef>()
             .ok_or_else(|| Error::InvalidConfig {
                 node_path: format!("shader-{}", self.node_handle.as_u32()),
                 reason: "Config is not a ShaderConfig".to_string(),
@@ -188,12 +188,12 @@ impl LegacyNodeRuntime for ShaderRuntime {
 
         let texture_changed = old_config
             .as_ref()
-            .map(|old| old.texture_spec != shader_config.texture_spec)
+            .map(|old| old.texture_loc != shader_config.texture_loc)
             .unwrap_or(true);
 
         if texture_changed {
             let texture_handle = ctx
-                .resolve_texture(&shader_config.texture_spec)
+                .resolve_texture(&shader_config.texture_loc)
                 .map_err(|e| {
                     let error_msg = format!("Failed to resolve texture: {e}");
                     self.compilation_error = Some(error_msg.clone());
@@ -294,10 +294,10 @@ impl ShaderRuntime {
 
     fn resolve_texture_handle(
         &mut self,
-        config: &ShaderConfig,
+        config: &ShaderDef,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
-        let texture_handle = ctx.resolve_texture(&config.texture_spec).map_err(|e| {
+        let texture_handle = ctx.resolve_texture(&config.texture_loc).map_err(|e| {
             let error_msg = format!("Failed to resolve texture: {e}");
             self.compilation_error = Some(error_msg.clone());
             let frame_id = FrameId::default();
@@ -310,7 +310,7 @@ impl ShaderRuntime {
 
     fn load_glsl_source(
         &mut self,
-        config: &ShaderConfig,
+        config: &ShaderDef,
         ctx: &dyn NodeInitContext,
     ) -> Result<String, Error> {
         let fs = ctx.get_node_fs();
@@ -423,7 +423,7 @@ impl ShaderRuntime {
 
     fn load_and_compile_shader(
         &mut self,
-        config: &ShaderConfig,
+        config: &ShaderDef,
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
@@ -458,6 +458,6 @@ mod tests {
         let handle = lpc_model::NodeId::new(0);
         let graphics: Arc<dyn LpGraphics> = Arc::new(crate::Graphics::new());
         let runtime = ShaderRuntime::new(handle, graphics);
-        let _boxed: alloc::boxed::Box<dyn LegacyNodeRuntime> = alloc::boxed::Box::new(runtime);
+        let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }

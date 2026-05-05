@@ -12,9 +12,9 @@ use alloc::vec::Vec;
 use lpc_model::NodeId;
 use lpc_model::lp_path::LpPathBuf;
 use lpc_model::project::FrameId;
-use lpc_source::legacy::nodes::{
-    NodeConfig, NodeKind, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
-    texture::TextureConfig,
+use lpc_source::node::node_def::NodeDef;
+use lpc_source::node::{
+    NodeKind, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
 };
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant};
 
@@ -89,8 +89,8 @@ pub enum NodeChange {
 #[derive(Debug)]
 pub struct NodeDetail {
     pub path: LpPathBuf,
-    pub config: Box<dyn NodeConfig>, // TODO: Needs serialization support (see struct docs)
-    pub state: NodeState,            // External state only
+    pub config: Box<dyn NodeDef>, // TODO: Needs serialization support (see struct docs)
+    pub state: NodeState,         // External state only
 }
 
 /// Node state - external state (shared with clients)
@@ -162,25 +162,25 @@ pub enum SerializableNodeDetail {
     /// Texture node detail
     Texture {
         path: LpPathBuf,
-        config: TextureConfig,
+        config: TextureDef,
         state: NodeState,
     },
     /// Shader node detail
     Shader {
         path: LpPathBuf,
-        config: ShaderConfig,
+        config: ShaderDef,
         state: NodeState,
     },
     /// Output node detail
     Output {
         path: LpPathBuf,
-        config: OutputConfig,
+        config: OutputDef,
         state: NodeState,
     },
     /// Fixture node detail
     Fixture {
         path: LpPathBuf,
-        config: FixtureConfig,
+        config: FixtureDef,
         state: NodeState,
     },
 }
@@ -491,7 +491,7 @@ impl NodeDetail {
                 let config = self
                     .config
                     .as_any()
-                    .downcast_ref::<TextureConfig>()
+                    .downcast_ref::<TextureDef>()
                     .ok_or_else(|| format!("Failed to downcast to TextureConfig"))?;
                 Ok(SerializableNodeDetail::Texture {
                     path: self.path.clone(),
@@ -503,7 +503,7 @@ impl NodeDetail {
                 let config = self
                     .config
                     .as_any()
-                    .downcast_ref::<ShaderConfig>()
+                    .downcast_ref::<ShaderDef>()
                     .ok_or_else(|| format!("Failed to downcast to ShaderConfig"))?;
                 Ok(SerializableNodeDetail::Shader {
                     path: self.path.clone(),
@@ -515,7 +515,7 @@ impl NodeDetail {
                 let config = self
                     .config
                     .as_any()
-                    .downcast_ref::<OutputConfig>()
+                    .downcast_ref::<OutputDef>()
                     .ok_or_else(|| format!("Failed to downcast to OutputConfig"))?;
                 Ok(SerializableNodeDetail::Output {
                     path: self.path.clone(),
@@ -527,7 +527,7 @@ impl NodeDetail {
                 let config = self
                     .config
                     .as_any()
-                    .downcast_ref::<FixtureConfig>()
+                    .downcast_ref::<FixtureDef>()
                     .ok_or_else(|| format!("Failed to downcast to FixtureConfig"))?;
                 Ok(SerializableNodeDetail::Fixture {
                     path: self.path.clone(),
@@ -535,6 +535,9 @@ impl NodeDetail {
                     state: self.state.clone(),
                 })
             }
+            NodeKind::Project => Err(String::from(
+                "Project nodes do not have a legacy NodeDetail representation",
+            )),
         }
     }
 }
@@ -580,8 +583,8 @@ impl ProjectResponse {
 mod tests {
     use super::*;
     use alloc::vec;
-    use lpc_source::legacy::nodes::shader::ShaderConfig;
-    use lpc_source::legacy::nodes::texture::{TextureConfig, TextureFormat};
+    use lpc_source::node::shader::ShaderDef;
+    use lpc_source::node::texture::{TextureDef, TextureFormat};
     use serde_json::Value;
 
     #[test]
@@ -619,7 +622,7 @@ mod tests {
             .set(FrameId::default(), TextureFormat::Rgba16);
         let detail = NodeDetail {
             path: LpPathBuf::from("/src/texture.texture"),
-            config: Box::new(TextureConfig {
+            config: Box::new(TextureDef {
                 width: 100,
                 height: 200,
             }),
@@ -647,7 +650,7 @@ mod tests {
         let shader_state = crate::legacy::nodes::shader::ShaderState::new(FrameId::default());
         let detail = NodeDetail {
             path: LpPathBuf::from("/src/shader.shader"),
-            config: Box::new(ShaderConfig::default()),
+            config: Box::new(ShaderDef::default()),
             state: NodeState::Shader(shader_state),
         };
         let serializable = detail.to_serializable().unwrap();
@@ -671,7 +674,7 @@ mod tests {
             NodeId::new(1),
             NodeDetail {
                 path: LpPathBuf::from("/src/texture.texture"),
-                config: Box::new(TextureConfig {
+                config: Box::new(TextureDef {
                     width: 100,
                     height: 200,
                 }),
@@ -747,7 +750,7 @@ mod tests {
             .set(FrameId::default(), TextureFormat::Rgba16);
         let detail = SerializableNodeDetail::Texture {
             path: LpPathBuf::from("/src/texture.texture"),
-            config: TextureConfig {
+            config: TextureDef {
                 width: 100,
                 height: 200,
             },
@@ -987,7 +990,7 @@ mod tests {
                 NodeId::new(1),
                 SerializableNodeDetail::Texture {
                     path: LpPathBuf::from("/src/texture.texture"),
-                    config: TextureConfig {
+                    config: TextureDef {
                         width: 100,
                         height: 200,
                     },
