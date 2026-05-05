@@ -5,30 +5,31 @@ use alloc::vec;
 
 use lpc_model::FrameId;
 use lpc_model::NodeId;
-use lpc_model::prop::PropPath;
-use lpc_model::prop::prop_path::parse_path;
+use lpc_model::prop::ValuePath;
+use lpc_model::prop::value_path::parse_path;
 use lpc_source::node::texture::{TextureDef, TextureFormat};
 use lps_shared::LpsValueF32;
 
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
-use crate::prop::RuntimePropAccess;
+use crate::prop::ProducedSlotAccess;
+use crate::runtime_product::RuntimeProduct;
 
-fn width_path() -> PropPath {
+fn width_path() -> ValuePath {
     parse_path("width").expect("width path")
 }
 
-fn height_path() -> PropPath {
+fn height_path() -> ValuePath {
     parse_path("height").expect("height path")
 }
 
-fn format_path() -> PropPath {
+fn format_path() -> ValuePath {
     parse_path("format").expect("format path")
 }
 
 /// [`NodeId`] of the texture and conventional prop paths for width/height (used by [`super::ShaderNode`]).
 pub(crate) fn texture_dimension_query_targets(
     texture_node_id: NodeId,
-) -> (NodeId, PropPath, PropPath) {
+) -> (NodeId, ValuePath, ValuePath) {
     (texture_node_id, width_path(), height_path())
 }
 
@@ -51,9 +52,9 @@ pub struct TextureNode {
 
 #[derive(Clone)]
 struct TextureProps {
-    width_path: PropPath,
-    height_path: PropPath,
-    format_path: PropPath,
+    width_path: ValuePath,
+    height_path: ValuePath,
+    format_path: ValuePath,
     width: i32,
     height: i32,
     format_tag: u32,
@@ -69,16 +70,25 @@ impl TextureProps {
     }
 }
 
-impl RuntimePropAccess for TextureProps {
-    fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+impl ProducedSlotAccess for TextureProps {
+    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         if path == &self.width_path {
-            return Some((LpsValueF32::I32(self.width), self.frame));
+            return Some((
+                RuntimeProduct::Value(LpsValueF32::I32(self.width)),
+                self.frame,
+            ));
         }
         if path == &self.height_path {
-            return Some((LpsValueF32::I32(self.height), self.frame));
+            return Some((
+                RuntimeProduct::Value(LpsValueF32::I32(self.height)),
+                self.frame,
+            ));
         }
         if path == &self.format_path {
-            return Some((LpsValueF32::U32(self.format_tag), self.frame));
+            return Some((
+                RuntimeProduct::Value(LpsValueF32::U32(self.format_tag)),
+                self.frame,
+            ));
         }
         None
     }
@@ -86,7 +96,7 @@ impl RuntimePropAccess for TextureProps {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         if self.frame.as_i64() <= since.as_i64() {
             return Box::new(core::iter::empty());
         }
@@ -94,17 +104,17 @@ impl RuntimePropAccess for TextureProps {
             vec![
                 (
                     self.width_path.clone(),
-                    LpsValueF32::I32(self.width),
+                    RuntimeProduct::Value(LpsValueF32::I32(self.width)),
                     self.frame,
                 ),
                 (
                     self.height_path.clone(),
-                    LpsValueF32::I32(self.height),
+                    RuntimeProduct::Value(LpsValueF32::I32(self.height)),
                     self.frame,
                 ),
                 (
                     self.format_path.clone(),
-                    LpsValueF32::U32(self.format_tag),
+                    RuntimeProduct::Value(LpsValueF32::U32(self.format_tag)),
                     self.frame,
                 ),
             ]
@@ -112,22 +122,24 @@ impl RuntimePropAccess for TextureProps {
         )
     }
 
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             vec![
                 (
                     self.width_path.clone(),
-                    LpsValueF32::I32(self.width),
+                    RuntimeProduct::Value(LpsValueF32::I32(self.width)),
                     self.frame,
                 ),
                 (
                     self.height_path.clone(),
-                    LpsValueF32::I32(self.height),
+                    RuntimeProduct::Value(LpsValueF32::I32(self.height)),
                     self.frame,
                 ),
                 (
                     self.format_path.clone(),
-                    LpsValueF32::U32(self.format_tag),
+                    RuntimeProduct::Value(LpsValueF32::U32(self.format_tag)),
                     self.frame,
                 ),
             ]
@@ -189,7 +201,7 @@ impl Node for TextureNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.props
     }
 }
@@ -235,9 +247,9 @@ mod tests {
             .attach_runtime_node(tid, Box::new(tex), frame)
             .expect("attach");
 
-        let w = QueryKey::NodeInput {
+        let w = QueryKey::ConsumedSlot {
             node: tid,
-            input: width_path(),
+            slot: width_path(),
         };
         let pv = resolve_with_engine_host(&mut engine, w, ResolveLogLevel::Off)
             .expect("resolve")

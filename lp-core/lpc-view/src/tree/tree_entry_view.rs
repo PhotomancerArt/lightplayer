@@ -29,7 +29,7 @@ pub struct TreeEntryView {
     pub children_ver: FrameId,
     // Coming soon (mirrors NodeEntry future fields):
     // pub config: NodeConfig,
-    // pub prop_cache: BTreeMap<PropPath, (LpsValue, FrameId)>,
+    // pub value_cache: BTreeMap<ValuePath, (LpsValue, FrameId)>,
     // pub prop_cache_ver: FrameId,
 }
 

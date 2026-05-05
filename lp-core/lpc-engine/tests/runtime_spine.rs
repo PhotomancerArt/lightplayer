@@ -1,4 +1,4 @@
-//! Integration-style tests for the M4.3 runtime spine (additive path; no legacy cutover).
+//! Integration-style tests for the demand-driven runtime spine.
 
 extern crate alloc;
 
@@ -12,13 +12,13 @@ use lpc_engine::node::NodeError;
 use lpc_engine::resolver::{ResolverContext, resolve_slot};
 use lpc_engine::{
     ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingKind, BindingPriority,
-    BindingRegistry, BindingSource, BindingTarget, Bus, Node, NodeRuntime, Production, QueryKey,
-    ResolveHost, ResolveLogLevel, ResolveSession, ResolveSource, ResolveTrace, Resolver,
+    BindingRegistry, BindingSource, BindingTarget, Bus, Node, Production, QueryKey, ResolveHost,
+    ResolveLogLevel, ResolveSession, ResolveSource, ResolveTrace, Resolver, RuntimeProduct,
     SessionHostResolver, SessionResolveError, SlotResolverCache, TickContext, TickResolver,
 };
 use lpc_model::{
-    FrameId, Kind, ModelValue, NodeId, NodePropSpec, PropPath, bus::ChannelName,
-    prop::prop_path::parse_path, tree::tree_path::TreePath,
+    FrameId, Kind, ModelValue, NodeId, NodePropSpec, ValuePath, bus::ChannelName,
+    prop::value_path::parse_path, tree::tree_path::TreePath,
 };
 use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::{
@@ -109,7 +109,7 @@ fn runtime_spine_bus_claim_publish_resolver_sees_value_in_resolved_slot() {
 }
 
 #[test]
-fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
+fn runtime_spine_node_prop_reads_outputs_via_produced_slot_access_facade() {
     let target_path = TreePath::parse("/show.demo/node_a.demo").unwrap();
     let outputs0 = parse_path("outputs[0]").unwrap();
 
@@ -139,7 +139,7 @@ fn runtime_spine_node_prop_reads_outputs_via_runtime_prop_access_facade() {
 }
 
 #[test]
-fn runtime_spine_node_prop_non_outputs_returns_resolve_error() {
+fn runtime_spine_node_prop_without_target_falls_back_to_default() {
     let mut cache = SlotResolverCache::new();
     let config = NodeInvocation::new(ArtifactLocator::path("d.lp"));
 
@@ -148,12 +148,9 @@ fn runtime_spine_node_prop_non_outputs_returns_resolve_error() {
         .with_binding("params.x", SrcBinding::NodeProp(spec));
 
     let prop = parse_path("params.x").unwrap();
-    let err = resolve_slot(&mut cache, &config, &prop, &ctx).unwrap_err();
-    assert!(
-        err.message.contains("outputs"),
-        "expected outputs-namespace rejection: {}",
-        err.message
-    );
+    let slot = resolve_slot(&mut cache, &config, &prop, &ctx).unwrap();
+    assert!(matches!(slot.value, LpsValueF32::F32(0.0)));
+    assert_eq!(slot.source, ResolveSource::Failed);
 }
 
 #[test]
@@ -231,14 +228,11 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 }
 
 #[test]
-fn runtime_spine_legacy_and_node_exports_are_reachable() {
-    fn assert_legacy_ptr(_: Option<&dyn NodeRuntime>) {}
+fn runtime_spine_node_export_is_reachable() {
     fn assert_spine_ptr(_: Option<&dyn Node>) {}
 
-    assert_legacy_ptr(None);
     assert_spine_ptr(None);
 
-    let _: Option<fn(&dyn lpc_engine::nodes::NodeRuntime)> = None;
     let _: Option<fn(&dyn lpc_engine::node::Node)> = None;
 }
 
@@ -247,17 +241,18 @@ fn runtime_spine_legacy_and_node_exports_are_reachable() {
 /// Maps node path → prop values; [`ResolverContext::target_prop`] reads like engine-side dereference.
 #[derive(Default, Clone)]
 struct MapRuntimeProps {
-    values: Vec<(PropPath, LpsValueF32, FrameId)>,
+    values: Vec<(ValuePath, RuntimeProduct, FrameId)>,
 }
 
 impl MapRuntimeProps {
-    fn insert(&mut self, path: PropPath, value: LpsValueF32, frame: FrameId) {
-        self.values.push((path, value, frame));
+    fn insert(&mut self, path: ValuePath, value: LpsValueF32, frame: FrameId) {
+        self.values
+            .push((path, RuntimeProduct::Value(value), frame));
     }
 }
 
-impl lpc_engine::RuntimePropAccess for MapRuntimeProps {
-    fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+impl lpc_engine::ProducedSlotAccess for MapRuntimeProps {
+    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -267,7 +262,7 @@ impl lpc_engine::RuntimePropAccess for MapRuntimeProps {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -276,7 +271,9 @@ impl lpc_engine::RuntimePropAccess for MapRuntimeProps {
         )
     }
 
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -288,8 +285,8 @@ impl lpc_engine::RuntimePropAccess for MapRuntimeProps {
 struct SyntheticResolverContext<'a> {
     frame: FrameId,
     bus: Option<&'a Bus>,
-    bindings: BTreeMap<PropPath, SrcBinding>,
-    defaults: BTreeMap<PropPath, LpsValueF32>,
+    bindings: BTreeMap<ValuePath, SrcBinding>,
+    defaults: BTreeMap<ValuePath, LpsValueF32>,
     targets: BTreeMap<TreePath, MapRuntimeProps>,
 }
 
@@ -335,27 +332,28 @@ impl ResolverContext for SyntheticResolverContext<'_> {
             .and_then(|b| b.read(channel).map(|v| (v, b.last_writer_frame(channel))))
     }
 
-    fn target_prop(&self, node: &TreePath, prop: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+    fn target_prop(&self, node: &TreePath, prop: &ValuePath) -> Option<(LpsValueF32, FrameId)> {
         self.targets
             .get(node)
-            .and_then(|t| RuntimePropAccessShim(t).get(prop))
+            .and_then(|t| ProducedSlotAccessShim(t).get(prop))
     }
 
-    fn artifact_binding(&self, prop: &PropPath) -> Option<SrcBinding> {
+    fn artifact_binding(&self, prop: &ValuePath) -> Option<SrcBinding> {
         self.bindings.get(prop).cloned()
     }
 
-    fn artifact_default(&self, prop: &PropPath) -> Option<LpsValueF32> {
+    fn artifact_default(&self, prop: &ValuePath) -> Option<LpsValueF32> {
         self.defaults.get(prop).cloned()
     }
 }
 
-/// Wraps a reference so we can call [`lpc_engine::RuntimePropAccess`] without importing the trait twice.
-struct RuntimePropAccessShim<'a>(&'a MapRuntimeProps);
+/// Wraps a reference so we can call [`lpc_engine::ProducedSlotAccess`] without importing the trait twice.
+struct ProducedSlotAccessShim<'a>(&'a MapRuntimeProps);
 
-impl RuntimePropAccessShim<'_> {
-    fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
-        lpc_engine::RuntimePropAccess::get(self.0, path)
+impl ProducedSlotAccessShim<'_> {
+    fn get(&self, path: &ValuePath) -> Option<(LpsValueF32, FrameId)> {
+        lpc_engine::ProducedSlotAccess::get(self.0, path)
+            .and_then(|(product, frame)| product.as_value().cloned().map(|value| (value, frame)))
     }
 }
 
@@ -387,26 +385,28 @@ impl Node for TickProbeNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn lpc_engine::RuntimePropAccess {
+    fn produced(&self) -> &dyn lpc_engine::ProducedSlotAccess {
         &EMPTY_PROPS
     }
 }
 
 struct EmptyProps;
 
-impl lpc_engine::RuntimePropAccess for EmptyProps {
-    fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+impl lpc_engine::ProducedSlotAccess for EmptyProps {
+    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
         _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(alloc::vec::Vec::new().into_iter())
     }
 
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(alloc::vec::Vec::new().into_iter())
     }
 }

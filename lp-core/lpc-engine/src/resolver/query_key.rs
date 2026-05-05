@@ -1,13 +1,13 @@
 //! Cache and cycle-detection key for engine resolution.
 
-use lpc_model::{ChannelName, NodeId, PropPath};
+use lpc_model::{ChannelName, NodeId, ValuePath};
 
 /// Demand/cache key for one resolved value in the engine resolver.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
     Bus(ChannelName),
-    NodeOutput { node: NodeId, output: PropPath },
-    NodeInput { node: NodeId, input: PropPath },
+    ProducedSlot { node: NodeId, slot: ValuePath },
+    ConsumedSlot { node: NodeId, slot: ValuePath },
 }
 
 #[cfg(test)]
@@ -18,7 +18,7 @@ mod tests {
     use alloc::vec::Vec;
     use lpc_model::ChannelName;
     use lpc_model::NodeId;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
 
     #[test]
     fn query_key_works_as_btree_map_key() {
@@ -27,9 +27,9 @@ mod tests {
         let k2 = QueryKey::Bus(ChannelName(String::from("b")));
         m.insert(k1.clone(), 1u32);
         m.insert(
-            QueryKey::NodeOutput {
+            QueryKey::ProducedSlot {
                 node: NodeId::new(0),
-                output: parse_path("out").unwrap(),
+                slot: parse_path("out").unwrap(),
             },
             2,
         );

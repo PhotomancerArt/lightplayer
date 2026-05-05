@@ -1,8 +1,7 @@
 //! Engine spine [`Node`] trait: tick, destroy, memory pressure, and produced props.
 
 use crate::prop::{
-    EMPTY_RUNTIME_OUTPUTS, EMPTY_RUNTIME_STATE, RuntimeOutputAccess, RuntimePropAccess,
-    RuntimeStateAccess,
+    EMPTY_PRODUCED_SLOTS, EMPTY_RUNTIME_STATE, ProducedSlotAccess, RuntimeStateAccess,
 };
 
 use crate::render_product::RenderProductId;
@@ -30,8 +29,7 @@ pub struct ShaderProjectionWire<'a> {
     pub render_product_id: Option<RenderProductId>,
 }
 
-/// Runtime node instance for the new spine (`node/`). Distinct from legacy
-/// [`crate::nodes::NodeRuntime`].
+/// Runtime node instance for the demand-driven engine spine.
 pub trait Node {
     /// Allocate [`RenderProductId`] / [`RuntimeBufferId`] slots owned by this node before first tick.
     ///
@@ -51,11 +49,9 @@ pub trait Node {
         ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError>;
 
-    fn props(&self) -> &dyn RuntimePropAccess;
-
-    /// Node-owned non-scalar products (e.g. render handles). Default: none.
-    fn outputs(&self) -> &dyn RuntimeOutputAccess {
-        &EMPTY_RUNTIME_OUTPUTS
+    /// Node-owned produced values and runtime products. Default: none.
+    fn produced(&self) -> &dyn ProducedSlotAccess {
+        &EMPTY_PRODUCED_SLOTS
     }
 
     /// Reserved for sync/debug state snapshots. Default: empty [`RuntimeStateAccess`].
@@ -97,8 +93,9 @@ mod tests {
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
     };
-    use lpc_model::prop::prop_path::parse_path;
-    use lpc_model::{FrameId, NodeId, PropPath};
+    use crate::runtime_product::RuntimeProduct;
+    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::{FrameId, NodeId, ValuePath};
     use lps_shared::LpsValueF32;
 
     struct EmptyResolveHost;
@@ -116,7 +113,7 @@ mod tests {
     }
 
     struct DummyProps {
-        values: Vec<(PropPath, LpsValueF32, FrameId)>,
+        values: Vec<(ValuePath, RuntimeProduct, FrameId)>,
     }
 
     impl Default for DummyProps {
@@ -125,8 +122,8 @@ mod tests {
         }
     }
 
-    impl RuntimePropAccess for DummyProps {
-        fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+    impl ProducedSlotAccess for DummyProps {
+        fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
             self.values
                 .iter()
                 .find(|(p, _, _)| p == path)
@@ -136,7 +133,7 @@ mod tests {
         fn iter_changed_since<'a>(
             &'a self,
             since: FrameId,
-        ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
             Box::new(
                 self.values
                     .iter()
@@ -147,7 +144,7 @@ mod tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
             Box::new(
                 self.values
                     .iter()
@@ -164,9 +161,11 @@ mod tests {
         fn new() -> Self {
             let mut props = DummyProps::default();
             let path = parse_path("out").expect("path");
-            props
-                .values
-                .push((path, LpsValueF32::F32(0.25), FrameId::new(1)));
+            props.values.push((
+                path,
+                RuntimeProduct::Value(LpsValueF32::F32(0.25)),
+                FrameId::new(1),
+            ));
             Self { props }
         }
     }
@@ -188,7 +187,7 @@ mod tests {
             Ok(())
         }
 
-        fn props(&self) -> &dyn RuntimePropAccess {
+        fn produced(&self) -> &dyn ProducedSlotAccess {
             &self.props
         }
     }
@@ -200,12 +199,15 @@ mod tests {
     }
 
     #[test]
-    fn props_returns_runtime_prop_access() {
+    fn props_returns_produced_slot_access() {
         let node = DummyNode::new();
         let path = parse_path("out").expect("path");
-        let got = node.props().get(&path);
+        let got = node.produced().get(&path);
         assert!(got.is_some());
-        assert!(got.unwrap().0.eq(&LpsValueF32::F32(0.25)));
+        assert!(matches!(
+            got.unwrap().0,
+            RuntimeProduct::Value(LpsValueF32::F32(0.25))
+        ));
 
         let registry = crate::binding::BindingRegistry::new();
         let mut res = Resolver::new();
@@ -232,8 +234,11 @@ mod tests {
         let mut dyn_node: Box<dyn Node> = Box::new(DummyNode::new());
         dyn_node.tick(&mut tick).expect("tick");
 
-        let from_dyn = dyn_node.props().get(&path);
+        let from_dyn = dyn_node.produced().get(&path);
         assert!(from_dyn.is_some());
-        assert!(from_dyn.unwrap().0.eq(&LpsValueF32::F32(0.25)));
+        assert!(matches!(
+            from_dyn.unwrap().0,
+            RuntimeProduct::Value(LpsValueF32::F32(0.25))
+        ));
     }
 }

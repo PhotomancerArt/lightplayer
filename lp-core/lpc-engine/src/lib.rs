@@ -43,15 +43,13 @@ pub use bus::{Bus, BusError, ChannelEntry};
 pub use engine::{Engine, EngineError};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
-pub use legacy::nodes::{FixtureRuntime, OutputRuntime, ShaderRuntime, TextureRuntime};
 pub use legacy::output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
-pub use nodes::NodeRuntime;
 pub use project_runtime::{
     CompatibilityProjection, CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime,
     OutputFlushError, RuntimeServices,
 };
-pub use prop::{RuntimeOutputAccess, RuntimePropAccess, RuntimeStateAccess};
+pub use prop::{ProducedSlotAccess, RuntimeStateAccess};
 pub use render_product::{
     RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
     RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, TextureRenderProduct,
@@ -63,7 +61,6 @@ pub use resolver::{
     ResolvedSlot, Resolver, ResolverCache, SessionHostResolver, SessionResolveError,
     SlotResolverCache, TickResolver, TraceGuard,
 };
-pub use runtime::{NodeInitContext, RenderContext};
 pub use runtime_buffer::{
     RuntimeBuffer, RuntimeBufferError, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
     RuntimeBufferStore, RuntimeChannelSampleFormat, RuntimeColorLayout, RuntimeTextureFormat,

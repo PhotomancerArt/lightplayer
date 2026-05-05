@@ -5,33 +5,35 @@ use alloc::boxed::Box;
 
 use alloc::vec::Vec;
 
-use lpc_model::prop::PropPath;
+use lpc_model::prop::ValuePath;
 use lpc_model::{FrameId, Versioned};
-use lps_shared::LpsValueF32;
 
 use crate::node::{
     DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
     TickContext,
 };
-use crate::prop::RuntimePropAccess;
+use crate::prop::ProducedSlotAccess;
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
+use crate::runtime_product::RuntimeProduct;
 
 #[derive(Default)]
 struct EmptyProps;
 
-impl RuntimePropAccess for EmptyProps {
-    fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+impl ProducedSlotAccess for EmptyProps {
+    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
         _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 }
@@ -88,7 +90,7 @@ impl Node for OutputNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.props
     }
 }

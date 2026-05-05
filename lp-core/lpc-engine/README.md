@@ -3,14 +3,12 @@
 The LightPlayer engine runtime for loaded projects.
 
 This crate owns engine-only behavior: project runtime state, node trees,
-resolution, bindings, runtime property access, and the boundary between
+resolution, bindings, produced-slot access, and the boundary between
 shader/runtime values and portable model or wire values.
 
 **Runtime spine:** `engine::Engine` is the core runtime owner for the new
 demand-driven path. It owns the `NodeTree`, `BindingRegistry`, engine-level
-`Resolver`, artifact manager, frame state, and demand roots. Legacy visual
-runtimes remain under `nodes` (`LegacyNodeRuntime`) and `legacy` beside this
-spine until the cutover milestones.
+`Resolver`, artifact manager, frame state, and demand roots.
 
 **Bindings and resolution:** `binding::BindingRegistry` owns binding identity,
 metadata, and discovery indexes. Bus names remain useful runtime vocabulary for
@@ -34,8 +32,12 @@ Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
 
 **Produced values:** demand-driven resolution caches
 [`resolver::production::Production`]: a versioned [`runtime_product::RuntimeProduct`]
-(`Value` = carried `LpsValueF32`, `Render` = engine product handle). That is
-separate from [`prop::RuntimePropAccess`] and the per-node [`resolver::resolved_slot::ResolvedSlot`] slot cascade, which stay on `LpsValueF32` for shader/wire compatibility and legacy binding.
+(`Value` = carried `LpsValueF32`, `Render` = engine product handle, `Buffer` =
+runtime-buffer handle). Nodes expose produced values through
+[`prop::ProducedSlotAccess`]. The per-node
+[`resolver::resolved_slot::ResolvedSlot`] cascade remains on `LpsValueF32` for
+shader/wire compatibility while the runtime model moves toward generic slot
+products.
 
 **Naming:** Prefer plain engine/runtime nouns when the crate already owns the
 concept (`Engine`, `ProjectRuntime`, `NodeTree`, `BindingRegistry`, `Resolver`).

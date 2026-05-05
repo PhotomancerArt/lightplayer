@@ -2,7 +2,7 @@
 
 use crate::resolver::resolved_slot::ResolvedSlot;
 use alloc::collections::BTreeMap;
-use lpc_model::PropPath;
+use lpc_model::ValuePath;
 
 /// Cache keyed by authored property path for legacy slot resolution.
 ///
@@ -10,7 +10,7 @@ use lpc_model::PropPath;
 /// keyed by [`super::QueryKey`].
 #[derive(Clone, Debug, Default)]
 pub struct SlotResolverCache {
-    entries: BTreeMap<PropPath, ResolvedSlot>,
+    entries: BTreeMap<ValuePath, ResolvedSlot>,
 }
 
 impl SlotResolverCache {
@@ -20,15 +20,15 @@ impl SlotResolverCache {
         }
     }
 
-    pub fn get(&self, path: &PropPath) -> Option<&ResolvedSlot> {
+    pub fn get(&self, path: &ValuePath) -> Option<&ResolvedSlot> {
         self.entries.get(path)
     }
 
-    pub fn insert(&mut self, path: PropPath, slot: ResolvedSlot) -> Option<ResolvedSlot> {
+    pub fn insert(&mut self, path: ValuePath, slot: ResolvedSlot) -> Option<ResolvedSlot> {
         self.entries.insert(path, slot)
     }
 
-    pub fn remove(&mut self, path: &PropPath) -> Option<ResolvedSlot> {
+    pub fn remove(&mut self, path: &ValuePath) -> Option<ResolvedSlot> {
         self.entries.remove(path)
     }
 
@@ -44,7 +44,7 @@ impl SlotResolverCache {
         self.entries.is_empty()
     }
 
-    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, PropPath, ResolvedSlot> {
+    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, ValuePath, ResolvedSlot> {
         self.entries.iter()
     }
 }
@@ -56,8 +56,8 @@ mod tests {
     use crate::resolver::resolved_slot::ResolvedSlot;
     use alloc::vec::Vec;
     use lpc_model::FrameId;
-    use lpc_model::PropPath;
-    use lpc_model::prop::prop_path::Segment;
+    use lpc_model::ValuePath;
+    use lpc_model::prop::value_path::Segment;
     use lps_shared::LpsValueF32;
 
     fn make_slot(value: f32, frame: i64) -> ResolvedSlot {
@@ -68,11 +68,11 @@ mod tests {
         )
     }
 
-    fn make_path(s: &str) -> PropPath {
-        lpc_model::prop::prop_path::parse_path(s).unwrap()
+    fn make_path(s: &str) -> ValuePath {
+        lpc_model::prop::value_path::parse_path(s).unwrap()
     }
 
-    fn first_seg_is_field(path: &PropPath, expected: &str) -> bool {
+    fn first_seg_is_field(path: &ValuePath, expected: &str) -> bool {
         matches!(
             path.first(),
             Some(Segment::Field(s)) if s == expected

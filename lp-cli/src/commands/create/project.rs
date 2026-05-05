@@ -5,8 +5,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use lpc_model::NodeLoc;
-use lpc_model::{AsLpPath, AsLpPathBuf};
+use lpc_model::{AsLpPath, AsLpPathBuf, RelativeNodeRef};
 use lpc_source::node::{
     fixture::{ColorOrder, FixtureDef, MappingConfig},
     output::OutputDef,
@@ -141,7 +140,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
     // Create shader node
     let shader_config = ShaderDef {
         glsl_path: "shader.glsl".as_path_buf(),
-        texture_loc: NodeLoc::from("..texture"),
+        texture_loc: RelativeNodeRef::parse("..texture").expect("valid node ref"),
         render_order: 0,
         glsl_opts: lpc_source::legacy::glsl_opts::GlslOpts::default(),
     };
@@ -234,8 +233,8 @@ vec4 render(vec2 pos) {
 
     // Create fixture node
     let fixture_config = FixtureDef {
-        output_loc: NodeLoc::from("..output"),
-        texture_loc: NodeLoc::from("..texture"),
+        output_loc: RelativeNodeRef::parse("..output").expect("valid node ref"),
+        texture_loc: RelativeNodeRef::parse("..texture").expect("valid node ref"),
         mapping: MappingConfig::PathPoints {
             paths: vec![],
             sample_diameter: 2.0,

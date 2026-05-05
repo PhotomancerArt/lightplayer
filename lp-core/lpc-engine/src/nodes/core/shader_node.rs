@@ -8,8 +8,8 @@ use alloc::vec;
 use lp_shader::LpsTextureBuf;
 use lpc_model::FrameId;
 use lpc_model::NodeId;
-use lpc_model::prop::PropPath;
-use lpc_model::prop::prop_path::parse_path;
+use lpc_model::prop::ValuePath;
+use lpc_model::prop::value_path::parse_path;
 use lpc_source::legacy::glsl_opts::{AddSubMode, DivMode, MulMode};
 use lpc_source::node::shader::ShaderDef;
 use lps_shared::LpsValueF32;
@@ -20,7 +20,7 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
     ShaderProjectionWire, TickContext,
 };
-use crate::prop::{RuntimeOutputAccess, RuntimePropAccess};
+use crate::prop::ProducedSlotAccess;
 use crate::render_product::{RenderProductId, TextureRenderProduct};
 use crate::resolver::QueryKey;
 use crate::runtime_product::RuntimeProduct;
@@ -30,40 +30,19 @@ use super::texture_node::texture_dimension_query_targets;
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end (matches legacy shader runtime).
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-pub fn shader_texture_output_path() -> PropPath {
+pub fn shader_texture_output_path() -> ValuePath {
     parse_path("texture").expect("texture output path")
 }
 
-/// Empty scalar props; shader texture output is only on [`ShaderRuntimeOutputs`].
-#[derive(Clone, Copy)]
-struct ShaderScalarProps;
-
-impl RuntimePropAccess for ShaderScalarProps {
-    fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
-        None
-    }
-
-    fn iter_changed_since<'a>(
-        &'a self,
-        _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
-        Box::new(core::iter::empty())
-    }
-
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
-        Box::new(core::iter::empty())
-    }
-}
-
 #[derive(Clone)]
-struct ShaderRuntimeOutputs {
-    path: PropPath,
+struct ShaderProducedSlots {
+    path: ValuePath,
     render_product_id: RenderProductId,
     last_frame: FrameId,
 }
 
-impl RuntimeOutputAccess for ShaderRuntimeOutputs {
-    fn get(&self, path: &PropPath) -> Option<(RuntimeProduct, FrameId)> {
+impl ProducedSlotAccess for ShaderProducedSlots {
+    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         if path == &self.path {
             Some((
                 RuntimeProduct::render(self.render_product_id),
@@ -72,6 +51,31 @@ impl RuntimeOutputAccess for ShaderRuntimeOutputs {
         } else {
             None
         }
+    }
+
+    fn iter_changed_since<'a>(
+        &'a self,
+        since: FrameId,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+        if self.last_frame.as_i64() > since.as_i64() {
+            Box::new(core::iter::once((
+                self.path.clone(),
+                RuntimeProduct::render(self.render_product_id),
+                self.last_frame,
+            )))
+        } else {
+            Box::new(core::iter::empty())
+        }
+    }
+
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+        Box::new(core::iter::once((
+            self.path.clone(),
+            RuntimeProduct::render(self.render_product_id),
+            self.last_frame,
+        )))
     }
 }
 
@@ -86,8 +90,7 @@ pub struct ShaderNode {
     placeholder_texture_height: u32,
     render_product_id: RenderProductId,
     resources_initialized: bool,
-    scalar_props: ShaderScalarProps,
-    outputs: ShaderRuntimeOutputs,
+    outputs: ShaderProducedSlots,
     shader: Option<Box<dyn LpShader>>,
     output_buf: Option<LpsTextureBuf>,
     compilation_error: Option<String>,
@@ -112,8 +115,7 @@ impl ShaderNode {
             placeholder_texture_height,
             render_product_id: dummy_id,
             resources_initialized: false,
-            scalar_props: ShaderScalarProps,
-            outputs: ShaderRuntimeOutputs {
+            outputs: ShaderProducedSlots {
                 path: shader_texture_output_path(),
                 render_product_id: dummy_id,
                 last_frame: FrameId::default(),
@@ -158,7 +160,7 @@ impl Node for ShaderNode {
         let tex = Box::new(self.build_placeholder_texture_product()?);
         let rid = ctx.insert_render_product(tex);
         self.render_product_id = rid;
-        self.outputs = ShaderRuntimeOutputs {
+        self.outputs = ShaderProducedSlots {
             path: shader_texture_output_path(),
             render_product_id: rid,
             last_frame: FrameId::default(),
@@ -185,15 +187,15 @@ impl Node for ShaderNode {
 
         let (tn, wpath, hpath) = texture_dimension_query_targets(self.texture_node_id);
         let w_prod = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node: tn,
-                input: wpath,
+                slot: wpath,
             })
             .map_err(|e| NodeError::msg(format!("resolve texture width: {}", e.message)))?;
         let h_prod = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node: tn,
-                input: hpath,
+                slot: hpath,
             })
             .map_err(|e| NodeError::msg(format!("resolve texture height: {}", e.message)))?;
 
@@ -285,11 +287,7 @@ impl Node for ShaderNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
-        &self.scalar_props
-    }
-
-    fn outputs(&self) -> &dyn RuntimeOutputAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.outputs
     }
 
@@ -460,7 +458,7 @@ mod tests {
 
         let cfg = ShaderDef {
             glsl_path: lpc_model::LpPathBuf::from("main.glsl"),
-            texture_loc: lpc_model::NodeLoc::from(""),
+            texture_loc: lpc_model::RelativeNodeRef::current(),
             render_order: 0,
             glsl_opts: Default::default(),
         };
@@ -478,10 +476,10 @@ mod tests {
     }
 
     #[test]
-    fn shader_render_output_is_on_runtime_output_access_only() {
+    fn shader_render_output_is_on_produced_slot_access() {
         let cfg = ShaderDef {
             glsl_path: lpc_model::LpPathBuf::from("main.glsl"),
-            texture_loc: lpc_model::NodeLoc::from(""),
+            texture_loc: lpc_model::RelativeNodeRef::current(),
             render_order: 0,
             glsl_opts: Default::default(),
         };
@@ -492,8 +490,7 @@ mod tests {
         node.init_resources(&mut ctx).expect("init resources");
         let rid = node.render_product_id();
         let p = shader_texture_output_path();
-        assert!(node.props().get(&p).is_none());
-        let (prod, _) = node.outputs().get(&p).expect("render output");
+        let (prod, _) = node.produced().get(&p).expect("render output");
         assert_eq!(prod.as_render(), Some(rid));
     }
 
@@ -502,9 +499,9 @@ mod tests {
         let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(1000).expect("tick");
 
-        let q = QueryKey::NodeOutput {
+        let q = QueryKey::ProducedSlot {
             node: sh_id,
-            output: shader_texture_output_path(),
+            slot: shader_texture_output_path(),
         };
         let prod = resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off)
             .expect("resolve")
@@ -519,9 +516,9 @@ mod tests {
         let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(500).expect("tick");
 
-        let q = QueryKey::NodeOutput {
+        let q = QueryKey::ProducedSlot {
             node: sh_id,
-            output: shader_texture_output_path(),
+            slot: shader_texture_output_path(),
         };
         resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off).expect("resolve");
 

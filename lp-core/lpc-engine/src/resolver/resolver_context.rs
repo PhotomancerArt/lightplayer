@@ -3,13 +3,13 @@
 //! This trait provides the minimal access the **slot** resolver needs to:
 //! - Read bus values and their frames
 //! - Read target node produced props as [`lps_shared::LpsValueF32`] (same shape as
-//!   [`crate::prop::RuntimePropAccess`], not [`crate::resolver::production::Production`])
+//!   [`crate::prop::ProducedSlotAccess`], not [`crate::resolver::production::Production`])
 //! - Look up artifact slot bindings and defaults
 //! - Know the current frame
 
 use lpc_model::bus::ChannelName;
 use lpc_model::project::FrameId;
-use lpc_model::prop::prop_path::PropPath;
+use lpc_model::prop::value_path::ValuePath;
 use lpc_model::tree::tree_path::TreePath;
 use lpc_source::prop::src_binding::SrcBinding;
 use lps_shared::LpsValueF32;
@@ -34,17 +34,17 @@ pub trait ResolverContext {
     ///
     /// Values are shader-runtime [`LpsValueF32`] for this cascade; render-product
     /// handles use the `ResolveSession` / [`crate::resolver::production::Production`] path instead.
-    fn target_prop(&self, node: &TreePath, prop: &PropPath) -> Option<(LpsValueF32, FrameId)>;
+    fn target_prop(&self, node: &TreePath, prop: &ValuePath) -> Option<(LpsValueF32, FrameId)>;
 
     /// Get the artifact's binding for a property path, if any.
     ///
     /// This comes from the artifact's slot `bind` field.
-    fn artifact_binding(&self, prop: &PropPath) -> Option<SrcBinding>;
+    fn artifact_binding(&self, prop: &ValuePath) -> Option<SrcBinding>;
 
     /// Get the artifact's default value for a property path, if any.
     ///
     /// This comes from the artifact's slot `default` or derived shape.
-    fn artifact_default(&self, prop: &PropPath) -> Option<LpsValueF32>;
+    fn artifact_default(&self, prop: &ValuePath) -> Option<LpsValueF32>;
 }
 
 #[cfg(test)]
@@ -54,15 +54,15 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::bus::ChannelName;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
 
     /// A dummy context for testing the resolver in isolation.
     struct DummyContext {
         frame: FrameId,
         bus: BTreeMap<ChannelName, (LpsValueF32, FrameId)>,
-        targets: BTreeMap<TreePath, Vec<(PropPath, LpsValueF32, FrameId)>>,
-        bindings: BTreeMap<PropPath, SrcBinding>,
-        defaults: BTreeMap<PropPath, LpsValueF32>,
+        targets: BTreeMap<TreePath, Vec<(ValuePath, LpsValueF32, FrameId)>>,
+        bindings: BTreeMap<ValuePath, SrcBinding>,
+        defaults: BTreeMap<ValuePath, LpsValueF32>,
     }
 
     impl DummyContext {
@@ -118,7 +118,7 @@ mod tests {
             self.bus.get(channel).map(|(v, f)| (v, *f))
         }
 
-        fn target_prop(&self, node: &TreePath, prop: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+        fn target_prop(&self, node: &TreePath, prop: &ValuePath) -> Option<(LpsValueF32, FrameId)> {
             self.targets.get(node).and_then(|entries| {
                 entries
                     .iter()
@@ -127,11 +127,11 @@ mod tests {
             })
         }
 
-        fn artifact_binding(&self, prop: &PropPath) -> Option<SrcBinding> {
+        fn artifact_binding(&self, prop: &ValuePath) -> Option<SrcBinding> {
             self.bindings.get(prop).cloned()
         }
 
-        fn artifact_default(&self, prop: &PropPath) -> Option<LpsValueF32> {
+        fn artifact_default(&self, prop: &ValuePath) -> Option<LpsValueF32> {
             self.defaults.get(prop).cloned()
         }
     }

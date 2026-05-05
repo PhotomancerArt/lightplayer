@@ -1,6 +1,6 @@
 //! ChannelEntry — per-channel state on the bus.
 
-use lpc_model::{FrameId, Kind, NodeId, PropPath};
+use lpc_model::{FrameId, Kind, NodeId, ValuePath};
 use lps_shared::LpsValueF32;
 
 /// Per-channel state on the bus.
@@ -8,7 +8,7 @@ use lps_shared::LpsValueF32;
 pub struct ChannelEntry {
     /// The current writer for this channel, if any. Set by
     /// `Bus::claim_writer`.
-    pub writer: Option<(NodeId, PropPath)>,
+    pub writer: Option<(NodeId, ValuePath)>,
 
     /// Last value published to this channel. `None` means no
     /// publish has happened yet.

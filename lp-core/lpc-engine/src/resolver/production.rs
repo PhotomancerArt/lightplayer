@@ -2,7 +2,7 @@
 
 use crate::binding::BindingId;
 use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
-use lpc_model::{NodeId, PropPath, Versioned};
+use lpc_model::{NodeId, ValuePath, Versioned};
 use lps_shared::LpsValueF32;
 
 /// One cached production: versioned runtime product and where it came from.
@@ -36,7 +36,7 @@ impl Production {
 pub enum ProductionSource {
     Literal,
     Default,
-    NodeOutput { node: NodeId, output: PropPath },
+    ProducedSlot { node: NodeId, slot: ValuePath },
     BusBinding { binding: BindingId },
 }
 
@@ -48,7 +48,7 @@ mod tests {
     use lpc_model::FrameId;
     use lpc_model::NodeId;
     use lpc_model::Versioned;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
     use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32};
 
     #[test]
@@ -73,9 +73,9 @@ mod tests {
         let v = Versioned::new(FrameId::new(3), LpsValueF32::F32(1.25));
         let pv = Production::value(
             v,
-            ProductionSource::NodeOutput {
+            ProductionSource::ProducedSlot {
                 node: NodeId::new(9),
-                output: parse_path("result").unwrap(),
+                slot: parse_path("result").unwrap(),
             },
         )
         .expect("production");
@@ -87,9 +87,9 @@ mod tests {
         assert_eq!(pv.product.changed_frame(), FrameId::new(3));
         assert_eq!(
             pv.source,
-            ProductionSource::NodeOutput {
+            ProductionSource::ProducedSlot {
                 node: NodeId::new(9),
-                output: parse_path("result").unwrap(),
+                slot: parse_path("result").unwrap(),
             }
         );
 

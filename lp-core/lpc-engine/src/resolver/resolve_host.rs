@@ -1,5 +1,5 @@
-//! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::NodeOutput`] (and
-//! unbound [`crate::resolver::QueryKey::NodeInput`]) production.
+//! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::ProducedSlot`] (and
+//! unbound [`crate::resolver::QueryKey::ConsumedSlot`]) production.
 
 use crate::render_product::{
     NativeTexturePayload, RenderProductError, RenderProductId, RenderSampleBatch,

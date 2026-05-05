@@ -23,7 +23,7 @@ pub use lpc_source::{artifact, presentation, schema};
 pub use lpc_model::tree::tree_path::TreePath;
 pub use lpc_model::{
     ChannelName, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, DomainError, Kind,
-    NodeId, NodeName, NodePropSpec, PropPath,
+    NodeId, NodeName, NodePropSpec, ValuePath,
 };
 pub use lpc_source::prop::{binding, shape};
 pub use lpc_source::{

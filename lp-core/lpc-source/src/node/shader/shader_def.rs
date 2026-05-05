@@ -1,7 +1,7 @@
 use crate::legacy::glsl_opts::GlslOpts;
 use crate::node::NodeKind;
 use crate::node::node_def::NodeDef;
-use lpc_model::NodeLoc;
+use lpc_model::RelativeNodeRef;
 use lpc_model::{AsLpPathBuf, LpPathBuf};
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: LpPathBuf,
     /// Texture node locator to render into.
-    pub texture_loc: NodeLoc,
+    pub texture_loc: RelativeNodeRef,
     /// Render order - lower numbers render first (default 0)
     pub render_order: i32,
     /// GLSL compilation options
@@ -23,7 +23,7 @@ impl Default for ShaderDef {
     fn default() -> Self {
         Self {
             glsl_path: "main.glsl".as_path_buf(),
-            texture_loc: NodeLoc::from(""),
+            texture_loc: RelativeNodeRef::current(),
             render_order: 0,
             glsl_opts: GlslOpts::default(),
         }
@@ -49,7 +49,7 @@ mod tests {
     fn test_shader_def_kind() {
         let def = ShaderDef {
             glsl_path: "main.glsl".as_path_buf(),
-            texture_loc: NodeLoc::from("..tex_texture"),
+            texture_loc: RelativeNodeRef::parse("..tex_texture").unwrap(),
             render_order: 0,
             glsl_opts: GlslOpts::default(),
         };

@@ -16,6 +16,7 @@ extern crate std;
 pub mod error;
 pub mod node;
 pub mod prop;
+pub mod slot;
 pub mod types;
 
 // --- Shared surface (non-wire) ---------------------------------------------------------------
@@ -39,16 +40,18 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// Cross-cutting error for domain property access and validation.
 pub use error::DomainError;
 pub use kind::Kind;
-pub use prop::PropNamespace;
 pub use prop::Versioned;
 pub use prop::{ModelStructMember, ModelType, ModelValue};
 
 pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
-pub use node::{NodeId, NodeLoc, NodeName, NodeNameError};
+pub use node::{
+    NodeId, NodeName, NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
+};
 pub use project::{FrameId, ProjectConfig};
-pub use prop::prop_path::PropPath;
+pub use prop::value_path::ValuePath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
+pub use slot::{SlotName, SlotNameError, SlotOwner, SlotRef, ValueRef};
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

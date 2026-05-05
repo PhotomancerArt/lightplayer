@@ -278,9 +278,10 @@ mod tests {
         Production, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
         SessionHostResolver, TickResolver,
     };
+    use crate::runtime_product::RuntimeProduct;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::prop::prop_path::{PropPath, parse_path};
+    use lpc_model::prop::value_path::{ValuePath, parse_path};
     use lpc_source::SrcValueSpec;
 
     struct PanicProduceHost;
@@ -378,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn tick_context_resolve_node_input_query() {
+    fn tick_context_resolve_consumed_slot_query() {
         let mut registry = BindingRegistry::new();
         let frame = FrameId::new(10);
         let node = NodeId::new(3);
@@ -389,9 +390,9 @@ mod tests {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
                         lpc_model::ModelValue::F32(4.25),
                     )),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node,
-                        input: input.clone(),
+                        slot: input.clone(),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Amplitude,
@@ -417,11 +418,11 @@ mod tests {
         );
 
         let pv = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node,
-                input: input.clone(),
+                slot: input.clone(),
             })
-            .expect("resolve node input");
+            .expect("resolve consumed slot");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(4.25)));
     }
 
@@ -452,7 +453,7 @@ mod tests {
 
     struct FixtureProduceHost {
         node: NodeId,
-        out_path: PropPath,
+        out_path: ValuePath,
     }
 
     impl ResolveHost for FixtureProduceHost {
@@ -462,8 +463,8 @@ mod tests {
             session: &mut ResolveSession<'_>,
         ) -> Result<Production, crate::resolver::SessionResolveError> {
             match query {
-                QueryKey::NodeInput { node, input }
-                    if *node == self.node && *input == self.out_path =>
+                QueryKey::ConsumedSlot { node, slot }
+                    if *node == self.node && *slot == self.out_path =>
                 {
                     Ok(Production::value(
                         lpc_model::Versioned::new(session.frame_id(), LpsValueF32::F32(11.0)),
@@ -509,22 +510,22 @@ mod tests {
             Ok(())
         }
 
-        fn props(&self) -> &dyn crate::prop::RuntimePropAccess {
+        fn produced(&self) -> &dyn crate::prop::ProducedSlotAccess {
             struct EmptyProps;
-            impl crate::prop::RuntimePropAccess for EmptyProps {
-                fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+            impl crate::prop::ProducedSlotAccess for EmptyProps {
+                fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
                     None
                 }
                 fn iter_changed_since<'b>(
                     &'b self,
                     _since: FrameId,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'b>
+                ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'b>
                 {
                     alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
                 }
                 fn snapshot<'b>(
                     &'b self,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'b>
+                ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'b>
                 {
                     alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
                 }
@@ -580,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn dummy_node_can_resolve_node_input_via_host_from_tick() {
+    fn dummy_node_can_resolve_consumed_slot_via_host_from_tick() {
         let registry = BindingRegistry::new();
         let frame = FrameId::new(10);
         let node_id = NodeId::new(2);
@@ -594,9 +595,9 @@ mod tests {
         };
 
         let mut node = QueryResolvingNode {
-            query: QueryKey::NodeInput {
+            query: QueryKey::ConsumedSlot {
                 node: node_id,
-                input: input_path,
+                slot: input_path,
             },
             resolved_value: None,
         };

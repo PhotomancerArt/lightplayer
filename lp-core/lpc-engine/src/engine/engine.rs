@@ -1,4 +1,4 @@
-//! [`Engine`] — owns spine state and mediates [`ResolveHost`] production for node outputs.
+//! [`Engine`] — owns spine state and mediates [`ResolveHost`] production for produced slots.
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
@@ -7,7 +7,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lpc_model::prop::prop_path::{PropPath, Segment};
+use lpc_model::prop::value_path::{Segment, ValuePath};
 use lpc_model::{FrameId, NodeId, TreePath, Versioned};
 
 use crate::artifact::ArtifactManager;
@@ -28,7 +28,7 @@ use crate::tree::{EntryState, NodeTree};
 use super::EngineError;
 
 /// Conventional demand input used by the M2 engine slice.
-pub(crate) fn default_demand_input_path() -> PropPath {
+pub(crate) fn default_demand_input_path() -> ValuePath {
     let mut path = Vec::new();
     path.push(Segment::Field(String::from("in")));
     path
@@ -184,7 +184,7 @@ impl Engine {
         let tick_after_resolve: Vec<bool> = self
             .demand_roots
             .iter()
-            .map(|&root| self.node_input_is_bound(root, &demand_input))
+            .map(|&root| self.consumed_slot_is_bound(root, &demand_input))
             .collect();
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
@@ -208,9 +208,9 @@ impl Engine {
                 session
                     .resolve(
                         &mut host,
-                        QueryKey::NodeInput {
+                        QueryKey::ConsumedSlot {
                             node: root,
-                            input: demand_input.clone(),
+                            slot: demand_input.clone(),
                         },
                     )
                     .map_err(EngineError::from)?;
@@ -225,14 +225,14 @@ impl Engine {
         Ok(())
     }
 
-    fn node_input_is_bound(&self, node: NodeId, input: &PropPath) -> bool {
+    fn consumed_slot_is_bound(&self, node: NodeId, slot: &ValuePath) -> bool {
         self.bindings.iter().any(|e| {
             matches!(
                 &e.target,
-                BindingTarget::NodeInput {
+                BindingTarget::ConsumedSlot {
                     node: n,
-                    input: p,
-                } if *n == node && p == input
+                    slot: p,
+                } if *n == node && p == slot
             )
         })
     }
@@ -344,7 +344,7 @@ impl ResolveHost for EngineResolveHost<'_> {
         session: &mut ResolveSession<'_>,
     ) -> Result<Production, SessionResolveError> {
         match query {
-            QueryKey::NodeOutput { node, output } => {
+            QueryKey::ProducedSlot { node, slot } => {
                 self.tick_node_once_for_output(*node, session)?;
                 let entry = self.tree.get(*node).ok_or_else(|| {
                     SessionResolveError::other(format!("read output: unknown node {node:?}"))
@@ -357,59 +357,44 @@ impl ResolveHost for EngineResolveHost<'_> {
                         )));
                     }
                 };
-                if let Some((product, frame)) = n.outputs().get(output) {
-                    return Ok(Production::new(
+                match n.produced().get(slot) {
+                    Some((product, frame)) => Ok(Production::new(
                         Versioned::new(frame, product),
-                        ProductionSource::NodeOutput {
+                        ProductionSource::ProducedSlot {
                             node: *node,
-                            output: output.clone(),
+                            slot: slot.clone(),
                         },
-                    ));
-                }
-                match n.props().get(output) {
-                    Some((v, frame)) => Ok(Production::value(
-                        Versioned::new(frame, v),
-                        ProductionSource::NodeOutput {
-                            node: *node,
-                            output: output.clone(),
-                        },
-                    )?),
+                    )),
                     None => Err(SessionResolveError::other(format!(
-                        "missing node output {output:?} on {node:?}"
+                        "missing produced slot {slot:?} on {node:?}"
                     ))),
                 }
             }
-            QueryKey::NodeInput { node, input } => {
+            QueryKey::ConsumedSlot { node, slot } => {
                 self.tick_node_once_for_output(*node, session)?;
                 let entry = self.tree.get(*node).ok_or_else(|| {
-                    SessionResolveError::UnresolvedNodeInput {
+                    SessionResolveError::UnresolvedConsumedSlot {
                         node: *node,
-                        input: input.clone(),
+                        slot: slot.clone(),
                     }
                 })?;
                 let n = match &entry.state {
                     EntryState::Alive(n) => n,
                     _ => {
-                        return Err(SessionResolveError::UnresolvedNodeInput {
+                        return Err(SessionResolveError::UnresolvedConsumedSlot {
                             node: *node,
-                            input: input.clone(),
+                            slot: slot.clone(),
                         });
                     }
                 };
-                if let Some((product, frame)) = n.outputs().get(input) {
-                    return Ok(Production::new(
+                match n.produced().get(slot) {
+                    Some((product, frame)) => Ok(Production::new(
                         Versioned::new(frame, product),
                         ProductionSource::Default,
-                    ));
-                }
-                match n.props().get(input) {
-                    Some((v, frame)) => Ok(Production::value(
-                        Versioned::new(frame, v),
-                        ProductionSource::Default,
-                    )?),
-                    None => Err(SessionResolveError::UnresolvedNodeInput {
+                    )),
+                    None => Err(SessionResolveError::UnresolvedConsumedSlot {
                         node: *node,
-                        input: input.clone(),
+                        slot: slot.clone(),
                     }),
                 }
             }
@@ -594,7 +579,7 @@ mod tests {
 
     use crate::binding::BindingError;
     use crate::engine::test_support::{
-        EngineTestBuilder, bus, literal, node_output, output, path, trace_has_value_origin_path,
+        EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
     use crate::render_product::{RenderSampleBatch, RenderSamplePoint, SolidColorProduct};
     use crate::runtime_buffer::RuntimeBuffer;
@@ -628,7 +613,7 @@ mod tests {
             .shader("shader", output("outputs[0]", 0.75))
             .fixture("fixture")
             .output_node("output")
-            .bind_bus("video_out", node_output("shader", "outputs[0]"))
+            .bind_bus("video_out", produced_slot("shader", "outputs[0]"))
             .bind_demand_input("fixture", bus("video_out"))
             .bind_demand_input("output", bus("video_out"))
             .demand_root("fixture")
@@ -647,7 +632,7 @@ mod tests {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 2.0))
             .fixture("fixture")
-            .bind_bus("video", node_output("shader", "outputs[0]"))
+            .bind_bus("video", produced_slot("shader", "outputs[0]"))
             .bind_demand_input("fixture", bus("video"))
             .demand_root("fixture")
             .build();
@@ -659,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn node_output_scalar_resolves_via_runtime_prop_access_after_empty_outputs() {
+    fn produced_slot_scalar_resolves_via_produced_slot_access_after_empty_produced() {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 2.0))
             .build();
@@ -667,9 +652,9 @@ mod tests {
         let out = path("outputs[0]");
         let shader = h.node("shader");
         let a = h
-            .resolve(QueryKey::NodeOutput {
+            .resolve(QueryKey::ProducedSlot {
                 node: shader,
-                output: out,
+                slot: out,
             })
             .expect("resolve");
         assert!(a.as_value().expect("value").eq(&LpsValueF32::F32(2.0)));
@@ -682,9 +667,9 @@ mod tests {
             .build();
         h.reset_shader_ticks("shader");
         let out = path("outputs[0]");
-        let key = QueryKey::NodeOutput {
+        let key = QueryKey::ProducedSlot {
             node: h.node("shader"),
-            output: out,
+            slot: out,
         };
 
         let (first, second) = super::resolve_twice_same_frame_with_engine_host(&mut h.engine, key)
@@ -750,7 +735,7 @@ mod tests {
     fn resolve_trace_records_value_origin_path() {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.5))
-            .bind_bus("video", node_output("shader", "outputs[0]"))
+            .bind_bus("video", produced_slot("shader", "outputs[0]"))
             .build();
         let out = path("outputs[0]");
 
@@ -771,7 +756,7 @@ mod tests {
         let h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.5))
             .fixture("fixture")
-            .bind_bus("video", node_output("shader", "outputs[0]"))
+            .bind_bus("video", produced_slot("shader", "outputs[0]"))
             .bind_demand_input("fixture", bus("video"))
             .build();
         let versions: Vec<_> = h.engine.bindings().iter().map(|e| e.version).collect();

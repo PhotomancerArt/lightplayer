@@ -5,33 +5,33 @@ use alloc::vec::Vec;
 
 use lpc_model::ModelValue;
 use lpc_model::project::FrameId;
-use lpc_model::prop::PropPath;
+use lpc_model::prop::ValuePath;
 
 /// Reflection over cached wire-safe property values held by a view/cache.
 pub trait PropAccessView {
     /// Get the current value at `path`, if any.
-    fn get(&self, path: &PropPath) -> Option<(&ModelValue, FrameId)>;
+    fn get(&self, path: &ValuePath) -> Option<(&ModelValue, FrameId)>;
 
     /// Iterate entries whose `changed_frame > since`.
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a>;
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a ModelValue, FrameId)> + 'a>;
 
     /// All cached entries.
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a>;
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a ModelValue, FrameId)> + 'a>;
 }
 
 /// Simple in-memory cache backing [`PropAccessView`] for tests and small clients.
 #[derive(Default)]
 pub struct PropsMapView {
-    values: Vec<(PropPath, ModelValue, FrameId)>,
+    values: Vec<(ValuePath, ModelValue, FrameId)>,
 }
 
 impl PropsMapView {
-    pub fn insert(&mut self, path: PropPath, value: ModelValue, frame: FrameId) {
+    pub fn insert(&mut self, path: ValuePath, value: ModelValue, frame: FrameId) {
         if let Some(i) = self.values.iter().position(|(p, _, _)| p == &path) {
             self.values[i] = (path, value, frame);
         } else {
@@ -41,7 +41,7 @@ impl PropsMapView {
 }
 
 impl PropAccessView for PropsMapView {
-    fn get(&self, path: &PropPath) -> Option<(&ModelValue, FrameId)> {
+    fn get(&self, path: &ValuePath) -> Option<(&ModelValue, FrameId)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -51,7 +51,7 @@ impl PropAccessView for PropsMapView {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a ModelValue, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -62,7 +62,7 @@ impl PropAccessView for PropsMapView {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a PropPath, &'a ModelValue, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a ModelValue, FrameId)> + 'a> {
         Box::new(self.values.iter().map(|(p, v, f)| (p, v, *f)))
     }
 }
@@ -70,7 +70,7 @@ impl PropAccessView for PropsMapView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
 
     #[test]
     fn prop_access_view_is_object_safe() {

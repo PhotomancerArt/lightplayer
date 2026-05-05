@@ -176,7 +176,7 @@ mod tests {
     use crate::BindingTarget;
     use alloc::string::String;
     use alloc::vec;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
     use lpc_model::{ChannelName, Kind, NodeId};
     use lpc_source::SrcValueSpec;
 
@@ -184,7 +184,7 @@ mod tests {
         ChannelName(String::from(s))
     }
 
-    fn path(s: &str) -> lpc_model::PropPath {
+    fn path(s: &str) -> lpc_model::ValuePath {
         parse_path(s).expect("test path")
     }
 
@@ -211,9 +211,9 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::BusChannel(ch("out/a")),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: NodeId::new(2),
-                        input: path("in"),
+                        slot: path("in"),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Amplitude,
@@ -258,9 +258,9 @@ mod tests {
         let c = ch("video/out");
         reg.register(
             BindingDraft {
-                source: BindingSource::NodeOutput {
+                source: BindingSource::ProducedSlot {
                     node: NodeId::new(1),
-                    output: path("color"),
+                    slot: path("color"),
                 },
                 target: BindingTarget::BusChannel(c.clone()),
                 priority: BindingPriority::new(5),
@@ -297,9 +297,9 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::BusChannel(c.clone()),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: NodeId::new(2),
-                        input: path("x"),
+                        slot: path("x"),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Ratio,

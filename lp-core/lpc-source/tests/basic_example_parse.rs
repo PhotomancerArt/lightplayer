@@ -1,4 +1,4 @@
-use lpc_model::{NodeLoc, NodeName};
+use lpc_model::{NodeName, RelativeNodeRef};
 use lpc_source::ProjectDef;
 use lpc_source::node::fixture::FixtureDef;
 use lpc_source::node::output::OutputDef;
@@ -27,7 +27,10 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
 
     let shader: ShaderDef = read_basic_toml("shader.toml");
     assert_eq!(shader.glsl_path.as_str(), "shader.glsl");
-    assert_eq!(shader.texture_loc, NodeLoc::from("..texture"));
+    assert_eq!(
+        shader.texture_loc,
+        RelativeNodeRef::parse("..texture").unwrap()
+    );
 
     let output: OutputDef = read_basic_toml("output.toml");
     match output {
@@ -38,8 +41,14 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     }
 
     let fixture: FixtureDef = read_basic_toml("fixture.toml");
-    assert_eq!(fixture.output_loc, NodeLoc::from("..output"));
-    assert_eq!(fixture.texture_loc, NodeLoc::from("..texture"));
+    assert_eq!(
+        fixture.output_loc,
+        RelativeNodeRef::parse("..output").unwrap()
+    );
+    assert_eq!(
+        fixture.texture_loc,
+        RelativeNodeRef::parse("..texture").unwrap()
+    );
 }
 
 fn read_basic_toml<T>(name: &str) -> T

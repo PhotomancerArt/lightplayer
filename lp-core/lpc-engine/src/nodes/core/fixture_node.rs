@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use lpc_model::FrameId;
 use lpc_model::NodeId;
-use lpc_model::prop::PropPath;
+use lpc_model::prop::ValuePath;
 use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -27,31 +27,34 @@ use crate::node::{
     DestroyCtx, FixtureProjectionInfo, MemPressureCtx, Node, NodeError, NodeResourceInitContext,
     PressureLevel, TickContext,
 };
-use crate::prop::RuntimePropAccess;
+use crate::prop::ProducedSlotAccess;
 use crate::render_product::{RenderSample, RenderSampleBatch, RenderSamplePoint};
 use crate::resolver::QueryKey;
 use crate::runtime_buffer::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat,
 };
 
+use crate::runtime_product::RuntimeProduct;
 use lps_shared::LpsValueF32;
 
 #[derive(Clone, Copy)]
 struct FixtureScalarProps;
 
-impl RuntimePropAccess for FixtureScalarProps {
-    fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+impl ProducedSlotAccess for FixtureScalarProps {
+    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
         _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 }
@@ -127,15 +130,15 @@ impl Node for FixtureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let (tn, wpath, hpath) = texture_dimension_query_targets(self.texture_node_id);
         let w_prod = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node: tn,
-                input: wpath,
+                slot: wpath,
             })
             .map_err(|e| NodeError::msg(format!("resolve texture width: {}", e.message)))?;
         let h_prod = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node: tn,
-                input: hpath,
+                slot: hpath,
             })
             .map_err(|e| NodeError::msg(format!("resolve texture height: {}", e.message)))?;
 
@@ -160,9 +163,9 @@ impl Node for FixtureNode {
 
         let out_path = shader_texture_output_path();
         let prod = ctx
-            .resolve(QueryKey::NodeOutput {
+            .resolve(QueryKey::ProducedSlot {
                 node: self.shader_node_id,
-                output: out_path,
+                slot: out_path,
             })
             .map_err(|e| NodeError::msg(format!("resolve shader render product: {}", e.message)))?;
 
@@ -231,7 +234,7 @@ impl Node for FixtureNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.scalar_props
     }
 }
@@ -519,7 +522,7 @@ mod tests {
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
     use crate::nodes::TextureNode;
-    use crate::prop::RuntimeOutputAccess;
+    use crate::prop::ProducedSlotAccess;
     use crate::render_product::SolidColorProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
@@ -527,18 +530,43 @@ mod tests {
 
     #[derive(Clone)]
     struct FixtureTickCountSolidProducerOutputs {
-        path: PropPath,
+        path: ValuePath,
         rid: crate::render_product::RenderProductId,
         last_frame: FrameId,
     }
 
-    impl RuntimeOutputAccess for FixtureTickCountSolidProducerOutputs {
-        fn get(&self, path: &PropPath) -> Option<(RpEnum, FrameId)> {
+    impl ProducedSlotAccess for FixtureTickCountSolidProducerOutputs {
+        fn get(&self, path: &ValuePath) -> Option<(RpEnum, FrameId)> {
             if path == &self.path {
                 Some((RpEnum::render(self.rid), self.last_frame))
             } else {
                 None
             }
+        }
+
+        fn iter_changed_since<'a>(
+            &'a self,
+            since: FrameId,
+        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+            if self.last_frame.as_i64() > since.as_i64() {
+                Box::new(core::iter::once((
+                    self.path.clone(),
+                    RuntimeProduct::render(self.rid),
+                    self.last_frame,
+                )))
+            } else {
+                Box::new(core::iter::empty())
+            }
+        }
+
+        fn snapshot<'a>(
+            &'a self,
+        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+            Box::new(core::iter::once((
+                self.path.clone(),
+                RuntimeProduct::render(self.rid),
+                self.last_frame,
+            )))
         }
     }
 
@@ -566,31 +594,7 @@ mod tests {
             Ok(())
         }
 
-        fn props(&self) -> &dyn crate::prop::RuntimePropAccess {
-            struct Empty;
-            impl crate::prop::RuntimePropAccess for Empty {
-                fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
-                    None
-                }
-                fn iter_changed_since<'b>(
-                    &'b self,
-                    _since: FrameId,
-                ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'b>
-                {
-                    Box::new(core::iter::empty())
-                }
-                fn snapshot<'b>(
-                    &'b self,
-                ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'b>
-                {
-                    Box::new(core::iter::empty())
-                }
-            }
-            static EMPTY: Empty = Empty;
-            &EMPTY
-        }
-
-        fn outputs(&self) -> &dyn RuntimeOutputAccess {
+        fn produced(&self) -> &dyn ProducedSlotAccess {
             &self.out
         }
     }
@@ -724,13 +728,13 @@ mod tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::NodeOutput {
+                    source: BindingSource::ProducedSlot {
                         node: sh_id,
-                        output: out_path.clone(),
+                        slot: out_path.clone(),
                     },
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: fix_id,
-                        input: default_demand_input_path(),
+                        slot: default_demand_input_path(),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Color,
@@ -875,9 +879,9 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: fix_id,
-                        input: default_demand_input_path(),
+                        slot: default_demand_input_path(),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Color,

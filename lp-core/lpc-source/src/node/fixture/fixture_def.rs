@@ -1,16 +1,16 @@
 use crate::node::NodeKind;
 use crate::node::fixture::mapping::MappingConfig;
 use crate::node::node_def::NodeDef;
-use lpc_model::NodeLoc;
+use lpc_model::RelativeNodeRef;
 use serde::{Deserialize, Serialize};
 
 /// Authored fixture node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FixtureDef {
     /// Output node locator.
-    pub output_loc: NodeLoc,
+    pub output_loc: RelativeNodeRef,
     /// Texture node locator.
-    pub texture_loc: NodeLoc,
+    pub texture_loc: RelativeNodeRef,
     /// Fixture mapping definition.
     pub mapping: MappingConfig,
     /// Color order for RGB channels
@@ -166,8 +166,8 @@ mod tests {
     #[test]
     fn test_fixture_def_kind() {
         let def = FixtureDef {
-            output_loc: NodeLoc::from("..out_output"),
-            texture_loc: NodeLoc::from("..tex_texture"),
+            output_loc: RelativeNodeRef::parse("..out_output").unwrap(),
+            texture_loc: RelativeNodeRef::parse("..tex_texture").unwrap(),
             mapping: MappingConfig::PathPoints {
                 paths: vec![PathSpec::RingArray {
                     center: (0.5, 0.5),

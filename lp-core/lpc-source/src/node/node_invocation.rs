@@ -1,13 +1,13 @@
 //! Parent-owned instruction to instantiate a child node.
 //!
-//! An invocation is currently artifact-only: the parent says "instantiate the
-//! node definition located at this [`ArtifactLocator`] here". Inline node
-//! definitions and artifact-plus-local-field merges are future extensions.
+//! The parent says "instantiate the node definition located at this
+//! [`ArtifactLocator`] here". Inline node definitions and artifact-plus-local
+//! field merges are reserved for richer invocation forms.
 
 use crate::artifact::artifact_loc::ArtifactLocator;
 use crate::prop::src_binding::SrcBinding;
 use alloc::vec::Vec;
-use lpc_model::prop::prop_path::PropPath;
+use lpc_model::prop::value_path::ValuePath;
 
 /// Parent-owned child node invocation.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -16,12 +16,9 @@ pub struct NodeInvocation {
     /// Artifact to load for this child node definition.
     pub artifact: ArtifactLocator,
 
-    /// Future use-site binding overrides.
-    ///
-    /// Kept during this transition because the resolver cache already consumes
-    /// it, but canonical `examples/basic` invocations are artifact-only.
+    /// Use-site binding overrides.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub overrides: Vec<(PropPath, SrcBinding)>,
+    pub overrides: Vec<(ValuePath, SrcBinding)>,
 }
 
 impl NodeInvocation {
@@ -41,7 +38,7 @@ mod tests {
     use alloc::string::String;
     use lpc_model::ModelValue;
     use lpc_model::bus::ChannelName;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
 
     #[test]
     fn node_invocation_round_trips_empty_overrides() {

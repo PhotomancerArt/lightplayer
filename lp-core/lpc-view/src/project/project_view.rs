@@ -136,8 +136,8 @@ impl ProjectView {
                                     options: None,
                                 }),
                                 NodeKind::Fixture => Box::new(FixtureDef {
-                                    output_loc: lpc_model::NodeLoc::from(""),
-                                    texture_loc: lpc_model::NodeLoc::from(""),
+                                    output_loc: lpc_model::RelativeNodeRef::current(),
+                                    texture_loc: lpc_model::RelativeNodeRef::current(),
                                     mapping: lpc_source::node::fixture::MappingConfig::PathPoints {
                                         paths: vec![],
                                         sample_diameter: 2.0,

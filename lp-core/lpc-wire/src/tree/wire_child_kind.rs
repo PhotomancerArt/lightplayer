@@ -2,7 +2,7 @@
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md`.
 
-use lpc_model::PropPath;
+use lpc_model::ValuePath;
 use lpc_model::node::NodeName;
 
 use super::WireSlotIndex;
@@ -25,7 +25,7 @@ pub enum WireChildKind {
     /// Inline child from a binding override.
     Inline {
         /// Prop path holding the inline binding.
-        source: PropPath,
+        source: ValuePath,
     },
 }
 

@@ -26,9 +26,9 @@ pub enum SessionResolveError {
     AmbiguousBusBinding {
         channel: ChannelName,
     },
-    UnresolvedNodeInput {
+    UnresolvedConsumedSlot {
         node: NodeId,
-        input: lpc_model::PropPath,
+        slot: lpc_model::ValuePath,
     },
     Trace(ResolveTraceError),
     Other(String),
@@ -65,8 +65,8 @@ impl core::fmt::Display for SessionResolveError {
                 f,
                 "ambiguous bus binding (equal top priority) for channel {channel:?}",
             ),
-            Self::UnresolvedNodeInput { node, input } => {
-                write!(f, "unresolved node input node={node:?} input={input:?}",)
+            Self::UnresolvedConsumedSlot { node, slot } => {
+                write!(f, "unresolved consumed slot node={node:?} slot={slot:?}",)
             }
             Self::Trace(e) => write!(f, "{e:?}"),
             Self::Other(msg) => f.write_str(msg),
@@ -91,14 +91,6 @@ impl ResolveError {
         Self {
             message: message.into(),
         }
-    }
-
-    /// Create an error for node-prop that doesn't target outputs namespace.
-    pub fn node_prop_not_outputs(actual_namespace: impl Into<String>) -> Self {
-        Self::new(format!(
-            "NodeProp binding must target outputs namespace, got: {}",
-            actual_namespace.into()
-        ))
     }
 
     /// Create an error for a missing target node in NodeProp resolution.
@@ -146,13 +138,6 @@ mod tests {
     fn resolve_error_new_stores_message() {
         let err = ResolveError::new("test message");
         assert_eq!(err.message, "test message");
-    }
-
-    #[test]
-    fn node_prop_not_outputs_formats_correctly() {
-        let err = ResolveError::node_prop_not_outputs("params");
-        assert!(err.message.contains("NodeProp binding must target outputs"));
-        assert!(err.message.contains("params"));
     }
 
     #[test]

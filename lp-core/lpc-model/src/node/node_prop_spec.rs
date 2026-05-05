@@ -1,5 +1,4 @@
-use crate::prop::prop_namespace::PropNamespace;
-use crate::prop::prop_path::{PathParseError, PropPath, Segment, parse_path};
+use crate::prop::value_path::{PathParseError, Segment, ValuePath, parse_path};
 use crate::tree::tree_path::{PathError, TreePath};
 use core::fmt;
 
@@ -38,7 +37,7 @@ impl core::error::Error for NodePropSpecError {
 }
 
 /// A **node + property** address: a [`TreePath`], a single `#`, then a
-/// [`PropPath`]. `Display` is round-trippable (see module tests) and matches
+/// [`ValuePath`]. `Display` is round-trippable (see module tests) and matches
 /// the v0 `node#property` form in
 /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/00-design.md` (`NodePropSpec`).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -47,7 +46,7 @@ pub struct NodePropSpec {
     /// Which node in the project graph.
     pub node: TreePath,
     /// Which property (possibly nested) on that node.
-    pub prop: PropPath,
+    pub prop: ValuePath,
 }
 
 impl NodePropSpec {
@@ -80,21 +79,9 @@ impl fmt::Display for NodePropSpec {
     }
 }
 
-impl NodePropSpec {
-    /// The top-level namespace of `prop`. Returns `None` if `prop` is
-    /// empty or its head segment is not a recognised namespace name.
-    ///
-    /// M4.3 config-load uses this to enforce "NodeProp targets must
-    /// address `outputs`" (per design 06 §"NodeProp resolution").
-    pub fn target_namespace(&self) -> Option<PropNamespace> {
-        PropNamespace::from_prop_path(&self.prop)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::NodePropSpec;
-    use crate::prop::prop_namespace::PropNamespace;
     use alloc::string::ToString;
 
     #[test]
@@ -119,35 +106,5 @@ mod tests {
     #[test]
     fn node_prop_spec_rejects_double_hash() {
         assert!(NodePropSpec::parse("/main.show#a#b").is_err());
-    }
-
-    #[test]
-    fn target_namespace_outputs() {
-        let spec = NodePropSpec::parse("/main.show#outputs[0]").unwrap();
-        assert_eq!(spec.target_namespace(), Some(PropNamespace::Outputs));
-    }
-
-    #[test]
-    fn target_namespace_params() {
-        let spec = NodePropSpec::parse("/x.y#params.speed").unwrap();
-        assert_eq!(spec.target_namespace(), Some(PropNamespace::Params));
-    }
-
-    #[test]
-    fn target_namespace_unknown_returns_none() {
-        let spec = NodePropSpec::parse("/x.y#weird.field").unwrap();
-        assert_eq!(spec.target_namespace(), None);
-    }
-
-    #[test]
-    fn target_namespace_inputs() {
-        let spec = NodePropSpec::parse("/audio.node#inputs.level").unwrap();
-        assert_eq!(spec.target_namespace(), Some(PropNamespace::Inputs));
-    }
-
-    #[test]
-    fn target_namespace_state() {
-        let spec = NodePropSpec::parse("/counter.node#state.value").unwrap();
-        assert_eq!(spec.target_namespace(), Some(PropNamespace::State));
     }
 }

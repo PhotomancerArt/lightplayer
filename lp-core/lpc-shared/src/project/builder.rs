@@ -2,9 +2,8 @@
 
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
-use lpc_model::NodeLoc;
 use lpc_model::lp_path::LpPathBuf;
-use lpc_model::{AsLpPath, AsLpPathBuf};
+use lpc_model::{AsLpPath, AsLpPathBuf, RelativeNodeRef};
 use lpc_source::legacy::glsl_opts::GlslOpts;
 use lpc_source::node::{
     fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder},
@@ -209,14 +208,14 @@ impl ProjectBuilder {
         self.nodes.push((name, path));
     }
 
-    fn node_loc_for_path(&self, path: &LpPathBuf) -> NodeLoc {
+    fn node_loc_for_path(&self, path: &LpPathBuf) -> RelativeNodeRef {
         let name = self
             .nodes
             .iter()
             .find(|(_, p)| p == path)
             .map(|(name, _)| name.clone())
             .unwrap_or_else(|| artifact_stem_as_node_name(path));
-        NodeLoc::from(format!("..{name}"))
+        RelativeNodeRef::parse(&format!("..{name}")).expect("builder emits valid relative node ref")
     }
 }
 

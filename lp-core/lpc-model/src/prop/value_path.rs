@@ -1,10 +1,12 @@
-//! Parse **property** paths: dot fields and array indices (`field`, `a.b[0]`).
+//! Parse value paths: dot fields and array indices (`field`, `a.b[0]`).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 /// One step in a value path (`obj.things[2].prop`).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Segment {
     Field(String),
@@ -39,11 +41,11 @@ impl core::fmt::Display for PathParseError {
 
 impl core::error::Error for PathParseError {}
 
-/// A parsed property path: `field`, `a.b[0]`, `config.spacing`, etc.
-pub type PropPath = Vec<Segment>;
+/// A parsed value path: `field`, `a.b[0]`, `config.spacing`, etc.
+pub type ValuePath = Vec<Segment>;
 
 /// Parse a path into segments. Allows a leading `[n]` for top-level arrays.
-pub fn parse_path(path: &str) -> Result<PropPath, PathParseError> {
+pub fn parse_path(path: &str) -> Result<ValuePath, PathParseError> {
     let path = path.trim();
     if path.is_empty() {
         return Err(PathParseError::EmptyPath);

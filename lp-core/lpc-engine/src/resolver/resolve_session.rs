@@ -12,7 +12,7 @@ use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::resolver::resolver::Resolver;
 use crate::resolver::resolver::materialize_src_value_literal;
 use lpc_model::ChannelName;
-use lpc_model::prop::prop_path::PropPath;
+use lpc_model::prop::value_path::ValuePath;
 use lpc_model::{FrameId, NodeId};
 
 /// Active resolution session for one frame (or nested test scope).
@@ -75,10 +75,10 @@ impl<'a> ResolveSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         match &query {
             QueryKey::Bus(channel) => self.resolve_bus(host, channel, &query),
-            QueryKey::NodeInput { node, input } => {
-                self.resolve_node_input(host, *node, input.clone(), &query)
+            QueryKey::ConsumedSlot { node, slot } => {
+                self.resolve_consumed_slot(host, *node, slot.clone(), &query)
             }
-            QueryKey::NodeOutput { .. } => {
+            QueryKey::ProducedSlot { .. } => {
                 self.trace
                     .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
                 let r = host.produce(&query, self);
@@ -110,14 +110,14 @@ impl<'a> ResolveSession<'a> {
         self.resolve_binding_source(host, entry.id, &entry.source)
     }
 
-    fn resolve_node_input(
+    fn resolve_consumed_slot(
         &mut self,
         host: &mut (impl ResolveHost + ?Sized),
         node: NodeId,
-        input: PropPath,
+        slot: ValuePath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        if let Some(entry) = find_binding_for_node_input(self.registry, node, &input) {
+        if let Some(entry) = find_binding_for_consumed_slot(self.registry, node, &slot) {
             self.trace.record_event(ResolveTraceEvent::SelectBinding {
                 query: query.clone(),
                 binding: entry.id,
@@ -155,10 +155,10 @@ impl<'a> ResolveSession<'a> {
                     })?;
                 Ok(Production::value(versioned, ProductionSource::Literal)?)
             }
-            BindingSource::NodeOutput { node, output } => {
-                let key = QueryKey::NodeOutput {
+            BindingSource::ProducedSlot { node, slot } => {
+                let key = QueryKey::ProducedSlot {
                     node: *node,
-                    output: output.clone(),
+                    slot: slot.clone(),
                 };
                 let mut pv = self.resolve(host, key)?;
                 pv.source = ProductionSource::BusBinding {
@@ -178,15 +178,15 @@ impl<'a> ResolveSession<'a> {
     }
 }
 
-fn find_binding_for_node_input<'a>(
+fn find_binding_for_consumed_slot<'a>(
     registry: &'a BindingRegistry,
     node: NodeId,
-    input: &PropPath,
+    slot: &ValuePath,
 ) -> Option<&'a BindingEntry> {
     registry.iter().find(|e| {
         matches!(
             &e.target,
-            BindingTarget::NodeInput { node: n, input: p } if *n == node && p == input
+            BindingTarget::ConsumedSlot { node: n, slot: p } if *n == node && p == slot
         )
     })
 }
@@ -227,7 +227,7 @@ mod tests {
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
     use lpc_model::{ChannelName, Versioned};
     use lpc_source::SrcValueSpec;
     use lps_shared::LpsValueF32;
@@ -236,18 +236,18 @@ mod tests {
         ChannelName(String::from(s))
     }
 
-    fn path(s: &str) -> PropPath {
+    fn path(s: &str) -> ValuePath {
         parse_path(s).expect("path")
     }
 
     struct CountingHost {
         produce_calls: u32,
         node: NodeId,
-        out_path: PropPath,
+        out_path: ValuePath,
     }
 
     impl CountingHost {
-        fn new(node: NodeId, out_path: PropPath) -> Self {
+        fn new(node: NodeId, out_path: ValuePath) -> Self {
             Self {
                 produce_calls: 0,
                 node,
@@ -264,14 +264,14 @@ mod tests {
         ) -> Result<Production, SessionResolveError> {
             self.produce_calls += 1;
             match query {
-                QueryKey::NodeOutput { node, output }
-                    if *node == self.node && *output == self.out_path =>
+                QueryKey::ProducedSlot { node, slot }
+                    if *node == self.node && *slot == self.out_path =>
                 {
                     Ok(Production::value(
                         Versioned::new(session.frame_id(), LpsValueF32::F32(42.0)),
-                        ProductionSource::NodeOutput {
+                        ProductionSource::ProducedSlot {
                             node: *node,
-                            output: output.clone(),
+                            slot: slot.clone(),
                         },
                     )?)
                 }
@@ -281,15 +281,15 @@ mod tests {
     }
 
     #[test]
-    fn same_node_output_twice_calls_host_once() {
+    fn same_produced_slot_twice_calls_host_once() {
         let mut resolver = Resolver::new();
         let registry = BindingRegistry::new();
         let frame = FrameId::new(1);
         let node = NodeId::new(7);
         let out = path("color");
-        let key = QueryKey::NodeOutput {
+        let key = QueryKey::ProducedSlot {
             node,
-            output: out.clone(),
+            slot: out.clone(),
         };
         let mut host = CountingHost::new(node, out.clone());
         let mut session = ResolveSession::new(
@@ -509,12 +509,12 @@ mod tests {
             session: &mut ResolveSession<'_>,
         ) -> Result<Production, SessionResolveError> {
             match query {
-                QueryKey::NodeOutput { node, output } if *node == self.node => {
+                QueryKey::ProducedSlot { node, slot } if *node == self.node => {
                     Ok(Production::value(
                         Versioned::new(session.frame_id(), LpsValueF32::F32(0.5)),
-                        ProductionSource::NodeOutput {
+                        ProductionSource::ProducedSlot {
                             node: *node,
-                            output: output.clone(),
+                            slot: slot.clone(),
                         },
                     )?)
                 }
@@ -534,9 +534,9 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::NodeOutput {
+                    source: BindingSource::ProducedSlot {
                         node,
-                        output: out.clone(),
+                        slot: out.clone(),
                     },
                     target: BindingTarget::BusChannel(bus.clone()),
                     priority: BindingPriority::new(0),
@@ -566,11 +566,11 @@ mod tests {
         );
         assert!(evs.iter().any(|e| matches!(
             e,
-            ResolveTraceEvent::ProduceStart(QueryKey::NodeOutput { .. })
+            ResolveTraceEvent::ProduceStart(QueryKey::ProducedSlot { .. })
         )));
         assert!(evs.iter().any(|e| matches!(
             e,
-            ResolveTraceEvent::ProduceEnd(QueryKey::NodeOutput { .. })
+            ResolveTraceEvent::ProduceEnd(QueryKey::ProducedSlot { .. })
         )));
         assert!(evs.iter().any(|e| matches!(
             e,

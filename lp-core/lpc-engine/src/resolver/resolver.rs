@@ -25,8 +25,7 @@ use crate::resolver::resolver_context::ResolverContext;
 use crate::resolver::slot_resolver_cache::SlotResolverCache;
 use lpc_model::FrameId;
 use lpc_model::Versioned;
-use lpc_model::prop::prop_namespace::PropNamespace;
-use lpc_model::prop::prop_path::PropPath;
+use lpc_model::prop::value_path::ValuePath;
 use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::prop::src_binding::SrcBinding;
 use lpc_source::prop::src_value_spec::{LoadCtx, SrcValueSpec};
@@ -86,7 +85,7 @@ pub(crate) fn materialize_src_value_literal(
 pub fn resolve_slot<'a, C: ResolverContext + ?Sized>(
     cache: &'a mut SlotResolverCache,
     config: &NodeInvocation,
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
 ) -> Result<&'a ResolvedSlot, ResolveError> {
     let mut resolved = try_resolve_cascade(config, prop, ctx)?;
@@ -107,7 +106,7 @@ pub fn resolve_slot<'a, C: ResolverContext + ?Sized>(
 /// Use this when managing cache separately; `resolve_slot` is preferred.
 pub fn resolve_slot_owned<C: ResolverContext + ?Sized>(
     config: &NodeInvocation,
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
 ) -> Result<ResolvedSlot, ResolveError> {
     try_resolve_cascade(config, prop, ctx)
@@ -116,7 +115,7 @@ pub fn resolve_slot_owned<C: ResolverContext + ?Sized>(
 /// Internal cascade: override -> artifact bind -> default.
 fn try_resolve_cascade<C: ResolverContext + ?Sized>(
     config: &NodeInvocation,
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
 ) -> Result<ResolvedSlot, ResolveError> {
     // Priority 1: Check overrides
@@ -138,7 +137,7 @@ fn try_resolve_cascade<C: ResolverContext + ?Sized>(
 /// Resolve a binding to a slot value.
 fn resolve_binding<C: ResolverContext + ?Sized>(
     binding: &SrcBinding,
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
     source_fn: impl FnOnce(BindingKind) -> ResolveSource,
 ) -> Result<ResolvedSlot, ResolveError> {
@@ -172,7 +171,7 @@ fn resolve_literal<C: ResolverContext + ?Sized>(
 /// Resolve a bus binding.
 fn resolve_bus<C: ResolverContext + ?Sized>(
     channel: &lpc_model::bus::ChannelName,
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
     source_fn: impl FnOnce(BindingKind) -> ResolveSource,
 ) -> Result<ResolvedSlot, ResolveError> {
@@ -192,23 +191,10 @@ fn resolve_bus<C: ResolverContext + ?Sized>(
 /// Resolve a NodeProp binding by dereferencing target's produced props.
 fn resolve_node_prop<C: ResolverContext + ?Sized>(
     spec: &lpc_model::NodePropSpec,
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
     source_fn: impl FnOnce(BindingKind) -> ResolveSource,
 ) -> Result<ResolvedSlot, ResolveError> {
-    // Validate namespace is outputs
-    match spec.target_namespace() {
-        Some(PropNamespace::Outputs) => {
-            // Valid - continue to dereference
-        }
-        Some(other) => {
-            return Err(ResolveError::node_prop_not_outputs(other.segment_name()));
-        }
-        None => {
-            return Err(ResolveError::node_prop_not_outputs("unknown"));
-        }
-    }
-
     // Try to read from target
     if let Some((value, frame)) = ctx.target_prop(&spec.node, &spec.prop) {
         return Ok(ResolvedSlot::new(
@@ -224,7 +210,7 @@ fn resolve_node_prop<C: ResolverContext + ?Sized>(
 
 /// Resolve to artifact default.
 fn resolve_default<C: ResolverContext + ?Sized>(
-    prop: &PropPath,
+    prop: &ValuePath,
     ctx: &C,
 ) -> Result<ResolvedSlot, ResolveError> {
     let frame = ctx.frame_id();
@@ -300,7 +286,7 @@ mod tests {
     use lpc_model::ModelValue;
     use lpc_model::NodePropSpec;
     use lpc_model::bus::ChannelName;
-    use lpc_model::prop::prop_path::parse_path;
+    use lpc_model::prop::value_path::parse_path;
     use lpc_model::tree::tree_path::TreePath;
     use lpc_source::artifact::artifact_loc::ArtifactLocator;
     use lpc_source::prop::src_value_spec::SrcValueSpec;
@@ -309,9 +295,9 @@ mod tests {
     struct TestContext {
         frame: FrameId,
         bus: BTreeMap<ChannelName, (LpsValueF32, FrameId)>,
-        targets: BTreeMap<TreePath, Vec<(PropPath, LpsValueF32, FrameId)>>,
-        bindings: BTreeMap<PropPath, SrcBinding>,
-        defaults: BTreeMap<PropPath, LpsValueF32>,
+        targets: BTreeMap<TreePath, Vec<(ValuePath, LpsValueF32, FrameId)>>,
+        bindings: BTreeMap<ValuePath, SrcBinding>,
+        defaults: BTreeMap<ValuePath, LpsValueF32>,
     }
 
     impl TestContext {
@@ -367,7 +353,7 @@ mod tests {
             self.bus.get(channel).map(|(v, f)| (v, *f))
         }
 
-        fn target_prop(&self, node: &TreePath, prop: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+        fn target_prop(&self, node: &TreePath, prop: &ValuePath) -> Option<(LpsValueF32, FrameId)> {
             self.targets.get(node).and_then(|entries| {
                 entries
                     .iter()
@@ -376,11 +362,11 @@ mod tests {
             })
         }
 
-        fn artifact_binding(&self, prop: &PropPath) -> Option<SrcBinding> {
+        fn artifact_binding(&self, prop: &ValuePath) -> Option<SrcBinding> {
             self.bindings.get(prop).cloned()
         }
 
-        fn artifact_default(&self, prop: &PropPath) -> Option<LpsValueF32> {
+        fn artifact_default(&self, prop: &ValuePath) -> Option<LpsValueF32> {
             self.defaults.get(prop).cloned()
         }
     }
@@ -486,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn node_prop_reads_target_runtime_prop_access() {
+    fn node_prop_reads_target_produced_slot_access() {
         let mut cache = SlotResolverCache::new();
         let config = make_config();
 
@@ -513,39 +499,45 @@ mod tests {
     }
 
     #[test]
-    fn node_prop_rejects_non_outputs_namespace() {
+    fn node_prop_reads_non_outputs_path_when_target_exists() {
         let mut cache = SlotResolverCache::new();
         let config = make_config();
 
-        // params is not outputs namespace
         let spec = NodePropSpec::parse("/show.source/node1.thing#params.value").unwrap();
         let ctx = TestContext::new(FrameId::new(10))
+            .with_target(
+                "/show.source/node1.thing",
+                "params.value",
+                LpsValueF32::F32(9.0),
+                FrameId::new(8),
+            )
             .with_binding("params.speed", SrcBinding::NodeProp(spec))
             .with_default("params.speed", LpsValueF32::F32(1.0));
 
         let prop = parse_path("params.speed").unwrap();
-        let result = resolve_slot(&mut cache, &config, &prop, &ctx);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.message.contains("NodeProp binding must target outputs"));
+        let slot = resolve_slot(&mut cache, &config, &prop, &ctx).unwrap();
+        assert!(matches!(slot.value, LpsValueF32::F32(9.0)));
     }
 
     #[test]
-    fn node_prop_rejects_state_namespace() {
+    fn node_prop_reads_state_path_when_target_exists() {
         let mut cache = SlotResolverCache::new();
         let config = make_config();
 
-        // state is also not outputs namespace
         let spec = NodePropSpec::parse("/show.source/node1.thing#state.counter").unwrap();
         let ctx = TestContext::new(FrameId::new(10))
+            .with_target(
+                "/show.source/node1.thing",
+                "state.counter",
+                LpsValueF32::I32(7),
+                FrameId::new(8),
+            )
             .with_binding("params.speed", SrcBinding::NodeProp(spec))
             .with_default("params.speed", LpsValueF32::F32(1.0));
 
         let prop = parse_path("params.speed").unwrap();
-        let result = resolve_slot(&mut cache, &config, &prop, &ctx);
-
-        assert!(result.is_err());
+        let slot = resolve_slot(&mut cache, &config, &prop, &ctx).unwrap();
+        assert!(matches!(slot.value, LpsValueF32::I32(7)));
     }
 
     #[test]

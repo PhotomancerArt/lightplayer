@@ -882,8 +882,8 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
                 NodeDetail {
                     path: path.clone(),
                     config: Box::new(FixtureDef {
-                        output_loc: lpc_model::NodeLoc::from("/out"),
-                        texture_loc: lpc_model::NodeLoc::from("/tex"),
+                        output_loc: lpc_model::RelativeNodeRef::parse("..out").unwrap(),
+                        texture_loc: lpc_model::RelativeNodeRef::parse("..tex").unwrap(),
                         mapping: MappingConfig::PathPoints {
                             paths: vec![],
                             sample_diameter: 2.0,

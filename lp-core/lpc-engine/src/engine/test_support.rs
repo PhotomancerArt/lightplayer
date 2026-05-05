@@ -6,8 +6,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use lpc_model::prop::prop_path::parse_path;
-use lpc_model::{ChannelName, FrameId, Kind, NodeId, NodeName, PropPath, TreePath};
+use lpc_model::prop::value_path::parse_path;
+use lpc_model::{ChannelName, FrameId, Kind, NodeId, NodeName, TreePath, ValuePath};
 use lpc_source::SrcValueSpec;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
@@ -15,10 +15,11 @@ use lps_shared::LpsValueF32;
 use crate::binding::{BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
-use crate::prop::RuntimePropAccess;
+use crate::prop::ProducedSlotAccess;
 use crate::resolver::{
     Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
 };
+use crate::runtime_product::RuntimeProduct;
 use crate::tree::test_placeholder_spine;
 
 use super::engine::default_demand_input_path;
@@ -41,13 +42,13 @@ pub(crate) struct EngineTestHarness {
 }
 
 pub(crate) struct OutputSpec {
-    path: PropPath,
+    path: ValuePath,
     value: LpsValueF32,
 }
 
 pub(crate) enum TestBindingSource {
     Literal(LpsValueF32),
-    NodeOutput { label: String, output: PropPath },
+    ProducedSlot { label: String, slot: ValuePath },
     Bus(ChannelName),
 }
 
@@ -68,9 +69,9 @@ impl EngineTestBuilder {
         }
     }
 
-    pub(crate) fn shader(mut self, label: &str, output: OutputSpec) -> Self {
+    pub(crate) fn shader(mut self, label: &str, slot: OutputSpec) -> Self {
         let ticks = Arc::new(AtomicU32::new(0));
-        let node = DummyShaderNode::new(output.path, output.value, Arc::clone(&ticks));
+        let node = DummyShaderNode::new(slot.path, slot.value, Arc::clone(&ticks));
         self.attach_node(label, "shader", Box::new(node));
         self.shader_ticks.insert(String::from(label), ticks);
         self
@@ -114,15 +115,15 @@ impl EngineTestBuilder {
         Ok(self)
     }
 
-    pub(crate) fn bind_input(self, label: &str, input: &str, source: TestBindingSource) -> Self {
-        self.bind_input_with_priority(label, input, source, 0)
+    pub(crate) fn bind_input(self, label: &str, slot: &str, source: TestBindingSource) -> Self {
+        self.bind_input_with_priority(label, slot, source, 0)
             .expect("bind input")
     }
 
     pub(crate) fn bind_input_with_priority(
         mut self,
         label: &str,
-        input: &str,
+        slot: &str,
         source: TestBindingSource,
         priority: i32,
     ) -> Result<Self, BindingError> {
@@ -130,9 +131,9 @@ impl EngineTestBuilder {
         let source = source.into_binding_source(&self.labels);
         self.register_binding(
             source,
-            BindingTarget::NodeInput {
+            BindingTarget::ConsumedSlot {
                 node,
-                input: path(input),
+                slot: path(slot),
             },
             priority,
             node,
@@ -274,9 +275,9 @@ impl TestBindingSource {
             Self::Literal(value) => BindingSource::Literal(SrcValueSpec::Literal(
                 lpc_model::ModelValue::F32(f32_value(value)),
             )),
-            Self::NodeOutput { label, output } => BindingSource::NodeOutput {
-                node: *labels.get(&label).expect("node output label"),
-                output,
+            Self::ProducedSlot { label, slot } => BindingSource::ProducedSlot {
+                node: *labels.get(&label).expect("produced slot label"),
+                slot,
             },
             Self::Bus(channel) => BindingSource::BusChannel(channel),
         }
@@ -284,7 +285,7 @@ impl TestBindingSource {
 
     fn owner(&self, labels: &BTreeMap<String, NodeId>) -> NodeId {
         match self {
-            Self::NodeOutput { label, .. } => *labels.get(label).expect("node output label"),
+            Self::ProducedSlot { label, .. } => *labels.get(label).expect("produced slot label"),
             Self::Literal(_) | Self::Bus(_) => NodeId::new(0),
         }
     }
@@ -319,10 +320,10 @@ pub(crate) fn literal(value: f32) -> TestBindingSource {
     TestBindingSource::Literal(LpsValueF32::F32(value))
 }
 
-pub(crate) fn node_output(label: &str, output: &str) -> TestBindingSource {
-    TestBindingSource::NodeOutput {
+pub(crate) fn produced_slot(label: &str, slot: &str) -> TestBindingSource {
+    TestBindingSource::ProducedSlot {
         label: String::from(label),
-        output: path(output),
+        slot: path(slot),
     }
 }
 
@@ -330,7 +331,7 @@ pub(crate) fn bus(channel: &str) -> TestBindingSource {
     TestBindingSource::Bus(channel_name(channel))
 }
 
-pub(crate) fn path(path: &str) -> PropPath {
+pub(crate) fn path(path: &str) -> ValuePath {
     parse_path(path).expect("test prop path")
 }
 
@@ -338,12 +339,12 @@ pub(crate) fn trace_has_value_origin_path(
     trace: &ResolveTrace,
     bus_name: &str,
     shader: NodeId,
-    output_path: &PropPath,
+    output_path: &ValuePath,
 ) -> bool {
     let bus_query = QueryKey::Bus(channel_name(bus_name));
-    let output_query = QueryKey::NodeOutput {
+    let output_query = QueryKey::ProducedSlot {
         node: shader,
-        output: output_path.clone(),
+        slot: output_path.clone(),
     };
     trace.events().iter().any(|e| {
         matches!(
@@ -364,9 +365,9 @@ pub(crate) struct DummyShaderNode {
 }
 
 impl DummyShaderNode {
-    fn new(output: PropPath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
+    fn new(slot: ValuePath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
         let mut props = DummyProps::new();
-        props.set(output, value, FrameId::new(0));
+        props.set(slot, value, FrameId::new(0));
         Self { props, tick_count }
     }
 }
@@ -390,21 +391,21 @@ impl Node for DummyShaderNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.props
     }
 }
 
 pub(crate) struct DummyFixtureNode {
-    input: PropPath,
+    slot: ValuePath,
     record: RecordedValue,
     props: DummyProps,
 }
 
 impl DummyFixtureNode {
-    fn new(input: PropPath, record: RecordedValue) -> Self {
+    fn new(slot: ValuePath, record: RecordedValue) -> Self {
         Self {
-            input,
+            slot,
             record,
             props: DummyProps::new(),
         }
@@ -414,9 +415,9 @@ impl DummyFixtureNode {
 impl Node for DummyFixtureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
-                input: self.input.clone(),
+                slot: self.slot.clone(),
             })
             .map_err(|e| NodeError::msg(format!("fixture resolve failed: {}", e.message)))?;
         self.record.record(pv.as_value().expect("value"));
@@ -435,21 +436,21 @@ impl Node for DummyFixtureNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.props
     }
 }
 
 pub(crate) struct DummyOutputNode {
-    input: PropPath,
+    slot: ValuePath,
     record: RecordedValue,
     props: DummyProps,
 }
 
 impl DummyOutputNode {
-    fn new(input: PropPath, record: RecordedValue) -> Self {
+    fn new(slot: ValuePath, record: RecordedValue) -> Self {
         Self {
-            input,
+            slot,
             record,
             props: DummyProps::new(),
         }
@@ -459,9 +460,9 @@ impl DummyOutputNode {
 impl Node for DummyOutputNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
-            .resolve(QueryKey::NodeInput {
+            .resolve(QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
-                input: self.input.clone(),
+                slot: self.slot.clone(),
             })
             .map_err(|e| NodeError::msg(format!("output resolve failed: {}", e.message)))?;
         self.record.record(pv.as_value().expect("value"));
@@ -480,13 +481,13 @@ impl Node for DummyOutputNode {
         Ok(())
     }
 
-    fn props(&self) -> &dyn RuntimePropAccess {
+    fn produced(&self) -> &dyn ProducedSlotAccess {
         &self.props
     }
 }
 
 struct DummyProps {
-    values: Vec<(PropPath, LpsValueF32, FrameId)>,
+    values: Vec<(ValuePath, RuntimeProduct, FrameId)>,
 }
 
 impl DummyProps {
@@ -494,13 +495,14 @@ impl DummyProps {
         Self { values: Vec::new() }
     }
 
-    fn set(&mut self, path: PropPath, value: LpsValueF32, frame: FrameId) {
+    fn set(&mut self, path: ValuePath, value: LpsValueF32, frame: FrameId) {
         if let Some((_, stored, stored_frame)) = self.values.iter_mut().find(|(p, _, _)| p == &path)
         {
-            *stored = value;
+            *stored = RuntimeProduct::Value(value);
             *stored_frame = frame;
         } else {
-            self.values.push((path, value, frame));
+            self.values
+                .push((path, RuntimeProduct::Value(value), frame));
         }
     }
 
@@ -511,8 +513,8 @@ impl DummyProps {
     }
 }
 
-impl RuntimePropAccess for DummyProps {
-    fn get(&self, path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
+impl ProducedSlotAccess for DummyProps {
+    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -522,7 +524,7 @@ impl RuntimePropAccess for DummyProps {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -531,7 +533,9 @@ impl RuntimePropAccess for DummyProps {
         )
     }
 
-    fn snapshot<'a>(&'a self) -> Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'a> {
+    fn snapshot<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()

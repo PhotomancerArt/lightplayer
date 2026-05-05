@@ -285,7 +285,16 @@ mod output_sink_flush_tests {
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use lpc_model::prop::PropPath;
+    use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::engine::default_demand_input_path;
+    use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+    use crate::nodes::{FixtureNode, TextureNode, shader_texture_output_path};
+    use crate::prop::ProducedSlotAccess;
+    use crate::render_product::SolidColorProduct;
+    use crate::runtime_buffer::RuntimeBuffer;
+    use crate::runtime_product::RuntimeProduct as RpEnum;
+    use crate::tree::test_placeholder_spine;
+    use lpc_model::prop::ValuePath;
     use lpc_model::{FrameId, Kind, ModelValue, TreePath, Versioned};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -296,17 +305,6 @@ mod output_sink_flush_tests {
     use lpc_source::node::output::OutputDef;
     use lpc_source::node::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
-    use lps_shared::LpsValueF32;
-
-    use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
-    use crate::engine::default_demand_input_path;
-    use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
-    use crate::nodes::{FixtureNode, TextureNode, shader_texture_output_path};
-    use crate::prop::{RuntimeOutputAccess, RuntimePropAccess};
-    use crate::render_product::SolidColorProduct;
-    use crate::runtime_buffer::RuntimeBuffer;
-    use crate::runtime_product::RuntimeProduct as RpEnum;
-    use crate::tree::test_placeholder_spine;
 
     use super::{CoreProjectRuntime, RuntimeServices};
 
@@ -339,18 +337,43 @@ mod output_sink_flush_tests {
 
     #[derive(Clone)]
     struct SolidFixtureOutputs {
-        path: PropPath,
+        path: ValuePath,
         rid: crate::render_product::RenderProductId,
         last_frame: FrameId,
     }
 
-    impl RuntimeOutputAccess for SolidFixtureOutputs {
-        fn get(&self, path: &PropPath) -> Option<(RpEnum, FrameId)> {
+    impl ProducedSlotAccess for SolidFixtureOutputs {
+        fn get(&self, path: &ValuePath) -> Option<(RpEnum, FrameId)> {
             if path == &self.path {
                 Some((RpEnum::render(self.rid), self.last_frame))
             } else {
                 None
             }
+        }
+
+        fn iter_changed_since<'a>(
+            &'a self,
+            since: FrameId,
+        ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RpEnum, FrameId)> + 'a> {
+            if self.last_frame.as_i64() > since.as_i64() {
+                alloc::boxed::Box::new(core::iter::once((
+                    self.path.clone(),
+                    RpEnum::render(self.rid),
+                    self.last_frame,
+                )))
+            } else {
+                alloc::boxed::Box::new(core::iter::empty())
+            }
+        }
+
+        fn snapshot<'a>(
+            &'a self,
+        ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RpEnum, FrameId)> + 'a> {
+            alloc::boxed::Box::new(core::iter::once((
+                self.path.clone(),
+                RpEnum::render(self.rid),
+                self.last_frame,
+            )))
         }
     }
 
@@ -378,31 +401,7 @@ mod output_sink_flush_tests {
             Ok(())
         }
 
-        fn props(&self) -> &dyn RuntimePropAccess {
-            struct Empty;
-            impl RuntimePropAccess for Empty {
-                fn get(&self, _path: &PropPath) -> Option<(LpsValueF32, FrameId)> {
-                    None
-                }
-                fn iter_changed_since<'b>(
-                    &'b self,
-                    _since: FrameId,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'b>
-                {
-                    alloc::boxed::Box::new(core::iter::empty())
-                }
-                fn snapshot<'b>(
-                    &'b self,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (PropPath, LpsValueF32, FrameId)> + 'b>
-                {
-                    alloc::boxed::Box::new(core::iter::empty())
-                }
-            }
-            static EMPTY: Empty = Empty;
-            &EMPTY
-        }
-
-        fn outputs(&self) -> &dyn RuntimeOutputAccess {
+        fn produced(&self) -> &dyn ProducedSlotAccess {
             &self.out
         }
     }
@@ -551,9 +550,9 @@ mod output_sink_flush_tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: fix_id,
-                        input: default_demand_input_path(),
+                        slot: default_demand_input_path(),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Color,
@@ -738,9 +737,9 @@ mod output_sink_flush_tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: fix_id,
-                        input: default_demand_input_path(),
+                        slot: default_demand_input_path(),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Color,
@@ -911,9 +910,9 @@ mod output_sink_flush_tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
-                    target: BindingTarget::NodeInput {
+                    target: BindingTarget::ConsumedSlot {
                         node: fix_id,
-                        input: default_demand_input_path(),
+                        slot: default_demand_input_path(),
                     },
                     priority: BindingPriority::new(0),
                     kind: Kind::Color,

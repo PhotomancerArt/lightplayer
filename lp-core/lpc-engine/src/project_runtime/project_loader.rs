@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
-use lpc_model::prop::prop_path::parse_path;
+use lpc_model::prop::value_path::parse_path;
 use lpc_model::{FrameId, Kind, ModelValue, NodeId, NodeName};
 use lpc_source::ArtifactReadRoot;
 use lpc_source::node::node_def::NodeDef;
@@ -279,8 +279,8 @@ impl CoreProjectLoader {
                     .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!(
-                            "no shader targets texture loc `{}`",
-                            config.texture_loc.as_str()
+                            "no shader targets texture node ref `{}`",
+                            config.texture_loc
                         ),
                     })?;
                 let output_node =
@@ -320,9 +320,9 @@ impl CoreProjectLoader {
                             source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(
                                 0.0,
                             ))),
-                            target: BindingTarget::NodeInput {
+                            target: BindingTarget::ConsumedSlot {
                                 node: node.id,
-                                input: demand_input_path(),
+                                slot: demand_input_path(),
                             },
                             priority: BindingPriority::new(0),
                             kind: Kind::Color,
@@ -332,7 +332,7 @@ impl CoreProjectLoader {
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
-                        reason: format!("bind fixture demand input: {e}"),
+                        reason: format!("bind fixture demand slot: {e}"),
                     })?;
                 runtime.engine_mut().add_demand_root(node.id);
             }
@@ -473,36 +473,29 @@ fn node_kind_name(
 fn find_node_by_loc<'a>(
     loaded_nodes: &'a [LoadedNode],
     current: &'a LoadedNode,
-    loc: &lpc_model::NodeLoc,
+    loc: &lpc_model::RelativeNodeRef,
 ) -> Option<&'a LoadedNode> {
-    let parsed = loc.parse().ok()?;
-    resolve_parsed_node_loc(loaded_nodes, current, &parsed)
+    resolve_relative_node_ref(loaded_nodes, current, loc)
 }
 
 fn resolve_node_loc<'a>(
     loaded_nodes: &'a [LoadedNode],
     current: &'a LoadedNode,
-    loc: &lpc_model::NodeLoc,
+    loc: &lpc_model::RelativeNodeRef,
     expected: &str,
 ) -> Result<&'a LoadedNode, CoreProjectLoadError> {
-    let parsed = loc
-        .parse()
-        .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: format!("invalid {expected} node loc `{}`: {e}", loc.as_str()),
-        })?;
-    resolve_parsed_node_loc(loaded_nodes, current, &parsed).ok_or_else(|| {
+    resolve_relative_node_ref(loaded_nodes, current, loc).ok_or_else(|| {
         CoreProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
-            reason: format!("unknown {expected} node loc `{}`", loc.as_str()),
+            reason: format!("unknown {expected} node ref `{loc}`"),
         }
     })
 }
 
-fn resolve_parsed_node_loc<'a>(
+fn resolve_relative_node_ref<'a>(
     loaded_nodes: &'a [LoadedNode],
     current: &'a LoadedNode,
-    parsed: &lpc_model::node::node_loc::ParsedNodeLoc,
+    parsed: &lpc_model::RelativeNodeRef,
 ) -> Option<&'a LoadedNode> {
     if parsed.parent_hops() == 0 && parsed.segments().is_empty() {
         return Some(current);
@@ -514,7 +507,7 @@ fn resolve_parsed_node_loc<'a>(
     None
 }
 
-fn demand_input_path() -> lpc_model::PropPath {
+fn demand_input_path() -> lpc_model::ValuePath {
     parse_path("in").expect("valid demand input path")
 }
 
@@ -757,14 +750,14 @@ render_order = 0
             matches!(
                 err,
                 CoreProjectLoadError::InvalidSourcePath { ref reason, .. }
-                    if reason.contains("unknown texture node loc `..missing`")
+                    if reason.contains("unknown texture node ref `..missing`")
             ),
-            "expected missing texture loc, got {err:?}"
+            "expected missing texture ref, got {err:?}"
         );
     }
 
     #[test]
-    fn slash_node_loc_is_rejected_during_load() {
+    fn slash_node_ref_is_rejected_during_parse() {
         let fs = flat_project();
         fs.write_file(
             "/shader.toml".as_path(),
@@ -786,11 +779,10 @@ render_order = 0
         assert!(
             matches!(
                 err,
-                CoreProjectLoadError::InvalidSourcePath { ref reason, .. }
-                    if reason.contains("invalid texture node loc `/texture`")
-                        && reason.contains("slash syntax")
+                CoreProjectLoadError::TomlParse { ref error, .. }
+                    if error.contains("node locations use dot syntax")
             ),
-            "expected invalid slash node loc, got {err:?}"
+            "expected invalid slash node ref parse error, got {err:?}"
         );
     }
 

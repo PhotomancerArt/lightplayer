@@ -1,10 +1,8 @@
-//! Engine-side property reflection (`LpsValueF32`) and explicit runtime outputs.
+//! Engine-side produced slot access and runtime state surfaces.
 
-mod runtime_output_access;
-mod runtime_prop_access;
+mod produced_slot_access;
 
-pub use runtime_output_access::{
-    EMPTY_RUNTIME_OUTPUTS, EMPTY_RUNTIME_STATE, EmptyRuntimeOutputs, EmptyRuntimeState,
-    RuntimeOutputAccess, RuntimeStateAccess,
+pub use produced_slot_access::{
+    EMPTY_PRODUCED_SLOTS, EMPTY_RUNTIME_STATE, EmptyProducedSlots, EmptyRuntimeState,
+    ProducedSlotAccess, ProducedSlotEntry, RuntimeStateAccess,
 };
-pub use runtime_prop_access::RuntimePropAccess;
