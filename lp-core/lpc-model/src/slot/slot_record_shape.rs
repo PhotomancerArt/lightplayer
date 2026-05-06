@@ -16,13 +16,13 @@ pub trait SlotRecordShape {
 mod tests {
     use super::*;
     use crate::{
-        ModelType, SlotDataAccess, SlotRecordAccess, SlotValue,
+        ModelType, SlotDataAccess, SlotRecordAccess, ValueSlot,
         slot::shape::{field, record, value},
     };
     use alloc::vec;
 
     struct TestRecord {
-        enabled: SlotValue<bool>,
+        enabled: ValueSlot<bool>,
     }
 
     impl SlotRecordShape for TestRecord {
@@ -44,7 +44,7 @@ mod tests {
     fn record_shape_matches_indexed_record_access() {
         let shape = TestRecord::slot_record_shape();
         let record = TestRecord {
-            enabled: SlotValue::new(true),
+            enabled: ValueSlot::new(true),
         };
 
         let SlotShape::Record { fields, .. } = shape else {

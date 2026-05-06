@@ -1,5 +1,6 @@
 use lpc_model::{
-    SlotAccess, SlotData, SlotDataAccess, SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotAccess, SlotData, SlotDataAccess, SlotMapKey, SlotPath, SlotPathSegment, SlotShape,
+    SlotShapeId, SlotShapeRegistry,
 };
 
 pub fn print_root(root: &dyn SlotAccess, registry: &SlotShapeRegistry) -> Vec<String> {
@@ -75,7 +76,7 @@ fn print_shape(
             for key in map.keys() {
                 if let Some(child) = map.get(&key) {
                     print_shape(
-                        format!("{path}.{}", key_segment(&key)),
+                        format!("{path}{}", key_segment(&key)),
                         value,
                         child,
                         registry,
@@ -116,9 +117,5 @@ fn print_shape(
 }
 
 fn key_segment(key: &SlotMapKey) -> String {
-    match key {
-        SlotMapKey::String(s) => s.clone(),
-        SlotMapKey::I32(n) => n.to_string(),
-        SlotMapKey::U32(n) => n.to_string(),
-    }
+    SlotPath::from_segments(vec![SlotPathSegment::Key(key.clone())]).to_string()
 }

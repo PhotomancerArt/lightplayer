@@ -1,18 +1,15 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ArtifactPathSlot, SlotMap, artifact_path_shape};
+use lpc_model::{ArtifactPathSlot, MapSlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.project")]
+#[slot(root)]
 pub struct ProjectDef {
-    #[slot(map(key = "string", value_ref = "source.node_invocation"))]
-    nodes: SlotMap<String, NodeInvocationDef>,
+    nodes: MapSlot<String, NodeInvocationDef>,
 }
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.node_invocation")]
 pub struct NodeInvocationDef {
-    #[slot(leaf = artifact_path_shape())]
     artifact: ArtifactPathSlot,
 }
 
@@ -37,7 +34,7 @@ impl ProjectDef {
         );
 
         Self {
-            nodes: SlotMap::new(nodes),
+            nodes: MapSlot::new(nodes),
         }
     }
 }

@@ -1,31 +1,28 @@
 #![cfg(feature = "derive")]
 
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotMapValueAccess, SlotRecordAccess, SlotRecordShape,
-    SlotShape, SlotShapeRegistry, SlotValue, StaticSlotAccess,
+    SlotAccess, SlotDataAccess, SlotMapValueAccess, SlotRecordAccess, SlotRecordShape, SlotShape,
+    SlotShapeRegistry, StaticSlotAccess, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "test.derived_record")]
+#[slot(root)]
 struct DerivedRecord {
-    #[slot(value = ModelType::Bool)]
-    enabled: SlotValue<bool>,
-    #[slot(record)]
+    enabled: ValueSlot<bool>,
     nested: NestedRecord,
 }
 
 #[derive(lpc_model::SlotRecord)]
 struct NestedRecord {
-    #[slot(value = ModelType::U32)]
-    count: SlotValue<u32>,
+    count: ValueSlot<u32>,
 }
 
 #[test]
 fn derive_generates_record_shape_access_and_root_registration() {
     let record = DerivedRecord {
-        enabled: SlotValue::new(true),
+        enabled: ValueSlot::new(true),
         nested: NestedRecord {
-            count: SlotValue::new(3),
+            count: ValueSlot::new(3),
         },
     };
 

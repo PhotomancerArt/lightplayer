@@ -11,7 +11,6 @@ pub use runtime::MockRuntime;
 pub use shader_node::ShaderNode;
 
 pub(crate) fn register_shapes(registry: &mut lpc_model::SlotShapeRegistry) {
-    TouchState::register_shape(registry).unwrap();
     FixtureNode::register_shape(registry).unwrap();
     OutputNode::register_shape(registry).unwrap();
 }

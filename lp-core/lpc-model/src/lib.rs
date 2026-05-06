@@ -77,13 +77,13 @@ pub use slot::{
     runtime_buffer_resource_shape, source_path_shape, xy_shape,
 };
 pub use slot::{
-    SlotAccess, SlotData, SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotEnumShape,
-    SlotFieldShape, SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike,
-    SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOption, SlotOptionAccess,
-    SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotRecord, SlotRecordAccess,
-    SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError, SlotShapeKind,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
-    SlotValidationError, SlotValue, SlotValueAccess, SlotVariantShape, StaticSlotAccess, ValueRef,
+    FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotData,
+    SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotEnumShape, SlotFieldShape,
+    SlotMapDyn, SlotMapKey, SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOptionAccess,
+    SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotRecord,
+    SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError,
+    SlotShapeKind, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
+    SlotValidationError, SlotValueAccess, SlotVariantShape, StaticSlotAccess, ValueRef, ValueSlot,
     VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

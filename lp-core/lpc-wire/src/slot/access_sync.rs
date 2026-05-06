@@ -2,8 +2,8 @@ use alloc::collections::BTreeMap;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
-    FrameId, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotMapKey, SlotName, SlotOptionDyn,
-    SlotPath, SlotShape, SlotShapeId, SlotShapeRegistry, Versioned,
+    FrameId, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
+    SlotShape, SlotShapeId, SlotShapeRegistry, Versioned,
 };
 
 use super::{WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot};
@@ -206,7 +206,7 @@ fn collect_diff_shape(
                 if let Some(child) = map.get(&key) {
                     collect_diff_shape(
                         root_name,
-                        path.child(slot_name_for_key(&key)),
+                        path.child_key(key.clone()),
                         value,
                         child,
                         registry,
@@ -259,17 +259,5 @@ fn collect_diff_shape(
             }
         }
         _ => panic!("slot shape/data mismatch"),
-    }
-}
-
-fn slot_name_for_key(key: &SlotMapKey) -> SlotName {
-    SlotName::parse(&key_segment(key)).expect("slot map key must be representable as a SlotName")
-}
-
-fn key_segment(key: &SlotMapKey) -> alloc::string::String {
-    match key {
-        SlotMapKey::String(s) => s.clone(),
-        SlotMapKey::I32(n) => n.to_string(),
-        SlotMapKey::U32(n) => n.to_string(),
     }
 }

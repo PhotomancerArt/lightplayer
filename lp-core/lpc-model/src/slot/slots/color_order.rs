@@ -1,0 +1,137 @@
+use crate::{
+    FieldSlot, FrameId, FromModelValue, ModelType, ModelValue, SlotDataAccess, SlotEditorHint,
+    SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
+    SlotValueShape, ToModelValue, Versioned, current_state_version,
+};
+use alloc::string::ToString;
+use alloc::vec;
+
+/// RGB channel order for fixture/output color packing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorOrderValue {
+    Rgb,
+    Grb,
+    Rbg,
+    Gbr,
+    Brg,
+    Bgr,
+}
+
+impl ColorOrderValue {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rgb => "rgb",
+            Self::Grb => "grb",
+            Self::Rbg => "rbg",
+            Self::Gbr => "gbr",
+            Self::Brg => "brg",
+            Self::Bgr => "bgr",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "rgb" => Some(Self::Rgb),
+            "grb" => Some(Self::Grb),
+            "rbg" => Some(Self::Rbg),
+            "gbr" => Some(Self::Gbr),
+            "brg" => Some(Self::Brg),
+            "bgr" => Some(Self::Bgr),
+            _ => None,
+        }
+    }
+}
+
+/// Versioned RGB channel order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColorOrderSlot {
+    inner: Versioned<ColorOrderValue>,
+}
+
+impl ColorOrderSlot {
+    pub fn new(value: ColorOrderValue) -> Self {
+        Self::with_version(current_state_version(), value)
+    }
+
+    pub fn with_version(frame: FrameId, value: ColorOrderValue) -> Self {
+        Self {
+            inner: Versioned::new(frame, value),
+        }
+    }
+
+    pub fn set(&mut self, value: ColorOrderValue) {
+        self.inner.set(current_state_version(), value);
+    }
+
+    pub fn changed_frame(&self) -> FrameId {
+        self.inner.changed_frame()
+    }
+
+    pub fn value(&self) -> &ColorOrderValue {
+        self.inner.value()
+    }
+}
+
+impl SlotValueAccess for ColorOrderSlot {
+    fn changed_frame(&self) -> FrameId {
+        self.inner.changed_frame()
+    }
+
+    fn value(&self) -> ModelValue {
+        self.inner.value().to_model_value()
+    }
+}
+
+impl FieldSlot for ColorOrderSlot {
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::leaf(color_order_shape())
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Value(self)
+    }
+}
+
+impl ToModelValue for ColorOrderValue {
+    fn to_model_value(&self) -> ModelValue {
+        ModelValue::String(self.as_str().to_string())
+    }
+}
+
+impl FromModelValue for ColorOrderValue {
+    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        match value {
+            ModelValue::String(value) => Self::parse(&value)
+                .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
+            other => Err(SlotLeafError::new(alloc::format!(
+                "expected String, got {other:?}"
+            ))),
+        }
+    }
+}
+
+impl SlotLeaf for ColorOrderValue {
+    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.color_order");
+
+    fn value_shape() -> SlotValueShape {
+        color_order_shape()
+    }
+}
+
+pub fn color_order_shape() -> SlotValueShape {
+    SlotValueShape {
+        leaf: SlotLeafId::from_static_name("slot.leaf.color_order"),
+        ty: ModelType::String,
+        meta: SlotMeta::empty(),
+        editor: SlotEditorHint::Dropdown {
+            options: vec![
+                SlotEnumOption::new("rgb", "RGB"),
+                SlotEnumOption::new("grb", "GRB"),
+                SlotEnumOption::new("rbg", "RBG"),
+                SlotEnumOption::new("gbr", "GBR"),
+                SlotEnumOption::new("brg", "BRG"),
+                SlotEnumOption::new("bgr", "BGR"),
+            ],
+        },
+    }
+}

@@ -1,4 +1,6 @@
-use lpc_model::{FrameId, SlotAccess, SlotData, SlotMapKey, SlotPath, SlotShapeId};
+use lpc_model::{
+    FrameId, SlotAccess, SlotData, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
+};
 use lpc_view::SlotMirrorView;
 use lpc_wire::{WireSlotChange, WireSlotPatch};
 use std::sync::{Mutex, MutexGuard};
@@ -184,7 +186,7 @@ fn shader_param_index(name: &str) -> usize {
 }
 
 pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str) {
-    let selected = select(data, &format!("param_defs.{name}"));
+    let selected = select(data, &format!("param_defs[{name}]"));
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
@@ -198,7 +200,7 @@ pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str)
 }
 
 pub fn assert_shader_param_def_label(data: &SlotData, name: &str, expected: &str) {
-    let selected = select(data, &format!("param_defs.{name}"));
+    let selected = select(data, &format!("param_defs[{name}]"));
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
@@ -227,6 +229,9 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
     for segment in SlotPath::parse(path).unwrap().segments() {
         current = match current {
             SlotData::Record(record) => {
+                let SlotPathSegment::Field(segment) = segment else {
+                    panic!("expected record field segment {segment:?}");
+                };
                 let index = match segment.as_str() {
                     "source.shader.param_defs" | "param_defs" => 4,
                     "engine.shader_node.params" | "params" => 0,
@@ -238,22 +243,23 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                 };
                 &record.fields[index]
             }
-            SlotData::Map(map) => map
-                .entries
-                .get(&SlotMapKey::String(segment.as_str().to_string()))
-                .or_else(|| {
-                    segment
-                        .as_str()
-                        .parse::<u32>()
-                        .ok()
-                        .and_then(|key| map.entries.get(&SlotMapKey::U32(key)))
-                })
-                .expect("map entry"),
+            SlotData::Map(map) => {
+                let SlotPathSegment::Key(segment) = segment else {
+                    panic!("expected map key segment {segment:?}");
+                };
+                map.entries.get(segment).expect("map entry")
+            }
             SlotData::Enum(en) => {
+                let SlotPathSegment::Field(segment) = segment else {
+                    panic!("expected enum variant segment {segment:?}");
+                };
                 assert_eq!(en.variant.as_str(), segment.as_str());
                 &en.data
             }
             SlotData::Option(option) => {
+                let SlotPathSegment::Field(segment) = segment else {
+                    panic!("expected option segment {segment:?}");
+                };
                 assert_eq!(segment.as_str(), "some");
                 option.data.as_deref().expect("option some")
             }

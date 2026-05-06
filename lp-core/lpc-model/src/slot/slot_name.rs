@@ -4,8 +4,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Name of one segment inside a slot owner's namespace.
 ///
-/// Slot names are joined into [`crate::SlotPath`] values. They are separate
-/// from [`crate::ValuePath`], which selects nested data inside a leaf value.
+/// Slot names are field segments inside [`crate::SlotPath`] values. They are
+/// separate from map keys and from [`crate::ValuePath`], which selects nested
+/// data inside a leaf value.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotName(String);
@@ -15,12 +16,18 @@ impl SlotName {
         if input.is_empty() {
             return Err(SlotNameError::Empty);
         }
-        if input.contains('#') {
-            return Err(SlotNameError::InvalidChar('#'));
+
+        let mut chars = input.chars();
+        let first = chars.next().expect("checked non-empty");
+        if !is_ident_start(first) {
+            return Err(SlotNameError::InvalidChar(first));
         }
-        if input.contains('.') {
-            return Err(SlotNameError::InvalidChar('.'));
+        for c in chars {
+            if !is_ident_continue(c) {
+                return Err(SlotNameError::InvalidChar(c));
+            }
         }
+
         Ok(Self(input.to_string()))
     }
 
@@ -72,6 +79,14 @@ impl fmt::Display for SlotNameError {
 
 impl core::error::Error for SlotNameError {}
 
+fn is_ident_start(c: char) -> bool {
+    c == '_' || c.is_ascii_alphabetic()
+}
+
+fn is_ident_continue(c: char) -> bool {
+    is_ident_start(c) || c.is_ascii_digit()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,14 +94,25 @@ mod tests {
 
     #[test]
     fn slot_name_accepts_segment_names() {
-        let name = SlotName::parse("width").unwrap();
-        assert_eq!(name.as_str(), "width");
-        assert_eq!(name.to_string(), "width");
+        for input in ["width", "_private", "color_order", "param2"] {
+            let name = SlotName::parse(input).unwrap();
+            assert_eq!(name.as_str(), input);
+            assert_eq!(name.to_string(), input);
+        }
     }
 
     #[test]
-    fn slot_name_rejects_empty_and_path_separators() {
-        for input in ["", "output#image", "config.width"] {
+    fn slot_name_rejects_empty_separators_and_non_idents() {
+        for input in [
+            "",
+            "2param",
+            "hello world",
+            "color-order",
+            "output#image",
+            "config.width",
+            "params[phase]",
+            "phase]",
+        ] {
             assert!(SlotName::parse(input).is_err(), "accepted {input:?}");
         }
     }

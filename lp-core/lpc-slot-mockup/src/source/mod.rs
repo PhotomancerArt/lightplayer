@@ -13,9 +13,6 @@ pub use shader_def::{CompilerOptions, ScalarHint, ShaderDef, ShaderParamDef};
 pub use texture_def::TextureDef;
 
 pub(crate) fn register_shapes(registry: &mut lpc_model::SlotShapeRegistry) {
-    NodeInvocationDef::register_shape(registry).unwrap();
-    ScalarHint::register_shape(registry).unwrap();
-    ShaderParamDef::register_shape(registry).unwrap();
     ProjectDef::register_shape(registry).unwrap();
     ShaderDef::register_shape(registry).unwrap();
     FixtureDef::register_shape(registry).unwrap();

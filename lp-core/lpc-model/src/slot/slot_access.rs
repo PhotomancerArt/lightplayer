@@ -1,5 +1,6 @@
 use crate::{
-    FrameId, ModelValue, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, Versioned,
+    FrameId, ModelValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
+    Versioned,
 };
 use alloc::vec::Vec;
 
@@ -26,13 +27,24 @@ pub trait StaticSlotAccess: SlotAccess {
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError>;
 }
 
+/// Field-level slot access used by derive inference.
+///
+/// A record field that implements this trait can be included in
+/// `#[derive(SlotRecord)]` without an explicit shape attribute. Fields that do
+/// not implement this trait must opt out with `#[slot(skip)]` or provide an
+/// explicit override supported by the derive.
+pub trait FieldSlot {
+    fn slot_field_shape() -> SlotShape;
+    fn slot_field_data(&self) -> SlotDataAccess<'_>;
+}
+
 /// Borrowed access to one slot-data node.
 #[derive(Clone, Copy)]
 pub enum SlotDataAccess<'a> {
     Unit(FrameId),
     Value(&'a dyn SlotValueAccess),
     Record(&'a dyn SlotRecordAccess),
-    Map(&'a dyn SlotMapAccess),
+    Map(&'a dyn MapSlotAccess),
     Enum(&'a dyn SlotEnumAccess),
     Option(&'a dyn SlotOptionAccess),
 }
@@ -53,7 +65,7 @@ pub trait SlotRecordAccess {
 }
 
 /// Borrowed access to a stable-key map slot.
-pub trait SlotMapAccess {
+pub trait MapSlotAccess {
     fn keys_changed_frame(&self) -> FrameId;
     fn keys(&self) -> Vec<SlotMapKey>;
     fn get(&self, key: &SlotMapKey) -> Option<SlotDataAccess<'_>>;
@@ -155,7 +167,7 @@ impl SlotRecordAccess for SlotRecord {
     }
 }
 
-impl SlotMapAccess for SlotMapDyn {
+impl MapSlotAccess for SlotMapDyn {
     fn keys_changed_frame(&self) -> FrameId {
         self.keys_changed_frame
     }

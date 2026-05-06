@@ -5,9 +5,16 @@ use syn::{
 
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
+    pub(crate) root: bool,
+}
+
+pub(crate) struct FieldAttrs {
+    pub(crate) name: Option<LitStr>,
+    pub(crate) shape: FieldShapeAttr,
 }
 
 pub(crate) enum FieldShapeAttr {
+    Infer,
     Value(Expr),
     Leaf(Expr),
     Record,
@@ -18,51 +25,62 @@ pub(crate) enum FieldShapeAttr {
 }
 
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
-    let mut parsed = ContainerAttrs { shape_id: None };
+    let mut parsed = ContainerAttrs {
+        shape_id: None,
+        root: false,
+    };
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("shape_id") {
                 let value = meta.value()?;
                 parsed.shape_id = Some(value.parse()?);
                 Ok(())
-            } else {
+            } else if meta.path.is_ident("root") {
+                parsed.root = true;
                 Ok(())
+            } else {
+                Err(meta.error("unsupported slot container attribute"))
             }
         })?;
     }
     Ok(parsed)
 }
 
-pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldShapeAttr> {
-    let mut parsed = None;
+pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
+    let mut name = None;
+    let mut shape = None;
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("value") {
+            if meta.path.is_ident("name") {
                 let value = meta.value()?;
-                parsed = Some(FieldShapeAttr::Value(value.parse()?));
+                name = Some(value.parse()?);
+                Ok(())
+            } else if meta.path.is_ident("value") {
+                let value = meta.value()?;
+                shape = Some(FieldShapeAttr::Value(value.parse()?));
                 Ok(())
             } else if meta.path.is_ident("leaf") {
                 let value = meta.value()?;
-                parsed = Some(FieldShapeAttr::Leaf(value.parse()?));
+                shape = Some(FieldShapeAttr::Leaf(value.parse()?));
                 Ok(())
             } else if meta.path.is_ident("record") {
-                parsed = Some(FieldShapeAttr::Record);
+                shape = Some(FieldShapeAttr::Record);
                 Ok(())
             } else if meta.path.is_ident("enum") {
-                parsed = Some(FieldShapeAttr::Enum);
+                shape = Some(FieldShapeAttr::Enum);
                 Ok(())
             } else if meta.path.is_ident("skip") {
-                parsed = Some(FieldShapeAttr::Skip);
+                shape = Some(FieldShapeAttr::Skip);
                 Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
-                parsed = Some(FieldShapeAttr::OptionRef(value.parse()?));
+                shape = Some(FieldShapeAttr::OptionRef(value.parse()?));
                 Ok(())
             } else if meta.path.is_ident("map") {
                 let content;
                 parenthesized!(content in meta.input);
                 let map = content.parse::<MapArgs>()?;
-                parsed = Some(FieldShapeAttr::Map {
+                shape = Some(FieldShapeAttr::Map {
                     key: map.key,
                     value_ref: map.value_ref,
                 });
@@ -72,11 +90,17 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldShapeAttr> {
             }
         })?;
     }
-    parsed.ok_or_else(|| syn::Error::new(proc_macro2::Span::call_site(), "missing #[slot(...)]"))
+    Ok(FieldAttrs {
+        name,
+        shape: shape.unwrap_or(FieldShapeAttr::Infer),
+    })
 }
 
 pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> TokenStream {
     match attr {
+        FieldShapeAttr::Infer => {
+            quote::quote! { <#ty as ::lpc_model::FieldSlot>::slot_field_shape() }
+        }
         FieldShapeAttr::Value(expr) => {
             quote::quote! { ::lpc_model::slot::shape::value(#expr) }
         }
@@ -111,9 +135,13 @@ pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> Token
 
 pub(crate) fn field_access_tokens(
     attr: &FieldShapeAttr,
+    ty: &syn::Type,
     field_ident: &syn::Ident,
 ) -> Option<TokenStream> {
     match attr {
+        FieldShapeAttr::Infer => Some(
+            quote::quote! { <#ty as ::lpc_model::FieldSlot>::slot_field_data(&self.#field_ident) },
+        ),
         FieldShapeAttr::Value(_) | FieldShapeAttr::Leaf(_) => {
             Some(quote::quote! { ::lpc_model::SlotDataAccess::Value(&self.#field_ident) })
         }

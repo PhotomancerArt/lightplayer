@@ -25,19 +25,26 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         let Some(field_ident) = field.ident else {
             continue;
         };
-        let field_name = field_ident.to_string();
-        let field_ty = field.ty;
         let field_attr = attr::parse_field(&field.attrs)?;
-        if matches!(field_attr, FieldShapeAttr::Skip) {
+        if matches!(field_attr.shape, FieldShapeAttr::Skip) {
             continue;
         }
 
-        let shape = attr::field_shape_tokens(&field_attr, &field_ty);
+        let field_name = field_attr
+            .name
+            .as_ref()
+            .map_or_else(|| field_ident.to_string(), syn::LitStr::value);
+        validate_slot_name(&field_name, field_ident.span())?;
+
+        let field_ty = field.ty;
+
+        let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
         shape_fields.push(quote! {
             ::lpc_model::slot::shape::field(#field_name, #shape)
         });
 
-        if let Some(access) = attr::field_access_tokens(&field_attr, &field_ident) {
+        if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
+        {
             let index = syn::Index::from(access_index);
             access_arms.push(quote! {
                 #index => Some(#access),
@@ -46,7 +53,17 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         }
     }
 
-    let root_impls = if let Some(shape_id) = container_attrs.shape_id {
+    let root_impls = if container_attrs.root || container_attrs.shape_id.is_some() {
+        let shape_id = if let Some(shape_id) = container_attrs.shape_id {
+            quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
+        } else {
+            quote! {
+                ::lpc_model::SlotShapeId::from_static_name(
+                    concat!(module_path!(), "::", stringify!(#ident)),
+                )
+            }
+        };
+
         quote! {
             impl ::lpc_model::SlotAccess for #ident {
                 fn shape_id(&self) -> ::lpc_model::SlotShapeId {
@@ -60,7 +77,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
             impl ::lpc_model::StaticSlotAccess for #ident {
                 const SHAPE_ID: ::lpc_model::SlotShapeId =
-                    ::lpc_model::SlotShapeId::from_static_name(#shape_id);
+                    #shape_id;
 
                 fn register_shape(
                     registry: &mut ::lpc_model::SlotShapeRegistry,
@@ -97,6 +114,16 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
         }
 
+        impl ::lpc_model::FieldSlot for #ident {
+            fn slot_field_shape() -> ::lpc_model::SlotShape {
+                <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
+            }
+
+            fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
+                ::lpc_model::SlotDataAccess::Record(self)
+            }
+        }
+
         #root_impls
     })
 }
@@ -115,4 +142,37 @@ fn named_fields(data: Data) -> Result<syn::FieldsNamed> {
             "SlotRecord derive only supports structs",
         )),
     }
+}
+
+fn validate_slot_name(name: &str, span: proc_macro2::Span) -> Result<()> {
+    if name.is_empty() {
+        return Err(syn::Error::new(span, "slot field name cannot be empty"));
+    }
+
+    let mut chars = name.chars();
+    let first = chars.next().expect("checked non-empty");
+    if !is_ident_start(first) {
+        return Err(syn::Error::new(
+            span,
+            "slot field name must start with '_' or an ASCII letter",
+        ));
+    }
+    for c in chars {
+        if !is_ident_continue(c) {
+            return Err(syn::Error::new(
+                span,
+                "slot field name must contain only ASCII letters, digits, or '_'",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_ident_start(c: char) -> bool {
+    c == '_' || c.is_ascii_alphabetic()
+}
+
+fn is_ident_continue(c: char) -> bool {
+    is_ident_start(c) || c.is_ascii_digit()
 }

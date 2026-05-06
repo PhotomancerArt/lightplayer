@@ -1,8 +1,7 @@
 use lpc_model::{
-    Affine2d, Affine2dSlot, ColorOrderSlot, ColorOrderValue, FrameId, PositiveF32Slot,
-    RelativeNodeRef, RelativeNodeRefSlot, SlotDataAccess, SlotEnumAccess, SlotEnumShape,
-    SlotMapValueAccess, SlotOption, SlotRecordAccess, XySlot, affine2d_shape, color_order_shape,
-    current_state_version, relative_node_ref_shape,
+    Affine2d, Affine2dSlot, ColorOrderSlot, ColorOrderValue, FieldSlot, FrameId, OptionSlot,
+    PositiveF32Slot, RelativeNodeRef, RelativeNodeRefSlot, SlotDataAccess, SlotEnumAccess,
+    SlotEnumShape, SlotMapValueAccess, SlotRecordAccess, SlotShape, XySlot, current_state_version,
 };
 
 use crate::model::mapping_shape;
@@ -10,22 +9,15 @@ use crate::model::mapping_shape;
 use super::shader_def::ScalarHint;
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.fixture")]
+#[slot(root)]
 pub struct FixtureDef {
-    #[slot(leaf = relative_node_ref_shape())]
     output_loc: RelativeNodeRefSlot,
-    #[slot(leaf = relative_node_ref_shape())]
     texture_loc: RelativeNodeRefSlot,
-    #[slot(enum)]
     mapping: FixtureMapping,
-    #[slot(leaf = color_order_shape())]
     color_order: ColorOrderSlot,
-    #[slot(leaf = affine2d_shape())]
     transform: Affine2dSlot,
-    #[slot(option_ref = "source.scalar_hint")]
-    brightness: SlotOption<ScalarHint>,
-    #[slot(value = lpc_model::ModelType::Bool)]
-    gamma_correction: lpc_model::SlotValue<bool>,
+    brightness: OptionSlot<ScalarHint>,
+    gamma_correction: lpc_model::ValueSlot<bool>,
 }
 
 pub enum FixtureMapping {
@@ -52,8 +44,8 @@ impl FixtureDef {
             mapping: FixtureMapping::circle(),
             color_order: ColorOrderSlot::new(ColorOrderValue::Grb),
             transform: Affine2dSlot::new(Affine2d::identity()),
-            brightness: SlotOption::some(ScalarHint::mock(0.8)),
-            gamma_correction: lpc_model::SlotValue::new(true),
+            brightness: OptionSlot::some(ScalarHint::mock(0.8)),
+            gamma_correction: lpc_model::ValueSlot::new(true),
         }
     }
 
@@ -161,6 +153,16 @@ impl SlotRecordAccess for FixtureMapping {
 
 impl SlotMapValueAccess for FixtureMapping {
     fn slot_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Enum(self)
+    }
+}
+
+impl FieldSlot for FixtureMapping {
+    fn slot_field_shape() -> SlotShape {
+        mapping_shape()
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Enum(self)
     }
 }

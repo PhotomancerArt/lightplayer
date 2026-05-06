@@ -1,5 +1,5 @@
-use crate::{ModelStructMember, ModelType, ModelValue, SlotName, SlotPath};
-use alloc::string::{String, ToString};
+use crate::{ModelStructMember, ModelType, ModelValue, SlotName, SlotPath, SlotPathSegment};
+use alloc::string::String;
 use core::fmt;
 
 use super::{
@@ -121,7 +121,7 @@ fn get_data<'a>(
     data: &'a SlotData,
     shape: &'a SlotShape,
     registry: &'a SlotShapeRegistry,
-    segments: &[SlotName],
+    segments: &[SlotPathSegment],
 ) -> Option<&'a SlotData> {
     if let SlotShape::Ref { id } = shape {
         return get_data(data, registry.get(id)?, registry, segments);
@@ -133,21 +133,26 @@ fn get_data<'a>(
 
     match (data, shape) {
         (SlotData::Record(record), SlotShape::Record { fields, .. }) => {
+            let SlotPathSegment::Field(head) = head else {
+                return None;
+            };
             let index = fields.iter().position(|field| field.name == *head)?;
             let field_data = record.fields.get(index)?;
             let field_shape = &fields.get(index)?.shape;
             get_data(field_data, field_shape, registry, tail)
         }
         (SlotData::Map(map), SlotShape::Map { key, value, .. }) => {
-            if *key != SlotMapKeyShape::String {
+            let SlotPathSegment::Key(head) = head else {
                 return None;
-            }
-            let data = map
-                .entries
-                .get(&SlotMapKey::String(head.as_str().to_string()))?;
+            };
+            let key = map_key_for_shape(head, *key)?;
+            let data = map.entries.get(&key)?;
             get_data(data, value, registry, tail)
         }
         (SlotData::Enum(active), SlotShape::Enum { variants, .. }) => {
+            let SlotPathSegment::Field(head) = head else {
+                return None;
+            };
             if active.variant != *head {
                 return None;
             }
@@ -155,6 +160,9 @@ fn get_data<'a>(
             get_data(&active.data, &variant.shape, registry, tail)
         }
         (SlotData::Option(option), SlotShape::Option { some, .. }) if option.data.is_some() => {
+            let SlotPathSegment::Field(head) = head else {
+                return None;
+            };
             if head.as_str() != "some" {
                 return None;
             }
@@ -164,6 +172,23 @@ fn get_data<'a>(
                 registry,
                 tail,
             )
+        }
+        _ => None,
+    }
+}
+
+fn map_key_for_shape(key: &SlotMapKey, shape: SlotMapKeyShape) -> Option<SlotMapKey> {
+    match (key, shape) {
+        (SlotMapKey::String(value), SlotMapKeyShape::String) => {
+            Some(SlotMapKey::String(value.clone()))
+        }
+        (SlotMapKey::I32(value), SlotMapKeyShape::I32) => Some(SlotMapKey::I32(*value)),
+        (SlotMapKey::U32(value), SlotMapKeyShape::U32) => Some(SlotMapKey::U32(*value)),
+        (SlotMapKey::U32(value), SlotMapKeyShape::I32) => {
+            i32::try_from(*value).ok().map(SlotMapKey::I32)
+        }
+        (SlotMapKey::I32(value), SlotMapKeyShape::U32) => {
+            u32::try_from(*value).ok().map(SlotMapKey::U32)
         }
         _ => None,
     }
@@ -356,6 +381,7 @@ mod tests {
     };
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
+    use alloc::string::ToString;
     use alloc::vec;
 
     #[test]
@@ -414,13 +440,17 @@ mod tests {
             ModelValue::Vec4([0.0, 1.0, 2.0, 3.0]),
         ));
         let mut entries = BTreeMap::new();
-        entries.insert(SlotMapKey::String("dome".to_string()), value.clone());
+        entries.insert(SlotMapKey::String("dome.front".to_string()), value.clone());
         let tree = SlotTree::new(shape_id, SlotData::Map(SlotMapDyn::new(entries)));
 
         tree.validate(&registry).unwrap();
         assert_eq!(
-            tree.get(&registry, &SlotPath::parse("dome").unwrap()),
+            tree.get(&registry, &SlotPath::parse(r#"["dome.front"]"#).unwrap()),
             Some(&value)
+        );
+        assert_eq!(
+            tree.get(&registry, &SlotPath::parse("dome.front").unwrap()),
+            None
         );
     }
 

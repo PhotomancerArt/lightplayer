@@ -1,23 +1,18 @@
 use std::collections::BTreeMap;
 
 use crate::source::FixtureMapping;
-use lpc_model::{PositiveF32Slot, SlotMap, XySlot, positive_f32_shape, xy_shape};
+use lpc_model::{MapSlot, PositiveF32Slot, XySlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "engine.fixture_node")]
+#[slot(root)]
 pub struct FixtureNode {
-    #[slot(map(key = "u32", value_ref = "engine.touch"))]
-    touches: SlotMap<u32, TouchState>,
-    #[slot(enum)]
+    touches: MapSlot<u32, TouchState>,
     mapping_preview: FixtureMapping,
 }
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "engine.touch")]
 pub struct TouchState {
-    #[slot(leaf = xy_shape())]
     position: XySlot,
-    #[slot(leaf = positive_f32_shape())]
     pressure: PositiveF32Slot,
 }
 
@@ -28,7 +23,7 @@ impl FixtureNode {
         touches.insert(2, TouchState::new([0.8, 0.4], 0.4));
 
         Self {
-            touches: SlotMap::new(touches),
+            touches: MapSlot::new(touches),
             mapping_preview: FixtureMapping::circle(),
         }
     }

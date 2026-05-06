@@ -14,7 +14,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
     harness.print_client_tree("source.shader");
     harness.print_client_tree("engine.shader_node");
 
-    println!("server updating source.shader#param_defs.exposure.value_type to vec3");
+    println!("server updating source.shader#param_defs[exposure].value_type to vec3");
     println!("server updating engine.shader_node params record shape");
     println!("server updating engine.shader_node#params.exposure to Vec3([0.25, 0.5, 0.75])");
     harness

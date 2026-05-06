@@ -474,7 +474,7 @@ impl LpClient {
             handle,
             request: WireProjectRequest::GetChanges {
                 since_frame,
-                legacy_detail_specifier: legacy_detail_specifier,
+                legacy_detail_specifier,
                 slot_watch_specifier: Default::default(),
                 resource_summary_specifier,
                 runtime_buffer_payload_specifier,

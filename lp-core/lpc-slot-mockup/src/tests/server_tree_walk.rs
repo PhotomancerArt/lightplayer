@@ -15,6 +15,6 @@ fn server_tree_walk_prints_runtime_and_source_roots() {
     assert!(
         shader_lines
             .iter()
-            .any(|line| line.contains("param_defs.exposure.default"))
+            .any(|line| line.contains("param_defs[exposure].default"))
     );
 }

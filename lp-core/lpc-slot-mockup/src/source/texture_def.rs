@@ -1,9 +1,8 @@
-use lpc_model::{Dim2u, Dim2uSlot, dim2u_shape};
+use lpc_model::{Dim2u, Dim2uSlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.texture")]
+#[slot(root)]
 pub struct TextureDef {
-    #[slot(leaf = dim2u_shape())]
     size: Dim2uSlot,
 }
 

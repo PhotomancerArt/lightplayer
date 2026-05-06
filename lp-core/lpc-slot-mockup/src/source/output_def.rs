@@ -1,22 +1,19 @@
-use lpc_model::{ModelType, SlotValue};
+use lpc_model::ValueSlot;
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.output")]
+#[slot(root)]
 pub struct OutputDef {
-    #[slot(value = ModelType::U32)]
-    pin: SlotValue<u32>,
-    #[slot(value = ModelType::Bool)]
-    interpolate: SlotValue<bool>,
-    #[slot(value = ModelType::Bool)]
-    dither: SlotValue<bool>,
+    pin: ValueSlot<u32>,
+    interpolate: ValueSlot<bool>,
+    dither: ValueSlot<bool>,
 }
 
 impl OutputDef {
     pub fn new() -> Self {
         Self {
-            pin: SlotValue::new(18),
-            interpolate: SlotValue::new(true),
-            dither: SlotValue::new(false),
+            pin: ValueSlot::new(18),
+            interpolate: ValueSlot::new(true),
+            dither: ValueSlot::new(false),
         }
     }
 }

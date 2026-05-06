@@ -217,7 +217,7 @@ impl MockRuntime {
         path: &str,
     ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
         match path {
-            "param_defs.exposure.label" => Ok(MutationTargetInfo {
+            "param_defs[exposure].label" => Ok(MutationTargetInfo {
                 target: MutationTarget::ShaderExposureLabel,
                 shape_version: self
                     .root_shape_version(<ShaderDef as StaticSlotAccess>::SHAPE_ID)?,
@@ -227,7 +227,7 @@ impl MockRuntime {
                     .ok_or(WireSlotMutationRejection::UnknownPath)?,
                 ty: ModelType::String,
             }),
-            "param_defs.exposure.default" => Ok(MutationTargetInfo {
+            "param_defs[exposure].default" => Ok(MutationTargetInfo {
                 target: MutationTarget::Unsupported,
                 shape_version: self
                     .root_shape_version(<ShaderDef as StaticSlotAccess>::SHAPE_ID)?,

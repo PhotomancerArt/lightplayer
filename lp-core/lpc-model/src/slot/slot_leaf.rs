@@ -1,6 +1,5 @@
-use crate::{ModelStructMember, ModelType, ModelValue, RelativeNodeRef, ResourceRef};
+use crate::{ModelType, ModelValue};
 use alloc::string::{String, ToString};
-use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -163,270 +162,6 @@ impl fmt::Display for SlotLeafError {
 
 impl core::error::Error for SlotLeafError {}
 
-/// Width/height dimensions in unsigned integer pixels or cells.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Dim2u {
-    pub width: u32,
-    pub height: u32,
-}
-
-/// 2D affine transform with translation.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Affine2d {
-    pub m00: f32,
-    pub m01: f32,
-    pub m10: f32,
-    pub m11: f32,
-    pub tx: f32,
-    pub ty: f32,
-}
-
-impl Affine2d {
-    pub fn identity() -> Self {
-        Self {
-            m00: 1.0,
-            m01: 0.0,
-            m10: 0.0,
-            m11: 1.0,
-            tx: 0.0,
-            ty: 0.0,
-        }
-    }
-}
-
-/// RGB channel order for fixture/output color packing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColorOrderValue {
-    Rgb,
-    Grb,
-    Rbg,
-    Gbr,
-    Brg,
-    Bgr,
-}
-
-impl ColorOrderValue {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Rgb => "rgb",
-            Self::Grb => "grb",
-            Self::Rbg => "rbg",
-            Self::Gbr => "gbr",
-            Self::Brg => "brg",
-            Self::Bgr => "bgr",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "rgb" => Some(Self::Rgb),
-            "grb" => Some(Self::Grb),
-            "rbg" => Some(Self::Rbg),
-            "gbr" => Some(Self::Gbr),
-            "brg" => Some(Self::Brg),
-            "bgr" => Some(Self::Bgr),
-            _ => None,
-        }
-    }
-}
-
-pub type RelativeNodeRefSlot = super::SlotValue<RelativeNodeRef>;
-pub type ArtifactPathSlot = super::SlotValue<String>;
-pub type SourcePathSlot = super::SlotValue<String>;
-pub type Dim2uSlot = super::SlotValue<Dim2u>;
-pub type RatioSlot = super::SlotValue<f32>;
-pub type PositiveF32Slot = super::SlotValue<f32>;
-pub type XySlot = super::SlotValue<[f32; 2]>;
-pub type Affine2dSlot = super::SlotValue<Affine2d>;
-pub type ColorOrderSlot = super::SlotValue<ColorOrderValue>;
-pub type RenderOrderSlot = super::SlotValue<i32>;
-pub type ResourceRefSlot = super::SlotValue<ResourceRef>;
-
-pub fn relative_node_ref_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.relative_node_ref"),
-        ty: ModelType::String,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::NodeRef,
-    }
-}
-
-pub fn artifact_path_shape() -> SlotValueShape {
-    path_shape("slot.leaf.artifact_path")
-}
-
-pub fn source_path_shape() -> SlotValueShape {
-    path_shape("slot.leaf.source_path")
-}
-
-pub fn dim2u_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.dim2u"),
-        ty: dim2u_model_type(),
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Dimensions,
-    }
-}
-
-pub fn ratio_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.ratio"),
-        ty: ModelType::F32,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Slider {
-            min: OrderedF32(0.0),
-            max: OrderedF32(1.0),
-            step: Some(OrderedF32(0.01)),
-        },
-    }
-}
-
-pub fn positive_f32_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.positive_f32"),
-        ty: ModelType::F32,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Number {
-            min: Some(OrderedF32(0.0)),
-            max: None,
-            step: None,
-        },
-    }
-}
-
-pub fn xy_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.xy"),
-        ty: ModelType::Vec2,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Xy,
-    }
-}
-
-pub fn affine2d_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.affine2d"),
-        ty: affine2d_model_type(),
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Affine2d,
-    }
-}
-
-pub fn color_order_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.color_order"),
-        ty: ModelType::String,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Dropdown {
-            options: vec![
-                SlotEnumOption::new("rgb", "RGB"),
-                SlotEnumOption::new("grb", "GRB"),
-                SlotEnumOption::new("rbg", "RBG"),
-                SlotEnumOption::new("gbr", "GBR"),
-                SlotEnumOption::new("brg", "BRG"),
-                SlotEnumOption::new("bgr", "BGR"),
-            ],
-        },
-    }
-}
-
-pub fn render_order_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.render_order"),
-        ty: ModelType::I32,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Number {
-            min: None,
-            max: None,
-            step: Some(OrderedF32(1.0)),
-        },
-    }
-}
-
-pub fn resource_ref_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.resource_ref"),
-        ty: ModelType::Resource,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Resource,
-    }
-}
-
-pub fn runtime_buffer_resource_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.runtime_buffer_resource"),
-        ty: ModelType::Resource,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::RuntimeBufferResource,
-    }
-}
-
-pub fn render_product_resource_shape() -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.render_product_resource"),
-        ty: ModelType::Resource,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::RenderProductResource,
-    }
-}
-
-fn path_shape(name: &str) -> SlotValueShape {
-    SlotValueShape {
-        leaf: SlotLeafId::from_static_name(name),
-        ty: ModelType::String,
-        meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Path,
-    }
-}
-
-fn dim2u_model_type() -> ModelType {
-    ModelType::Struct {
-        name: Some(String::from("Dim2u")),
-        fields: vec![
-            ModelStructMember {
-                name: String::from("width"),
-                ty: ModelType::U32,
-            },
-            ModelStructMember {
-                name: String::from("height"),
-                ty: ModelType::U32,
-            },
-        ],
-    }
-}
-
-fn affine2d_model_type() -> ModelType {
-    ModelType::Struct {
-        name: Some(String::from("Affine2d")),
-        fields: vec![
-            ModelStructMember {
-                name: String::from("m00"),
-                ty: ModelType::F32,
-            },
-            ModelStructMember {
-                name: String::from("m01"),
-                ty: ModelType::F32,
-            },
-            ModelStructMember {
-                name: String::from("m10"),
-                ty: ModelType::F32,
-            },
-            ModelStructMember {
-                name: String::from("m11"),
-                ty: ModelType::F32,
-            },
-            ModelStructMember {
-                name: String::from("tx"),
-                ty: ModelType::F32,
-            },
-            ModelStructMember {
-                name: String::from("ty"),
-                ty: ModelType::F32,
-            },
-        ],
-    }
-}
-
 impl ToModelValue for ModelValue {
     fn to_model_value(&self) -> ModelValue {
         self.clone()
@@ -442,12 +177,6 @@ impl ToModelValue for String {
 impl ToModelValue for &str {
     fn to_model_value(&self) -> ModelValue {
         ModelValue::String((*self).to_string())
-    }
-}
-
-impl ToModelValue for RelativeNodeRef {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.to_string())
     }
 }
 
@@ -484,46 +213,6 @@ impl ToModelValue for [f32; 2] {
 impl ToModelValue for [f32; 3] {
     fn to_model_value(&self) -> ModelValue {
         ModelValue::Vec3(*self)
-    }
-}
-
-impl ToModelValue for Dim2u {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Struct {
-            name: Some(String::from("Dim2u")),
-            fields: vec![
-                (String::from("width"), ModelValue::U32(self.width)),
-                (String::from("height"), ModelValue::U32(self.height)),
-            ],
-        }
-    }
-}
-
-impl ToModelValue for Affine2d {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Struct {
-            name: Some(String::from("Affine2d")),
-            fields: vec![
-                (String::from("m00"), ModelValue::F32(self.m00)),
-                (String::from("m01"), ModelValue::F32(self.m01)),
-                (String::from("m10"), ModelValue::F32(self.m10)),
-                (String::from("m11"), ModelValue::F32(self.m11)),
-                (String::from("tx"), ModelValue::F32(self.tx)),
-                (String::from("ty"), ModelValue::F32(self.ty)),
-            ],
-        }
-    }
-}
-
-impl ToModelValue for ColorOrderValue {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().to_string())
-    }
-}
-
-impl ToModelValue for ResourceRef {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Resource(*self)
     }
 }
 
@@ -571,80 +260,6 @@ impl FromModelValue for [f32; 3] {
     }
 }
 
-impl FromModelValue for RelativeNodeRef {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        match value {
-            ModelValue::String(value) => RelativeNodeRef::parse(&value)
-                .map_err(|err| SlotLeafError::new(alloc::format!("{err}"))),
-            other => Err(SlotLeafError::new(alloc::format!(
-                "expected String, got {other:?}"
-            ))),
-        }
-    }
-}
-
-impl FromModelValue for Dim2u {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        let ModelValue::Struct { name, fields } = value else {
-            return Err(SlotLeafError::new("expected Dim2u struct"));
-        };
-        if name.as_deref() != Some("Dim2u") || fields.len() != 2 {
-            return Err(SlotLeafError::new("expected Dim2u struct"));
-        }
-        let width = match &fields[0] {
-            (name, ModelValue::U32(value)) if name == "width" => *value,
-            _ => return Err(SlotLeafError::new("expected Dim2u.width")),
-        };
-        let height = match &fields[1] {
-            (name, ModelValue::U32(value)) if name == "height" => *value,
-            _ => return Err(SlotLeafError::new("expected Dim2u.height")),
-        };
-        Ok(Self { width, height })
-    }
-}
-
-impl FromModelValue for Affine2d {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        let ModelValue::Struct { name, fields } = value else {
-            return Err(SlotLeafError::new("expected Affine2d struct"));
-        };
-        if name.as_deref() != Some("Affine2d") || fields.len() != 6 {
-            return Err(SlotLeafError::new("expected Affine2d struct"));
-        }
-        Ok(Self {
-            m00: struct_f32(&fields, 0, "m00")?,
-            m01: struct_f32(&fields, 1, "m01")?,
-            m10: struct_f32(&fields, 2, "m10")?,
-            m11: struct_f32(&fields, 3, "m11")?,
-            tx: struct_f32(&fields, 4, "tx")?,
-            ty: struct_f32(&fields, 5, "ty")?,
-        })
-    }
-}
-
-impl FromModelValue for ColorOrderValue {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        match value {
-            ModelValue::String(value) => Self::parse(&value)
-                .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
-            other => Err(SlotLeafError::new(alloc::format!(
-                "expected String, got {other:?}"
-            ))),
-        }
-    }
-}
-
-impl FromModelValue for ResourceRef {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        match value {
-            ModelValue::Resource(value) => Ok(value),
-            other => Err(SlotLeafError::new(alloc::format!(
-                "expected Resource, got {other:?}"
-            ))),
-        }
-    }
-}
-
 macro_rules! impl_slot_leaf {
     ($ty:ty, $id:literal, $shape:expr) => {
         impl SlotLeaf for $ty {
@@ -657,11 +272,6 @@ macro_rules! impl_slot_leaf {
     };
 }
 
-impl_slot_leaf!(
-    RelativeNodeRef,
-    "slot.leaf.relative_node_ref",
-    relative_node_ref_shape()
-);
 impl_slot_leaf!(
     String,
     "slot.leaf.raw_string",
@@ -697,27 +307,6 @@ impl_slot_leaf!(
     "slot.leaf.raw_vec3",
     SlotValueShape::raw(ModelType::Vec3)
 );
-impl_slot_leaf!(Dim2u, "slot.leaf.dim2u", dim2u_shape());
-impl_slot_leaf!(Affine2d, "slot.leaf.affine2d", affine2d_shape());
-impl_slot_leaf!(
-    ColorOrderValue,
-    "slot.leaf.color_order",
-    color_order_shape()
-);
-impl_slot_leaf!(ResourceRef, "slot.leaf.resource_ref", resource_ref_shape());
-
-fn struct_f32(
-    fields: &[(String, ModelValue)],
-    index: usize,
-    expected_name: &str,
-) -> Result<f32, SlotLeafError> {
-    match fields.get(index) {
-        Some((name, ModelValue::F32(value))) if name == expected_name => Ok(*value),
-        _ => Err(SlotLeafError::new(alloc::format!(
-            "expected Affine2d.{expected_name}"
-        ))),
-    }
-}
 
 fn raw_leaf_id(ty: &ModelType) -> SlotLeafId {
     SlotLeafId::from_static_name(match ty {
@@ -765,6 +354,11 @@ const fn fnv1a32(input: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        Affine2d, ColorOrderValue, Dim2u, FromModelValue, RenderProductId, ResourceRef,
+        ToModelValue, affine2d_shape, color_order_shape, dim2u_shape, relative_node_ref_shape,
+        render_product_resource_shape, runtime_buffer_resource_shape,
+    };
 
     #[test]
     fn semantic_leaf_shapes_carry_editor_hints() {
@@ -808,7 +402,7 @@ mod tests {
             order
         );
 
-        let resource = ResourceRef::render_product(crate::RenderProductId::new(7));
+        let resource = ResourceRef::render_product(RenderProductId::new(7));
         assert_eq!(
             ResourceRef::from_model_value(resource.to_model_value()).unwrap(),
             resource

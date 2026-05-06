@@ -1,19 +1,20 @@
-use crate::{FrameId, ModelValue, Versioned, current_state_version};
+use crate::{FrameId, ModelValue, SlotMapKeyShape, SlotShape, Versioned, current_state_version};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::{
-    SlotDataAccess, SlotMapAccess, SlotMapKey, SlotOptionAccess, SlotValueAccess, ToModelValue,
+    FieldSlot, MapSlotAccess, SlotDataAccess, SlotLeaf, SlotMapKey, SlotOptionAccess,
+    SlotValueAccess, ToModelValue,
 };
 
 /// A typed versioned slot leaf for Rust-authored structs.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlotValue<T> {
+pub struct ValueSlot<T> {
     inner: Versioned<T>,
 }
 
-impl<T> SlotValue<T> {
+impl<T> ValueSlot<T> {
     pub fn new(value: T) -> Self {
         Self::with_version(current_state_version(), value)
     }
@@ -41,13 +42,13 @@ impl<T> SlotValue<T> {
     }
 }
 
-impl<T> From<Versioned<T>> for SlotValue<T> {
+impl<T> From<Versioned<T>> for ValueSlot<T> {
     fn from(inner: Versioned<T>) -> Self {
         Self { inner }
     }
 }
 
-impl<T: ToModelValue> SlotValueAccess for SlotValue<T> {
+impl<T: ToModelValue> SlotValueAccess for ValueSlot<T> {
     fn changed_frame(&self) -> FrameId {
         self.inner.changed_frame()
     }
@@ -57,8 +58,19 @@ impl<T: ToModelValue> SlotValueAccess for SlotValue<T> {
     }
 }
 
+impl<T: SlotLeaf> FieldSlot for ValueSlot<T> {
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::leaf(T::value_shape())
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Value(self)
+    }
+}
+
 /// Conversion between typed map keys and generic slot map keys.
-pub trait SlotMapKeyLike: Clone + Ord {
+pub trait MapSlotKeyLike: Clone + Ord {
+    fn key_shape() -> SlotMapKeyShape;
     fn to_slot_map_key(&self) -> SlotMapKey;
     fn from_slot_map_key(key: &SlotMapKey) -> Option<Self>;
 }
@@ -68,12 +80,12 @@ pub trait SlotMapKeyLike: Clone + Ord {
 /// The key set has its own version because adding or removing entries is a
 /// structural change independent from changes inside an entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlotMap<K, V> {
+pub struct MapSlot<K, V> {
     pub keys_changed_frame: FrameId,
     pub entries: BTreeMap<K, V>,
 }
 
-impl<K: Ord, V> SlotMap<K, V> {
+impl<K: Ord, V> MapSlot<K, V> {
     pub fn new(entries: BTreeMap<K, V>) -> Self {
         Self::with_version(current_state_version(), entries)
     }
@@ -107,9 +119,9 @@ impl<K: Ord, V> SlotMap<K, V> {
     }
 }
 
-impl<K, V> SlotMapAccess for SlotMap<K, V>
+impl<K, V> MapSlotAccess for MapSlot<K, V>
 where
-    K: SlotMapKeyLike,
+    K: MapSlotKeyLike,
     V: SlotMapValueAccess,
 {
     fn keys_changed_frame(&self) -> FrameId {
@@ -119,7 +131,7 @@ where
     fn keys(&self) -> Vec<SlotMapKey> {
         self.entries
             .keys()
-            .map(SlotMapKeyLike::to_slot_map_key)
+            .map(MapSlotKeyLike::to_slot_map_key)
             .collect()
     }
 
@@ -131,19 +143,43 @@ where
     }
 }
 
+impl<K, V> FieldSlot for MapSlot<K, V>
+where
+    K: MapSlotKeyLike,
+    V: FieldSlot + SlotMapValueAccess,
+{
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::Map {
+            meta: super::SlotMeta::empty(),
+            key: K::key_shape(),
+            value: alloc::boxed::Box::new(V::slot_field_shape()),
+        }
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Map(self)
+    }
+}
+
 /// A map value that can be exposed through slot traversal.
 pub trait SlotMapValueAccess {
     fn slot_data(&self) -> SlotDataAccess<'_>;
 }
 
+impl<T: SlotValueAccess> SlotMapValueAccess for T {
+    fn slot_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Value(self)
+    }
+}
+
 /// Typed option container for Rust-authored optional records.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlotOption<T> {
+pub struct OptionSlot<T> {
     pub presence_changed_frame: FrameId,
     pub data: Option<T>,
 }
 
-impl<T> SlotOption<T> {
+impl<T> OptionSlot<T> {
     pub fn none() -> Self {
         Self::none_with_version(current_state_version())
     }
@@ -185,7 +221,7 @@ impl<T> SlotOption<T> {
     }
 }
 
-impl<T: SlotMapValueAccess> SlotOptionAccess for SlotOption<T> {
+impl<T: SlotMapValueAccess> SlotOptionAccess for OptionSlot<T> {
     fn presence_changed_frame(&self) -> FrameId {
         self.presence_changed_frame
     }
@@ -195,7 +231,27 @@ impl<T: SlotMapValueAccess> SlotOptionAccess for SlotOption<T> {
     }
 }
 
-impl SlotMapKeyLike for String {
+impl<T> FieldSlot for OptionSlot<T>
+where
+    T: FieldSlot + SlotMapValueAccess,
+{
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::Option {
+            meta: super::SlotMeta::empty(),
+            some: alloc::boxed::Box::new(T::slot_field_shape()),
+        }
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Option(self)
+    }
+}
+
+impl MapSlotKeyLike for String {
+    fn key_shape() -> SlotMapKeyShape {
+        SlotMapKeyShape::String
+    }
+
     fn to_slot_map_key(&self) -> SlotMapKey {
         SlotMapKey::String(self.clone())
     }
@@ -208,7 +264,11 @@ impl SlotMapKeyLike for String {
     }
 }
 
-impl SlotMapKeyLike for i32 {
+impl MapSlotKeyLike for i32 {
+    fn key_shape() -> SlotMapKeyShape {
+        SlotMapKeyShape::I32
+    }
+
     fn to_slot_map_key(&self) -> SlotMapKey {
         SlotMapKey::I32(*self)
     }
@@ -221,7 +281,11 @@ impl SlotMapKeyLike for i32 {
     }
 }
 
-impl SlotMapKeyLike for u32 {
+impl MapSlotKeyLike for u32 {
+    fn key_shape() -> SlotMapKeyShape {
+        SlotMapKeyShape::U32
+    }
+
     fn to_slot_map_key(&self) -> SlotMapKey {
         SlotMapKey::U32(*self)
     }
@@ -242,7 +306,7 @@ mod tests {
 
     #[test]
     fn typed_slot_value_exposes_model_value() {
-        let value = SlotValue::with_version(FrameId::new(7), String::from("shader.glsl"));
+        let value = ValueSlot::with_version(FrameId::new(7), String::from("shader.glsl"));
 
         assert_eq!(value.changed_frame(), FrameId::new(7));
         assert_eq!(
@@ -253,7 +317,7 @@ mod tests {
 
     #[test]
     fn typed_slot_map_tracks_key_changes() {
-        struct Entry(SlotValue<u32>);
+        struct Entry(ValueSlot<u32>);
 
         impl SlotMapValueAccess for Entry {
             fn slot_data(&self) -> SlotDataAccess<'_> {
@@ -261,11 +325,11 @@ mod tests {
             }
         }
 
-        let mut map = SlotMap::new(BTreeMap::<String, Entry>::new());
+        let mut map = MapSlot::new(BTreeMap::<String, Entry>::new());
         map.insert_with_version(
             FrameId::new(3),
             String::from("a"),
-            Entry(SlotValue::with_version(FrameId::new(3), 1)),
+            Entry(ValueSlot::with_version(FrameId::new(3), 1)),
         );
 
         assert_eq!(map.keys_changed_frame(), FrameId::new(3));

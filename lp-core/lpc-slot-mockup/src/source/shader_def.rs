@@ -1,56 +1,38 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FrameId, ModelType, ModelValue, PositiveF32Slot, RatioSlot, RelativeNodeRef,
-    RelativeNodeRefSlot, RenderOrderSlot, SlotMap, SlotOption, SlotValue, SourcePathSlot,
-    positive_f32_shape, ratio_shape, relative_node_ref_shape, render_order_shape,
-    source_path_shape,
+    FrameId, MapSlot, ModelValue, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
+    RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.shader")]
+#[slot(root)]
 pub struct ShaderDef {
-    #[slot(leaf = source_path_shape())]
     glsl_path: SourcePathSlot,
-    #[slot(leaf = relative_node_ref_shape())]
     texture_loc: RelativeNodeRefSlot,
-    #[slot(leaf = render_order_shape())]
     render_order: RenderOrderSlot,
-    #[slot(record)]
     compiler_options: CompilerOptions,
-    #[slot(map(key = "string", value_ref = "source.shader_param_def"))]
-    pub param_defs: SlotMap<String, ShaderParamDef>,
+    pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
 #[derive(lpc_model::SlotRecord)]
 pub struct CompilerOptions {
-    #[slot(value = ModelType::String)]
-    add_sub: SlotValue<String>,
-    #[slot(value = ModelType::String)]
-    mul: SlotValue<String>,
-    #[slot(value = ModelType::String)]
-    div: SlotValue<String>,
+    add_sub: ValueSlot<String>,
+    mul: ValueSlot<String>,
+    div: ValueSlot<String>,
 }
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.shader_param_def")]
 pub struct ShaderParamDef {
-    #[slot(value = ModelType::String)]
-    label: SlotValue<String>,
-    #[slot(value = ModelType::String)]
-    description: SlotValue<String>,
-    #[slot(value = ModelType::String)]
-    value_type: SlotValue<String>,
-    #[slot(leaf = ratio_shape())]
+    label: ValueSlot<String>,
+    description: ValueSlot<String>,
+    value_type: ValueSlot<String>,
     default: RatioSlot,
-    #[slot(option_ref = "source.scalar_hint")]
-    min: SlotOption<ScalarHint>,
+    min: OptionSlot<ScalarHint>,
 }
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(shape_id = "source.scalar_hint")]
 pub struct ScalarHint {
-    #[slot(leaf = positive_f32_shape())]
     value: PositiveF32Slot,
 }
 
@@ -71,7 +53,7 @@ impl ShaderDef {
             texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..texture").unwrap()),
             render_order: RenderOrderSlot::new(0),
             compiler_options: CompilerOptions::default(),
-            param_defs: SlotMap::new(param_defs),
+            param_defs: MapSlot::new(param_defs),
         }
     }
 
@@ -116,9 +98,9 @@ impl Default for ShaderDef {
 impl Default for CompilerOptions {
     fn default() -> Self {
         Self {
-            add_sub: SlotValue::new(String::from("saturating")),
-            mul: SlotValue::new(String::from("saturating")),
-            div: SlotValue::new(String::from("saturating")),
+            add_sub: ValueSlot::new(String::from("saturating")),
+            mul: ValueSlot::new(String::from("saturating")),
+            div: ValueSlot::new(String::from("saturating")),
         }
     }
 }
@@ -126,13 +108,13 @@ impl Default for CompilerOptions {
 impl ShaderParamDef {
     fn new(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
-            label: SlotValue::new(label.to_string()),
-            description: SlotValue::new(description.to_string()),
-            value_type: SlotValue::new(String::from("f32")),
+            label: ValueSlot::new(label.to_string()),
+            description: ValueSlot::new(description.to_string()),
+            value_type: ValueSlot::new(String::from("f32")),
             default: RatioSlot::new(default),
             min: match min {
-                Some(value) => SlotOption::some(ScalarHint::new(value)),
-                None => SlotOption::none(),
+                Some(value) => OptionSlot::some(ScalarHint::new(value)),
+                None => OptionSlot::none(),
             },
         }
     }

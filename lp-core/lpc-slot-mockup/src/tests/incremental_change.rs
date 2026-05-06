@@ -10,7 +10,7 @@ fn incremental_changes_patch_client_state() {
     harness.sync_full();
     harness.print_client_tree("engine.shader_node");
 
-    println!("server updating source.shader#param_defs.gain.default to 0.5");
+    println!("server updating source.shader#param_defs[gain].default to 0.5");
     harness
         .runtime
         .add_shader_param_def(FrameId::new(2), "gain", 0.5);
