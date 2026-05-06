@@ -141,11 +141,11 @@ fn get_data<'a>(
             let variant = find_variant(variants, head)?;
             get_data(&active.data, &variant.shape, tail)
         }
-        (SlotData::Option(super::SlotOption::Some(data)), SlotShape::Option { some, .. }) => {
+        (SlotData::Option(option), SlotShape::Option { some, .. }) if option.data.is_some() => {
             if head.as_str() != "some" {
                 return None;
             }
-            get_data(data, some, tail)
+            get_data(option.data.as_deref().expect("checked some"), some, tail)
         }
         _ => None,
     }
@@ -180,9 +180,12 @@ fn validate_data(data: &SlotData, shape: &SlotShape) -> Result<(), SlotValidatio
                 .ok_or_else(|| SlotValidationError::UnknownEnumVariant(active.variant.clone()))?;
             validate_data(&active.data, &variant.shape)
         }
-        (SlotData::Option(super::SlotOption::None), SlotShape::Option { .. }) => Ok(()),
-        (SlotData::Option(super::SlotOption::Some(data)), SlotShape::Option { some, .. }) => {
-            validate_data(data, some)
+        (SlotData::Option(option), SlotShape::Option { some, .. }) => {
+            if let Some(data) = option.data.as_deref() {
+                validate_data(data, some)
+            } else {
+                Ok(())
+            }
         }
         _ => Err(SlotValidationError::KindMismatch {
             expected: shape.kind(),
@@ -213,7 +216,8 @@ fn validate_map_key(
 
 fn validate_model_value(value: &ModelValue, ty: &ModelType) -> Result<(), SlotValidationError> {
     let matches = match (value, ty) {
-        (ModelValue::I32(_), ModelType::I32)
+        (ModelValue::String(_), ModelType::String)
+        | (ModelValue::I32(_), ModelType::I32)
         | (ModelValue::U32(_), ModelType::U32)
         | (ModelValue::F32(_), ModelType::F32)
         | (ModelValue::Bool(_), ModelType::Bool)
@@ -314,7 +318,7 @@ impl SlotData {
 mod tests {
     use super::*;
     use crate::{
-        FrameId, SlotFieldShape, SlotMap, SlotMeta, SlotOption, SlotRecord, SlotRegistry,
+        FrameId, SlotFieldShape, SlotMapDyn, SlotMeta, SlotOptionDyn, SlotRecord, SlotRegistry,
         SlotShapeId, Versioned,
     };
     use alloc::boxed::Box;
@@ -378,7 +382,7 @@ mod tests {
         ));
         let mut entries = BTreeMap::new();
         entries.insert(SlotMapKey::String("dome".to_string()), value.clone());
-        let tree = SlotTree::new(shape_id, SlotData::Map(SlotMap::new(entries)));
+        let tree = SlotTree::new(shape_id, SlotData::Map(SlotMapDyn::new(entries)));
 
         tree.validate(&registry).unwrap();
         assert_eq!(
@@ -427,7 +431,7 @@ mod tests {
             SlotData::Value(Versioned::new(FrameId::new(1), ModelValue::Bool(true))),
         );
 
-        let tree = SlotTree::new(shape_id, SlotData::Map(SlotMap::new(entries)));
+        let tree = SlotTree::new(shape_id, SlotData::Map(SlotMapDyn::new(entries)));
         assert!(matches!(
             tree.validate(&registry),
             Err(SlotValidationError::MapKeyMismatch { .. })
@@ -458,7 +462,7 @@ mod tests {
             shape_id,
             SlotData::Enum(super::super::SlotEnum::new(
                 SlotName::parse("shape").unwrap(),
-                SlotData::Option(SlotOption::None),
+                SlotData::Option(SlotOptionDyn::none()),
             )),
         );
 

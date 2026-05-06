@@ -50,13 +50,19 @@ pub use node::{
     NodeId, NodeName, NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use project::{FrameId, ProjectConfig};
+pub use project::{advance_state_version, current_state_version, set_current_state_version};
 pub use prop::value_path::ValuePath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
-    SlotData, SlotDataKind, SlotEnum, SlotFieldShape, SlotMap, SlotMapKey, SlotMapKeyShape,
-    SlotMeta, SlotName, SlotNameError, SlotOption, SlotOwner, SlotPath, SlotPathError, SlotRecord,
-    SlotRef, SlotRegistry, SlotRegistryError, SlotShape, SlotShapeId, SlotShapeIdError,
-    SlotShapeKind, SlotTree, SlotValidationError, SlotVariantShape, ValueRef,
+    SlotAccess, SlotData, SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotFieldShape,
+    SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike, SlotMapKeyShape,
+    SlotMapValueAccess, SlotMeta, SlotName, SlotNameError, SlotOption, SlotOptionAccess,
+    SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotRecord, SlotRecordAccess, SlotRef,
+    SlotRegistry, SlotRegistryError, SlotShape, SlotShapeChild, SlotShapeField, SlotShapeId,
+    SlotShapeIdError, SlotShapeKind, SlotShapeNode, SlotShapeRegistry, SlotShapeRegistryError,
+    SlotShapeRegistrySnapshot, SlotShapeVariant, SlotTree, SlotValidationError, SlotValue,
+    SlotValueAccess, SlotVariantShape, StaticSlotAccess, ToModelValue, ValueRef,
+    VersionedSlotShapeNode,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

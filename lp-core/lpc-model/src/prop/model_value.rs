@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModelValue {
+    String(String),
     I32(i32),
     U32(u32),
     F32(f32),

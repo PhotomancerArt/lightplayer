@@ -1,22 +1,25 @@
-use crate::{ModelValue, SlotName, Versioned};
+use crate::{FrameId, ModelValue, SlotName, Versioned, current_state_version};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Runtime data for a slot tree.
+/// Owned dynamic data for a slot-accessible value tree.
 ///
 /// `Value` leaves carry their own version. Containers provide structure around
-/// those leaves and are interpreted against a registered [`crate::SlotShape`].
+/// those leaves and are interpreted against registered slot shapes. This type is
+/// the generic snapshot/wire mirror; Rust-authored source and runtime structs
+/// can expose the same model through access traits without first converting
+/// themselves into `SlotData`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SlotData {
     Value(Versioned<ModelValue>),
     Record(SlotRecord),
-    Map(SlotMap),
+    Map(SlotMapDyn),
     Enum(SlotEnum),
-    Option(SlotOption),
+    Option(SlotOptionDyn),
 }
 
 /// Indexed record fields.
@@ -26,29 +29,48 @@ pub enum SlotData {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotRecord {
+    pub fields_changed_frame: FrameId,
     pub fields: Vec<SlotData>,
 }
 
 impl SlotRecord {
     pub fn new(fields: Vec<SlotData>) -> Self {
-        Self { fields }
+        Self::with_version(current_state_version(), fields)
+    }
+
+    pub fn with_version(fields_changed_frame: FrameId, fields: Vec<SlotData>) -> Self {
+        Self {
+            fields_changed_frame,
+            fields,
+        }
     }
 }
 
-/// Stable key/value container for dynamic keyed data.
+/// Owned dynamic stable key/value container.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct SlotMap {
+pub struct SlotMapDyn {
+    pub keys_changed_frame: FrameId,
     pub entries: BTreeMap<SlotMapKey, SlotData>,
 }
 
-impl SlotMap {
+impl SlotMapDyn {
     pub fn new(entries: BTreeMap<SlotMapKey, SlotData>) -> Self {
-        Self { entries }
+        Self::with_version(current_state_version(), entries)
+    }
+
+    pub fn with_version(
+        keys_changed_frame: FrameId,
+        entries: BTreeMap<SlotMapKey, SlotData>,
+    ) -> Self {
+        Self {
+            keys_changed_frame,
+            entries,
+        }
     }
 }
 
-/// Key for a [`SlotMap`].
+/// Key for a dynamic or typed slot map.
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
@@ -64,31 +86,54 @@ pub enum SlotMapKey {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotEnum {
+    pub variant_changed_frame: FrameId,
     pub variant: SlotName,
     pub data: Box<SlotData>,
 }
 
 impl SlotEnum {
     pub fn new(variant: SlotName, data: SlotData) -> Self {
+        Self::with_version(current_state_version(), variant, data)
+    }
+
+    pub fn with_version(variant_changed_frame: FrameId, variant: SlotName, data: SlotData) -> Self {
         Self {
+            variant_changed_frame,
             variant,
             data: Box::new(data),
         }
     }
 }
 
-/// Optional slot data.
+/// Owned dynamic optional slot data.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum SlotOption {
-    None,
-    Some(Box<SlotData>),
+pub struct SlotOptionDyn {
+    pub presence_changed_frame: FrameId,
+    pub data: Option<Box<SlotData>>,
 }
 
-impl SlotOption {
+impl SlotOptionDyn {
+    pub fn none() -> Self {
+        Self::none_with_version(current_state_version())
+    }
+
     pub fn some(data: SlotData) -> Self {
-        Self::Some(Box::new(data))
+        Self::some_with_version(current_state_version(), data)
+    }
+
+    pub fn none_with_version(presence_changed_frame: FrameId) -> Self {
+        Self {
+            presence_changed_frame,
+            data: None,
+        }
+    }
+
+    pub fn some_with_version(presence_changed_frame: FrameId, data: SlotData) -> Self {
+        Self {
+            presence_changed_frame,
+            data: Some(Box::new(data)),
+        }
     }
 }
 

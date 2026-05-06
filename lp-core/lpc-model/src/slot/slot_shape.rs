@@ -1,56 +1,50 @@
 use crate::{ModelType, SlotName, SlotNameError};
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::SlotMeta;
 
-/// Registry identity for a complete slot shape tree.
+/// Compact registry identity for a slot shape node.
 ///
-/// Shape IDs are stable names owned by the producer of a slot tree. They let
-/// runtime data refer to one registered shape without embedding the whole shape
-/// alongside every update.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// Static Rust-authored shapes should define this as a type-level constant,
+/// usually with [`SlotShapeId::from_static_name`]. The registry rejects duplicate
+/// ids at registration time, so static hash collisions fail during startup
+/// shape registration instead of becoming ambiguous runtime lookups.
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct SlotShapeId(String);
+pub struct SlotShapeId(u32);
 
 impl SlotShapeId {
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    pub const fn from_static_name(input: &str) -> Self {
+        Self(fnv1a32(input))
+    }
+
+    pub fn from_name(input: &str) -> Result<Self, SlotShapeIdError> {
+        Self::parse(input)
+    }
+
     pub fn parse(input: &str) -> Result<Self, SlotShapeIdError> {
         if input.is_empty() {
             return Err(SlotShapeIdError::Empty);
         }
-        Ok(Self(input.to_string()))
+        Ok(Self::from_static_name(input))
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn raw(self) -> u32 {
+        self.0
     }
 }
 
 impl fmt::Display for SlotShapeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for SlotShapeId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for SlotShapeId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let input = String::deserialize(deserializer)?;
-        Self::parse(&input).map_err(serde::de::Error::custom)
+        write!(f, "0x{:08x}", self.0)
     }
 }
 
@@ -69,6 +63,21 @@ impl fmt::Display for SlotShapeIdError {
 }
 
 impl core::error::Error for SlotShapeIdError {}
+
+const fn fnv1a32(input: &str) -> u32 {
+    const OFFSET: u32 = 0x811c_9dc5;
+    const PRIME: u32 = 0x0100_0193;
+
+    let bytes = input.as_bytes();
+    let mut hash = OFFSET;
+    let mut index = 0;
+    while index < bytes.len() {
+        hash ^= bytes[index] as u32;
+        hash = hash.wrapping_mul(PRIME);
+        index += 1;
+    }
+    hash
+}
 
 /// Static shape of a slot tree.
 ///
@@ -164,15 +173,17 @@ impl SlotVariantShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
     use alloc::vec;
 
     #[test]
-    fn slot_shape_id_serializes_as_string() {
+    fn slot_shape_id_serializes_as_compact_integer() {
         let id = SlotShapeId::parse("fixture.config").unwrap();
-        assert_eq!(id.to_string(), "fixture.config");
+        assert_eq!(id, SlotShapeId::from_static_name("fixture.config"));
+        assert_ne!(id.raw(), 0);
 
         let json = serde_json::to_string(&id).unwrap();
-        assert_eq!(json, r#""fixture.config""#);
+        assert_eq!(json, format!("{}", id.raw()));
 
         let back: SlotShapeId = serde_json::from_str(&json).unwrap();
         assert_eq!(back, id);

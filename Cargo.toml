@@ -16,6 +16,7 @@ members = [
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-model",
+    "lp-core/lpc-slot-mockup",
     "lp-core/lpc-source",
     "lp-core/lpc-wire",
     # lps workspace members

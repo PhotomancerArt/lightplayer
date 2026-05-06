@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelType {
+    String,
     I32,
     U32,
     F32,

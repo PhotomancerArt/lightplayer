@@ -4169,6 +4169,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-slot-mockup"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+]
+
+[[package]]
 name = "lpc-source"
 version = "40.0.0"
 dependencies = [

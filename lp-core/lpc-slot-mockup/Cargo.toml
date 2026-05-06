@@ -1,0 +1,12 @@
+[package]
+name = "lpc-slot-mockup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lpc-model = { path = "../lpc-model", features = ["std"] }
+
+[lints]
+workspace = true
