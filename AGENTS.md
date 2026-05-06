@@ -156,6 +156,28 @@ cargo build --workspace \
 
 ## Code organization in Rust source files
 
+This repo prefers **filesystem-oriented, concept-per-file organization**. The
+directory tree should act as a useful map of the domain, especially in core
+model crates where the concepts are the product vocabulary.
+
+When adding or moving Rust files:
+
+- Prefer one clear concept per file when the concept has its own identity.
+- Use search-friendly filenames even when the parent module already provides
+  context. For example, `slot/slot_path.rs`, `slot/slot_shape.rs`, and
+  `slot/slot_shape_registry.rs` are preferred over a cluster of generic names
+  like `slot/path.rs`, `slot/shape.rs`, and `slot/registry.rs`.
+- Match the file name to the primary exported type when that type has a clear
+  domain name: `SlotPath` belongs in `slot_path.rs`, `ValueSlot` belongs in
+  `value_slot.rs`.
+- Avoid redundant suffixes inside directories that already name the collection.
+  For semantic slot leaves, prefer `slot/slots/ratio.rs` and
+  `slot/slots/resource_ref.rs`, not `ratio_slot.rs` or
+  `resource_ref_slot.rs`.
+- Do not collapse a set of domain concepts into a large `mod.rs` just because
+  the code is short. `mod.rs` should primarily declare and re-export modules,
+  not hide the filesystem map.
+
 Inside a single `.rs` file, the reading order is **top → bottom = most
 important → least important → tests**. Concretely:
 
