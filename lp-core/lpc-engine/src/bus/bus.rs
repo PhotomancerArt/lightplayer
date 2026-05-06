@@ -3,7 +3,7 @@
 use crate::bus::bus_error::BusError;
 use crate::bus::channel_entry::ChannelEntry;
 use alloc::collections::BTreeMap;
-use lpc_model::{ChannelName, FrameId, Kind, NodeId, ValuePath};
+use lpc_model::{ChannelName, FrameId, Kind, NodeId, SlotPath};
 use lps_shared::LpsValueF32;
 
 /// Runtime registry of bus channels.
@@ -40,7 +40,7 @@ impl Bus {
         &mut self,
         channel: &ChannelName,
         writer: NodeId,
-        prop: ValuePath,
+        prop: SlotPath,
         kind: Kind,
     ) -> Result<(), BusError> {
         let entry = self.channels.entry(channel.clone()).or_default();
@@ -95,15 +95,15 @@ impl Bus {
 #[cfg(test)]
 mod tests {
     use super::{Bus, BusError, ChannelName, FrameId, Kind, NodeId};
-    use lpc_model::ValuePath;
+    use lpc_model::SlotPath;
     use lps_shared::LpsValueF32;
 
     fn ch(name: &str) -> ChannelName {
         ChannelName(alloc::string::String::from(name))
     }
 
-    fn path(s: &str) -> ValuePath {
-        lpc_model::prop::value_path::parse_path(s).unwrap()
+    fn path(s: &str) -> SlotPath {
+        SlotPath::parse(s).unwrap()
     }
 
     #[test]

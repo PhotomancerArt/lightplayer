@@ -5,8 +5,8 @@ use lpc_model::project::FrameId;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
-    WireNodeSpecifier,
+    LegacyWireNodeSpecifier, RenderProductPayloadRequest, ResourceSummarySpecifier,
+    RuntimeBufferPayloadSpecifier, WireSlotWatchSpecifier,
 };
 
 /// Project-scoped request from client.
@@ -17,7 +17,10 @@ pub enum WireProjectRequest {
         /// Last frame the client synced.
         since_frame: FrameId,
         /// Which nodes need full detail.
-        detail_specifier: WireNodeSpecifier,
+        legacy_detail_specifier: LegacyWireNodeSpecifier,
+        /// Which generic slot roots the client wants to watch.
+        #[serde(default)]
+        slot_watch_specifier: WireSlotWatchSpecifier,
         /// Which resource summary domains to include (per-request; no server-side subscription state).
         #[serde(default)]
         resource_summary_specifier: ResourceSummarySpecifier,
@@ -49,21 +52,21 @@ pub enum WireNodeStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::WireNodeSpecifier;
+    use crate::LegacyWireNodeSpecifier;
     use alloc::vec;
     use lpc_model::node::NodeId;
 
     #[test]
     fn wire_node_specifier_round_trips() {
-        let spec = WireNodeSpecifier::None;
-        assert_eq!(spec, WireNodeSpecifier::None);
+        let spec = LegacyWireNodeSpecifier::None;
+        assert_eq!(spec, LegacyWireNodeSpecifier::None);
 
-        let spec = WireNodeSpecifier::All;
-        assert_eq!(spec, WireNodeSpecifier::All);
+        let spec = LegacyWireNodeSpecifier::All;
+        assert_eq!(spec, LegacyWireNodeSpecifier::All);
 
-        let spec = WireNodeSpecifier::ByHandles(vec![NodeId::new(1), NodeId::new(2)]);
+        let spec = LegacyWireNodeSpecifier::ByHandles(vec![NodeId::new(1), NodeId::new(2)]);
         match spec {
-            WireNodeSpecifier::ByHandles(handles) => {
+            LegacyWireNodeSpecifier::ByHandles(handles) => {
                 assert_eq!(handles.len(), 2);
             }
             _ => panic!("Expected ByHandles"),
@@ -74,7 +77,8 @@ mod tests {
     fn wire_project_request_shape() {
         let request = WireProjectRequest::GetChanges {
             since_frame: FrameId::default(),
-            detail_specifier: WireNodeSpecifier::All,
+            legacy_detail_specifier: LegacyWireNodeSpecifier::All,
+            slot_watch_specifier: WireSlotWatchSpecifier::None,
             resource_summary_specifier: ResourceSummarySpecifier::default(),
             runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
             render_product_payload_request: RenderProductPayloadRequest::default(),
@@ -82,13 +86,15 @@ mod tests {
         match request {
             WireProjectRequest::GetChanges {
                 since_frame,
-                detail_specifier,
+                legacy_detail_specifier: detail_specifier,
+                slot_watch_specifier,
                 resource_summary_specifier,
                 runtime_buffer_payload_specifier,
                 render_product_payload_request,
             } => {
                 assert_eq!(since_frame, FrameId::default());
-                assert_eq!(detail_specifier, WireNodeSpecifier::All);
+                assert_eq!(detail_specifier, LegacyWireNodeSpecifier::All);
+                assert_eq!(slot_watch_specifier, WireSlotWatchSpecifier::None);
                 assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::None);
                 assert_eq!(
                     runtime_buffer_payload_specifier,

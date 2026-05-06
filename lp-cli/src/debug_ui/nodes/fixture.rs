@@ -7,7 +7,7 @@ use lpc_source::node::shader::ShaderDef;
 use lpc_source::node::texture::TextureFormat;
 use lpc_view::project::resource_cache;
 use lpc_view::{NodeEntryView, ProjectView};
-use lpc_wire::legacy::NodeState;
+use lpc_wire::legacy::LegacyNodeState;
 use lpc_wire::legacy::nodes::fixture::{FixtureState, MappingCell};
 use lpc_wire::{WireResourceMetadataSummary, WireTextureFormat};
 
@@ -58,7 +58,7 @@ pub fn render_fixture_panel(
         .filter(|e| matches!(e.kind, NodeKind::Texture));
 
     if let Some(texture_entry) = texture_entry {
-        if let Some(NodeState::Texture(texture_state)) = &texture_entry.state {
+        if let Some(LegacyNodeState::Texture(texture_state)) = &texture_entry.state {
             let texture_data = resource_cache::resolve_legacy_compat_bytes(
                 &texture_state.texture_data,
                 &view.resource_cache,
@@ -140,7 +140,7 @@ fn shader_render_product_for_texture<'a>(
             continue;
         }
 
-        let Some(NodeState::Shader(shader_state)) = &entry.state else {
+        let Some(LegacyNodeState::Shader(shader_state)) = &entry.state else {
             continue;
         };
         let Some(resource_ref) = *shader_state.render_product.value() else {

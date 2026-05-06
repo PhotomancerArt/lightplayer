@@ -11,8 +11,8 @@ use lpc_source::node::node_def::NodeDef;
 use lpc_source::node::output::OutputDef;
 use lpc_source::node::shader::ShaderDef;
 use lpc_source::node::texture::TextureDef;
-use lpc_wire::legacy::{NodeChange, NodeState, ProjectResponse};
-use lpc_wire::{WireNodeSpecifier, WireNodeStatus};
+use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeState, LegacyProjectResponse};
+use lpc_wire::{LegacyWireNodeSpecifier, WireNodeSlotRoot, WireNodeStatus, WireSlotWatchSpecifier};
 
 use super::resource_cache::{self, ClientResourceCache};
 
@@ -34,7 +34,9 @@ pub struct ProjectView {
     /// Node entries
     pub nodes: BTreeMap<NodeId, NodeEntryView>,
     /// Which nodes we're tracking detail for
-    pub detail_tracking: BTreeSet<NodeId>,
+    pub legacy_detail_tracking: BTreeSet<NodeId>,
+    /// Generic slot roots requested by future slot sync.
+    pub slot_watch_roots: BTreeSet<WireNodeSlotRoot>,
     /// Previous status for each node (for detecting status changes)
     previous_status: BTreeMap<NodeId, WireNodeStatus>,
     /// Cached resource summaries and payloads from `GetChanges`.
@@ -46,7 +48,7 @@ pub struct NodeEntryView {
     pub kind: NodeKind,
     pub config: Box<dyn NodeDef>,
     pub config_ver: FrameId,
-    pub state: Option<NodeState>, // Only present if in detail_tracking
+    pub state: Option<LegacyNodeState>, // Only present if in legacy_detail_tracking
     pub state_ver: FrameId,
     pub status: WireNodeStatus,
     pub status_ver: FrameId,
@@ -58,20 +60,21 @@ impl ProjectView {
         Self {
             frame_id: FrameId::default(),
             nodes: BTreeMap::new(),
-            detail_tracking: BTreeSet::new(),
+            legacy_detail_tracking: BTreeSet::new(),
+            slot_watch_roots: BTreeSet::new(),
             previous_status: BTreeMap::new(),
             resource_cache: ClientResourceCache::new(),
         }
     }
 
     /// Start tracking detail for a node
-    pub fn watch_detail(&mut self, handle: NodeId) {
-        self.detail_tracking.insert(handle);
+    pub fn watch_legacy_detail(&mut self, handle: NodeId) {
+        self.legacy_detail_tracking.insert(handle);
     }
 
     /// Stop tracking detail for a node
-    pub fn unwatch_detail(&mut self, handle: NodeId) {
-        self.detail_tracking.remove(&handle);
+    pub fn unwatch_legacy_detail(&mut self, handle: NodeId) {
+        self.legacy_detail_tracking.remove(&handle);
         // Clear state when stopping detail
         if let Some(entry) = self.nodes.get_mut(&handle) {
             entry.state = None;
@@ -79,11 +82,32 @@ impl ProjectView {
     }
 
     /// Generate detail specifier for sync
-    pub fn detail_specifier(&self) -> WireNodeSpecifier {
-        if self.detail_tracking.is_empty() {
-            WireNodeSpecifier::None
+    pub fn legacy_detail_specifier(&self) -> LegacyWireNodeSpecifier {
+        if self.legacy_detail_tracking.is_empty() {
+            LegacyWireNodeSpecifier::None
         } else {
-            WireNodeSpecifier::ByHandles(self.detail_tracking.iter().copied().collect())
+            LegacyWireNodeSpecifier::ByHandles(
+                self.legacy_detail_tracking.iter().copied().collect(),
+            )
+        }
+    }
+
+    /// Start watching one generic slot root.
+    pub fn watch_slot_root(&mut self, root: WireNodeSlotRoot) {
+        self.slot_watch_roots.insert(root);
+    }
+
+    /// Stop watching one generic slot root.
+    pub fn unwatch_slot_root(&mut self, root: WireNodeSlotRoot) {
+        self.slot_watch_roots.remove(&root);
+    }
+
+    /// Generate the generic slot watch specifier for sync.
+    pub fn slot_watch_specifier(&self) -> WireSlotWatchSpecifier {
+        if self.slot_watch_roots.is_empty() {
+            WireSlotWatchSpecifier::None
+        } else {
+            WireSlotWatchSpecifier::ByRoots(self.slot_watch_roots.iter().copied().collect())
         }
     }
 
@@ -92,11 +116,11 @@ impl ProjectView {
     /// Returns a list of all status changes that the caller can use for logging or other purposes.
     pub fn apply_changes(
         &mut self,
-        response: &ProjectResponse,
+        response: &LegacyProjectResponse,
     ) -> Result<Vec<StatusChangeView>, String> {
         let mut status_changes = Vec::new();
         match response {
-            ProjectResponse::GetChanges {
+            LegacyProjectResponse::GetChanges {
                 current_frame,
                 since_frame: _,
                 node_handles,
@@ -123,7 +147,7 @@ impl ProjectView {
                 // Apply changes
                 for change in node_changes {
                     match change {
-                        NodeChange::Created { handle, path, kind } => {
+                        LegacyNodeChange::Created { handle, path, kind } => {
                             // Create new entry with placeholder config
                             let config: Box<dyn NodeDef> = match kind {
                                 NodeKind::Texture => Box::new(TextureDef {
@@ -171,17 +195,17 @@ impl ProjectView {
                             // Track initial status
                             self.previous_status.insert(*handle, initial_status);
                         }
-                        NodeChange::ConfigUpdated { handle, config_ver } => {
+                        LegacyNodeChange::ConfigUpdated { handle, config_ver } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
                                 entry.config_ver = *config_ver;
                             }
                         }
-                        NodeChange::StateUpdated { handle, state_ver } => {
+                        LegacyNodeChange::StateUpdated { handle, state_ver } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
                                 entry.state_ver = *state_ver;
                             }
                         }
-                        NodeChange::StatusChanged { handle, status } => {
+                        LegacyNodeChange::StatusChanged { handle, status } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
                                 let old_status = entry.status.clone();
                                 let new_status = status.clone();
@@ -205,9 +229,10 @@ impl ProjectView {
                                 self.previous_status.insert(*handle, status.clone());
                             }
                         }
-                        NodeChange::Removed { handle } => {
+                        LegacyNodeChange::Removed { handle } => {
                             self.nodes.remove(&handle);
-                            self.detail_tracking.remove(&handle);
+                            self.legacy_detail_tracking.remove(&handle);
+                            self.slot_watch_roots.retain(|root| root.node != *handle);
                             self.previous_status.remove(&handle);
                         }
                     }
@@ -231,10 +256,10 @@ impl ProjectView {
                         // Create new entry from detail (node exists but wasn't in Created changes)
                         // Note: NodeDetail doesn't have kind field, so we infer from state
                         let kind = match &detail.state {
-                            NodeState::Texture(_) => NodeKind::Texture,
-                            NodeState::Shader(_) => NodeKind::Shader,
-                            NodeState::Output(_) => NodeKind::Output,
-                            NodeState::Fixture(_) => NodeKind::Fixture,
+                            LegacyNodeState::Texture(_) => NodeKind::Texture,
+                            LegacyNodeState::Shader(_) => NodeKind::Shader,
+                            LegacyNodeState::Output(_) => NodeKind::Output,
+                            LegacyNodeState::Fixture(_) => NodeKind::Fixture,
                         };
 
                         let config = clone_node_config_for_kind(detail.config.as_ref(), kind)?;
@@ -289,10 +314,12 @@ impl ProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Texture(tex_state)) => resource_cache::resolve_legacy_compat_bytes(
-                &tex_state.texture_data,
-                &self.resource_cache,
-            ),
+            Some(LegacyNodeState::Texture(tex_state)) => {
+                resource_cache::resolve_legacy_compat_bytes(
+                    &tex_state.texture_data,
+                    &self.resource_cache,
+                )
+            }
             Some(_) => Err(format!(
                 "Node {} has wrong state type (expected Texture)",
                 entry.path.as_str()
@@ -325,10 +352,12 @@ impl ProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Output(output_state)) => resource_cache::resolve_output_channel_bytes(
-                &output_state.channel_data,
-                &self.resource_cache,
-            ),
+            Some(LegacyNodeState::Output(output_state)) => {
+                resource_cache::resolve_output_channel_bytes(
+                    &output_state.channel_data,
+                    &self.resource_cache,
+                )
+            }
             Some(_) => Err(format!(
                 "Node {} has wrong state type (expected Output)",
                 entry.path.as_str()

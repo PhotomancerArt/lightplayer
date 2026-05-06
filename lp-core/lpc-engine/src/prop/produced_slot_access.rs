@@ -2,24 +2,22 @@
 //!
 //! This is the runtime surface for data a node produces.
 //!
-//! Slot keys are still represented as [`ValuePath`] values in this transitional
-//! resolver path. New slot-model work should not copy that choice: produced
-//! and consumed endpoints should converge on [`lpc_model::SlotPath`] so the
-//! runtime does not keep treating value projection paths as slot identity.
+//! Produced slot identity uses [`lpc_model::SlotPath`]. Projection inside a
+//! produced value belongs to [`lpc_model::ValuePath`] at a higher layer.
 
 use alloc::boxed::Box;
 
-use lpc_model::{FrameId, ValuePath};
+use lpc_model::{FrameId, SlotPath};
 
 use crate::runtime_product::RuntimeProduct;
 
 /// One produced slot value and the frame when it last changed.
-pub type ProducedSlotEntry = (ValuePath, RuntimeProduct, FrameId);
+pub type ProducedSlotEntry = (SlotPath, RuntimeProduct, FrameId);
 
 /// Access to the values produced by a runtime node.
 pub trait ProducedSlotAccess {
     /// Get the current produced product at `path`, if any.
-    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)>;
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)>;
 
     /// Iterate produced slots whose `changed_frame > since`.
     fn iter_changed_since<'a>(
@@ -36,7 +34,7 @@ pub trait ProducedSlotAccess {
 pub struct EmptyProducedSlots;
 
 impl ProducedSlotAccess for EmptyProducedSlots {
-    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
@@ -69,7 +67,7 @@ pub const EMPTY_RUNTIME_STATE: EmptyRuntimeState = EmptyRuntimeState;
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::SlotPath;
     use lps_shared::LpsValueF32;
 
     #[derive(Default)]
@@ -78,7 +76,7 @@ mod tests {
     }
 
     impl ProducedSlotAccess for DummyProducedSlots {
-        fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
             self.values
                 .iter()
                 .find(|(p, _, _)| p == path)
@@ -114,7 +112,7 @@ mod tests {
     #[test]
     fn get_finds_existing_path() {
         let mut slots = DummyProducedSlots::default();
-        let path = parse_path("outputs.color").unwrap();
+        let path = SlotPath::parse("outputs.color").unwrap();
         slots.values.push((
             path.clone(),
             RuntimeProduct::try_value(LpsValueF32::F32(0.5)).unwrap(),
@@ -131,8 +129,8 @@ mod tests {
     #[test]
     fn iter_changed_since_filters_by_frame() {
         let mut slots = DummyProducedSlots::default();
-        let path1 = parse_path("outputs.a").unwrap();
-        let path2 = parse_path("outputs.b").unwrap();
+        let path1 = SlotPath::parse("outputs.a").unwrap();
+        let path2 = SlotPath::parse("outputs.b").unwrap();
         slots.values.push((
             path1,
             RuntimeProduct::try_value(LpsValueF32::F32(1.0)).unwrap(),
@@ -153,12 +151,12 @@ mod tests {
     fn snapshot_returns_all() {
         let mut slots = DummyProducedSlots::default();
         slots.values.push((
-            parse_path("outputs.a").unwrap(),
+            SlotPath::parse("outputs.a").unwrap(),
             RuntimeProduct::try_value(LpsValueF32::F32(1.0)).unwrap(),
             FrameId::new(1),
         ));
         slots.values.push((
-            parse_path("state.value").unwrap(),
+            SlotPath::parse("state.value").unwrap(),
             RuntimeProduct::try_value(LpsValueF32::I32(42)).unwrap(),
             FrameId::new(2),
         ));

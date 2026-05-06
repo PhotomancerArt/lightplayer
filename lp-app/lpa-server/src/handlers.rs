@@ -178,7 +178,8 @@ fn handle_project_request(
     match request {
         lpc_wire::WireProjectRequest::GetChanges {
             since_frame,
-            detail_specifier,
+            legacy_detail_specifier,
+            slot_watch_specifier: _,
             resource_summary_specifier,
             runtime_buffer_payload_specifier,
             render_product_payload_request,
@@ -193,7 +194,7 @@ fn handle_project_request(
                 .runtime_mut()
                 .get_changes(
                     since_frame,
-                    &detail_specifier,
+                    &legacy_detail_specifier,
                     resource_summary_specifier,
                     &runtime_buffer_payload_specifier,
                     &render_product_payload_request,
@@ -202,7 +203,7 @@ fn handle_project_request(
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
 
             let response_frame = match &response {
-                lpc_wire::legacy::ProjectResponse::GetChanges { current_frame, .. } => {
+                lpc_wire::legacy::LegacyProjectResponse::GetChanges { current_frame, .. } => {
                     *current_frame
                 }
             };

@@ -1,18 +1,16 @@
 //! Cache and cycle-detection key for engine resolution.
 //!
-//! Produced and consumed slots still use [`ValuePath`] in this transitional
-//! resolver layer. The slot data model uses [`lpc_model::SlotPath`] for slot
-//! identity, so this type should be converted before real runtime slot trees
-//! become the primary node surface.
+//! Produced and consumed endpoints use [`lpc_model::SlotPath`] because they
+//! address slot identity, not projection inside a leaf value.
 
-use lpc_model::{ChannelName, NodeId, ValuePath};
+use lpc_model::{ChannelName, NodeId, SlotPath};
 
 /// Demand/cache key for one resolved value in the engine resolver.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
     Bus(ChannelName),
-    ProducedSlot { node: NodeId, slot: ValuePath },
-    ConsumedSlot { node: NodeId, slot: ValuePath },
+    ProducedSlot { node: NodeId, slot: SlotPath },
+    ConsumedSlot { node: NodeId, slot: SlotPath },
 }
 
 #[cfg(test)]
@@ -23,7 +21,7 @@ mod tests {
     use alloc::vec::Vec;
     use lpc_model::ChannelName;
     use lpc_model::NodeId;
-    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::SlotPath;
 
     #[test]
     fn query_key_works_as_btree_map_key() {
@@ -34,7 +32,7 @@ mod tests {
         m.insert(
             QueryKey::ProducedSlot {
                 node: NodeId::new(0),
-                slot: parse_path("out").unwrap(),
+                slot: SlotPath::parse("out").unwrap(),
             },
             2,
         );

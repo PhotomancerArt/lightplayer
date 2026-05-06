@@ -36,8 +36,8 @@ pub enum ClientRequest {
 mod tests {
     use super::*;
     use crate::project::{
-        RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
-        WireNodeSpecifier, WireProjectRequest,
+        LegacyWireNodeSpecifier, RenderProductPayloadRequest, ResourceSummarySpecifier,
+        RuntimeBufferPayloadSpecifier, WireProjectRequest,
     };
     use lpc_model::lp_path::AsLpPathBuf;
     use lpc_model::project::FrameId;
@@ -96,7 +96,8 @@ mod tests {
             handle: WireProjectHandle::new(1),
             request: WireProjectRequest::GetChanges {
                 since_frame: FrameId::default(),
-                detail_specifier: WireNodeSpecifier::All,
+                legacy_detail_specifier: LegacyWireNodeSpecifier::All,
+                slot_watch_specifier: Default::default(),
                 resource_summary_specifier: ResourceSummarySpecifier::default(),
                 runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
                 render_product_payload_request: RenderProductPayloadRequest::default(),
@@ -110,13 +111,14 @@ mod tests {
                 match request {
                     WireProjectRequest::GetChanges {
                         since_frame,
-                        detail_specifier,
+                        legacy_detail_specifier,
+                        slot_watch_specifier: _,
                         resource_summary_specifier,
                         runtime_buffer_payload_specifier,
                         render_product_payload_request,
                     } => {
                         assert_eq!(since_frame, FrameId::default());
-                        assert_eq!(detail_specifier, WireNodeSpecifier::All);
+                        assert_eq!(legacy_detail_specifier, LegacyWireNodeSpecifier::All);
                         assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::None);
                         assert_eq!(
                             runtime_buffer_payload_specifier,

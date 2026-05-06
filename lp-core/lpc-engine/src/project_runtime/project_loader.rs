@@ -6,8 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
-use lpc_model::prop::value_path::parse_path;
-use lpc_model::{FrameId, Kind, ModelValue, NodeId, NodeName};
+use lpc_model::{FrameId, Kind, ModelValue, NodeId, NodeName, SlotPath};
 use lpc_source::ArtifactReadRoot;
 use lpc_source::node::node_def::NodeDef;
 use lpc_source::node::{
@@ -507,8 +506,8 @@ fn resolve_relative_node_ref<'a>(
     None
 }
 
-fn demand_input_path() -> lpc_model::ValuePath {
-    parse_path("in").expect("valid demand input path")
+fn demand_input_path() -> SlotPath {
+    SlotPath::parse("in").expect("valid demand input path")
 }
 
 fn find_shader_for_texture<'a>(

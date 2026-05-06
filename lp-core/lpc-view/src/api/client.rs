@@ -1,5 +1,5 @@
 use lpc_wire::WireProjectRequest;
-use lpc_wire::legacy::ProjectResponse;
+use lpc_wire::legacy::LegacyProjectResponse;
 
 /// Client API trait - implemented by server connection
 pub trait ClientApi {
@@ -7,5 +7,5 @@ pub trait ClientApi {
     fn get_changes(
         &self,
         request: WireProjectRequest,
-    ) -> Result<ProjectResponse, alloc::string::String>;
+    ) -> Result<LegacyProjectResponse, alloc::string::String>;
 }

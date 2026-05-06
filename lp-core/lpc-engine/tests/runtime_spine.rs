@@ -17,7 +17,7 @@ use lpc_engine::{
     SessionHostResolver, SessionResolveError, SlotResolverCache, TickContext, TickResolver,
 };
 use lpc_model::{
-    FrameId, Kind, ModelValue, NodeId, NodePropSpec, ValuePath, bus::ChannelName,
+    FrameId, Kind, ModelValue, NodeId, NodePropSpec, SlotPath, ValuePath, bus::ChannelName,
     prop::value_path::parse_path, tree::tree_path::TreePath,
 };
 use lpc_source::node::node_invocation::NodeInvocation;
@@ -85,7 +85,7 @@ fn runtime_spine_literal_override_and_artifact_default_resolution() {
 fn runtime_spine_bus_claim_publish_resolver_sees_value_in_resolved_slot() {
     let mut bus = Bus::new();
     let channel = ChannelName(String::from("ctrl/in/0"));
-    let out_path = parse_path("outputs[0]").unwrap();
+    let out_path = slot_path("output");
     bus.claim_writer(&channel, NodeId::new(42), out_path, Kind::Amplitude)
         .unwrap();
     bus.publish(&channel, LpsValueF32::F32(9.0), FrameId::new(11));
@@ -109,12 +109,12 @@ fn runtime_spine_bus_claim_publish_resolver_sees_value_in_resolved_slot() {
 }
 
 #[test]
-fn runtime_spine_node_prop_reads_outputs_via_produced_slot_access_facade() {
+fn runtime_spine_node_prop_reads_legacy_value_path_target() {
     let target_path = TreePath::parse("/show.demo/node_a.demo").unwrap();
-    let outputs0 = parse_path("outputs[0]").unwrap();
+    let output = parse_path("output").unwrap();
 
     let mut target_props = MapRuntimeProps::default();
-    target_props.insert(outputs0.clone(), LpsValueF32::F32(3.3), FrameId::new(4));
+    target_props.insert(output.clone(), LpsValueF32::F32(3.3), FrameId::new(4));
 
     let mut targets: BTreeMap<TreePath, MapRuntimeProps> = BTreeMap::new();
     targets.insert(target_path, target_props);
@@ -122,8 +122,7 @@ fn runtime_spine_node_prop_reads_outputs_via_produced_slot_access_facade() {
     let mut cache = SlotResolverCache::new();
     let config = NodeInvocation::new(ArtifactLocator::path("c.lp"));
 
-    let spec =
-        NodePropSpec::parse("/show.demo/node_a.demo#outputs[0]").expect("outputs NodePropSpec");
+    let spec = NodePropSpec::parse("/show.demo/node_a.demo#output").expect("output NodePropSpec");
     let ctx = SyntheticResolverContext::new(FrameId::new(8))
         .with_targets_map(targets)
         .with_binding("params.drive", SrcBinding::NodeProp(spec));
@@ -238,47 +237,19 @@ fn runtime_spine_node_export_is_reachable() {
 
 // --- Helpers ---
 
+fn slot_path(path: &str) -> SlotPath {
+    SlotPath::parse(path).expect("slot path")
+}
+
 /// Maps node path → prop values; [`ResolverContext::target_prop`] reads like engine-side dereference.
 #[derive(Default, Clone)]
 struct MapRuntimeProps {
-    values: Vec<(ValuePath, RuntimeProduct, FrameId)>,
+    values: Vec<(ValuePath, LpsValueF32, FrameId)>,
 }
 
 impl MapRuntimeProps {
     fn insert(&mut self, path: ValuePath, value: LpsValueF32, frame: FrameId) {
-        self.values
-            .push((path, RuntimeProduct::Value(value), frame));
-    }
-}
-
-impl lpc_engine::ProducedSlotAccess for MapRuntimeProps {
-    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
-        self.values
-            .iter()
-            .find(|(p, _, _)| p == path)
-            .map(|(_, v, f)| (v.clone(), *f))
-    }
-
-    fn iter_changed_since<'a>(
-        &'a self,
-        since: FrameId,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
-        Box::new(
-            self.values
-                .iter()
-                .filter(move |(_, _, frame)| frame.as_i64() > since.as_i64())
-                .map(|(p, v, f)| (p.clone(), v.clone(), *f)),
-        )
-    }
-
-    fn snapshot<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
-        Box::new(
-            self.values
-                .iter()
-                .map(|(p, v, f)| (p.clone(), v.clone(), *f)),
-        )
+        self.values.push((path, value, frame));
     }
 }
 
@@ -333,9 +304,13 @@ impl ResolverContext for SyntheticResolverContext<'_> {
     }
 
     fn target_prop(&self, node: &TreePath, prop: &ValuePath) -> Option<(LpsValueF32, FrameId)> {
-        self.targets
-            .get(node)
-            .and_then(|t| ProducedSlotAccessShim(t).get(prop))
+        self.targets.get(node).and_then(|target| {
+            target
+                .values
+                .iter()
+                .find(|(path, _, _)| path == prop)
+                .map(|(_, value, frame)| (value.clone(), *frame))
+        })
     }
 
     fn artifact_binding(&self, prop: &ValuePath) -> Option<SrcBinding> {
@@ -344,16 +319,6 @@ impl ResolverContext for SyntheticResolverContext<'_> {
 
     fn artifact_default(&self, prop: &ValuePath) -> Option<LpsValueF32> {
         self.defaults.get(prop).cloned()
-    }
-}
-
-/// Wraps a reference so we can call [`lpc_engine::ProducedSlotAccess`] without importing the trait twice.
-struct ProducedSlotAccessShim<'a>(&'a MapRuntimeProps);
-
-impl ProducedSlotAccessShim<'_> {
-    fn get(&self, path: &ValuePath) -> Option<(LpsValueF32, FrameId)> {
-        lpc_engine::ProducedSlotAccess::get(self.0, path)
-            .and_then(|(product, frame)| product.as_value().cloned().map(|value| (value, frame)))
     }
 }
 
@@ -393,20 +358,20 @@ impl Node for TickProbeNode {
 struct EmptyProps;
 
 impl lpc_engine::ProducedSlotAccess for EmptyProps {
-    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
         _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(alloc::vec::Vec::new().into_iter())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(alloc::vec::Vec::new().into_iter())
     }
 }

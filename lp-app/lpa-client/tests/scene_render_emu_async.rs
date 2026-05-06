@@ -134,7 +134,7 @@ async fn test_scene_render_fw_emu_async() {
         .expect("Output node not found in client view");
 
     // Watch output for detail changes
-    client_view.watch_detail(output_handle);
+    client_view.watch_legacy_detail(output_handle);
 
     // ---------------------------------------------------------------------------------------------
     // Act & Assert: Render frames
@@ -226,12 +226,12 @@ async fn sync_client_view(
     view: &mut ProjectView,
 ) {
     // For initial sync (empty view), request all nodes to populate the list
-    // Otherwise use normal detail_specifier
+    // Otherwise use normal legacy_detail_specifier
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lpc_wire::WireNodeSpecifier::All
+        lpc_wire::LegacyWireNodeSpecifier::All
     } else {
-        view.detail_specifier()
+        view.legacy_detail_specifier()
     };
 
     let response = client

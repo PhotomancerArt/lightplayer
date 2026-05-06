@@ -5,8 +5,7 @@ use alloc::boxed::Box;
 
 use alloc::vec::Vec;
 
-use lpc_model::prop::ValuePath;
-use lpc_model::{FrameId, Versioned};
+use lpc_model::{FrameId, SlotPath, Versioned};
 
 use crate::node::{
     DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
@@ -20,20 +19,20 @@ use crate::runtime_product::RuntimeProduct;
 struct EmptyProps;
 
 impl ProducedSlotAccess for EmptyProps {
-    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
         _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 }

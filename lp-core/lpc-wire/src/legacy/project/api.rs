@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant};
 /// serialized directly with serde. See `lpc-model/src/server/api.rs::ServerResponse`
 /// for the disabled variant.
 #[derive(Debug)]
-pub enum ProjectResponse {
+pub enum LegacyProjectResponse {
     /// Changes response
     GetChanges {
         /// Current frame ID
@@ -37,9 +37,9 @@ pub enum ProjectResponse {
         /// All current node handles (for pruning removed nodes)
         node_handles: Vec<NodeId>,
         /// Changed nodes since since_frame
-        node_changes: Vec<NodeChange>,
+        node_changes: Vec<LegacyNodeChange>,
         /// Full detail for requested nodes
-        node_details: BTreeMap<NodeId, NodeDetail>,
+        node_details: BTreeMap<NodeId, LegacyNodeDetail>,
         /// Theoretical FPS based on frame processing time (None if not available)
         theoretical_fps: Option<f32>,
         /// Resource summaries for domains requested by the client.
@@ -53,7 +53,7 @@ pub enum ProjectResponse {
 
 /// Node change notification
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NodeChange {
+pub enum LegacyNodeChange {
     /// New node created
     Created {
         handle: NodeId,
@@ -87,22 +87,22 @@ pub enum NodeChange {
 ///
 /// See: `lpc-model/src/server/api.rs::ServerResponse` for where this blocks serialization
 #[derive(Debug)]
-pub struct NodeDetail {
+pub struct LegacyNodeDetail {
     pub path: LpPathBuf,
     pub config: Box<dyn NodeDef>, // TODO: Needs serialization support (see struct docs)
-    pub state: NodeState,         // External state only
+    pub state: LegacyNodeState,   // External state only
 }
 
 /// Node state - external state (shared with clients)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum NodeState {
+pub enum LegacyNodeState {
     Texture(crate::legacy::nodes::texture::TextureState),
     Shader(crate::legacy::nodes::shader::ShaderState),
     Output(crate::legacy::nodes::output::OutputState),
     Fixture(crate::legacy::nodes::fixture::FixtureState),
 }
 
-impl NodeState {
+impl LegacyNodeState {
     /// Merge fields from a partial update into this state
     ///
     /// Only fields that are present in `other` (non-default values) are merged.
@@ -113,30 +113,30 @@ impl NodeState {
     /// Panics if `self` and `other` are different variants (should not happen in practice).
     pub fn merge_from(&mut self, other: &Self, frame_id: FrameId) {
         match self {
-            NodeState::Texture(self_state) => {
-                if let NodeState::Texture(other_state) = other {
+            LegacyNodeState::Texture(self_state) => {
+                if let LegacyNodeState::Texture(other_state) = other {
                     self_state.merge_from(other_state, frame_id);
                 } else {
                     // Mismatched variants shouldn't happen, but handle gracefully by replacing
                     *self = other.clone();
                 }
             }
-            NodeState::Shader(self_state) => {
-                if let NodeState::Shader(other_state) = other {
+            LegacyNodeState::Shader(self_state) => {
+                if let LegacyNodeState::Shader(other_state) = other {
                     self_state.merge_from(other_state, frame_id);
                 } else {
                     *self = other.clone();
                 }
             }
-            NodeState::Output(self_state) => {
-                if let NodeState::Output(other_state) = other {
+            LegacyNodeState::Output(self_state) => {
+                if let LegacyNodeState::Output(other_state) = other {
                     self_state.merge_from(other_state, frame_id);
                 } else {
                     *self = other.clone();
                 }
             }
-            NodeState::Fixture(self_state) => {
-                if let NodeState::Fixture(other_state) = other {
+            LegacyNodeState::Fixture(self_state) => {
+                if let LegacyNodeState::Fixture(other_state) = other {
                     self_state.merge_from(other_state, frame_id);
                 } else {
                     *self = other.clone();
@@ -158,30 +158,30 @@ impl NodeState {
 /// When serialized as part of SerializableProjectResponse, partial serialization
 /// is used based on since_frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum SerializableNodeDetail {
+pub enum LegacySerializableNodeDetail {
     /// Texture node detail
     Texture {
         path: LpPathBuf,
         config: TextureDef,
-        state: NodeState,
+        state: LegacyNodeState,
     },
     /// Shader node detail
     Shader {
         path: LpPathBuf,
         config: ShaderDef,
-        state: NodeState,
+        state: LegacyNodeState,
     },
     /// Output node detail
     Output {
         path: LpPathBuf,
         config: OutputDef,
-        state: NodeState,
+        state: LegacyNodeState,
     },
     /// Fixture node detail
     Fixture {
         path: LpPathBuf,
         config: FixtureDef,
-        state: NodeState,
+        state: LegacyNodeState,
     },
 }
 
@@ -193,17 +193,17 @@ pub enum SerializableNodeDetail {
 /// Note: node_details uses Vec instead of BTreeMap because JSON map keys must be strings,
 /// and tuple structs don't deserialize correctly from string keys.
 ///
-/// Uses custom [`Serialize`] so nested [`NodeState`] uses [`SerializableTextureState`] /
+/// Uses custom [`Serialize`] so nested [`LegacyNodeState`] uses [`SerializableTextureState`] /
 /// shader/output/fixture wrappers and omits unchanged fields when `since_frame` is not initial.
 ///
 /// JSON round-trip preserves scalar snapshot fields on initial sync (`since_frame`
 /// [`FrameId::default()`]). [`Versioned`] metadata uses [`FrameId::default()`] on deserialize
 /// because the wire omits provenance; compare `.value()` when testing payloads.
 ///
-/// [`Deserialize`] matches this wire shape (externally tagged [`SerializableNodeDetail`] and
-/// [`NodeState`] variants).
+/// [`Deserialize`] matches this wire shape (externally tagged [`LegacySerializableNodeDetail`] and
+/// [`LegacyNodeState`] variants).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-pub enum SerializableProjectResponse {
+pub enum LegacySerializableProjectResponse {
     /// Changes response
     GetChanges {
         /// Current frame ID
@@ -213,10 +213,10 @@ pub enum SerializableProjectResponse {
         /// All current node handles (for pruning removed nodes)
         node_handles: Vec<NodeId>,
         /// Changed nodes since since_frame
-        node_changes: Vec<NodeChange>,
+        node_changes: Vec<LegacyNodeChange>,
         /// Full detail for requested nodes (serializable)
         /// Uses Vec instead of BTreeMap for JSON compatibility
-        node_details: Vec<(NodeId, SerializableNodeDetail)>,
+        node_details: Vec<(NodeId, LegacySerializableNodeDetail)>,
         /// Theoretical FPS based on frame processing time (None if not available)
         theoretical_fps: Option<f32>,
         #[serde(default)]
@@ -250,7 +250,7 @@ impl Serialize for NodeStateSerializer<'_> {
 
 // Helper struct to serialize SerializableNodeDetail with since_frame context
 struct SerializableNodeDetailWithFrame<'a> {
-    detail: &'a SerializableNodeDetail,
+    detail: &'a LegacySerializableNodeDetail,
     since_frame: FrameId,
 }
 
@@ -260,7 +260,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
         S: Serializer,
     {
         match self.detail {
-            SerializableNodeDetail::Texture {
+            LegacySerializableNodeDetail::Texture {
                 path,
                 config,
                 state,
@@ -274,7 +274,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
-                    NodeState::Texture(texture_state) => {
+                    LegacyNodeState::Texture(texture_state) => {
                         let serializable_state =
                             SerializableTextureState::new(texture_state, self.since_frame);
                         s.serialize_field(
@@ -286,7 +286,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 }
                 s.end()
             }
-            SerializableNodeDetail::Shader {
+            LegacySerializableNodeDetail::Shader {
                 path,
                 config,
                 state,
@@ -300,7 +300,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
-                    NodeState::Shader(shader_state) => {
+                    LegacyNodeState::Shader(shader_state) => {
                         let serializable_state =
                             SerializableShaderState::new(shader_state, self.since_frame);
                         s.serialize_field(
@@ -312,7 +312,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 }
                 s.end()
             }
-            SerializableNodeDetail::Output {
+            LegacySerializableNodeDetail::Output {
                 path,
                 config,
                 state,
@@ -326,7 +326,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
-                    NodeState::Output(output_state) => {
+                    LegacyNodeState::Output(output_state) => {
                         let serializable_state =
                             SerializableOutputState::new(output_state, self.since_frame);
                         s.serialize_field(
@@ -338,7 +338,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 }
                 s.end()
             }
-            SerializableNodeDetail::Fixture {
+            LegacySerializableNodeDetail::Fixture {
                 path,
                 config,
                 state,
@@ -352,7 +352,7 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
-                    NodeState::Fixture(fixture_state) => {
+                    LegacyNodeState::Fixture(fixture_state) => {
                         let serializable_state =
                             SerializableFixtureState::new(fixture_state, self.since_frame);
                         s.serialize_field(
@@ -373,8 +373,8 @@ struct GetChangesSerializer<'a> {
     current_frame: &'a FrameId,
     since_frame: &'a FrameId,
     node_handles: &'a Vec<NodeId>,
-    node_changes: &'a Vec<NodeChange>,
-    node_details: &'a Vec<(NodeId, SerializableNodeDetail)>,
+    node_changes: &'a Vec<LegacyNodeChange>,
+    node_details: &'a Vec<(NodeId, LegacySerializableNodeDetail)>,
     theoretical_fps: &'a Option<f32>,
     resource_summaries: &'a Vec<WireResourceSummary>,
     runtime_buffer_payloads: &'a Vec<WireRuntimeBufferPayload>,
@@ -438,13 +438,13 @@ impl<'a> Serialize for GetChangesSerializer<'a> {
     }
 }
 
-impl Serialize for SerializableProjectResponse {
+impl Serialize for LegacySerializableProjectResponse {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 current_frame,
                 since_frame,
                 node_handles,
@@ -478,13 +478,13 @@ impl Serialize for SerializableProjectResponse {
     }
 }
 
-impl NodeDetail {
+impl LegacyNodeDetail {
     /// Convert NodeDetail to SerializableNodeDetail
     ///
     /// Downcasts the Box<dyn NodeConfig> to the concrete config type based on NodeKind.
     /// The state is stored as NodeState; context-aware serialization happens during
     /// SerializableProjectResponse serialization.
-    pub fn to_serializable(&self) -> Result<SerializableNodeDetail, String> {
+    pub fn to_serializable(&self) -> Result<LegacySerializableNodeDetail, String> {
         let kind = self.config.kind();
         match kind {
             NodeKind::Texture => {
@@ -493,7 +493,7 @@ impl NodeDetail {
                     .as_any()
                     .downcast_ref::<TextureDef>()
                     .ok_or_else(|| format!("Failed to downcast to TextureConfig"))?;
-                Ok(SerializableNodeDetail::Texture {
+                Ok(LegacySerializableNodeDetail::Texture {
                     path: self.path.clone(),
                     config: config.clone(),
                     state: self.state.clone(),
@@ -505,7 +505,7 @@ impl NodeDetail {
                     .as_any()
                     .downcast_ref::<ShaderDef>()
                     .ok_or_else(|| format!("Failed to downcast to ShaderConfig"))?;
-                Ok(SerializableNodeDetail::Shader {
+                Ok(LegacySerializableNodeDetail::Shader {
                     path: self.path.clone(),
                     config: config.clone(),
                     state: self.state.clone(),
@@ -517,7 +517,7 @@ impl NodeDetail {
                     .as_any()
                     .downcast_ref::<OutputDef>()
                     .ok_or_else(|| format!("Failed to downcast to OutputConfig"))?;
-                Ok(SerializableNodeDetail::Output {
+                Ok(LegacySerializableNodeDetail::Output {
                     path: self.path.clone(),
                     config: config.clone(),
                     state: self.state.clone(),
@@ -529,7 +529,7 @@ impl NodeDetail {
                     .as_any()
                     .downcast_ref::<FixtureDef>()
                     .ok_or_else(|| format!("Failed to downcast to FixtureConfig"))?;
-                Ok(SerializableNodeDetail::Fixture {
+                Ok(LegacySerializableNodeDetail::Fixture {
                     path: self.path.clone(),
                     config: config.clone(),
                     state: self.state.clone(),
@@ -542,13 +542,13 @@ impl NodeDetail {
     }
 }
 
-impl ProjectResponse {
+impl LegacyProjectResponse {
     /// Convert ProjectResponse to SerializableProjectResponse
     ///
     /// Converts all NodeDetail entries to SerializableNodeDetail with since_frame context.
-    pub fn to_serializable(&self) -> Result<SerializableProjectResponse, String> {
+    pub fn to_serializable(&self) -> Result<LegacySerializableProjectResponse, String> {
         match self {
-            ProjectResponse::GetChanges {
+            LegacyProjectResponse::GetChanges {
                 current_frame,
                 since_frame,
                 node_handles,
@@ -564,7 +564,7 @@ impl ProjectResponse {
                     let serializable_detail = detail.to_serializable()?;
                     serializable_details.push((*handle, serializable_detail));
                 }
-                Ok(SerializableProjectResponse::GetChanges {
+                Ok(LegacySerializableProjectResponse::GetChanges {
                     current_frame: *current_frame,
                     since_frame: *since_frame,
                     node_handles: node_handles.clone(),
@@ -599,9 +599,9 @@ mod tests {
         tex_state
             .format
             .set(FrameId::default(), TextureFormat::Rgba16);
-        let state = NodeState::Texture(tex_state);
+        let state = LegacyNodeState::Texture(tex_state);
         match state {
-            NodeState::Texture(tex_state) => {
+            LegacyNodeState::Texture(tex_state) => {
                 assert_eq!(tex_state.texture_data.inline_bytes().len(), 4);
             }
             _ => panic!("Expected Texture state"),
@@ -620,17 +620,17 @@ mod tests {
         tex_state
             .format
             .set(FrameId::default(), TextureFormat::Rgba16);
-        let detail = NodeDetail {
+        let detail = LegacyNodeDetail {
             path: LpPathBuf::from("/src/texture.texture"),
             config: Box::new(TextureDef {
                 width: 100,
                 height: 200,
             }),
-            state: NodeState::Texture(tex_state),
+            state: LegacyNodeState::Texture(tex_state),
         };
         let serializable = detail.to_serializable().unwrap();
         match serializable {
-            SerializableNodeDetail::Texture {
+            LegacySerializableNodeDetail::Texture {
                 path,
                 config,
                 state,
@@ -638,7 +638,7 @@ mod tests {
                 assert_eq!(path.as_str(), "/src/texture.texture");
                 assert_eq!(config.width, 100);
                 assert_eq!(config.height, 200);
-                assert!(matches!(state, NodeState::Texture(_)));
+                assert!(matches!(state, LegacyNodeState::Texture(_)));
             }
             _ => panic!("Expected Texture variant"),
         }
@@ -648,20 +648,20 @@ mod tests {
     fn test_node_detail_to_serializable_shader() {
         use lpc_model::project::FrameId;
         let shader_state = crate::legacy::nodes::shader::ShaderState::new(FrameId::default());
-        let detail = NodeDetail {
+        let detail = LegacyNodeDetail {
             path: LpPathBuf::from("/src/shader.shader"),
             config: Box::new(ShaderDef::default()),
-            state: NodeState::Shader(shader_state),
+            state: LegacyNodeState::Shader(shader_state),
         };
         let serializable = detail.to_serializable().unwrap();
         match serializable {
-            SerializableNodeDetail::Shader {
+            LegacySerializableNodeDetail::Shader {
                 path,
                 config: _,
                 state,
             } => {
                 assert_eq!(path.as_str(), "/src/shader.shader");
-                assert!(matches!(state, NodeState::Shader(_)));
+                assert!(matches!(state, LegacyNodeState::Shader(_)));
             }
             _ => panic!("Expected Shader variant"),
         }
@@ -672,7 +672,7 @@ mod tests {
         let mut node_details = BTreeMap::new();
         node_details.insert(
             NodeId::new(1),
-            NodeDetail {
+            LegacyNodeDetail {
                 path: LpPathBuf::from("/src/texture.texture"),
                 config: Box::new(TextureDef {
                     width: 100,
@@ -690,12 +690,12 @@ mod tests {
                     tex_state
                         .format
                         .set(FrameId::default(), TextureFormat::Rgba16);
-                    NodeState::Texture(tex_state)
+                    LegacyNodeState::Texture(tex_state)
                 },
             },
         );
 
-        let response = ProjectResponse::GetChanges {
+        let response = LegacyProjectResponse::GetChanges {
             current_frame: FrameId::default(),
             since_frame: FrameId::default(),
             node_handles: vec![NodeId::new(1)],
@@ -709,7 +709,7 @@ mod tests {
 
         let serializable = response.to_serializable().unwrap();
         match serializable {
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 current_frame,
                 since_frame: _,
                 node_handles,
@@ -748,18 +748,18 @@ mod tests {
         tex_state
             .format
             .set(FrameId::default(), TextureFormat::Rgba16);
-        let detail = SerializableNodeDetail::Texture {
+        let detail = LegacySerializableNodeDetail::Texture {
             path: LpPathBuf::from("/src/texture.texture"),
             config: TextureDef {
                 width: 100,
                 height: 200,
             },
-            state: NodeState::Texture(tex_state),
+            state: LegacyNodeState::Texture(tex_state),
         };
         let json = crate::json::to_string(&detail).unwrap();
-        let deserialized: SerializableNodeDetail = crate::json::from_str(&json).unwrap();
+        let deserialized: LegacySerializableNodeDetail = crate::json::from_str(&json).unwrap();
         match deserialized {
-            SerializableNodeDetail::Texture {
+            LegacySerializableNodeDetail::Texture {
                 path,
                 config,
                 state: _,
@@ -777,7 +777,7 @@ mod tests {
         let response = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
         let json = crate::json::to_string(&response).unwrap();
         assert_serializable_project_response_wire_shape(&json, WireShapeExpect::InitialSyncTexture);
-        let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        let deserialized: LegacySerializableProjectResponse = crate::json::from_str(&json).unwrap();
         assert_serializable_project_response_semantically_equal(&response, &deserialized);
     }
 
@@ -788,9 +788,9 @@ mod tests {
         let json = crate::json::to_string(&response).unwrap();
         assert_serializable_project_response_wire_shape(&json, WireShapeExpect::PartialTexture);
 
-        let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        let deserialized: LegacySerializableProjectResponse = crate::json::from_str(&json).unwrap();
         match deserialized {
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 since_frame: sf,
                 node_details,
                 ..
@@ -799,8 +799,8 @@ mod tests {
                 assert_eq!(node_details.len(), 1);
                 let (
                     _,
-                    SerializableNodeDetail::Texture {
-                        state: NodeState::Texture(tex),
+                    LegacySerializableNodeDetail::Texture {
+                        state: LegacyNodeState::Texture(tex),
                         ..
                     },
                 ) = &node_details[0]
@@ -817,11 +817,11 @@ mod tests {
     }
 
     fn assert_serializable_project_response_semantically_equal(
-        original: &SerializableProjectResponse,
-        decoded: &SerializableProjectResponse,
+        original: &LegacySerializableProjectResponse,
+        decoded: &LegacySerializableProjectResponse,
     ) {
         let (
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 current_frame: cf_a,
                 since_frame: sf_a,
                 node_handles: nh_a,
@@ -832,7 +832,7 @@ mod tests {
                 runtime_buffer_payloads: rbp_a,
                 render_product_payloads: rpp_a,
             },
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 current_frame: cf_b,
                 since_frame: sf_b,
                 node_handles: nh_b,
@@ -860,20 +860,20 @@ mod tests {
     }
 
     fn assert_serializable_node_detail_semantically_equal(
-        a: &SerializableNodeDetail,
-        b: &SerializableNodeDetail,
+        a: &LegacySerializableNodeDetail,
+        b: &LegacySerializableNodeDetail,
     ) {
         match (a, b) {
             (
-                SerializableNodeDetail::Texture {
+                LegacySerializableNodeDetail::Texture {
                     path: pa,
                     config: ca,
-                    state: NodeState::Texture(sa),
+                    state: LegacyNodeState::Texture(sa),
                 },
-                SerializableNodeDetail::Texture {
+                LegacySerializableNodeDetail::Texture {
                     path: pb,
                     config: cb,
-                    state: NodeState::Texture(sb),
+                    state: LegacyNodeState::Texture(sb),
                 },
             ) => {
                 assert_eq!(pa, pb);
@@ -967,7 +967,7 @@ mod tests {
     fn sample_get_changes_texture_response(
         current_frame: FrameId,
         since_frame: FrameId,
-    ) -> SerializableProjectResponse {
+    ) -> LegacySerializableProjectResponse {
         let mut tex_state = crate::legacy::nodes::texture::TextureState::new(FrameId::new(1));
         tex_state
             .texture_data
@@ -981,20 +981,20 @@ mod tests {
             tex_state.height.set(FrameId::new(5), 250);
         }
 
-        SerializableProjectResponse::GetChanges {
+        LegacySerializableProjectResponse::GetChanges {
             current_frame,
             since_frame,
             node_handles: vec![NodeId::new(1)],
             node_changes: vec![],
             node_details: vec![(
                 NodeId::new(1),
-                SerializableNodeDetail::Texture {
+                LegacySerializableNodeDetail::Texture {
                     path: LpPathBuf::from("/src/texture.texture"),
                     config: TextureDef {
                         width: 100,
                         height: 200,
                     },
-                    state: NodeState::Texture(tex_state),
+                    state: LegacyNodeState::Texture(tex_state),
                 },
             )],
             theoretical_fps: Some(60.0),
@@ -1008,9 +1008,9 @@ mod tests {
     fn get_changes_empty_resource_arrays_round_trip_via_json() {
         let resp = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
         let json = crate::json::to_string(&resp).unwrap();
-        let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        let deserialized: LegacySerializableProjectResponse = crate::json::from_str(&json).unwrap();
         match deserialized {
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 resource_summaries,
                 runtime_buffer_payloads,
                 render_product_payloads,
@@ -1060,16 +1060,16 @@ mod tests {
 
         let mut base = sample_get_changes_texture_response(FrameId::default(), FrameId::default());
         {
-            let SerializableProjectResponse::GetChanges {
+            let LegacySerializableProjectResponse::GetChanges {
                 resource_summaries, ..
             } = &mut base;
             *resource_summaries = summaries.clone();
         }
 
         let json = crate::json::to_string(&base).unwrap();
-        let decoded: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        let decoded: LegacySerializableProjectResponse = crate::json::from_str(&json).unwrap();
         match decoded {
-            SerializableProjectResponse::GetChanges {
+            LegacySerializableProjectResponse::GetChanges {
                 resource_summaries, ..
             } => assert_eq!(resource_summaries, summaries),
         }
@@ -1078,14 +1078,15 @@ mod tests {
     #[test]
     fn wire_project_request_by_id_runtime_buffer_payload_round_trip() {
         use crate::{
-            RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
-            WireNodeSpecifier, WireProjectRequest,
+            LegacyWireNodeSpecifier, RenderProductPayloadRequest, ResourceSummarySpecifier,
+            RuntimeBufferPayloadSpecifier, WireProjectRequest,
         };
         use lpc_model::resource::RuntimeBufferId;
 
         let req = WireProjectRequest::GetChanges {
             since_frame: FrameId::new(99),
-            detail_specifier: WireNodeSpecifier::None,
+            legacy_detail_specifier: LegacyWireNodeSpecifier::None,
+            slot_watch_specifier: Default::default(),
             resource_summary_specifier: ResourceSummarySpecifier::None,
             runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::ByIds(vec![
                 RuntimeBufferId::new(7),
@@ -1100,14 +1101,15 @@ mod tests {
     #[test]
     fn wire_project_request_render_product_payload_by_ids_round_trip() {
         use crate::{
-            RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-            RuntimeBufferPayloadSpecifier, WireNodeSpecifier, WireProjectRequest,
+            LegacyWireNodeSpecifier, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
+            ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireProjectRequest,
         };
         use lpc_model::resource::RenderProductId;
 
         let req = WireProjectRequest::GetChanges {
             since_frame: FrameId::new(100),
-            detail_specifier: WireNodeSpecifier::All,
+            legacy_detail_specifier: LegacyWireNodeSpecifier::All,
+            slot_watch_specifier: Default::default(),
             resource_summary_specifier: ResourceSummarySpecifier::All,
             runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::None,
             render_product_payload_request: RenderProductPayloadRequest {
@@ -1144,7 +1146,7 @@ mod tests {
             bytes: vec![0u8; 32],
         };
         {
-            let SerializableProjectResponse::GetChanges {
+            let LegacySerializableProjectResponse::GetChanges {
                 runtime_buffer_payloads,
                 render_product_payloads,
                 ..
@@ -1154,7 +1156,7 @@ mod tests {
         }
 
         let json = crate::json::to_string(&base).unwrap();
-        let decoded: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
+        let decoded: LegacySerializableProjectResponse = crate::json::from_str(&json).unwrap();
         assert_serializable_project_response_semantically_equal(&base, &decoded);
     }
 }

@@ -3,12 +3,10 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::format;
-use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lpc_model::prop::value_path::{Segment, ValuePath};
-use lpc_model::{FrameId, NodeId, TreePath, Versioned};
+use lpc_model::{FrameId, NodeId, SlotPath, TreePath, Versioned};
 
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
@@ -28,10 +26,8 @@ use crate::tree::{EntryState, NodeTree};
 use super::EngineError;
 
 /// Conventional demand input used by the M2 engine slice.
-pub(crate) fn default_demand_input_path() -> ValuePath {
-    let mut path = Vec::new();
-    path.push(Segment::Field(String::from("in")));
-    path
+pub(crate) fn default_demand_input_path() -> SlotPath {
+    SlotPath::parse("in").expect("default demand input slot path")
 }
 
 /// Core runtime owner for the demand-driven spine (M2).
@@ -225,7 +221,7 @@ impl Engine {
         Ok(())
     }
 
-    fn consumed_slot_is_bound(&self, node: NodeId, slot: &ValuePath) -> bool {
+    fn consumed_slot_is_bound(&self, node: NodeId, slot: &SlotPath) -> bool {
         self.bindings.iter().any(|e| {
             matches!(
                 &e.target,

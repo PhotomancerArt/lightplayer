@@ -12,7 +12,7 @@ use lpc_source::node::node_def::NodeDef;
 
 use super::project_loader::LoadedNodeConfig;
 
-/// Authoring/config index for legacy-compatible [`lpc_wire::legacy::NodeDetail`] construction.
+/// Authoring/config index for legacy-compatible [`lpc_wire::legacy::LegacyNodeDetail`] construction.
 pub struct CompatibilityProjection {
     authoring_configs: HashMap<NodeId, LoadedNodeConfig>,
     authoring_paths: HashMap<NodeId, LpPathBuf>,

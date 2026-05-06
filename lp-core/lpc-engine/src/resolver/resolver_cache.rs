@@ -55,8 +55,8 @@ mod tests {
     use lpc_model::ChannelName;
     use lpc_model::FrameId;
     use lpc_model::NodeId;
+    use lpc_model::SlotPath;
     use lpc_model::Versioned;
-    use lpc_model::prop::value_path::parse_path;
     use lps_shared::LpsValueF32;
 
     fn sample_bus_key(name: &str) -> QueryKey {
@@ -111,7 +111,7 @@ mod tests {
         let mut cache = ResolverCache::new();
         let k = QueryKey::ProducedSlot {
             node: NodeId::new(2),
-            slot: parse_path("color").unwrap(),
+            slot: SlotPath::parse("color").unwrap(),
         };
         cache.insert(k.clone(), make_produced(3, ProductionSource::Literal));
         assert_eq!(cache.len(), 1);

@@ -5,13 +5,13 @@ pub mod nodes;
 pub mod project;
 
 pub use project::{
-    NodeChange, NodeDetail, NodeState, ProjectResponse, SerializableNodeDetail,
-    SerializableProjectResponse,
+    LegacyNodeChange, LegacyNodeDetail, LegacyNodeState, LegacyProjectResponse,
+    LegacySerializableNodeDetail, LegacySerializableProjectResponse,
 };
 
-pub type LegacyMessage = crate::Message<SerializableProjectResponse>;
-pub type LegacyServerMessage = crate::ServerMessage<SerializableProjectResponse>;
-pub type LegacyServerMsgBody = crate::server::ServerMsgBody<SerializableProjectResponse>;
+pub type LegacyMessage = crate::Message<LegacySerializableProjectResponse>;
+pub type LegacyServerMessage = crate::ServerMessage<LegacySerializableProjectResponse>;
+pub type LegacyServerMsgBody = crate::server::ServerMsgBody<LegacySerializableProjectResponse>;
 
 #[cfg(test)]
 mod legacy_message_tests {

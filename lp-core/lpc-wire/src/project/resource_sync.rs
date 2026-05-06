@@ -7,7 +7,7 @@ use lpc_model::project::FrameId;
 use lpc_model::resource::{RenderProductId, ResourceRef, RuntimeBufferId};
 use serde::{Deserialize, Serialize};
 
-/// Domains requested for [`crate::legacy::SerializableProjectResponse::GetChanges`] resource summaries.
+/// Domains requested for [`crate::legacy::LegacySerializableProjectResponse::GetChanges`] resource summaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceSummarySpecifier {

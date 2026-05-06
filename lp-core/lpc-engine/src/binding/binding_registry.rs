@@ -176,7 +176,7 @@ mod tests {
     use crate::BindingTarget;
     use alloc::string::String;
     use alloc::vec;
-    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::SlotPath;
     use lpc_model::{ChannelName, Kind, NodeId};
     use lpc_source::SrcValueSpec;
 
@@ -184,8 +184,8 @@ mod tests {
         ChannelName(String::from(s))
     }
 
-    fn path(s: &str) -> lpc_model::ValuePath {
-        parse_path(s).expect("test path")
+    fn path(s: &str) -> lpc_model::SlotPath {
+        SlotPath::parse(s).expect("test path")
     }
 
     #[test]

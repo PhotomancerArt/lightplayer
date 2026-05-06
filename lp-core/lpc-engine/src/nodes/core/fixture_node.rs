@@ -7,9 +7,7 @@ use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpc_model::FrameId;
-use lpc_model::NodeId;
-use lpc_model::prop::ValuePath;
+use lpc_model::{FrameId, NodeId, SlotPath};
 use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -41,20 +39,20 @@ use lps_shared::LpsValueF32;
 struct FixtureScalarProps;
 
 impl ProducedSlotAccess for FixtureScalarProps {
-    fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
         _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::empty())
     }
 }
@@ -530,13 +528,13 @@ mod tests {
 
     #[derive(Clone)]
     struct FixtureTickCountSolidProducerOutputs {
-        path: ValuePath,
+        path: SlotPath,
         rid: crate::render_product::RenderProductId,
         last_frame: FrameId,
     }
 
     impl ProducedSlotAccess for FixtureTickCountSolidProducerOutputs {
-        fn get(&self, path: &ValuePath) -> Option<(RpEnum, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RpEnum, FrameId)> {
             if path == &self.path {
                 Some((RpEnum::render(self.rid), self.last_frame))
             } else {
@@ -547,7 +545,7 @@ mod tests {
         fn iter_changed_since<'a>(
             &'a self,
             since: FrameId,
-        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
             if self.last_frame.as_i64() > since.as_i64() {
                 Box::new(core::iter::once((
                     self.path.clone(),
@@ -561,7 +559,7 @@ mod tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
             Box::new(core::iter::once((
                 self.path.clone(),
                 RuntimeProduct::render(self.rid),

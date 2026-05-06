@@ -2,7 +2,7 @@
 
 use crate::binding::BindingId;
 use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
-use lpc_model::{NodeId, ValuePath, Versioned};
+use lpc_model::{NodeId, SlotPath, Versioned};
 use lps_shared::LpsValueF32;
 
 /// One cached production: versioned runtime product and where it came from.
@@ -36,7 +36,7 @@ impl Production {
 pub enum ProductionSource {
     Literal,
     Default,
-    ProducedSlot { node: NodeId, slot: ValuePath },
+    ProducedSlot { node: NodeId, slot: SlotPath },
     BusBinding { binding: BindingId },
 }
 
@@ -47,8 +47,8 @@ mod tests {
     use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
     use lpc_model::FrameId;
     use lpc_model::NodeId;
+    use lpc_model::SlotPath;
     use lpc_model::Versioned;
-    use lpc_model::prop::value_path::parse_path;
     use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32};
 
     #[test]
@@ -75,7 +75,7 @@ mod tests {
             v,
             ProductionSource::ProducedSlot {
                 node: NodeId::new(9),
-                slot: parse_path("result").unwrap(),
+                slot: SlotPath::parse("result").unwrap(),
             },
         )
         .expect("production");
@@ -89,7 +89,7 @@ mod tests {
             pv.source,
             ProductionSource::ProducedSlot {
                 node: NodeId::new(9),
-                slot: parse_path("result").unwrap(),
+                slot: SlotPath::parse("result").unwrap(),
             }
         );
 

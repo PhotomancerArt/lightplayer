@@ -8,8 +8,7 @@ use alloc::vec;
 use lp_shader::LpsTextureBuf;
 use lpc_model::FrameId;
 use lpc_model::NodeId;
-use lpc_model::prop::ValuePath;
-use lpc_model::prop::value_path::parse_path;
+use lpc_model::SlotPath;
 use lpc_source::legacy::glsl_opts::{AddSubMode, DivMode, MulMode};
 use lpc_source::node::shader::ShaderDef;
 use lps_shared::LpsValueF32;
@@ -30,19 +29,19 @@ use super::texture_node::texture_dimension_query_targets;
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end (matches legacy shader runtime).
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-pub fn shader_texture_output_path() -> ValuePath {
-    parse_path("texture").expect("texture output path")
+pub fn shader_texture_output_path() -> SlotPath {
+    SlotPath::parse("texture").expect("texture output path")
 }
 
 #[derive(Clone)]
 struct ShaderProducedSlots {
-    path: ValuePath,
+    path: SlotPath,
     render_product_id: RenderProductId,
     last_frame: FrameId,
 }
 
 impl ProducedSlotAccess for ShaderProducedSlots {
-    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
         if path == &self.path {
             Some((
                 RuntimeProduct::render(self.render_product_id),
@@ -56,7 +55,7 @@ impl ProducedSlotAccess for ShaderProducedSlots {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         if self.last_frame.as_i64() > since.as_i64() {
             Box::new(core::iter::once((
                 self.path.clone(),
@@ -70,7 +69,7 @@ impl ProducedSlotAccess for ShaderProducedSlots {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(core::iter::once((
             self.path.clone(),
             RuntimeProduct::render(self.render_product_id),

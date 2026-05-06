@@ -10,10 +10,10 @@ use lpc_engine::{CoreProjectLoader, CoreProjectRuntime, Graphics, LpGraphics, Ru
 use lpc_model::resource::{ResourceDomain, ResourceRef};
 use lpc_model::{AsLpPath, FrameId};
 use lpc_shared::project::ProjectBuilder;
-use lpc_wire::legacy::{NodeChange, NodeState};
+use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeState};
 use lpc_wire::{
-    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-    RuntimeBufferPayloadSpecifier, WireNodeSpecifier,
+    LegacyWireNodeSpecifier, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
 };
 use lpfs::LpFsMemory;
 
@@ -77,7 +77,7 @@ fn watched_nodes_receive_node_details() {
     let r = rt
         .get_changes(
             FrameId::default(),
-            &WireNodeSpecifier::ByHandles(alloc::vec![out_id]),
+            &LegacyWireNodeSpecifier::ByHandles(alloc::vec![out_id]),
             ResourceSummarySpecifier::default(),
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest::default(),
@@ -85,11 +85,11 @@ fn watched_nodes_receive_node_details() {
         )
         .unwrap();
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } = r;
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges { node_details, .. } = r;
     let detail = node_details.get(&out_id).expect("output detail");
     assert_eq!(detail.path.as_str(), "/output.toml");
-    assert!(matches!(&detail.state, NodeState::Output(_)));
-    let NodeState::Output(st) = &detail.state else {
+    assert!(matches!(&detail.state, LegacyNodeState::Output(_)));
+    let LegacyNodeState::Output(st) = &detail.state else {
         unreachable!();
     };
     assert!(
@@ -112,7 +112,7 @@ fn summary_all_reports_runtime_buffer_and_render_product_rows() {
     let r = rt
         .get_changes(
             FrameId::default(),
-            &WireNodeSpecifier::None,
+            &LegacyWireNodeSpecifier::None,
             ResourceSummarySpecifier::All,
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest::default(),
@@ -120,7 +120,7 @@ fn summary_all_reports_runtime_buffer_and_render_product_rows() {
         )
         .unwrap();
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         resource_summaries, ..
     } = r;
     let buf = resource_summaries
@@ -146,7 +146,7 @@ fn fixture_lamp_colors_field_points_at_fixture_colors_buffer_via_resource_ref() 
     let r = rt
         .get_changes(
             FrameId::default(),
-            &WireNodeSpecifier::ByHandles(alloc::vec![fid]),
+            &LegacyWireNodeSpecifier::ByHandles(alloc::vec![fid]),
             ResourceSummarySpecifier::default(),
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest::default(),
@@ -154,13 +154,13 @@ fn fixture_lamp_colors_field_points_at_fixture_colors_buffer_via_resource_ref() 
         )
         .unwrap();
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         node_changes,
         node_details,
         ..
     } = r;
     let det = node_details.get(&fid).expect("fixture detail");
-    let NodeState::Fixture(st) = &det.state else {
+    let LegacyNodeState::Fixture(st) = &det.state else {
         panic!("fixture state");
     };
     let rf = st.lamp_colors.resource_ref().expect("lamp ref");
@@ -169,7 +169,7 @@ fn fixture_lamp_colors_field_points_at_fixture_colors_buffer_via_resource_ref() 
     assert!(
         node_changes.iter().any(|ch| matches!(
             ch,
-            NodeChange::StateUpdated { handle, .. } if *handle == fid
+            LegacyNodeChange::StateUpdated { handle, .. } if *handle == fid
         )),
         "fixture should report state churn when ticked",
     );
@@ -190,7 +190,7 @@ fn runtime_buffer_payload_by_id_returns_bytes_after_fixture_writes() {
     let r = rt
         .get_changes(
             FrameId::default(),
-            &WireNodeSpecifier::None,
+            &LegacyWireNodeSpecifier::None,
             ResourceSummarySpecifier::default(),
             &RuntimeBufferPayloadSpecifier::ByIds(alloc::vec![sink]),
             &RenderProductPayloadRequest::default(),
@@ -198,7 +198,7 @@ fn runtime_buffer_payload_by_id_returns_bytes_after_fixture_writes() {
         )
         .unwrap();
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         runtime_buffer_payloads,
         ..
     } = r;
@@ -225,7 +225,7 @@ fn render_product_payload_by_id_returns_rgba16_unorm_pixels() {
     let r = rt
         .get_changes(
             FrameId::default(),
-            &WireNodeSpecifier::None,
+            &LegacyWireNodeSpecifier::None,
             ResourceSummarySpecifier::default(),
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest {
@@ -236,7 +236,7 @@ fn render_product_payload_by_id_returns_rgba16_unorm_pixels() {
         )
         .unwrap();
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         render_product_payloads,
         ..
     } = r;

@@ -1,4 +1,4 @@
-//! M4.1 legacy [`lpc_wire::legacy::NodeDetail`] projection (compatibility-facing).
+//! M4.1 legacy [`lpc_wire::legacy::LegacyNodeDetail`] projection (compatibility-facing).
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -11,12 +11,12 @@ use lpc_model::{FrameId, NodeId};
 use lpc_source::node::NodeKind;
 use lpc_source::node::fixture::FixtureDef;
 use lpc_source::node::texture::{TextureDef, TextureFormat};
-use lpc_wire::WireNodeSpecifier;
+use lpc_wire::LegacyWireNodeSpecifier;
 use lpc_wire::legacy::nodes::fixture::{FixtureState, MappingCell};
 use lpc_wire::legacy::nodes::output::OutputState;
 use lpc_wire::legacy::nodes::shader::ShaderState;
 use lpc_wire::legacy::nodes::texture::TextureState;
-use lpc_wire::legacy::{NodeDetail, NodeState};
+use lpc_wire::legacy::{LegacyNodeDetail, LegacyNodeState};
 
 use crate::engine::Engine;
 use crate::legacy::nodes::fixture::mapping::generate_mapping_points;
@@ -28,10 +28,10 @@ use super::kind::legacy_node_kind_from_ty;
 pub(crate) fn build_node_detail_map(
     engine: &Engine,
     compatibility: &CompatibilityProjection,
-    detail_specifier: &WireNodeSpecifier,
+    legacy_detail_specifier: &LegacyWireNodeSpecifier,
     current_frame: FrameId,
-) -> BTreeMap<NodeId, NodeDetail> {
-    let wanted = detail_handle_set(engine, detail_specifier);
+) -> BTreeMap<NodeId, LegacyNodeDetail> {
+    let wanted = detail_handle_set(engine, legacy_detail_specifier);
     let mut out = BTreeMap::new();
 
     for entry in engine.tree().entries() {
@@ -57,15 +57,15 @@ pub(crate) fn build_node_detail_map(
         let ver_frame = projection_frame_stamp(entry.created_frame, entry.change_frame);
 
         let state = match kind {
-            NodeKind::Texture => NodeState::Texture(build_texture_state(
+            NodeKind::Texture => LegacyNodeState::Texture(build_texture_state(
                 compatibility,
                 entry,
                 ver_frame,
                 current_frame,
             )),
-            NodeKind::Shader => NodeState::Shader(build_shader_state(entry, ver_frame)),
-            NodeKind::Output => NodeState::Output(build_output_state(entry, ver_frame)),
-            NodeKind::Fixture => NodeState::Fixture(build_fixture_state(
+            NodeKind::Shader => LegacyNodeState::Shader(build_shader_state(entry, ver_frame)),
+            NodeKind::Output => LegacyNodeState::Output(build_output_state(entry, ver_frame)),
+            NodeKind::Fixture => LegacyNodeState::Fixture(build_fixture_state(
                 engine,
                 compatibility,
                 entry,
@@ -77,7 +77,7 @@ pub(crate) fn build_node_detail_map(
 
         out.insert(
             entry.id,
-            NodeDetail {
+            LegacyNodeDetail {
                 path: compatibility
                     .node_path_for(entry.id)
                     .cloned()
@@ -95,11 +95,11 @@ fn projection_frame_stamp(created: FrameId, changed: FrameId) -> FrameId {
     FrameId::new(changed.0.max(created.0).max(FrameId::default().0))
 }
 
-fn detail_handle_set(engine: &Engine, spec: &WireNodeSpecifier) -> BTreeSet<NodeId> {
+fn detail_handle_set(engine: &Engine, spec: &LegacyWireNodeSpecifier) -> BTreeSet<NodeId> {
     let mut set = BTreeSet::new();
     match spec {
-        WireNodeSpecifier::None => {}
-        WireNodeSpecifier::All => {
+        LegacyWireNodeSpecifier::None => {}
+        LegacyWireNodeSpecifier::All => {
             for entry in engine.tree().entries() {
                 if entry.id == engine.tree().root() {
                     continue;
@@ -112,7 +112,7 @@ fn detail_handle_set(engine: &Engine, spec: &WireNodeSpecifier) -> BTreeSet<Node
                 }
             }
         }
-        WireNodeSpecifier::ByHandles(handles) => {
+        LegacyWireNodeSpecifier::ByHandles(handles) => {
             for &h in handles {
                 set.insert(h);
             }

@@ -36,7 +36,7 @@ model, source, wire, view, and engine do not collide:
   `SrcBinding`, …). No short root aliases; call sites use the `Src*` names.
 - **`lpc-wire`** — `Message`, `ClientRequest`, and similar already imply the
   wire; use `Wire*` only to disambiguate payload nouns (`WireTreeDelta`,
-  `WireNodeSpecifier`, `WireSlotIndex`, …).
+  `LegacyWireNodeSpecifier`, `WireSlotIndex`, …).
 - **`lpc-view`** — local cache/view structs use natural `*View` suffixes
   (`ProjectView`, `PropAccessView`, …). Reserve `Client*` for real
   client-facing API surfaces (e.g. `ClientApi`), not mirror data.

@@ -6,8 +6,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use lpc_model::prop::value_path::parse_path;
-use lpc_model::{ChannelName, FrameId, Kind, NodeId, NodeName, TreePath, ValuePath};
+use lpc_model::{ChannelName, FrameId, Kind, NodeId, NodeName, SlotPath, TreePath};
 use lpc_source::SrcValueSpec;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
@@ -42,13 +41,13 @@ pub(crate) struct EngineTestHarness {
 }
 
 pub(crate) struct OutputSpec {
-    path: ValuePath,
+    path: SlotPath,
     value: LpsValueF32,
 }
 
 pub(crate) enum TestBindingSource {
     Literal(LpsValueF32),
-    ProducedSlot { label: String, slot: ValuePath },
+    ProducedSlot { label: String, slot: SlotPath },
     Bus(ChannelName),
 }
 
@@ -331,15 +330,15 @@ pub(crate) fn bus(channel: &str) -> TestBindingSource {
     TestBindingSource::Bus(channel_name(channel))
 }
 
-pub(crate) fn path(path: &str) -> ValuePath {
-    parse_path(path).expect("test prop path")
+pub(crate) fn path(path: &str) -> SlotPath {
+    SlotPath::parse(path).expect("test slot path")
 }
 
 pub(crate) fn trace_has_value_origin_path(
     trace: &ResolveTrace,
     bus_name: &str,
     shader: NodeId,
-    output_path: &ValuePath,
+    output_path: &SlotPath,
 ) -> bool {
     let bus_query = QueryKey::Bus(channel_name(bus_name));
     let output_query = QueryKey::ProducedSlot {
@@ -365,7 +364,7 @@ pub(crate) struct DummyShaderNode {
 }
 
 impl DummyShaderNode {
-    fn new(slot: ValuePath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
+    fn new(slot: SlotPath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
         let mut props = DummyProps::new();
         props.set(slot, value, FrameId::new(0));
         Self { props, tick_count }
@@ -397,13 +396,13 @@ impl Node for DummyShaderNode {
 }
 
 pub(crate) struct DummyFixtureNode {
-    slot: ValuePath,
+    slot: SlotPath,
     record: RecordedValue,
     props: DummyProps,
 }
 
 impl DummyFixtureNode {
-    fn new(slot: ValuePath, record: RecordedValue) -> Self {
+    fn new(slot: SlotPath, record: RecordedValue) -> Self {
         Self {
             slot,
             record,
@@ -442,13 +441,13 @@ impl Node for DummyFixtureNode {
 }
 
 pub(crate) struct DummyOutputNode {
-    slot: ValuePath,
+    slot: SlotPath,
     record: RecordedValue,
     props: DummyProps,
 }
 
 impl DummyOutputNode {
-    fn new(slot: ValuePath, record: RecordedValue) -> Self {
+    fn new(slot: SlotPath, record: RecordedValue) -> Self {
         Self {
             slot,
             record,
@@ -487,7 +486,7 @@ impl Node for DummyOutputNode {
 }
 
 struct DummyProps {
-    values: Vec<(ValuePath, RuntimeProduct, FrameId)>,
+    values: Vec<(SlotPath, RuntimeProduct, FrameId)>,
 }
 
 impl DummyProps {
@@ -495,7 +494,7 @@ impl DummyProps {
         Self { values: Vec::new() }
     }
 
-    fn set(&mut self, path: ValuePath, value: LpsValueF32, frame: FrameId) {
+    fn set(&mut self, path: SlotPath, value: LpsValueF32, frame: FrameId) {
         if let Some((_, stored, stored_frame)) = self.values.iter_mut().find(|(p, _, _)| p == &path)
         {
             *stored = RuntimeProduct::Value(value);
@@ -514,7 +513,7 @@ impl DummyProps {
 }
 
 impl ProducedSlotAccess for DummyProps {
-    fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -524,7 +523,7 @@ impl ProducedSlotAccess for DummyProps {
     fn iter_changed_since<'a>(
         &'a self,
         since: FrameId,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -535,7 +534,7 @@ impl ProducedSlotAccess for DummyProps {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
         Box::new(
             self.values
                 .iter()

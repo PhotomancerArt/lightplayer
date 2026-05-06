@@ -94,8 +94,7 @@ mod tests {
         resolve_trace::ResolveLogLevel,
     };
     use crate::runtime_product::RuntimeProduct;
-    use lpc_model::prop::value_path::parse_path;
-    use lpc_model::{FrameId, NodeId, ValuePath};
+    use lpc_model::{FrameId, NodeId, SlotPath};
     use lps_shared::LpsValueF32;
 
     struct EmptyResolveHost;
@@ -113,7 +112,7 @@ mod tests {
     }
 
     struct DummyProps {
-        values: Vec<(ValuePath, RuntimeProduct, FrameId)>,
+        values: Vec<(SlotPath, RuntimeProduct, FrameId)>,
     }
 
     impl Default for DummyProps {
@@ -123,7 +122,7 @@ mod tests {
     }
 
     impl ProducedSlotAccess for DummyProps {
-        fn get(&self, path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
             self.values
                 .iter()
                 .find(|(p, _, _)| p == path)
@@ -133,7 +132,7 @@ mod tests {
         fn iter_changed_since<'a>(
             &'a self,
             since: FrameId,
-        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
             Box::new(
                 self.values
                     .iter()
@@ -144,7 +143,7 @@ mod tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
             Box::new(
                 self.values
                     .iter()
@@ -160,7 +159,7 @@ mod tests {
     impl DummyNode {
         fn new() -> Self {
             let mut props = DummyProps::default();
-            let path = parse_path("out").expect("path");
+            let path = SlotPath::parse("out").expect("path");
             props.values.push((
                 path,
                 RuntimeProduct::Value(LpsValueF32::F32(0.25)),
@@ -201,7 +200,7 @@ mod tests {
     #[test]
     fn props_returns_produced_slot_access() {
         let node = DummyNode::new();
-        let path = parse_path("out").expect("path");
+        let path = SlotPath::parse("out").expect("path");
         let got = node.produced().get(&path);
         assert!(got.is_some());
         assert!(matches!(

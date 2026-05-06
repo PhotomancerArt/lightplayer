@@ -11,7 +11,7 @@ serialization helpers.
 `ClientRequest`, `ServerMessage`, `FsRequest`, …) already imply the wire
 contract. Use `Wire*` when a noun also exists in model/source/view/engine form
 and needs disambiguation — for example `WireTreeDelta`, `WireNodeStatus`,
-`WireNodeSpecifier`, `WireSlotIndex`.
+`LegacyWireNodeSpecifier`, `WireSlotIndex`.
 
 `no_std`, designed for embedded-compatible transports. It should not depend on
 `lps-shared`; runtime values must cross the `lpc-engine` boundary as

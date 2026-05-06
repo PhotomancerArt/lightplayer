@@ -7,7 +7,7 @@ use lpc_model::{NodeId, project::FrameId};
 use lpc_source::node::NodeKind;
 use lpc_view::project::ProjectView;
 use lpc_wire::WireNodeStatus;
-use lpc_wire::legacy::NodeState;
+use lpc_wire::legacy::LegacyNodeState;
 
 /// Render status panel
 pub fn render_status_panel(
@@ -39,25 +39,27 @@ pub fn render_status_panel(
 pub fn render_all_nodes_panel(
     ui: &mut egui::Ui,
     view: &ProjectView,
-    tracked_nodes: &mut std::collections::BTreeSet<NodeId>,
-    all_detail: &mut bool,
+    legacy_detail_nodes: &mut std::collections::BTreeSet<NodeId>,
+    all_legacy_detail: &mut bool,
     show_texture_background: &mut bool,
     show_texture_labels: &mut bool,
     show_texture_strokes: &mut bool,
 ) -> bool {
     let mut changed = false;
 
-    // "All detail" checkbox
-    let all_detail_changed = ui.checkbox(all_detail, "All detail").changed();
-    if all_detail_changed {
+    // "All legacy detail" checkbox
+    let all_legacy_detail_changed = ui
+        .checkbox(all_legacy_detail, "All legacy detail")
+        .changed();
+    if all_legacy_detail_changed {
         changed = true;
-        if *all_detail {
+        if *all_legacy_detail {
             // Track all nodes
-            tracked_nodes.clear();
-            tracked_nodes.extend(view.nodes.keys().copied());
-        } else if tracked_nodes.len() == view.nodes.len() {
+            legacy_detail_nodes.clear();
+            legacy_detail_nodes.extend(view.nodes.keys().copied());
+        } else if legacy_detail_nodes.len() == view.nodes.len() {
             // If all were tracked and we uncheck, clear tracking
-            tracked_nodes.clear();
+            legacy_detail_nodes.clear();
         }
     }
 
@@ -76,7 +78,7 @@ pub fn render_all_nodes_panel(
     nodes.sort_by_key(|(_, entry)| entry.path.as_str());
 
     for (handle, entry) in nodes {
-        let is_tracked = tracked_nodes.contains(handle);
+        let is_tracked = legacy_detail_nodes.contains(handle);
         let mut checked = is_tracked;
 
         // Show status indicator and checkbox with node path
@@ -107,12 +109,12 @@ pub fn render_all_nodes_panel(
             if checkbox_response.changed() {
                 changed = true;
                 if checked {
-                    tracked_nodes.insert(*handle);
+                    legacy_detail_nodes.insert(*handle);
                 } else {
-                    tracked_nodes.remove(handle);
+                    legacy_detail_nodes.remove(handle);
                     // If we uncheck a node, also uncheck "all detail"
-                    if *all_detail {
-                        *all_detail = false;
+                    if *all_legacy_detail {
+                        *all_legacy_detail = false;
                     }
                 }
             }
@@ -122,7 +124,7 @@ pub fn render_all_nodes_panel(
         if checked {
             if let Some(state) = &entry.state {
                 match (entry.kind, state) {
-                    (NodeKind::Texture, NodeState::Texture(texture_state)) => {
+                    (NodeKind::Texture, LegacyNodeState::Texture(texture_state)) => {
                         texture::render_texture_panel(
                             ui,
                             view,
@@ -133,10 +135,10 @@ pub fn render_all_nodes_panel(
                             *show_texture_strokes,
                         );
                     }
-                    (NodeKind::Shader, NodeState::Shader(shader_state)) => {
+                    (NodeKind::Shader, LegacyNodeState::Shader(shader_state)) => {
                         shader::render_shader_panel(ui, view, entry, shader_state);
                     }
-                    (NodeKind::Fixture, NodeState::Fixture(fixture_state)) => {
+                    (NodeKind::Fixture, LegacyNodeState::Fixture(fixture_state)) => {
                         fixture::render_fixture_panel(
                             ui,
                             view,
@@ -147,7 +149,7 @@ pub fn render_all_nodes_panel(
                             *show_texture_strokes,
                         );
                     }
-                    (NodeKind::Output, NodeState::Output(output_state)) => {
+                    (NodeKind::Output, LegacyNodeState::Output(output_state)) => {
                         output::render_output_panel(ui, view, *handle, entry, output_state);
                     }
                     _ => {

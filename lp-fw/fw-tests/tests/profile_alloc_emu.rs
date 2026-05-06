@@ -137,7 +137,7 @@ async fn test_profile_alloc_produces_valid_output() {
         .map(|(handle, _)| *handle)
         .expect("Shader node not found in client view");
 
-    client_view.watch_detail(shader_handle);
+    client_view.watch_legacy_detail(shader_handle);
     sync_emu_project_view(&client, project_handle, &mut client_view).await;
     assert_shader_compiled_ok(&client_view, shader_path.as_str());
 

@@ -16,9 +16,9 @@ pub async fn sync_emu_project_view(
 ) {
     let is_initial_sync = view.nodes.is_empty();
     let detail_spec = if is_initial_sync {
-        lpc_wire::WireNodeSpecifier::All
+        lpc_wire::LegacyWireNodeSpecifier::All
     } else {
-        view.detail_specifier()
+        view.legacy_detail_specifier()
     };
 
     let response = client
@@ -43,7 +43,7 @@ pub mod shader_emu_gate {
     use lpc_source::node::NodeKind;
     use lpc_view::ProjectView;
     use lpc_wire::WireNodeStatus;
-    use lpc_wire::legacy::NodeState;
+    use lpc_wire::legacy::LegacyNodeState;
 
     pub fn assert_shader_compiled_ok(view: &ProjectView, shader_path: &str) {
         let handle = view
@@ -76,12 +76,12 @@ pub mod shader_emu_gate {
 
         let state = entry.state.as_ref().unwrap_or_else(|| {
             panic!(
-                "missing shader state; call watch_detail(shader_handle) then sync before assert_shader_compiled_ok"
+                "missing shader state; call watch_legacy_detail(shader_handle) then sync before assert_shader_compiled_ok"
             )
         });
 
         match state {
-            NodeState::Shader(shader) => {
+            LegacyNodeState::Shader(shader) => {
                 if let Some(err) = shader.error.value() {
                     panic!("shader runtime error after compile gate: {err:?}");
                 }

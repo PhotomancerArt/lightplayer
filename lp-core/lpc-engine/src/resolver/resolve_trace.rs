@@ -183,12 +183,12 @@ mod tests {
     use crate::binding::BindingId;
     use crate::resolver::query_key::QueryKey;
     use lpc_model::NodeId;
-    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::SlotPath;
 
     fn sample_key() -> QueryKey {
         QueryKey::ConsumedSlot {
             node: NodeId::new(1),
-            slot: parse_path("in").unwrap(),
+            slot: SlotPath::parse("in").unwrap(),
         }
     }
 

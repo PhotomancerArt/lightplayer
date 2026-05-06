@@ -7,7 +7,7 @@ use crate::debug_ui::panels;
 use eframe::egui;
 use lpc_model::{NodeId, project::FrameId};
 use lpc_view::project::ProjectView;
-use lpc_wire::{WireProjectHandle as ProjectHandle, legacy::SerializableProjectResponse};
+use lpc_wire::{WireProjectHandle as ProjectHandle, legacy::LegacySerializableProjectResponse};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -22,16 +22,17 @@ pub struct DebugUiState {
     /// Async client for syncing (shared via Arc<Mutex<>>)
     async_client: Arc<tokio::sync::Mutex<LpClient>>,
     /// Nodes we're tracking detail for
-    tracked_nodes: BTreeSet<NodeId>,
-    /// "All detail" checkbox state
-    all_detail: bool,
+    legacy_detail_nodes: BTreeSet<NodeId>,
+    /// "All legacy detail" checkbox state
+    all_legacy_detail: bool,
     /// Whether a sync is currently in progress
     sync_in_progress: bool,
     /// Pending sync result receiver (if sync is in progress)
     /// Contains SerializableProjectResponse which can be sent across threads
-    pending_sync: Option<oneshot::Receiver<Result<SerializableProjectResponse, anyhow::Error>>>,
-    /// Track if tracked_nodes changed since last sync (to trigger immediate sync)
-    tracked_nodes_changed: bool,
+    pending_sync:
+        Option<oneshot::Receiver<Result<LegacySerializableProjectResponse, anyhow::Error>>>,
+    /// Track if legacy_detail_nodes changed since last sync (to trigger immediate sync)
+    legacy_detail_nodes_changed: bool,
     /// Tokio runtime handle for spawning async tasks
     runtime_handle: tokio::runtime::Handle,
     /// Last frame time for UI FPS calculation
@@ -64,11 +65,11 @@ impl DebugUiState {
             project_view,
             project_handle,
             async_client: Arc::new(tokio::sync::Mutex::new(async_client)),
-            tracked_nodes: BTreeSet::new(),
-            all_detail: true,
+            legacy_detail_nodes: BTreeSet::new(),
+            all_legacy_detail: true,
             sync_in_progress: false,
             pending_sync: None,
-            tracked_nodes_changed: false,
+            legacy_detail_nodes_changed: false,
             runtime_handle,
             last_frame_time: None,
             last_server_frame_id: None,
@@ -93,7 +94,7 @@ impl DebugUiState {
             match receiver.try_recv() {
                 Ok(Ok(serializable_response)) => {
                     // Extract theoretical FPS from response before converting
-                    let SerializableProjectResponse::GetChanges {
+                    let LegacySerializableProjectResponse::GetChanges {
                         theoretical_fps, ..
                     } = &serializable_response;
                     self.theoretical_fps = *theoretical_fps;
@@ -130,24 +131,24 @@ impl DebugUiState {
                                             _ => {}
                                         }
                                     }
-                                    // If "All detail" is enabled, track all nodes
-                                    if self.all_detail && !view.nodes.is_empty() {
+                                    // If "All legacy detail" is enabled, track all nodes
+                                    if self.all_legacy_detail && !view.nodes.is_empty() {
                                         let all_node_handles: BTreeSet<_> =
                                             view.nodes.keys().copied().collect();
-                                        if self.tracked_nodes != all_node_handles {
-                                            self.tracked_nodes = all_node_handles;
+                                        if self.legacy_detail_nodes != all_node_handles {
+                                            self.legacy_detail_nodes = all_node_handles;
                                         }
                                     }
 
                                     self.sync_in_progress = false;
-                                    // Check if tracked_nodes changed while sync was in progress
+                                    // Check if legacy_detail_nodes changed while sync was in progress
                                     // If so, we need to sync again immediately
                                     let current_tracked: BTreeSet<_> =
-                                        self.tracked_nodes.iter().copied().collect();
+                                        self.legacy_detail_nodes.iter().copied().collect();
                                     let view_tracked: BTreeSet<_> =
-                                        view.detail_tracking.iter().copied().collect();
+                                        view.legacy_detail_tracking.iter().copied().collect();
                                     if current_tracked != view_tracked {
-                                        self.tracked_nodes_changed = true;
+                                        self.legacy_detail_nodes_changed = true;
                                     }
                                 }
                                 Err(e) => {
@@ -188,26 +189,26 @@ impl DebugUiState {
         }
 
         // Start new sync if not in progress and connection is still alive
-        // If tracked_nodes changed, we'll sync again after current sync finishes
+        // If legacy_detail_nodes changed, we'll sync again after current sync finishes
         if !self.sync_in_progress && !self.connection_lost {
-            // Update view's detail_tracking to match tracked_nodes and get sync parameters
-            let (since_frame, detail_specifier) = {
+            // Update view's legacy_detail_tracking to match legacy_detail_nodes and get sync parameters
+            let (since_frame, legacy_detail_specifier) = {
                 let mut view = self.project_view.lock().unwrap();
                 let is_initial_sync = view.nodes.is_empty();
 
-                view.detail_tracking.clear();
-                view.detail_tracking
-                    .extend(self.tracked_nodes.iter().copied());
+                view.legacy_detail_tracking.clear();
+                view.legacy_detail_tracking
+                    .extend(self.legacy_detail_nodes.iter().copied());
 
                 let since_frame = view.frame_id;
                 // For initial sync (empty view), request all nodes to populate the list
-                // Otherwise use normal detail_specifier
-                let detail_specifier = if is_initial_sync {
-                    lpc_wire::WireNodeSpecifier::All
+                // Otherwise use normal legacy_detail_specifier
+                let legacy_detail_specifier = if is_initial_sync {
+                    lpc_wire::LegacyWireNodeSpecifier::All
                 } else {
-                    view.detail_specifier()
+                    view.legacy_detail_specifier()
                 };
-                (since_frame, detail_specifier)
+                (since_frame, legacy_detail_specifier)
             };
 
             // Spawn async task to do sync (without holding view lock)
@@ -227,7 +228,7 @@ impl DebugUiState {
                         .project_sync_internal(
                             handle,
                             Some(since_frame),
-                            detail_specifier,
+                            legacy_detail_specifier,
                             ProjectGetChangesOptions::dev_demo_full_resources(),
                         )
                         .await
@@ -317,14 +318,14 @@ impl eframe::App for DebugUiState {
                     let nodes_changed = panels::render_all_nodes_panel(
                         ui,
                         &view,
-                        &mut self.tracked_nodes,
-                        &mut self.all_detail,
+                        &mut self.legacy_detail_nodes,
+                        &mut self.all_legacy_detail,
                         &mut self.show_texture_background,
                         &mut self.show_texture_labels,
                         &mut self.show_texture_strokes,
                     );
                     if nodes_changed {
-                        self.tracked_nodes_changed = true;
+                        self.legacy_detail_nodes_changed = true;
                     }
                 });
         });

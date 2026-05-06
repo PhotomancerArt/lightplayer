@@ -55,7 +55,7 @@ fn test_partial_state_updates() {
     let initial_response = runtime
         .get_changes(
             lpc_model::FrameId::default(),
-            &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::LegacyWireNodeSpecifier::ByHandles(vec![fixture_handle]),
             ResourceSummarySpecifier::All,
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest::default(),
@@ -73,7 +73,7 @@ fn test_partial_state_updates() {
     let lamp_colors_response = runtime
         .get_changes(
             initial_frame,
-            &lpc_wire::WireNodeSpecifier::ByHandles(vec![fixture_handle]),
+            &lpc_wire::LegacyWireNodeSpecifier::ByHandles(vec![fixture_handle]),
             ResourceSummarySpecifier::All,
             &RuntimeBufferPayloadSpecifier::ByIds(alloc::vec![lamp_colors_buf]),
             &RenderProductPayloadRequest::default(),
@@ -87,7 +87,7 @@ fn test_partial_state_updates() {
     let summaries_refresh = runtime
         .get_changes(
             lpc_model::FrameId::default(),
-            &lpc_wire::WireNodeSpecifier::ByHandles(alloc::vec![fixture_handle]),
+            &lpc_wire::LegacyWireNodeSpecifier::ByHandles(alloc::vec![fixture_handle]),
             ResourceSummarySpecifier::All,
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest::default(),
@@ -144,10 +144,10 @@ fn load_core_runtime(
 }
 
 fn resource_ref_set(
-    response: &lpc_wire::legacy::ProjectResponse,
+    response: &lpc_wire::legacy::LegacyProjectResponse,
 ) -> alloc::collections::BTreeSet<lpc_model::resource::ResourceRef> {
     use alloc::collections::BTreeSet;
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         resource_summaries, ..
     } = response;
     resource_summaries
@@ -167,16 +167,16 @@ fn assert_resource_summary_membership_stable(
 }
 
 fn lamp_colors_runtime_buffer(
-    response: &lpc_wire::legacy::ProjectResponse,
+    response: &lpc_wire::legacy::LegacyProjectResponse,
     fixture_handle: lpc_model::NodeId,
 ) -> lpc_model::resource::RuntimeBufferId {
     use lpc_model::resource::RuntimeBufferId;
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges { node_details, .. } = response;
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges { node_details, .. } = response;
     let detail = node_details
         .get(&fixture_handle)
         .expect("fixture detail projects lamp_colors ref source");
-    let lpc_wire::legacy::NodeState::Fixture(st) = &detail.state else {
+    let lpc_wire::legacy::LegacyNodeState::Fixture(st) = &detail.state else {
         panic!("expected fixture state");
     };
     let lamp = st.lamp_colors.resource_ref().expect("lamp buffer ref");
@@ -185,10 +185,10 @@ fn lamp_colors_runtime_buffer(
 }
 
 fn assert_fixture_projection_includes_lamp_colors_ref(
-    response: &lpc_wire::legacy::ProjectResponse,
+    response: &lpc_wire::legacy::LegacyProjectResponse,
     fixture_handle: lpc_model::NodeId,
 ) {
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         node_handles,
         node_details,
         ..
@@ -197,7 +197,7 @@ fn assert_fixture_projection_includes_lamp_colors_ref(
     let detail = node_details
         .get(&fixture_handle)
         .expect("M4.1 projects fixture detail when requested");
-    let lpc_wire::legacy::NodeState::Fixture(st) = &detail.state else {
+    let lpc_wire::legacy::LegacyNodeState::Fixture(st) = &detail.state else {
         panic!("expected fixture state");
     };
     let lamp = st.lamp_colors.resource_ref();
@@ -212,12 +212,12 @@ fn assert_fixture_projection_includes_lamp_colors_ref(
 }
 
 fn assert_fixture_lamp_colors_buffer_payload_nonempty(
-    response: &lpc_wire::legacy::ProjectResponse,
+    response: &lpc_wire::legacy::LegacyProjectResponse,
     lamp_buf: lpc_model::resource::RuntimeBufferId,
 ) {
     use lpc_model::resource::ResourceRef;
 
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         runtime_buffer_payloads,
         ..
     } = response;

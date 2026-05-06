@@ -11,9 +11,7 @@ use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::resolver::resolver::Resolver;
 use crate::resolver::resolver::materialize_src_value_literal;
-use lpc_model::ChannelName;
-use lpc_model::prop::value_path::ValuePath;
-use lpc_model::{FrameId, NodeId};
+use lpc_model::{ChannelName, FrameId, NodeId, SlotPath};
 
 /// Active resolution session for one frame (or nested test scope).
 pub struct ResolveSession<'a> {
@@ -114,7 +112,7 @@ impl<'a> ResolveSession<'a> {
         &mut self,
         host: &mut (impl ResolveHost + ?Sized),
         node: NodeId,
-        slot: ValuePath,
+        slot: SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
         if let Some(entry) = find_binding_for_consumed_slot(self.registry, node, &slot) {
@@ -181,7 +179,7 @@ impl<'a> ResolveSession<'a> {
 fn find_binding_for_consumed_slot<'a>(
     registry: &'a BindingRegistry,
     node: NodeId,
-    slot: &ValuePath,
+    slot: &SlotPath,
 ) -> Option<&'a BindingEntry> {
     registry.iter().find(|e| {
         matches!(
@@ -227,7 +225,6 @@ mod tests {
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::prop::value_path::parse_path;
     use lpc_model::{ChannelName, Versioned};
     use lpc_source::SrcValueSpec;
     use lps_shared::LpsValueF32;
@@ -236,18 +233,18 @@ mod tests {
         ChannelName(String::from(s))
     }
 
-    fn path(s: &str) -> ValuePath {
-        parse_path(s).expect("path")
+    fn path(s: &str) -> SlotPath {
+        SlotPath::parse(s).expect("path")
     }
 
     struct CountingHost {
         produce_calls: u32,
         node: NodeId,
-        out_path: ValuePath,
+        out_path: SlotPath,
     }
 
     impl CountingHost {
-        fn new(node: NodeId, out_path: ValuePath) -> Self {
+        fn new(node: NodeId, out_path: SlotPath) -> Self {
             Self {
                 produce_calls: 0,
                 node,

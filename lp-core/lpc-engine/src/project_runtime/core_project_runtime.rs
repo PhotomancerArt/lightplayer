@@ -9,10 +9,10 @@ use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{FrameId, NodeId, TreePath};
 use lpfs::FsChange;
 
-use lpc_wire::legacy::{NodeChange, ProjectResponse};
+use lpc_wire::legacy::{LegacyNodeChange, LegacyProjectResponse};
 use lpc_wire::{
-    RenderProductPayloadRequest, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
-    WireNodeSpecifier, WireNodeStatus,
+    LegacyWireNodeSpecifier, RenderProductPayloadRequest, ResourceSummarySpecifier,
+    RuntimeBufferPayloadSpecifier, WireNodeStatus,
 };
 
 use crate::engine::{Engine, EngineError};
@@ -118,12 +118,12 @@ impl CoreProjectRuntime {
     pub fn get_changes(
         &self,
         since_frame: FrameId,
-        detail_specifier: &WireNodeSpecifier,
+        legacy_detail_specifier: &LegacyWireNodeSpecifier,
         resource_summary_specifier: ResourceSummarySpecifier,
         runtime_buffer_payload_specifier: &RuntimeBufferPayloadSpecifier,
         render_product_payload_request: &RenderProductPayloadRequest,
         theoretical_fps: Option<f32>,
-    ) -> Result<ProjectResponse, EngineError> {
+    ) -> Result<LegacyProjectResponse, EngineError> {
         let mut node_handles = Vec::new();
         let mut node_changes = Vec::new();
 
@@ -139,7 +139,7 @@ impl CoreProjectRuntime {
             node_handles.push(entry.id);
 
             if entry.created_frame.as_i64() > since_frame.as_i64() {
-                node_changes.push(NodeChange::Created {
+                node_changes.push(LegacyNodeChange::Created {
                     handle: entry.id,
                     path: self
                         .compatibility
@@ -148,14 +148,14 @@ impl CoreProjectRuntime {
                         .unwrap_or_else(|| LpPathBuf::from(entry.path.to_string())),
                     kind,
                 });
-                node_changes.push(NodeChange::ConfigUpdated {
+                node_changes.push(LegacyNodeChange::ConfigUpdated {
                     handle: entry.id,
                     config_ver: entry.created_frame,
                 });
             }
 
             if entry.change_frame.as_i64() > since_frame.as_i64() {
-                node_changes.push(NodeChange::StateUpdated {
+                node_changes.push(LegacyNodeChange::StateUpdated {
                     handle: entry.id,
                     state_ver: entry.change_frame,
                 });
@@ -164,7 +164,7 @@ impl CoreProjectRuntime {
             if entry.change_frame.as_i64() > since_frame.as_i64()
                 || since_frame == FrameId::default()
             {
-                node_changes.push(NodeChange::StatusChanged {
+                node_changes.push(LegacyNodeChange::StatusChanged {
                     handle: entry.id,
                     status: projected_status(entry.status.clone()),
                 });
@@ -174,7 +174,7 @@ impl CoreProjectRuntime {
         let node_details = build_node_detail_map(
             self.engine(),
             self.compatibility(),
-            detail_specifier,
+            legacy_detail_specifier,
             self.frame_id(),
         );
 
@@ -212,7 +212,7 @@ impl CoreProjectRuntime {
             );
         }
 
-        Ok(ProjectResponse::GetChanges {
+        Ok(LegacyProjectResponse::GetChanges {
             current_frame: self.frame_id(),
             since_frame,
             node_handles,
@@ -294,7 +294,7 @@ mod output_sink_flush_tests {
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
     use crate::tree::test_placeholder_spine;
-    use lpc_model::prop::ValuePath;
+    use lpc_model::SlotPath;
     use lpc_model::{FrameId, Kind, ModelValue, TreePath, Versioned};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -337,13 +337,13 @@ mod output_sink_flush_tests {
 
     #[derive(Clone)]
     struct SolidFixtureOutputs {
-        path: ValuePath,
+        path: SlotPath,
         rid: crate::render_product::RenderProductId,
         last_frame: FrameId,
     }
 
     impl ProducedSlotAccess for SolidFixtureOutputs {
-        fn get(&self, path: &ValuePath) -> Option<(RpEnum, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RpEnum, FrameId)> {
             if path == &self.path {
                 Some((RpEnum::render(self.rid), self.last_frame))
             } else {
@@ -354,7 +354,7 @@ mod output_sink_flush_tests {
         fn iter_changed_since<'a>(
             &'a self,
             since: FrameId,
-        ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RpEnum, FrameId)> + 'a> {
+        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, FrameId)> + 'a> {
             if self.last_frame.as_i64() > since.as_i64() {
                 alloc::boxed::Box::new(core::iter::once((
                     self.path.clone(),
@@ -368,7 +368,7 @@ mod output_sink_flush_tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RpEnum, FrameId)> + 'a> {
+        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, FrameId)> + 'a> {
             alloc::boxed::Box::new(core::iter::once((
                 self.path.clone(),
                 RpEnum::render(self.rid),

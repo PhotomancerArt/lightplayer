@@ -56,7 +56,7 @@ render_order = 10
     let response = runtime
         .get_changes(
             before_change,
-            &lpc_wire::WireNodeSpecifier::ByHandles(vec![shader_handle]),
+            &lpc_wire::LegacyWireNodeSpecifier::ByHandles(vec![shader_handle]),
             ResourceSummarySpecifier::default(),
             &RuntimeBufferPayloadSpecifier::default(),
             &RenderProductPayloadRequest::default(),
@@ -65,7 +65,7 @@ render_order = 10
         .unwrap();
 
     match response {
-        lpc_wire::legacy::ProjectResponse::GetChanges {
+        lpc_wire::legacy::LegacyProjectResponse::GetChanges {
             current_frame,
             node_handles,
             node_changes,
@@ -77,14 +77,14 @@ render_order = 10
             assert!(
                 !node_changes.iter().any(|change| matches!(
                     change,
-                    lpc_wire::legacy::NodeChange::ConfigUpdated { handle, .. } if *handle == shader_handle
+                    lpc_wire::legacy::LegacyNodeChange::ConfigUpdated { handle, .. } if *handle == shader_handle
                 )),
                 "M4 does not reload node.toml changes on the core runtime path"
             );
             let detail = node_details
                 .get(&shader_handle)
                 .expect("M4.1 projects shader detail when the client specifies the handle");
-            let lpc_wire::legacy::NodeState::Shader(st) = &detail.state else {
+            let lpc_wire::legacy::LegacyNodeState::Shader(st) = &detail.state else {
                 panic!("shader node state")
             };
             assert_eq!(
@@ -213,14 +213,14 @@ fn resource_summary_membership_is_stable_after_ticks() {
         let r = runtime
             .get_changes(
                 lpc_model::FrameId::default(),
-                &lpc_wire::WireNodeSpecifier::ByHandles(alloc::vec![fixture_handle]),
+                &lpc_wire::LegacyWireNodeSpecifier::ByHandles(alloc::vec![fixture_handle]),
                 lpc_wire::ResourceSummarySpecifier::All,
                 &lpc_wire::RuntimeBufferPayloadSpecifier::default(),
                 &lpc_wire::RenderProductPayloadRequest::default(),
                 None,
             )
             .unwrap();
-        let lpc_wire::legacy::ProjectResponse::GetChanges {
+        let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
             resource_summaries, ..
         } = r;
         resource_summaries.iter().map(|s| s.resource_ref).collect()

@@ -28,7 +28,7 @@ pub enum SessionResolveError {
     },
     UnresolvedConsumedSlot {
         node: NodeId,
-        slot: lpc_model::ValuePath,
+        slot: lpc_model::SlotPath,
     },
     Trace(ResolveTraceError),
     Other(String),

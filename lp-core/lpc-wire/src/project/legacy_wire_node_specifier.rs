@@ -1,12 +1,12 @@
-//! Node specifier for sync/API requests over the wire (`WireNodeSpecifier`).
+//! Legacy node-detail specifier for compatibility sync requests.
 
 use alloc::vec::Vec;
 use lpc_model::node::NodeId;
 use serde::{Deserialize, Serialize};
 
-/// Node specifier for sync/API requests over the wire.
+/// Legacy selector for compatibility node config/state details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WireNodeSpecifier {
+pub enum LegacyWireNodeSpecifier {
     /// No nodes.
     None,
     /// All nodes.

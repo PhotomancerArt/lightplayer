@@ -199,7 +199,7 @@ fn sync_client_view_from_server(
         .runtime()
         .get_changes(
             client_view.frame_id,
-            &client_view.detail_specifier(),
+            &client_view.legacy_detail_specifier(),
             ResourceSummarySpecifier::All,
             &RuntimeBufferPayloadSpecifier::All,
             &RenderProductPayloadRequest {

@@ -12,6 +12,10 @@ pub struct SlotMeta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// True when clients may request mutation of this slot.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub writable: bool,
 }
 
 impl SlotMeta {
@@ -19,4 +23,8 @@ impl SlotMeta {
     pub fn empty() -> Self {
         Self::default()
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

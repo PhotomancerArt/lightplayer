@@ -4,10 +4,10 @@
 
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf, project::FrameId};
-use lpc_wire::legacy::{LegacyServerMessage, SerializableProjectResponse};
+use lpc_wire::legacy::{LegacySerializableProjectResponse, LegacyServerMessage};
 use lpc_wire::{
-    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-    RuntimeBufferPayloadSpecifier, WireNodeSpecifier, WireProjectHandle as ProjectHandle,
+    LegacyWireNodeSpecifier, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle,
     WireProjectRequest,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
@@ -447,7 +447,7 @@ impl LpClient {
     ///
     /// * `handle` - Project handle
     /// * `since_frame` - Frame ID to get changes since (None for all changes)
-    /// * `detail_specifier` - Which nodes to include in the response
+    /// * `legacy_detail_specifier` - Which nodes to include in the response
     /// * `resource_options` - Resource summary / payload specifiers for `GetChanges`
     ///
     /// # Returns
@@ -458,9 +458,9 @@ impl LpClient {
         &self,
         handle: ProjectHandle,
         since_frame: Option<FrameId>,
-        detail_specifier: WireNodeSpecifier,
+        legacy_detail_specifier: LegacyWireNodeSpecifier,
         resource_options: ProjectGetChangesOptions,
-    ) -> Result<SerializableProjectResponse> {
+    ) -> Result<LegacySerializableProjectResponse> {
         // Use FrameId::default() if since_frame is None (get all changes)
         let since_frame = since_frame.unwrap_or_default();
 
@@ -474,7 +474,8 @@ impl LpClient {
             handle,
             request: WireProjectRequest::GetChanges {
                 since_frame,
-                detail_specifier,
+                legacy_detail_specifier: legacy_detail_specifier,
+                slot_watch_specifier: Default::default(),
                 resource_summary_specifier,
                 runtime_buffer_payload_specifier,
                 render_product_payload_request,
@@ -560,10 +561,10 @@ impl LpClient {
 /// This is a helper function for converting the serializable response
 /// to the engine client's ProjectResponse type.
 pub fn serializable_response_to_project_response(
-    response: SerializableProjectResponse,
-) -> Result<lpc_wire::legacy::ProjectResponse, Error> {
+    response: LegacySerializableProjectResponse,
+) -> Result<lpc_wire::legacy::LegacyProjectResponse, Error> {
     match response {
-        SerializableProjectResponse::GetChanges {
+        LegacySerializableProjectResponse::GetChanges {
             current_frame,
             since_frame,
             node_handles,
@@ -574,45 +575,47 @@ pub fn serializable_response_to_project_response(
             runtime_buffer_payloads,
             render_product_payloads,
         } => {
-            use lpc_wire::legacy::{NodeDetail, ProjectResponse, SerializableNodeDetail};
+            use lpc_wire::legacy::{
+                LegacyNodeDetail, LegacyProjectResponse, LegacySerializableNodeDetail,
+            };
             use std::collections::BTreeMap;
 
             // Convert Vec<(NodeHandle, SerializableNodeDetail)> to BTreeMap<NodeHandle, NodeDetail>
             let mut node_details_map = BTreeMap::new();
             for (handle, serializable_detail) in node_details {
                 let detail = match serializable_detail {
-                    SerializableNodeDetail::Texture {
+                    LegacySerializableNodeDetail::Texture {
                         path,
                         config,
                         state,
-                    } => NodeDetail {
+                    } => LegacyNodeDetail {
                         path,
                         config: Box::new(config),
                         state,
                     },
-                    SerializableNodeDetail::Shader {
+                    LegacySerializableNodeDetail::Shader {
                         path,
                         config,
                         state,
-                    } => NodeDetail {
+                    } => LegacyNodeDetail {
                         path,
                         config: Box::new(config),
                         state,
                     },
-                    SerializableNodeDetail::Output {
+                    LegacySerializableNodeDetail::Output {
                         path,
                         config,
                         state,
-                    } => NodeDetail {
+                    } => LegacyNodeDetail {
                         path,
                         config: Box::new(config),
                         state,
                     },
-                    SerializableNodeDetail::Fixture {
+                    LegacySerializableNodeDetail::Fixture {
                         path,
                         config,
                         state,
-                    } => NodeDetail {
+                    } => LegacyNodeDetail {
                         path,
                         config: Box::new(config),
                         state,
@@ -621,7 +624,7 @@ pub fn serializable_response_to_project_response(
                 node_details_map.insert(handle, detail);
             }
 
-            Ok(ProjectResponse::GetChanges {
+            Ok(LegacyProjectResponse::GetChanges {
                 current_frame,
                 since_frame,
                 node_handles,
@@ -643,8 +646,8 @@ mod tests {
     use lpc_model::{LpPathBuf, project::FrameId};
     use lpc_shared::transport::ServerTransport;
     use lpc_wire::{
-        RenderProductPayloadSpecifier, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
-        WireNodeSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
+        LegacyWireNodeSpecifier, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
+        RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
         server::{LoadedProject, SampleStats, ServerMsgBody},
     };
     use tokio::task;
@@ -846,7 +849,8 @@ mod tests {
         let opts = ProjectGetChangesOptions::dev_demo_full_resources();
         let req = WireProjectRequest::GetChanges {
             since_frame: FrameId::default(),
-            detail_specifier: WireNodeSpecifier::All,
+            legacy_detail_specifier: LegacyWireNodeSpecifier::All,
+            slot_watch_specifier: Default::default(),
             resource_summary_specifier: opts.resource_summary_specifier,
             runtime_buffer_payload_specifier: opts.runtime_buffer_payload_specifier,
             render_product_payload_request: opts.render_product_payload_request,

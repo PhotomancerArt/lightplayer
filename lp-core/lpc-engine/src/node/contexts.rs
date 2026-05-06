@@ -281,7 +281,7 @@ mod tests {
     use crate::runtime_product::RuntimeProduct;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::prop::value_path::{ValuePath, parse_path};
+    use lpc_model::SlotPath;
     use lpc_source::SrcValueSpec;
 
     struct PanicProduceHost;
@@ -383,7 +383,7 @@ mod tests {
         let mut registry = BindingRegistry::new();
         let frame = FrameId::new(10);
         let node = NodeId::new(3);
-        let input = parse_path("in").unwrap();
+        let input = SlotPath::parse("in").unwrap();
         registry
             .register(
                 BindingDraft {
@@ -453,7 +453,7 @@ mod tests {
 
     struct FixtureProduceHost {
         node: NodeId,
-        out_path: ValuePath,
+        out_path: SlotPath,
     }
 
     impl ResolveHost for FixtureProduceHost {
@@ -513,19 +513,19 @@ mod tests {
         fn produced(&self) -> &dyn crate::prop::ProducedSlotAccess {
             struct EmptyProps;
             impl crate::prop::ProducedSlotAccess for EmptyProps {
-                fn get(&self, _path: &ValuePath) -> Option<(RuntimeProduct, FrameId)> {
+                fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
                     None
                 }
                 fn iter_changed_since<'b>(
                     &'b self,
                     _since: FrameId,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'b>
+                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'b>
                 {
                     alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
                 }
                 fn snapshot<'b>(
                     &'b self,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (ValuePath, RuntimeProduct, FrameId)> + 'b>
+                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'b>
                 {
                     alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
                 }
@@ -585,7 +585,7 @@ mod tests {
         let registry = BindingRegistry::new();
         let frame = FrameId::new(10);
         let node_id = NodeId::new(2);
-        let input_path = parse_path("fixture_in").unwrap();
+        let input_path = SlotPath::parse("fixture_in").unwrap();
 
         let mut resolver = Resolver::new();
         let mut session = session_bundle(&mut resolver, &registry, frame);
@@ -634,7 +634,7 @@ mod tests {
         bus.claim_writer(
             &channel,
             NodeId::new(1),
-            parse_path("outputs[0]").unwrap(),
+            SlotPath::parse("outputs[0]").unwrap(),
             lpc_model::Kind::Amplitude,
         )
         .unwrap();
@@ -661,7 +661,7 @@ mod tests {
         bus.claim_writer(
             &channel,
             NodeId::new(1),
-            parse_path("outputs[0]").unwrap(),
+            SlotPath::parse("outputs[0]").unwrap(),
             lpc_model::Kind::Amplitude,
         )
         .unwrap();

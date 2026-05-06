@@ -4,14 +4,38 @@ use alloc::collections::BTreeMap;
 use lpc_model::{FrameId, NodeId};
 use lpc_view::ProjectView;
 use lpc_wire::WireResourceSummary;
-use lpc_wire::legacy::ProjectResponse;
+use lpc_wire::legacy::LegacyProjectResponse;
 
 #[test]
 fn test_client_view_creation() {
     let view = ProjectView::new();
     assert_eq!(view.frame_id, FrameId::default());
     assert!(view.nodes.is_empty());
-    assert!(view.detail_tracking.is_empty());
+    assert!(view.legacy_detail_tracking.is_empty());
+    assert!(view.slot_watch_roots.is_empty());
+}
+
+#[test]
+fn test_slot_watch_specifier() {
+    let mut view = ProjectView::new();
+    let root = lpc_wire::WireNodeSlotRoot {
+        node: NodeId::new(1),
+        root: lpc_wire::WireSlotRootKind::State,
+    };
+
+    view.watch_slot_root(root);
+    assert!(view.slot_watch_roots.contains(&root));
+
+    match view.slot_watch_specifier() {
+        lpc_wire::WireSlotWatchSpecifier::ByRoots(roots) => assert_eq!(roots, vec![root]),
+        _ => panic!("Expected ByRoots"),
+    }
+
+    view.unwatch_slot_root(root);
+    assert!(matches!(
+        view.slot_watch_specifier(),
+        lpc_wire::WireSlotWatchSpecifier::None
+    ));
 }
 
 #[test]
@@ -19,13 +43,13 @@ fn test_request_detail() {
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
 
-    view.watch_detail(handle);
-    assert!(view.detail_tracking.contains(&handle));
+    view.watch_legacy_detail(handle);
+    assert!(view.legacy_detail_tracking.contains(&handle));
 
     // Generate specifier
-    let spec = view.detail_specifier();
+    let spec = view.legacy_detail_specifier();
     match spec {
-        lpc_wire::WireNodeSpecifier::ByHandles(handles) => {
+        lpc_wire::LegacyWireNodeSpecifier::ByHandles(handles) => {
             assert_eq!(handles.len(), 1);
             assert_eq!(handles[0], handle);
         }
@@ -38,16 +62,16 @@ fn test_stop_detail() {
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
 
-    view.watch_detail(handle);
-    assert!(view.detail_tracking.contains(&handle));
+    view.watch_legacy_detail(handle);
+    assert!(view.legacy_detail_tracking.contains(&handle));
 
-    view.unwatch_detail(handle);
-    assert!(!view.detail_tracking.contains(&handle));
+    view.unwatch_legacy_detail(handle);
+    assert!(!view.legacy_detail_tracking.contains(&handle));
 
     // Generate specifier should be None
-    let spec = view.detail_specifier();
+    let spec = view.legacy_detail_specifier();
     match spec {
-        lpc_wire::WireNodeSpecifier::None => {}
+        lpc_wire::LegacyWireNodeSpecifier::None => {}
         _ => panic!("Expected None"),
     }
 }
@@ -58,11 +82,11 @@ fn test_sync_with_changes() {
 
     // Create a mock response with a created node
     let handle = NodeId::new(1);
-    let response = ProjectResponse::GetChanges {
+    let response = LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lpc_wire::legacy::NodeChange::Created {
+        node_changes: vec![lpc_wire::legacy::LegacyNodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.texture"),
             kind: lpc_source::node::NodeKind::Texture,
@@ -88,7 +112,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
     use alloc::boxed::Box;
     use lpc_wire::WireNodeStatus;
     use lpc_wire::legacy::nodes::shader::ShaderState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
@@ -98,18 +122,18 @@ fn test_detail_only_entry_uses_pending_status_changed() {
     let mut details = BTreeMap::new();
     details.insert(
         handle,
-        NodeDetail {
+        LegacyNodeDetail {
             path: path.clone(),
             config: Box::new(lpc_source::node::shader::ShaderDef::default()),
-            state: NodeState::Shader(ShaderState::new(frame)),
+            state: LegacyNodeState::Shader(ShaderState::new(frame)),
         },
     );
 
-    let response = ProjectResponse::GetChanges {
+    let response = LegacyProjectResponse::GetChanges {
         current_frame: frame,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::StatusChanged {
+        node_changes: vec![LegacyNodeChange::StatusChanged {
             handle,
             status: WireNodeStatus::Ok,
         }],
@@ -129,7 +153,7 @@ fn test_detail_only_entry_uses_pending_status_changed() {
 fn test_partial_state_merge_texture() {
     use alloc::boxed::Box;
     use lpc_source::node::texture::TextureDef;
-    use lpc_wire::legacy::NodeState;
+    use lpc_wire::legacy::LegacyNodeState;
     use lpc_wire::legacy::nodes::texture::TextureState;
 
     let mut view = ProjectView::new();
@@ -147,11 +171,11 @@ fn test_partial_state_merge_texture() {
         lpc_source::node::texture::TextureFormat::Rgb8,
     );
 
-    let initial_response = ProjectResponse::GetChanges {
+    let initial_response = LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lpc_wire::legacy::NodeChange::Created {
+        node_changes: vec![lpc_wire::legacy::LegacyNodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.texture"),
             kind: lpc_source::node::NodeKind::Texture,
@@ -160,13 +184,13 @@ fn test_partial_state_merge_texture() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpc_wire::legacy::NodeDetail {
+                lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
                     config: Box::new(TextureDef {
                         width: 100,
                         height: 200,
                     }),
-                    state: NodeState::Texture(initial_state),
+                    state: LegacyNodeState::Texture(initial_state),
                 },
             );
             map
@@ -177,13 +201,13 @@ fn test_partial_state_merge_texture() {
         render_product_payloads: Vec::new(),
     };
 
-    view.watch_detail(handle);
+    view.watch_legacy_detail(handle);
     view.apply_changes(&initial_response).unwrap();
 
     // Verify initial state is stored
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
-        Some(NodeState::Texture(state)) => {
+        Some(LegacyNodeState::Texture(state)) => {
             assert_eq!(state.texture_data.inline_bytes(), &[10, 20, 30, 40][..]);
             assert_eq!(state.width.value(), &100);
             assert_eq!(state.height.value(), &200);
@@ -201,11 +225,11 @@ fn test_partial_state_merge_texture() {
     partial_state.height.set(FrameId::new(2), 250);
     // texture_data and format are NOT set (will be defaults)
 
-    let partial_response = ProjectResponse::GetChanges {
+    let partial_response = LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(2),
         since_frame: FrameId::new(1),
         node_handles: vec![handle],
-        node_changes: vec![lpc_wire::legacy::NodeChange::StateUpdated {
+        node_changes: vec![lpc_wire::legacy::LegacyNodeChange::StateUpdated {
             handle,
             state_ver: FrameId::new(2),
         }],
@@ -213,13 +237,13 @@ fn test_partial_state_merge_texture() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpc_wire::legacy::NodeDetail {
+                lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
                     config: Box::new(TextureDef {
                         width: 150,
                         height: 250,
                     }),
-                    state: NodeState::Texture(partial_state),
+                    state: LegacyNodeState::Texture(partial_state),
                 },
             );
             map
@@ -235,7 +259,7 @@ fn test_partial_state_merge_texture() {
     // Verify merged state: width/height updated, texture_data and format preserved
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
-        Some(NodeState::Texture(state)) => {
+        Some(LegacyNodeState::Texture(state)) => {
             // These should be updated
             assert_eq!(state.width.value(), &150);
             assert_eq!(state.height.value(), &250);
@@ -259,7 +283,7 @@ fn test_partial_state_merge_texture() {
 fn test_partial_state_merge_output() {
     use alloc::boxed::Box;
     use lpc_source::node::output::OutputDef;
-    use lpc_wire::legacy::NodeState;
+    use lpc_wire::legacy::LegacyNodeState;
     use lpc_wire::legacy::nodes::output::OutputState;
 
     let mut view = ProjectView::new();
@@ -271,11 +295,11 @@ fn test_partial_state_merge_output() {
         .channel_data
         .set_inline(FrameId::new(1), vec![100, 200, 255]);
 
-    let initial_response = ProjectResponse::GetChanges {
+    let initial_response = LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![lpc_wire::legacy::NodeChange::Created {
+        node_changes: vec![lpc_wire::legacy::LegacyNodeChange::Created {
             handle,
             path: lpc_model::LpPathBuf::from("/src/test.output"),
             kind: lpc_source::node::NodeKind::Output,
@@ -284,13 +308,13 @@ fn test_partial_state_merge_output() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpc_wire::legacy::NodeDetail {
+                lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
                     config: Box::new(OutputDef::GpioStrip {
                         pin: 0,
                         options: None,
                     }),
-                    state: NodeState::Output(initial_state),
+                    state: LegacyNodeState::Output(initial_state),
                 },
             );
             map
@@ -301,13 +325,13 @@ fn test_partial_state_merge_output() {
         render_product_payloads: Vec::new(),
     };
 
-    view.watch_detail(handle);
+    view.watch_legacy_detail(handle);
     view.apply_changes(&initial_response).unwrap();
 
     // Verify initial state is stored
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
-        Some(NodeState::Output(state)) => {
+        Some(LegacyNodeState::Output(state)) => {
             assert_eq!(state.channel_data.inline_bytes(), &[100, 200, 255][..]);
         }
         _ => panic!("Expected Output state"),
@@ -317,7 +341,7 @@ fn test_partial_state_merge_output() {
     let partial_state = OutputState::new(FrameId::new(2));
     // channel_data is NOT set (will be default empty)
 
-    let partial_response = ProjectResponse::GetChanges {
+    let partial_response = LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(2),
         since_frame: FrameId::new(1),
         node_handles: vec![handle],
@@ -326,13 +350,13 @@ fn test_partial_state_merge_output() {
             let mut map = BTreeMap::new();
             map.insert(
                 handle,
-                lpc_wire::legacy::NodeDetail {
+                lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
                     config: Box::new(OutputDef::GpioStrip {
                         pin: 0,
                         options: None,
                     }),
-                    state: NodeState::Output(partial_state),
+                    state: LegacyNodeState::Output(partial_state),
                 },
             );
             map
@@ -348,7 +372,7 @@ fn test_partial_state_merge_output() {
     // Verify merged state: channel_data should be preserved
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
-        Some(NodeState::Output(state)) => {
+        Some(LegacyNodeState::Output(state)) => {
             assert_eq!(
                 state.channel_data.inline_bytes(),
                 &[100, 200, 255][..],
@@ -364,7 +388,7 @@ fn detail_applies_real_texture_config() {
     use alloc::boxed::Box;
     use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
@@ -375,11 +399,11 @@ fn detail_applies_real_texture_config() {
     state.width.set(f1, 80);
     state.height.set(f1, 60);
 
-    let response = ProjectResponse::GetChanges {
+    let response = LegacyProjectResponse::GetChanges {
         current_frame: f1,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Texture,
@@ -388,13 +412,13 @@ fn detail_applies_real_texture_config() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path,
                     config: Box::new(TextureDef {
                         width: 320,
                         height: 240,
                     }),
-                    state: NodeState::Texture(state),
+                    state: LegacyNodeState::Texture(state),
                 },
             );
             m
@@ -405,7 +429,7 @@ fn detail_applies_real_texture_config() {
         render_product_payloads: Vec::new(),
     };
 
-    view.watch_detail(handle);
+    view.watch_legacy_detail(handle);
     view.apply_changes(&response).unwrap();
 
     let cfg = view.nodes[&handle]
@@ -422,7 +446,7 @@ fn detail_applies_real_output_config() {
     use alloc::boxed::Box;
     use lpc_source::node::output::{OutputDef, OutputDriverOptionsConfig};
     use lpc_wire::legacy::nodes::output::OutputState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(2);
@@ -435,11 +459,11 @@ fn detail_applies_real_output_config() {
         ..OutputDriverOptionsConfig::default()
     };
 
-    let response = ProjectResponse::GetChanges {
+    let response = LegacyProjectResponse::GetChanges {
         current_frame: f1,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Output,
@@ -448,13 +472,13 @@ fn detail_applies_real_output_config() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path,
                     config: Box::new(OutputDef::GpioStrip {
                         pin: 42,
                         options: Some(opts.clone()),
                     }),
-                    state: NodeState::Output(state),
+                    state: LegacyNodeState::Output(state),
                 },
             );
             m
@@ -465,7 +489,7 @@ fn detail_applies_real_output_config() {
         render_product_payloads: Vec::new(),
     };
 
-    view.watch_detail(handle);
+    view.watch_legacy_detail(handle);
     view.apply_changes(&response).unwrap();
 
     let cfg = view.nodes[&handle]
@@ -487,7 +511,7 @@ fn detail_after_config_updated_replaces_stored_config() {
     use alloc::boxed::Box;
     use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(1);
@@ -497,12 +521,12 @@ fn detail_after_config_updated_replaces_stored_config() {
     s1.width.set(FrameId::new(1), 10);
     s1.height.set(FrameId::new(1), 10);
 
-    view.watch_detail(handle);
-    view.apply_changes(&ProjectResponse::GetChanges {
+    view.watch_legacy_detail(handle);
+    view.apply_changes(&LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Texture,
@@ -511,13 +535,13 @@ fn detail_after_config_updated_replaces_stored_config() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(TextureDef {
                         width: 100,
                         height: 200,
                     }),
-                    state: NodeState::Texture(s1),
+                    state: LegacyNodeState::Texture(s1),
                 },
             );
             m
@@ -533,11 +557,11 @@ fn detail_after_config_updated_replaces_stored_config() {
     s2.width.set(FrameId::new(2), 10);
     s2.height.set(FrameId::new(2), 10);
 
-    view.apply_changes(&ProjectResponse::GetChanges {
+    view.apply_changes(&LegacyProjectResponse::GetChanges {
         current_frame: FrameId::new(2),
         since_frame: FrameId::new(1),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::ConfigUpdated {
+        node_changes: vec![LegacyNodeChange::ConfigUpdated {
             handle,
             config_ver: FrameId::new(2),
         }],
@@ -545,13 +569,13 @@ fn detail_after_config_updated_replaces_stored_config() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(TextureDef {
                         width: 640,
                         height: 480,
                     }),
-                    state: NodeState::Texture(s2),
+                    state: LegacyNodeState::Texture(s2),
                 },
             );
             m
@@ -579,7 +603,7 @@ fn detail_only_entry_stores_real_texture_config() {
     use lpc_source::node::texture::TextureDef;
     use lpc_wire::WireNodeStatus;
     use lpc_wire::legacy::nodes::texture::TextureState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(5);
@@ -590,11 +614,11 @@ fn detail_only_entry_stores_real_texture_config() {
     state.width.set(frame, 1);
     state.height.set(frame, 1);
 
-    let response = ProjectResponse::GetChanges {
+    let response = LegacyProjectResponse::GetChanges {
         current_frame: frame,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::StatusChanged {
+        node_changes: vec![LegacyNodeChange::StatusChanged {
             handle,
             status: WireNodeStatus::Ok,
         }],
@@ -602,13 +626,13 @@ fn detail_only_entry_stores_real_texture_config() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(TextureDef {
                         width: 128,
                         height: 96,
                     }),
-                    state: NodeState::Texture(state),
+                    state: LegacyNodeState::Texture(state),
                 },
             );
             m
@@ -637,7 +661,7 @@ fn project_watched_detail_entry_has_state_after_sync() {
     use alloc::collections::BTreeMap;
     use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
 
     let mut view = ProjectView::new();
     let handle = NodeId::new(9);
@@ -648,12 +672,12 @@ fn project_watched_detail_entry_has_state_after_sync() {
     state.width.set(frame, 4);
     state.height.set(frame, 4);
 
-    view.watch_detail(handle);
-    view.apply_changes(&ProjectResponse::GetChanges {
+    view.watch_legacy_detail(handle);
+    view.apply_changes(&LegacyProjectResponse::GetChanges {
         current_frame: frame,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Texture,
@@ -662,13 +686,13 @@ fn project_watched_detail_entry_has_state_after_sync() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path,
                     config: Box::new(TextureDef {
                         width: 4,
                         height: 4,
                     }),
-                    state: NodeState::Texture(state),
+                    state: LegacyNodeState::Texture(state),
                 },
             );
             m
@@ -685,7 +709,7 @@ fn project_watched_detail_entry_has_state_after_sync() {
         entry.state.is_some(),
         "watched detail sync should populate node state"
     );
-    assert!(view.detail_tracking.contains(&handle));
+    assert!(view.legacy_detail_tracking.contains(&handle));
 }
 
 #[test]
@@ -695,7 +719,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
     use lpc_model::resource::{ResourceRef, RuntimeBufferId};
     use lpc_source::node::output::OutputDef;
     use lpc_wire::legacy::nodes::output::OutputState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
     use lpc_wire::{
         WireChannelSampleFormat, WireResourceAvailability, WireResourceKindSummary,
         WireResourceMetadataSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
@@ -711,12 +735,12 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
     let mut state = OutputState::new(frame);
     state.channel_data.set_resource(frame, buf_ref);
 
-    view.watch_detail(handle);
-    view.apply_changes(&ProjectResponse::GetChanges {
+    view.watch_legacy_detail(handle);
+    view.apply_changes(&LegacyProjectResponse::GetChanges {
         current_frame: frame,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Output,
@@ -725,13 +749,13 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(OutputDef::GpioStrip {
                         pin: 0,
                         options: None,
                     }),
-                    state: NodeState::Output(state),
+                    state: LegacyNodeState::Output(state),
                 },
             );
             m
@@ -771,7 +795,7 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
     use lpc_model::resource::{RenderProductId, ResourceRef};
     use lpc_source::node::texture::TextureDef;
     use lpc_wire::legacy::nodes::texture::TextureState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
     use lpc_wire::{
         WireRenderProductKind, WireRenderProductPayload, WireResourceAvailability,
         WireResourceKindSummary, WireResourceMetadataSummary, WireTextureFormat,
@@ -788,12 +812,12 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
     state.width.set(frame, 1);
     state.height.set(frame, 1);
 
-    view.watch_detail(handle);
-    view.apply_changes(&ProjectResponse::GetChanges {
+    view.watch_legacy_detail(handle);
+    view.apply_changes(&LegacyProjectResponse::GetChanges {
         current_frame: frame,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Texture,
@@ -802,13 +826,13 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(TextureDef {
                         width: 1,
                         height: 1,
                     }),
-                    state: NodeState::Texture(state),
+                    state: LegacyNodeState::Texture(state),
                 },
             );
             m
@@ -849,7 +873,7 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
     use lpc_source::node::fixture::{ColorOrder, FixtureDef, MappingConfig};
     use lpc_view::project::resource_cache::resolve_legacy_compat_bytes;
     use lpc_wire::legacy::nodes::fixture::FixtureState;
-    use lpc_wire::legacy::{NodeChange, NodeDetail, NodeState};
+    use lpc_wire::legacy::{LegacyNodeChange, LegacyNodeDetail, LegacyNodeState};
     use lpc_wire::{
         WireColorLayout, WireResourceAvailability, WireResourceKindSummary,
         WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
@@ -865,12 +889,12 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
     let mut state = FixtureState::new(frame);
     state.lamp_colors.set_resource(frame, buf_ref);
 
-    view.watch_detail(handle);
-    view.apply_changes(&ProjectResponse::GetChanges {
+    view.watch_legacy_detail(handle);
+    view.apply_changes(&LegacyProjectResponse::GetChanges {
         current_frame: frame,
         since_frame: FrameId::default(),
         node_handles: vec![handle],
-        node_changes: vec![NodeChange::Created {
+        node_changes: vec![LegacyNodeChange::Created {
             handle,
             path: path.clone(),
             kind: lpc_source::node::NodeKind::Fixture,
@@ -879,7 +903,7 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
             let mut m = BTreeMap::new();
             m.insert(
                 handle,
-                NodeDetail {
+                LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(FixtureDef {
                         output_loc: lpc_model::RelativeNodeRef::parse("..out").unwrap(),
@@ -893,7 +917,7 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
                         brightness: None,
                         gamma_correction: None,
                     }),
-                    state: NodeState::Fixture(state),
+                    state: LegacyNodeState::Fixture(state),
                 },
             );
             m
@@ -924,7 +948,7 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
     .unwrap();
 
     let entry = view.nodes.get(&handle).expect("fixture entry");
-    let NodeState::Fixture(st) = entry.state.as_ref().expect("fixture detail state") else {
+    let LegacyNodeState::Fixture(st) = entry.state.as_ref().expect("fixture detail state") else {
         panic!("fixture state");
     };
     assert_eq!(

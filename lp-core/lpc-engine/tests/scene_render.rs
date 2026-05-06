@@ -13,7 +13,7 @@ use lpc_shared::output::{
 };
 use lpc_view::ProjectView;
 use lpc_view::project::resource_cache::resolve_legacy_compat_bytes;
-use lpc_wire::legacy::{NodeDetail, NodeState};
+use lpc_wire::legacy::{LegacyNodeDetail, LegacyNodeState};
 use lpc_wire::{
     RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
     RuntimeBufferPayloadSpecifier,
@@ -44,9 +44,9 @@ fn test_scene_render() {
         .artifact_node_id("/shader.toml".as_path())
         .expect("shader node handle");
 
-    client_view.watch_detail(output_handle);
-    client_view.watch_detail(fixture_handle);
-    client_view.watch_detail(shader_handle);
+    client_view.watch_legacy_detail(output_handle);
+    client_view.watch_legacy_detail(fixture_handle);
+    client_view.watch_legacy_detail(shader_handle);
 
     // Shader: vec4(mod(time, 1.0), 0.0, 0.0, 1.0) -> RGBA bytes [R, G, B, A]
     // Advancing time by 40ms gives an increment of (40/1000 * 255) = 10.2 ≈ 10.
@@ -162,11 +162,11 @@ fn assert_memory_output_red(provider: &MemoryOutputProvider, pin: u32, expected_
 fn demo_sync_response(
     runtime: &CoreProjectRuntime,
     client_view: &ProjectView,
-) -> lpc_wire::legacy::ProjectResponse {
+) -> lpc_wire::legacy::LegacyProjectResponse {
     runtime
         .get_changes(
             client_view.frame_id,
-            &client_view.detail_specifier(),
+            &client_view.legacy_detail_specifier(),
             ResourceSummarySpecifier::All,
             &RuntimeBufferPayloadSpecifier::All,
             &RenderProductPayloadRequest {
@@ -179,10 +179,10 @@ fn demo_sync_response(
 }
 
 fn assert_m4_demo_scene_projection(
-    response: &lpc_wire::legacy::ProjectResponse,
+    response: &lpc_wire::legacy::LegacyProjectResponse,
     shader_handle: lpc_model::NodeId,
 ) {
-    let lpc_wire::legacy::ProjectResponse::GetChanges {
+    let lpc_wire::legacy::LegacyProjectResponse::GetChanges {
         node_handles,
         node_details,
         resource_summaries,
@@ -216,10 +216,10 @@ fn assert_m4_demo_scene_projection(
         "render-product All payload sync should return rows"
     );
 
-    let NodeDetail { state, .. } = node_details
+    let LegacyNodeDetail { state, .. } = node_details
         .get(&shader_handle)
         .expect("watched shader should receive node detail");
-    let NodeState::Shader(st) = state else {
+    let LegacyNodeState::Shader(st) = state else {
         panic!("shader node state");
     };
     let rp_ref = st
@@ -251,7 +251,7 @@ fn assert_m4_demo_client_view_materialized(
     fixture_handle: lpc_model::NodeId,
     shader_handle: lpc_model::NodeId,
 ) {
-    fn assert_watched_detail_state(entry_state: Option<&NodeState>, label: &'static str) {
+    fn assert_watched_detail_state(entry_state: Option<&LegacyNodeState>, label: &'static str) {
         assert!(
             entry_state.is_some(),
             "{label}: watched nodes should receive detail state during M4.1 sync, not stall waiting"
@@ -288,7 +288,8 @@ fn assert_m4_demo_client_view_materialized(
         .nodes
         .get(&fixture_handle)
         .expect("fixture entry");
-    let NodeState::Fixture(fx_st) = fixture_entry.state.as_ref().expect("fixture state") else {
+    let LegacyNodeState::Fixture(fx_st) = fixture_entry.state.as_ref().expect("fixture state")
+    else {
         panic!("fixture state variant");
     };
     let lamp_ref = fx_st
@@ -304,7 +305,7 @@ fn assert_m4_demo_client_view_materialized(
         .expect("fixture lamp colors payload should populate cache");
 
     let shader_entry = client_view.nodes.get(&shader_handle).expect("shader entry");
-    let NodeState::Shader(sh_st) = shader_entry.state.as_ref().expect("shader state") else {
+    let LegacyNodeState::Shader(sh_st) = shader_entry.state.as_ref().expect("shader state") else {
         panic!("shader state variant");
     };
     let prod = sh_st

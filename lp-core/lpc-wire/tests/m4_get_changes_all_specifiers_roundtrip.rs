@@ -2,15 +2,16 @@
 
 use lpc_model::project::FrameId;
 use lpc_wire::{
-    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-    RuntimeBufferPayloadSpecifier, WireNodeSpecifier, WireProjectRequest,
+    LegacyWireNodeSpecifier, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireProjectRequest,
 };
 
 #[test]
 fn get_changes_all_summaries_and_payload_specifiers_round_trip_json() {
     let req = WireProjectRequest::GetChanges {
         since_frame: FrameId::default(),
-        detail_specifier: WireNodeSpecifier::All,
+        legacy_detail_specifier: LegacyWireNodeSpecifier::All,
+        slot_watch_specifier: Default::default(),
         resource_summary_specifier: ResourceSummarySpecifier::All,
         runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::All,
         render_product_payload_request: RenderProductPayloadRequest {
