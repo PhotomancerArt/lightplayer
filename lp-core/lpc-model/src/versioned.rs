@@ -11,7 +11,8 @@
 use crate::project::FrameId;
 
 /// A value of type `T` plus the [`FrameId`] at which it last changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct Versioned<T> {
     value: T,
     version: FrameId,

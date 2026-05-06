@@ -1,5 +1,6 @@
 //! Portable structural value shape (`ModelValue`), serde-friendly at the foundation layer.
 
+use crate::resource::ResourceRef;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -33,6 +34,7 @@ pub enum ModelValue {
         name: Option<String>,
         fields: Vec<(String, ModelValue)>,
     },
+    Resource(ResourceRef),
 }
 
 #[cfg(test)]
@@ -49,6 +51,9 @@ mod tests {
             ModelValue::Bool(true),
             ModelValue::Vec2([0.0, 1.0]),
             ModelValue::Vec3([1.0, 2.0, 3.0]),
+            ModelValue::Resource(crate::ResourceRef::render_product(
+                crate::RenderProductId::new(9),
+            )),
         ] {
             let json = serde_json::to_string(&v).unwrap();
             let back: ModelValue = serde_json::from_str(&json).unwrap();

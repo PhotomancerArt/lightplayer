@@ -1,4 +1,4 @@
-use super::{SlotName, SlotOwner};
+use super::{SlotOwner, SlotPath};
 
 /// Reference to one slot owned by a node or bus.
 ///
@@ -10,12 +10,12 @@ use super::{SlotName, SlotOwner};
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotRef {
     pub owner: SlotOwner,
-    pub slot: SlotName,
+    pub path: SlotPath,
 }
 
 impl SlotRef {
-    pub fn new(owner: SlotOwner, slot: SlotName) -> Self {
-        Self { owner, slot }
+    pub fn new(owner: SlotOwner, path: SlotPath) -> Self {
+        Self { owner, path }
     }
 }
 
@@ -23,13 +23,14 @@ impl SlotRef {
 mod tests {
     use super::*;
     use crate::NodeId;
+    use alloc::string::ToString;
 
     #[test]
-    fn slot_ref_contains_owner_and_slot_only() {
+    fn slot_ref_contains_owner_and_path_only() {
         let slot = SlotRef::new(
             SlotOwner::Node(NodeId::new(7)),
-            SlotName::parse("output").unwrap(),
+            SlotPath::parse("state.output").unwrap(),
         );
-        assert_eq!(slot.slot.as_str(), "output");
+        assert_eq!(slot.path.to_string(), "state.output");
     }
 }

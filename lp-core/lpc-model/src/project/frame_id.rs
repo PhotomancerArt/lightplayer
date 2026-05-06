@@ -2,6 +2,7 @@
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct FrameId(pub i64);
 

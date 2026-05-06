@@ -3,8 +3,8 @@ use crate::ValuePath;
 
 /// Reference to a nested value inside a slot.
 ///
-/// [`SlotRef`] answers "which slot"; [`ValuePath`] answers "where inside that
-/// slot's structured value".
+/// [`SlotRef`] answers "which slot tree node"; [`ValuePath`] answers "where
+/// inside that slot's leaf value".
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ValueRef {
@@ -22,13 +22,13 @@ impl ValueRef {
 mod tests {
     use super::*;
     use crate::prop::value_path::parse_path;
-    use crate::{NodeId, SlotName, SlotOwner};
+    use crate::{NodeId, SlotOwner, SlotPath};
 
     #[test]
     fn value_ref_combines_slot_and_value_path() {
         let slot = SlotRef::new(
             SlotOwner::Node(NodeId::new(2)),
-            SlotName::parse("output").unwrap(),
+            SlotPath::parse("state.output").unwrap(),
         );
         let reference = ValueRef::new(slot, parse_path("image.width").unwrap());
         assert_eq!(reference.path.len(), 2);

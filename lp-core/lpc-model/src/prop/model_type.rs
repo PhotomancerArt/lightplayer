@@ -35,6 +35,7 @@ pub enum ModelType {
         name: Option<String>,
         fields: Vec<ModelStructMember>,
     },
+    Resource,
 }
 
 /// One field in a [`ModelType::Struct`].
@@ -43,4 +44,17 @@ pub enum ModelType {
 pub struct ModelStructMember {
     pub name: String,
     pub ty: ModelType,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelType;
+
+    #[test]
+    fn model_type_resource_round_trips() {
+        let ty = ModelType::Resource;
+        let json = serde_json::to_string(&ty).unwrap();
+        let back: ModelType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ty);
+    }
 }

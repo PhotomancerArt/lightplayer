@@ -53,5 +53,10 @@ pub use project::{FrameId, ProjectConfig};
 pub use prop::value_path::ValuePath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
-pub use slot::{SlotName, SlotNameError, SlotOwner, SlotRef, ValueRef};
+pub use slot::{
+    SlotData, SlotDataKind, SlotEnum, SlotFieldShape, SlotMap, SlotMapKey, SlotMapKeyShape,
+    SlotMeta, SlotName, SlotNameError, SlotOption, SlotOwner, SlotPath, SlotPathError, SlotRecord,
+    SlotRef, SlotRegistry, SlotRegistryError, SlotShape, SlotShapeId, SlotShapeIdError,
+    SlotShapeKind, SlotTree, SlotValidationError, SlotVariantShape, ValueRef,
+};
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

@@ -2,11 +2,10 @@ use alloc::string::{String, ToString};
 use core::fmt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Name of one slot inside a slot owner's namespace.
+/// Name of one segment inside a slot owner's namespace.
 ///
-/// Slot names are separate from [`crate::ValuePath`]. A slot name selects the
-/// top-level produced or consumed slot; a value path selects nested data inside
-/// that slot's value.
+/// Slot names are joined into [`crate::SlotPath`] values. They are separate
+/// from [`crate::ValuePath`], which selects nested data inside a leaf value.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotName(String);
@@ -18,6 +17,9 @@ impl SlotName {
         }
         if input.contains('#') {
             return Err(SlotNameError::InvalidChar('#'));
+        }
+        if input.contains('.') {
+            return Err(SlotNameError::InvalidChar('.'));
         }
         Ok(Self(input.to_string()))
     }
@@ -76,15 +78,15 @@ mod tests {
     use alloc::string::ToString;
 
     #[test]
-    fn slot_name_accepts_opaque_names() {
-        let name = SlotName::parse("config.width").unwrap();
-        assert_eq!(name.as_str(), "config.width");
-        assert_eq!(name.to_string(), "config.width");
+    fn slot_name_accepts_segment_names() {
+        let name = SlotName::parse("width").unwrap();
+        assert_eq!(name.as_str(), "width");
+        assert_eq!(name.to_string(), "width");
     }
 
     #[test]
-    fn slot_name_rejects_empty_and_reference_separator() {
-        for input in ["", "output#image"] {
+    fn slot_name_rejects_empty_and_path_separators() {
+        for input in ["", "output#image", "config.width"] {
             assert!(SlotName::parse(input).is_err(), "accepted {input:?}");
         }
     }
