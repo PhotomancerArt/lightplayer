@@ -1,6 +1,6 @@
-use lpc_model::{SlotAccess, SlotData, SlotDataAccess, SlotShape, SlotShapeId, SlotShapeRegistry};
-
-use super::path::key_segment;
+use lpc_model::{
+    SlotAccess, SlotData, SlotDataAccess, SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry,
+};
 
 pub fn print_root(root: &dyn SlotAccess, registry: &SlotShapeRegistry) -> Vec<String> {
     let mut lines = Vec::new();
@@ -112,5 +112,13 @@ fn print_shape(
             }
         }
         _ => panic!("shape/data mismatch"),
+    }
+}
+
+fn key_segment(key: &SlotMapKey) -> String {
+    match key {
+        SlotMapKey::String(s) => s.clone(),
+        SlotMapKey::I32(n) => n.to_string(),
+        SlotMapKey::U32(n) => n.to_string(),
     }
 }

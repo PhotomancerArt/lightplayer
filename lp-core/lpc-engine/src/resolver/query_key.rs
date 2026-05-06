@@ -1,4 +1,9 @@
 //! Cache and cycle-detection key for engine resolution.
+//!
+//! Produced and consumed slots still use [`ValuePath`] in this transitional
+//! resolver layer. The slot data model uses [`lpc_model::SlotPath`] for slot
+//! identity, so this type should be converted before real runtime slot trees
+//! become the primary node surface.
 
 use lpc_model::{ChannelName, NodeId, ValuePath};
 

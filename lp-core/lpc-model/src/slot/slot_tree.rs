@@ -3,7 +3,8 @@ use alloc::string::{String, ToString};
 use core::fmt;
 
 use super::{
-    SlotData, SlotMapKey, SlotMapKeyShape, SlotRegistry, SlotShape, SlotShapeId, SlotVariantShape,
+    SlotData, SlotMapKey, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotVariantShape,
 };
 
 /// Runtime slot data rooted at one registered shape.
@@ -20,16 +21,20 @@ impl SlotTree {
     }
 
     /// Get data at `path`, interpreting indexed records through `registry`.
-    pub fn get<'a>(&'a self, registry: &'a SlotRegistry, path: &SlotPath) -> Option<&'a SlotData> {
+    pub fn get<'a>(
+        &'a self,
+        registry: &'a SlotShapeRegistry,
+        path: &SlotPath,
+    ) -> Option<&'a SlotData> {
         let shape = registry.get(&self.shape)?;
         get_data(&self.root, shape, registry, path.segments())
     }
 
     /// Validate this tree against its registered shape.
-    pub fn validate(&self, registry: &SlotRegistry) -> Result<(), SlotValidationError> {
+    pub fn validate(&self, registry: &SlotShapeRegistry) -> Result<(), SlotValidationError> {
         let shape = registry
             .get(&self.shape)
-            .ok_or_else(|| SlotValidationError::UnknownShape(self.shape.clone()))?;
+            .ok_or(SlotValidationError::UnknownShape(self.shape))?;
         validate_data(&self.root, shape, registry)
     }
 }
@@ -115,7 +120,7 @@ pub enum SlotDataKind {
 fn get_data<'a>(
     data: &'a SlotData,
     shape: &'a SlotShape,
-    registry: &'a SlotRegistry,
+    registry: &'a SlotShapeRegistry,
     segments: &[SlotName],
 ) -> Option<&'a SlotData> {
     if let SlotShape::Ref { id } = shape {
@@ -167,7 +172,7 @@ fn get_data<'a>(
 fn validate_data(
     data: &SlotData,
     shape: &SlotShape,
-    registry: &SlotRegistry,
+    registry: &SlotShapeRegistry,
 ) -> Result<(), SlotValidationError> {
     if let SlotShape::Ref { id } = shape {
         let shape = registry
@@ -346,8 +351,8 @@ impl SlotData {
 mod tests {
     use super::*;
     use crate::{
-        FrameId, SlotFieldShape, SlotMapDyn, SlotMeta, SlotOptionDyn, SlotRecord, SlotRegistry,
-        SlotShapeId, Versioned,
+        FrameId, SlotFieldShape, SlotMapDyn, SlotMeta, SlotOptionDyn, SlotRecord, SlotShapeId,
+        Versioned,
     };
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
@@ -355,11 +360,11 @@ mod tests {
 
     #[test]
     fn validates_and_traverses_indexed_record_data() {
-        let mut registry = SlotRegistry::new();
+        let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("fixture.state").unwrap();
         registry
-            .register(
-                shape_id.clone(),
+            .register_tree(
+                shape_id,
                 SlotShape::Record {
                     meta: SlotMeta::empty(),
                     fields: vec![
@@ -391,11 +396,11 @@ mod tests {
 
     #[test]
     fn validates_string_keyed_maps() {
-        let mut registry = SlotRegistry::new();
+        let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("fixture.shapes").unwrap();
         registry
-            .register(
-                shape_id.clone(),
+            .register_tree(
+                shape_id,
                 SlotShape::Map {
                     meta: SlotMeta::empty(),
                     key: SlotMapKeyShape::String,
@@ -421,10 +426,10 @@ mod tests {
 
     #[test]
     fn validation_rejects_value_type_mismatch() {
-        let mut registry = SlotRegistry::new();
+        let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("texture.config").unwrap();
         registry
-            .register(shape_id.clone(), SlotShape::value(ModelType::Vec2))
+            .register_tree(shape_id, SlotShape::value(ModelType::Vec2))
             .unwrap();
 
         let tree = SlotTree::new(
@@ -440,11 +445,9 @@ mod tests {
 
     #[test]
     fn validates_unit_shape_and_data() {
-        let mut registry = SlotRegistry::new();
+        let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("mapping.disabled").unwrap();
-        registry
-            .register(shape_id.clone(), SlotShape::unit())
-            .unwrap();
+        registry.register_tree(shape_id, SlotShape::unit()).unwrap();
 
         let tree = SlotTree::new(
             shape_id,
@@ -464,11 +467,11 @@ mod tests {
 
     #[test]
     fn validation_rejects_map_key_shape_mismatch() {
-        let mut registry = SlotRegistry::new();
+        let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("map").unwrap();
         registry
-            .register(
-                shape_id.clone(),
+            .register_tree(
+                shape_id,
                 SlotShape::Map {
                     meta: SlotMeta::empty(),
                     key: SlotMapKeyShape::U32,
@@ -492,11 +495,11 @@ mod tests {
 
     #[test]
     fn validates_enum_and_option_containers() {
-        let mut registry = SlotRegistry::new();
+        let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("fixture.mapping").unwrap();
         registry
-            .register(
-                shape_id.clone(),
+            .register_tree(
+                shape_id,
                 SlotShape::Enum {
                     meta: SlotMeta::empty(),
                     variants: vec![

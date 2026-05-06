@@ -1,4 +1,6 @@
-use crate::{FrameId, SlotShape, SlotShapeId, current_state_version};
+use crate::{
+    FrameId, SlotShape, SlotShapeId, SlotTree, SlotValidationError, current_state_version,
+};
 use alloc::collections::BTreeMap;
 
 /// Shape root plus the frame where that root last changed.
@@ -94,6 +96,11 @@ impl SlotShapeRegistry {
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.ids_changed_frame = snapshot.ids_changed_frame;
         self.shapes = snapshot.shapes;
+    }
+
+    /// Validate a dynamic slot tree against this registry.
+    pub fn validate_tree(&self, tree: &SlotTree) -> Result<(), SlotValidationError> {
+        tree.validate(self)
     }
 }
 

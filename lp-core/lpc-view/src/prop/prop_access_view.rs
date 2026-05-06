@@ -1,4 +1,7 @@
-//! Object-safe read-only view of properties held in view cache / wire state.
+//! Legacy object-safe read-only view of flat properties held in view cache / wire state.
+//!
+//! This predates slot shapes and cannot represent container versions or
+//! structural metadata. New UI code should use [`crate::SlotMirrorView`].
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;

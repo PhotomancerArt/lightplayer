@@ -1,9 +1,11 @@
 //! Node-owned produced slot access.
 //!
-//! This is the runtime surface for data a node produces. Slot keys are still
-//! represented as [`ValuePath`] values in the runtime compatibility layer; the
-//! semantic boundary remains the whole produced slot, not an individual nested
-//! field inside the produced value.
+//! This is the runtime surface for data a node produces.
+//!
+//! Slot keys are still represented as [`ValuePath`] values in this transitional
+//! resolver path. New slot-model work should not copy that choice: produced
+//! and consumed endpoints should converge on [`lpc_model::SlotPath`] so the
+//! runtime does not keep treating value projection paths as slot identity.
 
 use alloc::boxed::Box;
 

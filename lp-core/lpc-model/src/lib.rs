@@ -70,19 +70,20 @@ pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
     FromModelValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
-    SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotMapValueAccess,
-    SlotValueShape, SourcePathSlot, ToModelValue, XySlot, affine2d_shape, artifact_path_shape,
-    color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
-    render_order_shape, source_path_shape, xy_shape,
+    ResourceRefSlot, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId,
+    SlotMapValueAccess, SlotValueShape, SourcePathSlot, ToModelValue, XySlot, affine2d_shape,
+    artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape,
+    relative_node_ref_shape, render_order_shape, render_product_resource_shape, resource_ref_shape,
+    runtime_buffer_resource_shape, source_path_shape, xy_shape,
 };
 pub use slot::{
     SlotAccess, SlotData, SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotEnumShape,
     SlotFieldShape, SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike,
     SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOption, SlotOptionAccess,
     SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotRecord, SlotRecordAccess,
-    SlotRecordShape, SlotRef, SlotRegistry, SlotRegistryError, SlotShape, SlotShapeId,
-    SlotShapeIdError, SlotShapeKind, SlotShapeRegistry, SlotShapeRegistryError,
-    SlotShapeRegistrySnapshot, SlotTree, SlotValidationError, SlotValue, SlotValueAccess,
-    SlotVariantShape, StaticSlotAccess, ValueRef, VersionedSlotShape,
+    SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError, SlotShapeKind,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
+    SlotValidationError, SlotValue, SlotValueAccess, SlotVariantShape, StaticSlotAccess, ValueRef,
+    VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

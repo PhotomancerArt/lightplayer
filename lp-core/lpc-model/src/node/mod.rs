@@ -2,6 +2,11 @@
 
 pub mod node_id;
 pub mod node_name;
+/// Legacy node/property string parser from the pre-slot property model.
+///
+/// New code should prefer [`crate::SlotRef`] for slot endpoints and
+/// [`crate::ValueRef`] only when it explicitly needs to project inside an
+/// atomic slot value.
 pub mod node_prop_spec;
 pub mod relative_node_ref;
 

@@ -1,3 +1,10 @@
+//! Legacy node/property string parser.
+//!
+//! This predates slot trees and treats the part after `#` as a
+//! [`crate::ValuePath`]. New code should use [`crate::SlotRef`] for binding
+//! endpoints and [`crate::ValueRef`] only for explicit projection inside an
+//! atomic slot value.
+
 use crate::prop::value_path::{PathParseError, Segment, ValuePath, parse_path};
 use crate::tree::tree_path::{PathError, TreePath};
 use core::fmt;

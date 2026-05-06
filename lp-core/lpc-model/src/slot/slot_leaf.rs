@@ -1,4 +1,4 @@
-use crate::{ModelStructMember, ModelType, ModelValue, RelativeNodeRef};
+use crate::{ModelStructMember, ModelType, ModelValue, RelativeNodeRef, ResourceRef};
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -86,6 +86,9 @@ pub enum SlotEditorHint {
     Xy,
     Dimensions,
     Affine2d,
+    Resource,
+    RuntimeBufferResource,
+    RenderProductResource,
     Dropdown {
         options: Vec<SlotEnumOption>,
     },
@@ -237,6 +240,7 @@ pub type XySlot = super::SlotValue<[f32; 2]>;
 pub type Affine2dSlot = super::SlotValue<Affine2d>;
 pub type ColorOrderSlot = super::SlotValue<ColorOrderValue>;
 pub type RenderOrderSlot = super::SlotValue<i32>;
+pub type ResourceRefSlot = super::SlotValue<ResourceRef>;
 
 pub fn relative_node_ref_shape() -> SlotValueShape {
     SlotValueShape {
@@ -336,6 +340,33 @@ pub fn render_order_shape() -> SlotValueShape {
             max: None,
             step: Some(OrderedF32(1.0)),
         },
+    }
+}
+
+pub fn resource_ref_shape() -> SlotValueShape {
+    SlotValueShape {
+        leaf: SlotLeafId::from_static_name("slot.leaf.resource_ref"),
+        ty: ModelType::Resource,
+        meta: SlotMeta::empty(),
+        editor: SlotEditorHint::Resource,
+    }
+}
+
+pub fn runtime_buffer_resource_shape() -> SlotValueShape {
+    SlotValueShape {
+        leaf: SlotLeafId::from_static_name("slot.leaf.runtime_buffer_resource"),
+        ty: ModelType::Resource,
+        meta: SlotMeta::empty(),
+        editor: SlotEditorHint::RuntimeBufferResource,
+    }
+}
+
+pub fn render_product_resource_shape() -> SlotValueShape {
+    SlotValueShape {
+        leaf: SlotLeafId::from_static_name("slot.leaf.render_product_resource"),
+        ty: ModelType::Resource,
+        meta: SlotMeta::empty(),
+        editor: SlotEditorHint::RenderProductResource,
     }
 }
 
@@ -490,6 +521,12 @@ impl ToModelValue for ColorOrderValue {
     }
 }
 
+impl ToModelValue for ResourceRef {
+    fn to_model_value(&self) -> ModelValue {
+        ModelValue::Resource(*self)
+    }
+}
+
 macro_rules! impl_from_model_value {
     ($ty:ty, $variant:ident) => {
         impl FromModelValue for $ty {
@@ -597,6 +634,17 @@ impl FromModelValue for ColorOrderValue {
     }
 }
 
+impl FromModelValue for ResourceRef {
+    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        match value {
+            ModelValue::Resource(value) => Ok(value),
+            other => Err(SlotLeafError::new(alloc::format!(
+                "expected Resource, got {other:?}"
+            ))),
+        }
+    }
+}
+
 macro_rules! impl_slot_leaf {
     ($ty:ty, $id:literal, $shape:expr) => {
         impl SlotLeaf for $ty {
@@ -656,6 +704,7 @@ impl_slot_leaf!(
     "slot.leaf.color_order",
     color_order_shape()
 );
+impl_slot_leaf!(ResourceRef, "slot.leaf.resource_ref", resource_ref_shape());
 
 fn struct_f32(
     fields: &[(String, ModelValue)],
@@ -726,6 +775,14 @@ mod tests {
         assert!(matches!(dim2u_shape().editor, SlotEditorHint::Dimensions));
         assert!(matches!(affine2d_shape().editor, SlotEditorHint::Affine2d));
         assert!(matches!(
+            runtime_buffer_resource_shape().editor,
+            SlotEditorHint::RuntimeBufferResource
+        ));
+        assert!(matches!(
+            render_product_resource_shape().editor,
+            SlotEditorHint::RenderProductResource
+        ));
+        assert!(matches!(
             color_order_shape().editor,
             SlotEditorHint::Dropdown { .. }
         ));
@@ -749,6 +806,12 @@ mod tests {
         assert_eq!(
             ColorOrderValue::from_model_value(order.to_model_value()).unwrap(),
             order
+        );
+
+        let resource = ResourceRef::render_product(crate::RenderProductId::new(7));
+        assert_eq!(
+            ResourceRef::from_model_value(resource.to_model_value()).unwrap(),
+            resource
         );
     }
 }

@@ -1,3 +1,7 @@
+/// Legacy constraint model associated with [`legacy_kind`].
+///
+/// New slot-model code should attach constraints through typed slot leaves and
+/// shape metadata instead of adding new uses here.
 pub mod constraint;
 pub mod legacy_kind;
 pub mod model_type;

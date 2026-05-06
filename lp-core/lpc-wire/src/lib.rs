@@ -35,7 +35,8 @@ pub use server::{
 pub use slot::{
     WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
-    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot,
+    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, build_slot_full_sync,
+    collect_slot_diff, snapshot_slot_root, snapshot_slot_shape,
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
