@@ -232,7 +232,8 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                     "engine.shader_node.params" | "params" => 0,
                     "engine.fixture_node.touches" | "touches" => 0,
                     "mapping" => 2,
-                    "brightness" => 4,
+                    "transform" => 4,
+                    "brightness" => 5,
                     _ => panic!("unknown test record segment {segment}"),
                 };
                 &record.fields[index]

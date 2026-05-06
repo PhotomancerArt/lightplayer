@@ -1,19 +1,19 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
-    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, SlotValue,
-    StaticSlotAccess,
+    ArtifactPathSlot, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
+    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotAccess,
+    artifact_path_shape,
 };
 
-use crate::model::{field, id, map, record, reference, value};
+use crate::model::{field, id, leaf, map, record, reference};
 
 pub struct ProjectDef {
     nodes: SlotMap<String, NodeInvocationDef>,
 }
 
 pub struct NodeInvocationDef {
-    artifact: SlotValue<String>,
+    artifact: ArtifactPathSlot,
 }
 
 impl ProjectDef {
@@ -64,7 +64,7 @@ impl StaticSlotAccess for ProjectDef {
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
             id("source.node_invocation"),
-            record(vec![field("artifact", value(ModelType::String))]),
+            record(vec![field("artifact", leaf(artifact_path_shape()))]),
         )?;
 
         registry.register_tree(
@@ -92,7 +92,7 @@ impl SlotRecordAccess for ProjectDef {
 impl NodeInvocationDef {
     fn new(artifact: &str) -> Self {
         Self {
-            artifact: SlotValue::new(artifact.to_string()),
+            artifact: ArtifactPathSlot::new(artifact.to_string()),
         }
     }
 }

@@ -82,13 +82,13 @@ pub(super) fn validate_value_at(
     registry: &SlotShapeRegistry,
 ) -> Result<(), SlotMirrorError> {
     let (shape, data) = resolve_path(root, shape_id, path, registry)?;
-    let SlotShape::Value { ty, .. } = shape else {
+    let SlotShape::Value { shape } = shape else {
         return Err(SlotMirrorError::NotAValue);
     };
     let SlotData::Value(_) = data else {
         return Err(SlotMirrorError::NotAValue);
     };
-    if model_value_matches_type(value, ty) {
+    if model_value_matches_type(value, &shape.ty) {
         Ok(())
     } else {
         Err(SlotMirrorError::WrongType)

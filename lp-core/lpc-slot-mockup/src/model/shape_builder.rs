@@ -1,5 +1,6 @@
 use lpc_model::{
-    ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId, SlotVariantShape,
+    ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId, SlotValueShape,
+    SlotVariantShape,
 };
 
 pub(crate) fn id(value: &str) -> SlotShapeId {
@@ -13,15 +14,15 @@ pub(crate) fn mapping_shape() -> SlotShape {
             variant(
                 "circle",
                 record(vec![
-                    field("center", value(ModelType::Vec2)),
-                    field("radius", value(ModelType::F32)),
+                    field("center", leaf(lpc_model::xy_shape())),
+                    field("radius", leaf(lpc_model::positive_f32_shape())),
                 ]),
             ),
             variant(
                 "square",
                 record(vec![
-                    field("origin", value(ModelType::Vec2)),
-                    field("size", value(ModelType::Vec2)),
+                    field("origin", leaf(lpc_model::xy_shape())),
+                    field("size", leaf(lpc_model::xy_shape())),
                 ]),
             ),
             variant("disabled", unit()),
@@ -65,6 +66,10 @@ pub(crate) fn variant(name: &str, shape: SlotShape) -> SlotVariantShape {
 
 pub(crate) fn value(ty: ModelType) -> SlotShape {
     SlotShape::value(ty)
+}
+
+pub(crate) fn leaf(shape: SlotValueShape) -> SlotShape {
+    SlotShape::leaf(shape)
 }
 
 pub(crate) fn unit() -> SlotShape {

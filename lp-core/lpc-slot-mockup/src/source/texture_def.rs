@@ -1,20 +1,21 @@
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    Dim2u, Dim2uSlot, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, StaticSlotAccess, dim2u_shape,
 };
 
-use crate::model::{field, record, value};
+use crate::model::{field, leaf, record};
 
 pub struct TextureDef {
-    width: SlotValue<u32>,
-    height: SlotValue<u32>,
+    size: Dim2uSlot,
 }
 
 impl TextureDef {
     pub fn new() -> Self {
         Self {
-            width: SlotValue::new(64),
-            height: SlotValue::new(32),
+            size: Dim2uSlot::new(Dim2u {
+                width: 64,
+                height: 32,
+            }),
         }
     }
 }
@@ -41,10 +42,7 @@ impl StaticSlotAccess for TextureDef {
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
             Self::SHAPE_ID,
-            record(vec![
-                field("width", value(ModelType::U32)),
-                field("height", value(ModelType::U32)),
-            ]),
+            record(vec![field("size", leaf(dim2u_shape()))]),
         )
     }
 }
@@ -52,8 +50,7 @@ impl StaticSlotAccess for TextureDef {
 impl SlotRecordAccess for TextureDef {
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
         match index {
-            0 => Some(SlotDataAccess::Value(&self.width)),
-            1 => Some(SlotDataAccess::Value(&self.height)),
+            0 => Some(SlotDataAccess::Value(&self.size)),
             _ => None,
         }
     }

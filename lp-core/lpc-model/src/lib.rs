@@ -60,13 +60,20 @@ pub use prop::value_path::ValuePath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
+    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
+    FromModelValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
+    SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotMapValueAccess,
+    SlotValueShape, SourcePathSlot, ToModelValue, XySlot, affine2d_shape, artifact_path_shape,
+    color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
+    render_order_shape, source_path_shape, xy_shape,
+};
+pub use slot::{
     SlotAccess, SlotData, SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotFieldShape,
-    SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike, SlotMapKeyShape,
-    SlotMapValueAccess, SlotMeta, SlotName, SlotNameError, SlotOption, SlotOptionAccess,
-    SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotRecord, SlotRecordAccess, SlotRef,
-    SlotRegistry, SlotRegistryError, SlotShape, SlotShapeId, SlotShapeIdError, SlotShapeKind,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
-    SlotValidationError, SlotValue, SlotValueAccess, SlotVariantShape, StaticSlotAccess,
-    ToModelValue, ValueRef, VersionedSlotShape,
+    SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike, SlotMapKeyShape, SlotMeta,
+    SlotName, SlotNameError, SlotOption, SlotOptionAccess, SlotOptionDyn, SlotOwner, SlotPath,
+    SlotPathError, SlotRecord, SlotRecordAccess, SlotRef, SlotRegistry, SlotRegistryError,
+    SlotShape, SlotShapeId, SlotShapeIdError, SlotShapeKind, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree, SlotValidationError, SlotValue,
+    SlotValueAccess, SlotVariantShape, StaticSlotAccess, ValueRef, VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

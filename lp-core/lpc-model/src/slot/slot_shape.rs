@@ -1,4 +1,4 @@
-use crate::{ModelType, SlotName, SlotNameError};
+use crate::{ModelType, SlotName, SlotNameError, SlotValueShape};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
@@ -96,9 +96,7 @@ pub enum SlotShape {
         meta: SlotMeta,
     },
     Value {
-        #[serde(default)]
-        meta: SlotMeta,
-        ty: ModelType,
+        shape: SlotValueShape,
     },
     Record {
         #[serde(default)]
@@ -139,9 +137,13 @@ impl SlotShape {
     /// Convenience constructor for a value leaf with empty metadata.
     pub fn value(ty: ModelType) -> Self {
         Self::Value {
-            meta: SlotMeta::empty(),
-            ty,
+            shape: SlotValueShape::raw(ty),
         }
+    }
+
+    /// Convenience constructor for a semantic value leaf descriptor.
+    pub fn leaf(shape: SlotValueShape) -> Self {
+        Self::Value { shape }
     }
 }
 

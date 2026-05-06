@@ -1,17 +1,19 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FrameId, ModelType, ModelValue, RelativeNodeRef, SlotAccess, SlotDataAccess, SlotMap,
-    SlotMapKeyShape, SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    FrameId, ModelType, ModelValue, PositiveF32Slot, RatioSlot, RelativeNodeRef,
+    RelativeNodeRefSlot, RenderOrderSlot, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape,
+    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotValue, SourcePathSlot, StaticSlotAccess, positive_f32_shape,
+    ratio_shape, relative_node_ref_shape, render_order_shape, source_path_shape,
 };
 
-use crate::model::{field, id, map, option, record, reference, value};
+use crate::model::{field, id, leaf, map, option, record, reference, value};
 
 pub struct ShaderDef {
-    glsl_path: SlotValue<String>,
-    texture_loc: SlotValue<RelativeNodeRef>,
-    render_order: SlotValue<i32>,
+    glsl_path: SourcePathSlot,
+    texture_loc: RelativeNodeRefSlot,
+    render_order: RenderOrderSlot,
     compiler_options: CompilerOptions,
     pub param_defs: SlotMap<String, ShaderParamDef>,
 }
@@ -26,12 +28,12 @@ pub struct ShaderParamDef {
     label: SlotValue<String>,
     description: SlotValue<String>,
     value_type: SlotValue<String>,
-    default: SlotValue<f32>,
+    default: RatioSlot,
     min: SlotOption<ScalarHint>,
 }
 
 pub struct ScalarHint {
-    value: SlotValue<f32>,
+    value: PositiveF32Slot,
 }
 
 impl ShaderDef {
@@ -47,9 +49,9 @@ impl ShaderDef {
         );
 
         Self {
-            glsl_path: SlotValue::new(String::from("shader.glsl")),
-            texture_loc: SlotValue::new(RelativeNodeRef::parse("..texture").unwrap()),
-            render_order: SlotValue::new(0),
+            glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
+            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..texture").unwrap()),
+            render_order: RenderOrderSlot::new(0),
             compiler_options: CompilerOptions::default(),
             param_defs: SlotMap::new(param_defs),
         }
@@ -109,7 +111,7 @@ impl StaticSlotAccess for ShaderDef {
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
             id("source.scalar_hint"),
-            record(vec![field("value", value(ModelType::F32))]),
+            record(vec![field("value", leaf(positive_f32_shape()))]),
         )?;
 
         registry.register_tree(
@@ -118,7 +120,7 @@ impl StaticSlotAccess for ShaderDef {
                 field("label", value(ModelType::String)),
                 field("description", value(ModelType::String)),
                 field("value_type", value(ModelType::String)),
-                field("default", value(ModelType::F32)),
+                field("default", leaf(ratio_shape())),
                 field("min", option(reference(id("source.scalar_hint")))),
             ]),
         )?;
@@ -126,9 +128,9 @@ impl StaticSlotAccess for ShaderDef {
         registry.register_tree(
             Self::SHAPE_ID,
             record(vec![
-                field("glsl_path", value(ModelType::String)),
-                field("texture_loc", value(ModelType::String)),
-                field("render_order", value(ModelType::I32)),
+                field("glsl_path", leaf(source_path_shape())),
+                field("texture_loc", leaf(relative_node_ref_shape())),
+                field("render_order", leaf(render_order_shape())),
                 field(
                     "compiler_options",
                     record(vec![
@@ -189,7 +191,7 @@ impl ShaderParamDef {
             label: SlotValue::new(label.to_string()),
             description: SlotValue::new(description.to_string()),
             value_type: SlotValue::new(String::from("f32")),
-            default: SlotValue::new(default),
+            default: RatioSlot::new(default),
             min: match min {
                 Some(value) => SlotOption::some(ScalarHint::new(value)),
                 None => SlotOption::none(),
@@ -240,7 +242,7 @@ impl SlotRecordAccess for ShaderParamDef {
 impl ScalarHint {
     fn new(value: f32) -> Self {
         Self {
-            value: SlotValue::new(value),
+            value: PositiveF32Slot::new(value),
         }
     }
 

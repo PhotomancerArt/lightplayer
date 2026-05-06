@@ -1,17 +1,11 @@
-use crate::{FrameId, ModelValue, RelativeNodeRef, Versioned, current_state_version};
+use crate::{FrameId, ModelValue, Versioned, current_state_version};
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::{SlotDataAccess, SlotMapAccess, SlotMapKey, SlotOptionAccess, SlotValueAccess};
-
-/// Conversion from a Rust-authored leaf value into the generic slot leaf value.
-///
-/// `SlotValue<T>` keeps authoring code typed while generic traversal and sync
-/// see a serializable [`ModelValue`].
-pub trait ToModelValue {
-    fn to_model_value(&self) -> ModelValue;
-}
+use super::{
+    SlotDataAccess, SlotMapAccess, SlotMapKey, SlotOptionAccess, SlotValueAccess, ToModelValue,
+};
 
 /// A typed versioned slot leaf for Rust-authored structs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,66 +192,6 @@ impl<T: SlotMapValueAccess> SlotOptionAccess for SlotOption<T> {
 
     fn data(&self) -> Option<SlotDataAccess<'_>> {
         self.data.as_ref().map(SlotMapValueAccess::slot_data)
-    }
-}
-
-impl ToModelValue for ModelValue {
-    fn to_model_value(&self) -> ModelValue {
-        self.clone()
-    }
-}
-
-impl ToModelValue for String {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.clone())
-    }
-}
-
-impl ToModelValue for &str {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String((*self).to_string())
-    }
-}
-
-impl ToModelValue for RelativeNodeRef {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.to_string())
-    }
-}
-
-impl ToModelValue for i32 {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::I32(*self)
-    }
-}
-
-impl ToModelValue for u32 {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::U32(*self)
-    }
-}
-
-impl ToModelValue for f32 {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::F32(*self)
-    }
-}
-
-impl ToModelValue for bool {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Bool(*self)
-    }
-}
-
-impl ToModelValue for [f32; 2] {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Vec2(*self)
-    }
-}
-
-impl ToModelValue for [f32; 3] {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Vec3(*self)
     }
 }
 

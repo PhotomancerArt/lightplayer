@@ -5,6 +5,7 @@
 
 mod slot_access;
 mod slot_data;
+mod slot_leaf;
 mod slot_meta;
 mod slot_name;
 mod slot_owner;
@@ -22,6 +23,14 @@ pub use slot_access::{
     SlotValueAccess, StaticSlotAccess,
 };
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
+pub use slot_leaf::{
+    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
+    FromModelValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
+    SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotValueShape,
+    SourcePathSlot, ToModelValue, XySlot, affine2d_shape, artifact_path_shape, color_order_shape,
+    dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape, render_order_shape,
+    source_path_shape, xy_shape,
+};
 pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
@@ -35,7 +44,5 @@ pub use slot_shape_registry::{
     SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, VersionedSlotShape,
 };
 pub use slot_tree::{SlotDataKind, SlotShapeKind, SlotTree, SlotValidationError};
-pub use slot_value::{
-    SlotMap, SlotMapKeyLike, SlotMapValueAccess, SlotOption, SlotValue, ToModelValue,
-};
+pub use slot_value::{SlotMap, SlotMapKeyLike, SlotMapValueAccess, SlotOption, SlotValue};
 pub use value_ref::ValueRef;

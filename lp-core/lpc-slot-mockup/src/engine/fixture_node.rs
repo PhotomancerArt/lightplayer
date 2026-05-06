@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
-    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, SlotValue,
-    StaticSlotAccess,
+    PositiveF32Slot, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
+    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotAccess,
+    XySlot, positive_f32_shape, xy_shape,
 };
 
-use crate::model::{field, id, map, mapping_shape, record, reference, value};
+use crate::model::{field, id, leaf, map, mapping_shape, record, reference};
 use crate::source::FixtureMapping;
 
 pub struct FixtureNode {
@@ -15,8 +15,8 @@ pub struct FixtureNode {
 }
 
 pub struct TouchState {
-    position: SlotValue<[f32; 2]>,
-    pressure: SlotValue<f32>,
+    position: XySlot,
+    pressure: PositiveF32Slot,
 }
 
 impl FixtureNode {
@@ -66,8 +66,8 @@ impl StaticSlotAccess for FixtureNode {
         registry.register_tree(
             id("engine.touch"),
             record(vec![
-                field("position", value(ModelType::Vec2)),
-                field("pressure", value(ModelType::F32)),
+                field("position", leaf(xy_shape())),
+                field("pressure", leaf(positive_f32_shape())),
             ]),
         )?;
 
@@ -97,8 +97,8 @@ impl SlotRecordAccess for FixtureNode {
 impl TouchState {
     fn new(position: [f32; 2], pressure: f32) -> Self {
         Self {
-            position: SlotValue::new(position),
-            pressure: SlotValue::new(pressure),
+            position: XySlot::new(position),
+            pressure: PositiveF32Slot::new(pressure),
         }
     }
 }

@@ -178,8 +178,8 @@ fn validate_data(
 
     match (data, shape) {
         (SlotData::Unit { .. }, SlotShape::Unit { .. }) => Ok(()),
-        (SlotData::Value(value), SlotShape::Value { ty, .. }) => {
-            validate_model_value(value.value(), ty)
+        (SlotData::Value(value), SlotShape::Value { shape }) => {
+            validate_model_value(value.value(), &shape.ty)
         }
         (SlotData::Record(record), SlotShape::Record { fields, .. }) => {
             if record.fields.len() != fields.len() {
