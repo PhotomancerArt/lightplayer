@@ -1,4 +1,4 @@
-use lpc_model::{FrameId, SlotAccess, SlotData, SlotMapKey, SlotPath};
+use lpc_model::{FrameId, SlotAccess, SlotData, SlotMapKey, SlotPath, SlotShapeId};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::{
@@ -48,6 +48,34 @@ impl Harness {
         self.client.apply_patches(patches.clone());
         println!("client diff applied");
         patches
+    }
+
+    pub fn sync_registry(&mut self) {
+        println!("syncing shape registry to client");
+        let snapshot = self.runtime.registry.snapshot();
+        println!(
+            "registry frame={} shapes={}",
+            snapshot.ids_changed_frame.as_i64(),
+            snapshot.shapes.len()
+        );
+        for (shape_id, shape) in &snapshot.shapes {
+            println!(
+                "  shape {shape_id} changed_frame={} node={:?}",
+                shape.changed_frame.as_i64(),
+                shape.node
+            );
+        }
+        self.client.apply_registry_snapshot(snapshot);
+        println!("client registry applied");
+    }
+
+    pub fn print_client_shape(&self, shape_id: SlotShapeId) {
+        let shape = self.client.registry.entry(&shape_id).expect("client shape");
+        println!(
+            "client shape {shape_id} changed_frame={} node={:?}",
+            shape.changed_frame.as_i64(),
+            shape.node
+        );
     }
 
     pub fn print_server_tree(&self, root_name: &str) {
@@ -137,6 +165,20 @@ pub fn assert_shader_param(data: &SlotData, name: &str, expected: lpc_model::Mod
         panic!("shader param value");
     };
     assert_eq!(value.value(), &expected);
+}
+
+pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str) {
+    let selected = select(data, &format!("param_defs.{name}"));
+    let SlotData::Record(param_def) = selected else {
+        panic!("shader param def record");
+    };
+    let SlotData::Value(value_type) = &param_def.fields[2] else {
+        panic!("shader param def value_type");
+    };
+    assert_eq!(
+        value_type.value(),
+        &lpc_model::ModelValue::String(expected.to_string())
+    );
 }
 
 pub fn assert_map_has_key(data: &SlotData, path: &str, key: SlotMapKey) {

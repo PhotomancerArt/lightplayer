@@ -43,11 +43,19 @@ impl ShaderNode {
         }
     }
     pub fn set_param(&mut self, name: &str, value: f32) {
+        self.set_param_value(name, ModelValue::F32(value));
+    }
+
+    pub fn set_param_vec3(&mut self, name: &str, value: [f32; 3]) {
+        self.set_param_value(name, ModelValue::Vec3(value));
+    }
+
+    fn set_param_value(&mut self, name: &str, value: ModelValue) {
         let key = SlotMapKey::String(name.to_string());
         let Some(SlotData::Value(param)) = self.params.entries.get_mut(&key) else {
             panic!("shader param exists");
         };
-        param.set(current_state_version(), ModelValue::F32(value));
+        param.set(current_state_version(), value);
     }
 
     pub fn remove_param(&mut self, name: &str) {

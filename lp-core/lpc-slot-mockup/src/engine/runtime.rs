@@ -1,5 +1,6 @@
-use lpc_model::{FrameId, SlotAccess, SlotShapeRegistry, set_current_state_version};
+use lpc_model::{FrameId, ModelType, SlotAccess, SlotShapeRegistry, set_current_state_version};
 
+use crate::model::{id, value as shape_value};
 use crate::source::{FixtureDef, OutputDef, ProjectDef, ShaderDef, TextureDef};
 
 use super::{FixtureNode, OutputNode, ShaderNode};
@@ -58,6 +59,21 @@ impl MockRuntime {
     pub fn set_shader_param(&mut self, frame: FrameId, name: &str, value: f32) {
         set_current_state_version(frame);
         self.shader_node.set_param(name, value);
+    }
+
+    pub fn change_shader_param_to_vec3(
+        &mut self,
+        frame: FrameId,
+        name: &str,
+        param_value: [f32; 3],
+    ) {
+        set_current_state_version(frame);
+        self.shader_def.set_param_value_type(name, "vec3");
+        self.registry.replace_tree(
+            id("engine.shader_param_value"),
+            shape_value(ModelType::Vec3),
+        );
+        self.shader_node.set_param_vec3(name, param_value);
     }
 
     pub fn remove_shader_param(&mut self, frame: FrameId, name: &str) {

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     SlotData, SlotMapKey, SlotMapKeyShape, SlotPath, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistrySnapshot,
 };
 
 use crate::wire::{FullSync, SlotChange, SlotPatch};
@@ -32,6 +33,10 @@ impl MockClient {
             let data = self.roots.get_mut(&patch.root).expect("root data");
             apply_replace(data, &shape_id, &patch.path, patch.change, &self.registry);
         }
+    }
+
+    pub fn apply_registry_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
+        self.registry.apply_snapshot(snapshot);
     }
 }
 

@@ -9,6 +9,7 @@
 - Added an ambient state-version helper so slot containers stamp the current observable version instead of requiring call sites to thread versions through every leaf.
 - Added `lpc-slot-mockup` as a temporary domain pressure harness with `model`, `source`, `engine`, `wire`, and `view` modules.
 - Proved full sync and incremental patching across source defs, engine runtime state, dynamic shader params, enum switching, option clearing, and map key pruning.
+- Proved a shader param definition type change can update the runtime param value shape, sync that registry change to the client, and then sync the corresponding dynamic runtime value.
 
 ## Decisions For Future Reference
 

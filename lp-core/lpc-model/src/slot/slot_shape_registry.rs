@@ -46,6 +46,26 @@ impl SlotShapeRegistry {
         Ok(())
     }
 
+    pub fn replace_tree(&mut self, root: SlotShapeId, shape: SlotShape) {
+        self.replace_tree_with_version(current_state_version(), root, shape);
+    }
+
+    pub fn replace_tree_with_version(
+        &mut self,
+        frame: FrameId,
+        root: SlotShapeId,
+        shape: SlotShape,
+    ) {
+        self.shapes.insert(
+            root,
+            VersionedSlotShape {
+                node: shape,
+                changed_frame: frame,
+            },
+        );
+        self.ids_changed_frame = frame;
+    }
+
     pub fn unregister_tree(&mut self, root: &SlotShapeId) {
         self.unregister_tree_with_version(current_state_version(), root);
     }

@@ -61,6 +61,11 @@ impl ShaderDef {
             ShaderParamDef::new(name, "Dynamically authored shader parameter", default, None),
         );
     }
+
+    pub fn set_param_value_type(&mut self, name: &str, value_type: &str) {
+        let param = self.param_defs.entries.get_mut(name).expect("param def");
+        param.set_value_type(value_type);
+    }
 }
 
 impl Default for ShaderDef {
@@ -175,6 +180,10 @@ impl ShaderParamDef {
 
     pub fn default_value(&self) -> ModelValue {
         ModelValue::F32(*self.default.value())
+    }
+
+    fn set_value_type(&mut self, value_type: &str) {
+        self.value_type.set(value_type.to_string());
     }
 }
 
