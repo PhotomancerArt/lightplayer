@@ -1,6 +1,6 @@
 use lpc_model::{Dim2u, Dim2uSlot};
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
 pub struct TextureDef {
     size: Dim2uSlot,

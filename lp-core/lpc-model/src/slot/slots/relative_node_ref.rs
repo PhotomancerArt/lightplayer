@@ -4,6 +4,7 @@ use crate::{
     ToModelValue, Versioned, current_state_version,
 };
 use alloc::string::ToString;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned relative node reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +43,24 @@ impl SlotValueAccess for RelativeNodeRefSlot {
 
     fn value(&self) -> ModelValue {
         self.inner.value().to_model_value()
+    }
+}
+
+impl Serialize for RelativeNodeRefSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RelativeNodeRefSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(RelativeNodeRef::deserialize(deserializer)?))
     }
 }
 

@@ -3,6 +3,7 @@ use crate::{
     SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
     current_state_version,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned render ordering value.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +42,24 @@ impl SlotValueAccess for RenderOrderSlot {
 
     fn value(&self) -> ModelValue {
         ModelValue::I32(*self.inner.value())
+    }
+}
+
+impl Serialize for RenderOrderSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RenderOrderSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(i32::deserialize(deserializer)?))
     }
 }
 

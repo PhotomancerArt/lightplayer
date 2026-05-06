@@ -3,8 +3,9 @@ use crate::{
     SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
     SlotValueShape, ToModelValue, Versioned, current_state_version,
 };
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::vec;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// RGB channel order for fixture/output color packing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +40,27 @@ impl ColorOrderValue {
             "bgr" => Some(Self::Bgr),
             _ => None,
         }
+    }
+}
+
+impl Serialize for ColorOrderValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ColorOrderValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).ok_or_else(|| {
+            serde::de::Error::custom(alloc::format!("unknown color order {value:?}"))
+        })
     }
 }
 
@@ -79,6 +101,24 @@ impl SlotValueAccess for ColorOrderSlot {
 
     fn value(&self) -> ModelValue {
         self.inner.value().to_model_value()
+    }
+}
+
+impl Serialize for ColorOrderSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ColorOrderSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(ColorOrderValue::deserialize(deserializer)?))
     }
 }
 

@@ -30,3 +30,63 @@ pub use resource_ref::{
 };
 pub use source_path::{SourcePathSlot, source_path_shape};
 pub use xy::{XySlot, xy_shape};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{RelativeNodeRef, ResourceRef, RuntimeBufferId, current_state_version};
+    use alloc::string::String;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct SemanticSlots {
+        ratio: RatioSlot,
+        positive: PositiveF32Slot,
+        render_order: RenderOrderSlot,
+        xy: XySlot,
+        source_path: SourcePathSlot,
+        artifact_path: ArtifactPathSlot,
+        dim: Dim2uSlot,
+        transform: Affine2dSlot,
+        color_order: ColorOrderSlot,
+        texture_loc: RelativeNodeRefSlot,
+        resource: ResourceRefSlot,
+    }
+
+    #[test]
+    fn semantic_slots_serialize_as_authored_values_and_stamp_deserialize_version() {
+        let slots = SemanticSlots {
+            ratio: RatioSlot::new(0.75),
+            positive: PositiveF32Slot::new(2.0),
+            render_order: RenderOrderSlot::new(10),
+            xy: XySlot::new([1.0, 2.0]),
+            source_path: SourcePathSlot::new(String::from("shader.glsl")),
+            artifact_path: ArtifactPathSlot::new(String::from("./shader.toml")),
+            dim: Dim2uSlot::new(Dim2u {
+                width: 64,
+                height: 32,
+            }),
+            transform: Affine2dSlot::new(Affine2d::identity()),
+            color_order: ColorOrderSlot::new(ColorOrderValue::Grb),
+            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..texture").unwrap()),
+            resource: ResourceRefSlot::new(ResourceRef::runtime_buffer(RuntimeBufferId::new(4))),
+        };
+
+        let authored = toml::to_string_pretty(&slots).unwrap();
+        assert!(authored.contains("ratio = 0.75"));
+        assert!(authored.contains("source_path = \"shader.glsl\""));
+        assert!(authored.contains("color_order = \"grb\""));
+        assert!(authored.contains("texture_loc = \"..texture\""));
+
+        let expected_version = current_state_version();
+        let decoded: SemanticSlots = toml::from_str(&authored).unwrap();
+
+        assert_eq!(decoded.ratio.changed_frame(), expected_version);
+        assert_eq!(decoded.dim.changed_frame(), expected_version);
+        assert_eq!(decoded.transform.changed_frame(), expected_version);
+        assert_eq!(decoded.color_order.value(), &ColorOrderValue::Grb);
+        assert_eq!(
+            decoded.resource.value(),
+            &ResourceRef::runtime_buffer(RuntimeBufferId::new(4))
+        );
+    }
+}

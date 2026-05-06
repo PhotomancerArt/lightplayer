@@ -9,6 +9,8 @@ rust-version.workspace = true
 lpc-model = { path = "../lpc-model", features = ["std", "derive"] }
 lpc-view = { path = "../lpc-view", features = ["std"] }
 lpc-wire = { path = "../lpc-wire", features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true, features = ["display"] }
 
 [lints]
 workspace = true

@@ -3,6 +3,7 @@ use crate::{
     SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
     SlotValueShape, ToModelValue, Versioned, current_state_version,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned resource reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +42,24 @@ impl SlotValueAccess for ResourceRefSlot {
 
     fn value(&self) -> ModelValue {
         self.inner.value().to_model_value()
+    }
+}
+
+impl Serialize for ResourceRefSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ResourceRefSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(ResourceRef::deserialize(deserializer)?))
     }
 }
 

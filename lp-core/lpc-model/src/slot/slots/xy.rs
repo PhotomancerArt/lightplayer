@@ -2,6 +2,7 @@ use crate::{
     FieldSlot, FrameId, ModelType, ModelValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
     SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned 2D XY coordinate.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +41,24 @@ impl SlotValueAccess for XySlot {
 
     fn value(&self) -> ModelValue {
         ModelValue::Vec2(*self.inner.value())
+    }
+}
+
+impl Serialize for XySlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for XySlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(<[f32; 2]>::deserialize(deserializer)?))
     }
 }
 

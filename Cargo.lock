@@ -4185,6 +4185,8 @@ dependencies = [
  "lpc-model",
  "lpc-view",
  "lpc-wire",
+ "serde",
+ "toml",
 ]
 
 [[package]]

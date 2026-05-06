@@ -5,7 +5,7 @@ use lpc_model::{
     RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
 };
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
 pub struct ShaderDef {
     glsl_path: SourcePathSlot,
@@ -15,14 +15,14 @@ pub struct ShaderDef {
     pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 pub struct CompilerOptions {
     add_sub: ValueSlot<String>,
     mul: ValueSlot<String>,
     div: ValueSlot<String>,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 pub struct ShaderParamDef {
     label: ValueSlot<String>,
     description: ValueSlot<String>,
@@ -31,7 +31,7 @@ pub struct ShaderParamDef {
     min: OptionSlot<ScalarHint>,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 pub struct ScalarHint {
     value: PositiveF32Slot,
 }

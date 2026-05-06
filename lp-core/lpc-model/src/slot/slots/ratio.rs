@@ -3,6 +3,7 @@ use crate::{
     SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
     current_state_version,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned floating point ratio in the inclusive `0.0..=1.0` domain.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +42,24 @@ impl SlotValueAccess for RatioSlot {
 
     fn value(&self) -> ModelValue {
         ModelValue::F32(*self.inner.value())
+    }
+}
+
+impl Serialize for RatioSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RatioSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(f32::deserialize(deserializer)?))
     }
 }
 

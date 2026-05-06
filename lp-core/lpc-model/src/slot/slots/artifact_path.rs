@@ -3,6 +3,7 @@ use crate::{
     current_state_version,
 };
 use alloc::string::String;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::source_path::path_shape;
 
@@ -43,6 +44,24 @@ impl SlotValueAccess for ArtifactPathSlot {
 
     fn value(&self) -> ModelValue {
         ModelValue::String(self.inner.value().clone())
+    }
+}
+
+impl Serialize for ArtifactPathSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactPathSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(String::deserialize(deserializer)?))
     }
 }
 

@@ -3,6 +3,7 @@ use crate::{
     SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
 };
 use alloc::string::String;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned path to an authored source file.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +42,24 @@ impl SlotValueAccess for SourcePathSlot {
 
     fn value(&self) -> ModelValue {
         ModelValue::String(self.inner.value().clone())
+    }
+}
+
+impl Serialize for SourcePathSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SourcePathSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(String::deserialize(deserializer)?))
     }
 }
 

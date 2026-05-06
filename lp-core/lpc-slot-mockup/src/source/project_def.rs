@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 
 use lpc_model::{ArtifactPathSlot, MapSlot};
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
 pub struct ProjectDef {
     nodes: MapSlot<String, NodeInvocationDef>,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 pub struct NodeInvocationDef {
     artifact: ArtifactPathSlot,
 }

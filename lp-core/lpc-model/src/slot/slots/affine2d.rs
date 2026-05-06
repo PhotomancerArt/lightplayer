@@ -5,9 +5,10 @@ use crate::{
 };
 use alloc::string::String;
 use alloc::vec;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// 2D affine transform with translation.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Affine2d {
     pub m00: f32,
     pub m01: f32,
@@ -67,6 +68,24 @@ impl SlotValueAccess for Affine2dSlot {
 
     fn value(&self) -> ModelValue {
         self.inner.value().to_model_value()
+    }
+}
+
+impl Serialize for Affine2dSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Affine2dSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(Affine2d::deserialize(deserializer)?))
     }
 }
 

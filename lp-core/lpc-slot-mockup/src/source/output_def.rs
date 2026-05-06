@@ -1,6 +1,6 @@
 use lpc_model::ValueSlot;
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
 pub struct OutputDef {
     pin: ValueSlot<u32>,

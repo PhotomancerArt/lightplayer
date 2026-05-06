@@ -1,7 +1,14 @@
 use crate::{FrameId, ModelValue, SlotMapKeyShape, SlotShape, Versioned, current_state_version};
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::format;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::fmt;
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{MapAccess, Visitor},
+    ser::SerializeMap,
+};
 
 use super::{
     FieldSlot, MapSlotAccess, SlotDataAccess, SlotLeaf, SlotMapKey, SlotOptionAccess,
@@ -48,6 +55,24 @@ impl<T> From<Versioned<T>> for ValueSlot<T> {
     }
 }
 
+impl<T: Serialize> Serialize for ValueSlot<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ValueSlot<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(T::deserialize(deserializer)?))
+    }
+}
+
 impl<T: ToModelValue> SlotValueAccess for ValueSlot<T> {
     fn changed_frame(&self) -> FrameId {
         self.inner.changed_frame()
@@ -71,6 +96,8 @@ impl<T: SlotLeaf> FieldSlot for ValueSlot<T> {
 /// Conversion between typed map keys and generic slot map keys.
 pub trait MapSlotKeyLike: Clone + Ord {
     fn key_shape() -> SlotMapKeyShape;
+    fn to_authored_key(&self) -> String;
+    fn from_authored_key(key: &str) -> Result<Self, String>;
     fn to_slot_map_key(&self) -> SlotMapKey;
     fn from_slot_map_key(key: &SlotMapKey) -> Option<Self>;
 }
@@ -97,6 +124,10 @@ impl<K: Ord, V> MapSlot<K, V> {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         self.insert_with_version(current_state_version(), key, value)
     }
@@ -116,6 +147,66 @@ impl<K: Ord, V> MapSlot<K, V> {
             self.keys_changed_frame = frame;
         }
         removed
+    }
+}
+
+impl<K, V> Serialize for MapSlot<K, V>
+where
+    K: MapSlotKeyLike,
+    V: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.entries.len()))?;
+        for (key, value) in &self.entries {
+            map.serialize_entry(&key.to_authored_key(), value)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de, K, V> Deserialize<'de> for MapSlot<K, V>
+where
+    K: MapSlotKeyLike,
+    V: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MapSlotVisitor<K, V> {
+            marker: core::marker::PhantomData<(K, V)>,
+        }
+
+        impl<'de, K, V> Visitor<'de> for MapSlotVisitor<K, V>
+        where
+            K: MapSlotKeyLike,
+            V: Deserialize<'de>,
+        {
+            type Value = MapSlot<K, V>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a slot map")
+            }
+
+            fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut entries = BTreeMap::new();
+                while let Some((key, value)) = access.next_entry::<String, V>()? {
+                    let key = K::from_authored_key(&key).map_err(serde::de::Error::custom)?;
+                    entries.insert(key, value);
+                }
+                Ok(MapSlot::new(entries))
+            }
+        }
+
+        deserializer.deserialize_map(MapSlotVisitor {
+            marker: core::marker::PhantomData,
+        })
     }
 }
 
@@ -219,6 +310,31 @@ impl<T> OptionSlot<T> {
         self.presence_changed_frame = frame;
         self.data = None;
     }
+
+    pub fn is_none(&self) -> bool {
+        self.data.is_none()
+    }
+}
+
+impl<T: Serialize> Serialize for OptionSlot<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.data.serialize(serializer)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for OptionSlot<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self {
+            presence_changed_frame: current_state_version(),
+            data: Option::<T>::deserialize(deserializer)?,
+        })
+    }
 }
 
 impl<T: SlotMapValueAccess> SlotOptionAccess for OptionSlot<T> {
@@ -252,6 +368,14 @@ impl MapSlotKeyLike for String {
         SlotMapKeyShape::String
     }
 
+    fn to_authored_key(&self) -> String {
+        self.clone()
+    }
+
+    fn from_authored_key(key: &str) -> Result<Self, String> {
+        Ok(String::from(key))
+    }
+
     fn to_slot_map_key(&self) -> SlotMapKey {
         SlotMapKey::String(self.clone())
     }
@@ -267,6 +391,15 @@ impl MapSlotKeyLike for String {
 impl MapSlotKeyLike for i32 {
     fn key_shape() -> SlotMapKeyShape {
         SlotMapKeyShape::I32
+    }
+
+    fn to_authored_key(&self) -> String {
+        self.to_string()
+    }
+
+    fn from_authored_key(key: &str) -> Result<Self, String> {
+        key.parse()
+            .map_err(|_| format!("expected i32 map key, got {key:?}"))
     }
 
     fn to_slot_map_key(&self) -> SlotMapKey {
@@ -286,6 +419,15 @@ impl MapSlotKeyLike for u32 {
         SlotMapKeyShape::U32
     }
 
+    fn to_authored_key(&self) -> String {
+        self.to_string()
+    }
+
+    fn from_authored_key(key: &str) -> Result<Self, String> {
+        key.parse()
+            .map_err(|_| format!("expected u32 map key, got {key:?}"))
+    }
+
     fn to_slot_map_key(&self) -> SlotMapKey {
         SlotMapKey::U32(*self)
     }
@@ -301,7 +443,7 @@ impl MapSlotKeyLike for u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SlotDataAccess;
+    use crate::{SlotDataAccess, current_state_version};
     use alloc::vec;
 
     #[test]
@@ -334,5 +476,70 @@ mod tests {
 
         assert_eq!(map.keys_changed_frame(), FrameId::new(3));
         assert_eq!(map.keys(), vec![SlotMapKey::String(String::from("a"))]);
+    }
+
+    #[test]
+    fn value_slot_serializes_as_authored_value_and_stamps_deserialize_version() {
+        let value = ValueSlot::with_version(FrameId::new(4), String::from("shader.glsl"));
+
+        assert_eq!(serde_json::to_string(&value).unwrap(), r#""shader.glsl""#);
+
+        let expected_version = current_state_version();
+        let decoded: ValueSlot<String> = serde_json::from_str(r#""main.glsl""#).unwrap();
+
+        assert_eq!(decoded.value(), "main.glsl");
+        assert_eq!(decoded.changed_frame(), expected_version);
+    }
+
+    #[test]
+    fn map_slot_serializes_as_authored_map_and_stamps_key_version() {
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            String::from("speed"),
+            ValueSlot::with_version(FrameId::new(2), 7_u32),
+        );
+        let map = MapSlot::with_version(FrameId::new(3), entries);
+
+        assert_eq!(serde_json::to_string(&map).unwrap(), r#"{"speed":7}"#);
+
+        let expected_version = current_state_version();
+        let decoded: MapSlot<String, ValueSlot<u32>> =
+            serde_json::from_str(r#"{"phase":3}"#).unwrap();
+
+        assert_eq!(decoded.keys_changed_frame(), expected_version);
+        assert_eq!(decoded.entries["phase"].value(), &3);
+        assert_eq!(decoded.entries["phase"].changed_frame(), expected_version);
+    }
+
+    #[test]
+    fn map_slot_round_trips_numeric_authored_keys() {
+        let mut entries = BTreeMap::new();
+        entries.insert(7_u32, ValueSlot::new(String::from("seven")));
+        let map = MapSlot::new(entries);
+
+        let encoded = toml::to_string(&map).unwrap();
+        assert!(encoded.contains("7 = \"seven\""));
+
+        let decoded: MapSlot<u32, ValueSlot<String>> = toml::from_str(&encoded).unwrap();
+        assert_eq!(decoded.entries[&7].value(), "seven");
+    }
+
+    #[test]
+    fn option_slot_serializes_as_authored_option_and_stamps_presence_version() {
+        let some = OptionSlot::some_with_version(FrameId::new(3), ValueSlot::new(5_u32));
+        let none = OptionSlot::<ValueSlot<u32>>::none_with_version(FrameId::new(4));
+
+        assert_eq!(serde_json::to_string(&some).unwrap(), "5");
+        assert_eq!(serde_json::to_string(&none).unwrap(), "null");
+
+        let expected_version = current_state_version();
+        let decoded: OptionSlot<ValueSlot<u32>> = serde_json::from_str("6").unwrap();
+
+        assert_eq!(decoded.presence_changed_frame(), expected_version);
+        assert_eq!(decoded.data.as_ref().unwrap().value(), &6);
+        assert_eq!(
+            decoded.data.as_ref().unwrap().changed_frame(),
+            expected_version
+        );
     }
 }

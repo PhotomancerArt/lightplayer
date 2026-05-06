@@ -5,9 +5,10 @@ use crate::{
 };
 use alloc::string::String;
 use alloc::vec;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Width/height dimensions in unsigned integer pixels or cells.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dim2u {
     pub width: u32,
     pub height: u32,
@@ -50,6 +51,24 @@ impl SlotValueAccess for Dim2uSlot {
 
     fn value(&self) -> ModelValue {
         self.inner.value().to_model_value()
+    }
+}
+
+impl Serialize for Dim2uSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Dim2uSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(Dim2u::deserialize(deserializer)?))
     }
 }
 
