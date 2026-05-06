@@ -1,25 +1,27 @@
 # Future Work
 
-## General Node Source Specs
+## General Node Source Defs
 
-- **Idea:** Treat every node kind as having a source spec type in `lpc-source`:
-  `ProjectSpec`, `OutputSpec`, `FixtureSpec`, `ShaderSpec`, and `TextureSpec`.
-  These are no longer "legacy node configs"; they are the authored source shape
-  for the current core node set and should evolve toward the final node model.
+- **Idea:** Treat every node kind as having an authored definition type in
+  `lpc-source`: `ProjectDef`, `OutputDef`, `FixtureDef`, `ShaderDef`, and
+  `TextureDef`. These are no longer "legacy node configs"; they are the
+  authored source shape for the current core node set and should evolve toward
+  the final node model.
 - **Why not now:** This plan should focus on project-root artifact loading and
-  replacing directory discovery. The spec types can begin here, but broad
+  replacing directory discovery. The def types can begin here, but broad
   semantic cleanup should continue incrementally after initial load works.
 - **Useful context:** The old "legacy" label should apply to obsolete loading
   infrastructure and compatibility projection, not to these node types
   themselves.
 
-## Artifact As Identified Node Spec
+## Artifact As Identified Node Def
 
-- **Idea:** Model an artifact as an identified/loadable `NodeSpec`. A node spec
-  can be written inline in `project.toml` or saved in its own TOML file and
-  referenced with `artifact = "./node.toml"`.
+- **Idea:** Model an artifact as an identified/loadable node definition. A node
+  definition can eventually be written inline in `project.toml` or saved in its
+  own TOML file and referenced from a `NodeInvocation` with
+  `artifact = "./node.toml"`.
 - **Why not now:** The immediate plan only needs file-backed artifact references
-  for `examples/basic`; inline specs and artifact-plus-local-override merge
+  for `examples/basic`; inline defs and artifact-plus-local-override merge
   rules can wait until the base loader is stable.
 - **Useful context:** This keeps directory layout optional but encouraged, and
   makes "extract to artifact" / "inline artifact" natural editor operations
@@ -37,7 +39,7 @@
 - **Useful context:** A likely convention:
 
 ```text
-<node>#config.xyz    authored source/spec data, usually edited by artifact mutation
+<node>#config.xyz    authored definition data, usually edited by artifact mutation
 <node>#param.xyz     dynamic inputs by convention, often bindable
 <node>#state.xyz     produced/introspectable runtime data
 <node>#state.output  conventional primary output when a node has one
@@ -73,10 +75,11 @@ named paths; a fixture may expose no output at all.
   consumed values are resolved from source/config/bindings; produced values are
   written by runtime nodes and observed by other nodes/client sync.
 
-## Inline Project Specs
+## Inline Project Defs
 
 - **Idea:** Eventually allow a whole project to be authored in a single
-  `project.toml` by writing node specs directly under `[nodes.<name>]`, e.g.
+  `project.toml` by writing node definitions directly under `[nodes.<name>]`,
+  e.g.
   an output node with `kind = "output"`, `pin = 18`, and rendering options
   inline.
 - **Why not now:** It may be powerful but can become unwieldy in TOML. The

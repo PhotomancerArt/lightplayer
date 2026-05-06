@@ -115,7 +115,7 @@ project creation semantics would expand the milestone beyond validation.
 bytes.
 - `partial_state_updates` and client view tests assert real detail merges and
 resource-cache resolution for buffer- and render-product-backed fields (M4.1).
-- **`just demo` (manual):** The dev UI is still visual/temporary; after M4.1 the
+- `**just demo` (manual):** The dev UI is still visual/temporary; after M4.1 the
 wire path carries details and resources when the client requests them. Confirm
 locally that node panels show state and that buffer/texture inspection still
 behaves as expected.
