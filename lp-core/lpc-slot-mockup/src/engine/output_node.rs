@@ -1,9 +1,9 @@
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeChild, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, id, record, value, version};
+use crate::model::{field, record, value, version};
 
 pub struct OutputNode {
     frames_sent: SlotValue<u32>,
@@ -37,21 +37,10 @@ impl StaticSlotAccess for OutputNode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("engine.output_node");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::Owned;
-
         registry.register_tree(
             version(),
             Self::SHAPE_ID,
-            vec![
-                record(
-                    "engine.output_node",
-                    vec![field(
-                        "frames_sent",
-                        Owned(id("engine.output_node.frames_sent")),
-                    )],
-                ),
-                value("engine.output_node.frames_sent", ModelType::U32),
-            ],
+            record(vec![field("frames_sent", value(ModelType::U32))]),
         )
     }
 }

@@ -4,7 +4,7 @@
 
 - Added typed slot authoring helpers in `lpc-model`: `SlotValue<T>`, `SlotMap<K, V>`, `SlotOption<T>`, key conversion, and access traits.
 - Kept `SlotData` as the owned dynamic snapshot representation and renamed dynamic map/option containers to `SlotMapDyn` and `SlotOptionDyn`.
-- Added id-addressed `SlotShapeRegistry` nodes with owned/ref child edges, shape versions, and map key shape metadata.
+- Added id-addressed `SlotShapeRegistry` roots with inline `SlotShape` trees, root refs, shape versions, and map key shape metadata.
 - Made `SlotShapeId` a compact numeric id and moved static Rust-authored shape identity onto the type via `StaticSlotAccess`.
 - Added an ambient state-version helper so slot containers stamp the current observable version instead of requiring call sites to thread versions through every leaf.
 - Added `lpc-slot-mockup` as a temporary domain pressure harness with `model`, `source`, `engine`, `wire`, and `view` modules.
@@ -47,6 +47,13 @@
 - **Rejected alternatives:** Store a `SlotShapeId` on every `OutputDef`, node, or state object.
 - **Revisit when:** Derive support needs a generated static-id scheme.
 
+#### Only Shape Roots Are Registered
+
+- **Decision:** `SlotShapeRegistry` stores registered root `SlotShape` trees. Child shapes are inline, and `SlotShape::Ref` is only for referencing another registered root.
+- **Why:** This keeps domain-authored shapes readable: a field like `pin` can directly be `Value(U32)` instead of an owned child id plus a separate value node.
+- **Rejected alternatives:** Give every scalar field and nested record its own `SlotShapeId`.
+- **Revisit when:** Shared/global shape refs need lifetime or ownership rules beyond root registration.
+
 #### Shape IDs Are Compact Registry Keys
 
 - **Decision:** `SlotShapeId` is currently a compact `u32`, produced for static names with a const FNV-1a hash helper.
@@ -63,7 +70,7 @@
 
 #### Map Key Shape Is Registry Data
 
-- **Decision:** `SlotShapeNode::Map` carries `SlotMapKeyShape`.
+- **Decision:** `SlotShape::Map` carries `SlotMapKeyShape`.
 - **Why:** The client must know whether a path segment represents a string, `i32`, or `u32` key.
 - **Rejected alternatives:** Parse all patch paths as string keys.
 - **Revisit when:** Slot path encoding gets a richer typed segment representation.

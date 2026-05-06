@@ -88,6 +88,9 @@ const fn fnv1a32(input: &str) -> u32 {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SlotShape {
+    Ref {
+        id: SlotShapeId,
+    },
     Value {
         #[serde(default)]
         meta: SlotMeta,
@@ -117,6 +120,11 @@ pub enum SlotShape {
 }
 
 impl SlotShape {
+    /// Reference another registered root shape.
+    pub fn reference(id: SlotShapeId) -> Self {
+        Self::Ref { id }
+    }
+
     /// Convenience constructor for a value leaf with empty metadata.
     pub fn value(ty: ModelType) -> Self {
         Self::Value {

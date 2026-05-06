@@ -1,9 +1,9 @@
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeChild, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, id, record, value, version};
+use crate::model::{field, record, value, version};
 
 pub struct OutputDef {
     pin: SlotValue<u32>,
@@ -41,23 +41,14 @@ impl StaticSlotAccess for OutputDef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.output");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::Owned;
         registry.register_tree(
             version(),
             Self::SHAPE_ID,
-            vec![
-                record(
-                    "source.output",
-                    vec![
-                        field("pin", Owned(id("source.output.pin"))),
-                        field("interpolate", Owned(id("source.output.interpolate"))),
-                        field("dither", Owned(id("source.output.dither"))),
-                    ],
-                ),
-                value("source.output.pin", ModelType::U32),
-                value("source.output.interpolate", ModelType::Bool),
-                value("source.output.dither", ModelType::Bool),
-            ],
+            record(vec![
+                field("pin", value(ModelType::U32)),
+                field("interpolate", value(ModelType::Bool)),
+                field("dither", value(ModelType::Bool)),
+            ]),
         )
     }
 }

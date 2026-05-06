@@ -1,9 +1,9 @@
 use lpc_model::{
-    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeChild, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    ModelType, SlotAccess, SlotDataAccess, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, id, record, value, version};
+use crate::model::{field, record, value, version};
 
 pub struct TextureDef {
     width: SlotValue<u32>,
@@ -39,21 +39,13 @@ impl StaticSlotAccess for TextureDef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.texture");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::Owned;
         registry.register_tree(
             version(),
             Self::SHAPE_ID,
-            vec![
-                record(
-                    "source.texture",
-                    vec![
-                        field("width", Owned(id("source.texture.width"))),
-                        field("height", Owned(id("source.texture.height"))),
-                    ],
-                ),
-                value("source.texture.width", ModelType::U32),
-                value("source.texture.height", ModelType::U32),
-            ],
+            record(vec![
+                field("width", value(ModelType::U32)),
+                field("height", value(ModelType::U32)),
+            ]),
         )
     }
 }

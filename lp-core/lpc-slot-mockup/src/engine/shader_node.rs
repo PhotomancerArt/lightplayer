@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     ModelType, ModelValue, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotMapKey,
-    SlotMapKeyShape, SlotOptionDyn, SlotRecordAccess, SlotShapeChild, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotAccess, Versioned, current_state_version,
+    SlotMapKeyShape, SlotOptionDyn, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, StaticSlotAccess, Versioned, current_state_version,
 };
 
-use crate::model::{field, id, map, option, record, value, version};
+use crate::model::{field, id, map, option, record, reference, value, version};
 use crate::source::ShaderDef;
 
 pub struct ShaderNode {
@@ -80,39 +80,25 @@ impl StaticSlotAccess for ShaderNode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("engine.shader_node");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::{Owned, Ref};
-
         registry.register_tree(
             version(),
             id("engine.shader_param_value"),
-            vec![value("engine.shader_param_value", ModelType::F32)],
+            value(ModelType::F32),
         )?;
 
         registry.register_tree(
             version(),
             Self::SHAPE_ID,
-            vec![
-                record(
-                    "engine.shader_node",
-                    vec![
-                        field("params", Owned(id("engine.shader_node.params"))),
-                        field(
-                            "compile_error",
-                            Owned(id("engine.shader_node.compile_error")),
-                        ),
-                    ],
+            record(vec![
+                field(
+                    "params",
+                    map(
+                        SlotMapKeyShape::String,
+                        reference(id("engine.shader_param_value")),
+                    ),
                 ),
-                map(
-                    "engine.shader_node.params",
-                    SlotMapKeyShape::String,
-                    Ref(id("engine.shader_param_value")),
-                ),
-                option(
-                    "engine.shader_node.compile_error",
-                    Owned(id("engine.shader_node.compile_error.value")),
-                ),
-                value("engine.shader_node.compile_error.value", ModelType::String),
-            ],
+                field("compile_error", option(value(ModelType::String))),
+            ]),
         )
     }
 }

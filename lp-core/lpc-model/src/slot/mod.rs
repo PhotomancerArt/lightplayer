@@ -32,8 +32,7 @@ pub use slot_shape::{
     SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError, SlotVariantShape,
 };
 pub use slot_shape_registry::{
-    SlotShapeChild, SlotShapeField, SlotShapeNode, SlotShapeRegistry, SlotShapeRegistryError,
-    SlotShapeRegistrySnapshot, SlotShapeVariant, VersionedSlotShapeNode,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, VersionedSlotShape,
 };
 pub use slot_tree::{SlotDataKind, SlotShapeKind, SlotTree, SlotValidationError};
 pub use slot_value::{

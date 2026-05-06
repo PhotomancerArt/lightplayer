@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotShapeId, SlotShapeNode,
+    SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotShape, SlotShapeId,
     SlotShapeRegistry, Versioned,
 };
 
@@ -33,37 +33,42 @@ pub(super) fn snapshot(
     registry: &SlotShapeRegistry,
 ) -> SlotData {
     let shape = registry.get(shape_id).expect("shape");
+    snapshot_shape(shape, data, registry)
+}
+
+pub(super) fn snapshot_shape(
+    shape: &SlotShape,
+    data: SlotDataAccess<'_>,
+    registry: &SlotShapeRegistry,
+) -> SlotData {
     match (shape, data) {
-        (SlotShapeNode::Value { .. }, SlotDataAccess::Value(value)) => {
+        (SlotShape::Ref { id }, data) => snapshot(id, data, registry),
+        (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             SlotData::Value(Versioned::new(value.changed_frame(), value.value()))
         }
-        (SlotShapeNode::Record { fields, .. }, SlotDataAccess::Record(record)) => {
+        (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
             SlotData::Record(lpc_model::SlotRecord::with_version(
                 record.fields_changed_frame(),
                 fields
                     .iter()
                     .enumerate()
                     .map(|(index, field)| {
-                        snapshot(
-                            field.shape.id(),
-                            record.field(index).expect("field"),
-                            registry,
-                        )
+                        snapshot_shape(&field.shape, record.field(index).expect("field"), registry)
                     })
                     .collect(),
             ))
         }
-        (SlotShapeNode::Map { value, .. }, SlotDataAccess::Map(map)) => {
+        (SlotShape::Map { value, .. }, SlotDataAccess::Map(map)) => {
             let mut entries = BTreeMap::new();
             for key in map.keys() {
                 entries.insert(
                     key.clone(),
-                    snapshot(value.id(), map.get(&key).expect("map entry"), registry),
+                    snapshot_shape(value, map.get(&key).expect("map entry"), registry),
                 );
             }
             SlotData::Map(SlotMapDyn::with_version(map.keys_changed_frame(), entries))
         }
-        (SlotShapeNode::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
+        (SlotShape::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
             let variant = variants
                 .iter()
                 .find(|variant| variant.name.as_str() == en.variant())
@@ -71,14 +76,13 @@ pub(super) fn snapshot(
             SlotData::Enum(lpc_model::SlotEnum::with_version(
                 en.variant_changed_frame(),
                 SlotName::parse(en.variant()).unwrap(),
-                snapshot(variant.shape.id(), en.data(), registry),
+                snapshot_shape(&variant.shape, en.data(), registry),
             ))
         }
-        (SlotShapeNode::Option { some, .. }, SlotDataAccess::Option(option)) => match option.data()
-        {
+        (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => match option.data() {
             Some(data) => SlotData::Option(SlotOptionDyn::some_with_version(
                 option.presence_changed_frame(),
-                snapshot(some.id(), data, registry),
+                snapshot_shape(some, data, registry),
             )),
             None => SlotData::Option(SlotOptionDyn::none_with_version(
                 option.presence_changed_frame(),

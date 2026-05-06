@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     ModelType, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
-    SlotRecordAccess, SlotShapeChild, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    SlotValue, StaticSlotAccess,
+    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, SlotValue,
+    StaticSlotAccess,
 };
 
-use crate::model::{field, id, map, record, value, version};
+use crate::model::{field, id, map, record, reference, value, version};
 
 pub struct ProjectDef {
     nodes: SlotMap<String, NodeInvocationDef>,
@@ -62,37 +62,22 @@ impl StaticSlotAccess for ProjectDef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.project");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::{Owned, Ref};
-
         registry.register_tree(
             version(),
             id("source.node_invocation"),
-            vec![
-                record(
-                    "source.node_invocation",
-                    vec![field(
-                        "artifact",
-                        Owned(id("source.node_invocation.artifact")),
-                    )],
-                ),
-                value("source.node_invocation.artifact", ModelType::String),
-            ],
+            record(vec![field("artifact", value(ModelType::String))]),
         )?;
 
         registry.register_tree(
             version(),
             Self::SHAPE_ID,
-            vec![
-                record(
-                    "source.project",
-                    vec![field("nodes", Owned(id("source.project.nodes")))],
-                ),
+            record(vec![field(
+                "nodes",
                 map(
-                    "source.project.nodes",
                     SlotMapKeyShape::String,
-                    Ref(id("source.node_invocation")),
+                    reference(id("source.node_invocation")),
                 ),
-            ],
+            )]),
         )
     }
 }

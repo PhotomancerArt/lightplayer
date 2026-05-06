@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     ModelType, ModelValue, RelativeNodeRef, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape,
-    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeChild, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, id, map, option, record, value, version};
+use crate::model::{field, id, map, option, record, reference, value, version};
 
 pub struct ShaderDef {
     glsl_path: SlotValue<String>,
@@ -83,88 +83,47 @@ impl StaticSlotAccess for ShaderDef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.shader");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::{Owned, Ref};
-
         registry.register_tree(
             version(),
             id("source.scalar_hint"),
-            vec![
-                record(
-                    "source.scalar_hint",
-                    vec![field("value", Owned(id("source.scalar_hint.value")))],
-                ),
-                value("source.scalar_hint.value", ModelType::F32),
-            ],
+            record(vec![field("value", value(ModelType::F32))]),
         )?;
 
         registry.register_tree(
             version(),
             id("source.shader_param_def"),
-            vec![
-                record(
-                    "source.shader_param_def",
-                    vec![
-                        field("label", Owned(id("source.shader_param_def.label"))),
-                        field(
-                            "description",
-                            Owned(id("source.shader_param_def.description")),
-                        ),
-                        field(
-                            "value_type",
-                            Owned(id("source.shader_param_def.value_type")),
-                        ),
-                        field("default", Owned(id("source.shader_param_def.default"))),
-                        field("min", Owned(id("source.shader_param_def.min"))),
-                    ],
-                ),
-                value("source.shader_param_def.label", ModelType::String),
-                value("source.shader_param_def.description", ModelType::String),
-                value("source.shader_param_def.value_type", ModelType::String),
-                value("source.shader_param_def.default", ModelType::F32),
-                option("source.shader_param_def.min", Ref(id("source.scalar_hint"))),
-            ],
+            record(vec![
+                field("label", value(ModelType::String)),
+                field("description", value(ModelType::String)),
+                field("value_type", value(ModelType::String)),
+                field("default", value(ModelType::F32)),
+                field("min", option(reference(id("source.scalar_hint")))),
+            ]),
         )?;
 
         registry.register_tree(
             version(),
             Self::SHAPE_ID,
-            vec![
-                record(
-                    "source.shader",
-                    vec![
-                        field("glsl_path", Owned(id("source.shader.glsl_path"))),
-                        field("texture_loc", Owned(id("source.shader.texture_loc"))),
-                        field("render_order", Owned(id("source.shader.render_order"))),
-                        field(
-                            "compiler_options",
-                            Owned(id("source.shader.compiler_options")),
-                        ),
-                        field("param_defs", Owned(id("source.shader.param_defs"))),
-                    ],
+            record(vec![
+                field("glsl_path", value(ModelType::String)),
+                field("texture_loc", value(ModelType::String)),
+                field("render_order", value(ModelType::I32)),
+                field(
+                    "compiler_options",
+                    record(vec![
+                        field("add_sub", value(ModelType::String)),
+                        field("mul", value(ModelType::String)),
+                        field("div", value(ModelType::String)),
+                    ]),
                 ),
-                value("source.shader.glsl_path", ModelType::String),
-                value("source.shader.texture_loc", ModelType::String),
-                value("source.shader.render_order", ModelType::I32),
-                record(
-                    "source.shader.compiler_options",
-                    vec![
-                        field(
-                            "add_sub",
-                            Owned(id("source.shader.compiler_options.add_sub")),
-                        ),
-                        field("mul", Owned(id("source.shader.compiler_options.mul"))),
-                        field("div", Owned(id("source.shader.compiler_options.div"))),
-                    ],
+                field(
+                    "param_defs",
+                    map(
+                        SlotMapKeyShape::String,
+                        reference(id("source.shader_param_def")),
+                    ),
                 ),
-                value("source.shader.compiler_options.add_sub", ModelType::String),
-                value("source.shader.compiler_options.mul", ModelType::String),
-                value("source.shader.compiler_options.div", ModelType::String),
-                map(
-                    "source.shader.param_defs",
-                    SlotMapKeyShape::String,
-                    Ref(id("source.shader_param_def")),
-                ),
-            ],
+            ]),
         )
     }
 }

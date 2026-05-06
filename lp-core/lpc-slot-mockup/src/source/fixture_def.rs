@@ -1,10 +1,10 @@
 use lpc_model::{
     FrameId, ModelType, RelativeNodeRef, SlotAccess, SlotDataAccess, SlotEnumAccess,
-    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeChild, SlotShapeId,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess, current_state_version,
+    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, SlotValue, StaticSlotAccess, current_state_version,
 };
 
-use crate::model::{field, id, mapping_shape_nodes, option, record, value, version};
+use crate::model::{field, id, mapping_shape, option, record, reference, value, version};
 
 use super::shader_def::ScalarHint;
 
@@ -71,35 +71,18 @@ impl StaticSlotAccess for FixtureDef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.fixture");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::{Owned, Ref};
-
-        let mut nodes = vec![
-            record(
-                "source.fixture",
-                vec![
-                    field("output_loc", Owned(id("source.fixture.output_loc"))),
-                    field("texture_loc", Owned(id("source.fixture.texture_loc"))),
-                    field("mapping", Owned(id("source.fixture.mapping"))),
-                    field("color_order", Owned(id("source.fixture.color_order"))),
-                    field("brightness", Owned(id("source.fixture.brightness"))),
-                    field(
-                        "gamma_correction",
-                        Owned(id("source.fixture.gamma_correction")),
-                    ),
-                ],
-            ),
-            value("source.fixture.output_loc", ModelType::String),
-            value("source.fixture.texture_loc", ModelType::String),
-            value("source.fixture.color_order", ModelType::String),
-            option("source.fixture.brightness", Ref(id("source.scalar_hint"))),
-            value("source.fixture.gamma_correction", ModelType::Bool),
-        ];
-        nodes.extend(mapping_shape_nodes(
-            "source.fixture.mapping",
-            "source.fixture",
-        ));
-
-        registry.register_tree(version(), Self::SHAPE_ID, nodes)
+        registry.register_tree(
+            version(),
+            Self::SHAPE_ID,
+            record(vec![
+                field("output_loc", value(ModelType::String)),
+                field("texture_loc", value(ModelType::String)),
+                field("mapping", mapping_shape()),
+                field("color_order", value(ModelType::String)),
+                field("brightness", option(reference(id("source.scalar_hint")))),
+                field("gamma_correction", value(ModelType::Bool)),
+            ]),
+        )
     }
 }
 

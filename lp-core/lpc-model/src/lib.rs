@@ -59,10 +59,9 @@ pub use slot::{
     SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike, SlotMapKeyShape,
     SlotMapValueAccess, SlotMeta, SlotName, SlotNameError, SlotOption, SlotOptionAccess,
     SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotRecord, SlotRecordAccess, SlotRef,
-    SlotRegistry, SlotRegistryError, SlotShape, SlotShapeChild, SlotShapeField, SlotShapeId,
-    SlotShapeIdError, SlotShapeKind, SlotShapeNode, SlotShapeRegistry, SlotShapeRegistryError,
-    SlotShapeRegistrySnapshot, SlotShapeVariant, SlotTree, SlotValidationError, SlotValue,
-    SlotValueAccess, SlotVariantShape, StaticSlotAccess, ToModelValue, ValueRef,
-    VersionedSlotShapeNode,
+    SlotRegistry, SlotRegistryError, SlotShape, SlotShapeId, SlotShapeIdError, SlotShapeKind,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
+    SlotValidationError, SlotValue, SlotValueAccess, SlotVariantShape, StaticSlotAccess,
+    ToModelValue, ValueRef, VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

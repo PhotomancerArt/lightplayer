@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     ModelType, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
-    SlotRecordAccess, SlotShapeChild, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    SlotValue, StaticSlotAccess,
+    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, SlotValue,
+    StaticSlotAccess,
 };
 
-use crate::model::{field, id, map, mapping_shape_nodes, record, value, version};
+use crate::model::{field, id, map, mapping_shape, record, reference, value, version};
 use crate::source::FixtureMapping;
 
 pub struct FixtureNode {
@@ -59,47 +59,26 @@ impl StaticSlotAccess for FixtureNode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("engine.fixture_node");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        use SlotShapeChild::{Owned, Ref};
-
         registry.register_tree(
             version(),
             id("engine.touch"),
-            vec![
-                record(
-                    "engine.touch",
-                    vec![
-                        field("position", Owned(id("engine.touch.position"))),
-                        field("pressure", Owned(id("engine.touch.pressure"))),
-                    ],
-                ),
-                value("engine.touch.position", ModelType::Vec2),
-                value("engine.touch.pressure", ModelType::F32),
-            ],
+            record(vec![
+                field("position", value(ModelType::Vec2)),
+                field("pressure", value(ModelType::F32)),
+            ]),
         )?;
 
-        let mut nodes = vec![
-            record(
-                "engine.fixture_node",
-                vec![
-                    field("touches", Owned(id("engine.fixture_node.touches"))),
-                    field(
-                        "mapping_preview",
-                        Owned(id("engine.fixture_node.mapping_preview")),
-                    ),
-                ],
-            ),
-            map(
-                "engine.fixture_node.touches",
-                SlotMapKeyShape::U32,
-                Ref(id("engine.touch")),
-            ),
-        ];
-        nodes.extend(mapping_shape_nodes(
-            "engine.fixture_node.mapping_preview",
-            "engine.fixture",
-        ));
-
-        registry.register_tree(version(), Self::SHAPE_ID, nodes)
+        registry.register_tree(
+            version(),
+            Self::SHAPE_ID,
+            record(vec![
+                field(
+                    "touches",
+                    map(SlotMapKeyShape::U32, reference(id("engine.touch"))),
+                ),
+                field("mapping_preview", mapping_shape()),
+            ]),
+        )
     }
 }
 

@@ -1,4 +1,4 @@
-use lpc_model::{SlotAccess, SlotDataAccess, SlotShapeId, SlotShapeNode, SlotShapeRegistry};
+use lpc_model::{SlotAccess, SlotDataAccess, SlotShape, SlotShapeId, SlotShapeRegistry};
 
 use super::path::key_segment;
 
@@ -21,17 +21,29 @@ fn print_inner(
     registry: &SlotShapeRegistry,
     lines: &mut Vec<String>,
 ) {
-    match (registry.get(shape_id).expect("shape"), data) {
-        (SlotShapeNode::Value { .. }, SlotDataAccess::Value(value)) => {
+    let shape = registry.get(shape_id).expect("shape");
+    print_shape(path, shape, data, registry, lines);
+}
+
+fn print_shape(
+    path: String,
+    shape: &SlotShape,
+    data: SlotDataAccess<'_>,
+    registry: &SlotShapeRegistry,
+    lines: &mut Vec<String>,
+) {
+    match (shape, data) {
+        (SlotShape::Ref { id }, data) => print_inner(path, id, data, registry, lines),
+        (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             lines.push(format!("{path}: {:?}", value.value()));
         }
-        (SlotShapeNode::Record { fields, .. }, SlotDataAccess::Record(record)) => {
+        (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
             lines.push(format!("{path}: record"));
             for (index, field) in fields.iter().enumerate() {
                 if let Some(child) = record.field(index) {
-                    print_inner(
+                    print_shape(
                         format!("{path}.{}", field.name),
-                        field.shape.id(),
+                        &field.shape,
                         child,
                         registry,
                         lines,
@@ -39,13 +51,13 @@ fn print_inner(
                 }
             }
         }
-        (SlotShapeNode::Map { value, .. }, SlotDataAccess::Map(map)) => {
+        (SlotShape::Map { value, .. }, SlotDataAccess::Map(map)) => {
             lines.push(format!("{path}: map"));
             for key in map.keys() {
                 if let Some(child) = map.get(&key) {
-                    print_inner(
+                    print_shape(
                         format!("{path}.{}", key_segment(&key)),
-                        value.id(),
+                        value,
                         child,
                         registry,
                         lines,
@@ -53,21 +65,21 @@ fn print_inner(
                 }
             }
         }
-        (SlotShapeNode::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
+        (SlotShape::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
             lines.push(format!("{path}: enum {}", en.variant()));
             let variant = variants
                 .iter()
                 .find(|variant| variant.name.as_str() == en.variant())
                 .expect("variant");
-            print_inner(
+            print_shape(
                 format!("{path}.{}", en.variant()),
-                variant.shape.id(),
+                &variant.shape,
                 en.data(),
                 registry,
                 lines,
             );
         }
-        (SlotShapeNode::Option { some, .. }, SlotDataAccess::Option(option)) => {
+        (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => {
             lines.push(format!(
                 "{path}: option {}",
                 if option.data().is_some() {
@@ -77,7 +89,7 @@ fn print_inner(
                 }
             ));
             if let Some(child) = option.data() {
-                print_inner(format!("{path}.some"), some.id(), child, registry, lines);
+                print_shape(format!("{path}.some"), some, child, registry, lines);
             }
         }
         _ => panic!("shape/data mismatch"),

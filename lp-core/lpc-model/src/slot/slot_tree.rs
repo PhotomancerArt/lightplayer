@@ -22,7 +22,7 @@ impl SlotTree {
     /// Get data at `path`, interpreting indexed records through `registry`.
     pub fn get<'a>(&'a self, registry: &'a SlotRegistry, path: &SlotPath) -> Option<&'a SlotData> {
         let shape = registry.get(&self.shape)?;
-        get_data(&self.root, shape, path.segments())
+        get_data(&self.root, shape, registry, path.segments())
     }
 
     /// Validate this tree against its registered shape.
@@ -30,7 +30,7 @@ impl SlotTree {
         let shape = registry
             .get(&self.shape)
             .ok_or_else(|| SlotValidationError::UnknownShape(self.shape.clone()))?;
-        validate_data(&self.root, shape)
+        validate_data(&self.root, shape, registry)
     }
 }
 
@@ -92,6 +92,7 @@ impl core::error::Error for SlotValidationError {}
 /// Kind of slot shape, used in validation diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotShapeKind {
+    Ref,
     Value,
     Record,
     Map,
@@ -112,8 +113,13 @@ pub enum SlotDataKind {
 fn get_data<'a>(
     data: &'a SlotData,
     shape: &'a SlotShape,
+    registry: &'a SlotRegistry,
     segments: &[SlotName],
 ) -> Option<&'a SlotData> {
+    if let SlotShape::Ref { id } = shape {
+        return get_data(data, registry.get(id)?, registry, segments);
+    }
+
     let Some((head, tail)) = segments.split_first() else {
         return Some(data);
     };
@@ -123,7 +129,7 @@ fn get_data<'a>(
             let index = fields.iter().position(|field| field.name == *head)?;
             let field_data = record.fields.get(index)?;
             let field_shape = &fields.get(index)?.shape;
-            get_data(field_data, field_shape, tail)
+            get_data(field_data, field_shape, registry, tail)
         }
         (SlotData::Map(map), SlotShape::Map { key, value, .. }) => {
             if *key != SlotMapKeyShape::String {
@@ -132,26 +138,42 @@ fn get_data<'a>(
             let data = map
                 .entries
                 .get(&SlotMapKey::String(head.as_str().to_string()))?;
-            get_data(data, value, tail)
+            get_data(data, value, registry, tail)
         }
         (SlotData::Enum(active), SlotShape::Enum { variants, .. }) => {
             if active.variant != *head {
                 return None;
             }
             let variant = find_variant(variants, head)?;
-            get_data(&active.data, &variant.shape, tail)
+            get_data(&active.data, &variant.shape, registry, tail)
         }
         (SlotData::Option(option), SlotShape::Option { some, .. }) if option.data.is_some() => {
             if head.as_str() != "some" {
                 return None;
             }
-            get_data(option.data.as_deref().expect("checked some"), some, tail)
+            get_data(
+                option.data.as_deref().expect("checked some"),
+                some,
+                registry,
+                tail,
+            )
         }
         _ => None,
     }
 }
 
-fn validate_data(data: &SlotData, shape: &SlotShape) -> Result<(), SlotValidationError> {
+fn validate_data(
+    data: &SlotData,
+    shape: &SlotShape,
+    registry: &SlotRegistry,
+) -> Result<(), SlotValidationError> {
+    if let SlotShape::Ref { id } = shape {
+        let shape = registry
+            .get(id)
+            .ok_or(SlotValidationError::UnknownShape(*id))?;
+        return validate_data(data, shape, registry);
+    }
+
     match (data, shape) {
         (SlotData::Value(value), SlotShape::Value { ty, .. }) => {
             validate_model_value(value.value(), ty)
@@ -164,25 +186,25 @@ fn validate_data(data: &SlotData, shape: &SlotShape) -> Result<(), SlotValidatio
                 });
             }
             for (data, field) in record.fields.iter().zip(fields) {
-                validate_data(data, &field.shape)?;
+                validate_data(data, &field.shape, registry)?;
             }
             Ok(())
         }
         (SlotData::Map(map), SlotShape::Map { key, value, .. }) => {
             for (map_key, data) in &map.entries {
                 validate_map_key(map_key, *key)?;
-                validate_data(data, value)?;
+                validate_data(data, value, registry)?;
             }
             Ok(())
         }
         (SlotData::Enum(active), SlotShape::Enum { variants, .. }) => {
             let variant = find_variant(variants, &active.variant)
                 .ok_or_else(|| SlotValidationError::UnknownEnumVariant(active.variant.clone()))?;
-            validate_data(&active.data, &variant.shape)
+            validate_data(&active.data, &variant.shape, registry)
         }
         (SlotData::Option(option), SlotShape::Option { some, .. }) => {
             if let Some(data) = option.data.as_deref() {
-                validate_data(data, some)
+                validate_data(data, some, registry)
             } else {
                 Ok(())
             }
@@ -293,6 +315,7 @@ fn find_variant<'a>(
 impl SlotShape {
     fn kind(&self) -> SlotShapeKind {
         match self {
+            Self::Ref { .. } => SlotShapeKind::Ref,
             Self::Value { .. } => SlotShapeKind::Value,
             Self::Record { .. } => SlotShapeKind::Record,
             Self::Map { .. } => SlotShapeKind::Map,

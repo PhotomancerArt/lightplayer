@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    SlotData, SlotMapKey, SlotMapKeyShape, SlotPath, SlotShapeId, SlotShapeNode, SlotShapeRegistry,
+    SlotData, SlotMapKey, SlotMapKeyShape, SlotPath, SlotShape, SlotShapeId, SlotShapeRegistry,
 };
 
 use crate::wire::{FullSync, SlotChange, SlotPatch};
@@ -42,6 +42,23 @@ fn apply_replace(
     change: SlotChange,
     registry: &SlotShapeRegistry,
 ) {
+    let shape = registry.get(shape_id).expect("shape");
+    apply_replace_shape(data, shape, path, change, registry);
+}
+
+fn apply_replace_shape(
+    data: &mut SlotData,
+    shape: &SlotShape,
+    path: &SlotPath,
+    change: SlotChange,
+    registry: &SlotShapeRegistry,
+) {
+    if let SlotShape::Ref { id } = shape {
+        let shape = registry.get(id).expect("shape ref");
+        apply_replace_shape(data, shape, path, change, registry);
+        return;
+    }
+
     if path.is_root() {
         match change {
             SlotChange::Replace(replacement) => *data = replacement,
@@ -51,49 +68,49 @@ fn apply_replace(
 
     let (head, tail) = path.segments().split_first().expect("path");
     let tail = SlotPath::from_segments(tail.to_vec());
-    match (registry.get(shape_id).expect("shape"), data) {
-        (SlotShapeNode::Record { fields, .. }, SlotData::Record(record)) => {
+    match (shape, data) {
+        (SlotShape::Record { fields, .. }, SlotData::Record(record)) => {
             let (index, field) = fields
                 .iter()
                 .enumerate()
                 .find(|(_, field)| field.name == *head)
                 .expect("record field");
-            apply_replace(
+            apply_replace_shape(
                 &mut record.fields[index],
-                field.shape.id(),
+                &field.shape,
                 &tail,
                 change,
                 registry,
             );
         }
-        (SlotShapeNode::Map { key, value, .. }, SlotData::Map(map)) => {
+        (SlotShape::Map { key, value, .. }, SlotData::Map(map)) => {
             let key = parse_map_key(head.as_str(), *key);
-            apply_replace(
+            apply_replace_shape(
                 map.entries.get_mut(&key).expect("map key"),
-                value.id(),
+                value,
                 &tail,
                 change,
                 registry,
             );
         }
-        (SlotShapeNode::Enum { variants, .. }, SlotData::Enum(en)) => {
+        (SlotShape::Enum { variants, .. }, SlotData::Enum(en)) => {
             let variant = variants
                 .iter()
                 .find(|variant| variant.name == *head)
                 .expect("enum variant");
-            apply_replace(&mut en.data, variant.shape.id(), &tail, change, registry);
+            apply_replace_shape(&mut en.data, &variant.shape, &tail, change, registry);
         }
-        (SlotShapeNode::Option { some, .. }, SlotData::Option(option)) => {
+        (SlotShape::Option { some, .. }, SlotData::Option(option)) => {
             assert_eq!(head.as_str(), "some");
-            apply_replace(
+            apply_replace_shape(
                 option.data.as_mut().expect("some"),
-                some.id(),
+                some,
                 &tail,
                 change,
                 registry,
             );
         }
-        (SlotShapeNode::Value { .. }, SlotData::Value(_)) => {
+        (SlotShape::Value { .. }, SlotData::Value(_)) => {
             panic!("cannot walk through a value slot")
         }
         _ => panic!("shape/data mismatch"),

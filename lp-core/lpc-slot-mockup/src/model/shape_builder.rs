@@ -1,6 +1,6 @@
 use lpc_model::{
-    FrameId, ModelType, SlotMapKeyShape, SlotMeta, SlotShapeChild, SlotShapeField, SlotShapeId,
-    SlotShapeNode, SlotShapeVariant, current_state_version,
+    FrameId, ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId,
+    SlotVariantShape, current_state_version,
 };
 
 pub(crate) fn id(value: &str) -> SlotShapeId {
@@ -11,95 +11,62 @@ pub(crate) fn version() -> FrameId {
     current_state_version()
 }
 
-pub(crate) fn mapping_shape_nodes(
-    root: &str,
-    value_prefix: &str,
-) -> Vec<(SlotShapeId, SlotShapeNode)> {
-    use SlotShapeChild::Owned;
-    vec![
-        (
-            id(root),
-            SlotShapeNode::Enum {
-                meta: SlotMeta::empty(),
-                variants: vec![
-                    variant("circle", Owned(id(&format!("{root}.circle")))),
-                    variant("square", Owned(id(&format!("{root}.square")))),
-                ],
-            },
-        ),
-        record(
-            &format!("{root}.circle"),
-            vec![
-                field(
-                    "center",
-                    Owned(id(&format!("{value_prefix}.circle.center"))),
-                ),
-                field(
-                    "radius",
-                    Owned(id(&format!("{value_prefix}.circle.radius"))),
-                ),
-            ],
-        ),
-        value(&format!("{value_prefix}.circle.center"), ModelType::Vec2),
-        value(&format!("{value_prefix}.circle.radius"), ModelType::F32),
-        record(
-            &format!("{root}.square"),
-            vec![
-                field(
-                    "origin",
-                    Owned(id(&format!("{value_prefix}.square.origin"))),
-                ),
-                field("size", Owned(id(&format!("{value_prefix}.square.size")))),
-            ],
-        ),
-        value(&format!("{value_prefix}.square.origin"), ModelType::Vec2),
-        value(&format!("{value_prefix}.square.size"), ModelType::Vec2),
-    ]
+pub(crate) fn mapping_shape() -> SlotShape {
+    SlotShape::Enum {
+        meta: SlotMeta::empty(),
+        variants: vec![
+            variant(
+                "circle",
+                record(vec![
+                    field("center", value(ModelType::Vec2)),
+                    field("radius", value(ModelType::F32)),
+                ]),
+            ),
+            variant(
+                "square",
+                record(vec![
+                    field("origin", value(ModelType::Vec2)),
+                    field("size", value(ModelType::Vec2)),
+                ]),
+            ),
+        ],
+    }
 }
 
-pub(crate) fn record(id_text: &str, fields: Vec<SlotShapeField>) -> (SlotShapeId, SlotShapeNode) {
-    (
-        id(id_text),
-        SlotShapeNode::Record {
-            meta: SlotMeta::empty(),
-            fields,
-        },
-    )
+pub(crate) fn record(fields: Vec<SlotFieldShape>) -> SlotShape {
+    SlotShape::Record {
+        meta: SlotMeta::empty(),
+        fields,
+    }
 }
 
-pub(crate) fn map(
-    id_text: &str,
-    key: SlotMapKeyShape,
-    value: SlotShapeChild,
-) -> (SlotShapeId, SlotShapeNode) {
-    (
-        id(id_text),
-        SlotShapeNode::Map {
-            meta: SlotMeta::empty(),
-            key,
-            value,
-        },
-    )
+pub(crate) fn map(key: SlotMapKeyShape, value: SlotShape) -> SlotShape {
+    SlotShape::Map {
+        meta: SlotMeta::empty(),
+        key,
+        value: Box::new(value),
+    }
 }
 
-pub(crate) fn option(id_text: &str, some: SlotShapeChild) -> (SlotShapeId, SlotShapeNode) {
-    (
-        id(id_text),
-        SlotShapeNode::Option {
-            meta: SlotMeta::empty(),
-            some,
-        },
-    )
+pub(crate) fn option(some: SlotShape) -> SlotShape {
+    SlotShape::Option {
+        meta: SlotMeta::empty(),
+        some: Box::new(some),
+    }
 }
 
-pub(crate) fn field(name: &str, shape: SlotShapeChild) -> SlotShapeField {
-    SlotShapeField::new(name, shape).unwrap()
+pub(crate) fn reference(id: SlotShapeId) -> SlotShape {
+    SlotShape::reference(id)
 }
 
-pub(crate) fn variant(name: &str, shape: SlotShapeChild) -> SlotShapeVariant {
-    SlotShapeVariant::new(name, shape).unwrap()
+pub(crate) fn field(name: &str, shape: SlotShape) -> SlotFieldShape {
+    SlotFieldShape::new(name, shape).unwrap()
 }
 
-pub(crate) fn value(id_text: &str, ty: ModelType) -> (SlotShapeId, SlotShapeNode) {
-    (id(id_text), SlotShapeNode::value(ty))
+pub(crate) fn variant(name: &str, shape: SlotShape) -> SlotVariantShape {
+    SlotVariantShape::new(name, shape).unwrap()
+}
+
+pub(crate) fn value(ty: ModelType) -> SlotShape {
+    SlotShape::value(ty)
 }
