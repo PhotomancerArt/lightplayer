@@ -24,6 +24,7 @@ pub(crate) fn mapping_shape() -> SlotShape {
                     field("size", value(ModelType::Vec2)),
                 ]),
             ),
+            variant("disabled", unit()),
         ],
     }
 }
@@ -64,4 +65,8 @@ pub(crate) fn variant(name: &str, shape: SlotShape) -> SlotVariantShape {
 
 pub(crate) fn value(ty: ModelType) -> SlotShape {
     SlotShape::value(ty)
+}
+
+pub(crate) fn unit() -> SlotShape {
+    SlotShape::unit()
 }

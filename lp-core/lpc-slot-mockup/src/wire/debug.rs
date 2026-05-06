@@ -50,6 +50,9 @@ fn print_shape(
 ) {
     match (shape, data) {
         (SlotShape::Ref { id }, data) => print_inner(path, id, data, registry, lines),
+        (SlotShape::Unit { .. }, SlotDataAccess::Unit(_)) => {
+            lines.push(format!("{path}: unit"));
+        }
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             lines.push(format!("{path}: {:?}", value.value()));
         }

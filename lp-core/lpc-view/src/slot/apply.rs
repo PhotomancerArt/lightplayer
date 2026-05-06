@@ -65,6 +65,7 @@ pub(super) fn data_version_at(
 ) -> Result<FrameId, SlotMirrorError> {
     let (_, data) = resolve_path(root, shape_id, path, registry)?;
     match data {
+        SlotData::Unit { changed_frame } => Ok(*changed_frame),
         SlotData::Value(value) => Ok(value.changed_frame()),
         SlotData::Record(record) => Ok(record.fields_changed_frame),
         SlotData::Map(map) => Ok(map.keys_changed_frame),
@@ -166,6 +167,7 @@ fn apply_replace_shape(
             let child = option.data.as_mut().ok_or(SlotMirrorError::UnknownPath)?;
             apply_replace_shape(child, some, &tail, change, registry)
         }
+        (SlotShape::Unit { .. }, SlotData::Unit { .. }) => Err(SlotMirrorError::UnknownPath),
         (SlotShape::Value { .. }, SlotData::Value(_)) => Err(SlotMirrorError::UnknownPath),
         _ => Err(SlotMirrorError::UnknownPath),
     }
@@ -235,6 +237,7 @@ fn resolve_path_shape<'a>(
             let child = option.data.as_ref().ok_or(SlotMirrorError::UnknownPath)?;
             resolve_path_shape(child, some, &tail, registry)
         }
+        (SlotShape::Unit { .. }, SlotData::Unit { .. }) => Err(SlotMirrorError::UnknownPath),
         (SlotShape::Value { .. }, SlotData::Value(_)) => Err(SlotMirrorError::UnknownPath),
         _ => Err(SlotMirrorError::UnknownPath),
     }

@@ -1,6 +1,8 @@
 use lpc_model::{FrameId, ModelValue, SlotMapKey};
 
-use super::fixture::{Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks};
+use super::fixture::{
+    Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks, select,
+};
 
 #[test]
 fn incremental_changes_patch_client_state() {
@@ -53,4 +55,19 @@ fn incremental_changes_patch_client_state() {
     harness.print_server_tree("source.fixture");
     harness.sync_diff("source.fixture", FrameId::new(4));
     harness.print_client_tree("source.fixture");
+
+    println!("server updating source.fixture#mapping to disabled unit variant");
+    harness.runtime.disable_fixture_mapping(FrameId::new(7));
+    harness.print_server_tree("source.fixture");
+    harness.sync_diff("source.fixture", FrameId::new(6));
+    harness.print_client_tree("source.fixture");
+    assert_eq!(
+        select(
+            harness.client.roots.get("source.fixture").unwrap(),
+            "mapping.disabled",
+        ),
+        &lpc_model::SlotData::Unit {
+            changed_frame: FrameId::new(7),
+        },
+    );
 }

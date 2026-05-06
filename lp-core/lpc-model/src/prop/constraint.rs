@@ -8,11 +8,10 @@
 //! errors; the outer [`Constraint`] enum is `#[serde(untagged)]` to merge those
 //! shapes (`docs/plans/2026-04-22-lp-domain-m3-visual-artifact-types/00-design.md`).
 //!
-//! A [`Constraint`] **refines** the natural domain of a [`Kind`](crate::prop::kind::Kind)
-//! (e.g. [`Kind::Amplitude`](crate::prop::kind::Kind::Amplitude) defaults to
-//! a unit range, but a slot can tighten, widen, or set [`Constraint::Free`]
-//! for “boost”-style use (`quantity.md` §5). Bindings and loaded values that
-//! violate a slot’s constraint are **compose-time errors** (same section).
+//! In the legacy quantity model, a [`Constraint`] refined the natural domain of
+//! a [`Kind`](crate::prop::legacy_kind::Kind). New slot-model work should attach
+//! legality to typed slot leaf descriptors instead of pairing constraints with
+//! a free-floating kind.
 //! Color coordinates default to [`Constraint::Free`] in the spec so
 //! out-of-gamut/boost stays meaningful; a slot that needs strict in-gamut
 //! authoring can override with range form (`color.md` pointer in
@@ -52,9 +51,9 @@ pub struct ConstraintChoice {
 #[serde(deny_unknown_fields)]
 pub struct ConstraintFree {}
 
-/// Declares which wire-level values are *allowed* for a slot (together with
-/// its [`Kind`][`crate::kind::Kind`]). On-disk shape uses **peer-key**
-/// inference (`#[serde(untagged)]`): see module docs.
+/// Legacy declaration of which wire-level values are allowed for a property.
+/// On-disk shape uses **peer-key** inference (`#[serde(untagged)]`): see module
+/// docs.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(untagged)]

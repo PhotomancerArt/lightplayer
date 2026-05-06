@@ -1,5 +1,6 @@
-//! LightPlayer **core model** crate: **foundation** types (identity, addressing,
-//! Quantity model). Wire/protocol shapes live in `lpc-wire`.
+//! LightPlayer **core model** crate: **foundation** types for identity,
+//! addressing, portable values, and slot-shaped data. Wire/protocol shapes live
+//! in `lpc-wire`.
 //!
 //! Authored node definitions (Project / Texture / Shader / Output / Fixture)
 //! live in `lpc-source`.
@@ -11,7 +12,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-// --- Foundation (Quantity model) -------------------------------------------------------------
+// --- Foundation -------------------------------------------------------------------------------
 
 pub mod error;
 pub mod node;
@@ -39,6 +40,10 @@ pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Cross-cutting error for domain property access and validation.
 pub use error::DomainError;
+/// Legacy semantic value kind used by the pre-slot property model.
+///
+/// New slot-model code should prefer typed slot leaf descriptors whose semantic
+/// meaning owns its storage shape.
 pub use kind::Kind;
 pub use prop::Versioned;
 pub use prop::{ModelStructMember, ModelType, ModelValue};

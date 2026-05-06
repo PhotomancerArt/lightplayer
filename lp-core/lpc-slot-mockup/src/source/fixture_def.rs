@@ -18,6 +18,9 @@ pub struct FixtureDef {
 }
 
 pub enum FixtureMapping {
+    Disabled {
+        variant_changed_frame: FrameId,
+    },
     Circle {
         variant_changed_frame: FrameId,
         center: SlotValue<[f32; 2]>,
@@ -44,6 +47,10 @@ impl FixtureDef {
 
     pub fn switch_mapping_to_square(&mut self) {
         self.mapping = FixtureMapping::square();
+    }
+
+    pub fn disable_mapping(&mut self) {
+        self.mapping = FixtureMapping::disabled();
     }
 
     pub fn clear_brightness(&mut self) {
@@ -100,6 +107,12 @@ impl SlotRecordAccess for FixtureDef {
 }
 
 impl FixtureMapping {
+    pub fn disabled() -> Self {
+        Self::Disabled {
+            variant_changed_frame: current_state_version(),
+        }
+    }
+
     pub fn circle() -> Self {
         Self::Circle {
             variant_changed_frame: current_state_version(),
@@ -127,25 +140,35 @@ impl SlotEnumAccess for FixtureMapping {
             | Self::Square {
                 variant_changed_frame,
                 ..
+            }
+            | Self::Disabled {
+                variant_changed_frame,
             } => *variant_changed_frame,
         }
     }
 
     fn variant(&self) -> &str {
         match self {
+            Self::Disabled { .. } => "disabled",
             Self::Circle { .. } => "circle",
             Self::Square { .. } => "square",
         }
     }
 
     fn data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
+        match self {
+            Self::Disabled {
+                variant_changed_frame,
+            } => SlotDataAccess::Unit(*variant_changed_frame),
+            Self::Circle { .. } | Self::Square { .. } => SlotDataAccess::Record(self),
+        }
     }
 }
 
 impl SlotRecordAccess for FixtureMapping {
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
         match self {
+            Self::Disabled { .. } => None,
             Self::Circle { center, radius, .. } => match index {
                 0 => Some(SlotDataAccess::Value(center)),
                 1 => Some(SlotDataAccess::Value(radius)),

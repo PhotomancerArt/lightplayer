@@ -101,6 +101,12 @@ impl MockRuntime {
         self.fixture_node.switch_mapping_preview();
     }
 
+    pub fn disable_fixture_mapping(&mut self, frame: FrameId) {
+        set_current_state_version(frame);
+        self.fixture_def.disable_mapping();
+        self.fixture_node.disable_mapping_preview();
+    }
+
     pub fn clear_fixture_brightness(&mut self, frame: FrameId) {
         set_current_state_version(frame);
         self.fixture_def.clear_brightness();

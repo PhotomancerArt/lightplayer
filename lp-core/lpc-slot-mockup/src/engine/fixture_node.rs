@@ -34,6 +34,10 @@ impl FixtureNode {
         self.mapping_preview = FixtureMapping::square();
     }
 
+    pub fn disable_mapping_preview(&mut self) {
+        self.mapping_preview = FixtureMapping::disabled();
+    }
+
     pub fn remove_touch(&mut self, id: u32) {
         self.touches.remove(&id);
     }

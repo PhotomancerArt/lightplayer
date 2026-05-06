@@ -29,6 +29,7 @@ pub trait StaticSlotAccess: SlotAccess {
 /// Borrowed access to one slot-data node.
 #[derive(Clone, Copy)]
 pub enum SlotDataAccess<'a> {
+    Unit(FrameId),
     Value(&'a dyn SlotValueAccess),
     Record(&'a dyn SlotRecordAccess),
     Map(&'a dyn SlotMapAccess),
@@ -74,6 +75,7 @@ pub trait SlotOptionAccess {
 impl SlotData {
     pub fn access(&self) -> SlotDataAccess<'_> {
         match self {
+            Self::Unit { changed_frame } => SlotDataAccess::Unit(*changed_frame),
             Self::Value(value) => SlotDataAccess::Value(value),
             Self::Record(record) => SlotDataAccess::Record(record),
             Self::Map(map) => SlotDataAccess::Map(map),

@@ -137,6 +137,7 @@ pub fn describe_change(patch: &WireSlotPatch) -> String {
 
 pub fn describe_data(data: &SlotData) -> String {
     match data {
+        SlotData::Unit { .. } => "unit".to_string(),
         SlotData::Value(value) => format!("{:?}", value.value()),
         SlotData::Record(record) => format!("record[{}]", record.fields.len()),
         SlotData::Map(map) => format!("map[{}]", map.entries.len()),
@@ -255,6 +256,7 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                 assert_eq!(segment.as_str(), "some");
                 option.data.as_deref().expect("option some")
             }
+            SlotData::Unit { .. } => panic!("cannot select through unit"),
             SlotData::Value(_) => panic!("cannot select through value"),
         };
     }

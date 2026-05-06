@@ -91,6 +91,10 @@ pub enum SlotShape {
     Ref {
         id: SlotShapeId,
     },
+    Unit {
+        #[serde(default)]
+        meta: SlotMeta,
+    },
     Value {
         #[serde(default)]
         meta: SlotMeta,
@@ -123,6 +127,13 @@ impl SlotShape {
     /// Reference another registered root shape.
     pub fn reference(id: SlotShapeId) -> Self {
         Self::Ref { id }
+    }
+
+    /// Convenience constructor for a payload-free unit slot with empty metadata.
+    pub fn unit() -> Self {
+        Self::Unit {
+            meta: SlotMeta::empty(),
+        }
     }
 
     /// Convenience constructor for a value leaf with empty metadata.

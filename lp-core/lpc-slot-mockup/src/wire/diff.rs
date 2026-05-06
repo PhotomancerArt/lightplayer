@@ -52,6 +52,17 @@ fn collect_diff_shape(
         (SlotShape::Ref { id }, data) => {
             collect_diff_inner(root_name, path, id, data, registry, since, patches);
         }
+        (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => {
+            if frame > since {
+                patches.push(WireSlotPatch {
+                    root: root_name.to_string(),
+                    path,
+                    change: WireSlotChange::Replace(SlotData::Unit {
+                        changed_frame: frame,
+                    }),
+                });
+            }
+        }
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             if value.changed_frame() > since {
                 patches.push(WireSlotPatch {

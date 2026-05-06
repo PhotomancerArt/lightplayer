@@ -15,6 +15,7 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SlotData {
+    Unit { changed_frame: FrameId },
     Value(Versioned<ModelValue>),
     Record(SlotRecord),
     Map(SlotMapDyn),
@@ -148,6 +149,18 @@ mod tests {
     #[test]
     fn slot_data_serializes_versioned_value_leaf() {
         let data = SlotData::Value(Versioned::new(FrameId::new(3), ModelValue::Bool(true)));
+
+        let json = serde_json::to_string(&data).unwrap();
+        let back: SlotData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn slot_data_serializes_unit_leaf() {
+        let data = SlotData::Unit {
+            changed_frame: FrameId::new(5),
+        };
 
         let json = serde_json::to_string(&data).unwrap();
         let back: SlotData = serde_json::from_str(&json).unwrap();

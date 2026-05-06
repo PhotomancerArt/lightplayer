@@ -42,6 +42,9 @@ pub(super) fn snapshot_shape(
 ) -> SlotData {
     match (shape, data) {
         (SlotShape::Ref { id }, data) => snapshot(id, data, registry),
+        (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => SlotData::Unit {
+            changed_frame: frame,
+        },
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             SlotData::Value(Versioned::new(value.changed_frame(), value.value()))
         }

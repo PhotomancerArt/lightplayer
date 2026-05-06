@@ -273,6 +273,9 @@ fn model_value_to_lps_value_f32(
                 fields: result_fields,
             })
         }
+        ModelValue::String(_) | ModelValue::Resource(_) => Err(ResolveError::new(alloc::format!(
+            "model value cannot be resolved as shader value: {value:?}"
+        ))),
     }
 }
 

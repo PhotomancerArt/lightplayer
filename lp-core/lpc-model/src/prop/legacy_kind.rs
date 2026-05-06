@@ -1,3 +1,10 @@
+//! Legacy quantity [`Kind`] model.
+//!
+//! This module is retained for older source/runtime code that still describes
+//! authored properties as a semantic kind plus independent storage. New slot
+//! model work should prefer typed slot leaf descriptors where semantic meaning
+//! owns its storage shape instead of being attached to an arbitrary value.
+//!
 //! [`Kind`]: semantic identity of a value.
 //!
 //! In the five-layer Quantity model, [`Kind`] sits *above* storage types and

@@ -29,6 +29,9 @@ pub fn model_type_to_lps_type(ty: &ModelType) -> LpsType {
         ModelType::Mat2x2 => LpsType::Mat2,
         ModelType::Mat3x3 => LpsType::Mat3,
         ModelType::Mat4x4 => LpsType::Mat4,
+        ModelType::String | ModelType::Resource => {
+            panic!("model type cannot be mapped to shader ABI type: {ty:?}")
+        }
         ModelType::Array(element, len) => LpsType::Array {
             element: Box::new(model_type_to_lps_type(element)),
             len: u32::try_from(*len)

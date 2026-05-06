@@ -93,6 +93,7 @@ impl core::error::Error for SlotValidationError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotShapeKind {
     Ref,
+    Unit,
     Value,
     Record,
     Map,
@@ -103,6 +104,7 @@ pub enum SlotShapeKind {
 /// Kind of slot data, used in validation diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotDataKind {
+    Unit,
     Value,
     Record,
     Map,
@@ -175,6 +177,7 @@ fn validate_data(
     }
 
     match (data, shape) {
+        (SlotData::Unit { .. }, SlotShape::Unit { .. }) => Ok(()),
         (SlotData::Value(value), SlotShape::Value { ty, .. }) => {
             validate_model_value(value.value(), ty)
         }
@@ -316,6 +319,7 @@ impl SlotShape {
     fn kind(&self) -> SlotShapeKind {
         match self {
             Self::Ref { .. } => SlotShapeKind::Ref,
+            Self::Unit { .. } => SlotShapeKind::Unit,
             Self::Value { .. } => SlotShapeKind::Value,
             Self::Record { .. } => SlotShapeKind::Record,
             Self::Map { .. } => SlotShapeKind::Map,
@@ -328,6 +332,7 @@ impl SlotShape {
 impl SlotData {
     fn kind(&self) -> SlotDataKind {
         match self {
+            Self::Unit { .. } => SlotDataKind::Unit,
             Self::Value(_) => SlotDataKind::Value,
             Self::Record(_) => SlotDataKind::Record,
             Self::Map(_) => SlotDataKind::Map,
@@ -434,6 +439,30 @@ mod tests {
     }
 
     #[test]
+    fn validates_unit_shape_and_data() {
+        let mut registry = SlotRegistry::new();
+        let shape_id = SlotShapeId::parse("mapping.disabled").unwrap();
+        registry
+            .register(shape_id.clone(), SlotShape::unit())
+            .unwrap();
+
+        let tree = SlotTree::new(
+            shape_id,
+            SlotData::Unit {
+                changed_frame: FrameId::new(2),
+            },
+        );
+
+        tree.validate(&registry).unwrap();
+        assert_eq!(
+            tree.get(&registry, &SlotPath::root()),
+            Some(&SlotData::Unit {
+                changed_frame: FrameId::new(2),
+            })
+        );
+    }
+
+    #[test]
     fn validation_rejects_map_key_shape_mismatch() {
         let mut registry = SlotRegistry::new();
         let shape_id = SlotShapeId::parse("map").unwrap();
@@ -470,13 +499,19 @@ mod tests {
                 shape_id.clone(),
                 SlotShape::Enum {
                     meta: SlotMeta::empty(),
-                    variants: vec![SlotVariantShape {
-                        name: SlotName::parse("shape").unwrap(),
-                        shape: SlotShape::Option {
-                            meta: SlotMeta::empty(),
-                            some: Box::new(SlotShape::value(ModelType::Resource)),
+                    variants: vec![
+                        SlotVariantShape {
+                            name: SlotName::parse("shape").unwrap(),
+                            shape: SlotShape::Option {
+                                meta: SlotMeta::empty(),
+                                some: Box::new(SlotShape::value(ModelType::Resource)),
+                            },
                         },
-                    }],
+                        SlotVariantShape {
+                            name: SlotName::parse("disabled").unwrap(),
+                            shape: SlotShape::unit(),
+                        },
+                    ],
                 },
             )
             .unwrap();
@@ -490,5 +525,17 @@ mod tests {
         );
 
         tree.validate(&registry).unwrap();
+
+        let unit_tree = SlotTree::new(
+            SlotShapeId::parse("fixture.mapping").unwrap(),
+            SlotData::Enum(super::super::SlotEnum::new(
+                SlotName::parse("disabled").unwrap(),
+                SlotData::Unit {
+                    changed_frame: FrameId::new(4),
+                },
+            )),
+        );
+
+        unit_tree.validate(&registry).unwrap();
     }
 }
