@@ -23,7 +23,7 @@ mod value_slot;
 
 pub use slot_access::{
     FieldSlot, MapSlotAccess, SlotAccess, SlotDataAccess, SlotEnumAccess, SlotOptionAccess,
-    SlotRecordAccess, SlotValueAccess, StaticSlotAccess,
+    SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
 };
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;

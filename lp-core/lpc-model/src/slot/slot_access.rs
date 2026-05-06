@@ -16,15 +16,33 @@ pub trait SlotAccess {
     fn data(&self) -> SlotDataAccess<'_>;
 }
 
-/// Slot root whose shape is authored statically by its Rust implementation.
+/// Static slot shape root authored by a Rust type.
 ///
-/// Static slot roots do not store shape identity per value. The type owns a
-/// stable numeric shape id and knows how to register its shape into a registry
-/// during startup.
-pub trait StaticSlotAccess: SlotAccess {
+/// Static shapes are type-owned descriptions, not per-instance data. They are
+/// appropriate for Rust-authored defs, configs, and fixed runtime state whose
+/// structure does not vary by loaded artifact. Dynamic shapes, such as shader
+/// params authored by a specific shader file, should be registered by their
+/// runtime owner with an instance- or artifact-specific id instead.
+pub trait StaticSlotShape {
     const SHAPE_ID: SlotShapeId;
 
-    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError>;
+    fn slot_shape() -> SlotShape;
+
+    fn ensure_registered(registry: &mut SlotShapeRegistry) -> Result<bool, SlotShapeRegistryError> {
+        registry.ensure_tree(Self::SHAPE_ID, Self::slot_shape())
+    }
+}
+
+/// Slot root whose data and shape are both authored statically by Rust.
+///
+/// This is the data-access counterpart to [`StaticSlotShape`]. It remains as
+/// the ergonomic trait for code that needs both a root value and its static
+/// shape identity. `register_shape` is kept as a compatibility shim for older
+/// call sites; new static bootstrap code should prefer `ensure_registered`.
+pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
+    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
+        Self::ensure_registered(registry).map(|_| ())
+    }
 }
 
 /// Field-level slot access used by derive inference.

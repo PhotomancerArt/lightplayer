@@ -4170,6 +4170,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-slot-codegen"
+version = "40.0.0"
+dependencies = [
+ "syn",
+ "tempfile",
+]
+
+[[package]]
 name = "lpc-slot-macros"
 version = "40.0.0"
 dependencies = [
@@ -4183,6 +4191,7 @@ name = "lpc-slot-mockup"
 version = "40.0.0"
 dependencies = [
  "lpc-model",
+ "lpc-slot-codegen",
  "lpc-view",
  "lpc-wire",
  "serde",

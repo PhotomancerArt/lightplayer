@@ -2,7 +2,7 @@
 
 use lpc_model::{
     SlotAccess, SlotDataAccess, SlotMapValueAccess, SlotRecordAccess, SlotRecordShape, SlotShape,
-    SlotShapeRegistry, StaticSlotAccess, ValueSlot,
+    SlotShapeRegistry, StaticSlotAccess, StaticSlotShape, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord)]
@@ -27,6 +27,11 @@ fn derive_generates_record_shape_access_and_root_registration() {
     };
 
     assert_eq!(record.shape_id(), DerivedRecord::SHAPE_ID);
+    assert_static_slot_access::<DerivedRecord>();
+    assert_eq!(
+        record.shape_id(),
+        <DerivedRecord as StaticSlotShape>::SHAPE_ID
+    );
     assert!(matches!(record.field(0), Some(SlotDataAccess::Value(_))));
     assert!(matches!(record.field(1), Some(SlotDataAccess::Record(_))));
     assert!(record.field(2).is_none());
@@ -39,6 +44,10 @@ fn derive_generates_record_shape_access_and_root_registration() {
     assert_eq!(fields[1].name.as_str(), "nested");
 
     let mut registry = SlotShapeRegistry::default();
+    assert!(DerivedRecord::ensure_registered(&mut registry).unwrap());
+    assert!(!DerivedRecord::ensure_registered(&mut registry).unwrap());
     DerivedRecord::register_shape(&mut registry).unwrap();
     assert!(registry.get(&DerivedRecord::SHAPE_ID).is_some());
 }
+
+fn assert_static_slot_access<T: StaticSlotAccess>() {}

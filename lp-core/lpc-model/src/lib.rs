@@ -83,7 +83,7 @@ pub use slot::{
     SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotRecord,
     SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError,
     SlotShapeKind, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
-    SlotValidationError, SlotValueAccess, SlotVariantShape, StaticSlotAccess, ValueRef, ValueSlot,
-    VersionedSlotShape,
+    SlotValidationError, SlotValueAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape,
+    ValueRef, ValueSlot, VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

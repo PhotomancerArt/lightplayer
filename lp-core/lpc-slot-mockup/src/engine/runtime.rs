@@ -1,6 +1,6 @@
 use lpc_model::{
     FrameId, ModelType, ModelValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
-    StaticSlotAccess, set_current_state_version,
+    StaticSlotShape, set_current_state_version,
 };
 use lpc_wire::{
     WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
@@ -28,10 +28,12 @@ impl MockRuntime {
         set_current_state_version(FrameId::new(1));
 
         let mut registry = SlotShapeRegistry::default();
-        crate::model::register_shapes(&mut registry);
+        crate::model::register_shapes(&mut registry).unwrap();
 
         let shader_def = ShaderDef::new();
         let shader_node = ShaderNode::from_def(&shader_def);
+        // Shader runtime params are dynamic: the shape is owned by this loaded
+        // node/artifact instance, not by the Rust `ShaderNode` type.
         registry
             .register_tree(ShaderNode::SHAPE_ID, shader_node.shape())
             .unwrap();
@@ -219,8 +221,7 @@ impl MockRuntime {
         match path {
             "param_defs[exposure].label" => Ok(MutationTargetInfo {
                 target: MutationTarget::ShaderExposureLabel,
-                shape_version: self
-                    .root_shape_version(<ShaderDef as StaticSlotAccess>::SHAPE_ID)?,
+                shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
                 data_version: self
                     .shader_def
                     .param_label_changed_frame("exposure")
@@ -229,8 +230,7 @@ impl MockRuntime {
             }),
             "param_defs[exposure].default" => Ok(MutationTargetInfo {
                 target: MutationTarget::Unsupported,
-                shape_version: self
-                    .root_shape_version(<ShaderDef as StaticSlotAccess>::SHAPE_ID)?,
+                shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
                 data_version: self
                     .shader_def
                     .param_default_changed_frame("exposure")

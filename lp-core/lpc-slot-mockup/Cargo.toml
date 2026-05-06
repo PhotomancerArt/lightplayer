@@ -12,5 +12,8 @@ lpc-wire = { path = "../lpc-wire", features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
 toml = { workspace = true, features = ["display"] }
 
+[build-dependencies]
+lpc-slot-codegen = { path = "../lpc-slot-codegen" }
+
 [lints]
 workspace = true

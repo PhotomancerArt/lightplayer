@@ -5,6 +5,9 @@
 
 pub mod engine;
 pub mod model;
+pub mod slot_shapes {
+    include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
+}
 pub mod source;
 pub mod wire;
 

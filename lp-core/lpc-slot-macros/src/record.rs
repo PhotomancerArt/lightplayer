@@ -67,7 +67,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         quote! {
             impl ::lpc_model::SlotAccess for #ident {
                 fn shape_id(&self) -> ::lpc_model::SlotShapeId {
-                    <Self as ::lpc_model::StaticSlotAccess>::SHAPE_ID
+                    <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID
                 }
 
                 fn data(&self) -> ::lpc_model::SlotDataAccess<'_> {
@@ -75,16 +75,16 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                 }
             }
 
-            impl ::lpc_model::StaticSlotAccess for #ident {
+            impl ::lpc_model::StaticSlotShape for #ident {
                 const SHAPE_ID: ::lpc_model::SlotShapeId =
                     #shape_id;
 
-                fn register_shape(
-                    registry: &mut ::lpc_model::SlotShapeRegistry,
-                ) -> Result<(), ::lpc_model::SlotShapeRegistryError> {
-                    registry.register_tree(Self::SHAPE_ID, <Self as ::lpc_model::SlotRecordShape>::slot_record_shape())
+                fn slot_shape() -> ::lpc_model::SlotShape {
+                    <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
                 }
             }
+
+            impl ::lpc_model::StaticSlotAccess for #ident {}
         }
     } else {
         quote! {}

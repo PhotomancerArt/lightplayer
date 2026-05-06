@@ -6,3 +6,4 @@ mod full_sync;
 mod incremental_change;
 mod mutation;
 mod server_tree_walk;
+mod shape_codegen;

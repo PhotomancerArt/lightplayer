@@ -39,6 +39,19 @@ Out of scope:
 
 ## Current Codebase State
 
+### M1.2 Outcome
+
+- `ValueSlot<T>`, `MapSlot<K,V>`, and `OptionSlot<T>` now serialize as clean
+  authored values and deserialize with `current_state_version()`.
+- All current semantic slots under `lpc-model/src/slot/slots/` support authored
+  serde.
+- `MapSlot<String, V>`, `MapSlot<u32, V>`, and `MapSlot<i32, V>` round-trip
+  through authored map/table keys. TOML table keys are strings at the serde
+  boundary, so numeric keys are parsed through `MapSlotKeyLike`.
+- `lpc-slot-mockup` now proves the target shape with source-like defs,
+  generated TOML evidence, shader `param_defs`, and fixture `path_points`
+  backed by stable-key maps.
+
 ### Slot Model
 
 - `lpc-model/src/slot` contains the production slot primitives:
@@ -46,30 +59,31 @@ Out of scope:
   - `StaticSlotAccess`
   - `SlotDataAccess`
   - `SlotRecordAccess`
-  - `SlotMapAccess`
+  - `MapSlotAccess`
   - `SlotEnumAccess`
-  - `SlotOptionAccess`
+  - `OptionSlotAccess`
   - `SlotRecordShape`
   - `SlotEnumShape`
   - `SlotShapeRegistry`
   - `SlotPath`
 - `SlotPath` now distinguishes:
   - `SlotPathSegment::Field(SlotName)` for records/enums/options.
-  - `SlotPathSegment::Key(SlotMapKey)` for maps.
+  - `SlotPathSegment::Key(MapSlotKey)` for maps.
 - `SlotName` is the record/enum/option field-token type and is now identifier-like:
   - first char: ASCII alpha or `_`
   - later chars: ASCII alpha, digit, or `_`
 - `SlotData` is the owned snapshot/wire mirror. Rust-authored structs can expose access traits without first converting themselves into `SlotData`.
-- `SlotValue<T>`, `SlotMap<K,V>`, and `SlotOption<T>` exist for typed, versioned Rust-authored data.
+- `ValueSlot<T>`, `MapSlot<K,V>`, and `OptionSlot<T>` exist for typed,
+  versioned Rust-authored data.
 - `lpc-wire/src/slot/access_sync.rs` can snapshot/diff borrowed `SlotAccess` roots through a `SlotShapeRegistry`.
 
 ### Slot Derive
 
 - `lpc-slot-macros` provides `#[derive(lpc_model::SlotRecord)]`.
 - The derive currently assumes field storage already implements slot access:
-  - value/leaf fields are `SlotValue<T>`-like and expose `SlotValueAccess`.
-  - maps are `SlotMap<K,V>`.
-  - options are `SlotOption<T>`.
+  - value/leaf fields are `ValueSlot<T>`-like and expose `ValueSlotAccess`.
+  - maps are `MapSlot<K,V>`.
+  - options are `OptionSlot<T>`.
   - nested records implement `SlotRecordShape + SlotRecordAccess`.
   - enums implement `SlotEnumShape + SlotEnumAccess`.
 - The derive supports:
@@ -81,7 +95,8 @@ Out of scope:
   - `#[slot(map(key = "...", value_ref = "..."))]`
   - `#[slot(option_ref = "...")]`
   - `#[slot(skip)]`
-- This works well in `lpc-slot-mockup`, where source structs were authored around `SlotValue` wrappers.
+- This works well in `lpc-slot-mockup`, where source structs were authored
+  around `ValueSlot` wrappers.
 
 ### Real Source Defs
 
@@ -107,6 +122,25 @@ Out of scope:
   - `mapping` is currently `MappingConfig::PathPoints { paths: Vec<PathSpec>, sample_diameter }`
   - `PathSpec::RingArray` contains `ring_lamp_counts: Vec<u32>`, which does not fit the current slot map-first aggregate vocabulary cleanly.
 
+### Current Basic Example Shape
+
+- `examples/basic/project.toml` has `kind = "project"`, `uid = "basic"`,
+  `name = "basic"`, and `[nodes.<name>] artifact = "./node.toml"` tables.
+  `ProjectDef` currently has no `uid` field.
+- `examples/basic/shader.toml` uses `glsl_path = "shader.glsl"`,
+  `texture_loc = "..texture"`, `render_order = 0`, and `[glsl_opts]`.
+- `examples/basic/texture.toml` uses flat `width` and `height`.
+- `examples/basic/output.toml` uses flat `pin` plus `[options]`.
+- `examples/basic/fixture.toml` still uses externally tagged mapping tables and
+  arrays:
+  - `[mapping.PathPoints]`
+  - `[[mapping.PathPoints.paths]]`
+  - `[mapping.PathPoints.paths.RingArray]`
+  - `ring_lamp_counts = [ ... ]`
+
+M2 should expect to change the fixture TOML shape if we choose the stable-key
+map model for real source.
+
 ### Real Loading Path
 
 - `lpc-engine/src/project_runtime/project_loader.rs` loads:
@@ -129,8 +163,8 @@ Out of scope:
   - `source.texture`
 - The mockup source structs use typed slot wrappers and derive `SlotRecord`.
 - Useful ideas to promote:
-  - `ProjectDef.nodes` as `SlotMap<String, NodeInvocationDef>`
-  - `ShaderDef.param_defs` as `SlotMap<String, ShaderParamDef>`
+  - `ProjectDef.nodes` as `MapSlot<String, NodeInvocationDef>`
+  - `ShaderDef.param_defs` as `MapSlot<String, ShaderParamDef>`
   - source roots register through `StaticSlotAccess`
   - generic server/client tree walk tests over source roots
 - Differences from real source:
@@ -146,7 +180,7 @@ Real source defs are currently plain deserialized values. Slot snapshots require
 
 Options:
 
-1. Convert source defs to store `SlotValue<T>` / `SlotMap<K,V>` directly.
+1. Convert source defs to store `ValueSlot<T>` / `MapSlot<K,V>` directly.
    - Pros: one source of truth; works with current derive and access traits; disk, wire, metadata, mutation, and UI all hang off one domain model.
    - Cons: bigger serde/domain churn; runtime code must use `.value()` or explicit mutation APIs because fields are no longer plain values.
 2. Add borrowed source adapters that expose a plain def plus an artifact/content frame through `SlotAccess`.
@@ -156,9 +190,11 @@ Options:
    - Pros: source defs can remain plain and produce `SlotData` snapshots with a supplied frame.
    - Cons: introduces a second access path unless carefully aligned with `SlotAccess`.
 
-Decision: use option 1. Source defs should become authored domain objects whose fields are slot-aware. This matches the desired architecture: the core domain model is the source of truth and carries shape, metadata, versioning, serialization, and mutation semantics. A plain Rust object can still exist inside an atomic `SlotValue<T>` when the whole object is one lifecycle/version unit.
+Decision: use option 1. Source defs should become authored domain objects whose fields are slot-aware. This matches the desired architecture: the core domain model is the source of truth and carries shape, metadata, versioning, serialization, and mutation semantics. A plain Rust object can still exist inside an atomic `ValueSlot<T>` when the whole object is one lifecycle/version unit.
 
-Implementation implication: typed slot wrappers must serialize to authored TOML as their inner values, while `SlotData` remains the generic wire/snapshot representation with explicit versions.
+Implementation implication: M1.2 proved typed slot wrappers can serialize to
+authored TOML as their inner values, while `SlotData` remains the generic
+wire/snapshot representation with explicit versions.
 
 ### Shape Versus TOML Shape
 
@@ -186,7 +222,7 @@ Options:
 2. Add a source-specific map projection for vectors using string/u32 keys.
 3. Add array support to `SlotShape`/`SlotData` now.
 
-Decision: do not add arrays and do not add custom serde that hides arrays behind maps. Either keep `MappingConfig` as one opaque `SlotValue<MappingConfig>` for the first source cutover or model paths as `SlotMap<u32, PathSpec>` directly in the authored domain. The preferred direction is `SlotMap<u32, PathSpec>` because stable ids on paths are reasonable, there are no external users yet, and the slot-domain rule against arrays should be applied consistently.
+Decision: do not add arrays and do not add custom serde that hides arrays behind maps. Either keep `MappingConfig` as one opaque `ValueSlot<MappingConfig>` for the first source cutover or model paths as `MapSlot<u32, PathSpec>` directly in the authored domain. The preferred direction is `MapSlot<u32, PathSpec>` because stable ids on paths are reasonable, there are no external users yet, and the slot-domain rule against arrays should be applied consistently.
 
 Implication: `examples/basic` can change from TOML arrays to keyed path tables if M2 chooses the structured mapping path.
 
@@ -197,12 +233,15 @@ Implication: `examples/basic` can change from TOML arrays to keyed path tables i
 Suggested direction: add or reuse semantic leaf shapes/conversions:
 
 - `RelativeNodeRef` -> `relative_node_ref_shape()`
-- `LpPathBuf` / GLSL path -> `source_path_shape()`
-- `ArtifactLocator` -> `artifact_path_shape()` or a more specific artifact locator leaf
+- `LpPathBuf` / GLSL path -> `source_path_shape()` or a more precise
+  `LpPathBuf`-backed slot if we decide source defs should retain that concrete
+  type.
+- `ArtifactLocator` -> `artifact_path_shape()` or a more specific artifact
+  locator field/access implementation in `lpc-source`.
 
 ## Open Questions
 
-### Q1. Should M2 keep real source defs plain and use source adapters, rather than converting fields to `SlotValue<T>`?
+### Q1. Should M2 keep real source defs plain and use source adapters, rather than converting fields to `ValueSlot<T>`?
 
 Context: real source defs are clean serde structs today. The current derive assumes versioned wrapper fields, which would churn TOML types and may conflate authored data with runtime/version storage.
 
@@ -216,27 +255,35 @@ Suggested answer: omit `kind` from editable/display slot roots for concrete node
 
 ### Q3. Should `ShaderDef.param_defs` be added in M2?
 
-Context: shader params are one of the reasons source slot roots exist, but current real shader TOML and `examples/basic` do not have param defs. The mockup has `SlotMap<String, ShaderParamDef>`.
+Context: shader params are one of the reasons source slot roots exist, but current real shader TOML and `examples/basic` do not have param defs. The mockup has `MapSlot<String, ShaderParamDef>`.
 
-Suggested answer: add the field as `#[serde(default, skip_serializing_if = "SlotMap::is_empty")] pub param_defs: SlotMap<String, ShaderParamDef>` and expose it as a map slot. `SlotMap` should serialize to authored TOML like a normal map. Do not require `examples/basic` to use it in the first slice; add a focused source-slot test with one param def.
+Suggested answer: add the field as `#[serde(default, skip_serializing_if = "MapSlot::is_empty")] pub param_defs: MapSlot<String, ShaderParamDef>` and expose it as a map slot. `MapSlot` should serialize to authored TOML like a normal map. Do not require `examples/basic` to use it in the first slice; add a focused source-slot test with one param def.
 
 ### Q4. How should real `FixtureDef.mapping` be represented in M2?
 
 Context: mapping has nested vectors and enums. The slot system currently has records/maps/enums/options/value leaves, not arrays.
 
-Answer: do not introduce arrays. Prefer `SlotMap<u32, PathSpec>` for path collections, with no custom serde to preserve old array syntax. `SlotValue<MappingConfig>` is acceptable as a fallback if structured mapping makes M2 too large, but the architectural direction is keyed maps.
+Answer: do not introduce arrays. Prefer `MapSlot<u32, PathSpec>` for path collections, with no custom serde to preserve old array syntax. `ValueSlot<MappingConfig>` is acceptable as a fallback if structured mapping makes M2 too large, but the architectural direction is keyed maps.
 
 ### Q5. Should `TextureDef` expose flat `width`/`height` slots or one semantic `size` slot?
 
 Context: slot design favors versioning a logically complete value such as `size`, but real TOML has flat fields and changing TOML shape is not required for this milestone.
 
-Suggested answer: use flat `width` and `height` slots in M2 to reflect actual source; add a future note to consider a semantic `size` field when source schema reshaping is in scope.
+Answer: `size` is not mandatory, but it would be useful for UI work because it
+would show generic rendering of an opaque semantic object. It is reasonable for
+M2 to change `TextureDef` from flat `width` / `height` to a semantic `size`
+slot if that remains a low-risk source schema cleanup.
 
 ### Q6. Where should source shape registration live?
 
 Context: `lpc-source` owns the defs and can define the shapes; `lpc-engine` loads project artifacts and knows artifact content frames.
 
-Suggested answer: add a `lpc_source::node::source_slot_registry` or `lpc_source::node::slot_shapes` helper that registers all source def shapes into a `SlotShapeRegistry`. Engine can call that later, but M2 tests can call it directly.
+Suggested answer: after M1.3, `lpc-source` should use the generated
+`OUT_DIR` slot-shape bootstrap. The crate owns static source root shapes and
+will expose generated helpers such as
+`lpc_source::slot_shapes::register_all_static_slot_shapes` and
+`lpc_source::slot_shapes::ensure_static_slot_shape`. Engine can call those
+later, but M2 source tests can call them directly.
 
 ### Q7. Should M2 convert all real source defs or only one vertical slice?
 

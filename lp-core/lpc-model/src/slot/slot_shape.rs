@@ -145,6 +145,36 @@ impl SlotShape {
     pub fn leaf(shape: SlotValueShape) -> Self {
         Self::Value { shape }
     }
+
+    /// Collect root shape ids referenced by this shape tree.
+    ///
+    /// The returned ids are not de-duplicated. Callers that care about unique
+    /// ids can collect into a set; preserving traversal order keeps this helper
+    /// simple and predictable for generated bootstrap code.
+    pub fn referenced_shape_ids(&self) -> Vec<SlotShapeId> {
+        let mut refs = Vec::new();
+        self.collect_referenced_shape_ids(&mut refs);
+        refs
+    }
+
+    fn collect_referenced_shape_ids(&self, refs: &mut Vec<SlotShapeId>) {
+        match self {
+            Self::Ref { id } => refs.push(*id),
+            Self::Unit { .. } | Self::Value { .. } => {}
+            Self::Record { fields, .. } => {
+                for field in fields {
+                    field.shape.collect_referenced_shape_ids(refs);
+                }
+            }
+            Self::Map { value, .. } => value.collect_referenced_shape_ids(refs),
+            Self::Enum { variants, .. } => {
+                for variant in variants {
+                    variant.shape.collect_referenced_shape_ids(refs);
+                }
+            }
+            Self::Option { some, .. } => some.collect_referenced_shape_ids(refs),
+        }
+    }
 }
 
 /// Key domain for a [`SlotShape::Map`].
