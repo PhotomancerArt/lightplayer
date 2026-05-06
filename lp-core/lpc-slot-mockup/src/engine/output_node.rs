@@ -3,7 +3,7 @@ use lpc_model::{
     SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, record, value, version};
+use crate::model::{field, record, value};
 
 pub struct OutputNode {
     frames_sent: SlotValue<u32>,
@@ -38,7 +38,6 @@ impl StaticSlotAccess for OutputNode {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![field("frames_sent", value(ModelType::U32))]),
         )

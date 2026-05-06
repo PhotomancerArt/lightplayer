@@ -6,7 +6,7 @@ use lpc_model::{
     SlotShapeRegistryError, StaticSlotAccess, Versioned, current_state_version,
 };
 
-use crate::model::{field, id, map, option, record, reference, value, version};
+use crate::model::{field, id, map, option, record, reference, value};
 use crate::source::ShaderDef;
 
 pub struct ShaderNode {
@@ -80,14 +80,9 @@ impl StaticSlotAccess for ShaderNode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("engine.shader_node");
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        registry.register_tree(
-            version(),
-            id("engine.shader_param_value"),
-            value(ModelType::F32),
-        )?;
+        registry.register_tree(id("engine.shader_param_value"), value(ModelType::F32))?;
 
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![
                 field(

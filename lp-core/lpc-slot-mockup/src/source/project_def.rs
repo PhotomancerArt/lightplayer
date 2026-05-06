@@ -6,7 +6,7 @@ use lpc_model::{
     StaticSlotAccess,
 };
 
-use crate::model::{field, id, map, record, reference, value, version};
+use crate::model::{field, id, map, record, reference, value};
 
 pub struct ProjectDef {
     nodes: SlotMap<String, NodeInvocationDef>,
@@ -63,13 +63,11 @@ impl StaticSlotAccess for ProjectDef {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             id("source.node_invocation"),
             record(vec![field("artifact", value(ModelType::String))]),
         )?;
 
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![field(
                 "nodes",

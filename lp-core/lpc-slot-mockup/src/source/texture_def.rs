@@ -3,7 +3,7 @@ use lpc_model::{
     SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, record, value, version};
+use crate::model::{field, record, value};
 
 pub struct TextureDef {
     width: SlotValue<u32>,
@@ -40,7 +40,6 @@ impl StaticSlotAccess for TextureDef {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![
                 field("width", value(ModelType::U32)),

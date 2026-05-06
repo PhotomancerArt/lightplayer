@@ -6,7 +6,7 @@ use lpc_model::{
     SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, id, map, option, record, reference, value, version};
+use crate::model::{field, id, map, option, record, reference, value};
 
 pub struct ShaderDef {
     glsl_path: SlotValue<String>,
@@ -84,13 +84,11 @@ impl StaticSlotAccess for ShaderDef {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             id("source.scalar_hint"),
             record(vec![field("value", value(ModelType::F32))]),
         )?;
 
         registry.register_tree(
-            version(),
             id("source.shader_param_def"),
             record(vec![
                 field("label", value(ModelType::String)),
@@ -102,7 +100,6 @@ impl StaticSlotAccess for ShaderDef {
         )?;
 
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![
                 field("glsl_path", value(ModelType::String)),

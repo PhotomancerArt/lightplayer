@@ -4,7 +4,7 @@ use lpc_model::{
     SlotShapeRegistryError, SlotValue, StaticSlotAccess, current_state_version,
 };
 
-use crate::model::{field, id, mapping_shape, option, record, reference, value, version};
+use crate::model::{field, id, mapping_shape, option, record, reference, value};
 
 use super::shader_def::ScalarHint;
 
@@ -72,7 +72,6 @@ impl StaticSlotAccess for FixtureDef {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![
                 field("output_loc", value(ModelType::String)),

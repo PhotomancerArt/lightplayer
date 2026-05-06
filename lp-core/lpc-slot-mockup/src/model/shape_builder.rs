@@ -1,14 +1,9 @@
 use lpc_model::{
-    FrameId, ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId,
-    SlotVariantShape, current_state_version,
+    ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId, SlotVariantShape,
 };
 
 pub(crate) fn id(value: &str) -> SlotShapeId {
     SlotShapeId::parse(value).unwrap()
-}
-
-pub(crate) fn version() -> FrameId {
-    current_state_version()
 }
 
 pub(crate) fn mapping_shape() -> SlotShape {

@@ -6,7 +6,7 @@ use lpc_model::{
     StaticSlotAccess,
 };
 
-use crate::model::{field, id, map, mapping_shape, record, reference, value, version};
+use crate::model::{field, id, map, mapping_shape, record, reference, value};
 use crate::source::FixtureMapping;
 
 pub struct FixtureNode {
@@ -60,7 +60,6 @@ impl StaticSlotAccess for FixtureNode {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             id("engine.touch"),
             record(vec![
                 field("position", value(ModelType::Vec2)),
@@ -69,7 +68,6 @@ impl StaticSlotAccess for FixtureNode {
         )?;
 
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![
                 field(

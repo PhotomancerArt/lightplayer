@@ -3,7 +3,7 @@ use lpc_model::{
     SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
-use crate::model::{field, record, value, version};
+use crate::model::{field, record, value};
 
 pub struct OutputDef {
     pin: SlotValue<u32>,
@@ -42,7 +42,6 @@ impl StaticSlotAccess for OutputDef {
 
     fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
         registry.register_tree(
-            version(),
             Self::SHAPE_ID,
             record(vec![
                 field("pin", value(ModelType::U32)),

@@ -1,4 +1,4 @@
-use crate::{FrameId, SlotShape, SlotShapeId};
+use crate::{FrameId, SlotShape, SlotShapeId, current_state_version};
 use alloc::collections::BTreeMap;
 
 /// Shape root plus the frame where that root last changed.
@@ -20,6 +20,14 @@ pub struct SlotShapeRegistry {
 impl SlotShapeRegistry {
     pub fn register_tree(
         &mut self,
+        root: SlotShapeId,
+        shape: SlotShape,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_tree_with_version(current_state_version(), root, shape)
+    }
+
+    pub fn register_tree_with_version(
+        &mut self,
         frame: FrameId,
         root: SlotShapeId,
         shape: SlotShape,
@@ -38,7 +46,11 @@ impl SlotShapeRegistry {
         Ok(())
     }
 
-    pub fn unregister_tree(&mut self, frame: FrameId, root: &SlotShapeId) {
+    pub fn unregister_tree(&mut self, root: &SlotShapeId) {
+        self.unregister_tree_with_version(current_state_version(), root);
+    }
+
+    pub fn unregister_tree_with_version(&mut self, frame: FrameId, root: &SlotShapeId) {
         if self.shapes.remove(root).is_some() {
             self.ids_changed_frame = frame;
         }
