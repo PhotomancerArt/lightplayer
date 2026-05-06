@@ -1,6 +1,7 @@
 use crate::debug_ui::nodes::texture;
 use eframe::epaint::Color32;
 use egui::Painter;
+use lpc_model::{LpPathBuf, RelativeNodeRef};
 use lpc_source::node::NodeKind;
 use lpc_source::node::shader::ShaderDef;
 use lpc_source::node::texture::TextureFormat;
@@ -134,7 +135,8 @@ fn shader_render_product_for_texture<'a>(
         let Some(shader_config) = entry.config.as_any().downcast_ref::<ShaderDef>() else {
             continue;
         };
-        if shader_config.texture_loc.as_str() != texture_entry.path.as_str() {
+        if !relative_ref_targets_path(&entry.path, &shader_config.texture_loc, &texture_entry.path)
+        {
             continue;
         }
 
@@ -170,6 +172,22 @@ fn shader_render_product_for_texture<'a>(
     }
 
     None
+}
+
+fn relative_ref_targets_path(
+    current: &LpPathBuf,
+    loc: &RelativeNodeRef,
+    target: &LpPathBuf,
+) -> bool {
+    if loc.parent_hops() == 0 && loc.segments().is_empty() {
+        return current == target;
+    }
+    if loc.parent_hops() != 1 || loc.segments().len() != 1 {
+        return false;
+    }
+
+    current.as_path().parent() == target.as_path().parent()
+        && target.as_path().file_stem() == Some(loc.segments()[0].as_str())
 }
 
 fn draw_fixture_texture(
