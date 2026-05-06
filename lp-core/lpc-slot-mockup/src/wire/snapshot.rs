@@ -4,24 +4,23 @@ use lpc_model::{
     SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotShape, SlotShapeId,
     SlotShapeRegistry, Versioned,
 };
+use lpc_wire::{WireSlotFullSync, WireSlotRootSnapshot};
 
 use crate::engine::MockRuntime;
 
-use super::types::FullSync;
-
-pub fn full_sync(runtime: &MockRuntime) -> FullSync {
-    FullSync {
+pub fn full_sync(runtime: &MockRuntime) -> WireSlotFullSync {
+    WireSlotFullSync {
         registry: runtime.registry.snapshot(),
         roots: runtime
             .roots()
             .into_iter()
             .map(|(name, root)| {
                 let shape_id = root.shape_id();
-                (
-                    name.to_string(),
-                    shape_id.clone(),
-                    snapshot(&shape_id, root.data(), &runtime.registry),
-                )
+                WireSlotRootSnapshot {
+                    name: name.to_string(),
+                    shape: shape_id.clone(),
+                    data: snapshot(&shape_id, root.data(), &runtime.registry),
+                }
             })
             .collect(),
     }

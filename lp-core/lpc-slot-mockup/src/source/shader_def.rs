@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ModelType, ModelValue, RelativeNodeRef, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape,
-    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotValue, StaticSlotAccess,
+    FrameId, ModelType, ModelValue, RelativeNodeRef, SlotAccess, SlotDataAccess, SlotMap,
+    SlotMapKeyShape, SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotValue, StaticSlotAccess,
 };
 
 use crate::model::{field, id, map, option, record, reference, value};
@@ -65,6 +65,25 @@ impl ShaderDef {
     pub fn set_param_value_type(&mut self, name: &str, value_type: &str) {
         let param = self.param_defs.entries.get_mut(name).expect("param def");
         param.set_value_type(value_type);
+    }
+
+    pub fn set_param_label(&mut self, name: &str, label: &str) {
+        let param = self.param_defs.entries.get_mut(name).expect("param def");
+        param.set_label(label);
+    }
+
+    pub fn param_label_changed_frame(&self, name: &str) -> Option<FrameId> {
+        self.param_defs
+            .entries
+            .get(name)
+            .map(ShaderParamDef::label_changed_frame)
+    }
+
+    pub fn param_default_changed_frame(&self, name: &str) -> Option<FrameId> {
+        self.param_defs
+            .entries
+            .get(name)
+            .map(ShaderParamDef::default_changed_frame)
     }
 }
 
@@ -184,6 +203,18 @@ impl ShaderParamDef {
 
     fn set_value_type(&mut self, value_type: &str) {
         self.value_type.set(value_type.to_string());
+    }
+
+    fn set_label(&mut self, label: &str) {
+        self.label.set(label.to_string());
+    }
+
+    fn label_changed_frame(&self) -> FrameId {
+        self.label.changed_frame()
+    }
+
+    fn default_changed_frame(&self) -> FrameId {
+        self.default.changed_frame()
     }
 }
 

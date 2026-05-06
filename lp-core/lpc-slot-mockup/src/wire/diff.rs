@@ -2,17 +2,17 @@ use lpc_model::{
     FrameId, SlotAccess, SlotData, SlotDataAccess, SlotName, SlotPath, SlotShape, SlotShapeId,
     SlotShapeRegistry, Versioned,
 };
+use lpc_wire::{WireSlotChange, WireSlotPatch};
 
 use super::path::slot_name_for_key;
 use super::snapshot::snapshot_shape;
-use super::types::{SlotChange, SlotPatch};
 
 pub fn collect_diff(
     root_name: &str,
     root: &dyn SlotAccess,
     registry: &SlotShapeRegistry,
     since: FrameId,
-) -> Vec<SlotPatch> {
+) -> Vec<WireSlotPatch> {
     let mut patches = Vec::new();
     collect_diff_inner(
         root_name,
@@ -33,7 +33,7 @@ fn collect_diff_inner(
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
     since: FrameId,
-    patches: &mut Vec<SlotPatch>,
+    patches: &mut Vec<WireSlotPatch>,
 ) {
     let shape = registry.get(shape_id).expect("shape");
     collect_diff_shape(root_name, path, shape, data, registry, since, patches);
@@ -46,7 +46,7 @@ fn collect_diff_shape(
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
     since: FrameId,
-    patches: &mut Vec<SlotPatch>,
+    patches: &mut Vec<WireSlotPatch>,
 ) {
     match (shape, data) {
         (SlotShape::Ref { id }, data) => {
@@ -54,10 +54,10 @@ fn collect_diff_shape(
         }
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             if value.changed_frame() > since {
-                patches.push(SlotPatch {
+                patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: SlotChange::Replace(SlotData::Value(Versioned::new(
+                    change: WireSlotChange::Replace(SlotData::Value(Versioned::new(
                         value.changed_frame(),
                         value.value(),
                     ))),
@@ -66,10 +66,10 @@ fn collect_diff_shape(
         }
         (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
             if record.fields_changed_frame() > since {
-                patches.push(SlotPatch {
+                patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: SlotChange::Replace(snapshot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(snapshot_shape(shape, data, registry)),
                 });
             }
             for (index, field) in fields.iter().enumerate() {
@@ -88,10 +88,10 @@ fn collect_diff_shape(
         }
         (SlotShape::Map { value, .. }, SlotDataAccess::Map(map)) => {
             if map.keys_changed_frame() > since {
-                patches.push(SlotPatch {
+                patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: SlotChange::Replace(snapshot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(snapshot_shape(shape, data, registry)),
                 });
             }
             for key in map.keys() {
@@ -114,10 +114,10 @@ fn collect_diff_shape(
                 .find(|variant| variant.name.as_str() == en.variant())
                 .expect("variant");
             if en.variant_changed_frame() > since {
-                patches.push(SlotPatch {
+                patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: SlotChange::Replace(snapshot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(snapshot_shape(shape, data, registry)),
                 });
             }
             collect_diff_shape(
@@ -132,10 +132,10 @@ fn collect_diff_shape(
         }
         (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => {
             if option.presence_changed_frame() > since {
-                patches.push(SlotPatch {
+                patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: SlotChange::Replace(snapshot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(snapshot_shape(shape, data, registry)),
                 });
             }
             if let Some(child) = option.data() {

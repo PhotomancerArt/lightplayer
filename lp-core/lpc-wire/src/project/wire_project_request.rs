@@ -32,6 +32,7 @@ pub enum WireProjectRequest {
 
 /// Node lifecycle / health status on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum WireNodeStatus {
     /// Created but not yet initialized.
     Created,

@@ -1,6 +1,6 @@
 use lpc_model::{
-    ModelStructMember, ModelType, ModelValue, SlotAccess, SlotData, SlotDataAccess, SlotName,
-    SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
+    FrameId, ModelStructMember, ModelType, ModelValue, SlotAccess, SlotData, SlotDataAccess,
+    SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
     current_state_version,
 };
 
@@ -85,6 +85,25 @@ impl ShaderNode {
         self.param_names.remove(index);
         self.params.fields.remove(index);
         self.params.fields_changed_frame = current_state_version();
+    }
+
+    pub fn param_changed_frame(&self, name: &str) -> Option<FrameId> {
+        let index = self
+            .param_names
+            .iter()
+            .position(|param_name| param_name.as_str() == name)?;
+        let SlotData::Value(value) = self.params.fields.get(index)? else {
+            return None;
+        };
+        Some(value.changed_frame())
+    }
+
+    pub fn param_model_type(&self, name: &str) -> Option<ModelType> {
+        let index = self
+            .param_names
+            .iter()
+            .position(|param_name| param_name.as_str() == name)?;
+        self.params.fields.get(index).map(model_type_for_data)
     }
 
     pub fn clear_compile_error(&mut self) {

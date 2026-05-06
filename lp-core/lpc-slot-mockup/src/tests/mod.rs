@@ -3,4 +3,5 @@ mod dynamic_param_shape;
 mod fixture;
 mod full_sync;
 mod incremental_change;
+mod mutation;
 mod server_tree_walk;

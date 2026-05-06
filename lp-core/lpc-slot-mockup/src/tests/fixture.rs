@@ -1,16 +1,17 @@
 use lpc_model::{FrameId, SlotAccess, SlotData, SlotMapKey, SlotPath, SlotShapeId};
+use lpc_view::SlotMirrorView;
+use lpc_wire::{WireSlotChange, WireSlotPatch};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::{
     engine::MockRuntime,
-    view::MockClient,
-    wire::{SlotPatch, collect_diff, full_sync, print_data_root, print_root},
+    wire::{collect_diff, full_sync, print_data_root, print_root},
 };
 
 pub struct Harness {
     _log_guard: MutexGuard<'static, ()>,
     pub runtime: MockRuntime,
-    pub client: MockClient,
+    pub client: SlotMirrorView,
 }
 
 impl Harness {
@@ -22,7 +23,7 @@ impl Harness {
         Self {
             _log_guard: log_guard,
             runtime: MockRuntime::new(),
-            client: MockClient::default(),
+            client: SlotMirrorView::default(),
         }
     }
 
@@ -30,14 +31,14 @@ impl Harness {
         println!("syncing full state to client");
         let sync = full_sync(&self.runtime);
         println!("full sync roots:");
-        for (name, shape, _) in &sync.roots {
-            println!("  {name} shape={shape}");
+        for root in &sync.roots {
+            println!("  {} shape={}", root.name, root.shape);
         }
         self.client.apply_full_sync(sync);
         println!("client full sync applied");
     }
 
-    pub fn sync_diff(&mut self, root_name: &str, since: FrameId) -> Vec<SlotPatch> {
+    pub fn sync_diff(&mut self, root_name: &str, since: FrameId) -> Vec<WireSlotPatch> {
         println!(
             "syncing diff for {root_name} since frame {}",
             since.as_i64()
@@ -45,7 +46,7 @@ impl Harness {
         let root = self.server_root(root_name);
         let patches = collect_diff(root_name, root, &self.runtime.registry, since);
         print_patches(&patches);
-        self.client.apply_patches(patches.clone());
+        self.client.apply_patches(&patches).unwrap();
         println!("client diff applied");
         patches
     }
@@ -113,7 +114,7 @@ pub fn print_lines(lines: Vec<String>) {
     }
 }
 
-pub fn print_patches(patches: &[SlotPatch]) {
+pub fn print_patches(patches: &[WireSlotPatch]) {
     println!("diff:");
     if patches.is_empty() {
         println!("  <empty>");
@@ -128,9 +129,9 @@ pub fn print_patches(patches: &[SlotPatch]) {
     }
 }
 
-pub fn describe_change(patch: &SlotPatch) -> String {
+pub fn describe_change(patch: &WireSlotPatch) -> String {
     match &patch.change {
-        crate::wire::SlotChange::Replace(data) => format!("replace {}", describe_data(data)),
+        WireSlotChange::Replace(data) => format!("replace {}", describe_data(data)),
     }
 }
 
@@ -191,6 +192,20 @@ pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str)
     };
     assert_eq!(
         value_type.value(),
+        &lpc_model::ModelValue::String(expected.to_string())
+    );
+}
+
+pub fn assert_shader_param_def_label(data: &SlotData, name: &str, expected: &str) {
+    let selected = select(data, &format!("param_defs.{name}"));
+    let SlotData::Record(param_def) = selected else {
+        panic!("shader param def record");
+    };
+    let SlotData::Value(label) = &param_def.fields[0] else {
+        panic!("shader param def label");
+    };
+    assert_eq!(
+        label.value(),
         &lpc_model::ModelValue::String(expected.to_string())
     );
 }

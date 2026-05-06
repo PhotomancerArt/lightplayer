@@ -4173,6 +4173,8 @@ name = "lpc-slot-mockup"
 version = "40.0.0"
 dependencies = [
  "lpc-model",
+ "lpc-view",
+ "lpc-wire",
 ]
 
 [[package]]

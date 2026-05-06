@@ -1,4 +1,11 @@
-use lpc_model::{FrameId, SlotAccess, SlotShapeRegistry, set_current_state_version};
+use lpc_model::{
+    FrameId, ModelType, ModelValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
+    StaticSlotAccess, set_current_state_version,
+};
+use lpc_wire::{
+    WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
+    WireSlotMutationResponse, WireSlotMutationResult,
+};
 
 use crate::source::{FixtureDef, OutputDef, ProjectDef, ShaderDef, TextureDef};
 
@@ -104,9 +111,138 @@ impl MockRuntime {
         self.fixture_node.remove_touch(id);
     }
 
+    pub fn apply_slot_mutation(
+        &mut self,
+        frame: FrameId,
+        request: WireSlotMutationRequest,
+    ) -> WireSlotMutationResponse {
+        set_current_state_version(frame);
+        let result = self.apply_slot_mutation_result(&request);
+        WireSlotMutationResponse {
+            id: request.id,
+            result,
+        }
+    }
+
     fn refresh_shader_node_shape(&mut self) {
         self.registry
             .replace_tree(ShaderNode::SHAPE_ID, self.shader_node.shape());
+    }
+
+    fn apply_slot_mutation_result(
+        &mut self,
+        request: &WireSlotMutationRequest,
+    ) -> WireSlotMutationResult {
+        let info = match self.mutation_target_info(&request.root, &request.path) {
+            Ok(info) => info,
+            Err(rejection) => return WireSlotMutationResult::Rejected(rejection),
+        };
+
+        if info.shape_version != request.expected_shape_version {
+            return WireSlotMutationResult::Rejected(WireSlotMutationRejection::ShapeConflict {
+                current_version: info.shape_version,
+            });
+        }
+        if info.data_version != request.expected_data_version {
+            return WireSlotMutationResult::Rejected(WireSlotMutationRejection::DataConflict {
+                current_version: info.data_version,
+            });
+        }
+
+        let WireSlotMutationOp::SetValue(value) = &request.op;
+        if !model_value_matches_type(value, &info.ty) {
+            return WireSlotMutationResult::Rejected(WireSlotMutationRejection::WrongType);
+        }
+
+        match (&info.target, value) {
+            (MutationTarget::ShaderExposureParam, ModelValue::F32(value)) => {
+                self.shader_node.set_param("exposure", *value);
+                WireSlotMutationResult::Accepted
+            }
+            (MutationTarget::ShaderExposureLabel, ModelValue::String(value)) => {
+                self.shader_def.set_param_label("exposure", value);
+                WireSlotMutationResult::Accepted
+            }
+            (MutationTarget::Unsupported, _) => {
+                WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
+            }
+            _ => WireSlotMutationResult::Rejected(WireSlotMutationRejection::WrongType),
+        }
+    }
+
+    fn mutation_target_info(
+        &self,
+        root: &str,
+        path: &SlotPath,
+    ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
+        let path = path.to_string();
+        match root {
+            "engine.shader_node" => self.shader_node_mutation_target_info(&path),
+            "source.shader" => self.shader_source_mutation_target_info(&path),
+            _ => Err(WireSlotMutationRejection::UnknownRoot),
+        }
+    }
+
+    fn shader_node_mutation_target_info(
+        &self,
+        path: &str,
+    ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
+        let (name, target) = match path {
+            "params.exposure" => ("exposure", MutationTarget::ShaderExposureParam),
+            "params.speed" => ("speed", MutationTarget::Unsupported),
+            _ => return Err(WireSlotMutationRejection::UnknownPath),
+        };
+        Ok(MutationTargetInfo {
+            target,
+            shape_version: self.root_shape_version(ShaderNode::SHAPE_ID)?,
+            data_version: self
+                .shader_node
+                .param_changed_frame(name)
+                .ok_or(WireSlotMutationRejection::UnknownPath)?,
+            ty: self
+                .shader_node
+                .param_model_type(name)
+                .ok_or(WireSlotMutationRejection::UnknownPath)?,
+        })
+    }
+
+    fn shader_source_mutation_target_info(
+        &self,
+        path: &str,
+    ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
+        match path {
+            "param_defs.exposure.label" => Ok(MutationTargetInfo {
+                target: MutationTarget::ShaderExposureLabel,
+                shape_version: self
+                    .root_shape_version(<ShaderDef as StaticSlotAccess>::SHAPE_ID)?,
+                data_version: self
+                    .shader_def
+                    .param_label_changed_frame("exposure")
+                    .ok_or(WireSlotMutationRejection::UnknownPath)?,
+                ty: ModelType::String,
+            }),
+            "param_defs.exposure.default" => Ok(MutationTargetInfo {
+                target: MutationTarget::Unsupported,
+                shape_version: self
+                    .root_shape_version(<ShaderDef as StaticSlotAccess>::SHAPE_ID)?,
+                data_version: self
+                    .shader_def
+                    .param_default_changed_frame("exposure")
+                    .ok_or(WireSlotMutationRejection::UnknownPath)?,
+                ty: ModelType::F32,
+            }),
+            _ => Err(WireSlotMutationRejection::UnknownPath),
+        }
+    }
+
+    fn root_shape_version(
+        &self,
+        shape_id: SlotShapeId,
+    ) -> Result<FrameId, WireSlotMutationRejection> {
+        self.registry
+            .entry(&shape_id)
+            .map(|entry| entry.changed_frame)
+            .ok_or(WireSlotMutationRejection::UnknownRoot)
     }
 }
 
@@ -114,4 +250,44 @@ impl Default for MockRuntime {
     fn default() -> Self {
         Self::new()
     }
+}
+
+struct MutationTargetInfo {
+    target: MutationTarget,
+    shape_version: FrameId,
+    data_version: FrameId,
+    ty: ModelType,
+}
+
+enum MutationTarget {
+    ShaderExposureParam,
+    ShaderExposureLabel,
+    Unsupported,
+}
+
+fn model_value_matches_type(value: &ModelValue, ty: &ModelType) -> bool {
+    matches!(
+        (value, ty),
+        (ModelValue::String(_), ModelType::String)
+            | (ModelValue::I32(_), ModelType::I32)
+            | (ModelValue::U32(_), ModelType::U32)
+            | (ModelValue::F32(_), ModelType::F32)
+            | (ModelValue::Bool(_), ModelType::Bool)
+            | (ModelValue::Vec2(_), ModelType::Vec2)
+            | (ModelValue::Vec3(_), ModelType::Vec3)
+            | (ModelValue::Vec4(_), ModelType::Vec4)
+            | (ModelValue::IVec2(_), ModelType::IVec2)
+            | (ModelValue::IVec3(_), ModelType::IVec3)
+            | (ModelValue::IVec4(_), ModelType::IVec4)
+            | (ModelValue::UVec2(_), ModelType::UVec2)
+            | (ModelValue::UVec3(_), ModelType::UVec3)
+            | (ModelValue::UVec4(_), ModelType::UVec4)
+            | (ModelValue::BVec2(_), ModelType::BVec2)
+            | (ModelValue::BVec3(_), ModelType::BVec3)
+            | (ModelValue::BVec4(_), ModelType::BVec4)
+            | (ModelValue::Mat2x2(_), ModelType::Mat2x2)
+            | (ModelValue::Mat3x3(_), ModelType::Mat3x3)
+            | (ModelValue::Mat4x4(_), ModelType::Mat4x4)
+            | (ModelValue::Resource(_), ModelType::Resource)
+    )
 }

@@ -13,6 +13,7 @@ pub mod message;
 pub mod project;
 pub mod serde_base64;
 pub mod server;
+pub mod slot;
 pub mod state;
 pub mod transport_error;
 pub mod tree;
@@ -30,6 +31,11 @@ pub use project::{
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,
+};
+pub use slot::{
+    WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
+    WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
+    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot,
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
