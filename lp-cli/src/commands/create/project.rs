@@ -403,7 +403,10 @@ mod tests {
             toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
                 .expect("shader node TOML");
         assert_eq!(shader_config.glsl_path, "shader.glsl".as_path_buf());
-        assert_eq!(shader_config.texture_loc.as_str(), "..texture");
+        assert_eq!(
+            shader_config.texture_loc,
+            RelativeNodeRef::parse("..texture").expect("valid node ref")
+        );
 
         // Verify GLSL exists
         let glsl = fs.read_file("/shader.glsl".as_path()).unwrap();
