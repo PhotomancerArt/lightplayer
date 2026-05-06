@@ -1,4 +1,4 @@
-use lpc_model::{SlotAccess, SlotDataAccess, SlotShape, SlotShapeId, SlotShapeRegistry};
+use lpc_model::{SlotAccess, SlotData, SlotDataAccess, SlotShape, SlotShapeId, SlotShapeRegistry};
 
 use super::path::key_segment;
 
@@ -8,6 +8,22 @@ pub fn print_root(root: &dyn SlotAccess, registry: &SlotShapeRegistry) -> Vec<St
         "<root>".to_string(),
         &root.shape_id(),
         root.data(),
+        registry,
+        &mut lines,
+    );
+    lines
+}
+
+pub fn print_data_root(
+    shape_id: &SlotShapeId,
+    data: &SlotData,
+    registry: &SlotShapeRegistry,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    print_inner(
+        "<root>".to_string(),
+        shape_id,
+        data.access(),
         registry,
         &mut lines,
     );
