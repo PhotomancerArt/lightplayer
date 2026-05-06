@@ -1,6 +1,6 @@
 use lpc_model::{FrameId, ModelValue, SlotMapKey};
 
-use super::fixture::{Harness, assert_map_has_key, assert_map_lacks_key, assert_shader_param};
+use super::fixture::{Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks};
 
 #[test]
 fn incremental_changes_patch_client_state() {
@@ -39,12 +39,12 @@ fn incremental_changes_patch_client_state() {
         .runtime
         .remove_shader_param(FrameId::new(4), "speed");
     harness.print_server_tree("engine.shader_node");
+    harness.sync_registry();
     harness.sync_diff("engine.shader_node", FrameId::new(3));
     harness.print_client_tree("engine.shader_node");
-    assert_map_lacks_key(
+    assert_shader_param_lacks(
         harness.client.roots.get("engine.shader_node").unwrap(),
-        "params",
-        SlotMapKey::String("speed".to_string()),
+        "speed",
     );
 
     println!("server updating source.fixture#mapping to square and brightness to none");

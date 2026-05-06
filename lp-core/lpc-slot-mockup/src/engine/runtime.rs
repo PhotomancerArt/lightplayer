@@ -1,6 +1,5 @@
-use lpc_model::{FrameId, ModelType, SlotAccess, SlotShapeRegistry, set_current_state_version};
+use lpc_model::{FrameId, SlotAccess, SlotShapeRegistry, set_current_state_version};
 
-use crate::model::{id, value as shape_value};
 use crate::source::{FixtureDef, OutputDef, ProjectDef, ShaderDef, TextureDef};
 
 use super::{FixtureNode, OutputNode, ShaderNode};
@@ -25,10 +24,15 @@ impl MockRuntime {
         crate::model::register_shapes(&mut registry);
 
         let shader_def = ShaderDef::new();
+        let shader_node = ShaderNode::from_def(&shader_def);
+        registry
+            .register_tree(ShaderNode::SHAPE_ID, shader_node.shape())
+            .unwrap();
+
         Self {
             registry,
             project: ProjectDef::new(),
-            shader_node: ShaderNode::from_def(&shader_def),
+            shader_node,
             fixture_def: FixtureDef::new(),
             output_def: OutputDef::new(),
             texture_def: TextureDef::new(),
@@ -69,16 +73,14 @@ impl MockRuntime {
     ) {
         set_current_state_version(frame);
         self.shader_def.set_param_value_type(name, "vec3");
-        self.registry.replace_tree(
-            id("engine.shader_param_value"),
-            shape_value(ModelType::Vec3),
-        );
         self.shader_node.set_param_vec3(name, param_value);
+        self.refresh_shader_node_shape();
     }
 
     pub fn remove_shader_param(&mut self, frame: FrameId, name: &str) {
         set_current_state_version(frame);
         self.shader_node.remove_param(name);
+        self.refresh_shader_node_shape();
     }
 
     pub fn clear_compile_error(&mut self, frame: FrameId) {
@@ -100,6 +102,11 @@ impl MockRuntime {
     pub fn remove_touch(&mut self, frame: FrameId, id: u32) {
         set_current_state_version(frame);
         self.fixture_node.remove_touch(id);
+    }
+
+    fn refresh_shader_node_shape(&mut self) {
+        self.registry
+            .replace_tree(ShaderNode::SHAPE_ID, self.shader_node.shape());
     }
 }
 

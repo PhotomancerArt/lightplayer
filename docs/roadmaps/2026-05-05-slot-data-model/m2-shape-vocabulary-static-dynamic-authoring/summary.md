@@ -10,6 +10,7 @@
 - Added `lpc-slot-mockup` as a temporary domain pressure harness with `model`, `source`, `engine`, `wire`, and `view` modules.
 - Proved full sync and incremental patching across source defs, engine runtime state, dynamic shader params, enum switching, option clearing, and map key pruning.
 - Proved a shader param definition type change can update the runtime param value shape, sync that registry change to the client, and then sync the corresponding dynamic runtime value.
+- Changed shader runtime params to a dynamic record so per-param names and value types live in the shape, while shader param defs remain a homogeneous map.
 
 ## Decisions For Future Reference
 
@@ -75,3 +76,10 @@
 - **Why:** The client must know whether a path segment represents a string, `i32`, or `u32` key.
 - **Rejected alternatives:** Parse all patch paths as string keys.
 - **Revisit when:** Slot path encoding gets a richer typed segment representation.
+
+#### Dynamic Heterogeneous Namespaces Are Records
+
+- **Decision:** Shader runtime params are modeled as a generated record, not a map.
+- **Why:** Param names are part of the runtime shape and each param may have a different value type. `Map` stays reserved for homogeneous keyed collections like `param_defs`.
+- **Rejected alternatives:** Use one shared map value shape for all runtime params.
+- **Revisit when:** Dynamic record authoring and mutation APIs need add/remove/type-change helpers outside the mockup.

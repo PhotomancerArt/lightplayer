@@ -154,17 +154,31 @@ pub fn assert_shader_param(data: &SlotData, name: &str, expected: lpc_model::Mod
     let SlotData::Record(shader_node) = data else {
         panic!("shader node record");
     };
-    let SlotData::Map(params) = &shader_node.fields[0] else {
-        panic!("shader params map");
+    let SlotData::Record(params) = &shader_node.fields[0] else {
+        panic!("shader params record");
     };
-    let SlotData::Value(value) = params
-        .entries
-        .get(&SlotMapKey::String(name.into()))
-        .expect("shader param")
-    else {
+    let SlotData::Value(value) = &params.fields[shader_param_index(name)] else {
         panic!("shader param value");
     };
     assert_eq!(value.value(), &expected);
+}
+
+pub fn assert_shader_param_lacks(data: &SlotData, name: &str) {
+    let SlotData::Record(shader_node) = data else {
+        panic!("shader node record");
+    };
+    let SlotData::Record(params) = &shader_node.fields[0] else {
+        panic!("shader params record");
+    };
+    assert!(shader_param_index(name) >= params.fields.len());
+}
+
+fn shader_param_index(name: &str) -> usize {
+    match name {
+        "exposure" => 0,
+        "speed" => 1,
+        _ => panic!("unknown shader param {name}"),
+    }
 }
 
 pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str) {
@@ -187,14 +201,6 @@ pub fn assert_map_has_key(data: &SlotData, path: &str, key: SlotMapKey) {
         panic!("map at {path}");
     };
     assert!(map.entries.contains_key(&key));
-}
-
-pub fn assert_map_lacks_key(data: &SlotData, path: &str, key: SlotMapKey) {
-    let selected = select(data, path);
-    let SlotData::Map(map) = selected else {
-        panic!("map at {path}");
-    };
-    assert!(!map.entries.contains_key(&key));
 }
 
 pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
