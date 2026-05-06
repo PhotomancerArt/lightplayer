@@ -12,6 +12,14 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+#[cfg(feature = "derive")]
+pub use lpc_slot_macros::SlotRecord;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use alloc::vec::Vec;
+}
+
 // --- Foundation -------------------------------------------------------------------------------
 
 pub mod error;
@@ -68,12 +76,13 @@ pub use slot::{
     render_order_shape, source_path_shape, xy_shape,
 };
 pub use slot::{
-    SlotAccess, SlotData, SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotFieldShape,
-    SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike, SlotMapKeyShape, SlotMeta,
-    SlotName, SlotNameError, SlotOption, SlotOptionAccess, SlotOptionDyn, SlotOwner, SlotPath,
-    SlotPathError, SlotRecord, SlotRecordAccess, SlotRef, SlotRegistry, SlotRegistryError,
-    SlotShape, SlotShapeId, SlotShapeIdError, SlotShapeKind, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree, SlotValidationError, SlotValue,
-    SlotValueAccess, SlotVariantShape, StaticSlotAccess, ValueRef, VersionedSlotShape,
+    SlotAccess, SlotData, SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotEnumShape,
+    SlotFieldShape, SlotMap, SlotMapAccess, SlotMapDyn, SlotMapKey, SlotMapKeyLike,
+    SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOption, SlotOptionAccess,
+    SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotRecord, SlotRecordAccess,
+    SlotRecordShape, SlotRef, SlotRegistry, SlotRegistryError, SlotShape, SlotShapeId,
+    SlotShapeIdError, SlotShapeKind, SlotShapeRegistry, SlotShapeRegistryError,
+    SlotShapeRegistrySnapshot, SlotTree, SlotValidationError, SlotValue, SlotValueAccess,
+    SlotVariantShape, StaticSlotAccess, ValueRef, VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

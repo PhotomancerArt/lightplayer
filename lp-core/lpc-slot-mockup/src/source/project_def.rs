@@ -1,18 +1,18 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{
-    ArtifactPathSlot, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
-    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotAccess,
-    artifact_path_shape,
-};
+use lpc_model::{ArtifactPathSlot, SlotMap, artifact_path_shape};
 
-use crate::model::{field, id, leaf, map, record, reference};
-
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "source.project")]
 pub struct ProjectDef {
+    #[slot(map(key = "string", value_ref = "source.node_invocation"))]
     nodes: SlotMap<String, NodeInvocationDef>,
 }
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "source.node_invocation")]
 pub struct NodeInvocationDef {
+    #[slot(leaf = artifact_path_shape())]
     artifact: ArtifactPathSlot,
 }
 
@@ -48,66 +48,10 @@ impl Default for ProjectDef {
     }
 }
 
-impl SlotAccess for ProjectDef {
-    fn shape_id(&self) -> SlotShapeId {
-        <Self as StaticSlotAccess>::SHAPE_ID
-    }
-
-    fn data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl StaticSlotAccess for ProjectDef {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.project");
-
-    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        registry.register_tree(
-            id("source.node_invocation"),
-            record(vec![field("artifact", leaf(artifact_path_shape()))]),
-        )?;
-
-        registry.register_tree(
-            Self::SHAPE_ID,
-            record(vec![field(
-                "nodes",
-                map(
-                    SlotMapKeyShape::String,
-                    reference(id("source.node_invocation")),
-                ),
-            )]),
-        )
-    }
-}
-
-impl SlotRecordAccess for ProjectDef {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Map(&self.nodes)),
-            _ => None,
-        }
-    }
-}
-
 impl NodeInvocationDef {
     fn new(artifact: &str) -> Self {
         Self {
             artifact: ArtifactPathSlot::new(artifact.to_string()),
-        }
-    }
-}
-
-impl SlotMapValueAccess for NodeInvocationDef {
-    fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl SlotRecordAccess for NodeInvocationDef {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.artifact)),
-            _ => None,
         }
     }
 }

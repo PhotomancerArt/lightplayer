@@ -9,6 +9,7 @@ rust-version.workspace = true
 [features]
 default = ["std"]
 std = ["toml/std", "toml/preserve_order"]
+derive = ["dep:lpc-slot-macros"]
 # JSON Schema for model types (host-side tooling)
 schema-gen = ["std", "dep:schemars"]
 
@@ -17,6 +18,7 @@ hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }
+lpc-slot-macros = { path = "../lpc-slot-macros", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

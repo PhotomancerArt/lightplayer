@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-lpc-model = { path = "../lpc-model", features = ["std"] }
+lpc-model = { path = "../lpc-model", features = ["std", "derive"] }
 lpc-view = { path = "../lpc-view", features = ["std"] }
 lpc-wire = { path = "../lpc-wire", features = ["std"] }
 

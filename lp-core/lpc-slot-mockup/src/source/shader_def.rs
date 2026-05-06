@@ -2,37 +2,55 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     FrameId, ModelType, ModelValue, PositiveF32Slot, RatioSlot, RelativeNodeRef,
-    RelativeNodeRefSlot, RenderOrderSlot, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape,
-    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotValue, SourcePathSlot, StaticSlotAccess, positive_f32_shape,
-    ratio_shape, relative_node_ref_shape, render_order_shape, source_path_shape,
+    RelativeNodeRefSlot, RenderOrderSlot, SlotMap, SlotOption, SlotValue, SourcePathSlot,
+    positive_f32_shape, ratio_shape, relative_node_ref_shape, render_order_shape,
+    source_path_shape,
 };
 
-use crate::model::{field, id, leaf, map, option, record, reference, value};
-
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "source.shader")]
 pub struct ShaderDef {
+    #[slot(leaf = source_path_shape())]
     glsl_path: SourcePathSlot,
+    #[slot(leaf = relative_node_ref_shape())]
     texture_loc: RelativeNodeRefSlot,
+    #[slot(leaf = render_order_shape())]
     render_order: RenderOrderSlot,
+    #[slot(record)]
     compiler_options: CompilerOptions,
+    #[slot(map(key = "string", value_ref = "source.shader_param_def"))]
     pub param_defs: SlotMap<String, ShaderParamDef>,
 }
 
+#[derive(lpc_model::SlotRecord)]
 pub struct CompilerOptions {
+    #[slot(value = ModelType::String)]
     add_sub: SlotValue<String>,
+    #[slot(value = ModelType::String)]
     mul: SlotValue<String>,
+    #[slot(value = ModelType::String)]
     div: SlotValue<String>,
 }
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "source.shader_param_def")]
 pub struct ShaderParamDef {
+    #[slot(value = ModelType::String)]
     label: SlotValue<String>,
+    #[slot(value = ModelType::String)]
     description: SlotValue<String>,
+    #[slot(value = ModelType::String)]
     value_type: SlotValue<String>,
+    #[slot(leaf = ratio_shape())]
     default: RatioSlot,
+    #[slot(option_ref = "source.scalar_hint")]
     min: SlotOption<ScalarHint>,
 }
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "source.scalar_hint")]
 pub struct ScalarHint {
+    #[slot(leaf = positive_f32_shape())]
     value: PositiveF32Slot,
 }
 
@@ -95,92 +113,12 @@ impl Default for ShaderDef {
     }
 }
 
-impl SlotAccess for ShaderDef {
-    fn shape_id(&self) -> SlotShapeId {
-        <Self as StaticSlotAccess>::SHAPE_ID
-    }
-
-    fn data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl StaticSlotAccess for ShaderDef {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.shader");
-
-    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        registry.register_tree(
-            id("source.scalar_hint"),
-            record(vec![field("value", leaf(positive_f32_shape()))]),
-        )?;
-
-        registry.register_tree(
-            id("source.shader_param_def"),
-            record(vec![
-                field("label", value(ModelType::String)),
-                field("description", value(ModelType::String)),
-                field("value_type", value(ModelType::String)),
-                field("default", leaf(ratio_shape())),
-                field("min", option(reference(id("source.scalar_hint")))),
-            ]),
-        )?;
-
-        registry.register_tree(
-            Self::SHAPE_ID,
-            record(vec![
-                field("glsl_path", leaf(source_path_shape())),
-                field("texture_loc", leaf(relative_node_ref_shape())),
-                field("render_order", leaf(render_order_shape())),
-                field(
-                    "compiler_options",
-                    record(vec![
-                        field("add_sub", value(ModelType::String)),
-                        field("mul", value(ModelType::String)),
-                        field("div", value(ModelType::String)),
-                    ]),
-                ),
-                field(
-                    "param_defs",
-                    map(
-                        SlotMapKeyShape::String,
-                        reference(id("source.shader_param_def")),
-                    ),
-                ),
-            ]),
-        )
-    }
-}
-
-impl SlotRecordAccess for ShaderDef {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.glsl_path)),
-            1 => Some(SlotDataAccess::Value(&self.texture_loc)),
-            2 => Some(SlotDataAccess::Value(&self.render_order)),
-            3 => Some(SlotDataAccess::Record(&self.compiler_options)),
-            4 => Some(SlotDataAccess::Map(&self.param_defs)),
-            _ => None,
-        }
-    }
-}
-
 impl Default for CompilerOptions {
     fn default() -> Self {
         Self {
             add_sub: SlotValue::new(String::from("saturating")),
             mul: SlotValue::new(String::from("saturating")),
             div: SlotValue::new(String::from("saturating")),
-        }
-    }
-}
-
-impl SlotRecordAccess for CompilerOptions {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.add_sub)),
-            1 => Some(SlotDataAccess::Value(&self.mul)),
-            2 => Some(SlotDataAccess::Value(&self.div)),
-            _ => None,
         }
     }
 }
@@ -220,25 +158,6 @@ impl ShaderParamDef {
     }
 }
 
-impl SlotMapValueAccess for ShaderParamDef {
-    fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl SlotRecordAccess for ShaderParamDef {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.label)),
-            1 => Some(SlotDataAccess::Value(&self.description)),
-            2 => Some(SlotDataAccess::Value(&self.value_type)),
-            3 => Some(SlotDataAccess::Value(&self.default)),
-            4 => Some(SlotDataAccess::Option(&self.min)),
-            _ => None,
-        }
-    }
-}
-
 impl ScalarHint {
     fn new(value: f32) -> Self {
         Self {
@@ -248,20 +167,5 @@ impl ScalarHint {
 
     pub fn mock(value: f32) -> Self {
         Self::new(value)
-    }
-}
-
-impl SlotMapValueAccess for ScalarHint {
-    fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl SlotRecordAccess for ScalarHint {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.value)),
-            _ => None,
-        }
     }
 }

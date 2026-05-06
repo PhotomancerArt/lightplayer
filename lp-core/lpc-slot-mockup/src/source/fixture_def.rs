@@ -1,22 +1,30 @@
 use lpc_model::{
-    Affine2d, Affine2dSlot, ColorOrderSlot, ColorOrderValue, FrameId, ModelType, PositiveF32Slot,
-    RelativeNodeRef, RelativeNodeRefSlot, SlotAccess, SlotDataAccess, SlotEnumAccess,
-    SlotMapValueAccess, SlotOption, SlotRecordAccess, SlotShapeId, SlotShapeRegistry,
-    SlotShapeRegistryError, StaticSlotAccess, XySlot, affine2d_shape, color_order_shape,
+    Affine2d, Affine2dSlot, ColorOrderSlot, ColorOrderValue, FrameId, PositiveF32Slot,
+    RelativeNodeRef, RelativeNodeRefSlot, SlotDataAccess, SlotEnumAccess, SlotEnumShape,
+    SlotMapValueAccess, SlotOption, SlotRecordAccess, XySlot, affine2d_shape, color_order_shape,
     current_state_version, relative_node_ref_shape,
 };
 
-use crate::model::{field, id, leaf, mapping_shape, option, record, reference, value};
+use crate::model::mapping_shape;
 
 use super::shader_def::ScalarHint;
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "source.fixture")]
 pub struct FixtureDef {
+    #[slot(leaf = relative_node_ref_shape())]
     output_loc: RelativeNodeRefSlot,
+    #[slot(leaf = relative_node_ref_shape())]
     texture_loc: RelativeNodeRefSlot,
+    #[slot(enum)]
     mapping: FixtureMapping,
+    #[slot(leaf = color_order_shape())]
     color_order: ColorOrderSlot,
+    #[slot(leaf = affine2d_shape())]
     transform: Affine2dSlot,
+    #[slot(option_ref = "source.scalar_hint")]
     brightness: SlotOption<ScalarHint>,
+    #[slot(value = lpc_model::ModelType::Bool)]
     gamma_correction: lpc_model::SlotValue<bool>,
 }
 
@@ -68,50 +76,6 @@ impl Default for FixtureDef {
     }
 }
 
-impl SlotAccess for FixtureDef {
-    fn shape_id(&self) -> SlotShapeId {
-        <Self as StaticSlotAccess>::SHAPE_ID
-    }
-
-    fn data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl StaticSlotAccess for FixtureDef {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("source.fixture");
-
-    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        registry.register_tree(
-            Self::SHAPE_ID,
-            record(vec![
-                field("output_loc", leaf(relative_node_ref_shape())),
-                field("texture_loc", leaf(relative_node_ref_shape())),
-                field("mapping", mapping_shape()),
-                field("color_order", leaf(color_order_shape())),
-                field("transform", leaf(affine2d_shape())),
-                field("brightness", option(reference(id("source.scalar_hint")))),
-                field("gamma_correction", value(ModelType::Bool)),
-            ]),
-        )
-    }
-}
-
-impl SlotRecordAccess for FixtureDef {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.output_loc)),
-            1 => Some(SlotDataAccess::Value(&self.texture_loc)),
-            2 => Some(SlotDataAccess::Enum(&self.mapping)),
-            3 => Some(SlotDataAccess::Value(&self.color_order)),
-            4 => Some(SlotDataAccess::Value(&self.transform)),
-            5 => Some(SlotDataAccess::Option(&self.brightness)),
-            6 => Some(SlotDataAccess::Value(&self.gamma_correction)),
-            _ => None,
-        }
-    }
-}
-
 impl FixtureMapping {
     pub fn disabled() -> Self {
         Self::Disabled {
@@ -133,6 +97,12 @@ impl FixtureMapping {
             origin: XySlot::new([0.1, 0.2]),
             size: XySlot::new([0.8, 0.7]),
         }
+    }
+}
+
+impl SlotEnumShape for FixtureMapping {
+    fn slot_enum_shape() -> lpc_model::SlotShape {
+        mapping_shape()
     }
 }
 

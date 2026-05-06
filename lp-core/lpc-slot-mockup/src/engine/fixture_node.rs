@@ -1,21 +1,23 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{
-    PositiveF32Slot, SlotAccess, SlotDataAccess, SlotMap, SlotMapKeyShape, SlotMapValueAccess,
-    SlotRecordAccess, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotAccess,
-    XySlot, positive_f32_shape, xy_shape,
-};
-
-use crate::model::{field, id, leaf, map, mapping_shape, record, reference};
 use crate::source::FixtureMapping;
+use lpc_model::{PositiveF32Slot, SlotMap, XySlot, positive_f32_shape, xy_shape};
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "engine.fixture_node")]
 pub struct FixtureNode {
+    #[slot(map(key = "u32", value_ref = "engine.touch"))]
     touches: SlotMap<u32, TouchState>,
+    #[slot(enum)]
     mapping_preview: FixtureMapping,
 }
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(shape_id = "engine.touch")]
 pub struct TouchState {
+    #[slot(leaf = xy_shape())]
     position: XySlot,
+    #[slot(leaf = positive_f32_shape())]
     pressure: PositiveF32Slot,
 }
 
@@ -49,72 +51,11 @@ impl Default for FixtureNode {
     }
 }
 
-impl SlotAccess for FixtureNode {
-    fn shape_id(&self) -> SlotShapeId {
-        <Self as StaticSlotAccess>::SHAPE_ID
-    }
-
-    fn data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl StaticSlotAccess for FixtureNode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("engine.fixture_node");
-
-    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        registry.register_tree(
-            id("engine.touch"),
-            record(vec![
-                field("position", leaf(xy_shape())),
-                field("pressure", leaf(positive_f32_shape())),
-            ]),
-        )?;
-
-        registry.register_tree(
-            Self::SHAPE_ID,
-            record(vec![
-                field(
-                    "touches",
-                    map(SlotMapKeyShape::U32, reference(id("engine.touch"))),
-                ),
-                field("mapping_preview", mapping_shape()),
-            ]),
-        )
-    }
-}
-
-impl SlotRecordAccess for FixtureNode {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Map(&self.touches)),
-            1 => Some(SlotDataAccess::Enum(&self.mapping_preview)),
-            _ => None,
-        }
-    }
-}
-
 impl TouchState {
     fn new(position: [f32; 2], pressure: f32) -> Self {
         Self {
             position: XySlot::new(position),
             pressure: PositiveF32Slot::new(pressure),
-        }
-    }
-}
-
-impl SlotMapValueAccess for TouchState {
-    fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
-    }
-}
-
-impl SlotRecordAccess for TouchState {
-    fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
-        match index {
-            0 => Some(SlotDataAccess::Value(&self.position)),
-            1 => Some(SlotDataAccess::Value(&self.pressure)),
-            _ => None,
         }
     }
 }

@@ -4146,6 +4146,7 @@ name = "lpc-model"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "lpc-slot-macros",
  "schemars",
  "serde",
  "serde_json",
@@ -4166,6 +4167,15 @@ dependencies = [
  "lps-shared",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "lpc-slot-macros"
+version = "40.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

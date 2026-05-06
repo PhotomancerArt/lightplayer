@@ -5,14 +5,17 @@
 
 mod slot_access;
 mod slot_data;
+mod slot_enum_shape;
 mod slot_leaf;
 mod slot_meta;
 mod slot_name;
 mod slot_owner;
 mod slot_path;
+mod slot_record_shape;
 mod slot_ref;
 mod slot_registry;
 mod slot_shape;
+mod slot_shape_builder;
 mod slot_shape_registry;
 mod slot_tree;
 mod slot_value;
@@ -23,6 +26,7 @@ pub use slot_access::{
     SlotValueAccess, StaticSlotAccess,
 };
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
+pub use slot_enum_shape::SlotEnumShape;
 pub use slot_leaf::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
     FromModelValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
@@ -35,11 +39,17 @@ pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError};
+pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
 pub use slot_registry::{SlotRegistry, SlotRegistryError};
 pub use slot_shape::{
     SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError, SlotVariantShape,
 };
+pub mod shape {
+    pub use super::slot_shape_builder::{
+        field, id, leaf, map, option, record, reference, unit, value, variant,
+    };
+}
 pub use slot_shape_registry::{
     SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, VersionedSlotShape,
 };

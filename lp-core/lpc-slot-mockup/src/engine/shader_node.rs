@@ -1,11 +1,10 @@
+use crate::source::ShaderDef;
 use lpc_model::{
     FrameId, ModelStructMember, ModelType, ModelValue, SlotAccess, SlotData, SlotDataAccess,
     SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
     current_state_version,
+    slot::shape::{field, option, record, value},
 };
-
-use crate::model::{field, option, record, value};
-use crate::source::ShaderDef;
 
 pub struct ShaderNode {
     param_names: Vec<SlotName>,
