@@ -13,7 +13,7 @@ or engine runtime behavior. Those live in `lpc-source`, `lpc-wire`, and
 
 **Naming:** Keep foundational shared vocabulary unprefixed (`NodeId`,
 `TreePath`, `ValuePath`, `SlotRef`, `FrameId`, `Kind`, …). Use `Model*` for
-portable structural value/type representations (`ModelValue`, `ModelType`,
+portable structural value/type representations (`LpValue`, `LpType`,
 `ModelStructMember`). Do not use `Wire*` for those types — wire framing lives in
 `lpc-wire`, but the shared portable shapes are model-owned.
 

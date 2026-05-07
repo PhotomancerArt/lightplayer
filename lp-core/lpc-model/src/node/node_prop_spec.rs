@@ -5,8 +5,8 @@
 //! endpoints and [`crate::ValueRef`] only for explicit projection inside an
 //! atomic slot value.
 
-use crate::value::value_path::{PathParseError, Segment, ValuePath, parse_path};
 use crate::tree::tree_path::{PathError, TreePath};
+use crate::value::value_path::{PathParseError, Segment, ValuePath, parse_path};
 use core::fmt;
 
 /// Error from [`NodePropSpec::parse`]: missing or duplicate `#` separator, a

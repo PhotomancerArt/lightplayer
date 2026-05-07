@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ResourceRef, SlotDataAccess,
-    ValueEditorHint, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToLpValue, Versioned, current_state_version,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ResourceRef, SlotDataAccess, SlotMeta,
+    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError, Versioned, current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -91,7 +91,7 @@ impl FromLpValue for ResourceRef {
 }
 
 impl SlotValue for ResourceRef {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.resource_ref");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.resource_ref");
 
     fn value_shape() -> SlotValueShape {
         resource_ref_shape()
@@ -100,7 +100,7 @@ impl SlotValue for ResourceRef {
 
 pub fn resource_ref_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.resource_ref"),
+        id: SlotShapeId::from_static_name("slot.leaf.resource_ref"),
         ty: LpType::Resource,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Resource,
@@ -109,7 +109,7 @@ pub fn resource_ref_shape() -> SlotValueShape {
 
 pub fn runtime_buffer_resource_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.runtime_buffer_resource"),
+        id: SlotShapeId::from_static_name("slot.leaf.runtime_buffer_resource"),
         ty: LpType::Resource,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::RuntimeBufferResource,
@@ -118,7 +118,7 @@ pub fn runtime_buffer_resource_shape() -> SlotValueShape {
 
 pub fn render_product_resource_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.render_product_resource"),
+        id: SlotShapeId::from_static_name("slot.leaf.render_product_resource"),
         ty: LpType::Resource,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::RenderProductResource,

@@ -6,7 +6,7 @@
 //! its value last changed; the sync layer diffs against a client's
 //! `since_frame` to emit minimal field-level deltas. `T` is the natural
 //! Rust type per field (`Versioned<u32>`, `Versioned<Vec<u8>>`, …); reflection
-//! over [`ModelValue`] is the wire / client view.
+//! over [`LpValue`] is the wire / client view.
 
 use crate::project::FrameId;
 

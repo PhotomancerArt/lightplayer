@@ -4,7 +4,7 @@
 //! Together they are the **composition** layer of the Quantity model
 //! (`docs/design/lightplayer/quantity.md` §1, §2, and §6). `Shape` is *only*
 //! `Scalar | Array | Struct` (no tuples or sum types) so every slot’s storage
-//! projects cleanly to a [`crate::ModelType`] and GPU layouts (`quantity.md` §6,
+//! projects cleanly to a [`crate::LpType`] and GPU layouts (`quantity.md` §6,
 //! “Why no tuples”).
 //!
 //! **Defaults (M2, “Q15 Option A”):** [`SrcShape::Scalar`] carries a **mandatory**
@@ -31,7 +31,7 @@ use lpc_model::LpValue;
 use lpc_model::NodeName;
 use lpc_model::value::constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 use lpc_model::value::kind::Kind;
-use lpc_model::value::lp_type::{ModelStructMember, LpType};
+use lpc_model::value::lp_type::{LpType, ModelStructMember};
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Error;

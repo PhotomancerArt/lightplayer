@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, ValueEditorHint,
-    LpValueRootId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
+    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, Versioned,
     current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -75,7 +75,7 @@ impl FieldSlot for PositiveF32Slot {
 
 pub fn positive_f32_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.positive_f32"),
+        id: SlotShapeId::from_static_name("slot.leaf.positive_f32"),
         ty: LpType::F32,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Number {

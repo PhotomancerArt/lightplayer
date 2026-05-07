@@ -1,6 +1,10 @@
-use crate::{
-    FrameId, SlotShape, SlotShapeId, current_state_version,
-};
+//! Registry for id-addressed slot shape roots.
+//!
+//! Static Rust-authored slot roots and dynamic runtime-generated roots both
+//! register here. The registry is versioned so clients can sync shape additions,
+//! removals, and replacements before applying slot data patches.
+
+use crate::{FrameId, SlotShape, SlotShapeId, current_state_version};
 use alloc::collections::BTreeMap;
 
 /// Shape root plus the frame where that root last changed.
@@ -30,10 +34,10 @@ impl SlotShapeRegistry {
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
-        self.register_tree_with_version(current_state_version(), root, shape)
+        self.register_root_with_version(current_state_version(), root, shape)
     }
 
-    pub fn register_tree_with_version(
+    pub fn register_root_with_version(
         &mut self,
         frame: FrameId,
         root: SlotShapeId,
@@ -187,7 +191,7 @@ mod tests {
     use alloc::vec;
 
     #[test]
-    fn ensure_tree_inserts_new_shape() {
+    fn ensure_root_inserts_new_shape() {
         let mut registry = SlotShapeRegistry::default();
         let id = SlotShapeId::from_static_name("test.shape");
 
@@ -200,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_tree_is_idempotent_for_same_shape() {
+    fn ensure_root_is_idempotent_for_same_shape() {
         let mut registry = SlotShapeRegistry::default();
         let id = SlotShapeId::from_static_name("test.shape");
         let shape = SlotShape::value(LpType::Bool);
@@ -210,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_tree_rejects_conflicting_shape() {
+    fn ensure_root_rejects_conflicting_shape() {
         let mut registry = SlotShapeRegistry::default();
         let id = SlotShapeId::from_static_name("test.shape");
 

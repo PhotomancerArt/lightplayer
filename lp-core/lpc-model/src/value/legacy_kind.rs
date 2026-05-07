@@ -15,11 +15,11 @@
 //! A [`Kind`] is **orthogonal to storage** in the sense that each variant maps
 //! to a **fixed** [`Kind::storage`] recipe for GPU and serialization, while
 //! still carrying a distinct *meaning* (e.g. [`Kind::Amplitude`] vs
-//! [`Kind::Ratio`] both use `ModelType::F32` in v0 but differ in default
+//! [`Kind::Ratio`] both use `LpType::F32` in v0 but differ in default
 //! constraint, presentation, and intent — see the §3 table in `quantity.md`).
 
 use crate::value::constraint::{Constraint, ConstraintFree, ConstraintRange};
-use crate::value::lp_type::{ModelStructMember, LpType};
+use crate::value::lp_type::{LpType, ModelStructMember};
 use alloc::boxed::Box;
 use alloc::string::String;
 
@@ -118,11 +118,11 @@ pub enum Kind {
     Ratio,
     /// [0, 1) **wrapping** cycle position; distinct from [`Kind::Angle`] and [`Kind::Ratio`] by intent (`quantity.md` §3; see also `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` Q3 for `Phase` vs `Angle`).
     Phase,
-    /// Non-negative integer count; storage `ModelType::I32` (`quantity.md` §3, storage table).
+    /// Non-negative integer count; storage `LpType::I32` (`quantity.md` §3, storage table).
     Count,
     /// Boolean.
     Bool,
-    /// Discrete choice; storage `ModelType::I32` in v0 (`quantity.md` §3).
+    /// Discrete choice; storage `LpType::I32` in v0 (`quantity.md` §3).
     Choice,
 
     /// Time **instant** as F32 seconds since an epoch; [`Dimension::Time`] (`quantity.md` §3). Default bus is [`Binding::Bus`] with channel `"time"` when no explicit bind (`quantity.md` §8).
@@ -146,9 +146,9 @@ pub enum Kind {
     /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the gradient
     /// to a height-one texture and binds it as a shader field like `params.gradient`.
     Gradient,
-    /// 2D position as `ModelType::Vec2` (`quantity.md` §3).
+    /// 2D position as `LpType::Vec2` (`quantity.md` §3).
     Position2d,
-    /// 3D position as `ModelType::Vec3` (`quantity.md` §3).
+    /// 3D position as `LpType::Vec3` (`quantity.md` §3).
     Position3d,
 
     /// Opaque **texture** semantic kind: portable struct storage (`width` /

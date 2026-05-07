@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, ModelStructMember, LpType, LpValue, SlotDataAccess,
-    ValueEditorHint, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToLpValue, Versioned, current_state_version,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
+    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError, Versioned, current_state_version,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -115,7 +115,7 @@ impl FromLpValue for Dim2u {
 }
 
 impl SlotValue for Dim2u {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.dim2u");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.dim2u");
 
     fn value_shape() -> SlotValueShape {
         dim2u_shape()
@@ -124,7 +124,7 @@ impl SlotValue for Dim2u {
 
 pub fn dim2u_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.dim2u"),
+        id: SlotShapeId::from_static_name("slot.leaf.dim2u"),
         ty: dim2u_model_type(),
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Dimensions,

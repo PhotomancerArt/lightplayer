@@ -106,7 +106,7 @@ pub(crate) fn model_value_audio_level(
 
 pub(crate) fn wire_audio_level_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
-        return Err(FromTomlError::msg("AudioLevel must be a struct ModelValue"));
+        return Err(FromTomlError::msg("AudioLevel must be a struct LpValue"));
     };
     if name.as_deref() != Some("AudioLevel") {
         return Err(FromTomlError::msg("AudioLevel: wrong struct name"));
@@ -153,10 +153,7 @@ pub(crate) fn find_field_i32(
     }
 }
 
-fn find_field_vec3(
-    fields: &[(String, LpValue)],
-    key: &str,
-) -> Result<LpValue, FromTomlError> {
+fn find_field_vec3(fields: &[(String, LpValue)], key: &str) -> Result<LpValue, FromTomlError> {
     let v = fields
         .iter()
         .find(|(k, _)| k == key)

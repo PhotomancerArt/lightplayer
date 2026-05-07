@@ -1,10 +1,10 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use lpc_model::{
-    FieldSlot, FrameId, FromLpValue, MapSlot, LpType, LpValue, PositiveF32Slot,
-    SlotDataAccess, ValueEditorHint, SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotValue,
-    ValueRootError, LpValueRootId, SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess,
-    SlotShape, SlotValueShape, ToLpValue, ValueSlot, XySlot, current_state_version,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, MapSlot, PositiveF32Slot, SlotDataAccess,
+    SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta,
+    SlotRecordAccess, SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
+    ValueEditorHint, ValueRootError, ValueSlot, XySlot, current_state_version,
 };
 use serde::{Deserialize, Serialize};
 
@@ -277,11 +277,11 @@ impl FromLpValue for RingOrder {
 }
 
 impl SlotValue for RingOrder {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.ring_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.ring_order");
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
-            leaf: Self::LEAF_ID,
+            id: Self::SHAPE_ID,
             ty: LpType::String,
             meta: SlotMeta::empty(),
             editor: ValueEditorHint::Dropdown {

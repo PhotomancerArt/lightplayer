@@ -236,7 +236,7 @@ mod tests {
         let shape_id = SlotShapeId::from_static_name("engine.shader_node");
         let mut registry = SlotShapeRegistry::default();
         registry
-            .register_tree_with_version(FrameId::new(1), shape_id, shader_node_shape())
+            .register_root_with_version(FrameId::new(1), shape_id, shader_node_shape())
             .unwrap();
 
         let mut view = SlotMirrorView::new();

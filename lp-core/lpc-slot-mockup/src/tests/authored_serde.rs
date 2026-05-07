@@ -32,7 +32,8 @@ fn generated_basic_source_toml_round_trips_and_documents_authored_shape() {
     assert!(fixture_toml.contains("kind = \"path_points\""));
     assert!(fixture_toml.contains("[mapping.points.1]"));
     assert!(fixture_toml.contains("[mapping.path]"));
-    assert!(fixture_toml.contains("points_per_ring = 96"));
+    assert!(fixture_toml.contains("ring_lamp_counts = ["));
+    assert!(!fixture_toml.contains("[mapping.path.ring_lamp_counts]"));
 }
 
 fn evidence_dir() -> PathBuf {

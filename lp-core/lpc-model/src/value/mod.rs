@@ -17,6 +17,6 @@ pub mod kind {
 }
 
 pub use crate::versioned::Versioned;
-pub use lp_type::{ModelStructMember, LpType};
+pub use lp_type::{LpType, ModelStructMember};
 pub use lp_value::LpValue;
 pub use value_path::{PathParseError, Segment, ValuePath, parse_path};

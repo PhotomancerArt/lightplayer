@@ -1,6 +1,5 @@
 use crate::{
-    FrameId, LpValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    Versioned,
+    FrameId, LpValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, Versioned,
 };
 use alloc::vec::Vec;
 

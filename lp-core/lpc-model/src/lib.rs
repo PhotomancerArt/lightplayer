@@ -24,9 +24,9 @@ pub mod __private {
 
 pub mod error;
 pub mod node;
-pub mod value;
 pub mod slot;
 pub mod types;
+pub mod value;
 
 // --- Shared surface (non-wire) ---------------------------------------------------------------
 
@@ -54,7 +54,7 @@ pub use error::DomainError;
 /// meaning owns its storage shape.
 pub use kind::Kind;
 pub use value::Versioned;
-pub use value::{ModelStructMember, LpType, LpValue};
+pub use value::{LpType, LpValue, ModelStructMember};
 
 pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
@@ -64,26 +64,25 @@ pub use node::{
 };
 pub use project::{FrameId, ProjectConfig};
 pub use project::{advance_state_version, current_state_version, set_current_state_version};
-pub use value::value_path::ValuePath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
     FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
-    ResourceRefSlot, ValueEditorHint, SlotEnumOption, SlotValue, ValueRootError, LpValueRootId,
-    SlotMapValueAccess, SlotValueShape, SourcePathSlot, ToLpValue, XySlot, affine2d_shape,
-    artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape,
-    relative_node_ref_shape, render_order_shape, render_product_resource_shape, resource_ref_shape,
+    ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourcePathSlot,
+    ToLpValue, ValueEditorHint, ValueRootError, XySlot, affine2d_shape, artifact_path_shape,
+    color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
+    render_order_shape, render_product_resource_shape, resource_ref_shape,
     runtime_buffer_resource_shape, source_path_shape, xy_shape,
 };
 pub use slot::{
     FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotData,
-    SlotDataAccess, SlotEnum, SlotEnumAccess, SlotEnumShape, SlotFieldShape,
-    SlotMapDyn, SlotMapKey, SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOptionAccess,
+    SlotDataAccess, SlotEnum, SlotEnumAccess, SlotEnumShape, SlotFieldShape, SlotMapDyn,
+    SlotMapKey, SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOptionAccess,
     SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotRecord,
     SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, 
-    SlotValueAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape,
-    ValueRef, ValueSlot, VersionedSlotShape,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess,
+    SlotVariantShape, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};
+pub use value::value_path::ValuePath;

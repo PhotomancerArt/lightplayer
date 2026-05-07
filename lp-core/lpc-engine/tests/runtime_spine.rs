@@ -18,7 +18,7 @@ use lpc_engine::{
 };
 use lpc_model::{
     FrameId, Kind, LpValue, NodeId, NodePropSpec, SlotPath, ValuePath, bus::ChannelName,
-    value::value_path::parse_path, tree::tree_path::TreePath,
+    tree::tree_path::TreePath, value::value_path::parse_path,
 };
 use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::{

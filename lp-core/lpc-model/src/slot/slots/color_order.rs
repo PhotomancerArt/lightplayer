@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, SlotDataAccess, ValueEditorHint,
-    SlotEnumOption, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToLpValue, Versioned, current_state_version,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, SlotDataAccess, SlotEnumOption, SlotMeta,
+    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError, Versioned, current_state_version,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -151,7 +151,7 @@ impl FromLpValue for ColorOrderValue {
 }
 
 impl SlotValue for ColorOrderValue {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.color_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
 
     fn value_shape() -> SlotValueShape {
         color_order_shape()
@@ -160,7 +160,7 @@ impl SlotValue for ColorOrderValue {
 
 pub fn color_order_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.color_order"),
+        id: SlotShapeId::from_static_name("slot.leaf.color_order"),
         ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Dropdown {

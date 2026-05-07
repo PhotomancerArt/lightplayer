@@ -6,7 +6,6 @@
 mod slot_access;
 mod slot_data;
 mod slot_enum_shape;
-mod slot_value;
 mod slot_meta;
 mod slot_name;
 mod slot_owner;
@@ -16,6 +15,7 @@ mod slot_ref;
 mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
+mod slot_value;
 pub mod slots;
 mod value_ref;
 mod value_slot;
@@ -26,10 +26,6 @@ pub use slot_access::{
 };
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;
-pub use slot_value::{
-    FromLpValue, OrderedF32, ValueEditorHint, SlotEnumOption, SlotValue, ValueRootError,
-    LpValueRootId, SlotValueShape, ToLpValue,
-};
 pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
@@ -38,6 +34,10 @@ pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
 pub use slot_shape::{
     SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError, SlotVariantShape,
+};
+pub use slot_value::{
+    FromLpValue, OrderedF32, SlotEnumOption, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError,
 };
 pub mod shape {
     pub use super::slot_shape_builder::{

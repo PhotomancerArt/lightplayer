@@ -27,20 +27,20 @@
 //! | `Amplitude`, `Ratio`, `Phase`, `Instant`, `Duration`, `Frequency`, `Angle` | any TOML number → `F32` runtime literal |
 //! | `Count`, `Choice` | integer → `I32` runtime literal |
 //! | `Bool` | bool |
-//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`ModelType`](lpc_model::LpType) order: `space`, `coords`) |
+//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`LpType`](lpc_model::LpType) order: `space`, `coords`) |
 //! | `ColorPalette` | authoring table `{ space, count?, entries = [[f,f,f],…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Gradient` | authoring table `{ space, method, count?, stops = [{at,c},…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Position2d` / `Position3d` | 2- or 3-long array of numbers → `Vec2` / `Vec3` |
 //! | `AudioLevel` | table `{ low, mid, high }` |
 //! | `Texture` | string `"black"` (v0) → [`SrcValueSpec::Texture`] |
 //! | `SrcShape::Array` | TOML array, length must match, elements per element [`SrcSlot`][`crate::prop::src_shape::SrcSlot`]’s shape |
-//! | `SrcShape::Struct` | TOML table, one key per struct field, field **declaration** order in [`ModelType`] / slot list |
+//! | `SrcShape::Struct` | TOML table, one key per struct field, field **declaration** order in [`LpType`] / slot list |
 //!
 //! The inverse is `SrcValueSpec::to_toml_for_kind` / `SrcValueSpec::to_toml_for_shape` (private helpers).
 //!
 //! ## Serde and equality
 //!
-//! `ModelValue` in `lpc-model` does not derive `Serialize` / `PartialEq` in
+//! `LpValue` in `lpc-model` does not derive `Serialize` / `PartialEq` in
 //! M2; this module uses [`LpValue`] for serde and hand-written
 //! [`SrcValueSpec`]:[`PartialEq`] (see
 //! `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` — “SrcValueSpec
@@ -338,7 +338,7 @@ impl SrcValueSpec {
                 let a = match v {
                     LpValue::Array(x) => x,
                     _ => {
-                        return Err(FromTomlError::msg("array spec must be ModelValue::Array"));
+                        return Err(FromTomlError::msg("array spec must be LpValue::Array"));
                     }
                 };
                 if a.len() as u32 != *length {
@@ -363,7 +363,7 @@ impl SrcValueSpec {
                 let tval = match v {
                     LpValue::Struct { fields, .. } => fields,
                     _ => {
-                        return Err(FromTomlError::msg("struct spec must be ModelValue::Struct"));
+                        return Err(FromTomlError::msg("struct spec must be LpValue::Struct"));
                     }
                 };
                 let mut map: toml::map::Map<String, toml::Value> = toml::map::Map::new();

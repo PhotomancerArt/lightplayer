@@ -114,6 +114,14 @@ impl MockRuntime {
         self.fixture_def.clear_brightness();
     }
 
+    pub fn set_fixture_ring_lamp_counts(&mut self, frame: FrameId, counts: Vec<u32>) {
+        set_current_state_version(frame);
+        assert!(
+            self.fixture_def.set_ring_lamp_counts(counts),
+            "fixture mapping must be path_points/ring_array in the mockup"
+        );
+    }
+
     pub fn remove_touch(&mut self, frame: FrameId, id: u32) {
         set_current_state_version(frame);
         self.fixture_node.remove_touch(id);
@@ -158,7 +166,7 @@ impl MockRuntime {
         }
 
         let WireSlotMutationOp::SetValue(value) = &request.op;
-        if !model_value_matches_type(value, &info.ty) {
+        if !lp_value_matches_type(value, &info.ty) {
             return WireSlotMutationResult::Rejected(WireSlotMutationRejection::WrongType);
         }
 
@@ -209,7 +217,7 @@ impl MockRuntime {
                 .ok_or(WireSlotMutationRejection::UnknownPath)?,
             ty: self
                 .shader_node
-                .param_model_type(name)
+                .param_lp_type(name)
                 .ok_or(WireSlotMutationRejection::UnknownPath)?,
         })
     }
@@ -271,29 +279,38 @@ enum MutationTarget {
     Unsupported,
 }
 
-fn model_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
-    matches!(
-        (value, ty),
+fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
+    match (value, ty) {
         (LpValue::String(_), LpType::String)
-            | (LpValue::I32(_), LpType::I32)
-            | (LpValue::U32(_), LpType::U32)
-            | (LpValue::F32(_), LpType::F32)
-            | (LpValue::Bool(_), LpType::Bool)
-            | (LpValue::Vec2(_), LpType::Vec2)
-            | (LpValue::Vec3(_), LpType::Vec3)
-            | (LpValue::Vec4(_), LpType::Vec4)
-            | (LpValue::IVec2(_), LpType::IVec2)
-            | (LpValue::IVec3(_), LpType::IVec3)
-            | (LpValue::IVec4(_), LpType::IVec4)
-            | (LpValue::UVec2(_), LpType::UVec2)
-            | (LpValue::UVec3(_), LpType::UVec3)
-            | (LpValue::UVec4(_), LpType::UVec4)
-            | (LpValue::BVec2(_), LpType::BVec2)
-            | (LpValue::BVec3(_), LpType::BVec3)
-            | (LpValue::BVec4(_), LpType::BVec4)
-            | (LpValue::Mat2x2(_), LpType::Mat2x2)
-            | (LpValue::Mat3x3(_), LpType::Mat3x3)
-            | (LpValue::Mat4x4(_), LpType::Mat4x4)
-            | (LpValue::Resource(_), LpType::Resource)
-    )
+        | (LpValue::I32(_), LpType::I32)
+        | (LpValue::U32(_), LpType::U32)
+        | (LpValue::F32(_), LpType::F32)
+        | (LpValue::Bool(_), LpType::Bool)
+        | (LpValue::Vec2(_), LpType::Vec2)
+        | (LpValue::Vec3(_), LpType::Vec3)
+        | (LpValue::Vec4(_), LpType::Vec4)
+        | (LpValue::IVec2(_), LpType::IVec2)
+        | (LpValue::IVec3(_), LpType::IVec3)
+        | (LpValue::IVec4(_), LpType::IVec4)
+        | (LpValue::UVec2(_), LpType::UVec2)
+        | (LpValue::UVec3(_), LpType::UVec3)
+        | (LpValue::UVec4(_), LpType::UVec4)
+        | (LpValue::BVec2(_), LpType::BVec2)
+        | (LpValue::BVec3(_), LpType::BVec3)
+        | (LpValue::BVec4(_), LpType::BVec4)
+        | (LpValue::Mat2x2(_), LpType::Mat2x2)
+        | (LpValue::Mat3x3(_), LpType::Mat3x3)
+        | (LpValue::Mat4x4(_), LpType::Mat4x4)
+        | (LpValue::Resource(_), LpType::Resource) => true,
+        (LpValue::Array(values), LpType::Array(item_ty, len)) => {
+            values.len() == *len
+                && values
+                    .iter()
+                    .all(|value| lp_value_matches_type(value, item_ty))
+        }
+        (LpValue::Array(values), LpType::List(item_ty)) => values
+            .iter()
+            .all(|value| lp_value_matches_type(value, item_ty)),
+        _ => false,
+    }
 }

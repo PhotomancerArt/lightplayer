@@ -9,8 +9,8 @@
 
 use lpc_model::bus::ChannelName;
 use lpc_model::project::FrameId;
-use lpc_model::value::value_path::ValuePath;
 use lpc_model::tree::tree_path::TreePath;
+use lpc_model::value::value_path::ValuePath;
 use lpc_source::prop::src_binding::SrcBinding;
 use lps_shared::LpsValueF32;
 

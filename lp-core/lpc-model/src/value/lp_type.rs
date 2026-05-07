@@ -1,12 +1,15 @@
-//! Model-side structural type projection for storage and slot layout (`ModelType`).
+//! Portable value type grammar for [`LpValue`](crate::LpValue).
 //!
-//! Model-side layout types only; conversion to shader ABI types stays in `lpc-engine`.
+//! `LpType` validates the structural storage form of values that cross disk and
+//! wire boundaries. It intentionally carries no labels, editor hints, or domain
+//! semantics; those live on slot value shapes. Conversion to shader ABI types
+//! stays in `lpc-engine`.
 
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Structural type for GPU-oriented storage and serializers (foundation-side).
+/// Structural storage type for portable LightPlayer values.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -31,7 +34,10 @@ pub enum LpType {
     Mat2x2,
     Mat3x3,
     Mat4x4,
+    /// Fixed-size homogeneous sequence.
     Array(Box<LpType>, usize),
+    /// Variable-length homogeneous sequence.
+    List(Box<LpType>),
     Struct {
         name: Option<String>,
         fields: Vec<ModelStructMember>,
@@ -50,10 +56,19 @@ pub struct ModelStructMember {
 #[cfg(test)]
 mod tests {
     use super::LpType;
+    use alloc::boxed::Box;
 
     #[test]
-    fn model_type_resource_round_trips() {
+    fn lp_type_resource_round_trips() {
         let ty = LpType::Resource;
+        let json = serde_json::to_string(&ty).unwrap();
+        let back: LpType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ty);
+    }
+
+    #[test]
+    fn lp_type_list_round_trips() {
+        let ty = LpType::List(Box::new(LpType::U32));
         let json = serde_json::to_string(&ty).unwrap();
         let back: LpType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ty);

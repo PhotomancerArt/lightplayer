@@ -1,11 +1,15 @@
-//! Portable structural value shape (`ModelValue`), serde-friendly at the foundation layer.
+//! Portable structural value payloads.
+//!
+//! `LpValue` is the disk and wire representation used at slot value leaves. It
+//! may contain internal value structure, but that structure is opaque to the
+//! slot tree: the whole payload is versioned, watched, patched, and mutated as
+//! one logical value.
 
 use crate::resource::ResourceRef;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Value form crossing disk/wire boundaries; serde-friendly at the foundation layer (historical
-/// sibling of the wire mirror inside `lpc_source` value specs).
+/// Value form crossing disk and wire boundaries.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -30,6 +34,8 @@ pub enum LpValue {
     Mat2x2([[f32; 2]; 2]),
     Mat3x3([[f32; 3]; 3]),
     Mat4x4([[f32; 4]; 4]),
+    /// Sequence payload used for both fixed [`LpType::Array`](crate::LpType::Array)
+    /// and variable-length [`LpType::List`](crate::LpType::List) storage.
     Array(Vec<LpValue>),
     Struct {
         name: Option<String>,
@@ -45,7 +51,7 @@ mod tests {
     use alloc::vec;
 
     #[test]
-    fn model_value_serde_roundtrip_scalar_and_vectors() {
+    fn lp_value_serde_roundtrip_scalar_and_vectors() {
         for v in [
             LpValue::I32(-1),
             LpValue::F32(1.5),
@@ -63,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn model_value_serde_roundtrip_array_and_struct() {
+    fn lp_value_serde_roundtrip_array_and_struct() {
         let v = LpValue::Struct {
             name: Some(String::from("S")),
             fields: vec![

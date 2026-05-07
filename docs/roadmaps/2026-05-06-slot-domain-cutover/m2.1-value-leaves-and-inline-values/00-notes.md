@@ -259,7 +259,7 @@ shapes, or reusable value leaf shapes if needed.
 Suggested answer:
 
 Do not add a separate value registry in M2.1. Keep one `SlotShapeRegistry`.
-`ValueRootShape` can participate in the same root/reference machinery because it
+`SlotValueShape` can participate in the same root/reference machinery because it
 owns an `LpType` and represents the value tree root at the slot leaf boundary.
 
 ### Q5: What should this milestone prove?
@@ -275,9 +275,9 @@ Suggested answer:
 This milestone should prove the shape in `lpc-slot-mockup` only. The mockup
 evidence should assert that:
 
-- `mapping.path_points.paths[0].ring_array.ring_lamp_counts` exists as one
+- `mapping.path_points.path.ring_array.ring_lamp_counts` exists as one
   `SlotData::Value`
-- there is no slot path for `ring_lamp_counts[8]`
+- there is no slot path for `ring_lamp_counts[0]`
 - the `LpValue` is an array/list of `u32`
 
 If that feels good, a follow-up milestone can apply the same pattern to
@@ -311,3 +311,21 @@ cargo check -p lpc-source --features schema-gen
 cargo clippy -p lpc-model -p lpc-source -p lpc-slot-mockup -p lpc-wire -p lpc-view -p lpc-engine --all-targets -- -D warnings
 git diff --check
 ```
+
+## Implementation Notes
+
+M2.1 resolved the main naming and boundary questions:
+
+- `LpValueRootId` was removed. `SlotValueShape` now uses `SlotShapeId`.
+- `SlotValue` now exposes `const SHAPE_ID: SlotShapeId`.
+- `SlotValueShape` keeps the metadata/editor side of value semantics.
+- `LpType::List(Box<LpType>)` was added for variable-length homogeneous value
+  payloads.
+- `LpValue::Array(Vec<LpValue>)` remains the transport form for both fixed
+  arrays and lists.
+- `lpc-engine` shader ABI projection for `LpType::List` is intentionally
+  unsupported for now.
+- The mockup has `RingLampCounts` as `ValueSlot<RingLampCounts>`, proving a
+  concise authored list can sync as one slot value instead of a slot map.
+- The pretty TOML writer emits that list across multiple lines, but it is still
+  an inline value assignment rather than a nested map/table.

@@ -231,9 +231,7 @@ fn resolve_default<C: ResolverContext + ?Sized>(
 ///
 /// Not every future runtime domain maps 1:1 into `LpsValueF32`; engine demand
 /// resolution may represent other domains as [`RuntimeProduct`](crate::runtime_product::RuntimeProduct).
-fn model_value_to_lps_value_f32(
-    value: &lpc_model::LpValue,
-) -> Result<LpsValueF32, ResolveError> {
+fn model_value_to_lps_value_f32(value: &lpc_model::LpValue) -> Result<LpsValueF32, ResolveError> {
     use lpc_model::LpValue;
 
     match value {
@@ -289,8 +287,8 @@ mod tests {
     use lpc_model::LpValue;
     use lpc_model::NodePropSpec;
     use lpc_model::bus::ChannelName;
-    use lpc_model::value::value_path::parse_path;
     use lpc_model::tree::tree_path::TreePath;
+    use lpc_model::value::value_path::parse_path;
     use lpc_source::artifact::artifact_loc::ArtifactLocator;
     use lpc_source::prop::src_value_spec::SrcValueSpec;
 

@@ -2,8 +2,8 @@
 
 use alloc::string::{String, ToString};
 use lpc_model::{
-    FromLpValue, LpType, LpValue, ValueEditorHint, SlotEnumOption, SlotValue, ValueRootError,
-    LpValueRootId, SlotMeta, SlotValueShape, ToLpValue, ValueSlot,
+    FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -131,11 +131,11 @@ impl FromLpValue for AddSubMode {
 }
 
 impl SlotValue for AddSubMode {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.glsl_add_sub_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_add_sub_mode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
-            Self::LEAF_ID,
+            Self::SHAPE_ID,
             &[("saturating", "Saturating"), ("wrapping", "Wrapping")],
         )
     }
@@ -154,11 +154,11 @@ impl FromLpValue for MulMode {
 }
 
 impl SlotValue for MulMode {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.glsl_mul_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_mul_mode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
-            Self::LEAF_ID,
+            Self::SHAPE_ID,
             &[("saturating", "Saturating"), ("wrapping", "Wrapping")],
         )
     }
@@ -177,11 +177,11 @@ impl FromLpValue for DivMode {
 }
 
 impl SlotValue for DivMode {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.glsl_div_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_div_mode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
-            Self::LEAF_ID,
+            Self::SHAPE_ID,
             &[("saturating", "Saturating"), ("reciprocal", "Reciprocal")],
         )
     }
@@ -196,9 +196,9 @@ fn string_lp_value(value: LpValue) -> Result<String, ValueRootError> {
     }
 }
 
-fn mode_shape(leaf: LpValueRootId, options: &[(&str, &str)]) -> SlotValueShape {
+fn mode_shape(id: SlotShapeId, options: &[(&str, &str)]) -> SlotValueShape {
     SlotValueShape {
-        leaf,
+        id,
         ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Dropdown {

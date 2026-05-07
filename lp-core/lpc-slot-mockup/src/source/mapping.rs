@@ -6,6 +6,8 @@ use lpc_model::{
     SlotShape, ValueSlot, XySlot, current_state_version,
 };
 
+use super::{RingLampCounts, ring_lamp_counts_shape};
+
 /// Fixture pixel/point mapping authored on a fixture definition.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -48,8 +50,7 @@ pub enum PathSpec {
     RingArray {
         #[serde(skip, default = "current_state_version")]
         variant_changed_frame: FrameId,
-        rings: ValueSlot<u32>,
-        points_per_ring: ValueSlot<u32>,
+        ring_lamp_counts: ValueSlot<RingLampCounts>,
         clockwise: ValueSlot<bool>,
     },
     Manual {
@@ -89,8 +90,15 @@ impl FixtureMapping {
         Self::PathPoints {
             variant_changed_frame: current_state_version(),
             points: MapSlot::new(points),
-            path: PathSpec::ring_array(2, 96, true),
+            path: PathSpec::ring_array(vec![1, 96], true),
         }
+    }
+
+    pub fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
+        let Self::PathPoints { path, .. } = self else {
+            return false;
+        };
+        path.set_ring_lamp_counts(counts)
     }
 }
 
@@ -191,13 +199,23 @@ impl MappingPoint {
 }
 
 impl PathSpec {
-    fn ring_array(rings: u32, points_per_ring: u32, clockwise: bool) -> Self {
+    fn ring_array(ring_lamp_counts: Vec<u32>, clockwise: bool) -> Self {
         Self::RingArray {
             variant_changed_frame: current_state_version(),
-            rings: ValueSlot::new(rings),
-            points_per_ring: ValueSlot::new(points_per_ring),
+            ring_lamp_counts: ValueSlot::new(RingLampCounts::new(ring_lamp_counts)),
             clockwise: ValueSlot::new(clockwise),
         }
+    }
+
+    fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
+        let Self::RingArray {
+            ring_lamp_counts, ..
+        } = self
+        else {
+            return false;
+        };
+        ring_lamp_counts.set(RingLampCounts::new(counts));
+        true
     }
 }
 
@@ -241,14 +259,12 @@ impl SlotRecordAccess for PathSpec {
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
         match self {
             Self::RingArray {
-                rings,
-                points_per_ring,
+                ring_lamp_counts,
                 clockwise,
                 ..
             } => match index {
-                0 => Some(SlotDataAccess::Value(rings)),
-                1 => Some(SlotDataAccess::Value(points_per_ring)),
-                2 => Some(SlotDataAccess::Value(clockwise)),
+                0 => Some(SlotDataAccess::Value(ring_lamp_counts)),
+                1 => Some(SlotDataAccess::Value(clockwise)),
                 _ => None,
             },
             Self::Manual { .. } => None,
@@ -311,7 +327,7 @@ fn mapping_shape() -> SlotShape {
 }
 
 fn path_spec_shape() -> SlotShape {
-    use lpc_model::slot::shape::{field, record, unit, value, variant};
+    use lpc_model::slot::shape::{field, leaf, record, unit, value, variant};
 
     SlotShape::Enum {
         meta: lpc_model::SlotMeta::empty(),
@@ -319,8 +335,7 @@ fn path_spec_shape() -> SlotShape {
             variant(
                 "ring_array",
                 record(vec![
-                    field("rings", value(lpc_model::LpType::U32)),
-                    field("points_per_ring", value(lpc_model::LpType::U32)),
+                    field("ring_lamp_counts", leaf(ring_lamp_counts_shape())),
                     field("clockwise", value(lpc_model::LpType::Bool)),
                 ]),
             ),

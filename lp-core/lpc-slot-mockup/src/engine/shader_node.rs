@@ -1,7 +1,7 @@
 use crate::source::ShaderDef;
 use lpc_model::{
-    FrameId, ModelStructMember, LpType, LpValue, SlotAccess, SlotData, SlotDataAccess,
-    SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
+    FrameId, LpType, LpValue, ModelStructMember, SlotAccess, SlotData, SlotDataAccess, SlotName,
+    SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
     current_state_version,
     slot::shape::{field, option, record, value},
 };
@@ -61,7 +61,7 @@ impl ShaderNode {
                     self.param_names
                         .iter()
                         .zip(self.params.fields.iter())
-                        .map(|(name, data)| field(name.as_str(), value(model_type_for_data(data))))
+                        .map(|(name, data)| field(name.as_str(), value(lp_type_for_data(data))))
                         .collect(),
                 ),
             ),
@@ -103,12 +103,12 @@ impl ShaderNode {
         Some(value.changed_frame())
     }
 
-    pub fn param_model_type(&self, name: &str) -> Option<LpType> {
+    pub fn param_lp_type(&self, name: &str) -> Option<LpType> {
         let index = self
             .param_names
             .iter()
             .position(|param_name| param_name.as_str() == name)?;
-        self.params.fields.get(index).map(model_type_for_data)
+        self.params.fields.get(index).map(lp_type_for_data)
     }
 
     pub fn clear_compile_error(&mut self) {
@@ -143,14 +143,14 @@ impl SlotRecordAccess for ShaderNode {
     }
 }
 
-fn model_type_for_data(data: &SlotData) -> LpType {
+fn lp_type_for_data(data: &SlotData) -> LpType {
     let SlotData::Value(value) = data else {
         panic!("shader param value must be a value slot");
     };
-    model_type_for_value(value.value())
+    lp_type_for_value(value.value())
 }
 
-fn model_type_for_value(value: &LpValue) -> LpType {
+fn lp_type_for_value(value: &LpValue) -> LpType {
     match value {
         LpValue::String(_) => LpType::String,
         LpValue::I32(_) => LpType::I32,
@@ -176,7 +176,7 @@ fn model_type_for_value(value: &LpValue) -> LpType {
             let Some(first) = values.first() else {
                 panic!("empty shader param arrays need an explicit type");
             };
-            LpType::Array(Box::new(model_type_for_value(first)), values.len())
+            LpType::Array(Box::new(lp_type_for_value(first)), values.len())
         }
         LpValue::Struct { name, fields } => LpType::Struct {
             name: name.clone(),
@@ -184,7 +184,7 @@ fn model_type_for_value(value: &LpValue) -> LpType {
                 .iter()
                 .map(|(name, value)| ModelStructMember {
                     name: name.clone(),
-                    ty: model_type_for_value(value),
+                    ty: lp_type_for_value(value),
                 })
                 .collect(),
         },

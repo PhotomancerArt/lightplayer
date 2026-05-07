@@ -1,8 +1,8 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use lpc_model::{
-    FrameId, ModelStructMember, LpType, LpValue, SlotData, SlotMapKey, SlotMapKeyShape,
-    SlotPath, SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
+    FrameId, LpType, LpValue, ModelStructMember, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
+    SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};
 
@@ -88,7 +88,7 @@ pub(super) fn validate_value_at(
     let SlotData::Value(_) = data else {
         return Err(SlotMirrorError::NotAValue);
     };
-    if model_value_matches_type(value, &shape.ty) {
+    if lp_value_matches_type(value, &shape.ty) {
         Ok(())
     } else {
         Err(SlotMirrorError::WrongType)
@@ -287,7 +287,7 @@ fn map_key_for_shape(
     }
 }
 
-fn model_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
+fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
     match (value, ty) {
         (LpValue::String(_), LpType::String)
         | (LpValue::I32(_), LpType::I32)
@@ -314,8 +314,11 @@ fn model_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
             values.len() == *len
                 && values
                     .iter()
-                    .all(|value| model_value_matches_type(value, item_ty))
+                    .all(|value| lp_value_matches_type(value, item_ty))
         }
+        (LpValue::Array(values), LpType::List(item_ty)) => values
+            .iter()
+            .all(|value| lp_value_matches_type(value, item_ty)),
         (
             LpValue::Struct { name, fields },
             LpType::Struct {
@@ -333,6 +336,6 @@ fn struct_fields_match(fields: &[(String, LpValue)], ty_fields: &[ModelStructMem
             .iter()
             .zip(ty_fields.iter())
             .all(|((name, value), ty_field)| {
-                name == &ty_field.name && model_value_matches_type(value, &ty_field.ty)
+                name == &ty_field.name && lp_value_matches_type(value, &ty_field.ty)
             })
 }

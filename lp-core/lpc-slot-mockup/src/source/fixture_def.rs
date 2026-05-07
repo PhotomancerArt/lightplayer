@@ -41,6 +41,10 @@ impl FixtureDef {
     pub fn clear_brightness(&mut self) {
         self.brightness.set_none();
     }
+
+    pub fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
+        self.mapping.set_ring_lamp_counts(counts)
+    }
 }
 
 impl Default for FixtureDef {

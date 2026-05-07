@@ -31,12 +31,7 @@ impl SrcTextureSpec {
     }
 }
 
-fn texture_model_handle_value(
-    ctx: &mut LoadCtx,
-    format: i32,
-    width: i32,
-    height: i32,
-) -> LpValue {
+fn texture_model_handle_value(ctx: &mut LoadCtx, format: i32, width: i32, height: i32) -> LpValue {
     let handle = ctx.next_texture_handle;
     LpValue::Struct {
         name: None,

@@ -307,10 +307,7 @@ fn model_value_color_table(
     Ok(LpValue::Struct {
         name: Some(String::from("Color")),
         fields: vec![
-            (
-                String::from("space"),
-                LpValue::I32(colorspace_id(space)?),
-            ),
+            (String::from("space"), LpValue::I32(colorspace_id(space)?)),
             (String::from("coords"), v3),
         ],
     })
@@ -353,10 +350,7 @@ pub(super) fn model_value_color_palette(
     Ok(LpValue::Struct {
         name: Some(String::from("ColorPalette")),
         fields: vec![
-            (
-                String::from("space"),
-                LpValue::I32(colorspace_id(space)?),
-            ),
+            (String::from("space"), LpValue::I32(colorspace_id(space)?)),
             (String::from("count"), LpValue::I32(count as i32)),
             (String::from("entries"), entries_lps),
         ],
@@ -405,10 +399,7 @@ pub(super) fn model_value_gradient(
     Ok(LpValue::Struct {
         name: Some(String::from("Gradient")),
         fields: vec![
-            (
-                String::from("space"),
-                LpValue::I32(colorspace_id(space)?),
-            ),
+            (String::from("space"), LpValue::I32(colorspace_id(space)?)),
             (String::from("method"), LpValue::I32(method_id)),
             (String::from("count"), LpValue::I32(count as i32)),
             (String::from("stops"), stops_lps),
@@ -446,7 +437,7 @@ fn gradient_stop_default() -> LpValue {
     }
 }
 
-/// Parse `ModelValue` for struct kinds (Color, ColorPalette, Gradient).
+/// Parse `LpValue` for struct kinds (Color, ColorPalette, Gradient).
 pub(super) fn from_toml_struct_kind(
     value: &toml::Value,
     k: Kind,
@@ -471,9 +462,7 @@ pub(super) fn from_toml_struct_kind(
 
 pub(super) fn wire_color_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
-        return Err(FromTomlError::msg(
-            "Color literal must be a struct ModelValue",
-        ));
+        return Err(FromTomlError::msg("Color literal must be a struct LpValue"));
     };
     if name.as_deref() != Some("Color") {
         return Err(FromTomlError::msg("Color literal: wrong struct name"));
@@ -493,9 +482,7 @@ pub(super) fn wire_color_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlErr
 
 pub(super) fn wire_color_palette_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
-        return Err(FromTomlError::msg(
-            "ColorPalette must be a struct ModelValue",
-        ));
+        return Err(FromTomlError::msg("ColorPalette must be a struct LpValue"));
     };
     if name.as_deref() != Some("ColorPalette") {
         return Err(FromTomlError::msg("ColorPalette: wrong struct name"));
@@ -519,7 +506,7 @@ pub(super) fn wire_color_palette_to_toml(v: &LpValue) -> Result<toml::Value, Fro
 
 pub(super) fn wire_gradient_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
-        return Err(FromTomlError::msg("Gradient must be a struct ModelValue"));
+        return Err(FromTomlError::msg("Gradient must be a struct LpValue"));
     };
     if name.as_deref() != Some("Gradient") {
         return Err(FromTomlError::msg("Gradient: wrong struct name"));

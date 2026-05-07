@@ -36,10 +36,12 @@ Recent interactive refactoring has moved the portable value vocabulary toward:
 - `LpType` instead of `ModelType`
 - `value/` instead of `prop/` for the portable value modules
 - `ValueSlot<T>` remains the generic versioned Rust storage wrapper
-- `SlotLeaf`, `SlotLeafId`, and `SlotValueShape` remain the current leaf/value
-  shape vocabulary
+- `SlotValue` is the typed value trait at a slot leaf
+- `SlotShapeId` is the one shape identity type, including semantic value shapes
+- `SlotValueShape` remains the value-boundary shape vocabulary
 
-This direction is good, but the names are not fully settled.
+This direction is good. Some names may still evolve, but M2.1 intentionally
+removed the separate leaf/root id vocabulary.
 
 ## Three Tree Model
 
@@ -98,7 +100,7 @@ both fixed arrays and variable lists. `LpType` decides validation semantics.
 
 `SlotValueShape` currently holds:
 
-- leaf id
+- shape id
 - `LpType`
 - metadata
 - editor hints
@@ -114,6 +116,9 @@ Open naming question:
 
 Current feeling: `Leaf` language is useful because it differentiates value
 leaves from slot containers and node tree concepts.
+
+M2.1 decision: keep `SlotValueShape` and `SlotValue`, but do not keep
+`SlotLeaf` / `SlotLeafId` / `LpValueRootId`.
 
 ## Registry Ownership
 
@@ -182,15 +187,12 @@ Names that feel directionally good:
 - `LpType`
 - `SlotData`
 - `SlotShape`
-- `SlotTree`
 - `SlotPath`
 - `ValuePath`
 - `ResourceRef`
 
 Names that need more thought:
 
-- `SlotLeaf`
-- `SlotLeafId`
 - `SlotValueShape`
 - `ValueSlot<T>`
 - `SlotValueAccess`
@@ -220,8 +222,9 @@ No decision yet.
    list type.
 3. Add a ring-lamp-counts leaf/value object.
 4. Convert `PathSpec::RingArray.ring_lamp_counts` to the value object.
-5. Update `examples/basic/fixture.toml` back to an inline array.
-6. Update source slot sync evidence to assert `ring_lamp_counts` as one opaque
+5. Keep this proof in the mockup before changing real `lpc-source` and
+   `examples/basic`.
+6. Update mockup sync evidence to assert `ring_lamp_counts` as one opaque
    value leaf.
 7. Revisit naming after seeing the concrete code.
 
@@ -229,11 +232,17 @@ No decision yet.
 
 - Should `SlotValueShape` be renamed, or is it good because value shapes are
   explicitly part of the slot system?
-- Should `SlotLeaf` remain the core trait name?
 - Should `ValueSlot<T>` become `LeafSlot<T>` to reduce collision with
   `SlotValueShape`?
-- Should `LpType::Array` stay fixed-size only and `LpType::List` become the
-  variable-length authoring/value shape?
 - Which value objects should be promoted now versus left as source-local leaves?
 - Should value leaf shapes become registered roots in `SlotShapeRegistry`, or
   is inline `SlotShape::Value { shape: SlotValueShape }` still enough for now?
+
+## M2.1 Result
+
+- `LpType::Array` is fixed-size and `LpType::List` is variable-length.
+- `LpValue::Array` is the payload form for both.
+- `RingLampCounts` now proves a value object can sync as one slot leaf while
+  still carrying inspectable list structure.
+- Real fixture source/example conversion is intentionally deferred until the
+  mockup shape has been reviewed.

@@ -37,6 +37,9 @@ pub fn model_type_to_lps_type(ty: &LpType) -> LpsType {
             len: u32::try_from(*len)
                 .expect("lpc-model array length must fit LpsType::Array len (u32)"),
         },
+        LpType::List(_) => {
+            unimplemented!("LpType::List does not have a shader ABI projection yet")
+        }
         LpType::Struct { name, fields } => LpsType::Struct {
             name: name.clone(),
             members: fields
@@ -54,8 +57,8 @@ pub fn model_type_to_lps_type(ty: &LpType) -> LpsType {
 mod tests {
     use super::*;
     use alloc::string::String;
-    use lpc_model::ModelStructMember;
     use lpc_model::LpType as Mt;
+    use lpc_model::ModelStructMember;
     use lpc_model::kind::Kind;
 
     #[test]

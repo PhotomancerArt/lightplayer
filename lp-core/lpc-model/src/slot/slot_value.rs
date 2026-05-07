@@ -1,54 +1,40 @@
-use crate::{LpType, LpValue};
+//! Typed value contracts for [`SlotShape::Value`](crate::SlotShape::Value) leaves.
+//!
+//! The slot tree owns addressability, versioning, watching, mutation, and sync.
+//! A `SlotShape::Value` is the boundary where that tree stops and one complete
+//! [`LpValue`] payload begins. [`SlotValue`] is the typed Rust-side contract for
+//! values that can live at that boundary, while [`SlotValueShape`] describes the
+//! payload type, semantic metadata, and editor hints generic clients need.
+
+use crate::{LpType, LpValue, SlotShapeId};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
 use super::SlotMeta;
 
-/// Atomic typed leaf contract.
+/// Typed Rust value that can occupy a slot value boundary.
+///
+/// `SlotValue` implementors convert to and from the portable [`LpValue`] wire
+/// representation and provide the static shape metadata for that complete
+/// payload. Sub-fields inside the payload are value structure, not addressable
+/// slots, and they do not get independent versions.
 pub trait SlotValue: ToLpValue + FromLpValue {
-    const LEAF_ID: LpValueRootId;
+    const SHAPE_ID: SlotShapeId;
 
     fn value_shape() -> SlotValueShape;
 }
 
-
-/// Stable identity for a slot leaf descriptor.
+/// Shape of one complete value payload at a slot leaf.
 ///
-/// A leaf id names an atomic value contract: storage shape, semantic meaning,
-/// and editor hints travel together. This prevents attaching domain semantics
-/// to arbitrary incompatible storage.
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
-)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct LpValueRootId(u32);
-
-impl LpValueRootId {
-    pub const fn new(raw: u32) -> Self {
-        Self(raw)
-    }
-
-    pub const fn from_static_name(input: &str) -> Self {
-        Self(fnv1a32(input))
-    }
-
-    pub fn raw(self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for LpValueRootId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{:08x}", self.0)
-    }
-}
-
-/// Shape of one atomic value leaf.
+/// The `id` is a [`SlotShapeId`] so value shapes participate in the same shape
+/// identity space as slot roots. The `ty` validates the portable [`LpValue`]
+/// storage form. Metadata and editor hints attach to this semantic value
+/// contract, not to arbitrary storage types.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotValueShape {
-    pub leaf: LpValueRootId,
+    pub id: SlotShapeId,
     pub ty: LpType,
     #[serde(default)]
     pub meta: SlotMeta,
@@ -59,7 +45,7 @@ pub struct SlotValueShape {
 impl SlotValueShape {
     pub fn raw(ty: LpType) -> Self {
         Self {
-            leaf: raw_leaf_id(&ty),
+            id: raw_shape_id(&ty),
             ty,
             meta: SlotMeta::empty(),
             editor: ValueEditorHint::default(),
@@ -263,7 +249,7 @@ impl FromLpValue for [f32; 3] {
 macro_rules! impl_slot_leaf {
     ($ty:ty, $id:literal, $shape:expr) => {
         impl SlotValue for $ty {
-            const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name($id);
+            const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name($id);
 
             fn value_shape() -> SlotValueShape {
                 $shape
@@ -277,21 +263,9 @@ impl_slot_leaf!(
     "slot.leaf.raw_string",
     SlotValueShape::raw(LpType::String)
 );
-impl_slot_leaf!(
-    i32,
-    "slot.leaf.raw_i32",
-    SlotValueShape::raw(LpType::I32)
-);
-impl_slot_leaf!(
-    u32,
-    "slot.leaf.raw_u32",
-    SlotValueShape::raw(LpType::U32)
-);
-impl_slot_leaf!(
-    f32,
-    "slot.leaf.raw_f32",
-    SlotValueShape::raw(LpType::F32)
-);
+impl_slot_leaf!(i32, "slot.leaf.raw_i32", SlotValueShape::raw(LpType::I32));
+impl_slot_leaf!(u32, "slot.leaf.raw_u32", SlotValueShape::raw(LpType::U32));
+impl_slot_leaf!(f32, "slot.leaf.raw_f32", SlotValueShape::raw(LpType::F32));
 impl_slot_leaf!(
     bool,
     "slot.leaf.raw_bool",
@@ -308,8 +282,8 @@ impl_slot_leaf!(
     SlotValueShape::raw(LpType::Vec3)
 );
 
-fn raw_leaf_id(ty: &LpType) -> LpValueRootId {
-    LpValueRootId::from_static_name(match ty {
+fn raw_shape_id(ty: &LpType) -> SlotShapeId {
+    SlotShapeId::from_static_name(match ty {
         LpType::String => "slot.leaf.raw_string",
         LpType::I32 => "slot.leaf.raw_i32",
         LpType::U32 => "slot.leaf.raw_u32",
@@ -331,32 +305,18 @@ fn raw_leaf_id(ty: &LpType) -> LpValueRootId {
         LpType::Mat3x3 => "slot.leaf.raw_mat3x3",
         LpType::Mat4x4 => "slot.leaf.raw_mat4x4",
         LpType::Array(_, _) => "slot.leaf.raw_array",
+        LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
         LpType::Resource => "slot.leaf.raw_resource",
     })
-}
-
-const fn fnv1a32(input: &str) -> u32 {
-    const OFFSET: u32 = 0x811c_9dc5;
-    const PRIME: u32 = 0x0100_0193;
-
-    let bytes = input.as_bytes();
-    let mut hash = OFFSET;
-    let mut index = 0;
-    while index < bytes.len() {
-        hash ^= bytes[index] as u32;
-        hash = hash.wrapping_mul(PRIME);
-        index += 1;
-    }
-    hash
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        Affine2d, ColorOrderValue, Dim2u, FromLpValue, RenderProductId, ResourceRef,
-        ToLpValue, affine2d_shape, color_order_shape, dim2u_shape, relative_node_ref_shape,
+        Affine2d, ColorOrderValue, Dim2u, FromLpValue, RenderProductId, ResourceRef, ToLpValue,
+        affine2d_shape, color_order_shape, dim2u_shape, relative_node_ref_shape,
         render_product_resource_shape, runtime_buffer_resource_shape,
     };
 
@@ -383,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_leaf_values_round_trip_through_model_value() {
+    fn semantic_leaf_values_round_trip_through_lp_value() {
         let dim = Dim2u {
             width: 64,
             height: 32,

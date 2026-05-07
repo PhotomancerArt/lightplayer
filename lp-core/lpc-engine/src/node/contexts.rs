@@ -346,9 +346,9 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::LpValue::F32(7.8),
-                    )),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
+                        7.8,
+                    ))),
                     target: BindingTarget::BusChannel(channel.clone()),
                     priority: BindingPriority::new(0),
                     kind: lpc_model::Kind::Amplitude,
@@ -387,9 +387,9 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::LpValue::F32(4.25),
-                    )),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
+                        4.25,
+                    ))),
                     target: BindingTarget::ConsumedSlot {
                         node,
                         slot: input.clone(),
@@ -543,9 +543,9 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::LpValue::F32(8.8),
-                    )),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
+                        8.8,
+                    ))),
                     target: BindingTarget::BusChannel(channel.clone()),
                     priority: BindingPriority::new(0),
                     kind: Kind::Amplitude,

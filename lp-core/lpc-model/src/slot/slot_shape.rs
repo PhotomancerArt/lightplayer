@@ -5,7 +5,6 @@ use core::fmt;
 
 use super::SlotMeta;
 
-
 /// Static shape of a slot tree.
 ///
 /// A slot shape defines the authored and synchronized structure of slot data.

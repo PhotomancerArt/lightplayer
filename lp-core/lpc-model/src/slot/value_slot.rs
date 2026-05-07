@@ -11,7 +11,7 @@ use serde::{
 };
 
 use super::{
-    FieldSlot, MapSlotAccess, SlotDataAccess, SlotValue, SlotMapKey, SlotOptionAccess,
+    FieldSlot, MapSlotAccess, SlotDataAccess, SlotMapKey, SlotOptionAccess, SlotValue,
     SlotValueAccess, ToLpValue,
 };
 
@@ -513,7 +513,7 @@ mod tests {
     use alloc::vec;
 
     #[test]
-    fn typed_slot_value_exposes_model_value() {
+    fn typed_slot_value_exposes_lp_value() {
         let value = ValueSlot::with_version(FrameId::new(7), String::from("shader.glsl"));
 
         assert_eq!(value.changed_frame(), FrameId::new(7));

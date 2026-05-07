@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, RelativeNodeRef, SlotDataAccess, ValueEditorHint,
-    SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape,
-    ToLpValue, Versioned, current_state_version,
+    FieldSlot, FrameId, LpType, LpValue, RelativeNodeRef, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError, Versioned, current_state_version,
 };
 use alloc::string::ToString;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -93,7 +93,7 @@ impl crate::FromLpValue for RelativeNodeRef {
 }
 
 impl SlotValue for RelativeNodeRef {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.relative_node_ref");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.relative_node_ref");
 
     fn value_shape() -> SlotValueShape {
         relative_node_ref_shape()
@@ -102,7 +102,7 @@ impl SlotValue for RelativeNodeRef {
 
 pub fn relative_node_ref_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.relative_node_ref"),
+        id: SlotShapeId::from_static_name("slot.leaf.relative_node_ref"),
         ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::NodeRef,

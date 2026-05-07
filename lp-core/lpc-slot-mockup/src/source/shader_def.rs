@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FrameId, MapSlot, LpValue, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
+    FrameId, LpValue, MapSlot, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
     RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
 };
 

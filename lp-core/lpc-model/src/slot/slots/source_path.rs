@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, ValueEditorHint, LpValueRootId,
-    SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
+    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
+    SlotValueAccess, SlotValueShape, ValueEditorHint, Versioned, current_state_version,
 };
 use alloc::string::String;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -79,7 +79,7 @@ pub fn source_path_shape() -> SlotValueShape {
 
 pub(super) fn path_shape(name: &str) -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name(name),
+        id: SlotShapeId::from_static_name(name),
         ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Path,

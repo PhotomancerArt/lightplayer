@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, ModelStructMember, LpType, LpValue, SlotDataAccess,
-    ValueEditorHint, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToLpValue, Versioned, current_state_version,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
+    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError, Versioned, current_state_version,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -135,7 +135,7 @@ impl FromLpValue for Affine2d {
 }
 
 impl SlotValue for Affine2d {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.affine2d");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.affine2d");
 
     fn value_shape() -> SlotValueShape {
         affine2d_shape()
@@ -144,7 +144,7 @@ impl SlotValue for Affine2d {
 
 pub fn affine2d_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: LpValueRootId::from_static_name("slot.leaf.affine2d"),
+        id: SlotShapeId::from_static_name("slot.leaf.affine2d"),
         ty: affine2d_model_type(),
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Affine2d,

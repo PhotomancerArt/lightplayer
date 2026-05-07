@@ -4,7 +4,7 @@ use crate::node::node_def::NodeDef;
 use alloc::string::ToString;
 use lpc_model::{
     Affine2dSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
-    SlotValue, ValueRootError, LpValueRootId, SlotValueShape, ToLpValue, ValueSlot,
+    SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -234,7 +234,7 @@ impl FromLpValue for ColorOrder {
 }
 
 impl SlotValue for ColorOrder {
-    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.color_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
 
     fn value_shape() -> SlotValueShape {
         lpc_model::color_order_shape()

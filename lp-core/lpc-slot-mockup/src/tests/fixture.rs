@@ -111,7 +111,9 @@ impl Harness {
 
 pub fn log_guard() -> MutexGuard<'static, ()> {
     static TEST_LOG_LOCK: Mutex<()> = Mutex::new(());
-    TEST_LOG_LOCK.lock().unwrap()
+    TEST_LOG_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
 }
 
 pub fn print_lines(lines: Vec<String>) {
@@ -241,6 +243,10 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                     "engine.shader_node.params" | "params" => 0,
                     "engine.fixture_node.touches" | "touches" => 0,
                     "mapping" => 2,
+                    "points" => 0,
+                    "path" => 1,
+                    "ring_lamp_counts" => 0,
+                    "clockwise" => 1,
                     "transform" => 4,
                     "brightness" => 5,
                     _ => panic!("unknown test record segment {segment}"),
