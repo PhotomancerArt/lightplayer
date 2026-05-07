@@ -2,8 +2,11 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
-use alloc::{vec, vec::Vec};
-use lpc_model::{FrameId, LpPathBuf, NodeId};
+use alloc::vec::Vec;
+use lpc_model::{
+    Affine2d, Affine2dSlot, Dim2u, Dim2uSlot, FrameId, LpPathBuf, MapSlot, NodeId, OptionSlot,
+    RelativeNodeRef, RelativeNodeRefSlot, ValueSlot,
+};
 use lpc_source::ProjectDef;
 use lpc_source::node::NodeKind;
 use lpc_source::node::fixture::FixtureDef;
@@ -151,30 +154,36 @@ impl ProjectView {
                             // Create new entry with placeholder config
                             let config: Box<dyn NodeDef> = match kind {
                                 NodeKind::Texture => Box::new(TextureDef {
-                                    width: 0,
-                                    height: 0,
+                                    size: Dim2uSlot::new(Dim2u {
+                                        width: 0,
+                                        height: 0,
+                                    }),
                                 }),
                                 NodeKind::Shader => Box::new(ShaderDef::default()),
-                                NodeKind::Output => Box::new(OutputDef::GpioStrip {
-                                    pin: 0,
-                                    options: None,
+                                NodeKind::Output => Box::new(OutputDef {
+                                    pin: ValueSlot::new(0),
+                                    options: OptionSlot::none(),
                                 }),
                                 NodeKind::Fixture => Box::new(FixtureDef {
-                                    output_loc: lpc_model::RelativeNodeRef::current(),
-                                    texture_loc: lpc_model::RelativeNodeRef::current(),
-                                    mapping: lpc_source::node::fixture::MappingConfig::PathPoints {
-                                        paths: vec![],
-                                        sample_diameter: 2.0,
-                                    },
-                                    color_order: lpc_source::node::fixture::ColorOrder::Rgb,
-                                    transform: [[0.0; 4]; 4],
-                                    brightness: None,
-                                    gamma_correction: None,
+                                    output_loc: RelativeNodeRefSlot::new(RelativeNodeRef::current()),
+                                    texture_loc: RelativeNodeRefSlot::new(
+                                        RelativeNodeRef::current(),
+                                    ),
+                                    mapping: lpc_source::node::fixture::MappingConfig::path_points(
+                                        MapSlot::default(),
+                                        2.0,
+                                    ),
+                                    color_order: ValueSlot::new(
+                                        lpc_source::node::fixture::ColorOrder::Rgb,
+                                    ),
+                                    transform: Affine2dSlot::new(Affine2d::identity()),
+                                    brightness: OptionSlot::none(),
+                                    gamma_correction: OptionSlot::none(),
                                 }),
                                 NodeKind::Project => Box::new(ProjectDef {
                                     kind: String::from(ProjectDef::KIND),
-                                    name: None,
-                                    nodes: BTreeMap::new(),
+                                    name: OptionSlot::none(),
+                                    nodes: MapSlot::default(),
                                 }),
                             };
 

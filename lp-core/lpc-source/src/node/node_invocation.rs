@@ -6,18 +6,20 @@
 
 use crate::artifact::artifact_loc::ArtifactLocator;
 use crate::prop::src_binding::SrcBinding;
+use alloc::string::ToString;
 use alloc::vec::Vec;
-use lpc_model::prop::value_path::ValuePath;
+use lpc_model::{ArtifactPathSlot, prop::value_path::ValuePath};
 
 /// Parent-owned child node invocation.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_model::SlotRecord)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodeInvocation {
     /// Artifact to load for this child node definition.
-    pub artifact: ArtifactLocator,
+    pub artifact: ArtifactPathSlot,
 
     /// Use-site binding overrides.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[slot(skip)]
     pub overrides: Vec<(ValuePath, SrcBinding)>,
 }
 
@@ -25,9 +27,13 @@ impl NodeInvocation {
     /// New artifact-only invocation with no overrides.
     pub fn new(artifact: ArtifactLocator) -> Self {
         Self {
-            artifact,
+            artifact: ArtifactPathSlot::new(artifact.to_string()),
             overrides: Vec::new(),
         }
+    }
+
+    pub fn artifact_locator(&self) -> Result<ArtifactLocator, &'static str> {
+        ArtifactLocator::parse(self.artifact.value())
     }
 }
 
@@ -101,7 +107,10 @@ mod tests {
             artifact = "./texture.toml"
         "#;
         let invocation: NodeInvocation = toml::from_str(toml).unwrap();
-        assert_eq!(invocation.artifact, ArtifactLocator::path("./texture.toml"));
+        assert_eq!(
+            invocation.artifact_locator().unwrap(),
+            ArtifactLocator::path("./texture.toml")
+        );
         assert!(invocation.overrides.is_empty());
     }
 }

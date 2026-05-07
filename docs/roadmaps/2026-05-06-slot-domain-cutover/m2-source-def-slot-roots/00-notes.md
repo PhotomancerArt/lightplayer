@@ -52,10 +52,27 @@ Out of scope:
   generated TOML evidence, shader `param_defs`, and fixture `path_points`
   backed by stable-key maps.
 
+### M1.3 Outcome
+
+- `StaticSlotShape` now separates static shape construction from value access.
+- `StaticSlotAccess` remains available for roots that expose both data and a
+  static Rust-authored shape.
+- `SlotShapeRegistry::ensure_tree` is idempotent for static shape bootstrap.
+- `lpc-slot-codegen` can scan a crate for
+  `#[derive(SlotRecord)] #[slot(root)]` types and generate
+  `register_all_static_slot_shapes` / `ensure_static_slot_shape` into
+  `OUT_DIR`.
+- `lpc-slot-mockup` uses generated static registration rather than hand-written
+  registration lists.
+- Dynamic shader-node shapes are explicitly not part of static codegen. A local
+  prep change now proves two shader node instances can have different dynamic
+  param shapes by giving each instance its own `SlotShapeId`.
+
 ### Slot Model
 
 - `lpc-model/src/slot` contains the production slot primitives:
   - `SlotAccess`
+  - `StaticSlotShape`
   - `StaticSlotAccess`
   - `SlotDataAccess`
   - `SlotRecordAccess`
@@ -76,6 +93,10 @@ Out of scope:
 - `ValueSlot<T>`, `MapSlot<K,V>`, and `OptionSlot<T>` exist for typed,
   versioned Rust-authored data.
 - `lpc-wire/src/slot/access_sync.rs` can snapshot/diff borrowed `SlotAccess` roots through a `SlotShapeRegistry`.
+- Static roots should be registered through generated crate-local bootstrap
+  helpers. Dynamic roots whose shape varies by artifact or instance should be
+  registered directly by their owner with an artifact-/instance-owned
+  `SlotShapeId`.
 
 ### Slot Derive
 
@@ -87,6 +108,7 @@ Out of scope:
   - nested records implement `SlotRecordShape + SlotRecordAccess`.
   - enums implement `SlotEnumShape + SlotEnumAccess`.
 - The derive supports:
+  - `#[slot(root)]`
   - `#[slot(shape_id = "...")]`
   - `#[slot(value = ModelType::...)]`
   - `#[slot(leaf = some_shape())]`
@@ -102,9 +124,13 @@ Out of scope:
 
 - `lpc-source` is `#![no_std]`.
 - Real node defs are plain serde domain structs/enums, not slot-wrapper structs.
+- `lpc-source` does not yet depend on `lpc-slot-codegen`; M2 should add it as a
+  build-dependency and include generated `slot_shapes` from `OUT_DIR`.
 - `ProjectDef`:
   - fields: `kind: String`, `name: Option<String>`, `nodes: BTreeMap<NodeName, NodeInvocation>`
   - TOML uses `[nodes.output] artifact = "./output.toml"`.
+  - `examples/basic/project.toml` also contains `uid = "basic"`, which is
+    currently ignored because `ProjectDef` has no `uid` field.
 - `NodeInvocation`:
   - fields: `artifact: ArtifactLocator`, `overrides: Vec<(ValuePath, SrcBinding)>`
   - overrides are transitional and still use `ValuePath` because resolver/binding code has not moved fully to slots.
@@ -121,6 +147,9 @@ Out of scope:
   - fields: `output_loc`, `texture_loc`, `mapping`, `color_order`, `transform`, `brightness`, `gamma_correction`
   - `mapping` is currently `MappingConfig::PathPoints { paths: Vec<PathSpec>, sample_diameter }`
   - `PathSpec::RingArray` contains `ring_lamp_counts: Vec<u32>`, which does not fit the current slot map-first aggregate vocabulary cleanly.
+- `NodeKind` remains the source-level artifact discriminator. Most child node
+  structs do not store `kind`; TOML unknown fields are currently ignored for
+  those structs. `ProjectDef` does store `kind`.
 
 ### Current Basic Example Shape
 
@@ -206,11 +235,27 @@ Some slot shapes should be more semantic than current TOML fields:
 
 Suggested direction: M2 should expose the existing TOML shape first unless a semantic shape is low-risk and does not obscure the source-to-slot mapping. Record future semantic reshaping rather than hiding real fields.
 
+Updated direction: after M1.2, clean authored serde for semantic slots makes
+some schema cleanup cheap. `TextureDef.size: Dim2uSlot` is a good low-risk
+semantic cleanup. Fixture mapping is the more serious churn point.
+
 ### Shader Param Defs
 
 The roadmap says to add shader `param_defs` if this is the right time. The mockup proves the shape, but the real source shader TOML currently has no `param_defs`.
 
 Suggested direction: include the type definitions and shape/access for `ShaderParamDef`, but make the TOML field optional/default-empty so `examples/basic` does not need to change unless we want an explicit param fixture.
+
+### Static Versus Dynamic Shape Ids
+
+Static source defs should get type-owned `StaticSlotShape::SHAPE_ID`s generated
+or inferred by the derive. Runtime roots that vary with loaded artifact content
+must not reuse one Rust type id. M1.3 proved this with two shader instances:
+same Rust type, different param records, different dynamic shape ids.
+
+M2 source defs are mostly static because their field layout is Rust-authored.
+`ShaderDef.param_defs` is still a static `MapSlot<String, ShaderParamDef>` at
+the source level: the map keys vary, but the map value shape does not. The
+runtime shader params record remains dynamic and belongs to a later milestone.
 
 ### Mapping Collections
 
@@ -251,7 +296,13 @@ Answer: no. Convert real source defs to slot-aware fields. These are authored do
 
 Context: every artifact has `kind`, but it is mostly a loader discriminator, not user-editable config. The mockup source roots omit `kind`.
 
-Suggested answer: omit `kind` from editable/display slot roots for concrete node defs. The root shape id and node kind already identify the type. Keep `ProjectDef.name` and child `nodes`.
+Answer: omit `kind` from editable/display slot roots for concrete node defs.
+The root shape id and node kind already identify the type.
+
+Follow-up context: `ProjectDef` currently stores `kind` because it is the root
+artifact type. Child node structs usually do not store `kind`; TOML unknown
+fields are ignored. `examples/basic/project.toml` also has the defunct old
+`uid` field, currently ignored.
 
 ### Q3. Should `ShaderDef.param_defs` be added in M2?
 
@@ -290,6 +341,41 @@ later, but M2 source tests can call them directly.
 Context: converting only one or two defs is less churn, but it leaves production source partially split between plain structs and slot-aware domain objects.
 
 Answer: prefer all real source defs in M2. It is acceptable to phase the implementation internally, but the milestone should end with `ProjectDef`, `NodeInvocation`, `TextureDef`, `ShaderDef`, `OutputDef`, and `FixtureDef` exposed through the unified slot-domain model.
+
+### Q8. Should `OutputDef` stay an enum in M2?
+
+Context: `OutputDef` is currently `enum OutputDef::GpioStrip { pin, options }`
+with custom deserialization accepting flat TOML and older tagged forms. The
+current project language treats `kind = "output"` as the node type; future
+specific output kinds may be expressed as artifact refs such as
+`builtin:/output/gpio` or by later source fields.
+
+Answer: simplify `OutputDef` to a slot-derived struct for M2:
+`pin: ValueSlot<u32>`, `options: OptionSlot<OutputDriverOptionsConfig>`. Keep
+or add serde that preserves the current flat `output.toml` shape. Do not model
+output subtype as a slot enum until multiple output implementations actually
+exist. Longer-term direction is separate output node kinds such as
+`output/gpio`, `output/e131`, or `output/artnet`.
+
+### Q9. Should `ProjectDef.uid` become real?
+
+Context: `examples/basic/project.toml` contains `uid = "basic"` but
+`ProjectDef` ignores it. M2 is about making source defs authoritative slot
+roots, so silently ignored authored fields are suspect.
+
+Answer: remove it from `examples/basic`; `uid` is a defunct old concept and
+should not become part of the slot-domain source model.
+
+### Q10. Should M2 change `examples/basic` fixture mapping to keyed maps?
+
+Context: M2 can either keep fixture mapping as a temporary opaque leaf or fully
+apply the map-first domain rule. The current `fixture.toml` uses arrays:
+`[[mapping.PathPoints.paths]]` and `ring_lamp_counts = [...]`.
+
+Answer: use keyed maps in M2 so the real fixture source shape tests the slot
+model honestly. This means changing authored fixture TOML to stable ids for
+paths and ring counts. We are not using those paths heavily in test data yet,
+but real examples will need them soon.
 
 ## Suggested First Deliverable
 

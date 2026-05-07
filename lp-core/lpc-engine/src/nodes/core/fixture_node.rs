@@ -474,7 +474,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
     match config {
         MappingConfig::PathPoints { paths, .. } => {
             let mut total = 0u32;
-            for path in paths {
+            for path in paths.entries.values() {
                 let PathSpec::RingArray {
                     start_ring_inclusive,
                     end_ring_exclusive,
@@ -483,18 +483,19 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
                     ..
                 } = path;
 
-                let ring_indices: Vec<u32> = match order {
-                    RingOrder::InnerFirst => (*start_ring_inclusive..*end_ring_exclusive).collect(),
-                    RingOrder::OuterFirst => {
-                        (*start_ring_inclusive..*end_ring_exclusive).rev().collect()
-                    }
+                let start_ring = *start_ring_inclusive.value();
+                let end_ring = *end_ring_exclusive.value();
+                let ring_indices: Vec<u32> = match order.value() {
+                    RingOrder::InnerFirst => (start_ring..end_ring).collect(),
+                    RingOrder::OuterFirst => (start_ring..end_ring).rev().collect(),
                 };
 
                 for ring_index in ring_indices {
                     total = total.saturating_add(
                         ring_lamp_counts
-                            .get(ring_index as usize)
-                            .copied()
+                            .entries
+                            .get(&ring_index)
+                            .map(|count| *count.value())
                             .unwrap_or(0),
                     );
                 }
@@ -623,13 +624,7 @@ mod tests {
         engine
             .attach_runtime_node(
                 tex_id,
-                Box::new(TextureNode::new(
-                    tex_id,
-                    TextureDef {
-                        width: 4,
-                        height: 4,
-                    },
-                )),
+                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
                 frame,
             )
             .unwrap();
@@ -676,18 +671,18 @@ mod tests {
             RuntimeBuffer::raw(alloc::vec![0u8; 24]),
         ));
 
-        let mapping = MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.5, 0.5),
-                diameter: 1.0,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 1,
-                ring_lamp_counts: vec![1],
-                offset_angle: 0.0,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 2.0,
-        };
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
 
         let fix_id = engine
             .tree_mut()
@@ -773,13 +768,7 @@ mod tests {
         engine
             .attach_runtime_node(
                 tex_id,
-                Box::new(TextureNode::new(
-                    tex_id,
-                    TextureDef {
-                        width: 4,
-                        height: 4,
-                    },
-                )),
+                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
                 frame,
             )
             .unwrap();
@@ -826,18 +815,18 @@ mod tests {
             RuntimeBuffer::raw(alloc::vec![0u8; 6]),
         ));
 
-        let mapping = MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.5, 0.5),
-                diameter: 1.0,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 1,
-                ring_lamp_counts: vec![1],
-                offset_angle: 0.0,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 2.0,
-        };
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
 
         let fix_id = engine
             .tree_mut()

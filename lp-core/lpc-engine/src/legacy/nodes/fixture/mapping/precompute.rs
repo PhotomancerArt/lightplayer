@@ -33,6 +33,7 @@ pub fn compute_mapping(
         MappingConfig::PathPoints {
             paths: _,
             sample_diameter: _,
+            ..
         } => {
             // First pass: collect all mapping points (circles)
             let mapping_points = generate_mapping_points(config, texture_width, texture_height);

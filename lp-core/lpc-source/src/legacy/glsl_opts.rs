@@ -1,5 +1,10 @@
 //! GLSL compilation options (per-shader-node)
 
+use alloc::string::{String, ToString};
+use lpc_model::{
+    FromModelValue, ModelType, ModelValue, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
+    SlotLeafId, SlotMeta, SlotValueShape, ToModelValue, ValueSlot,
+};
 use serde::{Deserialize, Serialize};
 
 /// Mode for Q32 add/sub: saturating (builtin) or wrapping (inline iadd/isub)
@@ -13,6 +18,25 @@ pub enum AddSubMode {
     Wrapping,
 }
 
+impl AddSubMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Saturating => "saturating",
+            Self::Wrapping => "wrapping",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+        match value {
+            "saturating" => Ok(Self::Saturating),
+            "wrapping" => Ok(Self::Wrapping),
+            other => Err(SlotLeafError::new(alloc::format!(
+                "unknown add/sub mode {other:?}"
+            ))),
+        }
+    }
+}
+
 /// Mode for Q32 mul: saturating (builtin) or wrapping (inline imul+smulhi)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -22,6 +46,25 @@ pub enum MulMode {
     Saturating,
     /// Inline imul+smulhi: wraps on overflow, faster
     Wrapping,
+}
+
+impl MulMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Saturating => "saturating",
+            Self::Wrapping => "wrapping",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+        match value {
+            "saturating" => Ok(Self::Saturating),
+            "wrapping" => Ok(Self::Wrapping),
+            other => Err(SlotLeafError::new(alloc::format!(
+                "unknown mul mode {other:?}"
+            ))),
+        }
+    }
 }
 
 /// Mode for Q32 div: saturating (builtin) or reciprocal (inline approximate)
@@ -35,24 +78,135 @@ pub enum DivMode {
     Reciprocal,
 }
 
+impl DivMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Saturating => "saturating",
+            Self::Reciprocal => "reciprocal",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+        match value {
+            "saturating" => Ok(Self::Saturating),
+            "reciprocal" => Ok(Self::Reciprocal),
+            other => Err(SlotLeafError::new(alloc::format!(
+                "unknown div mode {other:?}"
+            ))),
+        }
+    }
+}
+
 /// GLSL compilation options (per-shader-node)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, lpc_model::SlotRecord)]
 pub struct GlslOpts {
     #[serde(default)]
-    pub add_sub: AddSubMode,
+    pub add_sub: ValueSlot<AddSubMode>,
     #[serde(default)]
-    pub mul: MulMode,
+    pub mul: ValueSlot<MulMode>,
     #[serde(default)]
-    pub div: DivMode,
+    pub div: ValueSlot<DivMode>,
 }
 
 impl Default for GlslOpts {
     fn default() -> Self {
         Self {
-            add_sub: AddSubMode::default(),
-            mul: MulMode::default(),
-            div: DivMode::default(),
+            add_sub: ValueSlot::new(AddSubMode::default()),
+            mul: ValueSlot::new(MulMode::default()),
+            div: ValueSlot::new(DivMode::default()),
         }
+    }
+}
+
+impl ToModelValue for AddSubMode {
+    fn to_model_value(&self) -> ModelValue {
+        ModelValue::String(self.as_str().to_string())
+    }
+}
+
+impl FromModelValue for AddSubMode {
+    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        string_model_value(value).and_then(|value| Self::parse(&value))
+    }
+}
+
+impl SlotLeaf for AddSubMode {
+    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.glsl_add_sub_mode");
+
+    fn value_shape() -> SlotValueShape {
+        mode_shape(
+            Self::LEAF_ID,
+            &[("saturating", "Saturating"), ("wrapping", "Wrapping")],
+        )
+    }
+}
+
+impl ToModelValue for MulMode {
+    fn to_model_value(&self) -> ModelValue {
+        ModelValue::String(self.as_str().to_string())
+    }
+}
+
+impl FromModelValue for MulMode {
+    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        string_model_value(value).and_then(|value| Self::parse(&value))
+    }
+}
+
+impl SlotLeaf for MulMode {
+    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.glsl_mul_mode");
+
+    fn value_shape() -> SlotValueShape {
+        mode_shape(
+            Self::LEAF_ID,
+            &[("saturating", "Saturating"), ("wrapping", "Wrapping")],
+        )
+    }
+}
+
+impl ToModelValue for DivMode {
+    fn to_model_value(&self) -> ModelValue {
+        ModelValue::String(self.as_str().to_string())
+    }
+}
+
+impl FromModelValue for DivMode {
+    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        string_model_value(value).and_then(|value| Self::parse(&value))
+    }
+}
+
+impl SlotLeaf for DivMode {
+    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.glsl_div_mode");
+
+    fn value_shape() -> SlotValueShape {
+        mode_shape(
+            Self::LEAF_ID,
+            &[("saturating", "Saturating"), ("reciprocal", "Reciprocal")],
+        )
+    }
+}
+
+fn string_model_value(value: ModelValue) -> Result<String, SlotLeafError> {
+    match value {
+        ModelValue::String(value) => Ok(value),
+        other => Err(SlotLeafError::new(alloc::format!(
+            "expected String, got {other:?}"
+        ))),
+    }
+}
+
+fn mode_shape(leaf: SlotLeafId, options: &[(&str, &str)]) -> SlotValueShape {
+    SlotValueShape {
+        leaf,
+        ty: ModelType::String,
+        meta: SlotMeta::empty(),
+        editor: SlotEditorHint::Dropdown {
+            options: options
+                .iter()
+                .map(|(value, label)| SlotEnumOption::new(value, label))
+                .collect(),
+        },
     }
 }
 
@@ -63,8 +217,8 @@ mod tests {
     #[test]
     fn test_glsl_opts_default() {
         let opts = GlslOpts::default();
-        assert_eq!(opts.add_sub, AddSubMode::Saturating);
-        assert_eq!(opts.mul, MulMode::Saturating);
-        assert_eq!(opts.div, DivMode::Saturating);
+        assert_eq!(*opts.add_sub.value(), AddSubMode::Saturating);
+        assert_eq!(*opts.mul.value(), MulMode::Saturating);
+        assert_eq!(*opts.div.value(), DivMode::Saturating);
     }
 }

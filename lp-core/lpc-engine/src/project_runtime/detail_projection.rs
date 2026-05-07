@@ -153,14 +153,18 @@ fn build_texture_state(
         ver_frame,
         compatibility
             .node_config_box_for(entry.id)
-            .and_then(|cfg| cfg.as_any().downcast_ref::<TextureDef>().map(|c| c.width))
+            .and_then(|cfg| cfg.as_any().downcast_ref::<TextureDef>().map(|c| c.width()))
             .unwrap_or(0),
     );
     state.height.set(
         ver_frame,
         compatibility
             .node_config_box_for(entry.id)
-            .and_then(|cfg| cfg.as_any().downcast_ref::<TextureDef>().map(|c| c.height))
+            .and_then(|cfg| {
+                cfg.as_any()
+                    .downcast_ref::<TextureDef>()
+                    .map(|c| c.height())
+            })
             .unwrap_or(0),
     );
     state.format.set(ver_frame, TextureFormat::Rgba16);
@@ -243,14 +247,15 @@ fn fixture_mapping_cells(
 
     let points = generate_mapping_points(
         &fixture_config.mapping,
-        texture_config.width,
-        texture_config.height,
+        texture_config.width(),
+        texture_config.height(),
     );
     Some(
         points
             .into_iter()
             .map(|point| {
-                let transformed = apply_transform_2d(point.center, fixture_config.transform);
+                let transformed =
+                    apply_transform_2d(point.center, fixture_config.transform_matrix());
                 MappingCell {
                     channel: point.channel,
                     center: [

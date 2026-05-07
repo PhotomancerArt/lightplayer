@@ -440,13 +440,7 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 tex_id,
-                Box::new(TextureNode::new(
-                    tex_id,
-                    TextureDef {
-                        width: 4,
-                        height: 4,
-                    },
-                )),
+                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
                 frame,
             )
             .unwrap();
@@ -496,20 +490,20 @@ mod output_sink_flush_tests {
         ));
 
         rt.services_mut()
-            .register_output_sink(sink, &OutputDef::GpioStrip { pin, options: None });
+            .register_output_sink(sink, &OutputDef::new(pin));
 
-        let mapping = MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.5, 0.5),
-                diameter: 1.0,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 1,
-                ring_lamp_counts: vec![1],
-                offset_angle: 0.0,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 2.0,
-        };
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
 
         let fix_id = rt
             .engine_mut()
@@ -609,13 +603,7 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 tex_id,
-                Box::new(TextureNode::new(
-                    tex_id,
-                    TextureDef {
-                        width: 4,
-                        height: 4,
-                    },
-                )),
+                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
                 frame,
             )
             .unwrap();
@@ -669,34 +657,24 @@ mod output_sink_flush_tests {
             RuntimeBuffer::raw(alloc::vec![0xffu8; 6]),
         ));
 
-        rt.services_mut().register_output_sink(
-            sink_written,
-            &OutputDef::GpioStrip {
-                pin: pin_written,
-                options: None,
-            },
-        );
+        rt.services_mut()
+            .register_output_sink(sink_written, &OutputDef::new(pin_written));
 
-        rt.services_mut().register_output_sink(
-            _sink_idle,
-            &OutputDef::GpioStrip {
-                pin: pin_idle,
-                options: None,
-            },
-        );
+        rt.services_mut()
+            .register_output_sink(_sink_idle, &OutputDef::new(pin_idle));
 
-        let mapping = MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.5, 0.5),
-                diameter: 1.0,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 1,
-                ring_lamp_counts: vec![1],
-                offset_angle: 0.0,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 2.0,
-        };
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
 
         let fix_id = rt
             .engine_mut()
@@ -795,13 +773,7 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 tex_id,
-                Box::new(TextureNode::new(
-                    tex_id,
-                    TextureDef {
-                        width: 4,
-                        height: 4,
-                    },
-                )),
+                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
                 frame,
             )
             .unwrap();
@@ -850,26 +822,21 @@ mod output_sink_flush_tests {
             RuntimeBuffer::raw(alloc::vec![0u8; 6]),
         ));
 
-        rt.services_mut().register_output_sink(
-            sink,
-            &OutputDef::GpioStrip {
-                pin: 99,
-                options: None,
-            },
-        );
+        rt.services_mut()
+            .register_output_sink(sink, &OutputDef::new(99));
 
-        let mapping = MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.5, 0.5),
-                diameter: 1.0,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 1,
-                ring_lamp_counts: vec![1],
-                offset_angle: 0.0,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 2.0,
-        };
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
 
         let fix_id = rt
             .engine_mut()

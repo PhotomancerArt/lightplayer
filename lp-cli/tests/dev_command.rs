@@ -17,7 +17,6 @@ fn create_test_project_dir() -> (TempDir, PathBuf) {
     fs::create_dir_all(&project_dir).unwrap();
 
     let project_toml = r#"kind = "project"
-uid = "2025.01.20-12.00.00-test-project"
 name = "test-project"
 "#;
     fs::write(project_dir.join("project.toml"), project_toml).unwrap();

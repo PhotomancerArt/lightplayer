@@ -4203,6 +4203,7 @@ name = "lpc-source"
 version = "40.0.0"
 dependencies = [
  "lpc-model",
+ "lpc-slot-codegen",
  "schemars",
  "serde",
  "serde_json",
@@ -4231,6 +4232,7 @@ dependencies = [
  "serde",
  "serde-json-core",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

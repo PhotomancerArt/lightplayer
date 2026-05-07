@@ -13,6 +13,9 @@ pub mod node;
 pub mod presentation;
 pub mod prop;
 pub mod schema;
+pub mod slot_shapes {
+    include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
+}
 
 pub use artifact::{
     ArtifactLocator, ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact,

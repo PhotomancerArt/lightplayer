@@ -55,12 +55,33 @@ impl<T> From<Versioned<T>> for ValueSlot<T> {
     }
 }
 
+impl<T: Default> Default for ValueSlot<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
 impl<T: Serialize> Serialize for ValueSlot<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         self.inner.value().serialize(serializer)
+    }
+}
+
+#[cfg(feature = "schema-gen")]
+impl<T: schemars::JsonSchema> schemars::JsonSchema for ValueSlot<T> {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        <T as schemars::JsonSchema>::schema_name()
+    }
+
+    fn schema_id() -> alloc::borrow::Cow<'static, str> {
+        <T as schemars::JsonSchema>::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <T as schemars::JsonSchema>::json_schema(generator)
     }
 }
 
@@ -150,6 +171,12 @@ impl<K: Ord, V> MapSlot<K, V> {
     }
 }
 
+impl<K: Ord, V> Default for MapSlot<K, V> {
+    fn default() -> Self {
+        Self::new(BTreeMap::new())
+    }
+}
+
 impl<K, V> Serialize for MapSlot<K, V>
 where
     K: MapSlotKeyLike,
@@ -164,6 +191,24 @@ where
             map.serialize_entry(&key.to_authored_key(), value)?;
         }
         map.end()
+    }
+}
+
+#[cfg(feature = "schema-gen")]
+impl<K, V> schemars::JsonSchema for MapSlot<K, V>
+where
+    V: schemars::JsonSchema,
+{
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        <BTreeMap<String, V> as schemars::JsonSchema>::schema_name()
+    }
+
+    fn schema_id() -> alloc::borrow::Cow<'static, str> {
+        <BTreeMap<String, V> as schemars::JsonSchema>::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <BTreeMap<String, V> as schemars::JsonSchema>::json_schema(generator)
     }
 }
 
@@ -316,12 +361,33 @@ impl<T> OptionSlot<T> {
     }
 }
 
+impl<T> Default for OptionSlot<T> {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
 impl<T: Serialize> Serialize for OptionSlot<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         self.data.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "schema-gen")]
+impl<T: schemars::JsonSchema> schemars::JsonSchema for OptionSlot<T> {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        <Option<T> as schemars::JsonSchema>::schema_name()
+    }
+
+    fn schema_id() -> alloc::borrow::Cow<'static, str> {
+        <Option<T> as schemars::JsonSchema>::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <Option<T> as schemars::JsonSchema>::json_schema(generator)
     }
 }
 

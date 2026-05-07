@@ -1,25 +1,32 @@
 use crate::node::NodeKind;
 use crate::node::node_def::NodeDef;
-use serde::{Deserialize, Deserializer, Serialize};
+use lpc_model::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+use serde::{Deserialize, Serialize};
 
-/// Authored output node definition.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub enum OutputDef {
-    /// GPIO strip output
-    GpioStrip {
-        pin: u32,
-        /// Optional display pipeline options (JSON key: "options")
-        #[serde(default)]
-        options: Option<OutputDriverOptionsConfig>,
-    },
+/// Authored GPIO output node definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[slot(root)]
+pub struct OutputDef {
+    pub pin: ValueSlot<u32>,
+    /// Optional display pipeline options.
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub options: OptionSlot<OutputDriverOptionsConfig>,
 }
 
-impl<'de> Deserialize<'de> for OutputDef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        OutputDefWire::deserialize(deserializer).map(Into::into)
+impl OutputDef {
+    pub fn new(pin: u32) -> Self {
+        Self {
+            pin: ValueSlot::new(pin),
+            options: OptionSlot::none(),
+        }
+    }
+
+    pub fn pin(&self) -> u32 {
+        *self.pin.value()
+    }
+
+    pub fn options(&self) -> Option<&OutputDriverOptionsConfig> {
+        self.options.data.as_ref()
     }
 }
 
@@ -34,82 +41,55 @@ impl NodeDef for OutputDef {
 }
 
 /// Authored output driver options for the display pipeline.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
 pub struct OutputDriverOptionsConfig {
-    /// Gamma exponent for luminance curve
-    #[serde(default = "default_lum_power")]
-    pub lum_power: f32,
-    /// RGB white point balance
-    #[serde(default = "default_white_point")]
-    pub white_point: [f32; 3],
-    /// Global brightness multiplier (0.0–1.0)
-    #[serde(default = "default_brightness")]
-    pub brightness: f32,
-    /// Enable interpolation between frames
-    #[serde(default = "default_true")]
-    pub interpolation_enabled: bool,
-    /// Enable temporal dithering
-    #[serde(default = "default_true")]
-    pub dithering_enabled: bool,
-    /// Enable gamma + white point LUT
-    #[serde(default = "default_true")]
-    pub lut_enabled: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_lum_power() -> f32 {
-    2.0
-}
-fn default_white_point() -> [f32; 3] {
-    [0.9, 1.0, 1.0]
-}
-fn default_brightness() -> f32 {
-    1.0
+    /// Gamma exponent for luminance curve.
+    #[serde(default = "default_lum_power_slot")]
+    pub lum_power: PositiveF32Slot,
+    /// RGB white point balance.
+    #[serde(default = "default_white_point_slot")]
+    pub white_point: ValueSlot<[f32; 3]>,
+    /// Global brightness multiplier.
+    #[serde(default = "default_brightness_slot")]
+    pub brightness: RatioSlot,
+    /// Enable interpolation between frames.
+    #[serde(default = "default_true_slot")]
+    pub interpolation_enabled: ValueSlot<bool>,
+    /// Enable temporal dithering.
+    #[serde(default = "default_true_slot")]
+    pub dithering_enabled: ValueSlot<bool>,
+    /// Enable gamma + white point LUT.
+    #[serde(default = "default_true_slot")]
+    pub lut_enabled: ValueSlot<bool>,
 }
 
 impl Default for OutputDriverOptionsConfig {
     fn default() -> Self {
         Self {
-            lum_power: 2.0,
-            white_point: [0.9, 1.0, 1.0],
-            brightness: 1.0,
-            interpolation_enabled: true,
-            dithering_enabled: true,
-            lut_enabled: true,
+            lum_power: default_lum_power_slot(),
+            white_point: default_white_point_slot(),
+            brightness: default_brightness_slot(),
+            interpolation_enabled: default_true_slot(),
+            dithering_enabled: default_true_slot(),
+            lut_enabled: default_true_slot(),
         }
     }
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum OutputDefWire {
-    Flat(OutputFlatDef),
-    Tagged {
-        #[serde(rename = "GpioStrip")]
-        gpio_strip: OutputFlatDef,
-    },
+fn default_lum_power_slot() -> PositiveF32Slot {
+    PositiveF32Slot::new(2.0)
 }
 
-impl From<OutputDefWire> for OutputDef {
-    fn from(value: OutputDefWire) -> Self {
-        let def = match value {
-            OutputDefWire::Flat(def) | OutputDefWire::Tagged { gpio_strip: def } => def,
-        };
-        OutputDef::GpioStrip {
-            pin: def.pin,
-            options: def.options,
-        }
-    }
+fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
+    ValueSlot::new([0.9, 1.0, 1.0])
 }
 
-#[derive(Deserialize)]
-struct OutputFlatDef {
-    pin: u32,
-    #[serde(default)]
-    options: Option<OutputDriverOptionsConfig>,
+fn default_brightness_slot() -> RatioSlot {
+    RatioSlot::new(1.0)
+}
+
+fn default_true_slot() -> ValueSlot<bool> {
+    ValueSlot::new(true)
 }
 
 #[cfg(test)]
@@ -118,27 +98,9 @@ mod tests {
 
     #[test]
     fn test_output_def_kind() {
-        let def = OutputDef::GpioStrip {
-            pin: 18,
-            options: None,
-        };
+        let def = OutputDef::new(18);
         assert_eq!(def.kind(), NodeKind::Output);
-    }
-
-    #[test]
-    fn test_output_def_with_options_deserialize() {
-        let json = r#"{"GpioStrip": {"pin": 18, "options": {"interpolation_enabled": true, "dithering_enabled": true, "lut_enabled": true, "brightness": 0.25}}}"#;
-        let def: OutputDef = serde_json::from_str(json).unwrap();
-        match &def {
-            OutputDef::GpioStrip { pin, options } => {
-                assert_eq!(*pin, 18);
-                let opts = options.as_ref().unwrap();
-                assert!(opts.interpolation_enabled);
-                assert!(opts.dithering_enabled);
-                assert!(opts.lut_enabled);
-                assert!((opts.brightness - 0.25).abs() < 0.001);
-            }
-        }
+        assert_eq!(def.pin(), 18);
     }
 
     #[test]
@@ -152,14 +114,10 @@ brightness = 0.25
 dithering_enabled = false
 "#;
         let def: OutputDef = toml::from_str(toml).unwrap();
-        match &def {
-            OutputDef::GpioStrip { pin, options } => {
-                assert_eq!(*pin, 18);
-                let opts = options.as_ref().unwrap();
-                assert!((opts.brightness - 0.25).abs() < 0.001);
-                assert!(!opts.dithering_enabled);
-                assert!(opts.interpolation_enabled);
-            }
-        }
+        assert_eq!(def.pin(), 18);
+        let opts = def.options().unwrap();
+        assert!((*opts.brightness.value() - 0.25).abs() < 0.001);
+        assert!(!*opts.dithering_enabled.value());
+        assert!(*opts.interpolation_enabled.value());
     }
 }

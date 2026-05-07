@@ -361,15 +361,15 @@ fn map_model_q32_options(
     opts: &lpc_source::legacy::glsl_opts::GlslOpts,
 ) -> lps_q32::q32_options::Q32Options {
     lps_q32::q32_options::Q32Options {
-        add_sub: match opts.add_sub {
+        add_sub: match opts.add_sub.value() {
             AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
             AddSubMode::Wrapping => lps_q32::q32_options::AddSubMode::Wrapping,
         },
-        mul: match opts.mul {
+        mul: match opts.mul.value() {
             MulMode::Saturating => lps_q32::q32_options::MulMode::Saturating,
             MulMode::Wrapping => lps_q32::q32_options::MulMode::Wrapping,
         },
-        div: match opts.div {
+        div: match opts.div.value() {
             DivMode::Saturating => lps_q32::q32_options::DivMode::Saturating,
             DivMode::Reciprocal => lps_q32::q32_options::DivMode::Reciprocal,
         },
@@ -429,13 +429,7 @@ mod tests {
             )
             .expect("texture");
 
-        let tex = TextureNode::new(
-            tex_id,
-            lpc_source::node::texture::TextureDef {
-                width: 8,
-                height: 8,
-            },
-        );
+        let tex = TextureNode::new(tex_id, lpc_source::node::texture::TextureDef::new(8, 8));
         engine
             .attach_runtime_node(tex_id, Box::new(tex), frame)
             .expect("attach tex");
@@ -455,12 +449,7 @@ mod tests {
             )
             .expect("shader");
 
-        let cfg = ShaderDef {
-            glsl_path: lpc_model::LpPathBuf::from("main.glsl"),
-            texture_loc: lpc_model::RelativeNodeRef::current(),
-            render_order: 0,
-            glsl_opts: Default::default(),
-        };
+        let cfg = ShaderDef::default();
 
         let sh = ShaderNode::new(sh_id, tex_id, cfg, String::from(DEMO_GLSL), 8, 8);
         engine
@@ -476,12 +465,7 @@ mod tests {
 
     #[test]
     fn shader_render_output_is_on_produced_slot_access() {
-        let cfg = ShaderDef {
-            glsl_path: lpc_model::LpPathBuf::from("main.glsl"),
-            texture_loc: lpc_model::RelativeNodeRef::current(),
-            render_order: 0,
-            glsl_opts: Default::default(),
-        };
+        let cfg = ShaderDef::default();
         let mut render_products = RenderProductStore::new();
         let mut runtime_buffers = RuntimeBufferStore::new();
         let mut ctx = NodeResourceInitContext::new(&mut render_products, &mut runtime_buffers);

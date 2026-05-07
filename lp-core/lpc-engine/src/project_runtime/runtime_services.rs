@@ -150,29 +150,21 @@ impl Drop for RuntimeServices {
 }
 
 fn pin_from_output_config(config: &OutputDef) -> u32 {
-    match config {
-        OutputDef::GpioStrip { pin, .. } => *pin,
-    }
+    config.pin()
 }
 
 fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOptions> {
-    match cfg {
-        OutputDef::GpioStrip {
-            options: Some(opts),
-            ..
-        } => Some(driver_options_from_cfg(opts)),
-        _ => None,
-    }
+    cfg.options().map(driver_options_from_cfg)
 }
 
 fn driver_options_from_cfg(cfg: &OutputDriverOptionsConfig) -> OutputDriverOptions {
     OutputDriverOptions {
-        lum_power: cfg.lum_power,
-        white_point: cfg.white_point,
-        brightness: cfg.brightness.clamp(0.0, 1.0),
-        interpolation_enabled: cfg.interpolation_enabled,
-        dithering_enabled: cfg.dithering_enabled,
-        lut_enabled: cfg.lut_enabled,
+        lum_power: *cfg.lum_power.value(),
+        white_point: *cfg.white_point.value(),
+        brightness: (*cfg.brightness.value()).clamp(0.0, 1.0),
+        interpolation_enabled: *cfg.interpolation_enabled.value(),
+        dithering_enabled: *cfg.dithering_enabled.value(),
+        lut_enabled: *cfg.lut_enabled.value(),
     }
 }
 
@@ -282,13 +274,7 @@ mod tests {
             FrameId::new(1),
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
-        services.register_output_sink(
-            buffer_id,
-            &OutputDef::GpioStrip {
-                pin: 4,
-                options: None,
-            },
-        );
+        services.register_output_sink(buffer_id, &OutputDef::new(4));
 
         services
             .flush_dirty_output_sinks(FrameId::new(1), &buffers)

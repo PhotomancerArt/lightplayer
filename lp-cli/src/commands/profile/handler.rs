@@ -257,10 +257,13 @@ fn read_project_uid(dir: &std::path::Path) -> Result<String> {
     let content = std::fs::read_to_string(&project_toml)
         .with_context(|| format!("Failed to read {}", project_toml.display()))?;
     let value: toml::Value = toml::from_str(&content).context("Failed to parse project.toml")?;
-    let uid = value["uid"]
-        .as_str()
-        .context("project.toml missing 'uid' field")?;
-    Ok(uid.to_string())
+    let project_key = value
+        .get("uid")
+        .and_then(toml::Value::as_str)
+        .or_else(|| value.get("name").and_then(toml::Value::as_str))
+        .or_else(|| dir.file_name().and_then(std::ffi::OsStr::to_str))
+        .context("project.toml missing 'name' field")?;
+    Ok(project_key.to_string())
 }
 
 fn derive_dir_label(input_dir: &Path, cwd: &Path) -> String {

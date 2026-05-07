@@ -12,10 +12,13 @@ std = ["lpc-model/std", "toml/std", "toml/preserve_order"]
 schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
 
 [dependencies]
-lpc-model = { path = "../lpc-model", default-features = false }
+lpc-model = { path = "../lpc-model", default-features = false, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }
+
+[build-dependencies]
+lpc-slot-codegen = { path = "../lpc-slot-codegen" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

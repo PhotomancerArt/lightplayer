@@ -22,11 +22,12 @@ pub fn generate_mapping_points(
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
+            ..
         } => {
             let mut all_points = Vec::new();
             let mut channel_offset = 0u32;
 
-            for path_spec in paths {
+            for path_spec in paths.entries.values() {
                 let points = match path_spec {
                     PathSpec::RingArray {
                         center,
@@ -36,15 +37,16 @@ pub fn generate_mapping_points(
                         ring_lamp_counts,
                         offset_angle,
                         order,
+                        ..
                     } => generate_ring_array_points(
-                        *center,
-                        *diameter,
-                        *start_ring_inclusive,
-                        *end_ring_exclusive,
+                        *center.value(),
+                        *diameter.value(),
+                        *start_ring_inclusive.value(),
+                        *end_ring_exclusive.value(),
                         ring_lamp_counts,
-                        *offset_angle,
-                        *order,
-                        *sample_diameter,
+                        *offset_angle.value(),
+                        *order.value(),
+                        *sample_diameter.value(),
                         texture_width,
                         texture_height,
                         channel_offset,
@@ -62,11 +64,11 @@ pub fn generate_mapping_points(
 
 /// Generate mapping points from RingArray path specification
 fn generate_ring_array_points(
-    center: (f32, f32),
+    center: [f32; 2],
     diameter: f32,
     start_ring_inclusive: u32,
     end_ring_exclusive: u32,
-    ring_lamp_counts: &Vec<u32>,
+    ring_lamp_counts: &lpc_model::MapSlot<u32, lpc_model::ValueSlot<u32>>,
     offset_angle: f32,
     order: RingOrder,
     sample_diameter: f32,
@@ -74,7 +76,7 @@ fn generate_ring_array_points(
     texture_height: u32,
     channel_offset: u32,
 ) -> Vec<MappingPoint> {
-    let (center_x, center_y) = center;
+    let [center_x, center_y] = center;
     let start_ring = start_ring_inclusive;
     let end_ring = end_ring_exclusive;
 
@@ -108,8 +110,9 @@ fn generate_ring_array_points(
 
         // Get lamp count for this ring
         let lamp_count = ring_lamp_counts
-            .get(ring_index as usize)
-            .copied()
+            .entries
+            .get(&ring_index)
+            .map(|count| *count.value())
             .unwrap_or(0);
 
         // Generate points for each lamp in the ring
@@ -152,15 +155,19 @@ mod tests {
         offset_angle: f32,
         order: RingOrder,
     ) -> PathSpec {
-        PathSpec::RingArray {
-            center,
+        PathSpec::ring_array_counts(
+            [center.0, center.1],
             diameter,
-            start_ring_inclusive: start_ring,
-            end_ring_exclusive: end_ring,
-            ring_lamp_counts,
+            start_ring,
+            end_ring,
+            &ring_lamp_counts,
             offset_angle,
             order,
-        }
+        )
+    }
+
+    fn create_mapping_config(paths: Vec<PathSpec>) -> MappingConfig {
+        MappingConfig::path_points_vec(paths, 2.0)
     }
 
     #[test]
@@ -168,10 +175,7 @@ mod tests {
         // Single ring at center (ring_index = 0) with 8 lamps
         let path =
             create_ring_array_path((0.5, 0.5), 1.0, 0, 1, vec![8], 0.0, RingOrder::InnerFirst);
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -210,10 +214,7 @@ mod tests {
             0.0,
             RingOrder::InnerFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -250,10 +251,7 @@ mod tests {
             0.0,
             RingOrder::InnerFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -279,10 +277,7 @@ mod tests {
             0.0,
             RingOrder::OuterFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -309,10 +304,7 @@ mod tests {
             core::f32::consts::PI / 4.0, // π/4 offset
             RingOrder::InnerFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -338,10 +330,7 @@ mod tests {
             0.0,
             RingOrder::InnerFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -359,10 +348,7 @@ mod tests {
         for center in [(0.0, 0.0), (1.0, 1.0), (0.5, 0.5)] {
             let path =
                 create_ring_array_path(center, 0.5, 0, 1, vec![4], 0.0, RingOrder::InnerFirst);
-            let config = MappingConfig::PathPoints {
-                paths: vec![path],
-                sample_diameter: 2.0,
-            };
+            let config = create_mapping_config(vec![path]);
 
             let points = generate_mapping_points(&config, 100, 100);
 
@@ -379,10 +365,7 @@ mod tests {
         // Test sample diameter to normalized radius conversion
         let path =
             create_ring_array_path((0.5, 0.5), 1.0, 0, 1, vec![1], 0.0, RingOrder::InnerFirst);
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         // Test with square texture (100x100)
         let points_square = generate_mapping_points(&config, 100, 100);
@@ -410,10 +393,7 @@ mod tests {
             create_ring_array_path((0.5, 0.5), 1.0, 0, 1, vec![5], 0.0, RingOrder::InnerFirst);
         let path2 =
             create_ring_array_path((0.5, 0.5), 1.0, 0, 1, vec![3], 0.0, RingOrder::InnerFirst);
-        let config = MappingConfig::PathPoints {
-            paths: vec![path1, path2],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path1, path2]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -439,10 +419,7 @@ mod tests {
             0.0,
             RingOrder::InnerFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -456,10 +433,7 @@ mod tests {
         // Test with start_ring >= end_ring
         let path =
             create_ring_array_path((0.5, 0.5), 1.0, 2, 2, vec![], 0.0, RingOrder::InnerFirst);
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -472,10 +446,7 @@ mod tests {
         // Test with single lamp in a ring
         let path =
             create_ring_array_path((0.5, 0.5), 1.0, 0, 1, vec![1], 0.0, RingOrder::InnerFirst);
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 
@@ -497,10 +468,7 @@ mod tests {
             0.0,
             RingOrder::InnerFirst,
         );
-        let config = MappingConfig::PathPoints {
-            paths: vec![path],
-            sample_diameter: 2.0,
-        };
+        let config = create_mapping_config(vec![path]);
 
         let points = generate_mapping_points(&config, 100, 100);
 

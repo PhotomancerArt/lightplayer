@@ -65,6 +65,21 @@ impl<'de> Deserialize<'de> for ArtifactPathSlot {
     }
 }
 
+#[cfg(feature = "schema-gen")]
+impl schemars::JsonSchema for ArtifactPathSlot {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        <String as schemars::JsonSchema>::schema_name()
+    }
+
+    fn schema_id() -> alloc::borrow::Cow<'static, str> {
+        <String as schemars::JsonSchema>::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+
 impl FieldSlot for ArtifactPathSlot {
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(artifact_path_shape())

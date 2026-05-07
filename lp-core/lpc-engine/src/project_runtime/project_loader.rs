@@ -148,9 +148,22 @@ impl CoreProjectLoader {
             })?;
 
         let mut loaded_nodes = Vec::new();
-        for (name, invocation) in project_def.nodes {
-            let artifact_path =
-                resolve_child_artifact_locator(&project_path, &invocation.artifact)?;
+        for (name, invocation) in project_def.nodes.entries {
+            let node_name =
+                NodeName::parse(&name).map_err(|e| CoreProjectLoadError::InvalidNodeName {
+                    path: project_path.as_str().to_string(),
+                    reason: format!("{e}"),
+                })?;
+            let artifact_locator = invocation.artifact_locator().map_err(|e| {
+                CoreProjectLoadError::InvalidSourcePath {
+                    path: project_path.as_str().to_string(),
+                    reason: format!(
+                        "invalid artifact locator `{}`: {e}",
+                        invocation.artifact.value()
+                    ),
+                }
+            })?;
+            let artifact_path = resolve_child_artifact_locator(&project_path, &artifact_locator)?;
             let config = load_node_def(root, artifact_path.as_path())?;
             let artifact_id = runtime
                 .engine_mut()
@@ -162,7 +175,7 @@ impl CoreProjectLoader {
                 .tree_mut()
                 .add_child(
                     root_id,
-                    name.clone(),
+                    node_name.clone(),
                     ty,
                     WireChildKind::Input {
                         source: WireSlotIndex(0),
@@ -175,7 +188,7 @@ impl CoreProjectLoader {
 
             runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
             loaded_nodes.push(LoadedNode {
-                name,
+                name: node_name,
                 artifact_path,
                 id: leaf_id,
                 config,
@@ -244,9 +257,9 @@ impl CoreProjectLoader {
         for node in loaded_nodes {
             if let LoadedNodeConfig::Shader(config) = &node.config {
                 let texture_node =
-                    resolve_node_loc(loaded_nodes, node, &config.texture_loc, "texture")?;
+                    resolve_node_loc(loaded_nodes, node, config.texture_loc(), "texture")?;
                 let shader_path =
-                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path)?;
+                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
                 let glsl_source = read_utf8_file(root, shader_path.as_path())?;
                 let placeholder_dims = placeholder_texture_dimensions_for_shader(texture_node)?;
                 runtime
@@ -273,17 +286,17 @@ impl CoreProjectLoader {
         for node in loaded_nodes {
             if let LoadedNodeConfig::Fixture(config) = &node.config {
                 let texture_node =
-                    resolve_node_loc(loaded_nodes, node, &config.texture_loc, "texture")?;
+                    resolve_node_loc(loaded_nodes, node, config.texture_loc(), "texture")?;
                 let shader_node = find_shader_for_texture(loaded_nodes, texture_node.id)
                     .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!(
                             "no shader targets texture node ref `{}`",
-                            config.texture_loc
+                            config.texture_loc()
                         ),
                     })?;
                 let output_node =
-                    resolve_node_loc(loaded_nodes, node, &config.output_loc, "output")?;
+                    resolve_node_loc(loaded_nodes, node, config.output_loc(), "output")?;
                 let sink_id = output_sink_for(
                     runtime.engine(),
                     output_node.id,
@@ -301,9 +314,9 @@ impl CoreProjectLoader {
                             config.mapping.clone(),
                             frame,
                             sink_id,
-                            config.color_order,
-                            config.brightness.unwrap_or(64),
-                            config.gamma_correction.unwrap_or(true),
+                            config.color_order(),
+                            config.brightness_u8(),
+                            config.gamma_correction(),
                         )),
                         frame,
                     )
@@ -520,17 +533,17 @@ fn find_shader_for_texture<'a>(
             let LoadedNodeConfig::Shader(config) = &node.config else {
                 return false;
             };
-            find_node_by_loc(loaded_nodes, node, &config.texture_loc)
+            find_node_by_loc(loaded_nodes, node, config.texture_loc())
                 .map(|candidate| candidate.id == texture_id)
                 .unwrap_or(false)
         })
         .max_by(|a, b| {
             let ar = match &a.config {
-                LoadedNodeConfig::Shader(config) => config.render_order,
+                LoadedNodeConfig::Shader(config) => config.render_order(),
                 _ => 0,
             };
             let br = match &b.config {
-                LoadedNodeConfig::Shader(config) => config.render_order,
+                LoadedNodeConfig::Shader(config) => config.render_order(),
                 _ => 0,
             };
             ar.cmp(&br)
@@ -547,7 +560,7 @@ fn placeholder_texture_dimensions_for_shader(
             reason: String::from("shader texture loc did not reference a texture node"),
         });
     };
-    Ok((config.width, config.height))
+    Ok((config.width(), config.height()))
 }
 
 fn output_sink_for(
@@ -810,6 +823,7 @@ artifact = "./fixture.toml"
             "/texture.toml".as_path(),
             br#"
 kind = "texture"
+[size]
 width = 16
 height = 16
 "#,
@@ -844,29 +858,33 @@ pin = 4
 kind = "fixture"
 output_loc = "..output"
 texture_loc = "..texture"
-color_order = "Rgb"
-transform = [
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.0],
-    [0.0, 0.0, 0.0, 1.0],
-]
+color_order = "rgb"
 brightness = 255
 gamma_correction = false
 
-[mapping.PathPoints]
+[transform]
+m00 = 1.0
+m01 = 0.0
+m10 = 0.0
+m11 = 1.0
+tx = 0.0
+ty = 0.0
+
+[mapping]
+kind = "path_points"
 sample_diameter = 2.0
 
-[[mapping.PathPoints.paths]]
-
-[mapping.PathPoints.paths.RingArray]
+[mapping.paths.0]
+kind = "ring_array"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0
 end_ring_exclusive = 1
-ring_lamp_counts = [1]
 offset_angle = 0.0
-order = "InnerFirst"
+order = "inner_first"
+
+[mapping.paths.0.ring_lamp_counts]
+0 = 1
 "#,
         )
         .expect("fixture.toml");

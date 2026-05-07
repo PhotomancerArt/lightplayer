@@ -1,7 +1,10 @@
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
-use lpc_model::{FrameId, NodeId};
+use lpc_model::{
+    Affine2d, Affine2dSlot, FrameId, MapSlot, NodeId, OptionSlot, RatioSlot, RelativeNodeRef,
+    RelativeNodeRefSlot, ValueSlot,
+};
 use lpc_view::ProjectView;
 use lpc_wire::WireResourceSummary;
 use lpc_wire::legacy::LegacyProjectResponse;
@@ -186,10 +189,7 @@ fn test_partial_state_merge_texture() {
                 handle,
                 lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
-                    config: Box::new(TextureDef {
-                        width: 100,
-                        height: 200,
-                    }),
+                    config: Box::new(TextureDef::new(100, 200)),
                     state: LegacyNodeState::Texture(initial_state),
                 },
             );
@@ -239,10 +239,7 @@ fn test_partial_state_merge_texture() {
                 handle,
                 lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.texture"),
-                    config: Box::new(TextureDef {
-                        width: 150,
-                        height: 250,
-                    }),
+                    config: Box::new(TextureDef::new(150, 250)),
                     state: LegacyNodeState::Texture(partial_state),
                 },
             );
@@ -310,10 +307,7 @@ fn test_partial_state_merge_output() {
                 handle,
                 lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
-                    config: Box::new(OutputDef::GpioStrip {
-                        pin: 0,
-                        options: None,
-                    }),
+                    config: Box::new(OutputDef::new(0)),
                     state: LegacyNodeState::Output(initial_state),
                 },
             );
@@ -352,10 +346,7 @@ fn test_partial_state_merge_output() {
                 handle,
                 lpc_wire::legacy::LegacyNodeDetail {
                     path: lpc_model::LpPathBuf::from("/src/test.output"),
-                    config: Box::new(OutputDef::GpioStrip {
-                        pin: 0,
-                        options: None,
-                    }),
+                    config: Box::new(OutputDef::new(0)),
                     state: LegacyNodeState::Output(partial_state),
                 },
             );
@@ -414,10 +405,7 @@ fn detail_applies_real_texture_config() {
                 handle,
                 LegacyNodeDetail {
                     path,
-                    config: Box::new(TextureDef {
-                        width: 320,
-                        height: 240,
-                    }),
+                    config: Box::new(TextureDef::new(320, 240)),
                     state: LegacyNodeState::Texture(state),
                 },
             );
@@ -437,8 +425,8 @@ fn detail_applies_real_texture_config() {
         .as_any()
         .downcast_ref::<TextureDef>()
         .expect("texture config");
-    assert_eq!(cfg.width, 320);
-    assert_eq!(cfg.height, 240);
+    assert_eq!(cfg.width(), 320);
+    assert_eq!(cfg.height(), 240);
 }
 
 #[test]
@@ -454,10 +442,8 @@ fn detail_applies_real_output_config() {
     let f1 = FrameId::new(1);
 
     let state = OutputState::new(f1);
-    let opts = OutputDriverOptionsConfig {
-        brightness: 0.75,
-        ..OutputDriverOptionsConfig::default()
-    };
+    let mut opts = OutputDriverOptionsConfig::default();
+    opts.brightness = RatioSlot::new(0.75);
 
     let response = LegacyProjectResponse::GetChanges {
         current_frame: f1,
@@ -474,9 +460,9 @@ fn detail_applies_real_output_config() {
                 handle,
                 LegacyNodeDetail {
                     path,
-                    config: Box::new(OutputDef::GpioStrip {
-                        pin: 42,
-                        options: Some(opts.clone()),
+                    config: Box::new(OutputDef {
+                        pin: ValueSlot::new(42),
+                        options: OptionSlot::some(opts.clone()),
                     }),
                     state: LegacyNodeState::Output(state),
                 },
@@ -499,9 +485,9 @@ fn detail_applies_real_output_config() {
         .expect("output config");
     assert_eq!(
         cfg,
-        &OutputDef::GpioStrip {
-            pin: 42,
-            options: Some(opts),
+        &OutputDef {
+            pin: ValueSlot::new(42),
+            options: OptionSlot::some(opts),
         }
     );
 }
@@ -537,10 +523,7 @@ fn detail_after_config_updated_replaces_stored_config() {
                 handle,
                 LegacyNodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureDef {
-                        width: 100,
-                        height: 200,
-                    }),
+                    config: Box::new(TextureDef::new(100, 200)),
                     state: LegacyNodeState::Texture(s1),
                 },
             );
@@ -571,10 +554,7 @@ fn detail_after_config_updated_replaces_stored_config() {
                 handle,
                 LegacyNodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureDef {
-                        width: 640,
-                        height: 480,
-                    }),
+                    config: Box::new(TextureDef::new(640, 480)),
                     state: LegacyNodeState::Texture(s2),
                 },
             );
@@ -592,8 +572,8 @@ fn detail_after_config_updated_replaces_stored_config() {
         .as_any()
         .downcast_ref::<TextureDef>()
         .expect("texture config");
-    assert_eq!(cfg.width, 640);
-    assert_eq!(cfg.height, 480);
+    assert_eq!(cfg.width(), 640);
+    assert_eq!(cfg.height(), 480);
     assert_eq!(view.nodes[&handle].config_ver, FrameId::new(2));
 }
 
@@ -628,10 +608,7 @@ fn detail_only_entry_stores_real_texture_config() {
                 handle,
                 LegacyNodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureDef {
-                        width: 128,
-                        height: 96,
-                    }),
+                    config: Box::new(TextureDef::new(128, 96)),
                     state: LegacyNodeState::Texture(state),
                 },
             );
@@ -650,8 +627,8 @@ fn detail_only_entry_stores_real_texture_config() {
         .as_any()
         .downcast_ref::<TextureDef>()
         .expect("real texture config, not placeholder zeros");
-    assert_eq!(cfg.width, 128);
-    assert_eq!(cfg.height, 96);
+    assert_eq!(cfg.width(), 128);
+    assert_eq!(cfg.height(), 96);
     assert!(matches!(entry.status, WireNodeStatus::Ok));
 }
 
@@ -688,10 +665,7 @@ fn project_watched_detail_entry_has_state_after_sync() {
                 handle,
                 LegacyNodeDetail {
                     path,
-                    config: Box::new(TextureDef {
-                        width: 4,
-                        height: 4,
-                    }),
+                    config: Box::new(TextureDef::new(4, 4)),
                     state: LegacyNodeState::Texture(state),
                 },
             );
@@ -751,10 +725,7 @@ fn project_view_resolves_output_bytes_from_resource_cache() {
                 handle,
                 LegacyNodeDetail {
                     path: path.clone(),
-                    config: Box::new(OutputDef::GpioStrip {
-                        pin: 0,
-                        options: None,
-                    }),
+                    config: Box::new(OutputDef::new(0)),
                     state: LegacyNodeState::Output(state),
                 },
             );
@@ -828,10 +799,7 @@ fn project_view_resolves_texture_bytes_from_render_product_cache() {
                 handle,
                 LegacyNodeDetail {
                     path: path.clone(),
-                    config: Box::new(TextureDef {
-                        width: 1,
-                        height: 1,
-                    }),
+                    config: Box::new(TextureDef::new(1, 1)),
                     state: LegacyNodeState::Texture(state),
                 },
             );
@@ -906,16 +874,17 @@ fn project_view_resolves_fixture_lamp_colors_from_cache() {
                 LegacyNodeDetail {
                     path: path.clone(),
                     config: Box::new(FixtureDef {
-                        output_loc: lpc_model::RelativeNodeRef::parse("..out").unwrap(),
-                        texture_loc: lpc_model::RelativeNodeRef::parse("..tex").unwrap(),
-                        mapping: MappingConfig::PathPoints {
-                            paths: vec![],
-                            sample_diameter: 2.0,
-                        },
-                        color_order: ColorOrder::Rgb,
-                        transform: [[0.0; 4]; 4],
-                        brightness: None,
-                        gamma_correction: None,
+                        output_loc: RelativeNodeRefSlot::new(
+                            RelativeNodeRef::parse("..out").unwrap(),
+                        ),
+                        texture_loc: RelativeNodeRefSlot::new(
+                            RelativeNodeRef::parse("..tex").unwrap(),
+                        ),
+                        mapping: MappingConfig::path_points(MapSlot::default(), 2.0),
+                        color_order: ValueSlot::new(ColorOrder::Rgb),
+                        transform: Affine2dSlot::new(Affine2d::identity()),
+                        brightness: OptionSlot::none(),
+                        gamma_correction: OptionSlot::none(),
                     }),
                     state: LegacyNodeState::Fixture(state),
                 },

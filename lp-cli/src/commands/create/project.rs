@@ -5,7 +5,10 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use lpc_model::{AsLpPath, AsLpPathBuf, RelativeNodeRef};
+use lpc_model::{
+    Affine2d, Affine2dSlot, AsLpPath, Dim2u, Dim2uSlot, MapSlot, OptionSlot, RelativeNodeRef,
+    RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
+};
 use lpc_source::node::{
     fixture::{ColorOrder, FixtureDef, MappingConfig},
     output::OutputDef,
@@ -26,72 +29,10 @@ pub fn derive_project_name(dir: &Path) -> String {
         .to_string()
 }
 
-/// Generate a UID from project name
-///
-/// Format: `YYYY.MM.DD-HH.MM.SS-<name>`
-/// Example: `2025.01.15-12.15.02-my-project`
-pub fn generate_uid(name: &str) -> String {
-    // Get current time
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    // Convert to UTC time components
-    // Using a simple approach - calculate from seconds since epoch
-    let days_since_epoch = now / 86400;
-    let seconds_today = now % 86400;
-
-    // Calculate date (approximate, doesn't account for leap years perfectly)
-    // Epoch: 1970-01-01
-    let mut year = 1970;
-    let mut days_remaining = days_since_epoch;
-
-    // Account for leap years
-    while days_remaining >= 365 {
-        let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-        let days_in_year = if is_leap { 366 } else { 365 };
-        if days_remaining >= days_in_year {
-            days_remaining -= days_in_year;
-            year += 1;
-        } else {
-            break;
-        }
-    }
-
-    // Calculate month and day (simplified)
-    let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-    let mut month = 1;
-    let mut day = days_remaining as u32 + 1;
-
-    for &days_in_month in &month_days {
-        let days = if month == 2 && is_leap {
-            29
-        } else {
-            days_in_month
-        };
-        if day > days {
-            day -= days;
-            month += 1;
-        } else {
-            break;
-        }
-    }
-
-    // Calculate time components
-    let hour = (seconds_today / 3600) as u32;
-    let minute = ((seconds_today % 3600) / 60) as u32;
-    let second = (seconds_today % 60) as u32;
-
-    // Format: YYYY.MM.DD-HH.MM.SS-<name>
-    format!("{year:04}.{month:02}.{day:02}-{hour:02}.{minute:02}.{second:02}-{name}")
-}
-
 /// Create project directory structure
 ///
 /// Creates the project directory, project.toml, and default node artifacts.
-pub fn create_project_structure(dir: &Path, name: Option<&str>, uid: Option<&str>) -> Result<()> {
+pub fn create_project_structure(dir: &Path, name: Option<&str>) -> Result<()> {
     // Create directory if doesn't exist
     std::fs::create_dir_all(dir)
         .with_context(|| format!("Failed to create directory: {}", dir.display()))?;
@@ -103,19 +44,12 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>, uid: Option<&str
         derive_project_name(dir)
     };
 
-    // Generate uid if not provided
-    let project_uid = if let Some(uid) = uid {
-        uid.to_string()
-    } else {
-        generate_uid(&project_name)
-    };
-
     // Create filesystem view for project directory
     let fs = lpfs::LpFsStd::new(dir.to_path_buf());
 
     // Create default template
     create_default_template(&fs)?;
-    write_project_toml(&fs, &project_uid, &project_name)?;
+    write_project_toml(&fs, &project_name)?;
 
     Ok(())
 }
@@ -127,8 +61,10 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>, uid: Option<&str
 pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
     // Create texture node
     let texture_config = TextureDef {
-        width: 64,
-        height: 64,
+        size: Dim2uSlot::new(Dim2u {
+            width: 64,
+            height: 64,
+        }),
     };
     let texture_toml = with_kind(
         "texture",
@@ -139,10 +75,13 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
 
     // Create shader node
     let shader_config = ShaderDef {
-        glsl_path: "shader.glsl".as_path_buf(),
-        texture_loc: RelativeNodeRef::parse("..texture").expect("valid node ref"),
-        render_order: 0,
+        glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
+        texture_loc: RelativeNodeRefSlot::new(
+            RelativeNodeRef::parse("..texture").expect("valid node ref"),
+        ),
+        render_order: RenderOrderSlot::new(0),
         glsl_opts: lpc_source::legacy::glsl_opts::GlslOpts::default(),
+        param_defs: MapSlot::default(),
     };
     let shader_toml = with_kind(
         "shader",
@@ -220,9 +159,9 @@ vec4 render(vec2 pos) {
     .map_err(|e| anyhow::anyhow!("Failed to write shader.glsl: {e}"))?;
 
     // Create output node
-    let output_config = OutputDef::GpioStrip {
-        pin: 4,
-        options: None,
+    let output_config = OutputDef {
+        pin: ValueSlot::new(4),
+        options: OptionSlot::none(),
     };
     let output_toml = with_kind(
         "output",
@@ -233,21 +172,17 @@ vec4 render(vec2 pos) {
 
     // Create fixture node
     let fixture_config = FixtureDef {
-        output_loc: RelativeNodeRef::parse("..output").expect("valid node ref"),
-        texture_loc: RelativeNodeRef::parse("..texture").expect("valid node ref"),
-        mapping: MappingConfig::PathPoints {
-            paths: vec![],
-            sample_diameter: 2.0,
-        },
-        color_order: ColorOrder::Rgb,
-        transform: [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        brightness: None,
-        gamma_correction: None,
+        output_loc: RelativeNodeRefSlot::new(
+            RelativeNodeRef::parse("..output").expect("valid node ref"),
+        ),
+        texture_loc: RelativeNodeRefSlot::new(
+            RelativeNodeRef::parse("..texture").expect("valid node ref"),
+        ),
+        mapping: MappingConfig::path_points(MapSlot::default(), 2.0),
+        color_order: ValueSlot::new(ColorOrder::Rgb),
+        transform: Affine2dSlot::new(Affine2d::identity()),
+        brightness: OptionSlot::none(),
+        gamma_correction: OptionSlot::none(),
     };
     let fixture_toml = with_kind(
         "fixture",
@@ -259,10 +194,9 @@ vec4 render(vec2 pos) {
     Ok(())
 }
 
-fn write_project_toml(fs: &dyn LpFs, uid: &str, name: &str) -> Result<()> {
+fn write_project_toml(fs: &dyn LpFs, name: &str) -> Result<()> {
     let project_toml = format!(
         r#"kind = "project"
-uid = "{uid}"
 name = "{name}"
 
 [nodes.output]
@@ -288,25 +222,12 @@ fn with_kind(kind: &str, body: String) -> String {
 }
 
 /// Print success message with next steps
-pub fn print_success_message(dir: &Path, name: &str) {
-    let uid = if let Ok(config) = std::fs::read_to_string(dir.join("project.toml")) {
-        match toml::from_str::<toml::Value>(&config) {
-            Ok(project_config) => project_config
-                .get("uid")
-                .and_then(toml::Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
-            Err(_) => "unknown".to_string(),
-        }
-    } else {
-        "unknown".to_string()
-    };
-
+pub fn print_success_message(_dir: &Path, name: &str) {
     let next_step_cmd =
         messages::format_command(&format!("cd {name} && lp-cli dev ws://localhost:2812/"));
 
     messages::print_success(
-        &format!("Project created successfully: {name} (uid: {uid})"),
+        &format!("Project created successfully: {name}"),
         &[&next_step_cmd],
     );
 }
@@ -328,44 +249,31 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_uid_format() {
-        let uid = generate_uid("test-project");
-        // Should match format: YYYY.MM.DD-HH.MM.SS-<name>
-        assert!(uid.starts_with("20")); // Year should start with 20
-        assert!(uid.contains(".")); // Should have dots
-        assert!(uid.contains("-")); // Should have dashes
-        assert!(uid.ends_with("-test-project")); // Should end with name
-        // Format: YYYY.MM.DD-HH.MM.SS-<name> = 4 dots (YYYY.MM.DD-HH.MM.SS)
-        assert_eq!(uid.matches(".").count(), 4);
-        assert_eq!(uid.matches("-").count(), 3); // 3 dashes (date-time-name)
-    }
-
-    #[test]
     fn test_create_project_structure_with_defaults() {
         let temp_dir = TempDir::new().unwrap();
         let project_dir = temp_dir.path().join("my-project");
 
-        create_project_structure(&project_dir, None, None).unwrap();
+        create_project_structure(&project_dir, None).unwrap();
 
         assert!(project_dir.join("project.toml").exists());
         let project_toml = std::fs::read_to_string(project_dir.join("project.toml")).unwrap();
         let project_value: toml::Value = toml::from_str(&project_toml).unwrap();
         assert_eq!(project_value["name"].as_str(), Some("my-project"));
-        assert!(!project_value["uid"].as_str().unwrap().is_empty());
+        assert!(project_value.get("uid").is_none());
         assert!(project_dir.join("shader.glsl").exists());
     }
 
     #[test]
-    fn test_create_project_structure_with_custom_name_uid() {
+    fn test_create_project_structure_with_custom_name() {
         let temp_dir = TempDir::new().unwrap();
         let project_dir = temp_dir.path().join("custom");
 
-        create_project_structure(&project_dir, Some("Custom Name"), Some("custom-uid")).unwrap();
+        create_project_structure(&project_dir, Some("Custom Name")).unwrap();
 
         let project_toml = std::fs::read_to_string(project_dir.join("project.toml")).unwrap();
         let project_value: toml::Value = toml::from_str(&project_toml).unwrap();
         assert_eq!(project_value["name"].as_str(), Some("Custom Name"));
-        assert_eq!(project_value["uid"].as_str(), Some("custom-uid"));
+        assert!(project_value.get("uid").is_none());
     }
 
     #[test]
@@ -394,18 +302,18 @@ mod tests {
         let texture_config: TextureDef =
             toml::from_str(std::str::from_utf8(&texture_toml).expect("UTF-8"))
                 .expect("texture node TOML");
-        assert_eq!(texture_config.width, 64);
-        assert_eq!(texture_config.height, 64);
+        assert_eq!(texture_config.width(), 64);
+        assert_eq!(texture_config.height(), 64);
 
         // Verify shader node content
         let shader_toml = fs.read_file("/shader.toml".as_path()).unwrap();
         let shader_config: ShaderDef =
             toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
                 .expect("shader node TOML");
-        assert_eq!(shader_config.glsl_path, "shader.glsl".as_path_buf());
+        assert_eq!(shader_config.glsl_path.value(), "shader.glsl");
         assert_eq!(
-            shader_config.texture_loc,
-            RelativeNodeRef::parse("..texture").expect("valid node ref")
+            shader_config.texture_loc(),
+            &RelativeNodeRef::parse("..texture").expect("valid node ref")
         );
 
         // Verify GLSL exists

@@ -1,32 +1,52 @@
 use crate::legacy::glsl_opts::GlslOpts;
 use crate::node::NodeKind;
 use crate::node::node_def::NodeDef;
-use lpc_model::RelativeNodeRef;
-use lpc_model::{AsLpPathBuf, LpPathBuf};
+use crate::node::shader::ShaderParamDef;
+use alloc::string::String;
+use lpc_model::{AsLpPathBuf, LpPathBuf, MapSlot, RelativeNodeRef, RelativeNodeRefSlot};
+use lpc_model::{RenderOrderSlot, SourcePathSlot};
 use serde::{Deserialize, Serialize};
 
 /// Authored shader node definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[slot(root)]
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
-    pub glsl_path: LpPathBuf,
+    pub glsl_path: SourcePathSlot,
     /// Texture node locator to render into.
-    pub texture_loc: RelativeNodeRef,
+    pub texture_loc: RelativeNodeRefSlot,
     /// Render order - lower numbers render first (default 0)
-    pub render_order: i32,
+    pub render_order: RenderOrderSlot,
     /// GLSL compilation options
     #[serde(default)]
     pub glsl_opts: GlslOpts,
+    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
+    pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
 impl Default for ShaderDef {
     fn default() -> Self {
         Self {
-            glsl_path: "main.glsl".as_path_buf(),
-            texture_loc: RelativeNodeRef::current(),
-            render_order: 0,
+            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
+            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::current()),
+            render_order: RenderOrderSlot::new(0),
             glsl_opts: GlslOpts::default(),
+            param_defs: MapSlot::default(),
         }
+    }
+}
+
+impl ShaderDef {
+    pub fn glsl_path_buf(&self) -> LpPathBuf {
+        self.glsl_path.value().as_path_buf()
+    }
+
+    pub fn texture_loc(&self) -> &RelativeNodeRef {
+        self.texture_loc.value()
+    }
+
+    pub fn render_order(&self) -> i32 {
+        *self.render_order.value()
     }
 }
 
@@ -48,10 +68,11 @@ mod tests {
     #[test]
     fn test_shader_def_kind() {
         let def = ShaderDef {
-            glsl_path: "main.glsl".as_path_buf(),
-            texture_loc: RelativeNodeRef::parse("..tex_texture").unwrap(),
-            render_order: 0,
+            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
+            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..tex_texture").unwrap()),
+            render_order: RenderOrderSlot::new(0),
             glsl_opts: GlslOpts::default(),
+            param_defs: MapSlot::default(),
         };
         assert_eq!(def.kind(), NodeKind::Shader);
     }
@@ -59,10 +80,10 @@ mod tests {
     #[test]
     fn test_shader_def_default() {
         let def = ShaderDef::default();
-        assert_eq!(def.glsl_path.as_str(), "main.glsl");
-        assert_eq!(def.render_order, 0);
-        assert_eq!(def.glsl_opts.add_sub, AddSubMode::Saturating);
-        assert_eq!(def.glsl_opts.mul, MulMode::Saturating);
-        assert_eq!(def.glsl_opts.div, DivMode::Saturating);
+        assert_eq!(def.glsl_path.value(), "main.glsl");
+        assert_eq!(def.render_order(), 0);
+        assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Saturating);
+        assert_eq!(*def.glsl_opts.mul.value(), MulMode::Saturating);
+        assert_eq!(*def.glsl_opts.div.value(), DivMode::Saturating);
     }
 }

@@ -174,7 +174,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
     let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
     let ar = mgr.acquire_location(
-        ArtifactLocation::try_from_src_spec(&config.artifact).unwrap(),
+        ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap()).unwrap(),
         FrameId::new(0),
     );
     mgr.load_with(&ar, FrameId::new(40), |_location| Ok(7u8))

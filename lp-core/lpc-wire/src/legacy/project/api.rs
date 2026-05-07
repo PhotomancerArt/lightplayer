@@ -622,10 +622,7 @@ mod tests {
             .set(FrameId::default(), TextureFormat::Rgba16);
         let detail = LegacyNodeDetail {
             path: LpPathBuf::from("/src/texture.texture"),
-            config: Box::new(TextureDef {
-                width: 100,
-                height: 200,
-            }),
+            config: Box::new(TextureDef::new(100, 200)),
             state: LegacyNodeState::Texture(tex_state),
         };
         let serializable = detail.to_serializable().unwrap();
@@ -636,8 +633,8 @@ mod tests {
                 state,
             } => {
                 assert_eq!(path.as_str(), "/src/texture.texture");
-                assert_eq!(config.width, 100);
-                assert_eq!(config.height, 200);
+                assert_eq!(config.width(), 100);
+                assert_eq!(config.height(), 200);
                 assert!(matches!(state, LegacyNodeState::Texture(_)));
             }
             _ => panic!("Expected Texture variant"),
@@ -674,10 +671,7 @@ mod tests {
             NodeId::new(1),
             LegacyNodeDetail {
                 path: LpPathBuf::from("/src/texture.texture"),
-                config: Box::new(TextureDef {
-                    width: 100,
-                    height: 200,
-                }),
+                config: Box::new(TextureDef::new(100, 200)),
                 state: {
                     use lpc_model::project::FrameId;
                     let mut tex_state =
@@ -750,10 +744,7 @@ mod tests {
             .set(FrameId::default(), TextureFormat::Rgba16);
         let detail = LegacySerializableNodeDetail::Texture {
             path: LpPathBuf::from("/src/texture.texture"),
-            config: TextureDef {
-                width: 100,
-                height: 200,
-            },
+            config: TextureDef::new(100, 200),
             state: LegacyNodeState::Texture(tex_state),
         };
         let json = crate::json::to_string(&detail).unwrap();
@@ -765,8 +756,8 @@ mod tests {
                 state: _,
             } => {
                 assert_eq!(path.as_str(), "/src/texture.texture");
-                assert_eq!(config.width, 100);
-                assert_eq!(config.height, 200);
+                assert_eq!(config.width(), 100);
+                assert_eq!(config.height(), 200);
             }
             _ => panic!("Expected Texture variant"),
         }
@@ -990,10 +981,7 @@ mod tests {
                 NodeId::new(1),
                 LegacySerializableNodeDetail::Texture {
                     path: LpPathBuf::from("/src/texture.texture"),
-                    config: TextureDef {
-                        width: 100,
-                        height: 200,
-                    },
+                    config: TextureDef::new(100, 200),
                     state: LegacyNodeState::Texture(tex_state),
                 },
             )],

@@ -1,9 +1,12 @@
 //! Project builder for creating artifact-authored test projects with a fluent API.
 
-use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
+use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
 use lpc_model::lp_path::LpPathBuf;
-use lpc_model::{AsLpPath, AsLpPathBuf, RelativeNodeRef};
+use lpc_model::{
+    Affine2d, Affine2dSlot, AsLpPath, Dim2u, Dim2uSlot, MapSlot, OptionSlot, PositiveF32Slot,
+    RatioSlot, RelativeNodeRef, RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
+};
 use lpc_source::legacy::glsl_opts::GlslOpts;
 use lpc_source::node::{
     fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder},
@@ -16,7 +19,6 @@ use lpfs::LpFs;
 /// Builder for creating test projects
 pub struct ProjectBuilder {
     fs: Rc<RefCell<dyn LpFs>>,
-    uid: String,
     name: String,
     texture_id: u32,
     shader_id: u32,
@@ -70,11 +72,10 @@ pub struct FixtureBuilder {
 }
 
 impl ProjectBuilder {
-    /// Create a new ProjectBuilder with default uid and name
+    /// Create a new ProjectBuilder with default name
     pub fn new(fs: Rc<RefCell<dyn LpFs>>) -> Self {
         Self {
             fs,
-            uid: String::from("test"),
             name: String::from("Test Project"),
             texture_id: 1,
             shader_id: 1,
@@ -82,12 +83,6 @@ impl ProjectBuilder {
             fixture_id: 1,
             nodes: Vec::new(),
         }
-    }
-
-    /// Set project UID (defaults to "test")
-    pub fn with_uid(mut self, uid: &str) -> Self {
-        self.uid = String::from(uid);
-        self
     }
 
     /// Set project name (defaults to "Test Project")
@@ -125,12 +120,12 @@ impl ProjectBuilder {
         OutputBuilder {
             pin: 0,
             options: OutputDriverOptionsConfig {
-                lum_power: 2.0,
-                white_point: [1.0, 1.0, 1.0],
-                brightness: 1.0,
-                interpolation_enabled: false,
-                dithering_enabled: false,
-                lut_enabled: false,
+                lum_power: PositiveF32Slot::new(2.0),
+                white_point: ValueSlot::new([1.0, 1.0, 1.0]),
+                brightness: RatioSlot::new(1.0),
+                interpolation_enabled: ValueSlot::new(false),
+                dithering_enabled: ValueSlot::new(false),
+                lut_enabled: ValueSlot::new(false),
             },
         }
     }
@@ -140,18 +135,7 @@ impl ProjectBuilder {
         FixtureBuilder {
             output_path: output_path.clone(),
             texture_path: texture_path.clone(),
-            mapping: MappingConfig::PathPoints {
-                paths: vec![PathSpec::RingArray {
-                    center: (0.5, 0.5),
-                    diameter: 1.0,
-                    start_ring_inclusive: 0,
-                    end_ring_exclusive: 1,
-                    ring_lamp_counts: vec![1],
-                    offset_angle: 0.0,
-                    order: RingOrder::InnerFirst,
-                }],
-                sample_diameter: 2.0,
-            },
+            mapping: default_mapping(),
             color_order: ColorOrder::Rgb,
             transform: [
                 [1.0, 0.0, 0.0, 0.0],
@@ -190,10 +174,7 @@ impl ProjectBuilder {
 
     /// Build completes - writes project.toml and all node artifact files.
     pub fn build(self) {
-        let mut project_toml = format!(
-            "kind = \"project\"\nuid = \"{}\"\nname = \"{}\"\n",
-            self.uid, self.name
-        );
+        let mut project_toml = format!("kind = \"project\"\nname = \"{}\"\n", self.name);
         for (name, path) in &self.nodes {
             let relative_path = path.as_str().trim_start_matches('/');
             project_toml.push_str(&format!(
@@ -254,8 +235,10 @@ impl TextureBuilder {
         let path = artifact_path_for_node(&node_name);
 
         let config = TextureDef {
-            width: self.width,
-            height: self.height,
+            size: Dim2uSlot::new(Dim2u {
+                width: self.width,
+                height: self.height,
+            }),
         };
 
         let toml = prepend_kind(
@@ -297,10 +280,11 @@ impl ShaderBuilder {
         let texture_loc = builder.node_loc_for_path(&self.texture_path);
 
         let config = ShaderDef {
-            glsl_path: glsl_file.as_path_buf(),
-            texture_loc,
-            render_order: self.render_order,
+            glsl_path: SourcePathSlot::new(glsl_file),
+            texture_loc: RelativeNodeRefSlot::new(texture_loc),
+            render_order: RenderOrderSlot::new(self.render_order),
             glsl_opts: GlslOpts::default(),
+            param_defs: MapSlot::default(),
         };
 
         let toml = prepend_kind(
@@ -336,9 +320,9 @@ impl OutputBuilder {
         let node_name = numbered_node_name("output", id);
         let path = artifact_path_for_node(&node_name);
 
-        let config = OutputDef::GpioStrip {
-            pin: self.pin,
-            options: Some(self.options),
+        let config = OutputDef {
+            pin: ValueSlot::new(self.pin),
+            options: OptionSlot::some(self.options),
         };
 
         let toml = prepend_kind(
@@ -397,13 +381,19 @@ impl FixtureBuilder {
         let texture_loc = builder.node_loc_for_path(&self.texture_path);
 
         let config = FixtureDef {
-            output_loc,
-            texture_loc,
+            output_loc: RelativeNodeRefSlot::new(output_loc),
+            texture_loc: RelativeNodeRefSlot::new(texture_loc),
             mapping: self.mapping,
-            color_order: self.color_order,
-            transform: self.transform,
-            brightness: self.brightness,
-            gamma_correction: self.gamma_correction,
+            color_order: ValueSlot::new(self.color_order),
+            transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
+            brightness: self.brightness.map_or_else(OptionSlot::none, |brightness| {
+                OptionSlot::some(ValueSlot::new(u32::from(brightness)))
+            }),
+            gamma_correction: self
+                .gamma_correction
+                .map_or_else(OptionSlot::none, |enabled| {
+                    OptionSlot::some(ValueSlot::new(enabled))
+                }),
         };
 
         let toml = prepend_kind(
@@ -417,6 +407,38 @@ impl FixtureBuilder {
         builder.register_node(node_name, path.clone());
 
         path
+    }
+}
+
+fn default_mapping() -> MappingConfig {
+    let mut ring_lamp_counts = BTreeMap::new();
+    ring_lamp_counts.insert(0, ValueSlot::new(1));
+
+    let mut paths = BTreeMap::new();
+    paths.insert(
+        0,
+        PathSpec::ring_array(
+            [0.5, 0.5],
+            1.0,
+            0,
+            1,
+            MapSlot::new(ring_lamp_counts),
+            0.0,
+            RingOrder::InnerFirst,
+        ),
+    );
+
+    MappingConfig::path_points(MapSlot::new(paths), 2.0)
+}
+
+fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
+    Affine2d {
+        m00: matrix[0][0],
+        m01: matrix[0][1],
+        m10: matrix[1][0],
+        m11: matrix[1][1],
+        tx: matrix[0][3],
+        ty: matrix[1][3],
     }
 }
 
@@ -438,10 +460,7 @@ mod tests {
 
         let def: ProjectDef = toml::from_str(project_toml_str).unwrap();
         assert_eq!(def.kind, ProjectDef::KIND);
-        assert_eq!(def.name.as_deref(), Some("Test Project"));
-        assert!(
-            def.nodes
-                .contains_key(&lpc_model::NodeName::parse("texture").unwrap())
-        );
+        assert_eq!(def.name(), Some("Test Project"));
+        assert!(def.nodes.entries.contains_key("texture"));
     }
 }

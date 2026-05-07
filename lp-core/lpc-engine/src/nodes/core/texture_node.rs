@@ -62,8 +62,8 @@ struct TextureProps {
 
 impl TextureProps {
     fn sync(&mut self, config: &TextureDef, pixel_format: TextureFormat, frame: FrameId) {
-        self.width = i32::try_from(config.width).unwrap_or(i32::MAX);
-        self.height = i32::try_from(config.height).unwrap_or(i32::MAX);
+        self.width = i32::try_from(config.width()).unwrap_or(i32::MAX);
+        self.height = i32::try_from(config.height()).unwrap_or(i32::MAX);
         self.format_tag = texture_format_tag(pixel_format);
         self.frame = frame;
     }
@@ -235,13 +235,7 @@ mod tests {
                 frame,
             )
             .expect("add");
-        let tex = TextureNode::new(
-            tid,
-            TextureDef {
-                width: 64,
-                height: 48,
-            },
-        );
+        let tex = TextureNode::new(tid, TextureDef::new(64, 48));
         engine
             .attach_runtime_node(tid, Box::new(tex), frame)
             .expect("attach");

@@ -27,18 +27,18 @@ fn test_partial_state_updates() {
     let output_path = builder.output_basic();
     builder
         .fixture(&output_path, &texture_path)
-        .mapping(MappingConfig::PathPoints {
-            paths: vec![PathSpec::RingArray {
-                center: (0.2, 0.2),
-                diameter: 0.1,
-                start_ring_inclusive: 0,
-                end_ring_exclusive: 2,
-                ring_lamp_counts: vec![1, 4],
-                offset_angle: 0.0,
-                order: RingOrder::InnerFirst,
-            }],
-            sample_diameter: 2.0,
-        })
+        .mapping(MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.2, 0.2],
+                0.1,
+                0,
+                2,
+                &[1, 4],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        ))
         .add(&mut builder);
 
     builder.build();

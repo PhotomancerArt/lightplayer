@@ -5,7 +5,11 @@ use lpc_model::AsLpPath;
 use lpfs::{LpFs, LpFsStd};
 use std::path::PathBuf;
 
-/// Validate that a local project exists and extract project info
+/// Validate that a local project exists and extract project info.
+///
+/// The first return value is the remote project directory key. Older projects
+/// may still carry `uid`; current project artifacts use `name`, then fall back
+/// to the local directory name.
 pub fn validate_local_project(project_dir: &PathBuf) -> Result<(String, String)> {
     let fs = LpFsStd::new(project_dir.clone());
 
@@ -27,15 +31,21 @@ pub fn validate_local_project(project_dir: &PathBuf) -> Result<(String, String)>
         )
     })?;
 
-    let uid = config
-        .get("uid")
-        .and_then(toml::Value::as_str)
-        .unwrap_or("unknown")
-        .to_string();
     let name = config
         .get("name")
         .and_then(toml::Value::as_str)
-        .unwrap_or("unknown")
-        .to_string();
-    Ok((uid, name))
+        .map(str::to_string)
+        .or_else(|| {
+            project_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| String::from("project"));
+    let project_key = config
+        .get("uid")
+        .and_then(toml::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| name.clone());
+    Ok((project_key, name))
 }

@@ -135,8 +135,11 @@ fn shader_render_product_for_texture<'a>(
         let Some(shader_config) = entry.config.as_any().downcast_ref::<ShaderDef>() else {
             continue;
         };
-        if !relative_ref_targets_path(&entry.path, &shader_config.texture_loc, &texture_entry.path)
-        {
+        if !relative_ref_targets_path(
+            &entry.path,
+            shader_config.texture_loc(),
+            &texture_entry.path,
+        ) {
             continue;
         }
 

@@ -1,36 +1,81 @@
 use crate::node::NodeKind;
 use crate::node::fixture::mapping::MappingConfig;
 use crate::node::node_def::NodeDef;
-use lpc_model::RelativeNodeRef;
+use alloc::string::ToString;
+use lpc_model::{
+    Affine2dSlot, FromModelValue, ModelValue, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
+    SlotLeaf, SlotLeafError, SlotLeafId, SlotValueShape, ToModelValue, ValueSlot,
+};
 use serde::{Deserialize, Serialize};
 
 /// Authored fixture node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[slot(root)]
 pub struct FixtureDef {
     /// Output node locator.
-    pub output_loc: RelativeNodeRef,
+    pub output_loc: RelativeNodeRefSlot,
     /// Texture node locator.
-    pub texture_loc: RelativeNodeRef,
+    pub texture_loc: RelativeNodeRefSlot,
     /// Fixture mapping definition.
+    #[slot(enum)]
     pub mapping: MappingConfig,
-    /// Color order for RGB channels
-    pub color_order: ColorOrder,
-    /// Transform matrix (4x4)
-    pub transform: [[f32; 4]; 4], // todo!() - will be proper matrix type later
-    /// Brightness level (0-255), defaults to 64 if not specified
+    /// Color order for RGB channels.
+    pub color_order: ValueSlot<ColorOrder>,
+    /// Texture-space 2D affine transform.
+    pub transform: Affine2dSlot,
+    /// Brightness level (0-255).
     #[serde(default = "default_brightness")]
-    pub brightness: Option<u8>,
-    /// Enable gamma correction, defaults to true if not specified
+    pub brightness: OptionSlot<ValueSlot<u32>>,
+    /// Enable gamma correction.
     #[serde(default = "default_gamma_correction")]
-    pub gamma_correction: Option<bool>,
+    pub gamma_correction: OptionSlot<ValueSlot<bool>>,
 }
 
-fn default_brightness() -> Option<u8> {
-    Some(64)
+impl FixtureDef {
+    pub fn output_loc(&self) -> &RelativeNodeRef {
+        self.output_loc.value()
+    }
+
+    pub fn texture_loc(&self) -> &RelativeNodeRef {
+        self.texture_loc.value()
+    }
+
+    pub fn color_order(&self) -> ColorOrder {
+        *self.color_order.value()
+    }
+
+    pub fn brightness_u8(&self) -> u8 {
+        self.brightness
+            .data
+            .as_ref()
+            .and_then(|value| u8::try_from(*value.value()).ok())
+            .unwrap_or(64)
+    }
+
+    pub fn gamma_correction(&self) -> bool {
+        self.gamma_correction
+            .data
+            .as_ref()
+            .is_none_or(|value| *value.value())
+    }
+
+    pub fn transform_matrix(&self) -> [[f32; 4]; 4] {
+        let transform = self.transform.value();
+        [
+            [transform.m00, transform.m01, 0.0, transform.tx],
+            [transform.m10, transform.m11, 0.0, transform.ty],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    }
 }
 
-fn default_gamma_correction() -> Option<bool> {
-    Some(true)
+fn default_brightness() -> OptionSlot<ValueSlot<u32>> {
+    OptionSlot::some(ValueSlot::new(64))
+}
+
+fn default_gamma_correction() -> OptionSlot<ValueSlot<bool>> {
+    OptionSlot::some(ValueSlot::new(true))
 }
 
 impl NodeDef for FixtureDef {
@@ -43,25 +88,26 @@ impl NodeDef for FixtureDef {
     }
 }
 
-/// Color order for RGB channels
+/// Color order for RGB channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ColorOrder {
-    /// Red, Green, Blue
+    /// Red, Green, Blue.
     Rgb,
-    /// Green, Red, Blue
+    /// Green, Red, Blue.
     Grb,
-    /// Red, Blue, Green
+    /// Red, Blue, Green.
     Rbg,
-    /// Green, Blue, Red
+    /// Green, Blue, Red.
     Gbr,
-    /// Blue, Red, Green
+    /// Blue, Red, Green.
     Brg,
-    /// Blue, Green, Red
+    /// Blue, Green, Red.
     Bgr,
 }
 
 impl ColorOrder {
-    /// Get color order as string
+    /// Get color order as string.
     pub fn as_str(&self) -> &'static str {
         match self {
             ColorOrder::Rgb => "rgb",
@@ -73,12 +119,24 @@ impl ColorOrder {
         }
     }
 
-    /// Get bytes per pixel (always 3 for RGB variants)
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "rgb" => Some(Self::Rgb),
+            "grb" => Some(Self::Grb),
+            "rbg" => Some(Self::Rbg),
+            "gbr" => Some(Self::Gbr),
+            "brg" => Some(Self::Brg),
+            "bgr" => Some(Self::Bgr),
+            _ => None,
+        }
+    }
+
+    /// Get bytes per pixel.
     pub fn bytes_per_pixel(&self) -> usize {
         3
     }
 
-    /// Write RGB values to buffer in the correct order
+    /// Write RGB values to buffer in the correct order.
     pub fn write_rgb(&self, buffer: &mut [u8], offset: usize, r: u8, g: u8, b: u8) {
         if offset + 3 > buffer.len() {
             return;
@@ -117,7 +175,7 @@ impl ColorOrder {
         }
     }
 
-    /// Write 16-bit RGB values to buffer in the correct order
+    /// Write 16-bit RGB values to buffer in the correct order.
     pub fn write_rgb_u16(&self, buffer: &mut [u16], offset: usize, r: u16, g: u16, b: u16) {
         if offset + 3 > buffer.len() {
             return;
@@ -157,33 +215,64 @@ impl ColorOrder {
     }
 }
 
+impl ToModelValue for ColorOrder {
+    fn to_model_value(&self) -> ModelValue {
+        ModelValue::String(self.as_str().to_string())
+    }
+}
+
+impl FromModelValue for ColorOrder {
+    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        match value {
+            ModelValue::String(value) => Self::parse(&value)
+                .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
+            other => Err(SlotLeafError::new(alloc::format!(
+                "expected String, got {other:?}"
+            ))),
+        }
+    }
+}
+
+impl SlotLeaf for ColorOrder {
+    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.color_order");
+
+    fn value_shape() -> SlotValueShape {
+        lpc_model::color_order_shape()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
-    use alloc::vec;
+    use crate::node::fixture::mapping::{PathSpec, RingOrder};
+    use alloc::collections::BTreeMap;
+    use lpc_model::{Affine2d, MapSlot};
 
     #[test]
     fn test_fixture_def_kind() {
+        let mut ring_lamp_counts = BTreeMap::new();
+        ring_lamp_counts.insert(0, ValueSlot::new(1));
+        let mut paths = BTreeMap::new();
+        paths.insert(
+            0,
+            PathSpec::ring_array(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                MapSlot::new(ring_lamp_counts),
+                0.0,
+                RingOrder::InnerFirst,
+            ),
+        );
         let def = FixtureDef {
-            output_loc: RelativeNodeRef::parse("..out_output").unwrap(),
-            texture_loc: RelativeNodeRef::parse("..tex_texture").unwrap(),
-            mapping: MappingConfig::PathPoints {
-                paths: vec![PathSpec::RingArray {
-                    center: (0.5, 0.5),
-                    diameter: 1.0,
-                    start_ring_inclusive: 0,
-                    end_ring_exclusive: 1,
-                    ring_lamp_counts: vec![1],
-                    offset_angle: 0.0,
-                    order: RingOrder::InnerFirst,
-                }],
-                sample_diameter: 2.0,
-            },
-            color_order: ColorOrder::Rgb,
-            transform: [[1.0; 4]; 4],
-            brightness: None,
-            gamma_correction: None,
+            output_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..out_output").unwrap()),
+            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..tex_texture").unwrap()),
+            mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
+            color_order: ValueSlot::new(ColorOrder::Rgb),
+            transform: Affine2dSlot::new(Affine2d::identity()),
+            brightness: OptionSlot::none(),
+            gamma_correction: OptionSlot::none(),
         };
         assert_eq!(def.kind(), NodeKind::Fixture);
     }
@@ -211,22 +300,19 @@ mod tests {
         assert_eq!(buffer[2], 255);
 
         ColorOrder::Grb.write_rgb(&mut buffer, 3, 100, 200, 255);
-        assert_eq!(buffer[3], 200); // G first
-        assert_eq!(buffer[4], 100); // R second
-        assert_eq!(buffer[5], 255); // B third
+        assert_eq!(buffer[3], 200);
+        assert_eq!(buffer[4], 100);
+        assert_eq!(buffer[5], 255);
 
         ColorOrder::Bgr.write_rgb(&mut buffer, 6, 100, 200, 255);
-        assert_eq!(buffer[6], 255); // B first
-        assert_eq!(buffer[7], 200); // G second
-        assert_eq!(buffer[8], 100); // R third
+        assert_eq!(buffer[6], 255);
+        assert_eq!(buffer[7], 200);
+        assert_eq!(buffer[8], 100);
     }
 
     #[test]
     fn test_color_order_write_rgb_bounds_check() {
-        let mut buffer = [0u8; 2]; // Too small
-
+        let mut buffer = [0u8; 2];
         ColorOrder::Rgb.write_rgb(&mut buffer, 0, 100, 200, 255);
-        // Should not panic, just return early
-        // Buffer should be unchanged or partially written
     }
 }
