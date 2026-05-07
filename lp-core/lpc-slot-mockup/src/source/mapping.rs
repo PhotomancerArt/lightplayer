@@ -50,7 +50,8 @@ pub enum PathSpec {
     RingArray {
         #[serde(skip, default = "current_state_version")]
         variant_changed_frame: FrameId,
-        ring_lamp_counts: ValueSlot<RingLampCounts>,
+        ring_lamp_counts: ValueSlot<Vec<u32>>,
+        semantic_ring_lamp_counts: ValueSlot<RingLampCounts>,
         clockwise: ValueSlot<bool>,
     },
     Manual {
@@ -202,7 +203,10 @@ impl PathSpec {
     fn ring_array(ring_lamp_counts: Vec<u32>, clockwise: bool) -> Self {
         Self::RingArray {
             variant_changed_frame: current_state_version(),
-            ring_lamp_counts: ValueSlot::new(RingLampCounts::new(ring_lamp_counts)),
+            semantic_ring_lamp_counts: ValueSlot::new(RingLampCounts::new(
+                ring_lamp_counts.clone(),
+            )),
+            ring_lamp_counts: ValueSlot::new(ring_lamp_counts),
             clockwise: ValueSlot::new(clockwise),
         }
     }
@@ -214,7 +218,7 @@ impl PathSpec {
         else {
             return false;
         };
-        ring_lamp_counts.set(RingLampCounts::new(counts));
+        ring_lamp_counts.set(counts);
         true
     }
 }
@@ -260,11 +264,13 @@ impl SlotRecordAccess for PathSpec {
         match self {
             Self::RingArray {
                 ring_lamp_counts,
+                semantic_ring_lamp_counts,
                 clockwise,
                 ..
             } => match index {
                 0 => Some(SlotDataAccess::Value(ring_lamp_counts)),
-                1 => Some(SlotDataAccess::Value(clockwise)),
+                1 => Some(SlotDataAccess::Value(semantic_ring_lamp_counts)),
+                2 => Some(SlotDataAccess::Value(clockwise)),
                 _ => None,
             },
             Self::Manual { .. } => None,
@@ -335,7 +341,8 @@ fn path_spec_shape() -> SlotShape {
             variant(
                 "ring_array",
                 record(vec![
-                    field("ring_lamp_counts", leaf(ring_lamp_counts_shape())),
+                    field("ring_lamp_counts", leaf(lpc_model::u32_list_shape())),
+                    field("semantic_ring_lamp_counts", leaf(ring_lamp_counts_shape())),
                     field("clockwise", value(lpc_model::LpType::Bool)),
                 ]),
             ),

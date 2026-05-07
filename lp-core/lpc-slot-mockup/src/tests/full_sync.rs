@@ -36,4 +36,15 @@ fn full_sync_copies_server_roots_to_client() {
         value.value(),
         &LpValue::Array(vec![LpValue::U32(1), LpValue::U32(96)])
     );
+    let semantic_ring_lamp_counts = select(
+        fixture,
+        "mapping.path_points.path.ring_array.semantic_ring_lamp_counts",
+    );
+    let SlotData::Value(value) = semantic_ring_lamp_counts else {
+        panic!("semantic_ring_lamp_counts should be one slot value");
+    };
+    assert_eq!(
+        value.value(),
+        &LpValue::Array(vec![LpValue::U32(1), LpValue::U32(96)])
+    );
 }

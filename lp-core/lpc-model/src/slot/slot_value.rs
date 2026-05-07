@@ -281,7 +281,6 @@ impl_slot_leaf!(
     "slot.leaf.raw_vec3",
     SlotValueShape::raw(LpType::Vec3)
 );
-
 fn raw_shape_id(ty: &LpType) -> SlotShapeId {
     SlotShapeId::from_static_name(match ty {
         LpType::String => "slot.leaf.raw_string",

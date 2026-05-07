@@ -20,26 +20,13 @@ impl RingLampCounts {
 
 impl ToLpValue for RingLampCounts {
     fn to_lp_value(&self) -> LpValue {
-        LpValue::Array(self.0.iter().copied().map(LpValue::U32).collect())
+        self.0.to_lp_value()
     }
 }
 
 impl FromLpValue for RingLampCounts {
     fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
-        let LpValue::Array(values) = value else {
-            return Err(ValueRootError::new("expected ring lamp counts array"));
-        };
-
-        let mut counts = Vec::with_capacity(values.len());
-        for value in values {
-            let LpValue::U32(count) = value else {
-                return Err(ValueRootError::new(
-                    "expected ring lamp counts array of u32 values",
-                ));
-            };
-            counts.push(count);
-        }
-        Ok(Self(counts))
+        Vec::<u32>::from_lp_value(value).map(Self)
     }
 }
 

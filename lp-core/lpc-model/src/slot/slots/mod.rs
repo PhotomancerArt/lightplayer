@@ -14,6 +14,7 @@ mod relative_node_ref;
 mod render_order;
 mod resource_ref;
 mod source_path;
+mod u32_list;
 mod xy;
 
 pub use affine2d::{Affine2d, Affine2dSlot, affine2d_shape};
@@ -29,6 +30,7 @@ pub use resource_ref::{
     runtime_buffer_resource_shape,
 };
 pub use source_path::{SourcePathSlot, source_path_shape};
+pub use u32_list::u32_list_shape;
 pub use xy::{XySlot, xy_shape};
 
 #[cfg(test)]

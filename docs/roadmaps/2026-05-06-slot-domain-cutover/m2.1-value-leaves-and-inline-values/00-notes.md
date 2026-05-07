@@ -329,3 +329,16 @@ M2.1 resolved the main naming and boundary questions:
   concise authored list can sync as one slot value instead of a slot map.
 - The pretty TOML writer emits that list across multiple lines, but it is still
   an inline value assignment rather than a nested map/table.
+
+## Follow-up: Concrete Raw Lists
+
+After the first value-leaf pass, we added only the immediate raw list case we
+needed: `Vec<u32>` lives in `lpc-model/src/slot/slots/u32_list.rs` and implements
+`SlotValue` directly. This intentionally avoids a broad generic `Vec<T>` slot
+value framework before we have concrete uses for other element types.
+
+The mockup now shows both styles side by side:
+
+- `ring_lamp_counts: ValueSlot<Vec<u32>>` for the easy raw-list path.
+- `semantic_ring_lamp_counts: ValueSlot<RingLampCounts>` for the semantic wrapper
+  path when a domain-specific value deserves its own shape/metadata.

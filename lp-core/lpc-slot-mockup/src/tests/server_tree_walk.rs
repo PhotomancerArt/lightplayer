@@ -26,6 +26,9 @@ fn server_tree_walk_prints_runtime_and_source_roots() {
     assert!(fixture_lines.iter().any(|line| {
         line.contains("mapping.path_points.path.ring_array.ring_lamp_counts: Array")
     }));
+    assert!(fixture_lines.iter().any(|line| {
+        line.contains("mapping.path_points.path.ring_array.semantic_ring_lamp_counts: Array")
+    }));
     assert!(
         !fixture_lines
             .iter()
