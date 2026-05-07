@@ -70,7 +70,7 @@ pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
     FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
-    ResourceRefSlot, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId,
+    ResourceRefSlot, ValueEditorHint, SlotEnumOption, SlotValue, ValueRootError, LpValueRootId,
     SlotMapValueAccess, SlotValueShape, SourcePathSlot, ToLpValue, XySlot, affine2d_shape,
     artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape,
     relative_node_ref_shape, render_order_shape, render_product_resource_shape, resource_ref_shape,
@@ -78,12 +78,12 @@ pub use slot::{
 };
 pub use slot::{
     FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotData,
-    SlotDataAccess, SlotDataKind, SlotEnum, SlotEnumAccess, SlotEnumShape, SlotFieldShape,
+    SlotDataAccess, SlotEnum, SlotEnumAccess, SlotEnumShape, SlotFieldShape,
     SlotMapDyn, SlotMapKey, SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOptionAccess,
     SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotRecord,
     SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError,
-    SlotShapeKind, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotTree,
-    SlotValidationError, SlotValueAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, 
+    SlotValueAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape,
     ValueRef, ValueSlot, VersionedSlotShape,
 };
 pub use tree::tree_path::{NodePathSegment, PathError, TreePath};

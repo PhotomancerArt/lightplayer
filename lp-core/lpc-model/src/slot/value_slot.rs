@@ -11,7 +11,7 @@ use serde::{
 };
 
 use super::{
-    FieldSlot, MapSlotAccess, SlotDataAccess, SlotLeaf, SlotMapKey, SlotOptionAccess,
+    FieldSlot, MapSlotAccess, SlotDataAccess, SlotValue, SlotMapKey, SlotOptionAccess,
     SlotValueAccess, ToLpValue,
 };
 
@@ -104,7 +104,7 @@ impl<T: ToLpValue> SlotValueAccess for ValueSlot<T> {
     }
 }
 
-impl<T: SlotLeaf> FieldSlot for ValueSlot<T> {
+impl<T: SlotValue> FieldSlot for ValueSlot<T> {
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(T::value_shape())
     }

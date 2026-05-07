@@ -6,7 +6,7 @@
 mod slot_access;
 mod slot_data;
 mod slot_enum_shape;
-mod slot_leaf;
+mod slot_value;
 mod slot_meta;
 mod slot_name;
 mod slot_owner;
@@ -16,7 +16,6 @@ mod slot_ref;
 mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
-mod slot_tree;
 pub mod slots;
 mod value_ref;
 mod value_slot;
@@ -27,9 +26,9 @@ pub use slot_access::{
 };
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;
-pub use slot_leaf::{
-    FromLpValue, OrderedF32, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
-    SlotLeafId, SlotValueShape, ToLpValue,
+pub use slot_value::{
+    FromLpValue, OrderedF32, ValueEditorHint, SlotEnumOption, SlotValue, ValueRootError,
+    LpValueRootId, SlotValueShape, ToLpValue,
 };
 pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
@@ -48,7 +47,7 @@ pub mod shape {
 pub use slot_shape_registry::{
     SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, VersionedSlotShape,
 };
-pub use slot_tree::{SlotDataKind, SlotShapeKind, SlotTree, SlotValidationError};
+
 pub use slots::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
     PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot, ResourceRefSlot,

@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
+    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, ValueEditorHint, LpValueRootId,
     SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
 };
 use alloc::string::String;
@@ -79,9 +79,9 @@ pub fn source_path_shape() -> SlotValueShape {
 
 pub(super) fn path_shape(name: &str) -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name(name),
+        leaf: LpValueRootId::from_static_name(name),
         ty: LpType::String,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Path,
+        editor: ValueEditorHint::Path,
     }
 }

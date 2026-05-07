@@ -5,6 +5,14 @@ use core::fmt;
 
 use super::SlotMeta;
 
+/// Atomic typed leaf contract.
+pub trait SlotValue: ToLpValue + FromLpValue {
+    const LEAF_ID: LpValueRootId;
+
+    fn value_shape() -> SlotValueShape;
+}
+
+
 /// Stable identity for a slot leaf descriptor.
 ///
 /// A leaf id names an atomic value contract: storage shape, semantic meaning,
@@ -14,9 +22,9 @@ use super::SlotMeta;
     Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct SlotLeafId(u32);
+pub struct LpValueRootId(u32);
 
-impl SlotLeafId {
+impl LpValueRootId {
     pub const fn new(raw: u32) -> Self {
         Self(raw)
     }
@@ -30,7 +38,7 @@ impl SlotLeafId {
     }
 }
 
-impl fmt::Display for SlotLeafId {
+impl fmt::Display for LpValueRootId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "0x{:08x}", self.0)
     }
@@ -40,12 +48,12 @@ impl fmt::Display for SlotLeafId {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotValueShape {
-    pub leaf: SlotLeafId,
+    pub leaf: LpValueRootId,
     pub ty: LpType,
     #[serde(default)]
     pub meta: SlotMeta,
     #[serde(default)]
-    pub editor: SlotEditorHint,
+    pub editor: ValueEditorHint,
 }
 
 impl SlotValueShape {
@@ -54,7 +62,7 @@ impl SlotValueShape {
             leaf: raw_leaf_id(&ty),
             ty,
             meta: SlotMeta::empty(),
-            editor: SlotEditorHint::default(),
+            editor: ValueEditorHint::default(),
         }
     }
 }
@@ -63,7 +71,7 @@ impl SlotValueShape {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "kind")]
-pub enum SlotEditorHint {
+pub enum ValueEditorHint {
     #[default]
     Plain,
     NodeRef,
@@ -130,23 +138,15 @@ pub trait ToLpValue {
 
 /// Conversion from the generic model value into a typed slot leaf value.
 pub trait FromLpValue: Sized {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError>;
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError>;
 }
-
-/// Atomic typed leaf contract.
-pub trait SlotLeaf: ToLpValue + FromLpValue {
-    const LEAF_ID: SlotLeafId;
-
-    fn value_shape() -> SlotValueShape;
-}
-
 /// Error converting a generic model value into a typed slot leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlotLeafError {
+pub struct ValueRootError {
     pub message: String,
 }
 
-impl SlotLeafError {
+impl ValueRootError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -154,13 +154,13 @@ impl SlotLeafError {
     }
 }
 
-impl fmt::Display for SlotLeafError {
+impl fmt::Display for ValueRootError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-impl core::error::Error for SlotLeafError {}
+impl core::error::Error for ValueRootError {}
 
 impl ToLpValue for LpValue {
     fn to_lp_value(&self) -> LpValue {
@@ -219,10 +219,10 @@ impl ToLpValue for [f32; 3] {
 macro_rules! impl_from_lp_value {
     ($ty:ty, $variant:ident) => {
         impl FromLpValue for $ty {
-            fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+            fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
                 match value {
                     LpValue::$variant(value) => Ok(value),
-                    other => Err(SlotLeafError::new(alloc::format!(
+                    other => Err(ValueRootError::new(alloc::format!(
                         "expected {}, got {other:?}",
                         stringify!($variant)
                     ))),
@@ -239,10 +239,10 @@ impl_from_lp_value!(f32, F32);
 impl_from_lp_value!(bool, Bool);
 
 impl FromLpValue for [f32; 2] {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::Vec2(value) => Ok(value),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected Vec2, got {other:?}"
             ))),
         }
@@ -250,10 +250,10 @@ impl FromLpValue for [f32; 2] {
 }
 
 impl FromLpValue for [f32; 3] {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::Vec3(value) => Ok(value),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected Vec3, got {other:?}"
             ))),
         }
@@ -262,8 +262,8 @@ impl FromLpValue for [f32; 3] {
 
 macro_rules! impl_slot_leaf {
     ($ty:ty, $id:literal, $shape:expr) => {
-        impl SlotLeaf for $ty {
-            const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name($id);
+        impl SlotValue for $ty {
+            const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name($id);
 
             fn value_shape() -> SlotValueShape {
                 $shape
@@ -308,8 +308,8 @@ impl_slot_leaf!(
     SlotValueShape::raw(LpType::Vec3)
 );
 
-fn raw_leaf_id(ty: &LpType) -> SlotLeafId {
-    SlotLeafId::from_static_name(match ty {
+fn raw_leaf_id(ty: &LpType) -> LpValueRootId {
+    LpValueRootId::from_static_name(match ty {
         LpType::String => "slot.leaf.raw_string",
         LpType::I32 => "slot.leaf.raw_i32",
         LpType::U32 => "slot.leaf.raw_u32",
@@ -364,21 +364,21 @@ mod tests {
     fn semantic_leaf_shapes_carry_editor_hints() {
         assert!(matches!(
             relative_node_ref_shape().editor,
-            SlotEditorHint::NodeRef
+            ValueEditorHint::NodeRef
         ));
-        assert!(matches!(dim2u_shape().editor, SlotEditorHint::Dimensions));
-        assert!(matches!(affine2d_shape().editor, SlotEditorHint::Affine2d));
+        assert!(matches!(dim2u_shape().editor, ValueEditorHint::Dimensions));
+        assert!(matches!(affine2d_shape().editor, ValueEditorHint::Affine2d));
         assert!(matches!(
             runtime_buffer_resource_shape().editor,
-            SlotEditorHint::RuntimeBufferResource
+            ValueEditorHint::RuntimeBufferResource
         ));
         assert!(matches!(
             render_product_resource_shape().editor,
-            SlotEditorHint::RenderProductResource
+            ValueEditorHint::RenderProductResource
         ));
         assert!(matches!(
             color_order_shape().editor,
-            SlotEditorHint::Dropdown { .. }
+            ValueEditorHint::Dropdown { .. }
         ));
     }
 

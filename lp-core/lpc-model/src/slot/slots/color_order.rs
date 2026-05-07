@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, SlotDataAccess, SlotEditorHint,
-    SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, SlotDataAccess, ValueEditorHint,
+    SlotEnumOption, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
     SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::{String, ToString};
@@ -139,19 +139,19 @@ impl ToLpValue for ColorOrderValue {
 }
 
 impl FromLpValue for ColorOrderValue {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => Self::parse(&value)
-                .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
-            other => Err(SlotLeafError::new(alloc::format!(
+                .ok_or_else(|| ValueRootError::new("expected RGB color order value")),
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected String, got {other:?}"
             ))),
         }
     }
 }
 
-impl SlotLeaf for ColorOrderValue {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.color_order");
+impl SlotValue for ColorOrderValue {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.color_order");
 
     fn value_shape() -> SlotValueShape {
         color_order_shape()
@@ -160,10 +160,10 @@ impl SlotLeaf for ColorOrderValue {
 
 pub fn color_order_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.color_order"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.color_order"),
         ty: LpType::String,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Dropdown {
+        editor: ValueEditorHint::Dropdown {
             options: vec![
                 SlotEnumOption::new("rgb", "RGB"),
                 SlotEnumOption::new("grb", "GRB"),

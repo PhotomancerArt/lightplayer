@@ -29,7 +29,7 @@ pub trait StaticSlotShape {
     fn slot_shape() -> SlotShape;
 
     fn ensure_registered(registry: &mut SlotShapeRegistry) -> Result<bool, SlotShapeRegistryError> {
-        registry.ensure_tree(Self::SHAPE_ID, Self::slot_shape())
+        registry.ensure_root(Self::SHAPE_ID, Self::slot_shape())
     }
 }
 

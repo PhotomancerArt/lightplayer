@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
+    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, ValueEditorHint, LpValueRootId,
     SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -74,9 +74,9 @@ impl FieldSlot for XySlot {
 
 pub fn xy_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.xy"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.xy"),
         ty: LpType::Vec2,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Xy,
+        editor: ValueEditorHint::Xy,
     }
 }

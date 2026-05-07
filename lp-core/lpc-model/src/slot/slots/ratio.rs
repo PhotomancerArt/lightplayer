@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotEditorHint,
-    SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
+    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, ValueEditorHint,
+    LpValueRootId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
     current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -75,10 +75,10 @@ impl FieldSlot for RatioSlot {
 
 pub fn ratio_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.ratio"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.ratio"),
         ty: LpType::F32,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Slider {
+        editor: ValueEditorHint::Slider {
             min: OrderedF32(0.0),
             max: OrderedF32(1.0),
             step: Some(OrderedF32(0.01)),

@@ -1,6 +1,6 @@
 use crate::{
     FieldSlot, FrameId, FromLpValue, ModelStructMember, LpType, LpValue, SlotDataAccess,
-    SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
+    ValueEditorHint, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
     SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::String;
@@ -95,27 +95,27 @@ impl ToLpValue for Dim2u {
 }
 
 impl FromLpValue for Dim2u {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         let LpValue::Struct { name, fields } = value else {
-            return Err(SlotLeafError::new("expected Dim2u struct"));
+            return Err(ValueRootError::new("expected Dim2u struct"));
         };
         if name.as_deref() != Some("Dim2u") || fields.len() != 2 {
-            return Err(SlotLeafError::new("expected Dim2u struct"));
+            return Err(ValueRootError::new("expected Dim2u struct"));
         }
         let width = match &fields[0] {
             (name, LpValue::U32(value)) if name == "width" => *value,
-            _ => return Err(SlotLeafError::new("expected Dim2u.width")),
+            _ => return Err(ValueRootError::new("expected Dim2u.width")),
         };
         let height = match &fields[1] {
             (name, LpValue::U32(value)) if name == "height" => *value,
-            _ => return Err(SlotLeafError::new("expected Dim2u.height")),
+            _ => return Err(ValueRootError::new("expected Dim2u.height")),
         };
         Ok(Self { width, height })
     }
 }
 
-impl SlotLeaf for Dim2u {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.dim2u");
+impl SlotValue for Dim2u {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.dim2u");
 
     fn value_shape() -> SlotValueShape {
         dim2u_shape()
@@ -124,10 +124,10 @@ impl SlotLeaf for Dim2u {
 
 pub fn dim2u_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.dim2u"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.dim2u"),
         ty: dim2u_model_type(),
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Dimensions,
+        editor: ValueEditorHint::Dimensions,
     }
 }
 

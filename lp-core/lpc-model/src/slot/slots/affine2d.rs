@@ -1,6 +1,6 @@
 use crate::{
     FieldSlot, FrameId, FromLpValue, ModelStructMember, LpType, LpValue, SlotDataAccess,
-    SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
+    ValueEditorHint, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
     SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::String;
@@ -116,12 +116,12 @@ impl ToLpValue for Affine2d {
 }
 
 impl FromLpValue for Affine2d {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         let LpValue::Struct { name, fields } = value else {
-            return Err(SlotLeafError::new("expected Affine2d struct"));
+            return Err(ValueRootError::new("expected Affine2d struct"));
         };
         if name.as_deref() != Some("Affine2d") || fields.len() != 6 {
-            return Err(SlotLeafError::new("expected Affine2d struct"));
+            return Err(ValueRootError::new("expected Affine2d struct"));
         }
         Ok(Self {
             m00: struct_f32(&fields, 0, "m00")?,
@@ -134,8 +134,8 @@ impl FromLpValue for Affine2d {
     }
 }
 
-impl SlotLeaf for Affine2d {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.affine2d");
+impl SlotValue for Affine2d {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.affine2d");
 
     fn value_shape() -> SlotValueShape {
         affine2d_shape()
@@ -144,10 +144,10 @@ impl SlotLeaf for Affine2d {
 
 pub fn affine2d_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.affine2d"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.affine2d"),
         ty: affine2d_model_type(),
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Affine2d,
+        editor: ValueEditorHint::Affine2d,
     }
 }
 
@@ -187,10 +187,10 @@ fn struct_f32(
     fields: &[(String, LpValue)],
     index: usize,
     expected_name: &str,
-) -> Result<f32, SlotLeafError> {
+) -> Result<f32, ValueRootError> {
     match fields.get(index) {
         Some((name, LpValue::F32(value))) if name == expected_name => Ok(*value),
-        _ => Err(SlotLeafError::new(alloc::format!(
+        _ => Err(ValueRootError::new(alloc::format!(
             "expected Affine2d.{expected_name}"
         ))),
     }

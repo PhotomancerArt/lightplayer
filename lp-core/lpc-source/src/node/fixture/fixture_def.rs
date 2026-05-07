@@ -4,7 +4,7 @@ use crate::node::node_def::NodeDef;
 use alloc::string::ToString;
 use lpc_model::{
     Affine2dSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
-    SlotLeaf, SlotLeafError, SlotLeafId, SlotValueShape, ToLpValue, ValueSlot,
+    SlotValue, ValueRootError, LpValueRootId, SlotValueShape, ToLpValue, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -222,19 +222,19 @@ impl ToLpValue for ColorOrder {
 }
 
 impl FromLpValue for ColorOrder {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => Self::parse(&value)
-                .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
-            other => Err(SlotLeafError::new(alloc::format!(
+                .ok_or_else(|| ValueRootError::new("expected RGB color order value")),
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected String, got {other:?}"
             ))),
         }
     }
 }
 
-impl SlotLeaf for ColorOrder {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.color_order");
+impl SlotValue for ColorOrder {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.color_order");
 
     fn value_shape() -> SlotValueShape {
         lpc_model::color_order_shape()

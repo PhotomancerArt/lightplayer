@@ -1,6 +1,6 @@
 use crate::{
     FieldSlot, FrameId, FromLpValue, LpType, LpValue, ResourceRef, SlotDataAccess,
-    SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
+    ValueEditorHint, SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess,
     SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -80,18 +80,18 @@ impl ToLpValue for ResourceRef {
 }
 
 impl FromLpValue for ResourceRef {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::Resource(value) => Ok(value),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected Resource, got {other:?}"
             ))),
         }
     }
 }
 
-impl SlotLeaf for ResourceRef {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.resource_ref");
+impl SlotValue for ResourceRef {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.resource_ref");
 
     fn value_shape() -> SlotValueShape {
         resource_ref_shape()
@@ -100,27 +100,27 @@ impl SlotLeaf for ResourceRef {
 
 pub fn resource_ref_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.resource_ref"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.resource_ref"),
         ty: LpType::Resource,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Resource,
+        editor: ValueEditorHint::Resource,
     }
 }
 
 pub fn runtime_buffer_resource_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.runtime_buffer_resource"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.runtime_buffer_resource"),
         ty: LpType::Resource,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::RuntimeBufferResource,
+        editor: ValueEditorHint::RuntimeBufferResource,
     }
 }
 
 pub fn render_product_resource_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.render_product_resource"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.render_product_resource"),
         ty: LpType::Resource,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::RenderProductResource,
+        editor: ValueEditorHint::RenderProductResource,
     }
 }

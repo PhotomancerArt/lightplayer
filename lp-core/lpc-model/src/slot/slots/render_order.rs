@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotEditorHint,
-    SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
+    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, ValueEditorHint,
+    LpValueRootId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
     current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -75,10 +75,10 @@ impl FieldSlot for RenderOrderSlot {
 
 pub fn render_order_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.render_order"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.render_order"),
         ty: LpType::I32,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Number {
+        editor: ValueEditorHint::Number {
             min: None,
             max: None,
             step: Some(OrderedF32(1.0)),

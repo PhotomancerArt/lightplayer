@@ -2,8 +2,8 @@
 
 use alloc::string::{String, ToString};
 use lpc_model::{
-    FromLpValue, LpType, LpValue, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
-    SlotLeafId, SlotMeta, SlotValueShape, ToLpValue, ValueSlot,
+    FromLpValue, LpType, LpValue, ValueEditorHint, SlotEnumOption, SlotValue, ValueRootError,
+    LpValueRootId, SlotMeta, SlotValueShape, ToLpValue, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,11 +26,11 @@ impl AddSubMode {
         }
     }
 
-    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+    pub fn parse(value: &str) -> Result<Self, ValueRootError> {
         match value {
             "saturating" => Ok(Self::Saturating),
             "wrapping" => Ok(Self::Wrapping),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "unknown add/sub mode {other:?}"
             ))),
         }
@@ -56,11 +56,11 @@ impl MulMode {
         }
     }
 
-    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+    pub fn parse(value: &str) -> Result<Self, ValueRootError> {
         match value {
             "saturating" => Ok(Self::Saturating),
             "wrapping" => Ok(Self::Wrapping),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "unknown mul mode {other:?}"
             ))),
         }
@@ -86,11 +86,11 @@ impl DivMode {
         }
     }
 
-    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+    pub fn parse(value: &str) -> Result<Self, ValueRootError> {
         match value {
             "saturating" => Ok(Self::Saturating),
             "reciprocal" => Ok(Self::Reciprocal),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "unknown div mode {other:?}"
             ))),
         }
@@ -125,13 +125,13 @@ impl ToLpValue for AddSubMode {
 }
 
 impl FromLpValue for AddSubMode {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
 
-impl SlotLeaf for AddSubMode {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.glsl_add_sub_mode");
+impl SlotValue for AddSubMode {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.glsl_add_sub_mode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -148,13 +148,13 @@ impl ToLpValue for MulMode {
 }
 
 impl FromLpValue for MulMode {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
 
-impl SlotLeaf for MulMode {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.glsl_mul_mode");
+impl SlotValue for MulMode {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.glsl_mul_mode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -171,13 +171,13 @@ impl ToLpValue for DivMode {
 }
 
 impl FromLpValue for DivMode {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
 
-impl SlotLeaf for DivMode {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.glsl_div_mode");
+impl SlotValue for DivMode {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.glsl_div_mode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -187,21 +187,21 @@ impl SlotLeaf for DivMode {
     }
 }
 
-fn string_lp_value(value: LpValue) -> Result<String, SlotLeafError> {
+fn string_lp_value(value: LpValue) -> Result<String, ValueRootError> {
     match value {
         LpValue::String(value) => Ok(value),
-        other => Err(SlotLeafError::new(alloc::format!(
+        other => Err(ValueRootError::new(alloc::format!(
             "expected String, got {other:?}"
         ))),
     }
 }
 
-fn mode_shape(leaf: SlotLeafId, options: &[(&str, &str)]) -> SlotValueShape {
+fn mode_shape(leaf: LpValueRootId, options: &[(&str, &str)]) -> SlotValueShape {
     SlotValueShape {
         leaf,
         ty: LpType::String,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::Dropdown {
+        editor: ValueEditorHint::Dropdown {
             options: options
                 .iter()
                 .map(|(value, label)| SlotEnumOption::new(value, label))

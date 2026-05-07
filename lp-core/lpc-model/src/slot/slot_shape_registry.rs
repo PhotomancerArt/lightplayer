@@ -1,5 +1,5 @@
 use crate::{
-    FrameId, SlotShape, SlotShapeId, SlotTree, SlotValidationError, current_state_version,
+    FrameId, SlotShape, SlotShapeId, current_state_version,
 };
 use alloc::collections::BTreeMap;
 
@@ -23,9 +23,9 @@ impl SlotShapeRegistry {
     /// Register a new shape root.
     ///
     /// This is intentionally strict: registering an id twice is an error even
-    /// when the shape is identical. Use [`Self::ensure_tree`] for static shape
+    /// when the shape is identical. Use [`Self::ensure_root`] for static shape
     /// bootstrap code that may be called more than once.
-    pub fn register_tree(
+    pub fn register_root(
         &mut self,
         root: SlotShapeId,
         shape: SlotShape,
@@ -59,15 +59,15 @@ impl SlotShapeRegistry {
     /// same shape was already registered. If the id is already registered with
     /// a different shape, this returns a conflict error rather than replacing
     /// the existing shape.
-    pub fn ensure_tree(
+    pub fn ensure_root(
         &mut self,
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
-        self.ensure_tree_with_version(current_state_version(), root, shape)
+        self.ensure_root_with_version(current_state_version(), root, shape)
     }
 
-    pub fn ensure_tree_with_version(
+    pub fn ensure_root_with_version(
         &mut self,
         frame: FrameId,
         root: SlotShapeId,
@@ -96,11 +96,11 @@ impl SlotShapeRegistry {
     ///
     /// Runtime-owned shapes whose structure varies by artifact or instance use
     /// this path when their shape changes.
-    pub fn replace_tree(&mut self, root: SlotShapeId, shape: SlotShape) {
-        self.replace_tree_with_version(current_state_version(), root, shape);
+    pub fn replace_root(&mut self, root: SlotShapeId, shape: SlotShape) {
+        self.replace_root_with_version(current_state_version(), root, shape);
     }
 
-    pub fn replace_tree_with_version(
+    pub fn replace_root_with_version(
         &mut self,
         frame: FrameId,
         root: SlotShapeId,
@@ -116,11 +116,11 @@ impl SlotShapeRegistry {
         self.ids_changed_frame = frame;
     }
 
-    pub fn unregister_tree(&mut self, root: &SlotShapeId) {
-        self.unregister_tree_with_version(current_state_version(), root);
+    pub fn unregister_root(&mut self, root: &SlotShapeId) {
+        self.unregister_root_with_version(current_state_version(), root);
     }
 
-    pub fn unregister_tree_with_version(&mut self, frame: FrameId, root: &SlotShapeId) {
+    pub fn unregister_root_with_version(&mut self, frame: FrameId, root: &SlotShapeId) {
         if self.shapes.remove(root).is_some() {
             self.ids_changed_frame = frame;
         }
@@ -148,11 +148,6 @@ impl SlotShapeRegistry {
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.ids_changed_frame = snapshot.ids_changed_frame;
         self.shapes = snapshot.shapes;
-    }
-
-    /// Validate a dynamic slot tree against this registry.
-    pub fn validate_tree(&self, tree: &SlotTree) -> Result<(), SlotValidationError> {
-        tree.validate(self)
     }
 }
 
@@ -197,7 +192,7 @@ mod tests {
         let id = SlotShapeId::from_static_name("test.shape");
 
         let inserted = registry
-            .ensure_tree(id, SlotShape::value(LpType::Bool))
+            .ensure_root(id, SlotShape::value(LpType::Bool))
             .unwrap();
 
         assert!(inserted);
@@ -210,8 +205,8 @@ mod tests {
         let id = SlotShapeId::from_static_name("test.shape");
         let shape = SlotShape::value(LpType::Bool);
 
-        assert!(registry.ensure_tree(id, shape.clone()).unwrap());
-        assert!(!registry.ensure_tree(id, shape).unwrap());
+        assert!(registry.ensure_root(id, shape.clone()).unwrap());
+        assert!(!registry.ensure_root(id, shape).unwrap());
     }
 
     #[test]
@@ -220,10 +215,10 @@ mod tests {
         let id = SlotShapeId::from_static_name("test.shape");
 
         registry
-            .ensure_tree(id, SlotShape::value(LpType::Bool))
+            .ensure_root(id, SlotShape::value(LpType::Bool))
             .unwrap();
         let err = registry
-            .ensure_tree(id, SlotShape::value(LpType::F32))
+            .ensure_root(id, SlotShape::value(LpType::F32))
             .unwrap_err();
 
         assert_eq!(err, SlotShapeRegistryError::ShapeIdConflict(id));

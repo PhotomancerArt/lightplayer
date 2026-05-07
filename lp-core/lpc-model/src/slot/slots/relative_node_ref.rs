@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, RelativeNodeRef, SlotDataAccess, SlotEditorHint,
-    SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape,
+    FieldSlot, FrameId, LpType, LpValue, RelativeNodeRef, SlotDataAccess, ValueEditorHint,
+    SlotValue, ValueRootError, LpValueRootId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape,
     ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::ToString;
@@ -81,19 +81,19 @@ impl ToLpValue for RelativeNodeRef {
 }
 
 impl crate::FromLpValue for RelativeNodeRef {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => RelativeNodeRef::parse(&value)
-                .map_err(|err| SlotLeafError::new(alloc::format!("{err}"))),
-            other => Err(SlotLeafError::new(alloc::format!(
+                .map_err(|err| ValueRootError::new(alloc::format!("{err}"))),
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected String, got {other:?}"
             ))),
         }
     }
 }
 
-impl SlotLeaf for RelativeNodeRef {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.relative_node_ref");
+impl SlotValue for RelativeNodeRef {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.relative_node_ref");
 
     fn value_shape() -> SlotValueShape {
         relative_node_ref_shape()
@@ -102,9 +102,9 @@ impl SlotLeaf for RelativeNodeRef {
 
 pub fn relative_node_ref_shape() -> SlotValueShape {
     SlotValueShape {
-        leaf: SlotLeafId::from_static_name("slot.leaf.relative_node_ref"),
+        leaf: LpValueRootId::from_static_name("slot.leaf.relative_node_ref"),
         ty: LpType::String,
         meta: SlotMeta::empty(),
-        editor: SlotEditorHint::NodeRef,
+        editor: ValueEditorHint::NodeRef,
     }
 }

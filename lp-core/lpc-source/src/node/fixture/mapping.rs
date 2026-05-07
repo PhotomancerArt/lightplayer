@@ -2,8 +2,8 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use lpc_model::{
     FieldSlot, FrameId, FromLpValue, MapSlot, LpType, LpValue, PositiveF32Slot,
-    SlotDataAccess, SlotEditorHint, SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotLeaf,
-    SlotLeafError, SlotLeafId, SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess,
+    SlotDataAccess, ValueEditorHint, SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotValue,
+    ValueRootError, LpValueRootId, SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess,
     SlotShape, SlotValueShape, ToLpValue, ValueSlot, XySlot, current_state_version,
 };
 use serde::{Deserialize, Serialize};
@@ -248,11 +248,11 @@ impl RingOrder {
         }
     }
 
-    pub fn parse(value: &str) -> Result<Self, SlotLeafError> {
+    pub fn parse(value: &str) -> Result<Self, ValueRootError> {
         match value {
             "inner_first" => Ok(Self::InnerFirst),
             "outer_first" => Ok(Self::OuterFirst),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "unknown ring order {other:?}"
             ))),
         }
@@ -266,25 +266,25 @@ impl ToLpValue for RingOrder {
 }
 
 impl FromLpValue for RingOrder {
-    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => Self::parse(&value),
-            other => Err(SlotLeafError::new(alloc::format!(
+            other => Err(ValueRootError::new(alloc::format!(
                 "expected String, got {other:?}"
             ))),
         }
     }
 }
 
-impl SlotLeaf for RingOrder {
-    const LEAF_ID: SlotLeafId = SlotLeafId::from_static_name("slot.leaf.ring_order");
+impl SlotValue for RingOrder {
+    const LEAF_ID: LpValueRootId = LpValueRootId::from_static_name("slot.leaf.ring_order");
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
             leaf: Self::LEAF_ID,
             ty: LpType::String,
             meta: SlotMeta::empty(),
-            editor: SlotEditorHint::Dropdown {
+            editor: ValueEditorHint::Dropdown {
                 options: alloc::vec![
                     SlotEnumOption::new("inner_first", "Inner first"),
                     SlotEnumOption::new("outer_first", "Outer first"),
