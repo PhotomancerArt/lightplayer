@@ -7,6 +7,7 @@ use lpc_model::{
 };
 
 pub struct ShaderNode {
+    shape_id: SlotShapeId,
     param_names: Vec<SlotName>,
     params: SlotRecord,
     compile_error: SlotOptionDyn,
@@ -16,6 +17,10 @@ impl ShaderNode {
     pub const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("engine.shader_node");
 
     pub fn from_def(def: &ShaderDef) -> Self {
+        Self::from_def_with_shape_id(def, Self::SHAPE_ID)
+    }
+
+    pub fn from_def_with_shape_id(def: &ShaderDef, shape_id: SlotShapeId) -> Self {
         let param_names = def
             .param_defs
             .entries
@@ -35,6 +40,7 @@ impl ShaderNode {
             .collect::<Vec<_>>();
 
         Self {
+            shape_id,
             param_names,
             params: SlotRecord::new(params),
             compile_error: SlotOptionDyn::some_with_version(
@@ -119,7 +125,7 @@ impl ShaderNode {
 
 impl SlotAccess for ShaderNode {
     fn shape_id(&self) -> SlotShapeId {
-        Self::SHAPE_ID
+        self.shape_id
     }
 
     fn data(&self) -> SlotDataAccess<'_> {

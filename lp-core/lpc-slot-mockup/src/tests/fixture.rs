@@ -18,8 +18,7 @@ pub struct Harness {
 
 impl Harness {
     pub fn new() -> Self {
-        static TEST_LOG_LOCK: Mutex<()> = Mutex::new(());
-        let log_guard = TEST_LOG_LOCK.lock().unwrap();
+        let log_guard = log_guard();
 
         println!("server loaded");
         Self {
@@ -108,6 +107,11 @@ impl Harness {
             .map(|(_, root)| root)
             .expect("server root")
     }
+}
+
+pub fn log_guard() -> MutexGuard<'static, ()> {
+    static TEST_LOG_LOCK: Mutex<()> = Mutex::new(());
+    TEST_LOG_LOCK.lock().unwrap()
 }
 
 pub fn print_lines(lines: Vec<String>) {
