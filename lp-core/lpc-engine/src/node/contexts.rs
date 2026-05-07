@@ -347,7 +347,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(7.8),
+                        lpc_model::LpValue::F32(7.8),
                     )),
                     target: BindingTarget::BusChannel(channel.clone()),
                     priority: BindingPriority::new(0),
@@ -388,7 +388,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(4.25),
+                        lpc_model::LpValue::F32(4.25),
                     )),
                     target: BindingTarget::ConsumedSlot {
                         node,
@@ -544,7 +544,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(8.8),
+                        lpc_model::LpValue::F32(8.8),
                     )),
                     target: BindingTarget::BusChannel(channel.clone()),
                     priority: BindingPriority::new(0),

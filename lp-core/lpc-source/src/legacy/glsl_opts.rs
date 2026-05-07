@@ -2,8 +2,8 @@
 
 use alloc::string::{String, ToString};
 use lpc_model::{
-    FromModelValue, ModelType, ModelValue, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
-    SlotLeafId, SlotMeta, SlotValueShape, ToModelValue, ValueSlot,
+    FromLpValue, LpType, LpValue, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
+    SlotLeafId, SlotMeta, SlotValueShape, ToLpValue, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -118,15 +118,15 @@ impl Default for GlslOpts {
     }
 }
 
-impl ToModelValue for AddSubMode {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().to_string())
+impl ToLpValue for AddSubMode {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().to_string())
     }
 }
 
-impl FromModelValue for AddSubMode {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        string_model_value(value).and_then(|value| Self::parse(&value))
+impl FromLpValue for AddSubMode {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+        string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
 
@@ -141,15 +141,15 @@ impl SlotLeaf for AddSubMode {
     }
 }
 
-impl ToModelValue for MulMode {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().to_string())
+impl ToLpValue for MulMode {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().to_string())
     }
 }
 
-impl FromModelValue for MulMode {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        string_model_value(value).and_then(|value| Self::parse(&value))
+impl FromLpValue for MulMode {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+        string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
 
@@ -164,15 +164,15 @@ impl SlotLeaf for MulMode {
     }
 }
 
-impl ToModelValue for DivMode {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().to_string())
+impl ToLpValue for DivMode {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().to_string())
     }
 }
 
-impl FromModelValue for DivMode {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        string_model_value(value).and_then(|value| Self::parse(&value))
+impl FromLpValue for DivMode {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+        string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
 
@@ -187,9 +187,9 @@ impl SlotLeaf for DivMode {
     }
 }
 
-fn string_model_value(value: ModelValue) -> Result<String, SlotLeafError> {
+fn string_lp_value(value: LpValue) -> Result<String, SlotLeafError> {
     match value {
-        ModelValue::String(value) => Ok(value),
+        LpValue::String(value) => Ok(value),
         other => Err(SlotLeafError::new(alloc::format!(
             "expected String, got {other:?}"
         ))),
@@ -199,7 +199,7 @@ fn string_model_value(value: ModelValue) -> Result<String, SlotLeafError> {
 fn mode_shape(leaf: SlotLeafId, options: &[(&str, &str)]) -> SlotValueShape {
     SlotValueShape {
         leaf,
-        ty: ModelType::String,
+        ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Dropdown {
             options: options

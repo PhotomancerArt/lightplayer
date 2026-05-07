@@ -25,7 +25,7 @@ use crate::resolver::resolver_context::ResolverContext;
 use crate::resolver::slot_resolver_cache::SlotResolverCache;
 use lpc_model::FrameId;
 use lpc_model::Versioned;
-use lpc_model::prop::value_path::ValuePath;
+use lpc_model::value::value_path::ValuePath;
 use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::prop::src_binding::SrcBinding;
 use lpc_source::prop::src_value_spec::{LoadCtx, SrcValueSpec};
@@ -232,38 +232,38 @@ fn resolve_default<C: ResolverContext + ?Sized>(
 /// Not every future runtime domain maps 1:1 into `LpsValueF32`; engine demand
 /// resolution may represent other domains as [`RuntimeProduct`](crate::runtime_product::RuntimeProduct).
 fn model_value_to_lps_value_f32(
-    value: &lpc_model::ModelValue,
+    value: &lpc_model::LpValue,
 ) -> Result<LpsValueF32, ResolveError> {
-    use lpc_model::ModelValue;
+    use lpc_model::LpValue;
 
     match value {
-        ModelValue::I32(v) => Ok(LpsValueF32::I32(*v)),
-        ModelValue::U32(v) => Ok(LpsValueF32::U32(*v)),
-        ModelValue::F32(v) => Ok(LpsValueF32::F32(*v)),
-        ModelValue::Bool(v) => Ok(LpsValueF32::Bool(*v)),
-        ModelValue::Vec2(v) => Ok(LpsValueF32::Vec2(*v)),
-        ModelValue::Vec3(v) => Ok(LpsValueF32::Vec3(*v)),
-        ModelValue::Vec4(v) => Ok(LpsValueF32::Vec4(*v)),
-        ModelValue::IVec2(v) => Ok(LpsValueF32::IVec2(*v)),
-        ModelValue::IVec3(v) => Ok(LpsValueF32::IVec3(*v)),
-        ModelValue::IVec4(v) => Ok(LpsValueF32::IVec4(*v)),
-        ModelValue::UVec2(v) => Ok(LpsValueF32::UVec2(*v)),
-        ModelValue::UVec3(v) => Ok(LpsValueF32::UVec3(*v)),
-        ModelValue::UVec4(v) => Ok(LpsValueF32::UVec4(*v)),
-        ModelValue::BVec2(v) => Ok(LpsValueF32::BVec2(*v)),
-        ModelValue::BVec3(v) => Ok(LpsValueF32::BVec3(*v)),
-        ModelValue::BVec4(v) => Ok(LpsValueF32::BVec4(*v)),
-        ModelValue::Mat2x2(v) => Ok(LpsValueF32::Mat2x2(*v)),
-        ModelValue::Mat3x3(v) => Ok(LpsValueF32::Mat3x3(*v)),
-        ModelValue::Mat4x4(v) => Ok(LpsValueF32::Mat4x4(*v)),
-        ModelValue::Array(items) => {
+        LpValue::I32(v) => Ok(LpsValueF32::I32(*v)),
+        LpValue::U32(v) => Ok(LpsValueF32::U32(*v)),
+        LpValue::F32(v) => Ok(LpsValueF32::F32(*v)),
+        LpValue::Bool(v) => Ok(LpsValueF32::Bool(*v)),
+        LpValue::Vec2(v) => Ok(LpsValueF32::Vec2(*v)),
+        LpValue::Vec3(v) => Ok(LpsValueF32::Vec3(*v)),
+        LpValue::Vec4(v) => Ok(LpsValueF32::Vec4(*v)),
+        LpValue::IVec2(v) => Ok(LpsValueF32::IVec2(*v)),
+        LpValue::IVec3(v) => Ok(LpsValueF32::IVec3(*v)),
+        LpValue::IVec4(v) => Ok(LpsValueF32::IVec4(*v)),
+        LpValue::UVec2(v) => Ok(LpsValueF32::UVec2(*v)),
+        LpValue::UVec3(v) => Ok(LpsValueF32::UVec3(*v)),
+        LpValue::UVec4(v) => Ok(LpsValueF32::UVec4(*v)),
+        LpValue::BVec2(v) => Ok(LpsValueF32::BVec2(*v)),
+        LpValue::BVec3(v) => Ok(LpsValueF32::BVec3(*v)),
+        LpValue::BVec4(v) => Ok(LpsValueF32::BVec4(*v)),
+        LpValue::Mat2x2(v) => Ok(LpsValueF32::Mat2x2(*v)),
+        LpValue::Mat3x3(v) => Ok(LpsValueF32::Mat3x3(*v)),
+        LpValue::Mat4x4(v) => Ok(LpsValueF32::Mat4x4(*v)),
+        LpValue::Array(items) => {
             let mut result = alloc::vec::Vec::with_capacity(items.len());
             for item in items.iter() {
                 result.push(model_value_to_lps_value_f32(item)?);
             }
             Ok(LpsValueF32::Array(result.into_boxed_slice()))
         }
-        ModelValue::Struct { name, fields } => {
+        LpValue::Struct { name, fields } => {
             let mut result_fields = alloc::vec::Vec::with_capacity(fields.len());
             for (k, v) in fields.iter() {
                 result_fields.push((k.clone(), model_value_to_lps_value_f32(v)?));
@@ -273,7 +273,7 @@ fn model_value_to_lps_value_f32(
                 fields: result_fields,
             })
         }
-        ModelValue::String(_) | ModelValue::Resource(_) => Err(ResolveError::new(alloc::format!(
+        LpValue::String(_) | LpValue::Resource(_) => Err(ResolveError::new(alloc::format!(
             "model value cannot be resolved as shader value: {value:?}"
         ))),
     }
@@ -286,10 +286,10 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::FrameId;
-    use lpc_model::ModelValue;
+    use lpc_model::LpValue;
     use lpc_model::NodePropSpec;
     use lpc_model::bus::ChannelName;
-    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::value::value_path::parse_path;
     use lpc_model::tree::tree_path::TreePath;
     use lpc_source::artifact::artifact_loc::ArtifactLocator;
     use lpc_source::prop::src_value_spec::SrcValueSpec;
@@ -389,7 +389,7 @@ mod tests {
         let mut cache = SlotResolverCache::new();
         let config = make_config_with_override(
             "params.speed",
-            SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(5.5))),
+            SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(5.5))),
         );
 
         let ctx = TestContext::new(FrameId::new(10))
@@ -417,7 +417,7 @@ mod tests {
         let ctx = TestContext::new(FrameId::new(10))
             .with_binding(
                 "params.speed",
-                SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(3.5))),
+                SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(3.5))),
             )
             .with_default("params.speed", LpsValueF32::F32(1.0));
 
@@ -644,7 +644,7 @@ mod tests {
         let ctx = TestContext::new(FrameId::new(10))
             .with_binding(
                 "inputs.level",
-                SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(1.0))),
+                SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(1.0))),
             )
             .with_bus("override_bus", LpsValueF32::F32(9.9), FrameId::new(3))
             .with_default("inputs.level", LpsValueF32::F32(0.5));
@@ -661,21 +661,21 @@ mod tests {
 
     #[test]
     fn model_value_conversion_f32() {
-        let val = ModelValue::F32(3.14);
+        let val = LpValue::F32(3.14);
         let lps = model_value_to_lps_value_f32(&val).unwrap();
         assert!(matches!(lps, LpsValueF32::F32(3.14)));
     }
 
     #[test]
     fn model_value_conversion_vec3() {
-        let val = ModelValue::Vec3([1.0, 2.0, 3.0]);
+        let val = LpValue::Vec3([1.0, 2.0, 3.0]);
         let lps = model_value_to_lps_value_f32(&val).unwrap();
         assert!(matches!(lps, LpsValueF32::Vec3([1.0, 2.0, 3.0])));
     }
 
     #[test]
     fn model_value_conversion_array() {
-        let val = ModelValue::Array(alloc::vec![ModelValue::F32(1.0), ModelValue::F32(2.0),]);
+        let val = LpValue::Array(alloc::vec![LpValue::F32(1.0), LpValue::F32(2.0),]);
         let lps = model_value_to_lps_value_f32(&val).unwrap();
         match lps {
             LpsValueF32::Array(items) => {
@@ -689,11 +689,11 @@ mod tests {
 
     #[test]
     fn model_value_conversion_struct() {
-        let val = ModelValue::Struct {
+        let val = LpValue::Struct {
             name: Some(String::from("Test")),
             fields: alloc::vec![
-                (String::from("x"), ModelValue::F32(1.0)),
-                (String::from("y"), ModelValue::F32(2.0)),
+                (String::from("x"), LpValue::F32(1.0)),
+                (String::from("y"), LpValue::F32(2.0)),
             ],
         };
         let lps = model_value_to_lps_value_f32(&val).unwrap();

@@ -21,7 +21,7 @@ impl ValueRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prop::value_path::parse_path;
+    use crate::value::value_path::parse_path;
     use crate::{NodeId, SlotOwner, SlotPath};
 
     #[test]

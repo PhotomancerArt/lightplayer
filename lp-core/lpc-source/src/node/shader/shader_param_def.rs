@@ -1,7 +1,7 @@
 //! Authored shader parameter metadata.
 
 use alloc::string::String;
-use lpc_model::{ModelValue, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+use lpc_model::{LpValue, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Authored definition for one shader parameter.
@@ -34,8 +34,8 @@ impl ShaderParamDef {
         }
     }
 
-    pub fn default_value(&self) -> ModelValue {
-        ModelValue::F32(*self.default.value())
+    pub fn default_value(&self) -> LpValue {
+        LpValue::F32(*self.default.value())
     }
 }
 

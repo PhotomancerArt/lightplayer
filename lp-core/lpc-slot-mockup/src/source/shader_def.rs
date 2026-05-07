@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FrameId, MapSlot, ModelValue, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
+    FrameId, MapSlot, LpValue, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
     RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
 };
 
@@ -119,8 +119,8 @@ impl ShaderParamDef {
         }
     }
 
-    pub fn default_value(&self) -> ModelValue {
-        ModelValue::F32(*self.default.value())
+    pub fn default_value(&self) -> LpValue {
+        LpValue::F32(*self.default.value())
     }
 
     fn set_value_type(&mut self, value_type: &str) {

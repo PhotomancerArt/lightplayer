@@ -1,5 +1,5 @@
 use lpc_model::{
-    ModelValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
+    LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
 };
 use lpc_source::node::{
     ProjectDef, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
@@ -57,7 +57,7 @@ fn real_source_defs_sync_as_slot_roots() {
         ),
         &SlotData::Value(lpc_model::Versioned::new(
             project.nodes.entries["shader"].artifact.changed_frame(),
-            ModelValue::String(String::from("./shader.toml")),
+            LpValue::String(String::from("./shader.toml")),
         )),
     );
 
@@ -69,7 +69,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &registry,
             "glsl_path",
         ),
-        ModelValue::String(String::from("shader.glsl")),
+        LpValue::String(String::from("shader.glsl")),
     );
     assert_value(
         select(
@@ -78,7 +78,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &registry,
             "texture_loc",
         ),
-        ModelValue::String(String::from("..texture")),
+        LpValue::String(String::from("..texture")),
     );
     assert_value(
         select(
@@ -87,7 +87,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &registry,
             "glsl_opts.add_sub",
         ),
-        ModelValue::String(String::from("wrapping")),
+        LpValue::String(String::from("wrapping")),
     );
 
     let shader_with_params: ShaderDef = toml::from_str(
@@ -120,7 +120,7 @@ value = 0.0
             &registry,
             "param_defs[speed].label",
         ),
-        ModelValue::String(String::from("Speed")),
+        LpValue::String(String::from("Speed")),
     );
 
     let texture_sync = build_slot_full_sync(
@@ -150,7 +150,7 @@ value = 0.0
             &registry,
             "options.some.brightness",
         ),
-        ModelValue::F32(0.12),
+        LpValue::F32(0.12),
     );
 
     let fixture_sync = build_slot_full_sync(
@@ -189,7 +189,7 @@ fn root_data<'a>(sync: &'a lpc_wire::WireSlotFullSync, name: &str) -> &'a SlotDa
         .data
 }
 
-fn assert_value(data: &SlotData, expected: ModelValue) {
+fn assert_value(data: &SlotData, expected: LpValue) {
     let SlotData::Value(value) = data else {
         panic!("expected value, got {data:?}");
     };

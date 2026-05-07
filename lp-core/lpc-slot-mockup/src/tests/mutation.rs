@@ -1,4 +1,4 @@
-use lpc_model::{FrameId, ModelValue, SlotPath};
+use lpc_model::{FrameId, LpValue, SlotPath};
 use lpc_wire::{
     WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,
@@ -20,14 +20,14 @@ fn client_mutation_accepts_runtime_value_without_optimistic_write() {
             mutation_id,
             "engine.shader_node",
             SlotPath::parse("params.exposure").unwrap(),
-            ModelValue::F32(2.0),
+            LpValue::F32(2.0),
         )
         .unwrap();
     assert!(harness.client.is_pending(mutation_id));
     assert_shader_param(
         harness.client.roots.get("engine.shader_node").unwrap(),
         "exposure",
-        ModelValue::F32(1.0),
+        LpValue::F32(1.0),
     );
 
     println!("server applying mutation");
@@ -44,7 +44,7 @@ fn client_mutation_accepts_runtime_value_without_optimistic_write() {
     assert_shader_param(
         harness.client.roots.get("engine.shader_node").unwrap(),
         "exposure",
-        ModelValue::F32(2.0),
+        LpValue::F32(2.0),
     );
 }
 
@@ -61,7 +61,7 @@ fn client_mutation_accepts_source_value() {
             mutation_id,
             "source.shader",
             SlotPath::parse("param_defs[exposure].label").unwrap(),
-            ModelValue::String("Brightness".to_string()),
+            LpValue::String("Brightness".to_string()),
         )
         .unwrap();
     let response = harness
@@ -90,7 +90,7 @@ fn client_mutation_rejects_stale_data_version() {
             WireSlotMutationId::new(3),
             "engine.shader_node",
             SlotPath::parse("params.exposure").unwrap(),
-            ModelValue::F32(2.0),
+            LpValue::F32(2.0),
         )
         .unwrap();
     println!("server independently updates engine.shader_node#params.exposure");
@@ -127,7 +127,7 @@ fn client_mutation_rejects_stale_shape_version() {
             WireSlotMutationId::new(4),
             "engine.shader_node",
             SlotPath::parse("params.exposure").unwrap(),
-            ModelValue::F32(2.0),
+            LpValue::F32(2.0),
         )
         .unwrap();
     println!("server changes engine.shader_node param shape before mutation arrives");
@@ -157,10 +157,10 @@ fn client_mutation_rejects_wrong_type_unknown_path_and_unsupported_target() {
             WireSlotMutationId::new(5),
             "engine.shader_node",
             SlotPath::parse("params.exposure").unwrap(),
-            ModelValue::F32(2.0),
+            LpValue::F32(2.0),
         )
         .unwrap();
-    wrong_type.op = WireSlotMutationOp::SetValue(ModelValue::Vec3([1.0, 2.0, 3.0]));
+    wrong_type.op = WireSlotMutationOp::SetValue(LpValue::Vec3([1.0, 2.0, 3.0]));
     let response = harness
         .runtime
         .apply_slot_mutation(FrameId::new(2), wrong_type);
@@ -172,7 +172,7 @@ fn client_mutation_rejects_wrong_type_unknown_path_and_unsupported_target() {
         path: SlotPath::parse("params.missing").unwrap(),
         expected_shape_version: FrameId::new(1),
         expected_data_version: FrameId::new(1),
-        op: WireSlotMutationOp::SetValue(ModelValue::F32(2.0)),
+        op: WireSlotMutationOp::SetValue(LpValue::F32(2.0)),
     };
     let response = harness
         .runtime
@@ -185,7 +185,7 @@ fn client_mutation_rejects_wrong_type_unknown_path_and_unsupported_target() {
             WireSlotMutationId::new(7),
             "engine.shader_node",
             SlotPath::parse("params.speed").unwrap(),
-            ModelValue::F32(1.0),
+            LpValue::F32(1.0),
         )
         .unwrap();
     let response = harness

@@ -28,8 +28,8 @@ pub use slot_access::{
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;
 pub use slot_leaf::{
-    FromModelValue, OrderedF32, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
-    SlotLeafId, SlotValueShape, ToModelValue,
+    FromLpValue, OrderedF32, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError,
+    SlotLeafId, SlotValueShape, ToLpValue,
 };
 pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};

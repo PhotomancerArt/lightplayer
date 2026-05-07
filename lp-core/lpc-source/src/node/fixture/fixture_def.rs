@@ -3,8 +3,8 @@ use crate::node::fixture::mapping::MappingConfig;
 use crate::node::node_def::NodeDef;
 use alloc::string::ToString;
 use lpc_model::{
-    Affine2dSlot, FromModelValue, ModelValue, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
-    SlotLeaf, SlotLeafError, SlotLeafId, SlotValueShape, ToModelValue, ValueSlot,
+    Affine2dSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
+    SlotLeaf, SlotLeafError, SlotLeafId, SlotValueShape, ToLpValue, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -215,16 +215,16 @@ impl ColorOrder {
     }
 }
 
-impl ToModelValue for ColorOrder {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().to_string())
+impl ToLpValue for ColorOrder {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().to_string())
     }
 }
 
-impl FromModelValue for ColorOrder {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl FromLpValue for ColorOrder {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::String(value) => Self::parse(&value)
+            LpValue::String(value) => Self::parse(&value)
                 .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected String, got {other:?}"

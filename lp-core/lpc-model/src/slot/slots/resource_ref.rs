@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromModelValue, ModelType, ModelValue, ResourceRef, SlotDataAccess,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ResourceRef, SlotDataAccess,
     SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToModelValue, Versioned, current_state_version,
+    SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -40,8 +40,8 @@ impl SlotValueAccess for ResourceRefSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        self.inner.value().to_model_value()
+    fn value(&self) -> LpValue {
+        self.inner.value().to_lp_value()
     }
 }
 
@@ -73,16 +73,16 @@ impl FieldSlot for ResourceRefSlot {
     }
 }
 
-impl ToModelValue for ResourceRef {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Resource(*self)
+impl ToLpValue for ResourceRef {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::Resource(*self)
     }
 }
 
-impl FromModelValue for ResourceRef {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl FromLpValue for ResourceRef {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::Resource(value) => Ok(value),
+            LpValue::Resource(value) => Ok(value),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected Resource, got {other:?}"
             ))),
@@ -101,7 +101,7 @@ impl SlotLeaf for ResourceRef {
 pub fn resource_ref_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.resource_ref"),
-        ty: ModelType::Resource,
+        ty: LpType::Resource,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Resource,
     }
@@ -110,7 +110,7 @@ pub fn resource_ref_shape() -> SlotValueShape {
 pub fn runtime_buffer_resource_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.runtime_buffer_resource"),
-        ty: ModelType::Resource,
+        ty: LpType::Resource,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::RuntimeBufferResource,
     }
@@ -119,7 +119,7 @@ pub fn runtime_buffer_resource_shape() -> SlotValueShape {
 pub fn render_product_resource_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.render_product_resource"),
-        ty: ModelType::Resource,
+        ty: LpType::Resource,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::RenderProductResource,
     }

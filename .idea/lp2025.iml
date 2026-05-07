@@ -88,6 +88,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-vis/lpv-model/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-vis/lpv-model/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-model/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-slot-codegen/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-slot-macros/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-slot-mockup/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-source/tests" isTestSource="true" />

@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use lpc_model::{
-    FrameId, ModelStructMember, ModelType, ModelValue, SlotData, SlotMapKey, SlotMapKeyShape,
+    FrameId, ModelStructMember, LpType, LpValue, SlotData, SlotMapKey, SlotMapKeyShape,
     SlotPath, SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};
@@ -78,7 +78,7 @@ pub(super) fn validate_value_at(
     root: &SlotData,
     shape_id: &SlotShapeId,
     path: &SlotPath,
-    value: &ModelValue,
+    value: &LpValue,
     registry: &SlotShapeRegistry,
 ) -> Result<(), SlotMirrorError> {
     let (shape, data) = resolve_path(root, shape_id, path, registry)?;
@@ -287,38 +287,38 @@ fn map_key_for_shape(
     }
 }
 
-fn model_value_matches_type(value: &ModelValue, ty: &ModelType) -> bool {
+fn model_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
     match (value, ty) {
-        (ModelValue::String(_), ModelType::String)
-        | (ModelValue::I32(_), ModelType::I32)
-        | (ModelValue::U32(_), ModelType::U32)
-        | (ModelValue::F32(_), ModelType::F32)
-        | (ModelValue::Bool(_), ModelType::Bool)
-        | (ModelValue::Vec2(_), ModelType::Vec2)
-        | (ModelValue::Vec3(_), ModelType::Vec3)
-        | (ModelValue::Vec4(_), ModelType::Vec4)
-        | (ModelValue::IVec2(_), ModelType::IVec2)
-        | (ModelValue::IVec3(_), ModelType::IVec3)
-        | (ModelValue::IVec4(_), ModelType::IVec4)
-        | (ModelValue::UVec2(_), ModelType::UVec2)
-        | (ModelValue::UVec3(_), ModelType::UVec3)
-        | (ModelValue::UVec4(_), ModelType::UVec4)
-        | (ModelValue::BVec2(_), ModelType::BVec2)
-        | (ModelValue::BVec3(_), ModelType::BVec3)
-        | (ModelValue::BVec4(_), ModelType::BVec4)
-        | (ModelValue::Mat2x2(_), ModelType::Mat2x2)
-        | (ModelValue::Mat3x3(_), ModelType::Mat3x3)
-        | (ModelValue::Mat4x4(_), ModelType::Mat4x4)
-        | (ModelValue::Resource(_), ModelType::Resource) => true,
-        (ModelValue::Array(values), ModelType::Array(item_ty, len)) => {
+        (LpValue::String(_), LpType::String)
+        | (LpValue::I32(_), LpType::I32)
+        | (LpValue::U32(_), LpType::U32)
+        | (LpValue::F32(_), LpType::F32)
+        | (LpValue::Bool(_), LpType::Bool)
+        | (LpValue::Vec2(_), LpType::Vec2)
+        | (LpValue::Vec3(_), LpType::Vec3)
+        | (LpValue::Vec4(_), LpType::Vec4)
+        | (LpValue::IVec2(_), LpType::IVec2)
+        | (LpValue::IVec3(_), LpType::IVec3)
+        | (LpValue::IVec4(_), LpType::IVec4)
+        | (LpValue::UVec2(_), LpType::UVec2)
+        | (LpValue::UVec3(_), LpType::UVec3)
+        | (LpValue::UVec4(_), LpType::UVec4)
+        | (LpValue::BVec2(_), LpType::BVec2)
+        | (LpValue::BVec3(_), LpType::BVec3)
+        | (LpValue::BVec4(_), LpType::BVec4)
+        | (LpValue::Mat2x2(_), LpType::Mat2x2)
+        | (LpValue::Mat3x3(_), LpType::Mat3x3)
+        | (LpValue::Mat4x4(_), LpType::Mat4x4)
+        | (LpValue::Resource(_), LpType::Resource) => true,
+        (LpValue::Array(values), LpType::Array(item_ty, len)) => {
             values.len() == *len
                 && values
                     .iter()
                     .all(|value| model_value_matches_type(value, item_ty))
         }
         (
-            ModelValue::Struct { name, fields },
-            ModelType::Struct {
+            LpValue::Struct { name, fields },
+            LpType::Struct {
                 name: ty_name,
                 fields: ty_fields,
             },
@@ -327,7 +327,7 @@ fn model_value_matches_type(value: &ModelValue, ty: &ModelType) -> bool {
     }
 }
 
-fn struct_fields_match(fields: &[(String, ModelValue)], ty_fields: &[ModelStructMember]) -> bool {
+fn struct_fields_match(fields: &[(String, LpValue)], ty_fields: &[ModelStructMember]) -> bool {
     fields.len() == ty_fields.len()
         && fields
             .iter()

@@ -1,43 +1,43 @@
-//! [`lpc_model::ModelType`] → [`lps_shared::LpsType`] for compiler/runtime boundaries.
+//! [`lpc_model::LpType`] → [`lps_shared::LpsType`] for compiler/runtime boundaries.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use lpc_model::ModelType;
+use lpc_model::LpType;
 use lps_shared::{LpsType, StructMember};
 
 /// Map foundation storage layout to shader ABI types.
 #[must_use]
-pub fn model_type_to_lps_type(ty: &ModelType) -> LpsType {
+pub fn model_type_to_lps_type(ty: &LpType) -> LpsType {
     match ty {
-        ModelType::I32 => LpsType::Int,
-        ModelType::U32 => LpsType::UInt,
-        ModelType::F32 => LpsType::Float,
-        ModelType::Bool => LpsType::Bool,
-        ModelType::Vec2 => LpsType::Vec2,
-        ModelType::Vec3 => LpsType::Vec3,
-        ModelType::Vec4 => LpsType::Vec4,
-        ModelType::IVec2 => LpsType::IVec2,
-        ModelType::IVec3 => LpsType::IVec3,
-        ModelType::IVec4 => LpsType::IVec4,
-        ModelType::UVec2 => LpsType::UVec2,
-        ModelType::UVec3 => LpsType::UVec3,
-        ModelType::UVec4 => LpsType::UVec4,
-        ModelType::BVec2 => LpsType::BVec2,
-        ModelType::BVec3 => LpsType::BVec3,
-        ModelType::BVec4 => LpsType::BVec4,
-        ModelType::Mat2x2 => LpsType::Mat2,
-        ModelType::Mat3x3 => LpsType::Mat3,
-        ModelType::Mat4x4 => LpsType::Mat4,
-        ModelType::String | ModelType::Resource => {
+        LpType::I32 => LpsType::Int,
+        LpType::U32 => LpsType::UInt,
+        LpType::F32 => LpsType::Float,
+        LpType::Bool => LpsType::Bool,
+        LpType::Vec2 => LpsType::Vec2,
+        LpType::Vec3 => LpsType::Vec3,
+        LpType::Vec4 => LpsType::Vec4,
+        LpType::IVec2 => LpsType::IVec2,
+        LpType::IVec3 => LpsType::IVec3,
+        LpType::IVec4 => LpsType::IVec4,
+        LpType::UVec2 => LpsType::UVec2,
+        LpType::UVec3 => LpsType::UVec3,
+        LpType::UVec4 => LpsType::UVec4,
+        LpType::BVec2 => LpsType::BVec2,
+        LpType::BVec3 => LpsType::BVec3,
+        LpType::BVec4 => LpsType::BVec4,
+        LpType::Mat2x2 => LpsType::Mat2,
+        LpType::Mat3x3 => LpsType::Mat3,
+        LpType::Mat4x4 => LpsType::Mat4,
+        LpType::String | LpType::Resource => {
             panic!("model type cannot be mapped to shader ABI type: {ty:?}")
         }
-        ModelType::Array(element, len) => LpsType::Array {
+        LpType::Array(element, len) => LpsType::Array {
             element: Box::new(model_type_to_lps_type(element)),
             len: u32::try_from(*len)
                 .expect("lpc-model array length must fit LpsType::Array len (u32)"),
         },
-        ModelType::Struct { name, fields } => LpsType::Struct {
+        LpType::Struct { name, fields } => LpsType::Struct {
             name: name.clone(),
             members: fields
                 .iter()
@@ -55,7 +55,7 @@ mod tests {
     use super::*;
     use alloc::string::String;
     use lpc_model::ModelStructMember;
-    use lpc_model::ModelType as Mt;
+    use lpc_model::LpType as Mt;
     use lpc_model::kind::Kind;
 
     #[test]

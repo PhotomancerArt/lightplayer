@@ -6,7 +6,7 @@
 //! the slot's **role** in its container (e.g. under `params` vs an output
 //! declaration), not from the [`SrcBinding`] enum (`quantity.md` §8 "Direction is
 //! contextual"). The first writer/reader to a channel establishes its
-//! [`Kind`](lpc_model::prop::kind::Kind); mismatches are compose-time errors (same
+//! [`Kind`](lpc_model::value::kind::Kind); mismatches are compose-time errors (same
 //! section).
 //!
 //! # On-disk shape
@@ -43,7 +43,7 @@ pub enum SrcBinding {
     NodeProp(NodePropSpec),
 }
 
-/// **Compose-time** lookup for "what [`Kind`](lpc_model::prop::kind::Kind) does this
+/// **Compose-time** lookup for "what [`Kind`](lpc_model::value::kind::Kind) does this
 /// channel carry?", used to validate that a slot's kind matches the bus. A
 /// real implementation lands in M3+; this is only a trait shape
 /// (`docs/roadmaps/2026-04-22-lp-domain/m2-domain-skeleton.md`).
@@ -51,7 +51,7 @@ pub trait BindingResolver {
     /// The kind currently associated with `channel`, if any. `None` means the
     /// channel will be **declared** by this binding (first use), per
     /// `docs/design/lightplayer/quantity.md` §8 "Compose-time validation".
-    fn channel_kind(&self, channel: &ChannelName) -> Option<lpc_model::prop::kind::Kind>;
+    fn channel_kind(&self, channel: &ChannelName) -> Option<lpc_model::value::kind::Kind>;
 }
 
 #[cfg(test)]
@@ -85,8 +85,8 @@ mod tests {
 
     #[test]
     fn literal_binding_serde_round_trips() {
-        use lpc_model::ModelValue;
-        let b = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(0.7)));
+        use lpc_model::LpValue;
+        let b = SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(0.7)));
         let json = serde_json::to_string(&b).unwrap();
         let back: SrcBinding = serde_json::from_str(&json).unwrap();
         assert_eq!(b, back);
@@ -94,8 +94,8 @@ mod tests {
 
     #[test]
     fn literal_binding_json_form_is_nested() {
-        use lpc_model::ModelValue;
-        let b = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(0.7)));
+        use lpc_model::LpValue;
+        let b = SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(0.7)));
         let json = serde_json::to_string(&b).unwrap();
         assert_eq!(
             json,
@@ -105,8 +105,8 @@ mod tests {
 
     #[test]
     fn literal_binding_toml_round_trips() {
-        use lpc_model::ModelValue;
-        let b = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(1.5)));
+        use lpc_model::LpValue;
+        let b = SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(1.5)));
         let toml_str = toml::to_string(&b).unwrap();
         let back: SrcBinding = toml::from_str(&toml_str).unwrap();
         assert_eq!(b, back);

@@ -5,7 +5,7 @@ use crate::presentation::Presentation;
 use crate::prop::src_binding::SrcBinding;
 use alloc::string::String;
 use lpc_model::bus::ChannelName;
-use lpc_model::prop::kind::Kind;
+use lpc_model::value::kind::Kind;
 
 /// **Presentation** when a [`super::src_shape::SrcSlot`] omits `present`.
 pub fn kind_default_presentation(k: Kind) -> Presentation {

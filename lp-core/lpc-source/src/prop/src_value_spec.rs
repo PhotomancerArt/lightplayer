@@ -3,7 +3,7 @@
 //!
 //! These specs are **authored** data and recipes, not engine-owned production
 //! envelopes (`Production` / `RuntimeProduct` in the `lpc-engine` crate).
-//! They materialize into portable [`ModelValue`] (and, downstream, into
+//! They materialize into portable [`LpValue`] (and, downstream, into
 //! shader-runtime [`lps_shared::LpsValueF32`] or into runtime product domains in
 //! the engine) **through** loader and engine resolution—there is no single
 //! universal “param equals one final runtime value” mapping for every domain.
@@ -27,7 +27,7 @@
 //! | `Amplitude`, `Ratio`, `Phase`, `Instant`, `Duration`, `Frequency`, `Angle` | any TOML number → `F32` runtime literal |
 //! | `Count`, `Choice` | integer → `I32` runtime literal |
 //! | `Bool` | bool |
-//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`ModelType`](lpc_model::ModelType) order: `space`, `coords`) |
+//! | `Color` | CSS string `"oklch(0.7 0.15 90)"` or table `{ space = "<str>", coords = [f,f,f] }` → struct `Color` ([`ModelType`](lpc_model::LpType) order: `space`, `coords`) |
 //! | `ColorPalette` | authoring table `{ space, count?, entries = [[f,f,f],…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Gradient` | authoring table `{ space, method, count?, stops = [{at,c},…] }`; lpfx may materialize this as a height-one texture resource before shader binding |
 //! | `Position2d` / `Position3d` | 2- or 3-long array of numbers → `Vec2` / `Vec3` |
@@ -41,7 +41,7 @@
 //! ## Serde and equality
 //!
 //! `ModelValue` in `lpc-model` does not derive `Serialize` / `PartialEq` in
-//! M2; this module uses [`ModelValue`] for serde and hand-written
+//! M2; this module uses [`LpValue`] for serde and hand-written
 //! [`SrcValueSpec`]:[`PartialEq`] (see
 //! `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` — “SrcValueSpec
 //! serde via wire enum” and hand-written `PartialEq` for `SrcValueSpec`).
@@ -63,7 +63,7 @@ use crate::prop::toml_parse::{
 
 pub use crate::prop::toml_parse::FromTomlError;
 
-use lpc_model::ModelValue;
+use lpc_model::LpValue;
 use lpc_model::kind::Kind;
 
 /// Load-time context for **materializing** author specs: allocating handles,
@@ -95,14 +95,14 @@ impl From<SrcValueSpecWire> for SrcValueSpec {
     }
 }
 
-/// Either a portable [`ModelValue`] for value-typed kinds, or a texture handle
+/// Either a portable [`LpValue`] for value-typed kinds, or a texture handle
 /// **recipe** for opaque kinds (`docs/design/lightplayer/quantity.md` §7)—not a
 /// sampled render product; those are engine runtime domains separate from source
 /// authoring.
 #[derive(Clone, Debug)]
 pub enum SrcValueSpec {
     /// Portable literal or texture recipe; see [`SrcValueSpec::default_model_value`].
-    Literal(ModelValue),
+    Literal(LpValue),
     /// [`SrcTextureSpec`] for [`Kind::Texture`] defaults
     /// (M2: v0 has [`SrcTextureSpec::Black`] only, `quantity.md` §7 sketch).
     Texture(SrcTextureSpec),
@@ -132,8 +132,8 @@ impl PartialEq for SrcValueSpec {
 
 impl SrcValueSpec {
     /// Default **wire** value for this spec: clone for [`SrcValueSpec::Literal`];
-    /// for [`SrcValueSpec::Texture`], allocate handle-shaped [`ModelValue`] through `ctx`.
-    pub fn default_model_value(&self, ctx: &mut LoadCtx) -> ModelValue {
+    /// for [`SrcValueSpec::Texture`], allocate handle-shaped [`LpValue`] through `ctx`.
+    pub fn default_model_value(&self, ctx: &mut LoadCtx) -> LpValue {
         match self {
             Self::Literal(v) => v.clone(),
             Self::Texture(spec) => spec.default_model_value(ctx),
@@ -193,9 +193,9 @@ impl SrcValueSpec {
                 | Kind::Instant
                 | Kind::Duration
                 | Kind::Frequency
-                | Kind::Angle => ModelValue::F32(toml_f32(value)?),
-                Kind::Count | Kind::Choice => ModelValue::I32(toml_i32(value)?),
-                Kind::Bool => ModelValue::Bool(value.as_bool().ok_or_else(|| {
+                | Kind::Angle => LpValue::F32(toml_f32(value)?),
+                Kind::Count | Kind::Choice => LpValue::I32(toml_i32(value)?),
+                Kind::Bool => LpValue::Bool(value.as_bool().ok_or_else(|| {
                     FromTomlError::msg("bool kind expects a TOML boolean `default`")
                 })?),
                 Kind::Texture
@@ -242,13 +242,13 @@ impl SrcValueSpec {
                         }
                     }
                 }
-                Ok(SrcValueSpec::Literal(ModelValue::Array(out)))
+                Ok(SrcValueSpec::Literal(LpValue::Array(out)))
             }
             SrcShape::Struct { fields, default: _ } => {
                 let t = value
                     .as_table()
                     .ok_or_else(|| FromTomlError::msg("struct default must be a TOML table"))?;
-                let mut out_fields: Vec<(String, ModelValue)> = Vec::with_capacity(fields.len());
+                let mut out_fields: Vec<(String, LpValue)> = Vec::with_capacity(fields.len());
                 for (name, slot) in fields {
                     let v = t.get(name.0.as_str()).ok_or_else(|| {
                         FromTomlError(format!("struct default table missing field `{}`", name.0))
@@ -262,7 +262,7 @@ impl SrcValueSpec {
                         }
                     }
                 }
-                Ok(SrcValueSpec::Literal(ModelValue::Struct {
+                Ok(SrcValueSpec::Literal(LpValue::Struct {
                     name: None,
                     fields: out_fields,
                 }))
@@ -292,19 +292,19 @@ impl SrcValueSpec {
             (SrcValueSpec::Literal(v), Kind::Position2d) => vec2_to_toml_value(v),
             (SrcValueSpec::Literal(v), Kind::Position3d) => vec3_to_toml_value(v),
             (SrcValueSpec::Literal(v), _) if k == Kind::Bool => match v {
-                ModelValue::Bool(b) => Ok(toml::Value::Boolean(*b)),
+                LpValue::Bool(b) => Ok(toml::Value::Boolean(*b)),
                 _ => Err(FromTomlError::msg(
                     "bool literal expected in SrcValueSpec::Literal",
                 )),
             },
             (SrcValueSpec::Literal(v), _) if k == Kind::Count || k == Kind::Choice => match v {
-                ModelValue::I32(i) => Ok(toml::Value::Integer(i64::from(*i))),
+                LpValue::I32(i) => Ok(toml::Value::Integer(i64::from(*i))),
                 _ => Err(FromTomlError::msg(
                     "i32 literal expected in SrcValueSpec::Literal",
                 )),
             },
             (SrcValueSpec::Literal(v), _) => match v {
-                ModelValue::F32(f) => Ok(toml::Value::Float(f64::from(*f))),
+                LpValue::F32(f) => Ok(toml::Value::Float(f64::from(*f))),
                 _ => Err(FromTomlError::msg("f32 scalar literal expected")),
             },
         }
@@ -336,7 +336,7 @@ impl SrcValueSpec {
                 },
             ) => {
                 let a = match v {
-                    ModelValue::Array(x) => x,
+                    LpValue::Array(x) => x,
                     _ => {
                         return Err(FromTomlError::msg("array spec must be ModelValue::Array"));
                     }
@@ -361,7 +361,7 @@ impl SrcValueSpec {
             }
             (SrcValueSpec::Literal(v), SrcShape::Struct { fields, .. }) => {
                 let tval = match v {
-                    ModelValue::Struct { fields, .. } => fields,
+                    LpValue::Struct { fields, .. } => fields,
                     _ => {
                         return Err(FromTomlError::msg("struct spec must be ModelValue::Struct"));
                     }
@@ -391,14 +391,14 @@ mod tests {
     use crate::prop::src_shape::{SrcShape, SrcSlot};
     use alloc::boxed::Box;
     use lpc_model::NodeName;
-    use lpc_model::prop::kind::Kind;
+    use lpc_model::value::kind::Kind;
 
     #[test]
     fn literal_materializes_to_itself() {
         let mut ctx = LoadCtx::default();
-        let spec = SrcValueSpec::Literal(ModelValue::F32(0.5));
+        let spec = SrcValueSpec::Literal(LpValue::F32(0.5));
         match spec.default_model_value(&mut ctx) {
-            ModelValue::F32(v) => assert_eq!(v, 0.5),
+            LpValue::F32(v) => assert_eq!(v, 0.5),
             other => panic!("expected F32(0.5), got {other:?}"),
         }
     }
@@ -409,13 +409,13 @@ mod tests {
         let spec = SrcValueSpec::Texture(SrcTextureSpec::Black);
         let v = spec.default_model_value(&mut ctx);
         match v {
-            ModelValue::Struct { fields, .. } => {
+            LpValue::Struct { fields, .. } => {
                 let handle = fields
                     .iter()
                     .find(|(n, _)| n == "handle")
                     .expect("handle field");
                 match &handle.1 {
-                    ModelValue::I32(h) => assert_eq!(*h, 0),
+                    LpValue::I32(h) => assert_eq!(*h, 0),
                     _ => panic!("handle must be I32"),
                 }
             }
@@ -498,7 +498,7 @@ mod tests {
         for (_label, tval, sp, a, b0, c0) in cases {
             let s = SrcValueSpec::from_toml_for_kind(&tval, Kind::Color).unwrap();
             let got = s.default_model_value(&mut LoadCtx::default());
-            let ModelValue::Struct { fields, .. } = got else {
+            let LpValue::Struct { fields, .. } = got else {
                 panic!("struct color");
             };
             let space = fields
@@ -509,10 +509,10 @@ mod tests {
                 .iter()
                 .find_map(|(n, v)| (n == "coords").then(|| v))
                 .expect("coords");
-            let ModelValue::I32(sid) = space else {
+            let LpValue::I32(sid) = space else {
                 panic!("space");
             };
-            let ModelValue::Vec3([x, y, z]) = coords else {
+            let LpValue::Vec3([x, y, z]) = coords else {
                 panic!("coords");
             };
             assert_eq!(*sid, sp);
@@ -559,8 +559,8 @@ mod tests {
     fn amp_slot() -> SrcShape {
         SrcShape::Scalar {
             kind: Kind::Amplitude,
-            constraint: lpc_model::prop::kind::Kind::Amplitude.default_constraint(),
-            default: SrcValueSpec::Literal(ModelValue::F32(0.0)),
+            constraint: lpc_model::value::kind::Kind::Amplitude.default_constraint(),
+            default: SrcValueSpec::Literal(LpValue::F32(0.0)),
         }
     }
 
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn literal_f32_serde_tag_matches_internal_wire_form() {
-        let spec = SrcValueSpec::Literal(ModelValue::F32(0.25));
+        let spec = SrcValueSpec::Literal(LpValue::F32(0.25));
         let json = serde_json::to_string(&spec).unwrap();
         assert_eq!(json, r#"{"kind":"literal","value":{"f32":0.25}}"#);
     }

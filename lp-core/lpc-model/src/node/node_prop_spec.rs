@@ -5,7 +5,7 @@
 //! endpoints and [`crate::ValueRef`] only for explicit projection inside an
 //! atomic slot value.
 
-use crate::prop::value_path::{PathParseError, Segment, ValuePath, parse_path};
+use crate::value::value_path::{PathParseError, Segment, ValuePath, parse_path};
 use crate::tree::tree_path::{PathError, TreePath};
 use core::fmt;
 

@@ -1,5 +1,5 @@
 use lpc_model::{
-    FrameId, ModelType, ModelValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
+    FrameId, LpType, LpValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
     StaticSlotShape, set_current_state_version,
 };
 use lpc_wire::{
@@ -163,11 +163,11 @@ impl MockRuntime {
         }
 
         match (&info.target, value) {
-            (MutationTarget::ShaderExposureParam, ModelValue::F32(value)) => {
+            (MutationTarget::ShaderExposureParam, LpValue::F32(value)) => {
                 self.shader_node.set_param("exposure", *value);
                 WireSlotMutationResult::Accepted
             }
-            (MutationTarget::ShaderExposureLabel, ModelValue::String(value)) => {
+            (MutationTarget::ShaderExposureLabel, LpValue::String(value)) => {
                 self.shader_def.set_param_label("exposure", value);
                 WireSlotMutationResult::Accepted
             }
@@ -226,7 +226,7 @@ impl MockRuntime {
                     .shader_def
                     .param_label_changed_frame("exposure")
                     .ok_or(WireSlotMutationRejection::UnknownPath)?,
-                ty: ModelType::String,
+                ty: LpType::String,
             }),
             "param_defs[exposure].default" => Ok(MutationTargetInfo {
                 target: MutationTarget::Unsupported,
@@ -235,7 +235,7 @@ impl MockRuntime {
                     .shader_def
                     .param_default_changed_frame("exposure")
                     .ok_or(WireSlotMutationRejection::UnknownPath)?,
-                ty: ModelType::F32,
+                ty: LpType::F32,
             }),
             _ => Err(WireSlotMutationRejection::UnknownPath),
         }
@@ -262,7 +262,7 @@ struct MutationTargetInfo {
     target: MutationTarget,
     shape_version: FrameId,
     data_version: FrameId,
-    ty: ModelType,
+    ty: LpType,
 }
 
 enum MutationTarget {
@@ -271,29 +271,29 @@ enum MutationTarget {
     Unsupported,
 }
 
-fn model_value_matches_type(value: &ModelValue, ty: &ModelType) -> bool {
+fn model_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
     matches!(
         (value, ty),
-        (ModelValue::String(_), ModelType::String)
-            | (ModelValue::I32(_), ModelType::I32)
-            | (ModelValue::U32(_), ModelType::U32)
-            | (ModelValue::F32(_), ModelType::F32)
-            | (ModelValue::Bool(_), ModelType::Bool)
-            | (ModelValue::Vec2(_), ModelType::Vec2)
-            | (ModelValue::Vec3(_), ModelType::Vec3)
-            | (ModelValue::Vec4(_), ModelType::Vec4)
-            | (ModelValue::IVec2(_), ModelType::IVec2)
-            | (ModelValue::IVec3(_), ModelType::IVec3)
-            | (ModelValue::IVec4(_), ModelType::IVec4)
-            | (ModelValue::UVec2(_), ModelType::UVec2)
-            | (ModelValue::UVec3(_), ModelType::UVec3)
-            | (ModelValue::UVec4(_), ModelType::UVec4)
-            | (ModelValue::BVec2(_), ModelType::BVec2)
-            | (ModelValue::BVec3(_), ModelType::BVec3)
-            | (ModelValue::BVec4(_), ModelType::BVec4)
-            | (ModelValue::Mat2x2(_), ModelType::Mat2x2)
-            | (ModelValue::Mat3x3(_), ModelType::Mat3x3)
-            | (ModelValue::Mat4x4(_), ModelType::Mat4x4)
-            | (ModelValue::Resource(_), ModelType::Resource)
+        (LpValue::String(_), LpType::String)
+            | (LpValue::I32(_), LpType::I32)
+            | (LpValue::U32(_), LpType::U32)
+            | (LpValue::F32(_), LpType::F32)
+            | (LpValue::Bool(_), LpType::Bool)
+            | (LpValue::Vec2(_), LpType::Vec2)
+            | (LpValue::Vec3(_), LpType::Vec3)
+            | (LpValue::Vec4(_), LpType::Vec4)
+            | (LpValue::IVec2(_), LpType::IVec2)
+            | (LpValue::IVec3(_), LpType::IVec3)
+            | (LpValue::IVec4(_), LpType::IVec4)
+            | (LpValue::UVec2(_), LpType::UVec2)
+            | (LpValue::UVec3(_), LpType::UVec3)
+            | (LpValue::UVec4(_), LpType::UVec4)
+            | (LpValue::BVec2(_), LpType::BVec2)
+            | (LpValue::BVec3(_), LpType::BVec3)
+            | (LpValue::BVec4(_), LpType::BVec4)
+            | (LpValue::Mat2x2(_), LpType::Mat2x2)
+            | (LpValue::Mat3x3(_), LpType::Mat3x3)
+            | (LpValue::Mat4x4(_), LpType::Mat4x4)
+            | (LpValue::Resource(_), LpType::Resource)
     )
 }

@@ -4,8 +4,8 @@
 /// shape metadata instead of adding new uses here.
 pub mod constraint;
 pub mod legacy_kind;
-pub mod model_type;
-pub mod model_value;
+pub mod lp_type;
+pub mod lp_value;
 pub mod value_path;
 
 /// Compatibility path for the legacy quantity model.
@@ -17,6 +17,6 @@ pub mod kind {
 }
 
 pub use crate::versioned::Versioned;
-pub use model_type::{ModelStructMember, ModelType};
-pub use model_value::ModelValue;
+pub use lp_type::{ModelStructMember, LpType};
+pub use lp_value::LpValue;
 pub use value_path::{PathParseError, Segment, ValuePath, parse_path};

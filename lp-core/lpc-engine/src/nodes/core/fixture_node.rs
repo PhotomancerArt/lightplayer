@@ -512,7 +512,7 @@ mod tests {
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use lpc_model::{Kind, ModelValue, TreePath, Versioned};
+    use lpc_model::{Kind, LpValue, TreePath, Versioned};
     use lpc_source::SrcValueSpec;
     use lpc_source::node::fixture::{PathSpec, RingOrder};
     use lpc_source::node::texture::TextureDef;
@@ -865,7 +865,7 @@ mod tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),

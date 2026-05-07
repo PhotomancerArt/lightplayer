@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, ModelType, ModelValue, OrderedF32, SlotDataAccess, SlotEditorHint,
+    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotEditorHint,
     SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
     current_state_version,
 };
@@ -40,8 +40,8 @@ impl SlotValueAccess for RenderOrderSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::I32(*self.inner.value())
+    fn value(&self) -> LpValue {
+        LpValue::I32(*self.inner.value())
     }
 }
 
@@ -76,7 +76,7 @@ impl FieldSlot for RenderOrderSlot {
 pub fn render_order_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.render_order"),
-        ty: ModelType::I32,
+        ty: LpType::I32,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Number {
             min: None,

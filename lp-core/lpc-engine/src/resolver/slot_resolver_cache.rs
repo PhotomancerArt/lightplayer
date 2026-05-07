@@ -57,7 +57,7 @@ mod tests {
     use alloc::vec::Vec;
     use lpc_model::FrameId;
     use lpc_model::ValuePath;
-    use lpc_model::prop::value_path::Segment;
+    use lpc_model::value::value_path::Segment;
     use lps_shared::LpsValueF32;
 
     fn make_slot(value: f32, frame: i64) -> ResolvedSlot {
@@ -69,7 +69,7 @@ mod tests {
     }
 
     fn make_path(s: &str) -> ValuePath {
-        lpc_model::prop::value_path::parse_path(s).unwrap()
+        lpc_model::value::value_path::parse_path(s).unwrap()
     }
 
     fn first_seg_is_field(path: &ValuePath, expected: &str) -> bool {

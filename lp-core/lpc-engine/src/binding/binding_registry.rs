@@ -196,7 +196,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(1.0),
+                        lpc_model::LpValue::F32(1.0),
                     )),
                     target: BindingTarget::BusChannel(ch("out/a")),
                     priority: BindingPriority::new(0),
@@ -234,7 +234,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(0.0),
+                        lpc_model::LpValue::F32(0.0),
                     )),
                     target: BindingTarget::BusChannel(ch("bus/z")),
                     priority: BindingPriority::new(10),
@@ -282,7 +282,7 @@ mod tests {
         let c = ch("shared");
         reg.register(
             BindingDraft {
-                source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::ModelValue::F32(
+                source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
                     1.0,
                 ))),
                 target: BindingTarget::BusChannel(c.clone()),
@@ -318,7 +318,7 @@ mod tests {
         let c = ch("x");
         reg.register(
             BindingDraft {
-                source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::ModelValue::F32(
+                source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
                     1.0,
                 ))),
                 target: BindingTarget::BusChannel(c.clone()),
@@ -333,7 +333,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(2.0),
+                        lpc_model::LpValue::F32(2.0),
                     )),
                     target: BindingTarget::BusChannel(c.clone()),
                     priority: BindingPriority::new(7),
@@ -357,7 +357,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::Bool(true),
+                        lpc_model::LpValue::Bool(true),
                     )),
                     target: BindingTarget::BusChannel(ch("b")),
                     priority: BindingPriority::new(0),
@@ -373,7 +373,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::Bool(false),
+                        lpc_model::LpValue::Bool(false),
                     )),
                     target: BindingTarget::BusChannel(ch("b2")),
                     priority: BindingPriority::new(0),

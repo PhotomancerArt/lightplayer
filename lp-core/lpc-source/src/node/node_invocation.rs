@@ -8,7 +8,7 @@ use crate::artifact::artifact_loc::ArtifactLocator;
 use crate::prop::src_binding::SrcBinding;
 use alloc::string::ToString;
 use alloc::vec::Vec;
-use lpc_model::{ArtifactPathSlot, prop::value_path::ValuePath};
+use lpc_model::{ArtifactPathSlot, value::value_path::ValuePath};
 
 /// Parent-owned child node invocation.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_model::SlotRecord)]
@@ -42,9 +42,9 @@ mod tests {
     use super::*;
     use crate::prop::src_value_spec::SrcValueSpec;
     use alloc::string::String;
-    use lpc_model::ModelValue;
+    use lpc_model::LpValue;
     use lpc_model::bus::ChannelName;
-    use lpc_model::prop::value_path::parse_path;
+    use lpc_model::value::value_path::parse_path;
 
     #[test]
     fn node_invocation_round_trips_empty_overrides() {
@@ -69,7 +69,7 @@ mod tests {
     fn node_invocation_round_trips_with_literal_override() {
         let mut config = NodeInvocation::new(ArtifactLocator::path("./shader.lp"));
         let path = parse_path("params.scale").unwrap();
-        let binding = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(6.0)));
+        let binding = SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(6.0)));
         config.overrides.push((path, binding));
 
         let json = serde_json::to_string(&config).unwrap();
@@ -93,7 +93,7 @@ mod tests {
     fn node_invocation_toml_round_trips() {
         let mut config = NodeInvocation::new(ArtifactLocator::path("./pattern.lp"));
         let path = parse_path("params.speed").unwrap();
-        let binding = SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(1.5)));
+        let binding = SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(1.5)));
         config.overrides.push((path, binding));
 
         let toml_str = toml::to_string(&config).unwrap();

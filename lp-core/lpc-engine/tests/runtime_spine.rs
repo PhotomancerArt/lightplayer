@@ -17,8 +17,8 @@ use lpc_engine::{
     SessionHostResolver, SessionResolveError, SlotResolverCache, TickContext, TickResolver,
 };
 use lpc_model::{
-    FrameId, Kind, ModelValue, NodeId, NodePropSpec, SlotPath, ValuePath, bus::ChannelName,
-    prop::value_path::parse_path, tree::tree_path::TreePath,
+    FrameId, Kind, LpValue, NodeId, NodePropSpec, SlotPath, ValuePath, bus::ChannelName,
+    value::value_path::parse_path, tree::tree_path::TreePath,
 };
 use lpc_source::node::node_invocation::NodeInvocation;
 use lpc_source::{
@@ -62,7 +62,7 @@ fn runtime_spine_literal_override_and_artifact_default_resolution() {
     let prop_lit = parse_path("params.gain").unwrap();
     config.overrides.push((
         prop_lit.clone(),
-        SrcBinding::Literal(SrcValueSpec::Literal(ModelValue::F32(6.25))),
+        SrcBinding::Literal(SrcValueSpec::Literal(LpValue::F32(6.25))),
     ));
 
     let ctx = SyntheticResolverContext::new(FrameId::new(7))
@@ -160,7 +160,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     registry
         .register(
             BindingDraft {
-                source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(2.0))),
+                source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(2.0))),
                 target: BindingTarget::BusChannel(channel.clone()),
                 priority: BindingPriority::new(0),
                 kind: Kind::Ratio,

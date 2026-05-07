@@ -322,7 +322,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(1.0),
+                        lpc_model::LpValue::F32(1.0),
                     )),
                     target: BindingTarget::BusChannel(c.clone()),
                     priority: BindingPriority::new(1),
@@ -336,7 +336,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(9.0),
+                        lpc_model::LpValue::F32(9.0),
                     )),
                     target: BindingTarget::BusChannel(c.clone()),
                     priority: BindingPriority::new(10),
@@ -365,7 +365,7 @@ mod tests {
     fn equal_priority_bus_providers_return_ambiguous_error() {
         let e1 = BindingEntry {
             id: BindingId::new(1),
-            source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::ModelValue::F32(1.0))),
+            source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(1.0))),
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
             kind: Kind::Amplitude,
@@ -374,7 +374,7 @@ mod tests {
         };
         let e2 = BindingEntry {
             id: BindingId::new(2),
-            source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::ModelValue::F32(2.0))),
+            source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(2.0))),
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
             kind: Kind::Amplitude,
@@ -412,7 +412,7 @@ mod tests {
             .register(
                 BindingDraft {
                     source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::ModelValue::F32(3.25),
+                        lpc_model::LpValue::F32(3.25),
                     )),
                     target: BindingTarget::BusChannel(inner.clone()),
                     priority: BindingPriority::new(0),

@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, ModelType, ModelValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
+    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
     SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -39,8 +39,8 @@ impl SlotValueAccess for XySlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::Vec2(*self.inner.value())
+    fn value(&self) -> LpValue {
+        LpValue::Vec2(*self.inner.value())
     }
 }
 
@@ -75,7 +75,7 @@ impl FieldSlot for XySlot {
 pub fn xy_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.xy"),
-        ty: ModelType::Vec2,
+        ty: LpType::Vec2,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Xy,
     }

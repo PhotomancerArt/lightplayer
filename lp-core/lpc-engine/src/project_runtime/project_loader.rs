@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
-use lpc_model::{FrameId, Kind, ModelValue, NodeId, NodeName, SlotPath};
+use lpc_model::{FrameId, Kind, LpValue, NodeId, NodeName, SlotPath};
 use lpc_source::ArtifactReadRoot;
 use lpc_source::node::node_def::NodeDef;
 use lpc_source::node::{
@@ -329,7 +329,7 @@ impl CoreProjectLoader {
                     .bindings_mut()
                     .register(
                         BindingDraft {
-                            source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(
+                            source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(
                                 0.0,
                             ))),
                             target: BindingTarget::ConsumedSlot {

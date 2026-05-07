@@ -295,7 +295,7 @@ mod output_sink_flush_tests {
     use crate::runtime_product::RuntimeProduct as RpEnum;
     use crate::tree::test_placeholder_spine;
     use lpc_model::SlotPath;
-    use lpc_model::{FrameId, Kind, ModelValue, TreePath, Versioned};
+    use lpc_model::{FrameId, Kind, LpValue, TreePath, Versioned};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
@@ -543,7 +543,7 @@ mod output_sink_flush_tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),
@@ -714,7 +714,7 @@ mod output_sink_flush_tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),
@@ -876,7 +876,7 @@ mod output_sink_flush_tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(ModelValue::F32(0.0))),
+                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),

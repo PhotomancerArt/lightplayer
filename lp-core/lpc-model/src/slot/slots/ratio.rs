@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, ModelType, ModelValue, OrderedF32, SlotDataAccess, SlotEditorHint,
+    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotEditorHint,
     SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned,
     current_state_version,
 };
@@ -40,8 +40,8 @@ impl SlotValueAccess for RatioSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::F32(*self.inner.value())
+    fn value(&self) -> LpValue {
+        LpValue::F32(*self.inner.value())
     }
 }
 
@@ -76,7 +76,7 @@ impl FieldSlot for RatioSlot {
 pub fn ratio_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.ratio"),
-        ty: ModelType::F32,
+        ty: LpType::F32,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Slider {
             min: OrderedF32(0.0),

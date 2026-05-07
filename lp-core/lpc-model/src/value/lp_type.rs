@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum ModelType {
+pub enum LpType {
     String,
     I32,
     U32,
@@ -31,7 +31,7 @@ pub enum ModelType {
     Mat2x2,
     Mat3x3,
     Mat4x4,
-    Array(Box<ModelType>, usize),
+    Array(Box<LpType>, usize),
     Struct {
         name: Option<String>,
         fields: Vec<ModelStructMember>,
@@ -39,23 +39,23 @@ pub enum ModelType {
     Resource,
 }
 
-/// One field in a [`ModelType::Struct`].
+/// One field in a [`LpType::Struct`].
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ModelStructMember {
     pub name: String,
-    pub ty: ModelType,
+    pub ty: LpType,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ModelType;
+    use super::LpType;
 
     #[test]
     fn model_type_resource_round_trips() {
-        let ty = ModelType::Resource;
+        let ty = LpType::Resource;
         let json = serde_json::to_string(&ty).unwrap();
-        let back: ModelType = serde_json::from_str(&json).unwrap();
+        let back: LpType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ty);
     }
 }

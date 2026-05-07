@@ -187,7 +187,7 @@ impl core::error::Error for SlotShapeRegistryError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotVariantShape};
+    use crate::{LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotVariantShape};
     use alloc::boxed::Box;
     use alloc::vec;
 
@@ -197,7 +197,7 @@ mod tests {
         let id = SlotShapeId::from_static_name("test.shape");
 
         let inserted = registry
-            .ensure_tree(id, SlotShape::value(ModelType::Bool))
+            .ensure_tree(id, SlotShape::value(LpType::Bool))
             .unwrap();
 
         assert!(inserted);
@@ -208,7 +208,7 @@ mod tests {
     fn ensure_tree_is_idempotent_for_same_shape() {
         let mut registry = SlotShapeRegistry::default();
         let id = SlotShapeId::from_static_name("test.shape");
-        let shape = SlotShape::value(ModelType::Bool);
+        let shape = SlotShape::value(LpType::Bool);
 
         assert!(registry.ensure_tree(id, shape.clone()).unwrap());
         assert!(!registry.ensure_tree(id, shape).unwrap());
@@ -220,10 +220,10 @@ mod tests {
         let id = SlotShapeId::from_static_name("test.shape");
 
         registry
-            .ensure_tree(id, SlotShape::value(ModelType::Bool))
+            .ensure_tree(id, SlotShape::value(LpType::Bool))
             .unwrap();
         let err = registry
-            .ensure_tree(id, SlotShape::value(ModelType::F32))
+            .ensure_tree(id, SlotShape::value(LpType::F32))
             .unwrap_err();
 
         assert_eq!(err, SlotShapeRegistryError::ShapeIdConflict(id));

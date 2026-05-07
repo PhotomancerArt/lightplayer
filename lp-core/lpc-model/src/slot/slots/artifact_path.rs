@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, ModelValue, SlotDataAccess, SlotShape, SlotValueAccess, Versioned,
+    FieldSlot, FrameId, LpValue, SlotDataAccess, SlotShape, SlotValueAccess, Versioned,
     current_state_version,
 };
 use alloc::string::String;
@@ -42,8 +42,8 @@ impl SlotValueAccess for ArtifactPathSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::String(self.inner.value().clone())
+    fn value(&self) -> LpValue {
+        LpValue::String(self.inner.value().clone())
     }
 }
 

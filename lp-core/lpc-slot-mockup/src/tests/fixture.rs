@@ -158,7 +158,7 @@ pub fn describe_data(data: &SlotData) -> String {
     }
 }
 
-pub fn assert_shader_param(data: &SlotData, name: &str, expected: lpc_model::ModelValue) {
+pub fn assert_shader_param(data: &SlotData, name: &str, expected: lpc_model::LpValue) {
     let SlotData::Record(shader_node) = data else {
         panic!("shader node record");
     };
@@ -199,7 +199,7 @@ pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str)
     };
     assert_eq!(
         value_type.value(),
-        &lpc_model::ModelValue::String(expected.to_string())
+        &lpc_model::LpValue::String(expected.to_string())
     );
 }
 
@@ -213,7 +213,7 @@ pub fn assert_shader_param_def_label(data: &SlotData, name: &str, expected: &str
     };
     assert_eq!(
         label.value(),
-        &lpc_model::ModelValue::String(expected.to_string())
+        &lpc_model::LpValue::String(expected.to_string())
     );
 }
 

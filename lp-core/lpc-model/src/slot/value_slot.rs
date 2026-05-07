@@ -1,4 +1,4 @@
-use crate::{FrameId, ModelValue, SlotMapKeyShape, SlotShape, Versioned, current_state_version};
+use crate::{FrameId, LpValue, SlotMapKeyShape, SlotShape, Versioned, current_state_version};
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -12,7 +12,7 @@ use serde::{
 
 use super::{
     FieldSlot, MapSlotAccess, SlotDataAccess, SlotLeaf, SlotMapKey, SlotOptionAccess,
-    SlotValueAccess, ToModelValue,
+    SlotValueAccess, ToLpValue,
 };
 
 /// A typed versioned slot leaf for Rust-authored structs.
@@ -94,13 +94,13 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for ValueSlot<T> {
     }
 }
 
-impl<T: ToModelValue> SlotValueAccess for ValueSlot<T> {
+impl<T: ToLpValue> SlotValueAccess for ValueSlot<T> {
     fn changed_frame(&self) -> FrameId {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        self.inner.value().to_model_value()
+    fn value(&self) -> LpValue {
+        self.inner.value().to_lp_value()
     }
 }
 
@@ -519,7 +519,7 @@ mod tests {
         assert_eq!(value.changed_frame(), FrameId::new(7));
         assert_eq!(
             SlotValueAccess::value(&value),
-            ModelValue::String(String::from("shader.glsl"))
+            LpValue::String(String::from("shader.glsl"))
         );
     }
 

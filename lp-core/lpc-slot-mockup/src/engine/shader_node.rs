@@ -1,6 +1,6 @@
 use crate::source::ShaderDef;
 use lpc_model::{
-    FrameId, ModelStructMember, ModelType, ModelValue, SlotAccess, SlotData, SlotDataAccess,
+    FrameId, ModelStructMember, LpType, LpValue, SlotAccess, SlotData, SlotDataAccess,
     SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
     current_state_version,
     slot::shape::{field, option, record, value},
@@ -47,7 +47,7 @@ impl ShaderNode {
                 current_state_version(),
                 SlotData::Value(Versioned::new(
                     current_state_version(),
-                    ModelValue::String(String::from("initial compile warning")),
+                    LpValue::String(String::from("initial compile warning")),
                 )),
             ),
         }
@@ -65,19 +65,19 @@ impl ShaderNode {
                         .collect(),
                 ),
             ),
-            field("compile_error", option(value(ModelType::String))),
+            field("compile_error", option(value(LpType::String))),
         ])
     }
 
     pub fn set_param(&mut self, name: &str, value: f32) {
-        self.set_param_value(name, ModelValue::F32(value));
+        self.set_param_value(name, LpValue::F32(value));
     }
 
     pub fn set_param_vec3(&mut self, name: &str, value: [f32; 3]) {
-        self.set_param_value(name, ModelValue::Vec3(value));
+        self.set_param_value(name, LpValue::Vec3(value));
     }
 
-    fn set_param_value(&mut self, name: &str, value: ModelValue) {
+    fn set_param_value(&mut self, name: &str, value: LpValue) {
         let index = self.param_index(name);
         let Some(SlotData::Value(param)) = self.params.fields.get_mut(index) else {
             panic!("shader param exists");
@@ -103,7 +103,7 @@ impl ShaderNode {
         Some(value.changed_frame())
     }
 
-    pub fn param_model_type(&self, name: &str) -> Option<ModelType> {
+    pub fn param_model_type(&self, name: &str) -> Option<LpType> {
         let index = self
             .param_names
             .iter()
@@ -143,42 +143,42 @@ impl SlotRecordAccess for ShaderNode {
     }
 }
 
-fn model_type_for_data(data: &SlotData) -> ModelType {
+fn model_type_for_data(data: &SlotData) -> LpType {
     let SlotData::Value(value) = data else {
         panic!("shader param value must be a value slot");
     };
     model_type_for_value(value.value())
 }
 
-fn model_type_for_value(value: &ModelValue) -> ModelType {
+fn model_type_for_value(value: &LpValue) -> LpType {
     match value {
-        ModelValue::String(_) => ModelType::String,
-        ModelValue::I32(_) => ModelType::I32,
-        ModelValue::U32(_) => ModelType::U32,
-        ModelValue::F32(_) => ModelType::F32,
-        ModelValue::Bool(_) => ModelType::Bool,
-        ModelValue::Vec2(_) => ModelType::Vec2,
-        ModelValue::Vec3(_) => ModelType::Vec3,
-        ModelValue::Vec4(_) => ModelType::Vec4,
-        ModelValue::IVec2(_) => ModelType::IVec2,
-        ModelValue::IVec3(_) => ModelType::IVec3,
-        ModelValue::IVec4(_) => ModelType::IVec4,
-        ModelValue::UVec2(_) => ModelType::UVec2,
-        ModelValue::UVec3(_) => ModelType::UVec3,
-        ModelValue::UVec4(_) => ModelType::UVec4,
-        ModelValue::BVec2(_) => ModelType::BVec2,
-        ModelValue::BVec3(_) => ModelType::BVec3,
-        ModelValue::BVec4(_) => ModelType::BVec4,
-        ModelValue::Mat2x2(_) => ModelType::Mat2x2,
-        ModelValue::Mat3x3(_) => ModelType::Mat3x3,
-        ModelValue::Mat4x4(_) => ModelType::Mat4x4,
-        ModelValue::Array(values) => {
+        LpValue::String(_) => LpType::String,
+        LpValue::I32(_) => LpType::I32,
+        LpValue::U32(_) => LpType::U32,
+        LpValue::F32(_) => LpType::F32,
+        LpValue::Bool(_) => LpType::Bool,
+        LpValue::Vec2(_) => LpType::Vec2,
+        LpValue::Vec3(_) => LpType::Vec3,
+        LpValue::Vec4(_) => LpType::Vec4,
+        LpValue::IVec2(_) => LpType::IVec2,
+        LpValue::IVec3(_) => LpType::IVec3,
+        LpValue::IVec4(_) => LpType::IVec4,
+        LpValue::UVec2(_) => LpType::UVec2,
+        LpValue::UVec3(_) => LpType::UVec3,
+        LpValue::UVec4(_) => LpType::UVec4,
+        LpValue::BVec2(_) => LpType::BVec2,
+        LpValue::BVec3(_) => LpType::BVec3,
+        LpValue::BVec4(_) => LpType::BVec4,
+        LpValue::Mat2x2(_) => LpType::Mat2x2,
+        LpValue::Mat3x3(_) => LpType::Mat3x3,
+        LpValue::Mat4x4(_) => LpType::Mat4x4,
+        LpValue::Array(values) => {
             let Some(first) = values.first() else {
                 panic!("empty shader param arrays need an explicit type");
             };
-            ModelType::Array(Box::new(model_type_for_value(first)), values.len())
+            LpType::Array(Box::new(model_type_for_value(first)), values.len())
         }
-        ModelValue::Struct { name, fields } => ModelType::Struct {
+        LpValue::Struct { name, fields } => LpType::Struct {
             name: name.clone(),
             fields: fields
                 .iter()
@@ -188,6 +188,6 @@ fn model_type_for_value(value: &ModelValue) -> ModelType {
                 })
                 .collect(),
         },
-        ModelValue::Resource(_) => ModelType::Resource,
+        LpValue::Resource(_) => LpType::Resource,
     }
 }

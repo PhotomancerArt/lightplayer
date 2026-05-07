@@ -1,5 +1,5 @@
 use crate::{
-    FrameId, ModelValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
+    FrameId, LpValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
     Versioned,
 };
 use alloc::vec::Vec;
@@ -70,7 +70,7 @@ pub enum SlotDataAccess<'a> {
 /// Borrowed access to an atomic slot value.
 pub trait SlotValueAccess {
     fn changed_frame(&self) -> FrameId;
-    fn value(&self) -> ModelValue;
+    fn value(&self) -> LpValue;
 }
 
 /// Borrowed access to a record slot.
@@ -115,12 +115,12 @@ impl SlotData {
     }
 }
 
-impl SlotValueAccess for Versioned<ModelValue> {
+impl SlotValueAccess for Versioned<LpValue> {
     fn changed_frame(&self) -> FrameId {
         self.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
+    fn value(&self) -> LpValue {
         self.value().clone()
     }
 }
@@ -130,8 +130,8 @@ impl SlotValueAccess for Versioned<f32> {
         self.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::F32(*self.value())
+    fn value(&self) -> LpValue {
+        LpValue::F32(*self.value())
     }
 }
 
@@ -140,8 +140,8 @@ impl SlotValueAccess for Versioned<u32> {
         self.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::U32(*self.value())
+    fn value(&self) -> LpValue {
+        LpValue::U32(*self.value())
     }
 }
 
@@ -150,8 +150,8 @@ impl SlotValueAccess for Versioned<bool> {
         self.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::Bool(*self.value())
+    fn value(&self) -> LpValue {
+        LpValue::Bool(*self.value())
     }
 }
 
@@ -160,8 +160,8 @@ impl SlotValueAccess for Versioned<[f32; 2]> {
         self.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::Vec2(*self.value())
+    fn value(&self) -> LpValue {
+        LpValue::Vec2(*self.value())
     }
 }
 
@@ -170,8 +170,8 @@ impl SlotValueAccess for Versioned<[f32; 3]> {
         self.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::Vec3(*self.value())
+    fn value(&self) -> LpValue {
+        LpValue::Vec3(*self.value())
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{ModelStructMember, ModelType, ModelValue, SlotName, SlotPath, SlotPathSegment};
+use crate::{ModelStructMember, LpType, LpValue, SlotName, SlotPath, SlotPathSegment};
 use alloc::string::String;
 use core::fmt;
 
@@ -48,8 +48,8 @@ pub enum SlotValidationError {
         actual: SlotDataKind,
     },
     ModelTypeMismatch {
-        expected: ModelType,
-        actual: ModelValue,
+        expected: LpType,
+        actual: LpValue,
     },
     RecordFieldCount {
         expected: usize,
@@ -269,41 +269,41 @@ fn validate_map_key(
     }
 }
 
-fn validate_model_value(value: &ModelValue, ty: &ModelType) -> Result<(), SlotValidationError> {
+fn validate_model_value(value: &LpValue, ty: &LpType) -> Result<(), SlotValidationError> {
     let matches = match (value, ty) {
-        (ModelValue::String(_), ModelType::String)
-        | (ModelValue::I32(_), ModelType::I32)
-        | (ModelValue::U32(_), ModelType::U32)
-        | (ModelValue::F32(_), ModelType::F32)
-        | (ModelValue::Bool(_), ModelType::Bool)
-        | (ModelValue::Vec2(_), ModelType::Vec2)
-        | (ModelValue::Vec3(_), ModelType::Vec3)
-        | (ModelValue::Vec4(_), ModelType::Vec4)
-        | (ModelValue::IVec2(_), ModelType::IVec2)
-        | (ModelValue::IVec3(_), ModelType::IVec3)
-        | (ModelValue::IVec4(_), ModelType::IVec4)
-        | (ModelValue::UVec2(_), ModelType::UVec2)
-        | (ModelValue::UVec3(_), ModelType::UVec3)
-        | (ModelValue::UVec4(_), ModelType::UVec4)
-        | (ModelValue::BVec2(_), ModelType::BVec2)
-        | (ModelValue::BVec3(_), ModelType::BVec3)
-        | (ModelValue::BVec4(_), ModelType::BVec4)
-        | (ModelValue::Mat2x2(_), ModelType::Mat2x2)
-        | (ModelValue::Mat3x3(_), ModelType::Mat3x3)
-        | (ModelValue::Mat4x4(_), ModelType::Mat4x4)
-        | (ModelValue::Resource(_), ModelType::Resource) => true,
-        (ModelValue::Array(values), ModelType::Array(element_ty, len)) => {
+        (LpValue::String(_), LpType::String)
+        | (LpValue::I32(_), LpType::I32)
+        | (LpValue::U32(_), LpType::U32)
+        | (LpValue::F32(_), LpType::F32)
+        | (LpValue::Bool(_), LpType::Bool)
+        | (LpValue::Vec2(_), LpType::Vec2)
+        | (LpValue::Vec3(_), LpType::Vec3)
+        | (LpValue::Vec4(_), LpType::Vec4)
+        | (LpValue::IVec2(_), LpType::IVec2)
+        | (LpValue::IVec3(_), LpType::IVec3)
+        | (LpValue::IVec4(_), LpType::IVec4)
+        | (LpValue::UVec2(_), LpType::UVec2)
+        | (LpValue::UVec3(_), LpType::UVec3)
+        | (LpValue::UVec4(_), LpType::UVec4)
+        | (LpValue::BVec2(_), LpType::BVec2)
+        | (LpValue::BVec3(_), LpType::BVec3)
+        | (LpValue::BVec4(_), LpType::BVec4)
+        | (LpValue::Mat2x2(_), LpType::Mat2x2)
+        | (LpValue::Mat3x3(_), LpType::Mat3x3)
+        | (LpValue::Mat4x4(_), LpType::Mat4x4)
+        | (LpValue::Resource(_), LpType::Resource) => true,
+        (LpValue::Array(values), LpType::Array(element_ty, len)) => {
             values.len() == *len
                 && values
                     .iter()
                     .all(|value| validate_model_value(value, element_ty).is_ok())
         }
         (
-            ModelValue::Struct {
+            LpValue::Struct {
                 name: value_name,
                 fields,
             },
-            ModelType::Struct {
+            LpType::Struct {
                 name: type_name,
                 fields: type_fields,
             },
@@ -328,7 +328,7 @@ fn struct_names_match(value_name: &Option<String>, type_name: &Option<String>) -
     type_name.is_none() || value_name == type_name
 }
 
-fn struct_fields_match(fields: &[(String, ModelValue)], type_fields: &[ModelStructMember]) -> bool {
+fn struct_fields_match(fields: &[(String, LpValue)], type_fields: &[ModelStructMember]) -> bool {
     fields.len() == type_fields.len()
         && fields
             .iter()
@@ -394,20 +394,20 @@ mod tests {
                 SlotShape::Record {
                     meta: SlotMeta::empty(),
                     fields: vec![
-                        SlotFieldShape::new("size", SlotShape::value(ModelType::Vec2)).unwrap(),
-                        SlotFieldShape::new("enabled", SlotShape::value(ModelType::Bool)).unwrap(),
+                        SlotFieldShape::new("size", SlotShape::value(LpType::Vec2)).unwrap(),
+                        SlotFieldShape::new("enabled", SlotShape::value(LpType::Bool)).unwrap(),
                     ],
                 },
             )
             .unwrap();
 
-        let enabled = SlotData::Value(Versioned::new(FrameId::new(9), ModelValue::Bool(true)));
+        let enabled = SlotData::Value(Versioned::new(FrameId::new(9), LpValue::Bool(true)));
         let tree = SlotTree::new(
             shape_id,
             SlotData::Record(SlotRecord::new(vec![
                 SlotData::Value(Versioned::new(
                     FrameId::new(8),
-                    ModelValue::Vec2([10.0, 20.0]),
+                    LpValue::Vec2([10.0, 20.0]),
                 )),
                 enabled.clone(),
             ])),
@@ -430,14 +430,14 @@ mod tests {
                 SlotShape::Map {
                     meta: SlotMeta::empty(),
                     key: SlotMapKeyShape::String,
-                    value: Box::new(SlotShape::value(ModelType::Vec4)),
+                    value: Box::new(SlotShape::value(LpType::Vec4)),
                 },
             )
             .unwrap();
 
         let value = SlotData::Value(Versioned::new(
             FrameId::new(1),
-            ModelValue::Vec4([0.0, 1.0, 2.0, 3.0]),
+            LpValue::Vec4([0.0, 1.0, 2.0, 3.0]),
         ));
         let mut entries = BTreeMap::new();
         entries.insert(SlotMapKey::String("dome.front".to_string()), value.clone());
@@ -459,12 +459,12 @@ mod tests {
         let mut registry = SlotShapeRegistry::default();
         let shape_id = SlotShapeId::parse("texture.config").unwrap();
         registry
-            .register_tree(shape_id, SlotShape::value(ModelType::Vec2))
+            .register_tree(shape_id, SlotShape::value(LpType::Vec2))
             .unwrap();
 
         let tree = SlotTree::new(
             shape_id,
-            SlotData::Value(Versioned::new(FrameId::new(1), ModelValue::Bool(true))),
+            SlotData::Value(Versioned::new(FrameId::new(1), LpValue::Bool(true))),
         );
 
         assert!(matches!(
@@ -505,7 +505,7 @@ mod tests {
                 SlotShape::Map {
                     meta: SlotMeta::empty(),
                     key: SlotMapKeyShape::U32,
-                    value: Box::new(SlotShape::value(ModelType::Bool)),
+                    value: Box::new(SlotShape::value(LpType::Bool)),
                 },
             )
             .unwrap();
@@ -513,7 +513,7 @@ mod tests {
         let mut entries = BTreeMap::new();
         entries.insert(
             SlotMapKey::String("bad".to_string()),
-            SlotData::Value(Versioned::new(FrameId::new(1), ModelValue::Bool(true))),
+            SlotData::Value(Versioned::new(FrameId::new(1), LpValue::Bool(true))),
         );
 
         let tree = SlotTree::new(shape_id, SlotData::Map(SlotMapDyn::new(entries)));
@@ -537,7 +537,7 @@ mod tests {
                             name: SlotName::parse("shape").unwrap(),
                             shape: SlotShape::Option {
                                 meta: SlotMeta::empty(),
-                                some: Box::new(SlotShape::value(ModelType::Resource)),
+                                some: Box::new(SlotShape::value(LpType::Resource)),
                             },
                         },
                         SlotVariantShape {

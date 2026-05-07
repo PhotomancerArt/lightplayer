@@ -41,7 +41,7 @@ pub enum WireSlotChange {
 mod tests {
     use super::*;
     use alloc::vec;
-    use lpc_model::{FrameId, ModelValue, SlotShapeRegistry, Versioned};
+    use lpc_model::{FrameId, LpValue, SlotShapeRegistry, Versioned};
 
     #[test]
     fn slot_patch_round_trips() {
@@ -50,7 +50,7 @@ mod tests {
             path: SlotPath::parse("params.exposure").unwrap(),
             change: WireSlotChange::Replace(SlotData::Value(Versioned::new(
                 FrameId::new(7),
-                ModelValue::F32(2.0),
+                LpValue::F32(2.0),
             ))),
         };
 

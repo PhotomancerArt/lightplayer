@@ -1,9 +1,52 @@
-use crate::{ModelType, SlotName, SlotNameError, SlotValueShape};
+use crate::{LpType, SlotName, SlotNameError, SlotValueShape};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
 use super::SlotMeta;
+
+
+/// Static shape of a slot tree.
+///
+/// A slot shape defines the authored and synchronized structure of slot data.
+/// `Value` leaves are produced and versioned as complete units; container
+/// shapes provide named or keyed structure around those leaves.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SlotShape {
+    Ref {
+        id: SlotShapeId,
+    },
+    Unit {
+        #[serde(default)]
+        meta: SlotMeta,
+    },
+    Value {
+        shape: SlotValueShape,
+    },
+    Record {
+        #[serde(default)]
+        meta: SlotMeta,
+        fields: Vec<SlotFieldShape>,
+    },
+    Map {
+        #[serde(default)]
+        meta: SlotMeta,
+        key: SlotMapKeyShape,
+        value: Box<SlotShape>,
+    },
+    Enum {
+        #[serde(default)]
+        meta: SlotMeta,
+        variants: Vec<SlotVariantShape>,
+    },
+    Option {
+        #[serde(default)]
+        meta: SlotMeta,
+        some: Box<SlotShape>,
+    },
+}
 
 /// Compact registry identity for a slot shape node.
 ///
@@ -79,48 +122,6 @@ const fn fnv1a32(input: &str) -> u32 {
     hash
 }
 
-/// Static shape of a slot tree.
-///
-/// A slot shape defines the authored and synchronized structure of slot data.
-/// `Value` leaves are produced and versioned as complete units; container
-/// shapes provide named or keyed structure around those leaves.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum SlotShape {
-    Ref {
-        id: SlotShapeId,
-    },
-    Unit {
-        #[serde(default)]
-        meta: SlotMeta,
-    },
-    Value {
-        shape: SlotValueShape,
-    },
-    Record {
-        #[serde(default)]
-        meta: SlotMeta,
-        fields: Vec<SlotFieldShape>,
-    },
-    Map {
-        #[serde(default)]
-        meta: SlotMeta,
-        key: SlotMapKeyShape,
-        value: Box<SlotShape>,
-    },
-    Enum {
-        #[serde(default)]
-        meta: SlotMeta,
-        variants: Vec<SlotVariantShape>,
-    },
-    Option {
-        #[serde(default)]
-        meta: SlotMeta,
-        some: Box<SlotShape>,
-    },
-}
-
 impl SlotShape {
     /// Reference another registered root shape.
     pub fn reference(id: SlotShapeId) -> Self {
@@ -135,7 +136,7 @@ impl SlotShape {
     }
 
     /// Convenience constructor for a value leaf with empty metadata.
-    pub fn value(ty: ModelType) -> Self {
+    pub fn value(ty: LpType) -> Self {
         Self::Value {
             shape: SlotValueShape::raw(ty),
         }
@@ -250,7 +251,7 @@ mod tests {
         let shape = SlotShape::Record {
             meta: SlotMeta::empty(),
             fields: vec![
-                SlotFieldShape::new("size", SlotShape::value(ModelType::Vec2)).unwrap(),
+                SlotFieldShape::new("size", SlotShape::value(LpType::Vec2)).unwrap(),
                 SlotFieldShape::new(
                     "mapping",
                     SlotShape::Enum {
@@ -263,7 +264,7 @@ mod tests {
                                     key: SlotMapKeyShape::String,
                                     value: Box::new(SlotShape::Option {
                                         meta: SlotMeta::empty(),
-                                        some: Box::new(SlotShape::value(ModelType::Vec4)),
+                                        some: Box::new(SlotShape::value(LpType::Vec4)),
                                     }),
                                 },
                             )

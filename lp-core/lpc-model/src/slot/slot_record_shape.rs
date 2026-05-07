@@ -16,7 +16,7 @@ pub trait SlotRecordShape {
 mod tests {
     use super::*;
     use crate::{
-        ModelType, SlotDataAccess, SlotRecordAccess, ValueSlot,
+        LpType, SlotDataAccess, SlotRecordAccess, ValueSlot,
         slot::shape::{field, record, value},
     };
     use alloc::vec;
@@ -27,7 +27,7 @@ mod tests {
 
     impl SlotRecordShape for TestRecord {
         fn slot_record_shape() -> SlotShape {
-            record(vec![field("enabled", value(ModelType::Bool))])
+            record(vec![field("enabled", value(LpType::Bool))])
         }
     }
 

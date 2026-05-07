@@ -1,4 +1,4 @@
-use lpc_model::{FrameId, ModelValue, SlotMapKey};
+use lpc_model::{FrameId, LpValue, SlotMapKey};
 
 use super::fixture::{
     Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks, select,
@@ -33,7 +33,7 @@ fn incremental_changes_patch_client_state() {
     assert_shader_param(
         harness.client.roots.get("engine.shader_node").unwrap(),
         "exposure",
-        ModelValue::F32(2.5),
+        LpValue::F32(2.5),
     );
 
     println!("server removing engine.shader_node#params.speed");

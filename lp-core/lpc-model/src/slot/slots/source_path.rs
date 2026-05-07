@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, FrameId, ModelType, ModelValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
+    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotEditorHint, SlotLeafId,
     SlotMeta, SlotShape, SlotValueAccess, SlotValueShape, Versioned, current_state_version,
 };
 use alloc::string::String;
@@ -40,8 +40,8 @@ impl SlotValueAccess for SourcePathSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        ModelValue::String(self.inner.value().clone())
+    fn value(&self) -> LpValue {
+        LpValue::String(self.inner.value().clone())
     }
 }
 
@@ -80,7 +80,7 @@ pub fn source_path_shape() -> SlotValueShape {
 pub(super) fn path_shape(name: &str) -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name(name),
-        ty: ModelType::String,
+        ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Path,
     }

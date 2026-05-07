@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromModelValue, ModelType, ModelValue, SlotDataAccess, SlotEditorHint,
+    FieldSlot, FrameId, FromLpValue, LpType, LpValue, SlotDataAccess, SlotEditorHint,
     SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToModelValue, Versioned, current_state_version,
+    SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -99,8 +99,8 @@ impl SlotValueAccess for ColorOrderSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        self.inner.value().to_model_value()
+    fn value(&self) -> LpValue {
+        self.inner.value().to_lp_value()
     }
 }
 
@@ -132,16 +132,16 @@ impl FieldSlot for ColorOrderSlot {
     }
 }
 
-impl ToModelValue for ColorOrderValue {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().to_string())
+impl ToLpValue for ColorOrderValue {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().to_string())
     }
 }
 
-impl FromModelValue for ColorOrderValue {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl FromLpValue for ColorOrderValue {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::String(value) => Self::parse(&value)
+            LpValue::String(value) => Self::parse(&value)
                 .ok_or_else(|| SlotLeafError::new("expected RGB color order value")),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected String, got {other:?}"
@@ -161,7 +161,7 @@ impl SlotLeaf for ColorOrderValue {
 pub fn color_order_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.color_order"),
-        ty: ModelType::String,
+        ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::Dropdown {
             options: vec![

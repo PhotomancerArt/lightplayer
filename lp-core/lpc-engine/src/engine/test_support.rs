@@ -272,7 +272,7 @@ impl TestBindingSource {
     fn into_binding_source(self, labels: &BTreeMap<String, NodeId>) -> BindingSource {
         match self {
             Self::Literal(value) => BindingSource::Literal(SrcValueSpec::Literal(
-                lpc_model::ModelValue::F32(f32_value(value)),
+                lpc_model::LpValue::F32(f32_value(value)),
             )),
             Self::ProducedSlot { label, slot } => BindingSource::ProducedSlot {
                 node: *labels.get(&label).expect("produced slot label"),

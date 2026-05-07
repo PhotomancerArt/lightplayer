@@ -319,9 +319,9 @@ fn path_spec_shape() -> SlotShape {
             variant(
                 "ring_array",
                 record(vec![
-                    field("rings", value(lpc_model::ModelType::U32)),
-                    field("points_per_ring", value(lpc_model::ModelType::U32)),
-                    field("clockwise", value(lpc_model::ModelType::Bool)),
+                    field("rings", value(lpc_model::LpType::U32)),
+                    field("points_per_ring", value(lpc_model::LpType::U32)),
+                    field("clockwise", value(lpc_model::LpType::Bool)),
                 ]),
             ),
             variant("manual", unit()),

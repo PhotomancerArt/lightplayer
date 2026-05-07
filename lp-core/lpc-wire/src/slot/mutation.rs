@@ -1,5 +1,5 @@
 use alloc::string::String;
-use lpc_model::{FrameId, ModelValue, SlotPath};
+use lpc_model::{FrameId, LpValue, SlotPath};
 use serde::{Deserialize, Serialize};
 
 /// Client-visible id for one requested slot mutation.
@@ -35,7 +35,7 @@ pub struct WireSlotMutationRequest {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireSlotMutationOp {
-    SetValue(ModelValue),
+    SetValue(LpValue),
 }
 
 /// Server response for one slot mutation request.
@@ -80,7 +80,7 @@ mod tests {
             path: SlotPath::parse("params.exposure").unwrap(),
             expected_shape_version: FrameId::new(1),
             expected_data_version: FrameId::new(3),
-            op: WireSlotMutationOp::SetValue(ModelValue::F32(2.0)),
+            op: WireSlotMutationOp::SetValue(LpValue::F32(2.0)),
         };
 
         let json = serde_json::to_string(&request).unwrap();

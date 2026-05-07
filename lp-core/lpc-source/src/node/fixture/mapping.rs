@@ -1,10 +1,10 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use lpc_model::{
-    FieldSlot, FrameId, FromModelValue, MapSlot, ModelType, ModelValue, PositiveF32Slot,
+    FieldSlot, FrameId, FromLpValue, MapSlot, LpType, LpValue, PositiveF32Slot,
     SlotDataAccess, SlotEditorHint, SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotLeaf,
     SlotLeafError, SlotLeafId, SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess,
-    SlotShape, SlotValueShape, ToModelValue, ValueSlot, XySlot, current_state_version,
+    SlotShape, SlotValueShape, ToLpValue, ValueSlot, XySlot, current_state_version,
 };
 use serde::{Deserialize, Serialize};
 
@@ -259,16 +259,16 @@ impl RingOrder {
     }
 }
 
-impl ToModelValue for RingOrder {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.as_str().into())
+impl ToLpValue for RingOrder {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().into())
     }
 }
 
-impl FromModelValue for RingOrder {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl FromLpValue for RingOrder {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::String(value) => Self::parse(&value),
+            LpValue::String(value) => Self::parse(&value),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected String, got {other:?}"
             ))),
@@ -282,7 +282,7 @@ impl SlotLeaf for RingOrder {
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
             leaf: Self::LEAF_ID,
-            ty: ModelType::String,
+            ty: LpType::String,
             meta: SlotMeta::empty(),
             editor: SlotEditorHint::Dropdown {
                 options: alloc::vec![
@@ -325,13 +325,13 @@ fn path_spec_shape() -> SlotShape {
             record(alloc::vec![
                 field("center", leaf(lpc_model::xy_shape())),
                 field("diameter", leaf(lpc_model::positive_f32_shape())),
-                field("start_ring_inclusive", value(ModelType::U32)),
-                field("end_ring_exclusive", value(ModelType::U32)),
+                field("start_ring_inclusive", value(LpType::U32)),
+                field("end_ring_exclusive", value(LpType::U32)),
                 field(
                     "ring_lamp_counts",
-                    map(SlotMapKeyShape::U32, value(ModelType::U32))
+                    map(SlotMapKeyShape::U32, value(LpType::U32))
                 ),
-                field("offset_angle", value(ModelType::F32)),
+                field("offset_angle", value(LpType::F32)),
                 field("order", leaf(RingOrder::value_shape())),
             ]),
         )],

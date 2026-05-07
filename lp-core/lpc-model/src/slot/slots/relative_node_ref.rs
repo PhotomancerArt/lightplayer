@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, ModelType, ModelValue, RelativeNodeRef, SlotDataAccess, SlotEditorHint,
+    FieldSlot, FrameId, LpType, LpValue, RelativeNodeRef, SlotDataAccess, SlotEditorHint,
     SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess, SlotValueShape,
-    ToModelValue, Versioned, current_state_version,
+    ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::ToString;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -41,8 +41,8 @@ impl SlotValueAccess for RelativeNodeRefSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        self.inner.value().to_model_value()
+    fn value(&self) -> LpValue {
+        self.inner.value().to_lp_value()
     }
 }
 
@@ -74,16 +74,16 @@ impl FieldSlot for RelativeNodeRefSlot {
     }
 }
 
-impl ToModelValue for RelativeNodeRef {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.to_string())
+impl ToLpValue for RelativeNodeRef {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.to_string())
     }
 }
 
-impl crate::FromModelValue for RelativeNodeRef {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl crate::FromLpValue for RelativeNodeRef {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::String(value) => RelativeNodeRef::parse(&value)
+            LpValue::String(value) => RelativeNodeRef::parse(&value)
                 .map_err(|err| SlotLeafError::new(alloc::format!("{err}"))),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected String, got {other:?}"
@@ -103,7 +103,7 @@ impl SlotLeaf for RelativeNodeRef {
 pub fn relative_node_ref_shape() -> SlotValueShape {
     SlotValueShape {
         leaf: SlotLeafId::from_static_name("slot.leaf.relative_node_ref"),
-        ty: ModelType::String,
+        ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: SlotEditorHint::NodeRef,
     }

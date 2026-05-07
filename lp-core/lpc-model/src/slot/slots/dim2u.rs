@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromModelValue, ModelStructMember, ModelType, ModelValue, SlotDataAccess,
+    FieldSlot, FrameId, FromLpValue, ModelStructMember, LpType, LpValue, SlotDataAccess,
     SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToModelValue, Versioned, current_state_version,
+    SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -49,8 +49,8 @@ impl SlotValueAccess for Dim2uSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        self.inner.value().to_model_value()
+    fn value(&self) -> LpValue {
+        self.inner.value().to_lp_value()
     }
 }
 
@@ -82,32 +82,32 @@ impl FieldSlot for Dim2uSlot {
     }
 }
 
-impl ToModelValue for Dim2u {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Struct {
+impl ToLpValue for Dim2u {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::Struct {
             name: Some(String::from("Dim2u")),
             fields: vec![
-                (String::from("width"), ModelValue::U32(self.width)),
-                (String::from("height"), ModelValue::U32(self.height)),
+                (String::from("width"), LpValue::U32(self.width)),
+                (String::from("height"), LpValue::U32(self.height)),
             ],
         }
     }
 }
 
-impl FromModelValue for Dim2u {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        let ModelValue::Struct { name, fields } = value else {
+impl FromLpValue for Dim2u {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+        let LpValue::Struct { name, fields } = value else {
             return Err(SlotLeafError::new("expected Dim2u struct"));
         };
         if name.as_deref() != Some("Dim2u") || fields.len() != 2 {
             return Err(SlotLeafError::new("expected Dim2u struct"));
         }
         let width = match &fields[0] {
-            (name, ModelValue::U32(value)) if name == "width" => *value,
+            (name, LpValue::U32(value)) if name == "width" => *value,
             _ => return Err(SlotLeafError::new("expected Dim2u.width")),
         };
         let height = match &fields[1] {
-            (name, ModelValue::U32(value)) if name == "height" => *value,
+            (name, LpValue::U32(value)) if name == "height" => *value,
             _ => return Err(SlotLeafError::new("expected Dim2u.height")),
         };
         Ok(Self { width, height })
@@ -131,17 +131,17 @@ pub fn dim2u_shape() -> SlotValueShape {
     }
 }
 
-fn dim2u_model_type() -> ModelType {
-    ModelType::Struct {
+fn dim2u_model_type() -> LpType {
+    LpType::Struct {
         name: Some(String::from("Dim2u")),
         fields: vec![
             ModelStructMember {
                 name: String::from("width"),
-                ty: ModelType::U32,
+                ty: LpType::U32,
             },
             ModelStructMember {
                 name: String::from("height"),
-                ty: ModelType::U32,
+                ty: LpType::U32,
             },
         ],
     }

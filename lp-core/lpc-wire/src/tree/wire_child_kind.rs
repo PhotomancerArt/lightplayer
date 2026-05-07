@@ -33,7 +33,7 @@ pub enum WireChildKind {
 mod tests {
     use super::{WireChildKind, WireSlotIndex};
     use lpc_model::node::NodeName;
-    use lpc_model::prop::parse_path;
+    use lpc_model::value::parse_path;
 
     #[test]
     fn child_kind_input_round_trips() {

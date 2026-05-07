@@ -9,7 +9,7 @@
 //! shapes (`docs/plans/2026-04-22-lp-domain-m3-visual-artifact-types/00-design.md`).
 //!
 //! In the legacy quantity model, a [`Constraint`] refined the natural domain of
-//! a [`Kind`](crate::prop::legacy_kind::Kind). New slot-model work should attach
+//! a [`Kind`](crate::value::legacy_kind::Kind). New slot-model work should attach
 //! legality to typed slot leaf descriptors instead of pairing constraints with
 //! a free-floating kind.
 //! Color coordinates default to [`Constraint::Free`] in the spec so

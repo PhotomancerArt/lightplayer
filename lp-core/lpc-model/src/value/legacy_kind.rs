@@ -9,7 +9,7 @@
 //!
 //! In the five-layer Quantity model, [`Kind`] sits *above* storage types and
 //! *below* per-slot legality: it answers “what category of thing is this value?”
-//! while [`crate::ModelType`] and runtime shader value types cover raw
+//! while [`crate::LpType`] and runtime shader value types cover raw
 //! shape. See `docs/design/lightplayer/quantity.md` §0, §1, §2, and §3.
 //!
 //! A [`Kind`] is **orthogonal to storage** in the sense that each variant maps
@@ -18,15 +18,15 @@
 //! [`Kind::Ratio`] both use `ModelType::F32` in v0 but differ in default
 //! constraint, presentation, and intent — see the §3 table in `quantity.md`).
 
-use crate::prop::constraint::{Constraint, ConstraintFree, ConstraintRange};
-use crate::prop::model_type::{ModelStructMember, ModelType};
+use crate::value::constraint::{Constraint, ConstraintFree, ConstraintRange};
+use crate::value::lp_type::{ModelStructMember, LpType};
 use alloc::boxed::Box;
 use alloc::string::String;
 
 /// Maximum number of colors in a [`Kind::ColorPalette`] value’s fixed array storage.
 ///
 /// v0 is deliberately small for embedded targets; the same constant sizes the
-/// `entries` field in the palette’s [`ModelType`] (see `quantity.md` §3 “Storage
+/// `entries` field in the palette’s [`LpType`] (see `quantity.md` §3 “Storage
 /// recipes” and the roadmap risk note on fixed-size arrays).
 pub const MAX_PALETTE_LEN: u32 = 16;
 
@@ -167,14 +167,14 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Returns the **structural** [`ModelType`] the serializer and layout logic
+    /// Returns the **structural** [`LpType`] the serializer and layout logic
     /// agree on: the “storage recipe” for this [`Kind`]
     /// (`docs/design/lightplayer/quantity.md` §3, “Storage recipes”, and `impl`
     /// block in §3).
     ///
     /// For `ColorPalette` and `Gradient`, this is the **authoring** storage type.
     /// The shader-visible runtime form is a baked texture field inside `params`.
-    pub fn storage(self) -> ModelType {
+    pub fn storage(self) -> LpType {
         match self {
             Self::Amplitude
             | Self::Ratio
@@ -182,11 +182,11 @@ impl Kind {
             | Self::Instant
             | Self::Duration
             | Self::Frequency
-            | Self::Angle => ModelType::F32,
-            Self::Count | Self::Choice => ModelType::I32,
-            Self::Bool => ModelType::Bool,
-            Self::Position2d => ModelType::Vec2,
-            Self::Position3d => ModelType::Vec3,
+            | Self::Angle => LpType::F32,
+            Self::Count | Self::Choice => LpType::I32,
+            Self::Bool => LpType::Bool,
+            Self::Position2d => LpType::Vec2,
+            Self::Position3d => LpType::Vec3,
             Self::Color => color_struct(),
             Self::ColorPalette => color_palette_struct(),
             Self::Gradient => gradient_struct(),
@@ -214,7 +214,7 @@ impl Kind {
     /// per-`Kind` contract and §5: constraints **refine** the kind, they don’t
     /// replace it).
     ///
-    /// v0 range fields are F32 in [`crate::prop::constraint::Constraint`]; see
+    /// v0 range fields are F32 in [`crate::value::constraint::Constraint`]; see
     /// `docs/plans-old/2026-04-22-lp-domain-m2-domain-skeleton/summary.md` (F32
     /// narrowing and future widening).
     pub fn default_constraint(self) -> Constraint {
@@ -232,118 +232,118 @@ impl Kind {
     }
 }
 
-fn color_struct() -> ModelType {
-    ModelType::Struct {
+fn color_struct() -> LpType {
+    LpType::Struct {
         name: Some(String::from("Color")),
         fields: alloc::vec![
             ModelStructMember {
                 name: String::from("space"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("coords"),
-                ty: ModelType::Vec3,
+                ty: LpType::Vec3,
             },
         ],
     }
 }
 
-fn color_palette_struct() -> ModelType {
-    ModelType::Struct {
+fn color_palette_struct() -> LpType {
+    LpType::Struct {
         name: Some(String::from("ColorPalette")),
         fields: alloc::vec![
             ModelStructMember {
                 name: String::from("space"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("count"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("entries"),
-                ty: ModelType::Array(Box::new(ModelType::Vec3), MAX_PALETTE_LEN as usize),
+                ty: LpType::Array(Box::new(LpType::Vec3), MAX_PALETTE_LEN as usize),
             },
         ],
     }
 }
 
-fn gradient_struct() -> ModelType {
-    let stop = ModelType::Struct {
+fn gradient_struct() -> LpType {
+    let stop = LpType::Struct {
         name: Some(String::from("GradientStop")),
         fields: alloc::vec![
             ModelStructMember {
                 name: String::from("at"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("c"),
-                ty: ModelType::Vec3,
+                ty: LpType::Vec3,
             },
         ],
     };
-    ModelType::Struct {
+    LpType::Struct {
         name: Some(String::from("Gradient")),
         fields: alloc::vec![
             ModelStructMember {
                 name: String::from("space"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("method"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("count"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("stops"),
-                ty: ModelType::Array(Box::new(stop), MAX_GRADIENT_STOPS as usize),
+                ty: LpType::Array(Box::new(stop), MAX_GRADIENT_STOPS as usize),
             },
         ],
     }
 }
 
-fn texture_struct() -> ModelType {
-    ModelType::Struct {
+fn texture_struct() -> LpType {
+    LpType::Struct {
         name: Some(String::from("Texture")),
         fields: alloc::vec![
             ModelStructMember {
                 name: String::from("format"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("width"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("height"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
             ModelStructMember {
                 name: String::from("handle"),
-                ty: ModelType::I32,
+                ty: LpType::I32,
             },
         ],
     }
 }
 
-fn audio_level_struct() -> ModelType {
-    ModelType::Struct {
+fn audio_level_struct() -> LpType {
+    LpType::Struct {
         name: Some(String::from("AudioLevel")),
         fields: alloc::vec![
             ModelStructMember {
                 name: String::from("low"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("mid"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("high"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
         ],
     }
@@ -380,30 +380,30 @@ mod tests {
 
     #[test]
     fn float_scalar_storages() {
-        assert_eq!(Kind::Amplitude.storage(), ModelType::F32);
-        assert_eq!(Kind::Frequency.storage(), ModelType::F32);
+        assert_eq!(Kind::Amplitude.storage(), LpType::F32);
+        assert_eq!(Kind::Frequency.storage(), LpType::F32);
     }
 
     #[test]
     fn int_scalar_storages() {
-        assert_eq!(Kind::Count.storage(), ModelType::I32);
-        assert_eq!(Kind::Choice.storage(), ModelType::I32);
+        assert_eq!(Kind::Count.storage(), LpType::I32);
+        assert_eq!(Kind::Choice.storage(), LpType::I32);
     }
 
     #[test]
     fn position_storages() {
-        assert_eq!(Kind::Position2d.storage(), ModelType::Vec2);
-        assert_eq!(Kind::Position3d.storage(), ModelType::Vec3);
+        assert_eq!(Kind::Position2d.storage(), LpType::Vec2);
+        assert_eq!(Kind::Position3d.storage(), LpType::Vec3);
     }
 
     #[test]
     fn texture_storage_has_four_int_fields() {
         let s = Kind::Texture.storage();
         match s {
-            ModelType::Struct { fields, .. } => {
+            LpType::Struct { fields, .. } => {
                 assert_eq!(fields.len(), 4);
                 for m in fields {
-                    assert_eq!(m.ty, ModelType::I32);
+                    assert_eq!(m.ty, LpType::I32);
                 }
             }
             _ => panic!("Texture storage must be a Struct"),
@@ -444,13 +444,13 @@ mod tests {
     fn audio_level_storage_is_three_floats() {
         let s = Kind::AudioLevel.storage();
         match s {
-            ModelType::Struct { fields, .. } => {
+            LpType::Struct { fields, .. } => {
                 assert_eq!(fields.len(), AUDIO_LEVEL_BANDS);
                 assert_eq!(fields[0].name.as_str(), "low");
                 assert_eq!(fields[1].name.as_str(), "mid");
                 assert_eq!(fields[2].name.as_str(), "high");
                 for m in &fields {
-                    assert_eq!(m.ty, ModelType::F32);
+                    assert_eq!(m.ty, LpType::F32);
                 }
             }
             _ => panic!("AudioLevel storage must be a Struct"),

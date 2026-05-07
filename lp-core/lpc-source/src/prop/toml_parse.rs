@@ -5,7 +5,7 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpc_model::ModelValue;
+use lpc_model::LpValue;
 
 /// Error from `SrcValueSpec::from_toml_for_kind` / `SrcValueSpec::from_toml_for_shape` and their inverses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +47,7 @@ pub(crate) fn toml_i32(v: &toml::Value) -> Result<i32, FromTomlError> {
         .ok_or_else(|| FromTomlError::msg("expected a TOML integer"))
 }
 
-pub(crate) fn vec3_from_toml(v: &toml::Value, _ctx: &str) -> Result<ModelValue, FromTomlError> {
+pub(crate) fn vec3_from_toml(v: &toml::Value, _ctx: &str) -> Result<LpValue, FromTomlError> {
     let a = v
         .as_array()
         .ok_or_else(|| FromTomlError::msg("expected a 3-long TOML array"))?;
@@ -57,14 +57,14 @@ pub(crate) fn vec3_from_toml(v: &toml::Value, _ctx: &str) -> Result<ModelValue, 
     let x = toml_f32(&a[0])?;
     let y = toml_f32(&a[1])?;
     let z = toml_f32(&a[2])?;
-    Ok(ModelValue::Vec3([x, y, z]))
+    Ok(LpValue::Vec3([x, y, z]))
 }
 
 pub(crate) fn vec_n_from_toml(
     v: &toml::Value,
     n: usize,
     _ctx: &str,
-) -> Result<ModelValue, FromTomlError> {
+) -> Result<LpValue, FromTomlError> {
     let a = v
         .as_array()
         .ok_or_else(|| FromTomlError::msg("expected a TOML array for position default"))?;
@@ -74,7 +74,7 @@ pub(crate) fn vec_n_from_toml(
     if n == 2 {
         let x = toml_f32(&a[0])?;
         let y = toml_f32(&a[1])?;
-        return Ok(ModelValue::Vec2([x, y]));
+        return Ok(LpValue::Vec2([x, y]));
     }
     if n == 3 {
         return vec3_from_toml(v, "position3d");
@@ -84,7 +84,7 @@ pub(crate) fn vec_n_from_toml(
 
 pub(crate) fn model_value_audio_level(
     t: &toml::map::Map<String, toml::Value>,
-) -> Result<ModelValue, FromTomlError> {
+) -> Result<LpValue, FromTomlError> {
     let low = t
         .get("low")
         .ok_or_else(|| FromTomlError::msg("audio_level: missing `low`"))?;
@@ -94,18 +94,18 @@ pub(crate) fn model_value_audio_level(
     let high = t
         .get("high")
         .ok_or_else(|| FromTomlError::msg("audio_level: missing `high`"))?;
-    Ok(ModelValue::Struct {
+    Ok(LpValue::Struct {
         name: Some(String::from("AudioLevel")),
         fields: vec![
-            (String::from("low"), ModelValue::F32(toml_f32(low)?)),
-            (String::from("mid"), ModelValue::F32(toml_f32(mid)?)),
-            (String::from("high"), ModelValue::F32(toml_f32(high)?)),
+            (String::from("low"), LpValue::F32(toml_f32(low)?)),
+            (String::from("mid"), LpValue::F32(toml_f32(mid)?)),
+            (String::from("high"), LpValue::F32(toml_f32(high)?)),
         ],
     })
 }
 
-pub(crate) fn wire_audio_level_to_toml(v: &ModelValue) -> Result<toml::Value, FromTomlError> {
-    let ModelValue::Struct { name, fields } = v else {
+pub(crate) fn wire_audio_level_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
+    let LpValue::Struct { name, fields } = v else {
         return Err(FromTomlError::msg("AudioLevel must be a struct ModelValue"));
     };
     if name.as_deref() != Some("AudioLevel") {
@@ -122,7 +122,7 @@ pub(crate) fn wire_audio_level_to_toml(v: &ModelValue) -> Result<toml::Value, Fr
 }
 
 pub(crate) fn find_field_f32(
-    fields: &[(String, ModelValue)],
+    fields: &[(String, LpValue)],
     key: &str,
 ) -> Result<f32, FromTomlError> {
     let v = fields
@@ -132,13 +132,13 @@ pub(crate) fn find_field_f32(
         .1
         .clone();
     match v {
-        ModelValue::F32(f) => Ok(f),
+        LpValue::F32(f) => Ok(f),
         _ => Err(FromTomlError::msg("not F32")),
     }
 }
 
 pub(crate) fn find_field_i32(
-    fields: &[(String, ModelValue)],
+    fields: &[(String, LpValue)],
     key: &str,
 ) -> Result<i32, FromTomlError> {
     let v = fields
@@ -148,42 +148,42 @@ pub(crate) fn find_field_i32(
         .1
         .clone();
     match v {
-        ModelValue::I32(i) => Ok(i),
+        LpValue::I32(i) => Ok(i),
         _ => Err(FromTomlError::msg("not I32")),
     }
 }
 
 fn find_field_vec3(
-    fields: &[(String, ModelValue)],
+    fields: &[(String, LpValue)],
     key: &str,
-) -> Result<ModelValue, FromTomlError> {
+) -> Result<LpValue, FromTomlError> {
     let v = fields
         .iter()
         .find(|(k, _)| k == key)
         .ok_or_else(|| FromTomlError::msg("missing field"))?
         .1
         .clone();
-    if matches!(&v, ModelValue::Vec3(_)) {
+    if matches!(&v, LpValue::Vec3(_)) {
         return Ok(v);
     }
     Err(FromTomlError::msg("not Vec3"))
 }
 
 pub(crate) fn find_field_vec3_value(
-    fields: &[(String, ModelValue)],
+    fields: &[(String, LpValue)],
     key: &str,
 ) -> Result<[f32; 3], FromTomlError> {
     let v = find_field_vec3(fields, key)?;
     match v {
-        ModelValue::Vec3(a) => Ok(a),
+        LpValue::Vec3(a) => Ok(a),
         _ => Err(FromTomlError::msg("not Vec3")),
     }
 }
 
 pub(crate) fn find_field_array(
-    fields: &[(String, ModelValue)],
+    fields: &[(String, LpValue)],
     key: &str,
-) -> Result<Vec<ModelValue>, FromTomlError> {
+) -> Result<Vec<LpValue>, FromTomlError> {
     let v = fields
         .iter()
         .find(|(k, _)| k == key)
@@ -191,15 +191,15 @@ pub(crate) fn find_field_array(
         .1
         .clone();
     match v {
-        ModelValue::Array(b) => Ok(b.iter().cloned().collect()),
+        LpValue::Array(b) => Ok(b.iter().cloned().collect()),
         _ => Err(FromTomlError::msg("not array")),
     }
 }
 
-pub(crate) fn slice_to_vec3_toml(s: &[ModelValue]) -> Result<Vec<toml::Value>, FromTomlError> {
+pub(crate) fn slice_to_vec3_toml(s: &[LpValue]) -> Result<Vec<toml::Value>, FromTomlError> {
     let mut out = Vec::with_capacity(s.len());
     for e in s {
-        let ModelValue::Vec3(a) = e else {
+        let LpValue::Vec3(a) = e else {
             return Err(FromTomlError::msg("entry not Vec3"));
         };
         out.push(vec3_to_toml_array(a)?);
@@ -207,8 +207,8 @@ pub(crate) fn slice_to_vec3_toml(s: &[ModelValue]) -> Result<Vec<toml::Value>, F
     Ok(out)
 }
 
-pub(crate) fn vec2_to_toml_value(v: &ModelValue) -> Result<toml::Value, FromTomlError> {
-    let ModelValue::Vec2(a) = v else {
+pub(crate) fn vec2_to_toml_value(v: &LpValue) -> Result<toml::Value, FromTomlError> {
+    let LpValue::Vec2(a) = v else {
         return Err(FromTomlError::msg(
             "position2d literal must be Vec2 wire value",
         ));
@@ -219,8 +219,8 @@ pub(crate) fn vec2_to_toml_value(v: &ModelValue) -> Result<toml::Value, FromToml
     ]))
 }
 
-pub(crate) fn vec3_to_toml_value(v: &ModelValue) -> Result<toml::Value, FromTomlError> {
-    let ModelValue::Vec3(a) = v else {
+pub(crate) fn vec3_to_toml_value(v: &LpValue) -> Result<toml::Value, FromTomlError> {
+    let LpValue::Vec3(a) = v else {
         return Err(FromTomlError::msg(
             "position3d literal must be Vec3 wire value",
         ));

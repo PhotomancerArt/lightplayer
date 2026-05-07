@@ -6,4 +6,4 @@
 //! [`NodeId`] is a cheap process-local handle; strings like [`NodeName`] and [`NodePath`]
 //! are the stable authored-addressing story.
 //!
-//! Implementation files: [`crate::node`], [`crate::prop`], [`crate::bus`], [`crate::artifact`].
+//! Implementation files: [`crate::node`], [`crate::value`], [`crate::bus`], [`crate::artifact`].

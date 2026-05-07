@@ -5,7 +5,7 @@
 //! underlying types remain explicit and serializable.
 
 use crate::{
-    ModelType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId, SlotValueShape,
+    LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotShape, SlotShapeId, SlotValueShape,
     SlotVariantShape,
 };
 use alloc::boxed::Box;
@@ -65,7 +65,7 @@ pub fn variant(name: &str, shape: SlotShape) -> SlotVariantShape {
 }
 
 /// Build a raw atomic value shape.
-pub fn value(ty: ModelType) -> SlotShape {
+pub fn value(ty: LpType) -> SlotShape {
     SlotShape::value(ty)
 }
 
@@ -82,13 +82,13 @@ pub fn unit() -> SlotShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ModelType, SlotMapKeyShape};
+    use crate::{LpType, SlotMapKeyShape};
     use alloc::vec;
 
     #[test]
     fn builders_create_concise_record_shapes() {
         let shape = record(vec![
-            field("enabled", value(ModelType::Bool)),
+            field("enabled", value(LpType::Bool)),
             field("child", option(reference(id("example.child")))),
         ]);
 

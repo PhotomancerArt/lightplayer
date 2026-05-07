@@ -8,7 +8,7 @@ use core::fmt;
 /// Failure from invalid or unknown property paths, mismatched types, or other cross-cutting domain checks.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DomainError {
-    /// No property at the given [`crate::prop::value_path::ValuePath`].
+    /// No property at the given [`crate::value::value_path::ValuePath`].
     UnknownProperty(String),
     /// A value with the wrong structural type for the target property. Carries
     /// simple expected/actual names for early diagnostics; richer paths land with real artifact types.

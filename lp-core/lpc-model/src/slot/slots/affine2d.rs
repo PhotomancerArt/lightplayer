@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromModelValue, ModelStructMember, ModelType, ModelValue, SlotDataAccess,
+    FieldSlot, FrameId, FromLpValue, ModelStructMember, LpType, LpValue, SlotDataAccess,
     SlotEditorHint, SlotLeaf, SlotLeafError, SlotLeafId, SlotMeta, SlotShape, SlotValueAccess,
-    SlotValueShape, ToModelValue, Versioned, current_state_version,
+    SlotValueShape, ToLpValue, Versioned, current_state_version,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -66,8 +66,8 @@ impl SlotValueAccess for Affine2dSlot {
         self.inner.changed_frame()
     }
 
-    fn value(&self) -> ModelValue {
-        self.inner.value().to_model_value()
+    fn value(&self) -> LpValue {
+        self.inner.value().to_lp_value()
     }
 }
 
@@ -99,25 +99,25 @@ impl FieldSlot for Affine2dSlot {
     }
 }
 
-impl ToModelValue for Affine2d {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Struct {
+impl ToLpValue for Affine2d {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::Struct {
             name: Some(String::from("Affine2d")),
             fields: vec![
-                (String::from("m00"), ModelValue::F32(self.m00)),
-                (String::from("m01"), ModelValue::F32(self.m01)),
-                (String::from("m10"), ModelValue::F32(self.m10)),
-                (String::from("m11"), ModelValue::F32(self.m11)),
-                (String::from("tx"), ModelValue::F32(self.tx)),
-                (String::from("ty"), ModelValue::F32(self.ty)),
+                (String::from("m00"), LpValue::F32(self.m00)),
+                (String::from("m01"), LpValue::F32(self.m01)),
+                (String::from("m10"), LpValue::F32(self.m10)),
+                (String::from("m11"), LpValue::F32(self.m11)),
+                (String::from("tx"), LpValue::F32(self.tx)),
+                (String::from("ty"), LpValue::F32(self.ty)),
             ],
         }
     }
 }
 
-impl FromModelValue for Affine2d {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
-        let ModelValue::Struct { name, fields } = value else {
+impl FromLpValue for Affine2d {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
+        let LpValue::Struct { name, fields } = value else {
             return Err(SlotLeafError::new("expected Affine2d struct"));
         };
         if name.as_deref() != Some("Affine2d") || fields.len() != 6 {
@@ -151,45 +151,45 @@ pub fn affine2d_shape() -> SlotValueShape {
     }
 }
 
-fn affine2d_model_type() -> ModelType {
-    ModelType::Struct {
+fn affine2d_model_type() -> LpType {
+    LpType::Struct {
         name: Some(String::from("Affine2d")),
         fields: vec![
             ModelStructMember {
                 name: String::from("m00"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("m01"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("m10"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("m11"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("tx"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
             ModelStructMember {
                 name: String::from("ty"),
-                ty: ModelType::F32,
+                ty: LpType::F32,
             },
         ],
     }
 }
 
 fn struct_f32(
-    fields: &[(String, ModelValue)],
+    fields: &[(String, LpValue)],
     index: usize,
     expected_name: &str,
 ) -> Result<f32, SlotLeafError> {
     match fields.get(index) {
-        Some((name, ModelValue::F32(value))) if name == expected_name => Ok(*value),
+        Some((name, LpValue::F32(value))) if name == expected_name => Ok(*value),
         _ => Err(SlotLeafError::new(alloc::format!(
             "expected Affine2d.{expected_name}"
         ))),

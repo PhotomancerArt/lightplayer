@@ -1,5 +1,5 @@
 use lpc_model::{
-    FrameId, ModelValue, SlotAccess, SlotData, SlotShapeId, SlotShapeRegistry,
+    FrameId, LpValue, SlotAccess, SlotData, SlotShapeId, SlotShapeRegistry,
     set_current_state_version,
 };
 use lpc_view::SlotMirrorView;
@@ -49,7 +49,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
     assert_shader_param(
         harness.client.roots.get("engine.shader_node").unwrap(),
         "exposure",
-        ModelValue::Vec3([0.25, 0.5, 0.75]),
+        LpValue::Vec3([0.25, 0.5, 0.75]),
     );
 }
 

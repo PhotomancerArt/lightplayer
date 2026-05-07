@@ -1,4 +1,4 @@
-use crate::{ModelType, ModelValue};
+use crate::{LpType, LpValue};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -41,7 +41,7 @@ impl fmt::Display for SlotLeafId {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotValueShape {
     pub leaf: SlotLeafId,
-    pub ty: ModelType,
+    pub ty: LpType,
     #[serde(default)]
     pub meta: SlotMeta,
     #[serde(default)]
@@ -49,7 +49,7 @@ pub struct SlotValueShape {
 }
 
 impl SlotValueShape {
-    pub fn raw(ty: ModelType) -> Self {
+    pub fn raw(ty: LpType) -> Self {
         Self {
             leaf: raw_leaf_id(&ty),
             ty,
@@ -124,17 +124,17 @@ impl PartialEq for OrderedF32 {
 impl Eq for OrderedF32 {}
 
 /// Conversion from a typed slot leaf value into the generic model value.
-pub trait ToModelValue {
-    fn to_model_value(&self) -> ModelValue;
+pub trait ToLpValue {
+    fn to_lp_value(&self) -> LpValue;
 }
 
 /// Conversion from the generic model value into a typed slot leaf value.
-pub trait FromModelValue: Sized {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError>;
+pub trait FromLpValue: Sized {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError>;
 }
 
 /// Atomic typed leaf contract.
-pub trait SlotLeaf: ToModelValue + FromModelValue {
+pub trait SlotLeaf: ToLpValue + FromLpValue {
     const LEAF_ID: SlotLeafId;
 
     fn value_shape() -> SlotValueShape;
@@ -162,66 +162,66 @@ impl fmt::Display for SlotLeafError {
 
 impl core::error::Error for SlotLeafError {}
 
-impl ToModelValue for ModelValue {
-    fn to_model_value(&self) -> ModelValue {
+impl ToLpValue for LpValue {
+    fn to_lp_value(&self) -> LpValue {
         self.clone()
     }
 }
 
-impl ToModelValue for String {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String(self.clone())
+impl ToLpValue for String {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.clone())
     }
 }
 
-impl ToModelValue for &str {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::String((*self).to_string())
+impl ToLpValue for &str {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String((*self).to_string())
     }
 }
 
-impl ToModelValue for i32 {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::I32(*self)
+impl ToLpValue for i32 {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::I32(*self)
     }
 }
 
-impl ToModelValue for u32 {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::U32(*self)
+impl ToLpValue for u32 {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::U32(*self)
     }
 }
 
-impl ToModelValue for f32 {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::F32(*self)
+impl ToLpValue for f32 {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::F32(*self)
     }
 }
 
-impl ToModelValue for bool {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Bool(*self)
+impl ToLpValue for bool {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::Bool(*self)
     }
 }
 
-impl ToModelValue for [f32; 2] {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Vec2(*self)
+impl ToLpValue for [f32; 2] {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::Vec2(*self)
     }
 }
 
-impl ToModelValue for [f32; 3] {
-    fn to_model_value(&self) -> ModelValue {
-        ModelValue::Vec3(*self)
+impl ToLpValue for [f32; 3] {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::Vec3(*self)
     }
 }
 
-macro_rules! impl_from_model_value {
+macro_rules! impl_from_lp_value {
     ($ty:ty, $variant:ident) => {
-        impl FromModelValue for $ty {
-            fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+        impl FromLpValue for $ty {
+            fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
                 match value {
-                    ModelValue::$variant(value) => Ok(value),
+                    LpValue::$variant(value) => Ok(value),
                     other => Err(SlotLeafError::new(alloc::format!(
                         "expected {}, got {other:?}",
                         stringify!($variant)
@@ -232,16 +232,16 @@ macro_rules! impl_from_model_value {
     };
 }
 
-impl_from_model_value!(String, String);
-impl_from_model_value!(i32, I32);
-impl_from_model_value!(u32, U32);
-impl_from_model_value!(f32, F32);
-impl_from_model_value!(bool, Bool);
+impl_from_lp_value!(String, String);
+impl_from_lp_value!(i32, I32);
+impl_from_lp_value!(u32, U32);
+impl_from_lp_value!(f32, F32);
+impl_from_lp_value!(bool, Bool);
 
-impl FromModelValue for [f32; 2] {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl FromLpValue for [f32; 2] {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::Vec2(value) => Ok(value),
+            LpValue::Vec2(value) => Ok(value),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected Vec2, got {other:?}"
             ))),
@@ -249,10 +249,10 @@ impl FromModelValue for [f32; 2] {
     }
 }
 
-impl FromModelValue for [f32; 3] {
-    fn from_model_value(value: ModelValue) -> Result<Self, SlotLeafError> {
+impl FromLpValue for [f32; 3] {
+    fn from_lp_value(value: LpValue) -> Result<Self, SlotLeafError> {
         match value {
-            ModelValue::Vec3(value) => Ok(value),
+            LpValue::Vec3(value) => Ok(value),
             other => Err(SlotLeafError::new(alloc::format!(
                 "expected Vec3, got {other:?}"
             ))),
@@ -275,64 +275,64 @@ macro_rules! impl_slot_leaf {
 impl_slot_leaf!(
     String,
     "slot.leaf.raw_string",
-    SlotValueShape::raw(ModelType::String)
+    SlotValueShape::raw(LpType::String)
 );
 impl_slot_leaf!(
     i32,
     "slot.leaf.raw_i32",
-    SlotValueShape::raw(ModelType::I32)
+    SlotValueShape::raw(LpType::I32)
 );
 impl_slot_leaf!(
     u32,
     "slot.leaf.raw_u32",
-    SlotValueShape::raw(ModelType::U32)
+    SlotValueShape::raw(LpType::U32)
 );
 impl_slot_leaf!(
     f32,
     "slot.leaf.raw_f32",
-    SlotValueShape::raw(ModelType::F32)
+    SlotValueShape::raw(LpType::F32)
 );
 impl_slot_leaf!(
     bool,
     "slot.leaf.raw_bool",
-    SlotValueShape::raw(ModelType::Bool)
+    SlotValueShape::raw(LpType::Bool)
 );
 impl_slot_leaf!(
     [f32; 2],
     "slot.leaf.raw_vec2",
-    SlotValueShape::raw(ModelType::Vec2)
+    SlotValueShape::raw(LpType::Vec2)
 );
 impl_slot_leaf!(
     [f32; 3],
     "slot.leaf.raw_vec3",
-    SlotValueShape::raw(ModelType::Vec3)
+    SlotValueShape::raw(LpType::Vec3)
 );
 
-fn raw_leaf_id(ty: &ModelType) -> SlotLeafId {
+fn raw_leaf_id(ty: &LpType) -> SlotLeafId {
     SlotLeafId::from_static_name(match ty {
-        ModelType::String => "slot.leaf.raw_string",
-        ModelType::I32 => "slot.leaf.raw_i32",
-        ModelType::U32 => "slot.leaf.raw_u32",
-        ModelType::F32 => "slot.leaf.raw_f32",
-        ModelType::Bool => "slot.leaf.raw_bool",
-        ModelType::Vec2 => "slot.leaf.raw_vec2",
-        ModelType::Vec3 => "slot.leaf.raw_vec3",
-        ModelType::Vec4 => "slot.leaf.raw_vec4",
-        ModelType::IVec2 => "slot.leaf.raw_ivec2",
-        ModelType::IVec3 => "slot.leaf.raw_ivec3",
-        ModelType::IVec4 => "slot.leaf.raw_ivec4",
-        ModelType::UVec2 => "slot.leaf.raw_uvec2",
-        ModelType::UVec3 => "slot.leaf.raw_uvec3",
-        ModelType::UVec4 => "slot.leaf.raw_uvec4",
-        ModelType::BVec2 => "slot.leaf.raw_bvec2",
-        ModelType::BVec3 => "slot.leaf.raw_bvec3",
-        ModelType::BVec4 => "slot.leaf.raw_bvec4",
-        ModelType::Mat2x2 => "slot.leaf.raw_mat2x2",
-        ModelType::Mat3x3 => "slot.leaf.raw_mat3x3",
-        ModelType::Mat4x4 => "slot.leaf.raw_mat4x4",
-        ModelType::Array(_, _) => "slot.leaf.raw_array",
-        ModelType::Struct { .. } => "slot.leaf.raw_struct",
-        ModelType::Resource => "slot.leaf.raw_resource",
+        LpType::String => "slot.leaf.raw_string",
+        LpType::I32 => "slot.leaf.raw_i32",
+        LpType::U32 => "slot.leaf.raw_u32",
+        LpType::F32 => "slot.leaf.raw_f32",
+        LpType::Bool => "slot.leaf.raw_bool",
+        LpType::Vec2 => "slot.leaf.raw_vec2",
+        LpType::Vec3 => "slot.leaf.raw_vec3",
+        LpType::Vec4 => "slot.leaf.raw_vec4",
+        LpType::IVec2 => "slot.leaf.raw_ivec2",
+        LpType::IVec3 => "slot.leaf.raw_ivec3",
+        LpType::IVec4 => "slot.leaf.raw_ivec4",
+        LpType::UVec2 => "slot.leaf.raw_uvec2",
+        LpType::UVec3 => "slot.leaf.raw_uvec3",
+        LpType::UVec4 => "slot.leaf.raw_uvec4",
+        LpType::BVec2 => "slot.leaf.raw_bvec2",
+        LpType::BVec3 => "slot.leaf.raw_bvec3",
+        LpType::BVec4 => "slot.leaf.raw_bvec4",
+        LpType::Mat2x2 => "slot.leaf.raw_mat2x2",
+        LpType::Mat3x3 => "slot.leaf.raw_mat3x3",
+        LpType::Mat4x4 => "slot.leaf.raw_mat4x4",
+        LpType::Array(_, _) => "slot.leaf.raw_array",
+        LpType::Struct { .. } => "slot.leaf.raw_struct",
+        LpType::Resource => "slot.leaf.raw_resource",
     })
 }
 
@@ -355,8 +355,8 @@ const fn fnv1a32(input: &str) -> u32 {
 mod tests {
     use super::*;
     use crate::{
-        Affine2d, ColorOrderValue, Dim2u, FromModelValue, RenderProductId, ResourceRef,
-        ToModelValue, affine2d_shape, color_order_shape, dim2u_shape, relative_node_ref_shape,
+        Affine2d, ColorOrderValue, Dim2u, FromLpValue, RenderProductId, ResourceRef,
+        ToLpValue, affine2d_shape, color_order_shape, dim2u_shape, relative_node_ref_shape,
         render_product_resource_shape, runtime_buffer_resource_shape,
     };
 
@@ -388,23 +388,23 @@ mod tests {
             width: 64,
             height: 32,
         };
-        assert_eq!(Dim2u::from_model_value(dim.to_model_value()).unwrap(), dim);
+        assert_eq!(Dim2u::from_lp_value(dim.to_lp_value()).unwrap(), dim);
 
         let affine = Affine2d::identity();
         assert_eq!(
-            Affine2d::from_model_value(affine.to_model_value()).unwrap(),
+            Affine2d::from_lp_value(affine.to_lp_value()).unwrap(),
             affine
         );
 
         let order = ColorOrderValue::Grb;
         assert_eq!(
-            ColorOrderValue::from_model_value(order.to_model_value()).unwrap(),
+            ColorOrderValue::from_lp_value(order.to_lp_value()).unwrap(),
             order
         );
 
         let resource = ResourceRef::render_product(RenderProductId::new(7));
         assert_eq!(
-            ResourceRef::from_model_value(resource.to_model_value()).unwrap(),
+            ResourceRef::from_lp_value(resource.to_lp_value()).unwrap(),
             resource
         );
     }

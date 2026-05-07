@@ -24,7 +24,7 @@ pub mod __private {
 
 pub mod error;
 pub mod node;
-pub mod prop;
+pub mod value;
 pub mod slot;
 pub mod types;
 
@@ -41,8 +41,8 @@ pub mod resource;
 mod versioned;
 // --- Foundation re-exports ------------------------------------------------------------------
 
-pub use prop::constraint;
-pub use prop::kind;
+pub use value::constraint;
+pub use value::kind;
 
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
@@ -53,8 +53,8 @@ pub use error::DomainError;
 /// New slot-model code should prefer typed slot leaf descriptors whose semantic
 /// meaning owns its storage shape.
 pub use kind::Kind;
-pub use prop::Versioned;
-pub use prop::{ModelStructMember, ModelType, ModelValue};
+pub use value::Versioned;
+pub use value::{ModelStructMember, LpType, LpValue};
 
 pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
@@ -64,14 +64,14 @@ pub use node::{
 };
 pub use project::{FrameId, ProjectConfig};
 pub use project::{advance_state_version, current_state_version, set_current_state_version};
-pub use prop::value_path::ValuePath;
+pub use value::value_path::ValuePath;
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    FromModelValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
+    FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
     ResourceRefSlot, SlotEditorHint, SlotEnumOption, SlotLeaf, SlotLeafError, SlotLeafId,
-    SlotMapValueAccess, SlotValueShape, SourcePathSlot, ToModelValue, XySlot, affine2d_shape,
+    SlotMapValueAccess, SlotValueShape, SourcePathSlot, ToLpValue, XySlot, affine2d_shape,
     artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape,
     relative_node_ref_shape, render_order_shape, render_product_resource_shape, resource_ref_shape,
     runtime_buffer_resource_shape, source_path_shape, xy_shape,

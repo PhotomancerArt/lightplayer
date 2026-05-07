@@ -1,6 +1,6 @@
 //! Private serde wire shape for [`crate::prop::src_value_spec::SrcValueSpec`].
 
-use lpc_model::ModelValue;
+use lpc_model::LpValue;
 
 use crate::prop::src_texture_spec::SrcTextureSpec;
 
@@ -9,7 +9,7 @@ use crate::prop::src_texture_spec::SrcTextureSpec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub(crate) enum SrcValueSpecWire {
-    Literal(ModelValue),
+    Literal(LpValue),
     Texture(SrcTextureSpec),
 }
 
