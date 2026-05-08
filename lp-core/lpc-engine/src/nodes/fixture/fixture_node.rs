@@ -11,13 +11,13 @@ use lpc_model::{FrameId, NodeId, SlotPath};
 use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
-use super::shader_node::shader_texture_output_path;
-use super::texture_node::texture_dimension_query_targets;
-use crate::legacy::nodes::fixture::gamma::apply_gamma;
-use crate::legacy::nodes::fixture::mapping::{
+use crate::nodes::fixture::gamma::apply_gamma;
+use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators,
 };
+use crate::nodes::shader::shader_node::shader_texture_output_path;
+use crate::nodes::texture::texture_node::texture_dimension_query_targets;
 use lpc_model::Versioned;
 use lpc_source::node::texture::TextureFormat;
 
@@ -308,7 +308,7 @@ fn uv_batch_for_fixture_entries(
     RenderSampleBatch { points }
 }
 
-/// Match legacy [`crate::legacy::nodes::fixture::mapping::accumulation`] channel math but source
+/// Match legacy [`crate::nodes::fixture::mapping::accumulation`] channel math but source
 /// pixel RGB from normalized [`RenderSample`] colors (converted to legacy u8 like RGBA16 >> 8).
 fn accumulate_fixture_channels_from_texture_samples(
     entries: &[PixelMappingEntry],

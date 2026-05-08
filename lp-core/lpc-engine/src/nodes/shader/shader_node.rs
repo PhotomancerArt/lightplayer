@@ -24,7 +24,7 @@ use crate::render_product::{RenderProductId, TextureRenderProduct};
 use crate::resolver::QueryKey;
 use crate::runtime_product::RuntimeProduct;
 
-use super::texture_node::texture_dimension_query_targets;
+use crate::nodes::texture::texture_node::texture_dimension_query_targets;
 
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end (matches legacy shader runtime).
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
@@ -393,11 +393,11 @@ mod tests {
     use alloc::sync::Arc;
     use alloc::vec;
 
-    use super::super::TextureNode;
     use super::*;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     use crate::node::NodeResourceInitContext;
+    use crate::nodes::TextureNode;
     use crate::render_product::{RenderProductStore, RenderSampleBatch, RenderSamplePoint};
     use crate::resolver::ResolveLogLevel;
     use crate::runtime_buffer::RuntimeBufferStore;

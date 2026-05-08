@@ -17,7 +17,6 @@ pub mod bus;
 pub mod engine;
 pub mod error;
 pub mod gfx;
-pub mod legacy;
 pub mod node;
 pub mod nodes;
 pub mod output;
@@ -43,8 +42,8 @@ pub use bus::{Bus, BusError, ChannelEntry};
 pub use engine::{Engine, EngineError};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
-pub use legacy::output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project_runtime::{
     CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, LoadedNodeDef, OutputFlushError,
     RuntimeServices, SourceAuthoringIndex,

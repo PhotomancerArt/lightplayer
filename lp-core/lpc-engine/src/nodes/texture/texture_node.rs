@@ -25,7 +25,7 @@ fn format_path() -> SlotPath {
     SlotPath::parse("format").expect("format path")
 }
 
-/// [`NodeId`] of the texture and conventional prop paths for width/height (used by [`super::ShaderNode`]).
+/// [`NodeId`] of the texture and conventional prop paths for width/height (used by shader nodes).
 pub(crate) fn texture_dimension_query_targets(
     texture_node_id: NodeId,
 ) -> (NodeId, SlotPath, SlotPath) {

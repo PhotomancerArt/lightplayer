@@ -5,17 +5,6 @@ use lpc_source::SrcValueSpec;
 
 use super::BindingId;
 
-/// Input to [`crate::binding::BindingRegistry::register`]: all fields of a
-/// [`BindingEntry`] except assigned id and version (the frame sets version).
-#[derive(Clone, Debug)]
-pub struct BindingDraft {
-    pub source: BindingSource,
-    pub target: BindingTarget,
-    pub priority: BindingPriority,
-    pub kind: Kind,
-    pub owner: NodeId,
-}
-
 /// One registered binding: identity, endpoints, priority, kind, and version.
 #[derive(Clone, Debug)]
 pub struct BindingEntry {
@@ -25,6 +14,17 @@ pub struct BindingEntry {
     pub priority: BindingPriority,
     pub kind: Kind,
     pub version: FrameId,
+    pub owner: NodeId,
+}
+
+/// Input to [`crate::binding::BindingRegistry::register`]: all fields of a
+/// [`BindingEntry`] except assigned id and version (the frame sets version).
+#[derive(Clone, Debug)]
+pub struct BindingDraft {
+    pub source: BindingSource,
+    pub target: BindingTarget,
+    pub priority: BindingPriority,
+    pub kind: Kind,
     pub owner: NodeId,
 }
 
