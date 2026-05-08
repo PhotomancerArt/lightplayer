@@ -22,6 +22,7 @@ pub mod __private {
 
 // --- Foundation -------------------------------------------------------------------------------
 
+pub mod binding;
 pub mod error;
 pub mod node;
 pub mod slot;
@@ -44,6 +45,10 @@ mod versioned;
 pub use value::constraint;
 pub use value::kind;
 
+pub use binding::{
+    BindingDef, BindingDefError, BindingDefs, BindingEndpoint, BindingEndpointError, BusSlotRef,
+    BusSlotRefError, NodeSlotRef, NodeSlotRefError,
+};
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Cross-cutting error for domain property access and validation.

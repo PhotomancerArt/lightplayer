@@ -4,8 +4,9 @@ use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
 use lpc_model::lp_path::LpPathBuf;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, Dim2u, Dim2uSlot, MapSlot, OptionSlot, PositiveF32Slot,
-    RatioSlot, RelativeNodeRef, RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
+    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
+    Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
+    RelativeNodeRefSlot, RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
 use lpc_source::legacy::glsl_opts::GlslOpts;
 use lpc_source::node::{
@@ -49,7 +50,7 @@ impl TextureBuilder {
 
 /// Builder for shader nodes
 pub struct ShaderBuilder {
-    texture_path: LpPathBuf,
+    _texture_path: LpPathBuf,
     glsl_source: String,
     render_order: i32,
 }
@@ -107,7 +108,7 @@ impl ProjectBuilder {
     /// Start building a shader node
     pub fn shader(&mut self, texture_path: &LpPathBuf) -> ShaderBuilder {
         ShaderBuilder {
-            texture_path: texture_path.clone(),
+            _texture_path: texture_path.clone(),
             glsl_source: String::from(
                 "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }",
             ),
@@ -239,6 +240,7 @@ impl TextureBuilder {
                 width: self.width,
                 height: self.height,
             }),
+            bindings: bus_input_binding_defs("visual.out"),
         };
 
         let toml = prepend_kind(
@@ -277,12 +279,11 @@ impl ShaderBuilder {
         let path = artifact_path_for_node(&node_name);
         let glsl_path = format!("/{node_name}.glsl");
         let glsl_file = format!("{node_name}.glsl");
-        let texture_loc = builder.node_loc_for_path(&self.texture_path);
 
         let config = ShaderDef {
             glsl_path: SourcePathSlot::new(glsl_file),
-            texture_loc: RelativeNodeRefSlot::new(texture_loc),
             render_order: RenderOrderSlot::new(self.render_order),
+            bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
         };
@@ -382,7 +383,7 @@ impl FixtureBuilder {
 
         let config = FixtureDef {
             output_loc: RelativeNodeRefSlot::new(output_loc),
-            texture_loc: RelativeNodeRefSlot::new(texture_loc),
+            bindings: texture_input_binding_defs(texture_loc),
             mapping: self.mapping,
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
@@ -408,6 +409,40 @@ impl FixtureBuilder {
 
         path
     }
+}
+
+fn bus_input_binding_defs(slot: &str) -> BindingDefs {
+    single_binding_defs(
+        "input",
+        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse(slot).expect("valid bus slot path"),
+        ))),
+    )
+}
+
+fn bus_output_binding_defs(slot: &str) -> BindingDefs {
+    single_binding_defs(
+        "output",
+        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse(slot).expect("valid bus slot path"),
+        ))),
+    )
+}
+
+fn texture_input_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
+    single_binding_defs(
+        "input",
+        BindingDef::source(BindingEndpoint::Node(NodeSlotRef::new(
+            texture_loc,
+            SlotPath::parse("output").expect("valid texture output slot"),
+        ))),
+    )
+}
+
+fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
+    let mut entries = BTreeMap::new();
+    entries.insert(String::from(slot), binding);
+    BindingDefs::new(entries)
 }
 
 fn default_mapping() -> MappingConfig {

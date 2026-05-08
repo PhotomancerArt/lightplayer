@@ -1,4 +1,4 @@
-use lpc_model::RelativeNodeRef;
+use lpc_model::{BindingEndpoint, RelativeNodeRef};
 use lpc_source::ProjectDef;
 use lpc_source::node::fixture::FixtureDef;
 use lpc_source::node::output::OutputDef;
@@ -25,13 +25,17 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     let texture: TextureDef = read_basic_toml("texture.toml");
     assert_eq!(texture.width(), 16);
     assert_eq!(texture.height(), 16);
+    assert!(matches!(
+        texture.bindings.entries()["input"].source,
+        Some(BindingEndpoint::Bus(_))
+    ));
 
     let shader: ShaderDef = read_basic_toml("shader.toml");
     assert_eq!(shader.glsl_path.value(), "shader.glsl");
-    assert_eq!(
-        shader.texture_loc(),
-        &RelativeNodeRef::parse("..texture").unwrap()
-    );
+    assert!(matches!(
+        shader.bindings.entries()["output"].target,
+        Some(BindingEndpoint::Bus(_))
+    ));
 
     let output: OutputDef = read_basic_toml("output.toml");
     assert_eq!(output.pin(), 4);
@@ -42,10 +46,10 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
         fixture.output_loc(),
         &RelativeNodeRef::parse("..output").unwrap()
     );
-    assert_eq!(
-        fixture.texture_loc(),
-        &RelativeNodeRef::parse("..texture").unwrap()
-    );
+    assert!(matches!(
+        fixture.bindings.entries()["input"].source,
+        Some(BindingEndpoint::Node(_))
+    ));
 }
 
 fn read_basic_toml<T>(name: &str) -> T

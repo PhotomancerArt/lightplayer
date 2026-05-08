@@ -1,13 +1,16 @@
 use crate::node::NodeKind;
 use crate::node::node_def::NodeDef;
-use lpc_model::{Dim2u, Dim2uSlot};
+use lpc_model::{BindingDefs, Dim2u, Dim2uSlot};
 use serde::{Deserialize, Serialize};
 
 /// Authored texture node definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
 #[slot(root)]
 pub struct TextureDef {
     pub size: Dim2uSlot,
+    /// Authored slot bindings for texture materialization.
+    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
+    pub bindings: BindingDefs,
     // Format selection will be added when texture output semantics are revisited.
 }
 
@@ -15,6 +18,7 @@ impl TextureDef {
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             size: Dim2uSlot::new(Dim2u { width, height }),
+            bindings: BindingDefs::default(),
         }
     }
 

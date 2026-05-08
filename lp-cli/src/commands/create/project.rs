@@ -6,8 +6,9 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, Dim2u, Dim2uSlot, MapSlot, OptionSlot, RelativeNodeRef,
-    RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
+    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
+    Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
+    RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
 use lpc_source::node::{
     fixture::{ColorOrder, FixtureDef, MappingConfig},
@@ -65,6 +66,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
             width: 64,
             height: 64,
         }),
+        bindings: bus_input_binding_defs("visual.out"),
     };
     let texture_toml = with_kind(
         "texture",
@@ -76,10 +78,8 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
     // Create shader node
     let shader_config = ShaderDef {
         glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
-        texture_loc: RelativeNodeRefSlot::new(
-            RelativeNodeRef::parse("..texture").expect("valid node ref"),
-        ),
         render_order: RenderOrderSlot::new(0),
+        bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_source::legacy::glsl_opts::GlslOpts::default(),
         param_defs: MapSlot::default(),
     };
@@ -175,7 +175,7 @@ vec4 render(vec2 pos) {
         output_loc: RelativeNodeRefSlot::new(
             RelativeNodeRef::parse("..output").expect("valid node ref"),
         ),
-        texture_loc: RelativeNodeRefSlot::new(
+        bindings: texture_input_binding_defs(
             RelativeNodeRef::parse("..texture").expect("valid node ref"),
         ),
         mapping: MappingConfig::path_points(MapSlot::default(), 2.0),
@@ -219,6 +219,40 @@ artifact = "./fixture.toml"
 
 fn with_kind(kind: &str, body: String) -> String {
     format!("kind = \"{kind}\"\n{body}")
+}
+
+fn bus_input_binding_defs(slot: &str) -> BindingDefs {
+    single_binding_defs(
+        "input",
+        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse(slot).expect("valid bus slot path"),
+        ))),
+    )
+}
+
+fn bus_output_binding_defs(slot: &str) -> BindingDefs {
+    single_binding_defs(
+        "output",
+        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse(slot).expect("valid bus slot path"),
+        ))),
+    )
+}
+
+fn texture_input_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
+    single_binding_defs(
+        "input",
+        BindingDef::source(BindingEndpoint::Node(NodeSlotRef::new(
+            texture_loc,
+            SlotPath::parse("output").expect("valid texture output slot"),
+        ))),
+    )
+}
+
+fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
+    let mut entries = std::collections::BTreeMap::new();
+    entries.insert(String::from(slot), binding);
+    BindingDefs::new(entries)
 }
 
 /// Print success message with next steps
@@ -304,6 +338,10 @@ mod tests {
                 .expect("texture node TOML");
         assert_eq!(texture_config.width(), 64);
         assert_eq!(texture_config.height(), 64);
+        assert!(matches!(
+            texture_config.bindings.entries()["input"].source,
+            Some(BindingEndpoint::Bus(_))
+        ));
 
         // Verify shader node content
         let shader_toml = fs.read_file("/shader.toml".as_path()).unwrap();
@@ -311,10 +349,10 @@ mod tests {
             toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
                 .expect("shader node TOML");
         assert_eq!(shader_config.glsl_path.value(), "shader.glsl");
-        assert_eq!(
-            shader_config.texture_loc(),
-            &RelativeNodeRef::parse("..texture").expect("valid node ref")
-        );
+        assert!(matches!(
+            shader_config.bindings.entries()["output"].target,
+            Some(BindingEndpoint::Bus(_))
+        ));
 
         // Verify GLSL exists
         let glsl = fs.read_file("/shader.glsl".as_path()).unwrap();

@@ -76,9 +76,9 @@ fn real_source_defs_sync_as_slot_roots() {
             shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "texture_loc",
+            "bindings[output]",
         ),
-        LpValue::String(String::from("..texture")),
+        binding_value("target", "bus#visual.out"),
     );
     assert_value(
         select(
@@ -94,8 +94,10 @@ fn real_source_defs_sync_as_slot_roots() {
         r#"
 kind = "shader"
 glsl_path = "shader.glsl"
-texture_loc = "..texture"
 render_order = 0
+
+[bindings.output]
+target = "bus#visual.out"
 
 [param_defs.speed]
 label = "Speed"
@@ -194,6 +196,22 @@ fn assert_value(data: &SlotData, expected: LpValue) {
         panic!("expected value, got {data:?}");
     };
     assert_eq!(value.value(), &expected);
+}
+
+fn binding_value(direction: &str, endpoint: &str) -> LpValue {
+    LpValue::Struct {
+        name: Some(String::from("BindingDef")),
+        fields: vec![
+            (
+                String::from("direction"),
+                LpValue::String(String::from(direction)),
+            ),
+            (
+                String::from("endpoint"),
+                LpValue::String(String::from(endpoint)),
+            ),
+        ],
+    }
 }
 
 fn select<'a>(

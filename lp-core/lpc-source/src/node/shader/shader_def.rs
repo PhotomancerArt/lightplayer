@@ -3,7 +3,7 @@ use crate::node::NodeKind;
 use crate::node::node_def::NodeDef;
 use crate::node::shader::ShaderParamDef;
 use alloc::string::String;
-use lpc_model::{AsLpPathBuf, LpPathBuf, MapSlot, RelativeNodeRef, RelativeNodeRefSlot};
+use lpc_model::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot};
 use lpc_model::{RenderOrderSlot, SourcePathSlot};
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +13,11 @@ use serde::{Deserialize, Serialize};
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: SourcePathSlot,
-    /// Texture node locator to render into.
-    pub texture_loc: RelativeNodeRefSlot,
     /// Render order - lower numbers render first (default 0)
     pub render_order: RenderOrderSlot,
+    /// Authored slot bindings for shader inputs and outputs.
+    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
+    pub bindings: BindingDefs,
     /// GLSL compilation options
     #[serde(default)]
     pub glsl_opts: GlslOpts,
@@ -28,8 +29,8 @@ impl Default for ShaderDef {
     fn default() -> Self {
         Self {
             glsl_path: SourcePathSlot::new(String::from("main.glsl")),
-            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::current()),
             render_order: RenderOrderSlot::new(0),
+            bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
         }
@@ -39,10 +40,6 @@ impl Default for ShaderDef {
 impl ShaderDef {
     pub fn glsl_path_buf(&self) -> LpPathBuf {
         self.glsl_path.value().as_path_buf()
-    }
-
-    pub fn texture_loc(&self) -> &RelativeNodeRef {
-        self.texture_loc.value()
     }
 
     pub fn render_order(&self) -> i32 {
@@ -69,8 +66,8 @@ mod tests {
     fn test_shader_def_kind() {
         let def = ShaderDef {
             glsl_path: SourcePathSlot::new(String::from("main.glsl")),
-            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..tex_texture").unwrap()),
             render_order: RenderOrderSlot::new(0),
+            bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
         };

@@ -3,8 +3,9 @@ use crate::node::fixture::mapping::MappingConfig;
 use crate::node::node_def::NodeDef;
 use alloc::string::ToString;
 use lpc_model::{
-    Affine2dSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
-    SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError, ValueSlot,
+    Affine2dSlot, BindingDefs, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,
+    RelativeNodeRefSlot, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError,
+    ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +15,9 @@ use serde::{Deserialize, Serialize};
 pub struct FixtureDef {
     /// Output node locator.
     pub output_loc: RelativeNodeRefSlot,
-    /// Texture node locator.
-    pub texture_loc: RelativeNodeRefSlot,
+    /// Authored slot bindings for fixture inputs.
+    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
+    pub bindings: BindingDefs,
     /// Fixture mapping definition.
     #[slot(enum)]
     pub mapping: MappingConfig,
@@ -34,10 +36,6 @@ pub struct FixtureDef {
 impl FixtureDef {
     pub fn output_loc(&self) -> &RelativeNodeRef {
         self.output_loc.value()
-    }
-
-    pub fn texture_loc(&self) -> &RelativeNodeRef {
-        self.texture_loc.value()
     }
 
     pub fn color_order(&self) -> ColorOrder {
@@ -267,7 +265,7 @@ mod tests {
         );
         let def = FixtureDef {
             output_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..out_output").unwrap()),
-            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..tex_texture").unwrap()),
+            bindings: BindingDefs::default(),
             mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),

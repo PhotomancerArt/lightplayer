@@ -1,9 +1,11 @@
 kind = "fixture"
 output_loc = "..output"
-texture_loc = "..texture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+
+[bindings.input]
+source = "..texture#output"
 
 [transform]
 m00 = 1.0

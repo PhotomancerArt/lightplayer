@@ -1,7 +1,9 @@
 kind = "shader"
 glsl_path = "shader.glsl"
-texture_loc = "..texture"
 render_order = 0
+
+[bindings.output]
+target = "bus#visual.out"
 
 [glsl_opts]
 add_sub = "wrapping"

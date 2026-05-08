@@ -1,10 +1,9 @@
-//! [`Kind`]-associated defaults that live with Presentation and [`SrcBinding`], so
-//! `lpc_model::prop::kind::Kind` does not depend on `lpc-source`.
+//! Legacy [`Kind`]-associated presentation defaults.
+//!
+//! New slot-domain code should prefer semantic slot leaves with their own
+//! metadata. This module remains only for older source-shape tests and tooling.
 
 use crate::presentation::Presentation;
-use crate::prop::src_binding::SrcBinding;
-use alloc::string::String;
-use lpc_model::bus::ChannelName;
 use lpc_model::value::kind::Kind;
 
 /// **Presentation** when a [`super::src_shape::SrcSlot`] omits `present`.
@@ -23,18 +22,6 @@ pub fn kind_default_presentation(k: Kind) -> Presentation {
         Kind::Position3d => NumberInput,
         Kind::Texture => TexturePreview,
         Kind::AudioLevel => NumberInput,
-    }
-}
-
-/// **Conventional** input [`SrcBinding`] when a slot’s `bind` is absent.
-pub fn kind_default_bind(k: Kind) -> Option<SrcBinding> {
-    match k {
-        Kind::Instant => Some(SrcBinding::Bus(ChannelName(String::from("time")))),
-        Kind::Texture => Some(SrcBinding::Bus(ChannelName(String::from("video/in/0")))),
-        Kind::AudioLevel => Some(SrcBinding::Bus(ChannelName(String::from(
-            "audio/in/0/level",
-        )))),
-        _ => None,
     }
 }
 
@@ -68,31 +55,10 @@ mod tests {
     }
 
     #[test]
-    fn default_bind_for_instant_is_time() {
-        match kind_default_bind(Kind::Instant) {
-            Some(SrcBinding::Bus(ChannelName(ch))) => assert_eq!(ch, "time"),
-            other => panic!("expected Bus(time), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn default_bind_for_color_is_none() {
-        assert!(kind_default_bind(Kind::Color).is_none());
-    }
-
-    #[test]
     fn audio_level_default_presentation_is_number_input() {
         assert_eq!(
             kind_default_presentation(Kind::AudioLevel),
             Presentation::NumberInput
         );
-    }
-
-    #[test]
-    fn audio_level_default_bind_is_audio_in_level() {
-        match kind_default_bind(Kind::AudioLevel) {
-            Some(SrcBinding::Bus(ChannelName(ch))) => assert_eq!(ch, "audio/in/0/level"),
-            other => panic!("expected Bus(audio/in/0/level), got {other:?}"),
-        }
     }
 }

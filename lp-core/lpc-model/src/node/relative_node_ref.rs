@@ -22,6 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Future value references may append a value suffix, but this type only
 /// validates and parses the node-reference portion.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct RelativeNodeRef {
     parent_hops: u8,
     segments: Vec<NodeName>,

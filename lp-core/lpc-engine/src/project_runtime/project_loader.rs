@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
-use lpc_model::{FrameId, Kind, LpValue, NodeId, NodeName, SlotPath};
+use lpc_model::{BindingDefs, BindingEndpoint, FrameId, Kind, LpValue, NodeId, NodeName, SlotPath};
 use lpc_source::ArtifactReadRoot;
 use lpc_source::node::{
     NodeKind, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
@@ -246,8 +246,7 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let LoadedNodeDef::Shader(config) = &node.config {
-                let texture_node =
-                    resolve_node_loc(loaded_nodes, node, config.texture_loc(), "texture")?;
+                let texture_node = resolve_shader_texture_node(loaded_nodes, node, config)?;
                 let shader_path =
                     resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
                 let glsl_source = read_utf8_file(root, shader_path.as_path())?;
@@ -275,14 +274,13 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let LoadedNodeDef::Fixture(config) = &node.config {
-                let texture_node =
-                    resolve_node_loc(loaded_nodes, node, config.texture_loc(), "texture")?;
+                let texture_node = resolve_fixture_texture_node(loaded_nodes, node, config)?;
                 let shader_node = find_shader_for_texture(loaded_nodes, texture_node.id)
                     .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!(
-                            "no shader targets texture node ref `{}`",
-                            config.texture_loc()
+                            "no shader targets texture node `{}`",
+                            texture_node.name.as_str()
                         ),
                     })?;
                 let output_node =
@@ -469,14 +467,6 @@ fn node_kind_name(config: &LoadedNodeDef, path: &LpPath) -> Result<NodeName, Cor
     })
 }
 
-fn find_node_by_loc<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    current: &'a LoadedNode,
-    loc: &lpc_model::RelativeNodeRef,
-) -> Option<&'a LoadedNode> {
-    resolve_relative_node_ref(loaded_nodes, current, loc)
-}
-
 fn resolve_node_loc<'a>(
     loaded_nodes: &'a [LoadedNode],
     current: &'a LoadedNode,
@@ -510,6 +500,87 @@ fn demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("valid demand input path")
 }
 
+fn resolve_shader_texture_node<'a>(
+    loaded_nodes: &'a [LoadedNode],
+    current: &'a LoadedNode,
+    config: &ShaderDef,
+) -> Result<&'a LoadedNode, CoreProjectLoadError> {
+    let target = binding_target(&config.bindings, "output").ok_or_else(|| {
+        CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("shader output binding is missing"),
+        }
+    })?;
+
+    match target {
+        BindingEndpoint::Bus(bus) => {
+            find_texture_consuming_bus(loaded_nodes, bus).ok_or_else(|| {
+                CoreProjectLoadError::InvalidSourcePath {
+                    path: current.artifact_path.as_str().to_string(),
+                    reason: format!("no texture consumes shader output bus `{bus}`"),
+                }
+            })
+        }
+        BindingEndpoint::Node(node_slot) => {
+            resolve_node_loc(loaded_nodes, current, node_slot.node(), "texture")
+        }
+        BindingEndpoint::Literal(_) => Err(CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("shader output target cannot be a literal"),
+        }),
+    }
+}
+
+fn resolve_fixture_texture_node<'a>(
+    loaded_nodes: &'a [LoadedNode],
+    current: &'a LoadedNode,
+    config: &FixtureDef,
+) -> Result<&'a LoadedNode, CoreProjectLoadError> {
+    let source = binding_source(&config.bindings, "input").ok_or_else(|| {
+        CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("fixture input binding is missing"),
+        }
+    })?;
+
+    match source {
+        BindingEndpoint::Node(node_slot) => {
+            resolve_node_loc(loaded_nodes, current, node_slot.node(), "texture")
+        }
+        BindingEndpoint::Bus(bus) => Err(CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("fixture input bus `{bus}` cannot be resolved to a texture yet"),
+        }),
+        BindingEndpoint::Literal(_) => Err(CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("fixture input source cannot be a literal"),
+        }),
+    }
+}
+
+fn find_texture_consuming_bus<'a>(
+    loaded_nodes: &'a [LoadedNode],
+    bus: &lpc_model::BusSlotRef,
+) -> Option<&'a LoadedNode> {
+    loaded_nodes.iter().find(|node| {
+        let LoadedNodeDef::Texture(config) = &node.config else {
+            return false;
+        };
+        matches!(
+            binding_source(&config.bindings, "input"),
+            Some(BindingEndpoint::Bus(candidate)) if candidate == bus
+        )
+    })
+}
+
+fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
+    bindings.entries().get(slot)?.source.as_ref()
+}
+
+fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
+    bindings.entries().get(slot)?.target.as_ref()
+}
+
 fn find_shader_for_texture<'a>(
     loaded_nodes: &'a [LoadedNode],
     texture_id: NodeId,
@@ -520,7 +591,7 @@ fn find_shader_for_texture<'a>(
             let LoadedNodeDef::Shader(config) = &node.config else {
                 return false;
             };
-            find_node_by_loc(loaded_nodes, node, config.texture_loc())
+            resolve_shader_texture_node(loaded_nodes, node, config)
                 .map(|candidate| candidate.id == texture_id)
                 .unwrap_or(false)
         })
@@ -729,15 +800,43 @@ artifact = "./weird.toml"
     fn missing_sibling_node_loc_names_missing_ref() {
         let fs = flat_project();
         fs.write_file(
-            "/shader.toml".as_path(),
+            "/fixture.toml".as_path(),
             br#"
-kind = "shader"
-glsl_path = "shader.glsl"
-texture_loc = "..missing"
-render_order = 0
+kind = "fixture"
+output_loc = "..output"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+
+[bindings.input]
+source = "..missing#output"
+
+[transform]
+m00 = 1.0
+m01 = 0.0
+m10 = 1.0
+m11 = 1.0
+tx = 0.0
+ty = 0.0
+
+[mapping]
+kind = "path_points"
+sample_diameter = 2.0
+
+[mapping.paths.0]
+kind = "ring_array"
+center = [0.5, 0.5]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 1
+offset_angle = 0.0
+order = "inner_first"
+
+[mapping.paths.0.ring_lamp_counts]
+0 = 1
 "#,
         )
-        .expect("shader.toml");
+        .expect("fixture.toml");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = RuntimeServices::new(root_path);
@@ -759,15 +858,43 @@ render_order = 0
     fn slash_node_ref_is_rejected_during_parse() {
         let fs = flat_project();
         fs.write_file(
-            "/shader.toml".as_path(),
+            "/fixture.toml".as_path(),
             br#"
-kind = "shader"
-glsl_path = "shader.glsl"
-texture_loc = "/texture"
-render_order = 0
+kind = "fixture"
+output_loc = "..output"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+
+[bindings.input]
+source = "/texture#output"
+
+[transform]
+m00 = 1.0
+m01 = 0.0
+m10 = 1.0
+m11 = 1.0
+tx = 0.0
+ty = 0.0
+
+[mapping]
+kind = "path_points"
+sample_diameter = 2.0
+
+[mapping.paths.0]
+kind = "ring_array"
+center = [0.5, 0.5]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 1
+offset_angle = 0.0
+order = "inner_first"
+
+[mapping.paths.0.ring_lamp_counts]
+0 = 1
 "#,
         )
-        .expect("shader.toml");
+        .expect("fixture.toml");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = RuntimeServices::new(root_path);
@@ -813,6 +940,9 @@ kind = "texture"
 [size]
 width = 16
 height = 16
+
+[bindings.input]
+source = "bus#visual.out"
 "#,
         )
         .expect("texture.toml");
@@ -821,8 +951,10 @@ height = 16
             br#"
 kind = "shader"
 glsl_path = "shader.glsl"
-texture_loc = "..texture"
 render_order = 0
+
+[bindings.output]
+target = "bus#visual.out"
 "#,
         )
         .expect("shader.toml");
@@ -844,10 +976,12 @@ pin = 4
             br#"
 kind = "fixture"
 output_loc = "..output"
-texture_loc = "..texture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+
+[bindings.input]
+source = "..texture#output"
 
 [transform]
 m00 = 1.0
