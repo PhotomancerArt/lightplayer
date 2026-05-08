@@ -3,7 +3,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::{ArtifactLocator, FrameId, NodeId, NodeInvocation, TreePath};
+use lpc_model::{ArtifactLocator, Revision, NodeId, NodeInvocation, TreePath};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
@@ -29,9 +29,9 @@ pub struct NodeEntry<N> {
 
     // Three frame counters per entry (12 bytes/entry); see design/01-tree.md
     // "Frame versioning" for why three (not five).
-    pub created_frame: FrameId, // set on insert; never bumped
-    pub change_frame: FrameId,  // bumped on status / state / (future: config) change
-    pub children_ver: FrameId,  // bumped on children-list mutation
+    pub created_frame: Revision, // set on insert; never bumped
+    pub change_frame: Revision,  // bumped on status / state / (future: config) change
+    pub children_ver: Revision,  // bumped on children-list mutation
 
     /// Authored per-instance config (artifact spec + overrides).
     pub config: NodeInvocation,
@@ -53,7 +53,7 @@ impl<N> NodeEntry<N> {
         path: TreePath,
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
-        frame: FrameId,
+        frame: Revision,
     ) -> Self {
         Self::new_spine(
             id,
@@ -74,7 +74,7 @@ impl<N> NodeEntry<N> {
         child_kind: Option<WireChildKind>,
         config: NodeInvocation,
         artifact: ArtifactId,
-        frame: FrameId,
+        frame: Revision,
     ) -> Self {
         Self {
             id,
@@ -93,19 +93,19 @@ impl<N> NodeEntry<N> {
     }
 
     /// Set status and bump `change_frame`.
-    pub fn set_status(&mut self, status: WireNodeStatus, frame: FrameId) {
+    pub fn set_status(&mut self, status: WireNodeStatus, frame: Revision) {
         self.status = status;
         self.change_frame = frame;
     }
 
     /// Set state and bump `change_frame`.
-    pub fn set_state(&mut self, state: EntryState<N>, frame: FrameId) {
+    pub fn set_state(&mut self, state: EntryState<N>, frame: Revision) {
         self.state = state;
         self.change_frame = frame;
     }
 
     /// Returns true if this entry has any frame version newer than `since`.
-    pub fn is_dirty_since(&self, since: FrameId) -> bool {
+    pub fn is_dirty_since(&self, since: Revision) -> bool {
         self.created_frame.0 > since.0
             || self.change_frame.0 > since.0
             || self.children_ver.0 > since.0
@@ -115,13 +115,13 @@ impl<N> NodeEntry<N> {
 #[cfg(test)]
 mod tests {
     use super::NodeEntry;
-    use lpc_model::{FrameId, NodeId, TreePath};
+    use lpc_model::{Revision, NodeId, TreePath};
     use lpc_model::{ArtifactLocator, NodeInvocation};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
-        let frame = FrameId::new(5);
+        let frame = Revision::new(5);
         let entry: NodeEntry<()> = NodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn node_entry_set_status_bumps_change_frame() {
-        let frame = FrameId::new(5);
+        let frame = Revision::new(5);
         let mut entry: NodeEntry<()> = NodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
@@ -146,7 +146,7 @@ mod tests {
             None,
             frame,
         );
-        entry.set_status(WireNodeStatus::Ok, FrameId::new(10));
+        entry.set_status(WireNodeStatus::Ok, Revision::new(10));
         assert_eq!(entry.status, WireNodeStatus::Ok);
         assert_eq!(entry.change_frame.0, 10);
         // created_frame and children_ver unchanged
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn node_entry_is_dirty_since() {
-        let frame = FrameId::new(5);
+        let frame = Revision::new(5);
         let entry: NodeEntry<()> = NodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
@@ -164,15 +164,15 @@ mod tests {
             None,
             frame,
         );
-        assert!(!entry.is_dirty_since(FrameId::new(5)));
-        assert!(entry.is_dirty_since(FrameId::new(4)));
-        assert!(!entry.is_dirty_since(FrameId::new(6)));
+        assert!(!entry.is_dirty_since(Revision::new(5)));
+        assert!(entry.is_dirty_since(Revision::new(4)));
+        assert!(!entry.is_dirty_since(Revision::new(6)));
     }
 
     #[test]
     fn node_entry_child_kind_is_immutable_conceptually() {
         // Verify we can set it at construction; it's not changed after
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let entry: NodeEntry<()> = NodeEntry::new(
             NodeId::new(2),
             TreePath::parse("/main.show/child.vis").unwrap(),
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn node_entry_new_spine_stores_config_and_artifact() {
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let config = NodeInvocation::new(ArtifactLocator::path("./fluid.vis"));
         let artifact = crate::artifact::ArtifactId::from_raw(7);
         let entry: NodeEntry<()> = NodeEntry::new_spine(

@@ -11,11 +11,11 @@ use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::resolver::resolver::Resolver;
 use crate::resolver::resolver::materialize_literal_value;
-use lpc_model::{ChannelName, FrameId, NodeId, SlotPath};
+use lpc_model::{ChannelName, Revision, NodeId, SlotPath};
 
 /// Active resolution session for one frame (or nested test scope).
 pub struct ResolveSession<'a> {
-    frame_id: FrameId,
+    revision: Revision,
     resolver: &'a mut Resolver,
     registry: &'a BindingRegistry,
     trace: ResolveTrace,
@@ -23,21 +23,21 @@ pub struct ResolveSession<'a> {
 
 impl<'a> ResolveSession<'a> {
     pub fn new(
-        frame_id: FrameId,
+        frame_id: Revision,
         resolver: &'a mut Resolver,
         registry: &'a BindingRegistry,
         trace: ResolveTrace,
     ) -> Self {
         Self {
-            frame_id,
+            revision: frame_id,
             resolver,
             registry,
             trace,
         }
     }
 
-    pub fn frame_id(&self) -> FrameId {
-        self.frame_id
+    pub fn revision(&self) -> Revision {
+        self.revision
     }
 
     pub fn trace(&self) -> &ResolveTrace {
@@ -144,7 +144,7 @@ impl<'a> ResolveSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         match source {
             BindingSource::Literal(spec) => {
-                let versioned = materialize_literal_value(spec, self.frame_id).map_err(|e| {
+                let versioned = materialize_literal_value(spec, self.revision).map_err(|e| {
                     SessionResolveError::other(format!("literal materialization: {}", e.message))
                 })?;
                 Ok(Production::value(versioned, ProductionSource::Literal)?)
@@ -221,7 +221,7 @@ mod tests {
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::{ChannelName, LpValue, Versioned};
+    use lpc_model::{ChannelName, LpValue, WithRevision};
     use lps_shared::LpsValueF32;
 
     fn ch(s: &str) -> ChannelName {
@@ -260,7 +260,7 @@ mod tests {
                     if *node == self.node && *slot == self.out_path =>
                 {
                     Ok(Production::value(
-                        Versioned::new(session.frame_id(), LpsValueF32::F32(42.0)),
+                        WithRevision::new(session.revision(), LpsValueF32::F32(42.0)),
                         ProductionSource::ProducedSlot {
                             node: *node,
                             slot: slot.clone(),
@@ -276,7 +276,7 @@ mod tests {
     fn same_produced_slot_twice_calls_host_once() {
         let mut resolver = Resolver::new();
         let registry = BindingRegistry::new();
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let node = NodeId::new(7);
         let out = path("color");
         let key = QueryKey::ProducedSlot {
@@ -309,7 +309,7 @@ mod tests {
     fn bus_channel_selects_highest_priority_binding() {
         let mut resolver = Resolver::new();
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(2);
+        let frame = Revision::new(2);
         let c = ch("video");
         let low_node = NodeId::new(1);
         let high_node = NodeId::new(2);
@@ -360,7 +360,7 @@ mod tests {
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
             kind: Kind::Amplitude,
-            version: FrameId::new(0),
+            version: Revision::new(0),
             owner: NodeId::new(0),
         };
         let e2 = BindingEntry {
@@ -369,7 +369,7 @@ mod tests {
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
             kind: Kind::Amplitude,
-            version: FrameId::new(0),
+            version: Revision::new(0),
             owner: NodeId::new(1),
         };
         let c = ch("z");
@@ -384,7 +384,7 @@ mod tests {
     fn bus_to_bus_recursion_resolves_through_both_labels() {
         let mut resolver = Resolver::new();
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(3);
+        let frame = Revision::new(3);
         let outer = ch("a");
         let inner = ch("b");
         registry
@@ -443,7 +443,7 @@ mod tests {
     fn bus_recursion_cycle_is_detected() {
         let mut resolver = Resolver::new();
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(4);
+        let frame = Revision::new(4);
         let a = ch("loop_a");
         let b = ch("loop_b");
         registry
@@ -497,7 +497,7 @@ mod tests {
             match query {
                 QueryKey::ProducedSlot { node, slot } if *node == self.node => {
                     Ok(Production::value(
-                        Versioned::new(session.frame_id(), LpsValueF32::F32(0.5)),
+                        WithRevision::new(session.revision(), LpsValueF32::F32(0.5)),
                         ProductionSource::ProducedSlot {
                             node: *node,
                             slot: slot.clone(),
@@ -513,7 +513,7 @@ mod tests {
     fn trace_events_when_logging_basic() {
         let mut resolver = Resolver::new();
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(5);
+        let frame = Revision::new(5);
         let bus = ch("out");
         let node = NodeId::new(3);
         let out = path("rgb");

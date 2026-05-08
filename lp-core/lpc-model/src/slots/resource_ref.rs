@@ -1,32 +1,32 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ResourceRef, SlotDataAccess, SlotMeta,
+    FieldSlot, Revision, FromLpValue, LpType, LpValue, ResourceRef, SlotDataAccess, SlotMeta,
     SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, Versioned, current_state_version,
+    ValueRootError, WithRevision, current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned resource reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceRefSlot {
-    inner: Versioned<ResourceRef>,
+    inner: WithRevision<ResourceRef>,
 }
 
 impl ResourceRefSlot {
     pub fn new(value: ResourceRef) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: ResourceRef) -> Self {
+    pub fn with_version(frame: Revision, value: ResourceRef) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: ResourceRef) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -36,7 +36,7 @@ impl ResourceRefSlot {
 }
 
 impl SlotValueAccess for ResourceRefSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

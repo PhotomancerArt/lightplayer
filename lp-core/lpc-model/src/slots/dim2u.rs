@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
+    FieldSlot, Revision, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
     SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, Versioned, current_state_version,
+    ValueRootError, WithRevision, current_revision,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -17,25 +17,25 @@ pub struct Dim2u {
 /// Versioned unsigned 2D dimensions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dim2uSlot {
-    inner: Versioned<Dim2u>,
+    inner: WithRevision<Dim2u>,
 }
 
 impl Dim2uSlot {
     pub fn new(value: Dim2u) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: Dim2u) -> Self {
+    pub fn with_version(frame: Revision, value: Dim2u) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: Dim2u) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -45,7 +45,7 @@ impl Dim2uSlot {
 }
 
 impl SlotValueAccess for Dim2uSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

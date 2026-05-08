@@ -3,7 +3,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::FrameId;
+use lpc_model::Revision;
 use lpc_wire::WireTreeDelta;
 
 use super::{NodeEntry, NodeTree};
@@ -19,7 +19,7 @@ use super::{NodeEntry, NodeTree};
 /// the initial sync to work correctly even though root is created at frame 0.
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
-pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: FrameId) -> Vec<WireTreeDelta>
+pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTreeDelta>
 where
     N: Clone,
 {
@@ -78,7 +78,7 @@ where
 fn collect_created_deltas<N>(
     tree: &NodeTree<N>,
     id: lpc_model::NodeId,
-    since: FrameId,
+    since: Revision,
     deltas: &mut Vec<WireTreeDelta>,
 ) where
     N: Clone,
@@ -116,12 +116,12 @@ mod tests {
     use crate::tree::{EntryState, NodeTree};
     use alloc::vec;
     use alloc::vec::Vec;
-    use lpc_model::{FrameId, NodeId, NodeName, TreePath};
+    use lpc_model::{Revision, NodeId, NodeName, TreePath};
     use lpc_model::NodeInvocation;
     use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
     fn make_tree() -> NodeTree<()> {
-        NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
+        NodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
     }
 
     fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
@@ -145,7 +145,7 @@ mod tests {
                 },
                 cfg_a,
                 art_a,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         let (cfg_b, art_b) = spine_placeholder();
@@ -159,11 +159,11 @@ mod tests {
                 },
                 cfg_b,
                 art_b,
-                FrameId::new(2),
+                Revision::new(2),
             )
             .unwrap();
 
-        let deltas = tree_deltas_since(&tree, FrameId::new(0));
+        let deltas = tree_deltas_since(&tree, Revision::new(0));
 
         // Should have 3 Created deltas (root + a + b)
         let created: Vec<&WireTreeDelta> = deltas
@@ -203,11 +203,11 @@ mod tests {
             },
             cfg,
             art,
-            FrameId::new(1),
+            Revision::new(1),
         )
         .unwrap();
 
-        let deltas = tree_deltas_since(&tree, FrameId::new(1));
+        let deltas = tree_deltas_since(&tree, Revision::new(1));
         let created: Vec<&WireTreeDelta> = deltas
             .iter()
             .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
@@ -232,16 +232,16 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
         // Change status at frame 5
         tree.get_mut(a)
             .unwrap()
-            .set_status(lpc_wire::WireNodeStatus::Ok, FrameId::new(5));
+            .set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
 
-        let deltas = tree_deltas_since(&tree, FrameId::new(0));
+        let deltas = tree_deltas_since(&tree, Revision::new(0));
 
         // Bulk sync since frame 0 should include all entries
         let created: Vec<&WireTreeDelta> = deltas
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(created.len(), 2); // root + a
 
         // Since frame 1: a was created at frame 1, so 1 > 1 is false, no Created
-        let deltas = tree_deltas_since(&tree, FrameId::new(1));
+        let deltas = tree_deltas_since(&tree, Revision::new(1));
         let created: Vec<&WireTreeDelta> = deltas
             .iter()
             .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(created.len(), 0); // a already seen at frame 1
 
         // Now check deltas since frame 4 (after a was created but before status change)
-        let deltas = tree_deltas_since(&tree, FrameId::new(4));
+        let deltas = tree_deltas_since(&tree, Revision::new(4));
         let changed: Vec<&WireTreeDelta> = deltas
             .iter()
             .filter(|d| matches!(d, WireTreeDelta::EntryChanged { .. }))
@@ -289,12 +289,12 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(5),
+                Revision::new(5),
             )
             .unwrap();
 
         // Get deltas since frame 1 (before child was added)
-        let deltas = tree_deltas_since(&tree, FrameId::new(1));
+        let deltas = tree_deltas_since(&tree, Revision::new(1));
 
         // Root's children changed (a was added)
         let children_changed: Vec<&WireTreeDelta> = deltas
@@ -327,7 +327,7 @@ mod tests {
                 },
                 cfg_p,
                 art_p,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         let (cfg_c, art_c) = spine_placeholder();
@@ -341,11 +341,11 @@ mod tests {
                 },
                 cfg_c,
                 art_c,
-                FrameId::new(2),
+                Revision::new(2),
             )
             .unwrap();
 
-        let deltas = tree_deltas_since(&tree, FrameId::new(0));
+        let deltas = tree_deltas_since(&tree, Revision::new(0));
 
         // Extract Created deltas in order
         let created_order: Vec<NodeId> = deltas
@@ -379,15 +379,15 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
         // Remove a at frame 5
-        tree.remove_subtree(a, FrameId::new(5)).unwrap();
+        tree.remove_subtree(a, Revision::new(5)).unwrap();
 
         // Get deltas since frame 1
-        let deltas = tree_deltas_since(&tree, FrameId::new(1));
+        let deltas = tree_deltas_since(&tree, Revision::new(1));
 
         // Should have ChildrenChanged for root (a was removed)
         // No Destroyed delta - client infers from ChildrenChanged
@@ -429,7 +429,7 @@ mod tests {
                 },
                 cfg_a,
                 art_a,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         let (cfg_b, art_b) = spine_placeholder();
@@ -443,16 +443,16 @@ mod tests {
                 },
                 cfg_b,
                 art_b,
-                FrameId::new(2),
+                Revision::new(2),
             )
             .unwrap();
 
         // Generate deltas for initial sync (since=0)
-        let deltas = tree_deltas_since(&server_tree, FrameId::new(0));
+        let deltas = tree_deltas_since(&server_tree, Revision::new(0));
 
         // Apply to client
         let mut client_tree = NodeTreeView::new();
-        apply_tree_deltas(&mut client_tree, &deltas, FrameId::new(0)).unwrap();
+        apply_tree_deltas(&mut client_tree, &deltas, Revision::new(0)).unwrap();
 
         // Verify client matches server
         assert_eq!(client_tree.len(), 3);
@@ -480,18 +480,18 @@ mod tests {
         assert!(client_root.children.contains(&b));
 
         // Now mutate server: remove 'a', wake 'b' (Pending -> Alive) and set status
-        server_tree.remove_subtree(a, FrameId::new(5)).unwrap();
+        server_tree.remove_subtree(a, Revision::new(5)).unwrap();
         {
             let b_entry = server_tree.get_mut(b).unwrap();
-            b_entry.set_state(EntryState::Alive(()), FrameId::new(5));
-            b_entry.set_status(lpc_wire::WireNodeStatus::Ok, FrameId::new(5));
+            b_entry.set_state(EntryState::Alive(()), Revision::new(5));
+            b_entry.set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
         }
 
         // Get deltas since frame 2 (after b was created)
-        let deltas = tree_deltas_since(&server_tree, FrameId::new(2));
+        let deltas = tree_deltas_since(&server_tree, Revision::new(2));
 
         // Apply to client
-        apply_tree_deltas(&mut client_tree, &deltas, FrameId::new(5)).unwrap();
+        apply_tree_deltas(&mut client_tree, &deltas, Revision::new(5)).unwrap();
 
         // Verify client updated correctly
         assert!(client_tree.get(a).is_none()); // a removed

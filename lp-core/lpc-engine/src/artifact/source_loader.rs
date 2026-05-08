@@ -45,7 +45,7 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec::Vec;
 
-    use lpc_model::{FrameId, LpPath, LpPathBuf};
+    use lpc_model::{Revision, LpPath, LpPathBuf};
     use lpc_source::ArtifactLocator;
 
     use crate::artifact::{ArtifactManager, ArtifactState};
@@ -143,8 +143,8 @@ title = "from-manager"
 "#,
         );
         let mut m: ArtifactManager<DummySrcArtifact> = ArtifactManager::new();
-        let r = m.acquire_location(ArtifactLocation::file("/eff.toml"), FrameId::new(1));
-        m.load_with(&r, FrameId::new(2), |location| {
+        let r = m.acquire_location(ArtifactLocation::file("/eff.toml"), Revision::new(1));
+        m.load_with(&r, Revision::new(2), |location| {
             load_source_artifact(&fs, location)
         })
         .unwrap();

@@ -3,7 +3,7 @@
 use alloc::boxed::Box;
 use alloc::vec;
 
-use lpc_model::FrameId;
+use lpc_model::Revision;
 use lpc_model::NodeId;
 use lpc_model::SlotPath;
 use lpc_model::nodes::texture::{TextureDef, TextureFormat};
@@ -57,11 +57,11 @@ struct TextureProps {
     width: i32,
     height: i32,
     format_tag: u32,
-    frame: FrameId,
+    frame: Revision,
 }
 
 impl TextureProps {
-    fn sync(&mut self, config: &TextureDef, pixel_format: TextureFormat, frame: FrameId) {
+    fn sync(&mut self, config: &TextureDef, pixel_format: TextureFormat, frame: Revision) {
         self.width = i32::try_from(config.width()).unwrap_or(i32::MAX);
         self.height = i32::try_from(config.height()).unwrap_or(i32::MAX);
         self.format_tag = texture_format_tag(pixel_format);
@@ -70,7 +70,7 @@ impl TextureProps {
 }
 
 impl ProducedSlotAccess for TextureProps {
-    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         if path == &self.width_path {
             return Some((
                 RuntimeProduct::Value(LpsValueF32::I32(self.width)),
@@ -94,8 +94,8 @@ impl ProducedSlotAccess for TextureProps {
 
     fn iter_changed_since<'a>(
         &'a self,
-        since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         if self.frame.as_i64() <= since.as_i64() {
             return Box::new(core::iter::empty());
         }
@@ -123,7 +123,7 @@ impl ProducedSlotAccess for TextureProps {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(
             vec![
                 (
@@ -157,9 +157,9 @@ impl TextureNode {
             width: 0,
             height: 0,
             format_tag: texture_format_tag(pixel_format),
-            frame: FrameId::default(),
+            frame: Revision::default(),
         };
-        props.sync(&config, pixel_format, FrameId::default());
+        props.sync(&config, pixel_format, Revision::default());
         Self {
             node_id,
             config,
@@ -184,7 +184,7 @@ impl TextureNode {
 impl Node for TextureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.props
-            .sync(&self.config, self.pixel_format, ctx.frame_id());
+            .sync(&self.config, self.pixel_format, ctx.revision());
         Ok(())
     }
 
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn texture_metadata_props_resolve_on_engine() {
         let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = engine.tree().root();
         let (spine, artifact) = test_placeholder_spine();
         let tid = engine

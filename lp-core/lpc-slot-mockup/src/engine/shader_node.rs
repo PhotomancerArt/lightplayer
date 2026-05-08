@@ -1,8 +1,8 @@
 use crate::source::ShaderDef;
 use lpc_model::{
-    FrameId, LpType, LpValue, ModelStructMember, SlotAccess, SlotData, SlotDataAccess, SlotName,
-    SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, Versioned,
-    current_state_version,
+    Revision, LpType, LpValue, ModelStructMember, SlotAccess, SlotData, SlotDataAccess, SlotName,
+    SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, WithRevision,
+    current_revision,
     slot::shape::{field, option, record, value},
 };
 
@@ -32,8 +32,8 @@ impl ShaderNode {
             .entries
             .values()
             .map(|param_def| {
-                SlotData::Value(Versioned::new(
-                    current_state_version(),
+                SlotData::Value(WithRevision::new(
+                    current_revision(),
                     param_def.default_value(),
                 ))
             })
@@ -44,9 +44,9 @@ impl ShaderNode {
             param_names,
             params: SlotRecord::new(params),
             compile_error: SlotOptionDyn::some_with_version(
-                current_state_version(),
-                SlotData::Value(Versioned::new(
-                    current_state_version(),
+                current_revision(),
+                SlotData::Value(WithRevision::new(
+                    current_revision(),
                     LpValue::String(String::from("initial compile warning")),
                 )),
             ),
@@ -82,17 +82,17 @@ impl ShaderNode {
         let Some(SlotData::Value(param)) = self.params.fields.get_mut(index) else {
             panic!("shader param exists");
         };
-        param.set(current_state_version(), value);
+        param.set(current_revision(), value);
     }
 
     pub fn remove_param(&mut self, name: &str) {
         let index = self.param_index(name);
         self.param_names.remove(index);
         self.params.fields.remove(index);
-        self.params.fields_changed_frame = current_state_version();
+        self.params.fields_changed_frame = current_revision();
     }
 
-    pub fn param_changed_frame(&self, name: &str) -> Option<FrameId> {
+    pub fn param_changed_frame(&self, name: &str) -> Option<Revision> {
         let index = self
             .param_names
             .iter()

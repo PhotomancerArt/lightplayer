@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    current_state_version, FieldSlot, FrameId, FromLpValue, LpType, LpValue, MapSlot,
+    current_revision, FieldSlot, Revision, FromLpValue, LpType, LpValue, MapSlot,
     PositiveF32Slot, SlotDataAccess, SlotEnumAccess, SlotEnumOption, SlotEnumShape,
     SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess, SlotShape, SlotShapeId,
     SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, XySlot,
@@ -15,8 +15,8 @@ use crate::{
 pub enum MappingConfig {
     /// A mapping defined by fixture paths sampled from the target texture.
     PathPoints {
-        #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: FrameId,
+        #[serde(skip, default = "current_revision")]
+        variant_changed_frame: Revision,
         paths: MapSlot<u32, PathSpec>,
         sample_diameter: PositiveF32Slot,
     },
@@ -28,8 +28,8 @@ pub enum MappingConfig {
 pub enum PathSpec {
     /// A display made of concentric rings of lamps, usually LEDs on a PCB.
     RingArray {
-        #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: FrameId,
+        #[serde(skip, default = "current_revision")]
+        variant_changed_frame: Revision,
         center: XySlot,
         diameter: PositiveF32Slot,
         start_ring_inclusive: ValueSlot<u32>,
@@ -51,7 +51,7 @@ pub enum RingOrder {
 impl MappingConfig {
     pub fn path_points(paths: MapSlot<u32, PathSpec>, sample_diameter: f32) -> Self {
         Self::PathPoints {
-            variant_changed_frame: current_state_version(),
+            variant_changed_frame: current_revision(),
             paths,
             sample_diameter: PositiveF32Slot::new(sample_diameter),
         }
@@ -73,7 +73,7 @@ impl SlotEnumShape for MappingConfig {
 }
 
 impl SlotEnumAccess for MappingConfig {
-    fn variant_changed_frame(&self) -> FrameId {
+    fn variant_changed_frame(&self) -> Revision {
         match self {
             Self::PathPoints {
                 variant_changed_frame,
@@ -136,7 +136,7 @@ impl PathSpec {
         order: RingOrder,
     ) -> Self {
         Self::RingArray {
-            variant_changed_frame: current_state_version(),
+            variant_changed_frame: current_revision(),
             center: XySlot::new(center),
             diameter: PositiveF32Slot::new(diameter),
             start_ring_inclusive: ValueSlot::new(start_ring_inclusive),
@@ -179,7 +179,7 @@ impl SlotEnumShape for PathSpec {
 }
 
 impl SlotEnumAccess for PathSpec {
-    fn variant_changed_frame(&self) -> FrameId {
+    fn variant_changed_frame(&self) -> Revision {
         match self {
             Self::RingArray {
                 variant_changed_frame,

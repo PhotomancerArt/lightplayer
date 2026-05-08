@@ -1,22 +1,22 @@
 use alloc::{string::String, vec::Vec};
-use lpc_model::Versioned;
-use lpc_model::project::FrameId;
+use lpc_model::WithRevision;
+use lpc_model::project::Revision;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 /// Test state struct for validating `Prop<T>` serialization
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestState {
-    pub field1: Versioned<String>,
-    pub field2: Versioned<u32>,
-    pub field3: Versioned<Vec<u8>>,
+    pub field1: WithRevision<String>,
+    pub field2: WithRevision<u32>,
+    pub field3: WithRevision<Vec<u8>>,
 }
 
 impl TestState {
-    pub fn new(frame_id: FrameId) -> Self {
+    pub fn new(revision: Revision) -> Self {
         Self {
-            field1: Versioned::new(frame_id, String::from("default")),
-            field2: Versioned::new(frame_id, 0),
-            field3: Versioned::new(frame_id, Vec::new()),
+            field1: WithRevision::new(revision, String::from("default")),
+            field2: WithRevision::new(revision, 0),
+            field3: WithRevision::new(revision, Vec::new()),
         }
     }
 }
@@ -36,8 +36,8 @@ mod tests {
 
     #[test]
     fn test_serialize_all_fields_initial_sync() {
-        let state = TestState::new(FrameId::new(1));
-        let serializable = SerializableTestState::new(&state, FrameId::default());
+        let state = TestState::new(Revision::new(1));
+        let serializable = SerializableTestState::new(&state, Revision::default());
         let json = json::to_string(&serializable).unwrap();
         // Should contain all fields for initial sync
         assert!(json.contains("field1"));
@@ -47,13 +47,13 @@ mod tests {
 
     #[test]
     fn test_serialize_partial_fields() {
-        let mut state = TestState::new(FrameId::new(1));
-        state.field1.set(FrameId::new(5), String::from("updated"));
+        let mut state = TestState::new(Revision::new(1));
+        state.field1.set(Revision::new(5), String::from("updated"));
         // field2 and field3 unchanged (frame 1)
 
         // Serialize with since_frame = FrameId::new(2)
         // Should only include field1 (changed at frame 5 > 2)
-        let serializable = SerializableTestState::new(&state, FrameId::new(2));
+        let serializable = SerializableTestState::new(&state, Revision::new(2));
         let json = json::to_string(&serializable).unwrap();
         assert!(json.contains("field1"));
         assert!(json.contains("updated"));
@@ -64,13 +64,13 @@ mod tests {
 
     #[test]
     fn test_serialize_no_changes() {
-        let mut state = TestState::new(FrameId::new(1));
-        state.field1.set(FrameId::new(2), String::from("updated"));
+        let mut state = TestState::new(Revision::new(1));
+        state.field1.set(Revision::new(2), String::from("updated"));
         // All fields changed at frame 1 or 2
 
         // Serialize with since_frame = FrameId::new(5)
         // No fields should be included (all changed before frame 5)
-        let serializable = SerializableTestState::new(&state, FrameId::new(5));
+        let serializable = SerializableTestState::new(&state, Revision::new(5));
         let json = json::to_string(&serializable).unwrap();
         // Should be empty object or minimal
         assert!(!json.contains("field1"));

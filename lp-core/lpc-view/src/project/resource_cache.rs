@@ -159,7 +159,7 @@ impl ClientResourceCache {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use lpc_model::project::FrameId;
+    use lpc_model::project::Revision;
     use lpc_model::{RenderProductId, RuntimeBufferId};
     use lpc_wire::{
         WireChannelSampleFormat, WireRenderProductKind, WireRenderProductPayload,
@@ -172,7 +172,7 @@ mod tests {
         let buf_id = RuntimeBufferId::new(id);
         WireResourceSummary {
             resource_ref: ResourceRef::runtime_buffer(buf_id),
-            changed_frame: FrameId::new(frame),
+            changed_frame: Revision::new(frame),
             kind: WireResourceKindSummary::RuntimeBuffer(WireRuntimeBufferKind::OutputChannels),
             metadata: WireResourceMetadataSummary::OutputChannels {
                 channels: 3,
@@ -199,7 +199,7 @@ mod tests {
         cache.apply_summaries(&[sample_buffer_summary(7, 1)]);
         cache.apply_runtime_buffer_payloads(&[WireRuntimeBufferPayload {
             resource_ref: r,
-            changed_frame: FrameId::new(2),
+            changed_frame: Revision::new(2),
             metadata: WireRuntimeBufferMetadataPayload::OutputChannels {
                 channels: 3,
                 sample_format: WireChannelSampleFormat::U8,
@@ -219,7 +219,7 @@ mod tests {
         let r = ResourceRef::render_product(RenderProductId::new(4));
         cache.apply_summaries(&[WireResourceSummary {
             resource_ref: r,
-            changed_frame: FrameId::new(1),
+            changed_frame: Revision::new(1),
             kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
             metadata: WireResourceMetadataSummary::Texture {
                 width: 2,
@@ -232,7 +232,7 @@ mod tests {
 
         cache.apply_render_product_payloads(&[WireRenderProductPayload {
             resource_ref: r,
-            changed_frame: FrameId::new(2),
+            changed_frame: Revision::new(2),
             width: 2,
             height: 2,
             format: WireTextureFormat::Rgb8,
@@ -254,7 +254,7 @@ mod tests {
         cache.apply_summaries(&[a, b]);
         cache.apply_runtime_buffer_payloads(&[WireRuntimeBufferPayload {
             resource_ref: ref_b,
-            changed_frame: FrameId::new(1),
+            changed_frame: Revision::new(1),
             metadata: WireRuntimeBufferMetadataPayload::Raw,
             bytes: Vec::from([7u8, 8]),
         }]);
@@ -275,7 +275,7 @@ mod tests {
         cache.apply_summaries(&[sample_buffer_summary(5, 1)]);
         cache.apply_runtime_buffer_payloads(&[WireRuntimeBufferPayload {
             resource_ref: r,
-            changed_frame: FrameId::new(1),
+            changed_frame: Revision::new(1),
             metadata: WireRuntimeBufferMetadataPayload::OutputChannels {
                 channels: 2,
                 sample_format: WireChannelSampleFormat::U16,

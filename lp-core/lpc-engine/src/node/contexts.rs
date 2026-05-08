@@ -16,7 +16,7 @@ use crate::render_product::{
 };
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
-use lpc_model::{FrameId, NodeId, Versioned, bus::ChannelName};
+use lpc_model::{Revision, NodeId, WithRevision, bus::ChannelName};
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -44,7 +44,7 @@ impl<'a> NodeResourceInitContext<'a> {
         self.render_products.insert(product)
     }
 
-    pub fn insert_runtime_buffer(&mut self, buffer: Versioned<RuntimeBuffer>) -> RuntimeBufferId {
+    pub fn insert_runtime_buffer(&mut self, buffer: WithRevision<RuntimeBuffer>) -> RuntimeBufferId {
         self.runtime_buffers.insert(buffer)
     }
 }
@@ -58,9 +58,9 @@ pub type PendingRenderProductReplaces<'r> = &'r mut Vec<(RenderProductId, Box<dy
 /// Demand-style reads go through [`TickResolver`] (typically [`crate::resolver::SessionHostResolver`]).
 pub struct TickContext<'r> {
     node_id: NodeId,
-    frame_id: FrameId,
+    revision: Revision,
     artifact_ref: ArtifactId,
-    artifact_content_frame: FrameId,
+    artifact_content_frame: Revision,
     resolver: &'r mut dyn TickResolver,
     deferred_render_replaces: Option<PendingRenderProductReplaces<'r>>,
     graphics: Option<Arc<dyn LpGraphics>>,
@@ -70,9 +70,9 @@ pub struct TickContext<'r> {
 impl<'r> TickContext<'r> {
     pub fn new(
         node_id: NodeId,
-        frame_id: FrameId,
+        frame_id: Revision,
         artifact_ref: ArtifactId,
-        artifact_content_frame: FrameId,
+        artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
     ) -> Self {
         Self::with_render_services(
@@ -90,9 +90,9 @@ impl<'r> TickContext<'r> {
     /// [`TickContext`] with graphics, frame time, and optional deferred render-product replaces.
     pub fn with_render_services(
         node_id: NodeId,
-        frame_id: FrameId,
+        frame_id: Revision,
         artifact_ref: ArtifactId,
-        artifact_content_frame: FrameId,
+        artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
         deferred_render_replaces: Option<PendingRenderProductReplaces<'r>>,
         graphics: Option<Arc<dyn LpGraphics>>,
@@ -100,7 +100,7 @@ impl<'r> TickContext<'r> {
     ) -> Self {
         Self {
             node_id,
-            frame_id,
+            revision: frame_id,
             artifact_ref,
             artifact_content_frame,
             resolver,
@@ -114,8 +114,8 @@ impl<'r> TickContext<'r> {
         self.node_id
     }
 
-    pub fn frame_id(&self) -> FrameId {
-        self.frame_id
+    pub fn revision(&self) -> Revision {
+        self.revision
     }
 
     /// Resolve a [`QueryKey`] for this frame (cache, bindings, optional host production).
@@ -127,11 +127,11 @@ impl<'r> TickContext<'r> {
         self.artifact_ref
     }
 
-    pub fn artifact_content_frame(&self) -> FrameId {
+    pub fn artifact_content_frame(&self) -> Revision {
         self.artifact_content_frame
     }
 
-    pub fn artifact_changed_since(&self, since: FrameId) -> bool {
+    pub fn artifact_changed_since(&self, since: Revision) -> bool {
         self.artifact_content_frame.0 > since.0
     }
 
@@ -186,7 +186,7 @@ impl<'r> TickContext<'r> {
     pub fn with_runtime_buffer_mut<F>(
         &mut self,
         id: RuntimeBufferId,
-        frame: FrameId,
+        frame: Revision,
         write: F,
     ) -> Result<(), NodeError>
     where
@@ -203,16 +203,16 @@ impl<'r> TickContext<'r> {
 /// Context for [`super::Node::destroy`](super::Node::destroy).
 pub struct DestroyCtx<'a> {
     node_id: NodeId,
-    frame_id: FrameId,
+    revision: Revision,
     bus: &'a Bus,
 }
 
 impl<'a> DestroyCtx<'a> {
     /// Create a new destroy context.
-    pub fn new(node_id: NodeId, frame_id: FrameId, bus: &'a Bus) -> Self {
+    pub fn new(node_id: NodeId, frame_id: Revision, bus: &'a Bus) -> Self {
         Self {
             node_id,
-            frame_id,
+            revision: frame_id,
             bus,
         }
     }
@@ -223,8 +223,8 @@ impl<'a> DestroyCtx<'a> {
     }
 
     /// Frame at which destruction is occurring.
-    pub fn frame_id(&self) -> FrameId {
-        self.frame_id
+    pub fn frame_id(&self) -> Revision {
+        self.revision
     }
 
     /// Read the current value from a bus channel.
@@ -236,16 +236,16 @@ impl<'a> DestroyCtx<'a> {
 /// Context for [`super::Node::handle_memory_pressure`](super::Node::handle_memory_pressure).
 pub struct MemPressureCtx<'a> {
     node_id: NodeId,
-    frame_id: FrameId,
+    revision: Revision,
     bus: &'a Bus,
 }
 
 impl<'a> MemPressureCtx<'a> {
     /// Create a new memory pressure context.
-    pub fn new(node_id: NodeId, frame_id: FrameId, bus: &'a Bus) -> Self {
+    pub fn new(node_id: NodeId, frame_id: Revision, bus: &'a Bus) -> Self {
         Self {
             node_id,
-            frame_id,
+            revision: frame_id,
             bus,
         }
     }
@@ -256,8 +256,8 @@ impl<'a> MemPressureCtx<'a> {
     }
 
     /// Current frame.
-    pub fn frame_id(&self) -> FrameId {
-        self.frame_id
+    pub fn revision(&self) -> Revision {
+        self.revision
     }
 
     /// Read the current value from a bus channel.
@@ -300,7 +300,7 @@ mod tests {
     fn session_bundle<'a>(
         resolver: &'a mut Resolver,
         registry: &'a BindingRegistry,
-        frame: FrameId,
+        frame: Revision,
     ) -> ResolveSession<'a> {
         ResolveSession::new(
             frame,
@@ -314,7 +314,7 @@ mod tests {
     fn tick_context_accessors() {
         let registry = BindingRegistry::new();
         let mut resolver = Resolver::new();
-        let frame = FrameId::new(10);
+        let frame = Revision::new(10);
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
         let artifact_ref = ArtifactId::from_raw(1);
@@ -325,22 +325,22 @@ mod tests {
         };
         let ctx = TickContext::new(
             NodeId::new(7),
-            FrameId::new(3),
+            Revision::new(3),
             artifact_ref,
-            FrameId::new(5),
+            Revision::new(5),
             &mut bridge as &mut dyn TickResolver,
         );
 
         assert_eq!(ctx.node_id(), NodeId::new(7));
-        assert_eq!(ctx.frame_id(), FrameId::new(3));
+        assert_eq!(ctx.revision(), Revision::new(3));
         assert_eq!(ctx.artifact_ref(), artifact_ref);
-        assert_eq!(ctx.artifact_content_frame(), FrameId::new(5));
+        assert_eq!(ctx.artifact_content_frame(), Revision::new(5));
     }
 
     #[test]
     fn tick_context_resolve_bus_query() {
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(10);
+        let frame = Revision::new(10);
         let channel = lpc_model::ChannelName(String::from("level_bus"));
         registry
             .register(
@@ -366,7 +366,7 @@ mod tests {
             NodeId::new(1),
             frame,
             ArtifactId::from_raw(1),
-            FrameId::new(1),
+            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
         );
         let pv = ctx
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn tick_context_resolve_consumed_slot_query() {
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(10);
+        let frame = Revision::new(10);
         let node = NodeId::new(3);
         let input = SlotPath::parse("in").unwrap();
         registry
@@ -408,7 +408,7 @@ mod tests {
             node,
             frame,
             ArtifactId::from_raw(1),
-            FrameId::new(1),
+            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
         );
 
@@ -425,7 +425,7 @@ mod tests {
     fn tick_context_artifact_changed_since_compares_content_frame() {
         let registry = BindingRegistry::new();
         let mut resolver = Resolver::new();
-        let frame = FrameId::new(10);
+        let frame = Revision::new(10);
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
 
@@ -437,13 +437,13 @@ mod tests {
             NodeId::new(1),
             frame,
             ArtifactId::from_raw(1),
-            FrameId::new(5),
+            Revision::new(5),
             &mut bridge as &mut dyn TickResolver,
         );
 
-        assert!(ctx.artifact_changed_since(FrameId::new(4)));
-        assert!(!ctx.artifact_changed_since(FrameId::new(5)));
-        assert!(!ctx.artifact_changed_since(FrameId::new(6)));
+        assert!(ctx.artifact_changed_since(Revision::new(4)));
+        assert!(!ctx.artifact_changed_since(Revision::new(5)));
+        assert!(!ctx.artifact_changed_since(Revision::new(6)));
     }
 
     struct FixtureProduceHost {
@@ -462,7 +462,7 @@ mod tests {
                     if *node == self.node && *slot == self.out_path =>
                 {
                     Ok(Production::value(
-                        lpc_model::Versioned::new(session.frame_id(), LpsValueF32::F32(11.0)),
+                        lpc_model::WithRevision::new(session.revision(), LpsValueF32::F32(11.0)),
                         crate::resolver::ProductionSource::Default,
                     )?)
                 }
@@ -508,19 +508,19 @@ mod tests {
         fn produced(&self) -> &dyn crate::prop::ProducedSlotAccess {
             struct EmptyProps;
             impl crate::prop::ProducedSlotAccess for EmptyProps {
-                fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+                fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
                     None
                 }
                 fn iter_changed_since<'b>(
                     &'b self,
-                    _since: FrameId,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'b>
+                    _since: Revision,
+                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'b>
                 {
                     alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
                 }
                 fn snapshot<'b>(
                     &'b self,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'b>
+                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'b>
                 {
                     alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
                 }
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn dummy_node_can_resolve_bus_query_from_tick() {
         let mut registry = BindingRegistry::new();
-        let frame = FrameId::new(10);
+        let frame = Revision::new(10);
         let channel = lpc_model::ChannelName(String::from("in"));
         registry
             .register(
@@ -565,7 +565,7 @@ mod tests {
             NodeId::new(2),
             frame,
             ArtifactId::from_raw(1),
-            FrameId::new(1),
+            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
         );
 
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn dummy_node_can_resolve_consumed_slot_via_host_from_tick() {
         let registry = BindingRegistry::new();
-        let frame = FrameId::new(10);
+        let frame = Revision::new(10);
         let node_id = NodeId::new(2);
         let input_path = SlotPath::parse("fixture_in").unwrap();
 
@@ -603,7 +603,7 @@ mod tests {
             node_id,
             frame,
             ArtifactId::from_raw(1),
-            FrameId::new(1),
+            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
         );
 
@@ -614,9 +614,9 @@ mod tests {
     #[test]
     fn destroy_ctx_accessors() {
         let bus = Bus::new();
-        let ctx = DestroyCtx::new(NodeId::new(1), FrameId::new(99), &bus);
+        let ctx = DestroyCtx::new(NodeId::new(1), Revision::new(99), &bus);
         assert_eq!(ctx.node_id(), NodeId::new(1));
-        assert_eq!(ctx.frame_id(), FrameId::new(99));
+        assert_eq!(ctx.frame_id(), Revision::new(99));
     }
 
     #[test]
@@ -631,9 +631,9 @@ mod tests {
             lpc_model::Kind::Amplitude,
         )
         .unwrap();
-        bus.publish(&channel, LpsValueF32::F32(2.5), FrameId::new(5));
+        bus.publish(&channel, LpsValueF32::F32(2.5), Revision::new(5));
 
-        let ctx = DestroyCtx::new(NodeId::new(1), FrameId::new(99), &bus);
+        let ctx = DestroyCtx::new(NodeId::new(1), Revision::new(99), &bus);
         let val = ctx.bus_read(&channel).unwrap();
         assert!(matches!(val, LpsValueF32::F32(2.5)));
     }
@@ -641,9 +641,9 @@ mod tests {
     #[test]
     fn mem_pressure_ctx_accessors() {
         let bus = Bus::new();
-        let ctx = MemPressureCtx::new(NodeId::new(2), FrameId::new(100), &bus);
+        let ctx = MemPressureCtx::new(NodeId::new(2), Revision::new(100), &bus);
         assert_eq!(ctx.node_id(), NodeId::new(2));
-        assert_eq!(ctx.frame_id(), FrameId::new(100));
+        assert_eq!(ctx.revision(), Revision::new(100));
     }
 
     #[test]
@@ -658,9 +658,9 @@ mod tests {
             lpc_model::Kind::Amplitude,
         )
         .unwrap();
-        bus.publish(&channel, LpsValueF32::F32(0.8), FrameId::new(2));
+        bus.publish(&channel, LpsValueF32::F32(0.8), Revision::new(2));
 
-        let ctx = MemPressureCtx::new(NodeId::new(2), FrameId::new(100), &bus);
+        let ctx = MemPressureCtx::new(NodeId::new(2), Revision::new(100), &bus);
         let val = ctx.bus_read(&channel).unwrap();
         assert!(matches!(val, LpsValueF32::F32(0.8)));
     }

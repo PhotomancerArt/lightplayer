@@ -1,6 +1,6 @@
 use lpc_model::{
-    FrameId, LpValue, SlotAccess, SlotData, SlotShapeId, SlotShapeRegistry,
-    set_current_state_version,
+    Revision, LpValue, SlotAccess, SlotData, SlotShapeId, SlotShapeRegistry,
+    set_current_revision,
 };
 use lpc_view::SlotMirrorView;
 use lpc_wire::build_slot_full_sync;
@@ -28,7 +28,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
     println!("server updating engine.shader_node#params.exposure to Vec3([0.25, 0.5, 0.75])");
     harness
         .runtime
-        .change_shader_param_to_vec3(FrameId::new(2), "exposure", [0.25, 0.5, 0.75]);
+        .change_shader_param_to_vec3(Revision::new(2), "exposure", [0.25, 0.5, 0.75]);
 
     harness.print_server_tree("source.shader");
     harness.print_server_tree("engine.shader_node");
@@ -36,7 +36,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
     harness.sync_registry();
     harness.print_client_shape(ShaderNode::SHAPE_ID);
 
-    harness.sync_diff("source.shader", FrameId::new(1));
+    harness.sync_diff("source.shader", Revision::new(1));
     harness.print_client_tree("source.shader");
     assert_shader_param_def_type(
         harness.client.roots.get("source.shader").unwrap(),
@@ -44,7 +44,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
         "vec3",
     );
 
-    harness.sync_diff("engine.shader_node", FrameId::new(1));
+    harness.sync_diff("engine.shader_node", Revision::new(1));
     harness.print_client_tree("engine.shader_node");
     assert_shader_param(
         harness.client.roots.get("engine.shader_node").unwrap(),
@@ -56,7 +56,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
 #[test]
 fn two_shader_instances_can_have_distinct_dynamic_param_shapes() {
     let _log_guard = log_guard();
-    set_current_state_version(FrameId::new(1));
+    set_current_revision(Revision::new(1));
 
     let primary_shape_id = SlotShapeId::from_static_name("engine.shader_node.primary");
     let secondary_shape_id = SlotShapeId::from_static_name("engine.shader_node.secondary");

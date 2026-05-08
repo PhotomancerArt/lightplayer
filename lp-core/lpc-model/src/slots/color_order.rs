@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, SlotDataAccess, SlotEnumOption, SlotMeta,
+    FieldSlot, Revision, FromLpValue, LpType, LpValue, SlotDataAccess, SlotEnumOption, SlotMeta,
     SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, Versioned, current_state_version,
+    ValueRootError, WithRevision, current_revision,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -67,25 +67,25 @@ impl<'de> Deserialize<'de> for ColorOrderValue {
 /// Versioned RGB channel order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColorOrderSlot {
-    inner: Versioned<ColorOrderValue>,
+    inner: WithRevision<ColorOrderValue>,
 }
 
 impl ColorOrderSlot {
     pub fn new(value: ColorOrderValue) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: ColorOrderValue) -> Self {
+    pub fn with_version(frame: Revision, value: ColorOrderValue) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: ColorOrderValue) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -95,7 +95,7 @@ impl ColorOrderSlot {
 }
 
 impl SlotValueAccess for ColorOrderSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
+    FieldSlot, Revision, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
     SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, Versioned, current_state_version,
+    ValueRootError, WithRevision, current_revision,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -34,25 +34,25 @@ impl Affine2d {
 /// Versioned 2D affine transform.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Affine2dSlot {
-    inner: Versioned<Affine2d>,
+    inner: WithRevision<Affine2d>,
 }
 
 impl Affine2dSlot {
     pub fn new(value: Affine2d) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: Affine2d) -> Self {
+    pub fn with_version(frame: Revision, value: Affine2d) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: Affine2d) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -62,7 +62,7 @@ impl Affine2dSlot {
 }
 
 impl SlotValueAccess for Affine2dSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

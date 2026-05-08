@@ -1,32 +1,32 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
-    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, Versioned,
-    current_state_version,
+    FieldSlot, Revision, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision,
+    current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned render ordering value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderOrderSlot {
-    inner: Versioned<i32>,
+    inner: WithRevision<i32>,
 }
 
 impl RenderOrderSlot {
     pub fn new(value: i32) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: i32) -> Self {
+    pub fn with_version(frame: Revision, value: i32) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: i32) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -36,7 +36,7 @@ impl RenderOrderSlot {
 }
 
 impl SlotValueAccess for RenderOrderSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

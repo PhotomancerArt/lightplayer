@@ -1,6 +1,6 @@
 //! ChannelEntry — per-channel state on the bus.
 
-use lpc_model::{FrameId, Kind, NodeId, SlotPath};
+use lpc_model::{Revision, Kind, NodeId, SlotPath};
 use lps_shared::LpsValueF32;
 
 /// Per-channel state on the bus.
@@ -16,7 +16,7 @@ pub struct ChannelEntry {
 
     /// Frame at which `last_value` was published. `FrameId::new(0)`
     /// if never written.
-    pub last_writer_frame: FrameId,
+    pub last_writer_frame: Revision,
 
     /// Channel kind, established by first reader/writer claim.
     /// `None` until the first claim.
@@ -28,7 +28,7 @@ impl Default for ChannelEntry {
         Self {
             writer: None,
             last_value: None,
-            last_writer_frame: FrameId::new(0),
+            last_writer_frame: Revision::new(0),
             kind: None,
         }
     }

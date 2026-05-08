@@ -1,32 +1,32 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
-    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, Versioned,
-    current_state_version,
+    FieldSlot, Revision, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision,
+    current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned floating point ratio in the inclusive `0.0..=1.0` domain.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RatioSlot {
-    inner: Versioned<f32>,
+    inner: WithRevision<f32>,
 }
 
 impl RatioSlot {
     pub fn new(value: f32) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: f32) -> Self {
+    pub fn with_version(frame: Revision, value: f32) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: f32) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -36,7 +36,7 @@ impl RatioSlot {
 }
 
 impl SlotValueAccess for RatioSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

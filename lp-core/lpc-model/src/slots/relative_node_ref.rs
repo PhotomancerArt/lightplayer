@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, RelativeNodeRef, SlotDataAccess, SlotMeta, SlotShape,
+    FieldSlot, Revision, LpType, LpValue, RelativeNodeRef, SlotDataAccess, SlotMeta, SlotShape,
     SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, Versioned, current_state_version,
+    ValueRootError, WithRevision, current_revision,
 };
 use alloc::string::ToString;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -9,25 +9,25 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Versioned relative node reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelativeNodeRefSlot {
-    inner: Versioned<RelativeNodeRef>,
+    inner: WithRevision<RelativeNodeRef>,
 }
 
 impl RelativeNodeRefSlot {
     pub fn new(value: RelativeNodeRef) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: RelativeNodeRef) -> Self {
+    pub fn with_version(frame: Revision, value: RelativeNodeRef) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: RelativeNodeRef) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -37,7 +37,7 @@ impl RelativeNodeRefSlot {
 }
 
 impl SlotValueAccess for RelativeNodeRefSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

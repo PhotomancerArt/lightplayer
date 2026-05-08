@@ -7,34 +7,34 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use lpc_model::LpValue;
-use lpc_model::project::FrameId;
+use lpc_model::project::Revision;
 use lpc_model::value::ValuePath;
 
 /// Reflection over cached wire-safe property values held by a view/cache.
 pub trait PropAccessView {
     /// Get the current value at `path`, if any.
-    fn get(&self, path: &ValuePath) -> Option<(&LpValue, FrameId)>;
+    fn get(&self, path: &ValuePath) -> Option<(&LpValue, Revision)>;
 
     /// Iterate entries whose `changed_frame > since`.
     fn iter_changed_since<'a>(
         &'a self,
-        since: FrameId,
-    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, FrameId)> + 'a>;
+        since: Revision,
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, Revision)> + 'a>;
 
     /// All cached entries.
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, FrameId)> + 'a>;
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, Revision)> + 'a>;
 }
 
 /// Simple in-memory cache backing [`PropAccessView`] for tests and small clients.
 #[derive(Default)]
 pub struct PropsMapView {
-    values: Vec<(ValuePath, LpValue, FrameId)>,
+    values: Vec<(ValuePath, LpValue, Revision)>,
 }
 
 impl PropsMapView {
-    pub fn insert(&mut self, path: ValuePath, value: LpValue, frame: FrameId) {
+    pub fn insert(&mut self, path: ValuePath, value: LpValue, frame: Revision) {
         if let Some(i) = self.values.iter().position(|(p, _, _)| p == &path) {
             self.values[i] = (path, value, frame);
         } else {
@@ -44,7 +44,7 @@ impl PropsMapView {
 }
 
 impl PropAccessView for PropsMapView {
-    fn get(&self, path: &ValuePath) -> Option<(&LpValue, FrameId)> {
+    fn get(&self, path: &ValuePath) -> Option<(&LpValue, Revision)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -53,8 +53,8 @@ impl PropAccessView for PropsMapView {
 
     fn iter_changed_since<'a>(
         &'a self,
-        since: FrameId,
-    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, FrameId)> + 'a> {
+        since: Revision,
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, Revision)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -65,7 +65,7 @@ impl PropAccessView for PropsMapView {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&'a ValuePath, &'a LpValue, Revision)> + 'a> {
         Box::new(self.values.iter().map(|(p, v, f)| (p, v, *f)))
     }
 }
@@ -84,9 +84,9 @@ mod tests {
     fn map_get_and_snapshot() {
         let mut m = PropsMapView::default();
         let p = parse_path("outputs.x").unwrap();
-        m.insert(p.clone(), LpValue::F32(2.0), FrameId::new(1));
+        m.insert(p.clone(), LpValue::F32(2.0), Revision::new(1));
 
-        assert_eq!(m.get(&p), Some((&LpValue::F32(2.0), FrameId::new(1))));
+        assert_eq!(m.get(&p), Some((&LpValue::F32(2.0), Revision::new(1))));
         assert_eq!(m.snapshot().count(), 1);
     }
 
@@ -95,10 +95,10 @@ mod tests {
         let mut m = PropsMapView::default();
         let p1 = parse_path("a").unwrap();
         let p2 = parse_path("b").unwrap();
-        m.insert(p1.clone(), LpValue::I32(1), FrameId::new(1));
-        m.insert(p2.clone(), LpValue::I32(2), FrameId::new(10));
+        m.insert(p1.clone(), LpValue::I32(1), Revision::new(1));
+        m.insert(p2.clone(), LpValue::I32(2), Revision::new(10));
 
-        let recent: Vec<_> = m.iter_changed_since(FrameId::new(5)).collect();
+        let recent: Vec<_> = m.iter_changed_since(Revision::new(5)).collect();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].0, &p2);
     }

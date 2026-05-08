@@ -7,7 +7,7 @@ use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpc_model::{FrameId, NodeId, SlotPath};
+use lpc_model::{Revision, NodeId, SlotPath};
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -18,7 +18,7 @@ use crate::nodes::fixture::mapping::{
 };
 use crate::nodes::shader::shader_node::shader_texture_output_path;
 use crate::nodes::texture::texture_node::texture_dimension_query_targets;
-use lpc_model::Versioned;
+use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
@@ -39,20 +39,20 @@ use lps_shared::LpsValueF32;
 struct FixtureScalarProps;
 
 impl ProducedSlotAccess for FixtureScalarProps {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
-        _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        _since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::empty())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::empty())
     }
 }
@@ -63,7 +63,7 @@ pub struct FixtureNode {
     texture_node_id: NodeId,
     shader_node_id: NodeId,
     mapping: MappingConfig,
-    mapping_version: FrameId,
+    mapping_version: Revision,
     output_sink: RuntimeBufferId,
     lamp_colors_buffer_id: Option<RuntimeBufferId>,
     scalar_props: FixtureScalarProps,
@@ -71,7 +71,7 @@ pub struct FixtureNode {
     brightness: u8,
     gamma_correction: bool,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
-    precomputed: Option<(u32, u32, FrameId, alloc::vec::Vec<PixelMappingEntry>)>,
+    precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
 }
 
 impl FixtureNode {
@@ -80,7 +80,7 @@ impl FixtureNode {
         texture_node_id: NodeId,
         shader_node_id: NodeId,
         mapping: MappingConfig,
-        mapping_version: FrameId,
+        mapping_version: Revision,
         output_sink: RuntimeBufferId,
         color_order: ColorOrder,
         brightness: u8,
@@ -109,8 +109,8 @@ impl Node for FixtureNode {
         }
         let channels = fixture_lamp_channel_count(&self.mapping);
         let byte_len = (channels as usize).saturating_mul(3);
-        let id = ctx.insert_runtime_buffer(Versioned::new(
-            FrameId::default(),
+        let id = ctx.insert_runtime_buffer(WithRevision::new(
+            Revision::default(),
             RuntimeBuffer::fixture_colors_rgb8(channels, vec![0u8; byte_len]),
         ));
         self.lamp_colors_buffer_id = Some(id);
@@ -172,7 +172,7 @@ impl Node for FixtureNode {
                 NodeError::msg("fixture expected RuntimeProduct::Render from shader")
             })?;
 
-        let ver = ctx.frame_id();
+        let ver = ctx.revision();
         let mapping_ver = self.mapping_version;
         let stale = match &self.precomputed {
             None => true,
@@ -268,10 +268,10 @@ fn accumulate_fixture_channels(
     }
 
     let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
-    if ctx.frame_id().as_i64() % 60 == 0 {
+    if ctx.revision().as_i64() % 60 == 0 {
         log::info!(
             "[fixture] frame={} sampling {} points from {} mapping entries via generic render product path",
-            ctx.frame_id().as_i64(),
+            ctx.revision().as_i64(),
             batch.points.len(),
             mapping_entries.len()
         );
@@ -376,7 +376,7 @@ fn push_fixture_output(
     ctx: &mut TickContext<'_>,
     output_sink: RuntimeBufferId,
     lamp_colors: RuntimeBufferId,
-    frame: FrameId,
+    frame: Revision,
     accumulators: &ChannelAccumulators,
     color_order: ColorOrder,
     brightness_u8: u8,
@@ -512,7 +512,7 @@ mod tests {
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use lpc_model::{Kind, LpValue, TreePath, Versioned};
+    use lpc_model::{Kind, LpValue, TreePath, WithRevision};
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
     use lpc_model::nodes::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -530,11 +530,11 @@ mod tests {
     struct FixtureTickCountSolidProducerOutputs {
         path: SlotPath,
         rid: crate::render_product::RenderProductId,
-        last_frame: FrameId,
+        last_frame: Revision,
     }
 
     impl ProducedSlotAccess for FixtureTickCountSolidProducerOutputs {
-        fn get(&self, path: &SlotPath) -> Option<(RpEnum, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RpEnum, Revision)> {
             if path == &self.path {
                 Some((RpEnum::render(self.rid), self.last_frame))
             } else {
@@ -544,8 +544,8 @@ mod tests {
 
         fn iter_changed_since<'a>(
             &'a self,
-            since: FrameId,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+            since: Revision,
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
             if self.last_frame.as_i64() > since.as_i64() {
                 Box::new(core::iter::once((
                     self.path.clone(),
@@ -559,7 +559,7 @@ mod tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
             Box::new(core::iter::once((
                 self.path.clone(),
                 RuntimeProduct::render(self.rid),
@@ -576,7 +576,7 @@ mod tests {
     impl Node for FixtureTickCountSolidProducer {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            self.out.last_frame = ctx.frame_id();
+            self.out.last_frame = ctx.revision();
             Ok(())
         }
 
@@ -601,7 +601,7 @@ mod tests {
     fn fixture_demand_resolve_and_tick_share_one_shader_producer_tick_via_resolver_cache() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = engine.tree().root();
         let (spine, artifact) = test_placeholder_spine();
 
@@ -665,7 +665,7 @@ mod tests {
             )
             .unwrap();
 
-        let sink = engine.runtime_buffers_mut().insert(Versioned::new(
+        let sink = engine.runtime_buffers_mut().insert(WithRevision::new(
             frame,
             RuntimeBuffer::raw(alloc::vec![0u8; 24]),
         ));
@@ -745,7 +745,7 @@ mod tests {
     fn fixture_writes_expected_u16_rgb_for_solid_red_product() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = engine.tree().root();
         let (spine, artifact) = test_placeholder_spine();
 
@@ -809,7 +809,7 @@ mod tests {
             )
             .unwrap();
 
-        let sink = engine.runtime_buffers_mut().insert(Versioned::new(
+        let sink = engine.runtime_buffers_mut().insert(WithRevision::new(
             frame,
             RuntimeBuffer::raw(alloc::vec![0u8; 6]),
         ));

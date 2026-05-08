@@ -4,7 +4,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId, TreePath};
+use lpc_model::{Revision, NodeId, TreePath};
 
 use super::TreeEntryView;
 
@@ -15,7 +15,7 @@ use super::TreeEntryView;
 pub struct NodeTreeView {
     pub nodes: BTreeMap<NodeId, TreeEntryView>,
     pub by_path: BTreeMap<TreePath, NodeId>,
-    pub last_synced_frame: FrameId,
+    pub last_synced_frame: Revision,
 }
 
 impl NodeTreeView {
@@ -24,7 +24,7 @@ impl NodeTreeView {
         Self {
             nodes: BTreeMap::new(),
             by_path: BTreeMap::new(),
-            last_synced_frame: FrameId::new(0),
+            last_synced_frame: Revision::new(0),
         }
     }
 
@@ -83,7 +83,7 @@ impl NodeTreeView {
     }
 
     /// Update the last synced frame (call after applying deltas).
-    pub fn update_synced_frame(&mut self, frame: FrameId) {
+    pub fn update_synced_frame(&mut self, frame: Revision) {
         if frame.0 > self.last_synced_frame.0 {
             self.last_synced_frame = frame;
         }

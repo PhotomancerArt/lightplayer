@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
-    SlotValueAccess, SlotValueShape, ValueEditorHint, Versioned, current_state_version,
+    FieldSlot, Revision, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
+    SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision, current_revision,
 };
 use alloc::string::String;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -8,25 +8,25 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Versioned path to an authored source file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourcePathSlot {
-    inner: Versioned<String>,
+    inner: WithRevision<String>,
 }
 
 impl SourcePathSlot {
     pub fn new(value: String) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: String) -> Self {
+    pub fn with_version(frame: Revision, value: String) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: String) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -36,7 +36,7 @@ impl SourcePathSlot {
 }
 
 impl SlotValueAccess for SourcePathSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -77,7 +77,7 @@ pub fn source_path_shape() -> SlotValueShape {
     path_shape("slot.leaf.source_path")
 }
 
-pub(super) fn path_shape(name: &str) -> SlotValueShape {
+pub(crate) fn path_shape(name: &str) -> SlotValueShape {
     SlotValueShape {
         id: SlotShapeId::from_static_name(name),
         ty: LpType::String,

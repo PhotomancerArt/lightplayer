@@ -3,7 +3,7 @@
 use crate::project::WireNodeStatus;
 use crate::tree::{WireChildKind, WireEntryState};
 use lpc_model::node::{NodeId, TreePath};
-use lpc_model::project::FrameId;
+use lpc_model::project::Revision;
 
 /// Structural delta for the node tree (wire shape).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -19,9 +19,9 @@ pub enum WireTreeDelta {
         children: alloc::vec::Vec<NodeId>,
         status: WireNodeStatus,
         state: WireEntryState,
-        created_frame: FrameId,
-        change_frame: FrameId,
-        children_ver: FrameId,
+        created_frame: Revision,
+        change_frame: Revision,
+        children_ver: Revision,
     },
 
     /// Status/state changed on an existing entry.
@@ -29,14 +29,14 @@ pub enum WireTreeDelta {
         id: NodeId,
         status: WireNodeStatus,
         state: WireEntryState,
-        change_frame: FrameId,
+        change_frame: Revision,
     },
 
     /// Children list changed.
     ChildrenChanged {
         id: NodeId,
         children: alloc::vec::Vec<NodeId>,
-        children_ver: FrameId,
+        children_ver: Revision,
     },
 }
 
@@ -46,7 +46,7 @@ mod tests {
     use crate::project::WireNodeStatus;
     use crate::tree::{WireChildKind, WireEntryState, WireSlotIndex};
     use lpc_model::node::{NodeId, TreePath};
-    use lpc_model::project::FrameId;
+    use lpc_model::project::Revision;
 
     #[test]
     fn tree_delta_created_round_trips() {
@@ -60,9 +60,9 @@ mod tests {
             children: alloc::vec![NodeId::new(8), NodeId::new(9)],
             status: WireNodeStatus::Created,
             state: WireEntryState::Pending,
-            created_frame: FrameId::new(1),
-            change_frame: FrameId::new(1),
-            children_ver: FrameId::new(1),
+            created_frame: Revision::new(1),
+            change_frame: Revision::new(1),
+            children_ver: Revision::new(1),
         };
         let json = serde_json::to_string(&delta).unwrap();
         let decoded: WireTreeDelta = serde_json::from_str(&json).unwrap();
@@ -75,7 +75,7 @@ mod tests {
             id: NodeId::new(7),
             status: WireNodeStatus::Ok,
             state: WireEntryState::Alive,
-            change_frame: FrameId::new(42),
+            change_frame: Revision::new(42),
         };
         let json = serde_json::to_string(&delta).unwrap();
         let decoded: WireTreeDelta = serde_json::from_str(&json).unwrap();
@@ -87,7 +87,7 @@ mod tests {
         let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(1),
             children: alloc::vec![NodeId::new(2), NodeId::new(3)],
-            children_ver: FrameId::new(10),
+            children_ver: Revision::new(10),
         };
         let json = serde_json::to_string(&delta).unwrap();
         let decoded: WireTreeDelta = serde_json::from_str(&json).unwrap();
@@ -104,9 +104,9 @@ mod tests {
             children: alloc::vec![],
             status: WireNodeStatus::Created,
             state: WireEntryState::Pending,
-            created_frame: FrameId::new(0),
-            change_frame: FrameId::new(0),
-            children_ver: FrameId::new(0),
+            created_frame: Revision::new(0),
+            change_frame: Revision::new(0),
+            children_ver: Revision::new(0),
         };
         let json = serde_json::to_string(&delta).unwrap();
         let decoded: WireTreeDelta = serde_json::from_str(&json).unwrap();

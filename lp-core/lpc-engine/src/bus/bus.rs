@@ -3,7 +3,7 @@
 use crate::bus::bus_error::BusError;
 use crate::bus::channel_entry::ChannelEntry;
 use alloc::collections::BTreeMap;
-use lpc_model::{ChannelName, FrameId, Kind, NodeId, SlotPath};
+use lpc_model::{ChannelName, Revision, Kind, NodeId, SlotPath};
 use lps_shared::LpsValueF32;
 
 /// Runtime registry of bus channels.
@@ -61,7 +61,7 @@ impl Bus {
     /// Publish `value` on `channel`. Bumps `last_writer_frame` and
     /// replaces `last_value`. No-op if no writer has been claimed
     /// for `channel`.
-    pub fn publish(&mut self, channel: &ChannelName, value: LpsValueF32, frame: FrameId) {
+    pub fn publish(&mut self, channel: &ChannelName, value: LpsValueF32, frame: Revision) {
         if let Some(entry) = self.channels.get_mut(channel) {
             if entry.writer.is_some() {
                 entry.last_value = Some(value);
@@ -79,11 +79,11 @@ impl Bus {
 
     /// Frame at which the channel was last written. `FrameId::new(0)`
     /// if the channel has never been written.
-    pub fn last_writer_frame(&self, channel: &ChannelName) -> FrameId {
+    pub fn last_writer_frame(&self, channel: &ChannelName) -> Revision {
         self.channels
             .get(channel)
             .map(|e| e.last_writer_frame)
-            .unwrap_or_else(FrameId::default)
+            .unwrap_or_else(Revision::default)
     }
 
     /// The channel's established `Kind`, if any.
@@ -94,7 +94,7 @@ impl Bus {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bus, BusError, ChannelName, FrameId, Kind, NodeId};
+    use super::{Bus, BusError, ChannelName, Revision, Kind, NodeId};
     use lpc_model::SlotPath;
     use lps_shared::LpsValueF32;
 
@@ -121,7 +121,7 @@ mod tests {
         .unwrap();
 
         // Publish
-        bus.publish(&channel, LpsValueF32::F32(3.5), FrameId::new(10));
+        bus.publish(&channel, LpsValueF32::F32(3.5), Revision::new(10));
 
         // Read
         let val = bus.read(&channel).unwrap();
@@ -166,7 +166,7 @@ mod tests {
         let mut bus = Bus::new();
         let channel = ch("unclaimed");
 
-        bus.publish(&channel, LpsValueF32::F32(5.0), FrameId::new(5));
+        bus.publish(&channel, LpsValueF32::F32(5.0), Revision::new(5));
 
         assert!(bus.read(&channel).is_none());
         assert_eq!(bus.last_writer_frame(&channel).as_i64(), 0);

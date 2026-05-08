@@ -254,9 +254,9 @@ impl LpServer {
         for (handle, _) in &project_info {
             if let Some(project) = self.project_manager.get_project(*handle) {
                 log::debug!(
-                    "LpServer::tick: Project {} frame_id: {}",
+                    "LpServer::tick: Project {} revision: {}",
                     project.name(),
-                    project.runtime().frame_id().as_i64()
+                    project.runtime().revision().as_i64()
                 );
             }
         }

@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 
-use lpc_model::FrameId;
+use lpc_model::Revision;
 use lpc_model::SlotPath;
 use lpc_model::NodeKind;
 
@@ -14,20 +14,20 @@ use crate::runtime_product::RuntimeProduct;
 struct EmptyProps;
 
 impl ProducedSlotAccess for EmptyProps {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
-        _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        _since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::empty())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::empty())
     }
 }

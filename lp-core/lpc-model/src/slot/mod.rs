@@ -16,7 +16,6 @@ mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
 mod slot_value;
-pub mod slots;
 mod value_ref;
 mod value_slot;
 
@@ -48,13 +47,13 @@ pub use slot_shape_registry::{
     SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, VersionedSlotShape,
 };
 
-pub use slots::{
-    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot, ResourceRefSlot,
-    SourcePathSlot, XySlot, affine2d_shape, artifact_path_shape, color_order_shape, dim2u_shape,
-    positive_f32_shape, ratio_shape, relative_node_ref_shape, render_order_shape,
-    render_product_resource_shape, resource_ref_shape, runtime_buffer_resource_shape,
-    source_path_shape, u32_list_shape, xy_shape,
+pub use crate::slots::{
+    affine2d_shape, artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
+    render_order_shape, render_product_resource_shape, resource_ref_shape, runtime_buffer_resource_shape, source_path_shape,
+    u32_list_shape, xy_shape, Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot,
+    ColorOrderValue, Dim2u, Dim2uSlot, PositiveF32Slot,
+    RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
+    ResourceRefSlot, SourcePathSlot, XySlot,
 };
 pub use value_ref::ValueRef;
 pub use value_slot::{MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, ValueSlot};

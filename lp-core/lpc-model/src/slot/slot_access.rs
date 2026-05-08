@@ -1,5 +1,5 @@
 use crate::{
-    FrameId, LpValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, Versioned,
+    Revision, LpValue, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, WithRevision,
 };
 use alloc::vec::Vec;
 
@@ -58,7 +58,7 @@ pub trait FieldSlot {
 /// Borrowed access to one slot-data node.
 #[derive(Clone, Copy)]
 pub enum SlotDataAccess<'a> {
-    Unit(FrameId),
+    Unit(Revision),
     Value(&'a dyn SlotValueAccess),
     Record(&'a dyn SlotRecordAccess),
     Map(&'a dyn MapSlotAccess),
@@ -68,14 +68,14 @@ pub enum SlotDataAccess<'a> {
 
 /// Borrowed access to an atomic slot value.
 pub trait SlotValueAccess {
-    fn changed_frame(&self) -> FrameId;
+    fn changed_frame(&self) -> Revision;
     fn value(&self) -> LpValue;
 }
 
 /// Borrowed access to a record slot.
 pub trait SlotRecordAccess {
-    fn fields_changed_frame(&self) -> FrameId {
-        FrameId::default()
+    fn fields_changed_frame(&self) -> Revision {
+        Revision::default()
     }
 
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>>;
@@ -83,21 +83,21 @@ pub trait SlotRecordAccess {
 
 /// Borrowed access to a stable-key map slot.
 pub trait MapSlotAccess {
-    fn keys_changed_frame(&self) -> FrameId;
+    fn keys_changed_frame(&self) -> Revision;
     fn keys(&self) -> Vec<SlotMapKey>;
     fn get(&self, key: &SlotMapKey) -> Option<SlotDataAccess<'_>>;
 }
 
 /// Borrowed access to an enum slot with one active variant.
 pub trait SlotEnumAccess {
-    fn variant_changed_frame(&self) -> FrameId;
+    fn variant_changed_frame(&self) -> Revision;
     fn variant(&self) -> &str;
     fn data(&self) -> SlotDataAccess<'_>;
 }
 
 /// Borrowed access to an optional slot.
 pub trait SlotOptionAccess {
-    fn presence_changed_frame(&self) -> FrameId;
+    fn presence_changed_frame(&self) -> Revision;
     fn data(&self) -> Option<SlotDataAccess<'_>>;
 }
 
@@ -114,8 +114,8 @@ impl SlotData {
     }
 }
 
-impl SlotValueAccess for Versioned<LpValue> {
-    fn changed_frame(&self) -> FrameId {
+impl SlotValueAccess for WithRevision<LpValue> {
+    fn changed_frame(&self) -> Revision {
         self.changed_frame()
     }
 
@@ -124,8 +124,8 @@ impl SlotValueAccess for Versioned<LpValue> {
     }
 }
 
-impl SlotValueAccess for Versioned<f32> {
-    fn changed_frame(&self) -> FrameId {
+impl SlotValueAccess for WithRevision<f32> {
+    fn changed_frame(&self) -> Revision {
         self.changed_frame()
     }
 
@@ -134,8 +134,8 @@ impl SlotValueAccess for Versioned<f32> {
     }
 }
 
-impl SlotValueAccess for Versioned<u32> {
-    fn changed_frame(&self) -> FrameId {
+impl SlotValueAccess for WithRevision<u32> {
+    fn changed_frame(&self) -> Revision {
         self.changed_frame()
     }
 
@@ -144,8 +144,8 @@ impl SlotValueAccess for Versioned<u32> {
     }
 }
 
-impl SlotValueAccess for Versioned<bool> {
-    fn changed_frame(&self) -> FrameId {
+impl SlotValueAccess for WithRevision<bool> {
+    fn changed_frame(&self) -> Revision {
         self.changed_frame()
     }
 
@@ -154,8 +154,8 @@ impl SlotValueAccess for Versioned<bool> {
     }
 }
 
-impl SlotValueAccess for Versioned<[f32; 2]> {
-    fn changed_frame(&self) -> FrameId {
+impl SlotValueAccess for WithRevision<[f32; 2]> {
+    fn changed_frame(&self) -> Revision {
         self.changed_frame()
     }
 
@@ -164,8 +164,8 @@ impl SlotValueAccess for Versioned<[f32; 2]> {
     }
 }
 
-impl SlotValueAccess for Versioned<[f32; 3]> {
-    fn changed_frame(&self) -> FrameId {
+impl SlotValueAccess for WithRevision<[f32; 3]> {
+    fn changed_frame(&self) -> Revision {
         self.changed_frame()
     }
 
@@ -175,7 +175,7 @@ impl SlotValueAccess for Versioned<[f32; 3]> {
 }
 
 impl SlotRecordAccess for SlotRecord {
-    fn fields_changed_frame(&self) -> FrameId {
+    fn fields_changed_frame(&self) -> Revision {
         self.fields_changed_frame
     }
 
@@ -185,7 +185,7 @@ impl SlotRecordAccess for SlotRecord {
 }
 
 impl MapSlotAccess for SlotMapDyn {
-    fn keys_changed_frame(&self) -> FrameId {
+    fn keys_changed_frame(&self) -> Revision {
         self.keys_changed_frame
     }
 
@@ -199,7 +199,7 @@ impl MapSlotAccess for SlotMapDyn {
 }
 
 impl SlotEnumAccess for SlotEnum {
-    fn variant_changed_frame(&self) -> FrameId {
+    fn variant_changed_frame(&self) -> Revision {
         self.variant_changed_frame
     }
 
@@ -213,7 +213,7 @@ impl SlotEnumAccess for SlotEnum {
 }
 
 impl SlotOptionAccess for SlotOptionDyn {
-    fn presence_changed_frame(&self) -> FrameId {
+    fn presence_changed_frame(&self) -> Revision {
         self.presence_changed_frame
     }
 

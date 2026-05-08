@@ -1,4 +1,4 @@
-use crate::{FrameId, LpValue, SlotMapKeyShape, SlotShape, Versioned, current_state_version};
+use crate::{Revision, LpValue, SlotMapKeyShape, SlotShape, WithRevision, current_revision};
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -18,29 +18,29 @@ use super::{
 /// A typed versioned slot leaf for Rust-authored structs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValueSlot<T> {
-    inner: Versioned<T>,
+    inner: WithRevision<T>,
 }
 
 impl<T> ValueSlot<T> {
     pub fn new(value: T) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: T) -> Self {
+    pub fn with_version(frame: Revision, value: T) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: T) {
-        self.set_with_version(current_state_version(), value);
+        self.set_with_version(current_revision(), value);
     }
 
-    pub fn set_with_version(&mut self, frame: FrameId, value: T) {
+    pub fn set_with_version(&mut self, frame: Revision, value: T) {
         self.inner.set(frame, value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -49,8 +49,8 @@ impl<T> ValueSlot<T> {
     }
 }
 
-impl<T> From<Versioned<T>> for ValueSlot<T> {
-    fn from(inner: Versioned<T>) -> Self {
+impl<T> From<WithRevision<T>> for ValueSlot<T> {
+    fn from(inner: WithRevision<T>) -> Self {
         Self { inner }
     }
 }
@@ -95,7 +95,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for ValueSlot<T> {
 }
 
 impl<T: ToLpValue> SlotValueAccess for ValueSlot<T> {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -129,16 +129,16 @@ pub trait MapSlotKeyLike: Clone + Ord {
 /// structural change independent from changes inside an entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapSlot<K, V> {
-    pub keys_changed_frame: FrameId,
+    pub keys_changed_frame: Revision,
     pub entries: BTreeMap<K, V>,
 }
 
 impl<K: Ord, V> MapSlot<K, V> {
     pub fn new(entries: BTreeMap<K, V>) -> Self {
-        Self::with_version(current_state_version(), entries)
+        Self::with_version(current_revision(), entries)
     }
 
-    pub fn with_version(keys_changed_frame: FrameId, entries: BTreeMap<K, V>) -> Self {
+    pub fn with_version(keys_changed_frame: Revision, entries: BTreeMap<K, V>) -> Self {
         Self {
             keys_changed_frame,
             entries,
@@ -150,19 +150,19 @@ impl<K: Ord, V> MapSlot<K, V> {
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        self.insert_with_version(current_state_version(), key, value)
+        self.insert_with_version(current_revision(), key, value)
     }
 
-    pub fn insert_with_version(&mut self, frame: FrameId, key: K, value: V) -> Option<V> {
+    pub fn insert_with_version(&mut self, frame: Revision, key: K, value: V) -> Option<V> {
         self.keys_changed_frame = frame;
         self.entries.insert(key, value)
     }
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.remove_with_version(current_state_version(), key)
+        self.remove_with_version(current_revision(), key)
     }
 
-    pub fn remove_with_version(&mut self, frame: FrameId, key: &K) -> Option<V> {
+    pub fn remove_with_version(&mut self, frame: Revision, key: &K) -> Option<V> {
         let removed = self.entries.remove(key);
         if removed.is_some() {
             self.keys_changed_frame = frame;
@@ -260,7 +260,7 @@ where
     K: MapSlotKeyLike,
     V: SlotMapValueAccess,
 {
-    fn keys_changed_frame(&self) -> FrameId {
+    fn keys_changed_frame(&self) -> Revision {
         self.keys_changed_frame
     }
 
@@ -311,27 +311,27 @@ impl<T: SlotValueAccess> SlotMapValueAccess for T {
 /// Typed option container for Rust-authored optional records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OptionSlot<T> {
-    pub presence_changed_frame: FrameId,
+    pub presence_changed_frame: Revision,
     pub data: Option<T>,
 }
 
 impl<T> OptionSlot<T> {
     pub fn none() -> Self {
-        Self::none_with_version(current_state_version())
+        Self::none_with_version(current_revision())
     }
 
     pub fn some(data: T) -> Self {
-        Self::some_with_version(current_state_version(), data)
+        Self::some_with_version(current_revision(), data)
     }
 
-    pub fn none_with_version(frame: FrameId) -> Self {
+    pub fn none_with_version(frame: Revision) -> Self {
         Self {
             presence_changed_frame: frame,
             data: None,
         }
     }
 
-    pub fn some_with_version(frame: FrameId, data: T) -> Self {
+    pub fn some_with_version(frame: Revision, data: T) -> Self {
         Self {
             presence_changed_frame: frame,
             data: Some(data),
@@ -339,19 +339,19 @@ impl<T> OptionSlot<T> {
     }
 
     pub fn set_some(&mut self, data: T) {
-        self.set_some_with_version(current_state_version(), data);
+        self.set_some_with_version(current_revision(), data);
     }
 
-    pub fn set_some_with_version(&mut self, frame: FrameId, data: T) {
+    pub fn set_some_with_version(&mut self, frame: Revision, data: T) {
         self.presence_changed_frame = frame;
         self.data = Some(data);
     }
 
     pub fn set_none(&mut self) {
-        self.set_none_with_version(current_state_version());
+        self.set_none_with_version(current_revision());
     }
 
-    pub fn set_none_with_version(&mut self, frame: FrameId) {
+    pub fn set_none_with_version(&mut self, frame: Revision) {
         self.presence_changed_frame = frame;
         self.data = None;
     }
@@ -397,14 +397,14 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for OptionSlot<T> {
         D: Deserializer<'de>,
     {
         Ok(Self {
-            presence_changed_frame: current_state_version(),
+            presence_changed_frame: current_revision(),
             data: Option::<T>::deserialize(deserializer)?,
         })
     }
 }
 
 impl<T: SlotMapValueAccess> SlotOptionAccess for OptionSlot<T> {
-    fn presence_changed_frame(&self) -> FrameId {
+    fn presence_changed_frame(&self) -> Revision {
         self.presence_changed_frame
     }
 
@@ -509,14 +509,14 @@ impl MapSlotKeyLike for u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SlotDataAccess, current_state_version};
+    use crate::{SlotDataAccess, current_revision};
     use alloc::vec;
 
     #[test]
     fn typed_slot_value_exposes_lp_value() {
-        let value = ValueSlot::with_version(FrameId::new(7), String::from("shader.glsl"));
+        let value = ValueSlot::with_version(Revision::new(7), String::from("shader.glsl"));
 
-        assert_eq!(value.changed_frame(), FrameId::new(7));
+        assert_eq!(value.changed_frame(), Revision::new(7));
         assert_eq!(
             SlotValueAccess::value(&value),
             LpValue::String(String::from("shader.glsl"))
@@ -535,22 +535,22 @@ mod tests {
 
         let mut map = MapSlot::new(BTreeMap::<String, Entry>::new());
         map.insert_with_version(
-            FrameId::new(3),
+            Revision::new(3),
             String::from("a"),
-            Entry(ValueSlot::with_version(FrameId::new(3), 1)),
+            Entry(ValueSlot::with_version(Revision::new(3), 1)),
         );
 
-        assert_eq!(map.keys_changed_frame(), FrameId::new(3));
+        assert_eq!(map.keys_changed_frame(), Revision::new(3));
         assert_eq!(map.keys(), vec![SlotMapKey::String(String::from("a"))]);
     }
 
     #[test]
     fn value_slot_serializes_as_authored_value_and_stamps_deserialize_version() {
-        let value = ValueSlot::with_version(FrameId::new(4), String::from("shader.glsl"));
+        let value = ValueSlot::with_version(Revision::new(4), String::from("shader.glsl"));
 
         assert_eq!(serde_json::to_string(&value).unwrap(), r#""shader.glsl""#);
 
-        let expected_version = current_state_version();
+        let expected_version = current_revision();
         let decoded: ValueSlot<String> = serde_json::from_str(r#""main.glsl""#).unwrap();
 
         assert_eq!(decoded.value(), "main.glsl");
@@ -562,13 +562,13 @@ mod tests {
         let mut entries = BTreeMap::new();
         entries.insert(
             String::from("speed"),
-            ValueSlot::with_version(FrameId::new(2), 7_u32),
+            ValueSlot::with_version(Revision::new(2), 7_u32),
         );
-        let map = MapSlot::with_version(FrameId::new(3), entries);
+        let map = MapSlot::with_version(Revision::new(3), entries);
 
         assert_eq!(serde_json::to_string(&map).unwrap(), r#"{"speed":7}"#);
 
-        let expected_version = current_state_version();
+        let expected_version = current_revision();
         let decoded: MapSlot<String, ValueSlot<u32>> =
             serde_json::from_str(r#"{"phase":3}"#).unwrap();
 
@@ -592,13 +592,13 @@ mod tests {
 
     #[test]
     fn option_slot_serializes_as_authored_option_and_stamps_presence_version() {
-        let some = OptionSlot::some_with_version(FrameId::new(3), ValueSlot::new(5_u32));
-        let none = OptionSlot::<ValueSlot<u32>>::none_with_version(FrameId::new(4));
+        let some = OptionSlot::some_with_version(Revision::new(3), ValueSlot::new(5_u32));
+        let none = OptionSlot::<ValueSlot<u32>>::none_with_version(Revision::new(4));
 
         assert_eq!(serde_json::to_string(&some).unwrap(), "5");
         assert_eq!(serde_json::to_string(&none).unwrap(), "null");
 
-        let expected_version = current_state_version();
+        let expected_version = current_revision();
         let decoded: OptionSlot<ValueSlot<u32>> = serde_json::from_str("6").unwrap();
 
         assert_eq!(decoded.presence_changed_frame(), expected_version);

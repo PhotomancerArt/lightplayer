@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::{BindingDefs, BindingEndpoint, FrameId, Kind, LpValue, NodeId, NodeName, SlotPath};
+use lpc_model::{BindingDefs, BindingEndpoint, Revision, Kind, LpValue, NodeId, NodeName, SlotPath};
 use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::nodes::fixture::FixtureDef;
@@ -110,7 +110,7 @@ impl CoreProjectLoader {
 
         let project_root = services.project_root().clone();
         let mut runtime = CoreProjectRuntime::new(project_root.clone(), services);
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root_id = runtime.engine().tree().root();
         let project_artifact = runtime
             .engine_mut()
@@ -204,7 +204,7 @@ impl CoreProjectLoader {
         root: &R,
         runtime: &mut CoreProjectRuntime,
         loaded_nodes: &[LoadedNode],
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<(), CoreProjectLoadError>
     where
         R: ArtifactReadRoot + ?Sized,

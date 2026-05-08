@@ -6,7 +6,7 @@ use alloc::string::String;
 use alloc::vec;
 
 use lp_shader::LpsTextureBuf;
-use lpc_model::FrameId;
+use lpc_model::Revision;
 use lpc_model::NodeId;
 use lpc_model::SlotPath;
 use lpc_model::{AddSubMode, DivMode, GlslOpts, MulMode};
@@ -37,11 +37,11 @@ pub fn shader_texture_output_path() -> SlotPath {
 struct ShaderProducedSlots {
     path: SlotPath,
     render_product_id: RenderProductId,
-    last_frame: FrameId,
+    last_frame: Revision,
 }
 
 impl ProducedSlotAccess for ShaderProducedSlots {
-    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         if path == &self.path {
             Some((
                 RuntimeProduct::render(self.render_product_id),
@@ -54,8 +54,8 @@ impl ProducedSlotAccess for ShaderProducedSlots {
 
     fn iter_changed_since<'a>(
         &'a self,
-        since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         if self.last_frame.as_i64() > since.as_i64() {
             Box::new(core::iter::once((
                 self.path.clone(),
@@ -69,7 +69,7 @@ impl ProducedSlotAccess for ShaderProducedSlots {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::once((
             self.path.clone(),
             RuntimeProduct::render(self.render_product_id),
@@ -117,7 +117,7 @@ impl ShaderNode {
             outputs: ShaderProducedSlots {
                 path: shader_texture_output_path(),
                 render_product_id: dummy_id,
-                last_frame: FrameId::default(),
+                last_frame: Revision::default(),
             },
             shader: None,
             output_buf: None,
@@ -162,7 +162,7 @@ impl Node for ShaderNode {
         self.outputs = ShaderProducedSlots {
             path: shader_texture_output_path(),
             render_product_id: rid,
-            last_frame: FrameId::default(),
+            last_frame: Revision::default(),
         };
         self.resources_initialized = true;
         Ok(())
@@ -176,7 +176,7 @@ impl Node for ShaderNode {
         }
 
         let Some(shader) = self.shader.as_mut() else {
-            self.outputs.last_frame = ctx.frame_id();
+            self.outputs.last_frame = ctx.revision();
             return Ok(());
         };
 
@@ -248,7 +248,7 @@ impl Node for ShaderNode {
             .render(buf, ctx.time_seconds())
             .map_err(|e| NodeError::msg(format!("shader render: {e}")))?;
 
-        let frame = ctx.frame_id();
+        let frame = ctx.revision();
         if frame.as_i64() % 60 == 0 {
             let byte_len = buf.data().len();
             log::info!(
@@ -266,7 +266,7 @@ impl Node for ShaderNode {
             .map_err(|e| NodeError::msg(format!("texture product: {e}")))?;
 
         ctx.defer_render_product_replace(self.render_product_id, Box::new(tex))?;
-        self.outputs.last_frame = ctx.frame_id();
+        self.outputs.last_frame = ctx.revision();
 
         Ok(())
     }
@@ -410,7 +410,7 @@ mod tests {
     fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, RenderProductId) {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = engine.tree().root();
         let (spine, artifact) = test_placeholder_spine();
 

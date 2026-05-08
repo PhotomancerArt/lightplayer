@@ -2,8 +2,8 @@ use alloc::collections::BTreeMap;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
-    FrameId, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
-    SlotShape, SlotShapeId, SlotShapeRegistry, Versioned,
+    Revision, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
+    SlotShape, SlotShapeId, SlotShapeRegistry, WithRevision,
 };
 
 use super::{WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot};
@@ -51,7 +51,7 @@ pub fn snapshot_slot_shape(
             changed_frame: frame,
         },
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
-            SlotData::Value(Versioned::new(value.changed_frame(), value.value()))
+            SlotData::Value(WithRevision::new(value.changed_frame(), value.value()))
         }
         (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
             SlotData::Record(lpc_model::SlotRecord::with_version(
@@ -108,7 +108,7 @@ pub fn collect_slot_diff(
     root_name: &str,
     root: &dyn SlotAccess,
     registry: &SlotShapeRegistry,
-    since: FrameId,
+    since: Revision,
 ) -> Vec<WireSlotPatch> {
     let mut patches = Vec::new();
     collect_diff_inner(
@@ -129,7 +129,7 @@ fn collect_diff_inner(
     shape_id: &SlotShapeId,
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
-    since: FrameId,
+    since: Revision,
     patches: &mut Vec<WireSlotPatch>,
 ) {
     let shape = registry.get(shape_id).expect("slot shape is registered");
@@ -142,7 +142,7 @@ fn collect_diff_shape(
     shape: &SlotShape,
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
-    since: FrameId,
+    since: Revision,
     patches: &mut Vec<WireSlotPatch>,
 ) {
     match (shape, data) {
@@ -165,7 +165,7 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(SlotData::Value(Versioned::new(
+                    change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
                         value.changed_frame(),
                         value.value(),
                     ))),

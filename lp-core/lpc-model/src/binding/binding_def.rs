@@ -1,6 +1,6 @@
 use super::BindingEndpoint;
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotShape,
+    FieldSlot, Revision, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotShape,
     SlotValueAccess,
 };
 use alloc::string::{String, ToString};
@@ -63,8 +63,8 @@ impl BindingDef {
 }
 
 impl SlotValueAccess for BindingDef {
-    fn changed_frame(&self) -> FrameId {
-        crate::current_state_version()
+    fn changed_frame(&self) -> Revision {
+        crate::current_revision()
     }
 
     fn value(&self) -> LpValue {

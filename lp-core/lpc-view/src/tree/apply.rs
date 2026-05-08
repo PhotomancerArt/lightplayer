@@ -3,7 +3,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId};
+use lpc_model::{Revision, NodeId};
 use lpc_wire::WireTreeDelta;
 
 use super::{NodeTreeView, TreeEntryView};
@@ -53,7 +53,7 @@ impl core::error::Error for ApplyError {}
 pub fn apply_tree_delta(
     tree: &mut NodeTreeView,
     delta: &WireTreeDelta,
-    frame: FrameId,
+    frame: Revision,
 ) -> Result<(), ApplyError> {
     match delta {
         WireTreeDelta::Created {
@@ -133,7 +133,7 @@ pub fn apply_tree_delta(
 pub fn apply_tree_deltas(
     tree: &mut NodeTreeView,
     deltas: &[WireTreeDelta],
-    frame: FrameId,
+    frame: Revision,
 ) -> Result<(), ApplyError> {
     for delta in deltas {
         apply_tree_delta(tree, delta, frame)?;
@@ -144,7 +144,7 @@ pub fn apply_tree_deltas(
 #[cfg(test)]
 mod tests {
     use super::{NodeTreeView, TreeEntryView, apply_tree_delta};
-    use lpc_model::{FrameId, NodeId, NodeName, TreePath};
+    use lpc_model::{Revision, NodeId, NodeName, TreePath};
     use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus, WireSlotIndex, WireTreeDelta};
 
     fn make_tree_with_root() -> NodeTreeView {
@@ -156,9 +156,9 @@ mod tests {
             None,
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(0),
-            FrameId::new(0),
-            FrameId::new(0),
+            Revision::new(0),
+            Revision::new(0),
+            Revision::new(0),
         );
         tree.insert(root);
         tree
@@ -178,12 +178,12 @@ mod tests {
             children: alloc::vec![],
             status: WireNodeStatus::Created,
             state: WireEntryState::Pending,
-            created_frame: FrameId::new(1),
-            change_frame: FrameId::new(1),
-            children_ver: FrameId::new(1),
+            created_frame: Revision::new(1),
+            change_frame: Revision::new(1),
+            children_ver: Revision::new(1),
         };
 
-        apply_tree_delta(&mut tree, &delta, FrameId::new(1)).unwrap();
+        apply_tree_delta(&mut tree, &delta, Revision::new(1)).unwrap();
 
         assert_eq!(tree.len(), 2);
         assert!(tree.get(NodeId::new(1)).is_some());
@@ -203,9 +203,9 @@ mod tests {
             }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(1),
-            FrameId::new(1),
-            FrameId::new(1),
+            Revision::new(1),
+            Revision::new(1),
+            Revision::new(1),
         );
         tree.insert(child);
 
@@ -214,10 +214,10 @@ mod tests {
             id: NodeId::new(1),
             status: WireNodeStatus::Ok,
             state: WireEntryState::Alive,
-            change_frame: FrameId::new(5),
+            change_frame: Revision::new(5),
         };
 
-        apply_tree_delta(&mut tree, &delta, FrameId::new(5)).unwrap();
+        apply_tree_delta(&mut tree, &delta, Revision::new(5)).unwrap();
 
         let entry = tree.get(NodeId::new(1)).unwrap();
         assert!(matches!(entry.status, WireNodeStatus::Ok));
@@ -239,9 +239,9 @@ mod tests {
             }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(1),
-            FrameId::new(1),
-            FrameId::new(1),
+            Revision::new(1),
+            Revision::new(1),
+            Revision::new(1),
         );
         tree.insert(child);
 
@@ -249,10 +249,10 @@ mod tests {
         let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(0),
             children: alloc::vec![NodeId::new(1)],
-            children_ver: FrameId::new(2),
+            children_ver: Revision::new(2),
         };
 
-        apply_tree_delta(&mut tree, &delta, FrameId::new(2)).unwrap();
+        apply_tree_delta(&mut tree, &delta, Revision::new(2)).unwrap();
 
         let root = tree.get(NodeId::new(0)).unwrap();
         assert_eq!(root.children, alloc::vec![NodeId::new(1)]);
@@ -273,9 +273,9 @@ mod tests {
             }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(1),
-            FrameId::new(1),
-            FrameId::new(1),
+            Revision::new(1),
+            Revision::new(1),
+            Revision::new(1),
         );
         let b = TreeEntryView::new(
             NodeId::new(2),
@@ -286,9 +286,9 @@ mod tests {
             }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(1),
-            FrameId::new(1),
-            FrameId::new(1),
+            Revision::new(1),
+            Revision::new(1),
+            Revision::new(1),
         );
         tree.insert(a);
         tree.insert(b);
@@ -303,10 +303,10 @@ mod tests {
         let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(0),
             children: alloc::vec![NodeId::new(1)], // b is gone
-            children_ver: FrameId::new(5),
+            children_ver: Revision::new(5),
         };
 
-        apply_tree_delta(&mut tree, &delta, FrameId::new(5)).unwrap();
+        apply_tree_delta(&mut tree, &delta, Revision::new(5)).unwrap();
 
         // b should be removed
         assert!(tree.get(NodeId::new(1)).is_some());
@@ -328,9 +328,9 @@ mod tests {
             }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(1),
-            FrameId::new(1),
-            FrameId::new(1),
+            Revision::new(1),
+            Revision::new(1),
+            Revision::new(1),
         );
         let grandchild = TreeEntryView::new(
             NodeId::new(2),
@@ -341,9 +341,9 @@ mod tests {
             }),
             WireNodeStatus::Created,
             WireEntryState::Pending,
-            FrameId::new(2),
-            FrameId::new(2),
-            FrameId::new(2),
+            Revision::new(2),
+            Revision::new(2),
+            Revision::new(2),
         );
         tree.insert(parent);
         tree.insert(grandchild);
@@ -362,10 +362,10 @@ mod tests {
         let delta = WireTreeDelta::ChildrenChanged {
             id: NodeId::new(0),
             children: alloc::vec![], // parent is gone
-            children_ver: FrameId::new(5),
+            children_ver: Revision::new(5),
         };
 
-        apply_tree_delta(&mut tree, &delta, FrameId::new(5)).unwrap();
+        apply_tree_delta(&mut tree, &delta, Revision::new(5)).unwrap();
 
         // Both parent and grandchild should be removed
         assert!(tree.get(NodeId::new(1)).is_none());
@@ -381,10 +381,10 @@ mod tests {
             id: NodeId::new(99), // doesn't exist
             status: WireNodeStatus::Ok,
             state: WireEntryState::Alive,
-            change_frame: FrameId::new(5),
+            change_frame: Revision::new(5),
         };
 
-        let result = apply_tree_delta(&mut tree, &delta, FrameId::new(5));
+        let result = apply_tree_delta(&mut tree, &delta, Revision::new(5));
         assert!(result.is_err());
     }
 }

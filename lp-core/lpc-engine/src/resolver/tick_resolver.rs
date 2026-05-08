@@ -9,7 +9,7 @@ use crate::resolver::resolve_error::{ResolveError, SessionResolveError};
 use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_session::ResolveSession;
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
-use lpc_model::FrameId;
+use lpc_model::Revision;
 
 /// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
 pub trait TickResolver {
@@ -30,7 +30,7 @@ pub trait TickResolver {
     fn runtime_buffer_mut(
         &mut self,
         id: RuntimeBufferId,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<&mut RuntimeBuffer, ResolveError>;
 }
 
@@ -74,7 +74,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     fn runtime_buffer_mut(
         &mut self,
         id: RuntimeBufferId,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<&mut RuntimeBuffer, ResolveError> {
         self.host
             .runtime_buffer_mut(id, frame)

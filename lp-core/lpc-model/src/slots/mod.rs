@@ -36,7 +36,7 @@ pub use xy::{XySlot, xy_shape};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RelativeNodeRef, ResourceRef, RuntimeBufferId, current_state_version};
+    use crate::{RelativeNodeRef, ResourceRef, RuntimeBufferId, current_revision};
     use alloc::string::String;
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -79,7 +79,7 @@ mod tests {
         assert!(authored.contains("color_order = \"grb\""));
         assert!(authored.contains("texture_loc = \"..texture\""));
 
-        let expected_version = current_state_version();
+        let expected_version = current_revision();
         let decoded: SemanticSlots = toml::from_str(&authored).unwrap();
 
         assert_eq!(decoded.ratio.changed_frame(), expected_version);

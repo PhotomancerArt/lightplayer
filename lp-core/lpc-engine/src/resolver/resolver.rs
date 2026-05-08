@@ -2,8 +2,8 @@
 
 use crate::resolver::resolve_error::ResolveError;
 use crate::resolver::resolver_cache::ResolverCache;
-use lpc_model::FrameId;
-use lpc_model::Versioned;
+use lpc_model::Revision;
+use lpc_model::WithRevision;
 use lps_shared::LpsValueF32;
 
 /// Owns the same-frame [`ResolverCache`] for engine demand resolution.
@@ -36,10 +36,10 @@ impl Resolver {
 /// [`LpsValueF32`] for call sites that still need the shader-value shape.
 pub(crate) fn materialize_literal_value(
     value: &lpc_model::LpValue,
-    frame: FrameId,
-) -> Result<Versioned<LpsValueF32>, ResolveError> {
+    frame: Revision,
+) -> Result<WithRevision<LpsValueF32>, ResolveError> {
     let lps_value = model_value_to_lps_value_f32(value)?;
-    Ok(Versioned::new(frame, lps_value))
+    Ok(WithRevision::new(frame, lps_value))
 }
 
 /// Convert [`lpc_model::LpValue`] to [`LpsValueF32`] for shader-compatible literals.

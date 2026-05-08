@@ -1,6 +1,6 @@
 use lpc_model::{
-    FrameId, LpType, LpValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
-    StaticSlotShape, set_current_state_version,
+    Revision, LpType, LpValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
+    StaticSlotShape, set_current_revision,
 };
 use lpc_wire::{
     WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
@@ -25,7 +25,7 @@ pub struct MockRuntime {
 
 impl MockRuntime {
     pub fn new() -> Self {
-        set_current_state_version(FrameId::new(1));
+        set_current_revision(Revision::new(1));
 
         let mut registry = SlotShapeRegistry::default();
         crate::model::register_shapes(&mut registry).unwrap();
@@ -64,75 +64,75 @@ impl MockRuntime {
         ]
     }
 
-    pub fn add_shader_param_def(&mut self, frame: FrameId, name: &str, default: f32) {
-        set_current_state_version(frame);
+    pub fn add_shader_param_def(&mut self, frame: Revision, name: &str, default: f32) {
+        set_current_revision(frame);
         self.shader_def.add_param_def(name, default);
     }
 
-    pub fn set_shader_param(&mut self, frame: FrameId, name: &str, value: f32) {
-        set_current_state_version(frame);
+    pub fn set_shader_param(&mut self, frame: Revision, name: &str, value: f32) {
+        set_current_revision(frame);
         self.shader_node.set_param(name, value);
     }
 
     pub fn change_shader_param_to_vec3(
         &mut self,
-        frame: FrameId,
+        frame: Revision,
         name: &str,
         param_value: [f32; 3],
     ) {
-        set_current_state_version(frame);
+        set_current_revision(frame);
         self.shader_def.set_param_value_type(name, "vec3");
         self.shader_node.set_param_vec3(name, param_value);
         self.refresh_shader_node_shape();
     }
 
-    pub fn remove_shader_param(&mut self, frame: FrameId, name: &str) {
-        set_current_state_version(frame);
+    pub fn remove_shader_param(&mut self, frame: Revision, name: &str) {
+        set_current_revision(frame);
         self.shader_node.remove_param(name);
         self.refresh_shader_node_shape();
     }
 
-    pub fn clear_compile_error(&mut self, frame: FrameId) {
-        set_current_state_version(frame);
+    pub fn clear_compile_error(&mut self, frame: Revision) {
+        set_current_revision(frame);
         self.shader_node.clear_compile_error();
     }
 
-    pub fn switch_fixture_mapping(&mut self, frame: FrameId) {
-        set_current_state_version(frame);
+    pub fn switch_fixture_mapping(&mut self, frame: Revision) {
+        set_current_revision(frame);
         self.fixture_def.switch_mapping_to_square();
         self.fixture_node.switch_mapping_preview();
     }
 
-    pub fn disable_fixture_mapping(&mut self, frame: FrameId) {
-        set_current_state_version(frame);
+    pub fn disable_fixture_mapping(&mut self, frame: Revision) {
+        set_current_revision(frame);
         self.fixture_def.disable_mapping();
         self.fixture_node.disable_mapping_preview();
     }
 
-    pub fn clear_fixture_brightness(&mut self, frame: FrameId) {
-        set_current_state_version(frame);
+    pub fn clear_fixture_brightness(&mut self, frame: Revision) {
+        set_current_revision(frame);
         self.fixture_def.clear_brightness();
     }
 
-    pub fn set_fixture_ring_lamp_counts(&mut self, frame: FrameId, counts: Vec<u32>) {
-        set_current_state_version(frame);
+    pub fn set_fixture_ring_lamp_counts(&mut self, frame: Revision, counts: Vec<u32>) {
+        set_current_revision(frame);
         assert!(
             self.fixture_def.set_ring_lamp_counts(counts),
             "fixture mapping must be path_points/ring_array in the mockup"
         );
     }
 
-    pub fn remove_touch(&mut self, frame: FrameId, id: u32) {
-        set_current_state_version(frame);
+    pub fn remove_touch(&mut self, frame: Revision, id: u32) {
+        set_current_revision(frame);
         self.fixture_node.remove_touch(id);
     }
 
     pub fn apply_slot_mutation(
         &mut self,
-        frame: FrameId,
+        frame: Revision,
         request: WireSlotMutationRequest,
     ) -> WireSlotMutationResponse {
-        set_current_state_version(frame);
+        set_current_revision(frame);
         let result = self.apply_slot_mutation_result(&request);
         WireSlotMutationResponse {
             id: request.id,
@@ -252,7 +252,7 @@ impl MockRuntime {
     fn root_shape_version(
         &self,
         shape_id: SlotShapeId,
-    ) -> Result<FrameId, WireSlotMutationRejection> {
+    ) -> Result<Revision, WireSlotMutationRejection> {
         self.registry
             .entry(&shape_id)
             .map(|entry| entry.changed_frame)
@@ -268,8 +268,8 @@ impl Default for MockRuntime {
 
 struct MutationTargetInfo {
     target: MutationTarget,
-    shape_version: FrameId,
-    data_version: FrameId,
+    shape_version: Revision,
+    data_version: Revision,
     ty: LpType,
 }
 

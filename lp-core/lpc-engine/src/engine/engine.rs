@@ -6,7 +6,7 @@ use alloc::format;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lpc_model::{FrameId, NodeId, SlotPath, TreePath, Versioned};
+use lpc_model::{advance_revision, Revision, NodeId, SlotPath, TreePath, WithRevision};
 
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
@@ -19,6 +19,7 @@ use crate::resolver::{
     Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
+use crate::runtime::frame_num::FrameNum;
 use crate::runtime::frame_time::FrameTime;
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 use crate::tree::{EntryState, NodeTree};
@@ -32,7 +33,8 @@ pub(crate) fn default_demand_input_path() -> SlotPath {
 
 /// Core runtime owner for the demand-driven spine (M2).
 pub struct Engine {
-    frame_id: FrameId,
+    frame_num: FrameNum,
+    revision: Revision,
     frame_time: FrameTime,
     tree: NodeTree<Box<dyn Node>>,
     bindings: BindingRegistry,
@@ -46,11 +48,12 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(root_path: TreePath) -> Self {
-        let frame = FrameId::default();
+        let revision = Revision::default();
         Self {
-            frame_id: frame,
+            frame_num: FrameNum::default(),
+            revision,
             frame_time: FrameTime::zero(),
-            tree: NodeTree::new(root_path, frame),
+            tree: NodeTree::new(root_path, revision),
             bindings: BindingRegistry::new(),
             resolver: Resolver::new(),
             render_products: RenderProductStore::new(),
@@ -61,8 +64,12 @@ impl Engine {
         }
     }
 
-    pub fn frame_id(&self) -> FrameId {
-        self.frame_id
+    pub fn revision(&self) -> Revision {
+        self.revision
+    }
+
+    pub fn frame_num(&self) -> FrameNum {
+        self.frame_num
     }
 
     pub fn frame_time(&self) -> FrameTime {
@@ -142,7 +149,7 @@ impl Engine {
         &mut self,
         id: NodeId,
         mut runtime: Box<dyn Node>,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<(), EngineError> {
         let mut ctx =
             NodeResourceInitContext::new(&mut self.render_products, &mut self.runtime_buffers);
@@ -172,7 +179,8 @@ impl Engine {
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
         self.resolver.clear_frame_cache();
-        self.frame_id = self.frame_id.next();
+        self.frame_num = self.frame_num.next();
+        self.revision = advance_revision();
         self.frame_time =
             FrameTime::new(delta_ms, self.frame_time.total_ms.saturating_add(delta_ms));
 
@@ -185,7 +193,7 @@ impl Engine {
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
-        let mut session = ResolveSession::new(self.frame_id, &mut resolver, &self.bindings, trace);
+        let mut session = ResolveSession::new(self.revision, &mut resolver, &self.bindings, trace);
 
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
@@ -237,7 +245,7 @@ impl Engine {
 fn apply_deferred_render_replaces(
     store: &mut RenderProductStore,
     pending: Vec<(RenderProductId, Box<dyn RenderProduct>)>,
-    frame: FrameId,
+    frame: Revision,
 ) -> Result<(), SessionResolveError> {
     for (id, product) in pending {
         store
@@ -268,8 +276,8 @@ impl EngineResolveHost<'_> {
             return Ok(());
         }
 
-        let frame = session.frame_id();
-        let restore_frame = session.frame_id();
+        let revision = session.revision();
+        let restore_frame = session.revision();
         let (artifact_id, content_frame, mut node_runtime) = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
@@ -304,7 +312,7 @@ impl EngineResolveHost<'_> {
             let resolver_dyn: &mut dyn TickResolver = &mut bridge;
             let mut tick_ctx = TickContext::with_render_services(
                 node_id,
-                frame,
+                revision,
                 artifact_id,
                 content_frame,
                 resolver_dyn,
@@ -322,7 +330,7 @@ impl EngineResolveHost<'_> {
 
         match tick_result {
             Ok(()) => {
-                apply_deferred_render_replaces(self.render_products, pending_replaces, frame)?;
+                apply_deferred_render_replaces(self.render_products, pending_replaces, revision)?;
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
@@ -355,7 +363,7 @@ impl ResolveHost for EngineResolveHost<'_> {
                 };
                 match n.produced().get(slot) {
                     Some((product, frame)) => Ok(Production::new(
-                        Versioned::new(frame, product),
+                        WithRevision::new(frame, product),
                         ProductionSource::ProducedSlot {
                             node: *node,
                             slot: slot.clone(),
@@ -385,7 +393,7 @@ impl ResolveHost for EngineResolveHost<'_> {
                 };
                 match n.produced().get(slot) {
                     Some((product, frame)) => Ok(Production::new(
-                        Versioned::new(frame, product),
+                        WithRevision::new(frame, product),
                         ProductionSource::Default,
                     )),
                     None => Err(SessionResolveError::UnresolvedConsumedSlot {
@@ -426,7 +434,7 @@ impl ResolveHost for EngineResolveHost<'_> {
     fn runtime_buffer_mut(
         &mut self,
         id: crate::runtime_buffer::RuntimeBufferId,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<&mut crate::runtime_buffer::RuntimeBuffer, SessionResolveError> {
         self.runtime_buffers
             .get_mut_mark_updated(id, frame)
@@ -439,8 +447,8 @@ fn tick_tree_node(
     host: &mut EngineResolveHost<'_>,
     node_id: NodeId,
 ) -> Result<(), EngineError> {
-    let frame = session.frame_id();
-    let restore_frame = session.frame_id();
+    let revision = session.revision();
+    let restore_frame = session.revision();
     let (artifact_id, content_frame, mut node_runtime) = {
         let entry = host
             .tree
@@ -474,7 +482,7 @@ fn tick_tree_node(
         let resolver_dyn: &mut dyn TickResolver = &mut bridge;
         let mut tick_ctx = TickContext::with_render_services(
             node_id,
-            frame,
+            revision,
             artifact_id,
             content_frame,
             resolver_dyn,
@@ -493,7 +501,7 @@ fn tick_tree_node(
 
     match tick_result {
         Ok(()) => {
-            apply_deferred_render_replaces(host.render_products, pending_replaces, frame)?;
+            apply_deferred_render_replaces(host.render_products, pending_replaces, revision)?;
             Ok(())
         }
         Err(e) => Err(EngineError::node(node_id, e)),
@@ -506,7 +514,7 @@ pub(crate) fn resolve_with_engine_host(
     key: QueryKey,
     log_level: ResolveLogLevel,
 ) -> Result<(Production, ResolveTrace), SessionResolveError> {
-    let fid = eng.frame_id;
+    let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
     let mut session = ResolveSession::new(
@@ -538,7 +546,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     eng: &mut Engine,
     key: QueryKey,
 ) -> Result<(Production, Production), SessionResolveError> {
-    let fid = eng.frame_id;
+    let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
     let mut session = ResolveSession::new(
@@ -584,7 +592,7 @@ mod tests {
     #[test]
     fn engine_new_has_frame_state_and_empty_registry_resolver_tree_root() {
         let eng = Engine::new(TreePath::parse("/show.t").expect("path"));
-        assert_eq!(eng.frame_id(), FrameId::default());
+        assert_eq!(eng.revision(), Revision::default());
         assert_eq!(eng.frame_time(), FrameTime::zero());
         assert!(eng.bindings().iter().next().is_none());
         assert!(eng.resolver().cache().is_empty());
@@ -592,14 +600,18 @@ mod tests {
     }
 
     #[test]
-    fn tick_advances_frame_id_and_accumulates_frame_time() {
+    fn tick_advances_frame_num_revision_and_accumulates_frame_time() {
         let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let initial_revision = eng.revision();
         eng.tick(10).expect("tick");
-        assert_eq!(eng.frame_id().as_i64(), 1);
+        assert_eq!(eng.frame_num(), FrameNum::new(1));
+        assert!(eng.revision() > initial_revision);
         assert_eq!(eng.frame_time().delta_ms, 10);
         assert_eq!(eng.frame_time().total_ms, 10);
+        let first_tick_revision = eng.revision();
         eng.tick(5).expect("tick");
-        assert_eq!(eng.frame_id().as_i64(), 2);
+        assert_eq!(eng.frame_num(), FrameNum::new(2));
+        assert!(eng.revision() > first_tick_revision);
         assert_eq!(eng.frame_time().total_ms, 15);
     }
 
@@ -757,7 +769,7 @@ mod tests {
             .build();
         let versions: Vec<_> = h.engine.bindings().iter().map(|e| e.version).collect();
 
-        assert_eq!(versions, alloc::vec![FrameId::new(1), FrameId::new(1)]);
+        assert_eq!(versions, alloc::vec![Revision::new(1), Revision::new(1)]);
     }
 
     #[test]
@@ -784,10 +796,10 @@ mod tests {
     fn runtime_buffer_inserted_via_engine_store_round_trips() {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let payload = RuntimeBuffer::raw(alloc::vec![0xaa, 0xbb]);
-        let frame = FrameId::new(4);
+        let frame = Revision::new(4);
         let id = engine
             .runtime_buffers_mut()
-            .insert(Versioned::new(frame, payload.clone()));
+            .insert(WithRevision::new(frame, payload.clone()));
         let buffers = engine.runtime_buffers();
         let got = buffers.get(id).expect("inserted buffer");
         assert_eq!(got.changed_frame(), frame);

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FrameId, LpValue, MapSlot, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
+    Revision, LpValue, MapSlot, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
     RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
 };
 
@@ -74,14 +74,14 @@ impl ShaderDef {
         param.set_label(label);
     }
 
-    pub fn param_label_changed_frame(&self, name: &str) -> Option<FrameId> {
+    pub fn param_label_changed_frame(&self, name: &str) -> Option<Revision> {
         self.param_defs
             .entries
             .get(name)
             .map(ShaderParamDef::label_changed_frame)
     }
 
-    pub fn param_default_changed_frame(&self, name: &str) -> Option<FrameId> {
+    pub fn param_default_changed_frame(&self, name: &str) -> Option<Revision> {
         self.param_defs
             .entries
             .get(name)
@@ -131,11 +131,11 @@ impl ShaderParamDef {
         self.label.set(label.to_string());
     }
 
-    fn label_changed_frame(&self) -> FrameId {
+    fn label_changed_frame(&self) -> Revision {
         self.label.changed_frame()
     }
 
-    fn default_changed_frame(&self) -> FrameId {
+    fn default_changed_frame(&self) -> Revision {
         self.default.changed_frame()
     }
 }

@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use alloc::string::String;
 
 use lpc_model::{
-    FrameId,
+    Revision,
     resource::{RenderProductId, ResourceRef, RuntimeBufferId},
 };
 use lpc_wire::{
@@ -74,12 +74,12 @@ pub(crate) fn render_payload_interest(
     }
 }
 
-fn resource_changed_since(since_frame: FrameId, changed: FrameId) -> bool {
-    changed.as_i64() > since_frame.as_i64() || since_frame == FrameId::default()
+fn resource_changed_since(since_frame: Revision, changed: Revision) -> bool {
+    changed.as_i64() > since_frame.as_i64() || since_frame == Revision::default()
 }
 
 pub(crate) fn summarize_runtime_buffers_if_requested(
-    _since_frame: FrameId,
+    _since_frame: Revision,
     spec: ResourceSummarySpecifier,
     buffers: &crate::runtime_buffer::RuntimeBufferStore,
     out: &mut Vec<WireResourceSummary>,
@@ -97,7 +97,7 @@ pub(crate) fn summarize_runtime_buffers_if_requested(
 fn push_buffer_summary(
     out: &mut Vec<WireResourceSummary>,
     buf: &RuntimeBuffer,
-    changed: FrameId,
+    changed: Revision,
     id: RuntimeBufferId,
 ) {
     let (kind, meta, avail) = match wire_kind_and_meta_for_runtime_buffer(buf) {
@@ -203,7 +203,7 @@ fn output_sample_wire_format(f: RChFmt) -> Result<WireChannelSampleFormat, &'sta
 }
 
 pub(crate) fn summarize_render_products_if_requested(
-    _since_frame: FrameId,
+    _since_frame: Revision,
     spec: ResourceSummarySpecifier,
     products: &crate::render_product::RenderProductStore,
     out: &mut Vec<WireResourceSummary>,
@@ -223,7 +223,7 @@ fn push_render_product_summary(
     out: &mut Vec<WireResourceSummary>,
     product: Option<&dyn RenderProduct>,
     id: RenderProductId,
-    changed: FrameId,
+    changed: Revision,
 ) {
     let Some(product) = product else {
         return;
@@ -272,7 +272,7 @@ fn push_render_product_summary(
 }
 
 pub(crate) fn runtime_buffer_payloads_for_request(
-    since_frame: FrameId,
+    since_frame: Revision,
     interest: &BufferPayloadInterest,
     buffers: &crate::runtime_buffer::RuntimeBufferStore,
     out: &mut Vec<WireRuntimeBufferPayload>,
@@ -334,7 +334,7 @@ fn wire_runtime_buffer_metadata_payload_for_buffer(
 }
 
 pub(crate) fn render_product_payloads_for_request(
-    since_frame: FrameId,
+    since_frame: Revision,
     interest: &RenderPayloadInterest,
     products: &crate::render_product::RenderProductStore,
     out: &mut Vec<WireRenderProductPayload>,

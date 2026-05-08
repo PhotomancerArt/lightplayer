@@ -53,10 +53,10 @@ mod tests {
     use crate::resolver::production::ProductionSource;
     use crate::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
     use lpc_model::ChannelName;
-    use lpc_model::FrameId;
+    use lpc_model::Revision;
     use lpc_model::NodeId;
     use lpc_model::SlotPath;
-    use lpc_model::Versioned;
+    use lpc_model::WithRevision;
     use lps_shared::LpsValueF32;
 
     fn sample_bus_key(name: &str) -> QueryKey {
@@ -65,7 +65,7 @@ mod tests {
 
     fn make_produced(frame: i64, source: ProductionSource) -> Production {
         Production::value(
-            Versioned::new(FrameId::new(frame), LpsValueF32::F32(1.0)),
+            WithRevision::new(Revision::new(frame), LpsValueF32::F32(1.0)),
             source,
         )
         .expect("scalar production")

@@ -1,6 +1,6 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 
-use lpc_model::{FrameId, LpPathBuf, NodeId};
+use lpc_model::{Revision, LpPathBuf, NodeId};
 use lpc_model::NodeKind;
 use lpc_wire::{WireNodeSlotRoot, WireNodeStatus, WireSlotWatchSpecifier};
 
@@ -22,8 +22,8 @@ pub struct StatusChangeView {
 /// TODO(M4 project view rebuild): make this own the canonical node index, slot mirror, watch
 /// state, and resource cache updates from canonical project sync.
 pub struct ProjectView {
-    /// Current frame ID, once canonical sync exists.
-    pub frame_id: FrameId,
+    /// Current revision, once canonical sync exists.
+    pub revision: Revision,
     /// Minimal node index retained for callers that need a project-view shell.
     pub nodes: BTreeMap<NodeId, NodeEntryView>,
     /// Generic slot roots the client wants to watch.
@@ -37,14 +37,14 @@ pub struct NodeEntryView {
     pub path: LpPathBuf,
     pub kind: NodeKind,
     pub status: WireNodeStatus,
-    pub status_ver: FrameId,
+    pub status_ver: Revision,
 }
 
 impl ProjectView {
     /// Create an empty project view shell.
     pub fn new() -> Self {
         Self {
-            frame_id: FrameId::default(),
+            revision: Revision::default(),
             nodes: BTreeMap::new(),
             slot_watch_roots: BTreeSet::new(),
             resource_cache: ClientResourceCache::new(),

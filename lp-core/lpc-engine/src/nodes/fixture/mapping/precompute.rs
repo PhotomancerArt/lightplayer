@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use libm;
-use lpc_model::FrameId;
+use lpc_model::Revision;
 use lpc_model::nodes::fixture::MappingConfig;
 use lps_q32::q32::Q32;
 
@@ -25,7 +25,7 @@ pub fn compute_mapping(
     config: &MappingConfig,
     texture_width: u32,
     texture_height: u32,
-    mapping_data_ver: FrameId,
+    mapping_data_ver: Revision,
 ) -> PrecomputedMapping {
     let mut mapping = PrecomputedMapping::new(texture_width, texture_height, mapping_data_ver);
 

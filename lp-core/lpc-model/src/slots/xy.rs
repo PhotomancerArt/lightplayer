@@ -1,31 +1,31 @@
 use crate::{
-    FieldSlot, FrameId, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
-    SlotValueAccess, SlotValueShape, ValueEditorHint, Versioned, current_state_version,
+    FieldSlot, Revision, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
+    SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision, current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Versioned 2D XY coordinate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct XySlot {
-    inner: Versioned<[f32; 2]>,
+    inner: WithRevision<[f32; 2]>,
 }
 
 impl XySlot {
     pub fn new(value: [f32; 2]) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: [f32; 2]) -> Self {
+    pub fn with_version(frame: Revision, value: [f32; 2]) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: [f32; 2]) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -35,7 +35,7 @@ impl XySlot {
 }
 
 impl SlotValueAccess for XySlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

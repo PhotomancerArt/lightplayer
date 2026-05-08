@@ -1,4 +1,4 @@
-use lpc_model::{FrameId, LpValue, SlotPath};
+use lpc_model::{Revision, LpValue, SlotPath};
 use lpc_wire::{
     WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,
@@ -33,13 +33,13 @@ fn client_mutation_accepts_runtime_value_without_optimistic_write() {
     println!("server applying mutation");
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(2), request);
+        .apply_slot_mutation(Revision::new(2), request);
     assert_accepted(&response);
     harness.client.apply_mutation_response(response);
     assert!(!harness.client.is_pending(mutation_id));
 
     println!("syncing accepted mutation result back to client");
-    harness.sync_diff("engine.shader_node", FrameId::new(1));
+    harness.sync_diff("engine.shader_node", Revision::new(1));
     harness.print_client_tree("engine.shader_node");
     assert_shader_param(
         harness.client.roots.get("engine.shader_node").unwrap(),
@@ -66,11 +66,11 @@ fn client_mutation_accepts_source_value() {
         .unwrap();
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(2), request);
+        .apply_slot_mutation(Revision::new(2), request);
     assert_accepted(&response);
     harness.client.apply_mutation_response(response);
 
-    harness.sync_diff("source.shader", FrameId::new(1));
+    harness.sync_diff("source.shader", Revision::new(1));
     harness.print_client_tree("source.shader");
     assert_shader_param_def_label(
         harness.client.roots.get("source.shader").unwrap(),
@@ -96,22 +96,22 @@ fn client_mutation_rejects_stale_data_version() {
     println!("server independently updates engine.shader_node#params.exposure");
     harness
         .runtime
-        .set_shader_param(FrameId::new(2), "exposure", 3.0);
+        .set_shader_param(Revision::new(2), "exposure", 3.0);
 
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(3), request);
+        .apply_slot_mutation(Revision::new(3), request);
     assert_rejected(
         &response,
         WireSlotMutationRejection::DataConflict {
-            current_version: FrameId::new(2),
+            current_version: Revision::new(2),
         },
     );
     harness.client.apply_mutation_response(response);
     assert_eq!(
         harness.client.error(WireSlotMutationId::new(3)),
         Some(&WireSlotMutationRejection::DataConflict {
-            current_version: FrameId::new(2)
+            current_version: Revision::new(2)
         })
     );
 }
@@ -133,15 +133,15 @@ fn client_mutation_rejects_stale_shape_version() {
     println!("server changes engine.shader_node param shape before mutation arrives");
     harness
         .runtime
-        .change_shader_param_to_vec3(FrameId::new(2), "exposure", [0.1, 0.2, 0.3]);
+        .change_shader_param_to_vec3(Revision::new(2), "exposure", [0.1, 0.2, 0.3]);
 
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(3), request);
+        .apply_slot_mutation(Revision::new(3), request);
     assert_rejected(
         &response,
         WireSlotMutationRejection::ShapeConflict {
-            current_version: FrameId::new(2),
+            current_version: Revision::new(2),
         },
     );
 }
@@ -163,20 +163,20 @@ fn client_mutation_rejects_wrong_type_unknown_path_and_unsupported_target() {
     wrong_type.op = WireSlotMutationOp::SetValue(LpValue::Vec3([1.0, 2.0, 3.0]));
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(2), wrong_type);
+        .apply_slot_mutation(Revision::new(2), wrong_type);
     assert_rejected(&response, WireSlotMutationRejection::WrongType);
 
     let unknown_path = WireSlotMutationRequest {
         id: WireSlotMutationId::new(6),
         root: "engine.shader_node".to_string(),
         path: SlotPath::parse("params.missing").unwrap(),
-        expected_shape_version: FrameId::new(1),
-        expected_data_version: FrameId::new(1),
+        expected_shape_version: Revision::new(1),
+        expected_data_version: Revision::new(1),
         op: WireSlotMutationOp::SetValue(LpValue::F32(2.0)),
     };
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(2), unknown_path);
+        .apply_slot_mutation(Revision::new(2), unknown_path);
     assert_rejected(&response, WireSlotMutationRejection::UnknownPath);
 
     let unsupported = harness
@@ -190,7 +190,7 @@ fn client_mutation_rejects_wrong_type_unknown_path_and_unsupported_target() {
         .unwrap();
     let response = harness
         .runtime
-        .apply_slot_mutation(FrameId::new(2), unsupported);
+        .apply_slot_mutation(Revision::new(2), unsupported);
     assert_rejected(&response, WireSlotMutationRejection::UnsupportedTarget);
 }
 

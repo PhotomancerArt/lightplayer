@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{ChannelName, FrameId};
+use lpc_model::{ChannelName, Revision};
 
 use super::BindingError;
 use super::BindingId;
@@ -38,7 +38,7 @@ impl BindingRegistry {
     pub fn register(
         &mut self,
         draft: BindingDraft,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<BindingId, BindingError> {
         let channels = channels_touched(&draft.source, &draft.target);
 
@@ -101,7 +101,7 @@ impl BindingRegistry {
     pub fn unregister(
         &mut self,
         id: BindingId,
-        _frame: FrameId,
+        _frame: Revision,
     ) -> Result<BindingEntry, BindingError> {
         let entry = self
             .entries
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn register_assigns_stable_nonzero_binding_id() {
         let mut reg = BindingRegistry::new();
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let id = reg
             .register(
                 BindingDraft {
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn unregister_removes_binding_and_updates_indexes() {
         let mut reg = BindingRegistry::new();
-        let frame = FrameId::new(3);
+        let frame = Revision::new(3);
         let id = reg
             .register(
                 BindingDraft {
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn providers_for_bus_returns_bus_target_entries() {
         let mut reg = BindingRegistry::new();
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let c = ch("video/out");
         reg.register(
             BindingDraft {
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn kind_mismatch_on_same_bus_channel_errors() {
         let mut reg = BindingRegistry::new();
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let c = ch("shared");
         reg.register(
             BindingDraft {
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn equal_priority_providers_on_same_bus_channel_errors() {
         let mut reg = BindingRegistry::new();
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let c = ch("x");
         reg.register(
             BindingDraft {
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn binding_version_follows_frame() {
         let mut reg = BindingRegistry::new();
-        let f10 = FrameId::new(10);
+        let f10 = Revision::new(10);
         let id = reg
             .register(
                 BindingDraft {
@@ -355,7 +355,7 @@ mod tests {
             )
             .expect("register");
         assert_eq!(reg.get(id).expect("entry").version, f10);
-        let f11 = FrameId::new(11);
+        let f11 = Revision::new(11);
         let id2 = reg
             .register(
                 BindingDraft {

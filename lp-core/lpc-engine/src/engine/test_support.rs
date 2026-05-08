@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use lpc_model::{ChannelName, FrameId, Kind, NodeId, NodeName, SlotPath, TreePath};
+use lpc_model::{ChannelName, Revision, Kind, NodeId, NodeName, SlotPath, TreePath};
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
@@ -174,11 +174,11 @@ impl EngineTestBuilder {
                 },
                 cfg,
                 artifact,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .expect("add test node");
         self.engine
-            .attach_runtime_node(node_id, node, FrameId::new(1))
+            .attach_runtime_node(node_id, node, Revision::new(1))
             .expect("attach test node");
         self.labels.insert(String::from(label), node_id);
         node_id
@@ -199,7 +199,7 @@ impl EngineTestBuilder {
                 kind: Kind::Color,
                 owner,
             },
-            FrameId::new(1),
+            Revision::new(1),
         )?;
         Ok(())
     }
@@ -365,7 +365,7 @@ pub(crate) struct DummyShaderNode {
 impl DummyShaderNode {
     fn new(slot: SlotPath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
         let mut props = DummyProps::new();
-        props.set(slot, value, FrameId::new(0));
+        props.set(slot, value, Revision::new(0));
         Self { props, tick_count }
     }
 }
@@ -373,7 +373,7 @@ impl DummyShaderNode {
 impl Node for DummyShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.tick_count.fetch_add(1, Ordering::Relaxed);
-        self.props.mark_all_updated(ctx.frame_id());
+        self.props.mark_all_updated(ctx.revision());
         Ok(())
     }
 
@@ -485,7 +485,7 @@ impl Node for DummyOutputNode {
 }
 
 struct DummyProps {
-    values: Vec<(SlotPath, RuntimeProduct, FrameId)>,
+    values: Vec<(SlotPath, RuntimeProduct, Revision)>,
 }
 
 impl DummyProps {
@@ -493,7 +493,7 @@ impl DummyProps {
         Self { values: Vec::new() }
     }
 
-    fn set(&mut self, path: SlotPath, value: LpsValueF32, frame: FrameId) {
+    fn set(&mut self, path: SlotPath, value: LpsValueF32, frame: Revision) {
         if let Some((_, stored, stored_frame)) = self.values.iter_mut().find(|(p, _, _)| p == &path)
         {
             *stored = RuntimeProduct::Value(value);
@@ -504,7 +504,7 @@ impl DummyProps {
         }
     }
 
-    fn mark_all_updated(&mut self, frame: FrameId) {
+    fn mark_all_updated(&mut self, frame: Revision) {
         for (_, _, stored_frame) in &mut self.values {
             *stored_frame = frame;
         }
@@ -512,7 +512,7 @@ impl DummyProps {
 }
 
 impl ProducedSlotAccess for DummyProps {
-    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         self.values
             .iter()
             .find(|(p, _, _)| p == path)
@@ -521,8 +521,8 @@ impl ProducedSlotAccess for DummyProps {
 
     fn iter_changed_since<'a>(
         &'a self,
-        since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(
             self.values
                 .iter()
@@ -533,7 +533,7 @@ impl ProducedSlotAccess for DummyProps {
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(
             self.values
                 .iter()

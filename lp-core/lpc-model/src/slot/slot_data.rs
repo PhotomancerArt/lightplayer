@@ -1,4 +1,4 @@
-use crate::{FrameId, LpValue, SlotName, Versioned, current_state_version};
+use crate::{Revision, LpValue, SlotName, WithRevision, current_revision};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -15,8 +15,8 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SlotData {
-    Unit { changed_frame: FrameId },
-    Value(Versioned<LpValue>),
+    Unit { changed_frame: Revision },
+    Value(WithRevision<LpValue>),
     Record(SlotRecord),
     Map(SlotMapDyn),
     Enum(SlotEnum),
@@ -30,16 +30,16 @@ pub enum SlotData {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotRecord {
-    pub fields_changed_frame: FrameId,
+    pub fields_changed_frame: Revision,
     pub fields: Vec<SlotData>,
 }
 
 impl SlotRecord {
     pub fn new(fields: Vec<SlotData>) -> Self {
-        Self::with_version(current_state_version(), fields)
+        Self::with_version(current_revision(), fields)
     }
 
-    pub fn with_version(fields_changed_frame: FrameId, fields: Vec<SlotData>) -> Self {
+    pub fn with_version(fields_changed_frame: Revision, fields: Vec<SlotData>) -> Self {
         Self {
             fields_changed_frame,
             fields,
@@ -51,17 +51,17 @@ impl SlotRecord {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotMapDyn {
-    pub keys_changed_frame: FrameId,
+    pub keys_changed_frame: Revision,
     pub entries: BTreeMap<SlotMapKey, SlotData>,
 }
 
 impl SlotMapDyn {
     pub fn new(entries: BTreeMap<SlotMapKey, SlotData>) -> Self {
-        Self::with_version(current_state_version(), entries)
+        Self::with_version(current_revision(), entries)
     }
 
     pub fn with_version(
-        keys_changed_frame: FrameId,
+        keys_changed_frame: Revision,
         entries: BTreeMap<SlotMapKey, SlotData>,
     ) -> Self {
         Self {
@@ -87,17 +87,17 @@ pub enum SlotMapKey {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotEnum {
-    pub variant_changed_frame: FrameId,
+    pub variant_changed_frame: Revision,
     pub variant: SlotName,
     pub data: Box<SlotData>,
 }
 
 impl SlotEnum {
     pub fn new(variant: SlotName, data: SlotData) -> Self {
-        Self::with_version(current_state_version(), variant, data)
+        Self::with_version(current_revision(), variant, data)
     }
 
-    pub fn with_version(variant_changed_frame: FrameId, variant: SlotName, data: SlotData) -> Self {
+    pub fn with_version(variant_changed_frame: Revision, variant: SlotName, data: SlotData) -> Self {
         Self {
             variant_changed_frame,
             variant,
@@ -110,27 +110,27 @@ impl SlotEnum {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotOptionDyn {
-    pub presence_changed_frame: FrameId,
+    pub presence_changed_frame: Revision,
     pub data: Option<Box<SlotData>>,
 }
 
 impl SlotOptionDyn {
     pub fn none() -> Self {
-        Self::none_with_version(current_state_version())
+        Self::none_with_version(current_revision())
     }
 
     pub fn some(data: SlotData) -> Self {
-        Self::some_with_version(current_state_version(), data)
+        Self::some_with_version(current_revision(), data)
     }
 
-    pub fn none_with_version(presence_changed_frame: FrameId) -> Self {
+    pub fn none_with_version(presence_changed_frame: Revision) -> Self {
         Self {
             presence_changed_frame,
             data: None,
         }
     }
 
-    pub fn some_with_version(presence_changed_frame: FrameId, data: SlotData) -> Self {
+    pub fn some_with_version(presence_changed_frame: Revision, data: SlotData) -> Self {
         Self {
             presence_changed_frame,
             data: Some(Box::new(data)),
@@ -141,14 +141,14 @@ impl SlotOptionDyn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FrameId;
+    use crate::Revision;
     use alloc::collections::BTreeMap;
     use alloc::string::ToString;
     use alloc::vec;
 
     #[test]
     fn slot_data_serializes_versioned_value_leaf() {
-        let data = SlotData::Value(Versioned::new(FrameId::new(3), LpValue::Bool(true)));
+        let data = SlotData::Value(WithRevision::new(Revision::new(3), LpValue::Bool(true)));
 
         let json = serde_json::to_string(&data).unwrap();
         let back: SlotData = serde_json::from_str(&json).unwrap();
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn slot_data_serializes_unit_leaf() {
         let data = SlotData::Unit {
-            changed_frame: FrameId::new(5),
+            changed_frame: Revision::new(5),
         };
 
         let json = serde_json::to_string(&data).unwrap();

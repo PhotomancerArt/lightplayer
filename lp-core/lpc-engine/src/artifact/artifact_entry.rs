@@ -1,6 +1,6 @@
 //! Single artifact slot in [`super::ArtifactManager`].
 
-use lpc_model::FrameId;
+use lpc_model::Revision;
 
 use super::{ArtifactError, ArtifactId, ArtifactLocation, ArtifactState};
 
@@ -10,7 +10,7 @@ pub struct ArtifactEntry<A> {
     pub location: ArtifactLocation,
     pub state: ArtifactState<A>,
     pub refcount: u32,
-    pub content_frame: FrameId,
+    pub content_frame: Revision,
     /// Secondary slot for errors not represented in [`ArtifactState`] (currently unused; kept for API parity).
     pub error: Option<ArtifactError>,
 }

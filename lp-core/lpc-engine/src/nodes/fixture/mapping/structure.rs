@@ -2,7 +2,7 @@
 
 use super::entry::PixelMappingEntry;
 use alloc::vec::Vec;
-use lpc_model::FrameId;
+use lpc_model::Revision;
 
 /// Pre-computed texture-to-fixture mapping
 ///
@@ -18,12 +18,12 @@ pub struct PrecomputedMapping {
     /// Texture height (for validation)
     pub texture_height: u32,
     /// FrameId when this mapping was computed
-    pub mapping_data_ver: FrameId,
+    pub mapping_data_ver: Revision,
 }
 
 impl PrecomputedMapping {
     /// Create a new empty mapping
-    pub fn new(texture_width: u32, texture_height: u32, mapping_data_ver: FrameId) -> Self {
+    pub fn new(texture_width: u32, texture_height: u32, mapping_data_ver: Revision) -> Self {
         Self {
             entries: Vec::new(),
             texture_width,
@@ -55,18 +55,18 @@ mod tests {
 
     #[test]
     fn test_new_empty() {
-        let mapping = PrecomputedMapping::new(100, 200, FrameId::new(42));
+        let mapping = PrecomputedMapping::new(100, 200, Revision::new(42));
         assert!(mapping.is_empty());
         assert_eq!(mapping.len(), 0);
         assert_eq!(mapping.texture_width, 100);
         assert_eq!(mapping.texture_height, 200);
-        assert_eq!(mapping.mapping_data_ver, FrameId::new(42));
+        assert_eq!(mapping.mapping_data_ver, Revision::new(42));
         assert_eq!(mapping.pixel_count(), 20000);
     }
 
     #[test]
     fn test_with_entries() {
-        let mut mapping = PrecomputedMapping::new(10, 10, FrameId::new(1));
+        let mut mapping = PrecomputedMapping::new(10, 10, Revision::new(1));
         mapping.entries.push(PixelMappingEntry::new(
             0,
             Q32::from_f32_wrapping(1.0),

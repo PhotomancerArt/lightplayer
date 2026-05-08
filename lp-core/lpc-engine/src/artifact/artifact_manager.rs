@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::FrameId;
+use lpc_model::Revision;
 
 use super::{ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactState};
 
@@ -38,7 +38,7 @@ impl<A> ArtifactManager<A> {
     /// Acquire (or reuse) an entry for `location`, increment refcount, and return its handle.
     ///
     /// New entries start as [`ArtifactState::Resolved`] with `content_frame = frame`.
-    pub fn acquire_location(&mut self, location: ArtifactLocation, frame: FrameId) -> ArtifactId {
+    pub fn acquire_location(&mut self, location: ArtifactLocation, frame: Revision) -> ArtifactId {
         if let Some(&handle) = self.location_to_handle.get(&location) {
             if let Some(entry) = self.by_handle.get_mut(&handle) {
                 entry.refcount += 1;
@@ -70,7 +70,7 @@ impl<A> ArtifactManager<A> {
     pub fn load_with<F>(
         &mut self,
         r: &ArtifactId,
-        frame: FrameId,
+        frame: Revision,
         loader: F,
     ) -> Result<(), ArtifactError>
     where
@@ -104,7 +104,7 @@ impl<A> ArtifactManager<A> {
 
     /// Decrement refcount. Payload-bearing entries become [`ArtifactState::Idle`] at zero refs;
     /// resolved-only and error entries are removed (see struct docs).
-    pub fn release(&mut self, r: &ArtifactId, _frame: FrameId) -> Result<(), ArtifactError> {
+    pub fn release(&mut self, r: &ArtifactId, _frame: Revision) -> Result<(), ArtifactError> {
         let handle = r.handle();
         let entry = self
             .by_handle
@@ -141,7 +141,7 @@ impl<A> ArtifactManager<A> {
         self.by_handle.get(&r.handle())
     }
 
-    pub fn content_frame(&self, r: &ArtifactId) -> Option<FrameId> {
+    pub fn content_frame(&self, r: &ArtifactId) -> Option<Revision> {
         self.entry(r).map(|e| e.content_frame)
     }
 
@@ -169,8 +169,8 @@ mod tests {
     fn acquire_same_location_reuses_handle_and_increments_refcount() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
         let l = location("a.lp");
-        let r1 = m.acquire_location(l.clone(), FrameId::new(1));
-        let r2 = m.acquire_location(l, FrameId::new(2));
+        let r1 = m.acquire_location(l.clone(), Revision::new(1));
+        let r2 = m.acquire_location(l, Revision::new(2));
         assert_eq!(r1.handle(), r2.handle());
         assert_eq!(m.refcount(&r1), Some(2));
     }
@@ -178,11 +178,11 @@ mod tests {
     #[test]
     fn release_decrements_refcount() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_location(location("b.lp"), FrameId::new(1));
+        let r = m.acquire_location(location("b.lp"), Revision::new(1));
         let h = r.handle();
-        let r2 = m.acquire_location(location("b.lp"), FrameId::new(1));
+        let r2 = m.acquire_location(location("b.lp"), Revision::new(1));
         assert_eq!(m.refcount(&r), Some(2));
-        m.release(&r2, FrameId::new(1)).unwrap();
+        m.release(&r2, Revision::new(1)).unwrap();
         assert_eq!(m.refcount(&r), Some(1));
         assert_eq!(m.entry(&r).unwrap().id.handle(), h);
         assert_eq!(m.entry(&r).unwrap().location, location("b.lp"));
@@ -192,14 +192,14 @@ mod tests {
     #[test]
     fn loaded_moves_to_idle_when_refcount_reaches_zero() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_location(location("c.lp"), FrameId::new(1));
-        m.load_with(&r, FrameId::new(5), |_location| Ok(42))
+        let r = m.acquire_location(location("c.lp"), Revision::new(1));
+        m.load_with(&r, Revision::new(5), |_location| Ok(42))
             .unwrap();
         assert!(matches!(
             m.entry(&r).unwrap().state,
             ArtifactState::Loaded(42)
         ));
-        m.release(&r, FrameId::new(1)).unwrap();
+        m.release(&r, Revision::new(1)).unwrap();
         let e = m.entry(&r).unwrap();
         assert_eq!(e.refcount, 0);
         assert!(matches!(&e.state, ArtifactState::Idle(42)));
@@ -208,13 +208,13 @@ mod tests {
     #[test]
     fn load_success_bumps_content_frame() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_location(location("d.lp"), FrameId::new(1));
-        m.load_with(&r, FrameId::new(10), |_location| Ok(1))
+        let r = m.acquire_location(location("d.lp"), Revision::new(1));
+        m.load_with(&r, Revision::new(10), |_location| Ok(1))
             .unwrap();
-        assert_eq!(m.content_frame(&r), Some(FrameId::new(10)));
-        m.load_with(&r, FrameId::new(99), |_location| Ok(2))
+        assert_eq!(m.content_frame(&r), Some(Revision::new(10)));
+        m.load_with(&r, Revision::new(99), |_location| Ok(2))
             .unwrap();
-        assert_eq!(m.content_frame(&r), Some(FrameId::new(99)));
+        assert_eq!(m.content_frame(&r), Some(Revision::new(99)));
         if let ArtifactState::Loaded(v) = &m.entry(&r).unwrap().state {
             assert_eq!(*v, 2);
         } else {
@@ -225,9 +225,9 @@ mod tests {
     #[test]
     fn load_failure_records_load_error() {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
-        let r = m.acquire_location(location("e.lp"), FrameId::new(1));
+        let r = m.acquire_location(location("e.lp"), Revision::new(1));
         let err = m
-            .load_with(&r, FrameId::new(3), |_location| {
+            .load_with(&r, Revision::new(3), |_location| {
                 Err(ArtifactError::Load(String::from("boom")))
             })
             .unwrap_err();
@@ -244,11 +244,11 @@ mod tests {
         let mut m: ArtifactManager<i32> = ArtifactManager::new();
         let bad = ArtifactId::from_raw(999);
         assert_eq!(
-            m.release(&bad, FrameId::default()).unwrap_err(),
+            m.release(&bad, Revision::default()).unwrap_err(),
             ArtifactError::UnknownHandle { handle: 999 }
         );
         assert_eq!(
-            m.load_with(&bad, FrameId::default(), |_location| Ok(0))
+            m.load_with(&bad, Revision::default(), |_location| Ok(0))
                 .unwrap_err(),
             ArtifactError::UnknownHandle { handle: 999 }
         );

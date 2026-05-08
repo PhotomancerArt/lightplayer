@@ -244,6 +244,7 @@ impl SlotValue for ColorOrder {
 mod tests {
     use super::*;
     use alloc::collections::BTreeMap;
+    use crate::{Affine2d, MapSlot};
     use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
 
     #[test]

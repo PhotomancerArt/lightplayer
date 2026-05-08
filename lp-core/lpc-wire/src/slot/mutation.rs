@@ -1,5 +1,5 @@
 use alloc::string::String;
-use lpc_model::{FrameId, LpValue, SlotPath};
+use lpc_model::{Revision, LpValue, SlotPath};
 use serde::{Deserialize, Serialize};
 
 /// Client-visible id for one requested slot mutation.
@@ -25,8 +25,8 @@ pub struct WireSlotMutationRequest {
     pub id: WireSlotMutationId,
     pub root: String,
     pub path: SlotPath,
-    pub expected_shape_version: FrameId,
-    pub expected_data_version: FrameId,
+    pub expected_shape_version: Revision,
+    pub expected_data_version: Revision,
     pub op: WireSlotMutationOp,
 }
 
@@ -60,8 +60,8 @@ pub enum WireSlotMutationResult {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum WireSlotMutationRejection {
-    ShapeConflict { current_version: FrameId },
-    DataConflict { current_version: FrameId },
+    ShapeConflict { current_version: Revision },
+    DataConflict { current_version: Revision },
     WrongType,
     UnknownRoot,
     UnknownPath,
@@ -78,8 +78,8 @@ mod tests {
             id: WireSlotMutationId::new(42),
             root: String::from("engine.shader_node"),
             path: SlotPath::parse("params.exposure").unwrap(),
-            expected_shape_version: FrameId::new(1),
-            expected_data_version: FrameId::new(3),
+            expected_shape_version: Revision::new(1),
+            expected_data_version: Revision::new(3),
             op: WireSlotMutationOp::SetValue(LpValue::F32(2.0)),
         };
 
@@ -94,7 +94,7 @@ mod tests {
         let response = WireSlotMutationResponse {
             id: WireSlotMutationId::new(7),
             result: WireSlotMutationResult::Rejected(WireSlotMutationRejection::DataConflict {
-                current_version: FrameId::new(5),
+                current_version: Revision::new(5),
             }),
         };
 

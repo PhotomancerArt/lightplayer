@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::{FrameId, Versioned};
+use lpc_model::{Revision, WithRevision};
 
 use super::{RuntimeBuffer, RuntimeBufferId};
 
@@ -19,13 +19,13 @@ impl RuntimeBufferError {
     }
 }
 
-/// Maps [`RuntimeBufferId`] to [`Versioned`] buffer payloads for [`crate::engine::Engine`].
+/// Maps [`RuntimeBufferId`] to [`WithRevision`] buffer payloads for [`crate::engine::Engine`].
 ///
 /// [`insert`](RuntimeBufferStore::insert) allocates ids monotonically; ids are not reused for
 /// the lifetime of this store.
 pub struct RuntimeBufferStore {
     next_id: u32,
-    buffers: BTreeMap<RuntimeBufferId, Versioned<RuntimeBuffer>>,
+    buffers: BTreeMap<RuntimeBufferId, WithRevision<RuntimeBuffer>>,
 }
 
 impl RuntimeBufferStore {
@@ -38,30 +38,30 @@ impl RuntimeBufferStore {
     }
 
     /// Allocates a new id. Ids increase monotonically and are never reused after allocation.
-    pub fn insert(&mut self, buffer: Versioned<RuntimeBuffer>) -> RuntimeBufferId {
+    pub fn insert(&mut self, buffer: WithRevision<RuntimeBuffer>) -> RuntimeBufferId {
         let id = RuntimeBufferId::new(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.buffers.insert(id, buffer);
         id
     }
 
-    pub fn get(&self, id: RuntimeBufferId) -> Option<&Versioned<RuntimeBuffer>> {
+    pub fn get(&self, id: RuntimeBufferId) -> Option<&WithRevision<RuntimeBuffer>> {
         self.buffers.get(&id)
     }
 
-    pub fn get_mut(&mut self, id: RuntimeBufferId) -> Option<&mut Versioned<RuntimeBuffer>> {
+    pub fn get_mut(&mut self, id: RuntimeBufferId) -> Option<&mut WithRevision<RuntimeBuffer>> {
         self.buffers.get_mut(&id)
     }
 
     /// Iterate all buffers in deterministic id order (for M4.1 resource summaries).
-    pub fn iter(&self) -> impl Iterator<Item = (RuntimeBufferId, &Versioned<RuntimeBuffer>)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (RuntimeBufferId, &WithRevision<RuntimeBuffer>)> + '_ {
         self.buffers.iter().map(|(&id, buf)| (id, buf))
     }
 
     pub fn get_mut_mark_updated(
         &mut self,
         id: RuntimeBufferId,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<&mut RuntimeBuffer, RuntimeBufferError> {
         let buffer = self
             .buffers
@@ -74,7 +74,7 @@ impl RuntimeBufferStore {
     pub fn replace(
         &mut self,
         id: RuntimeBufferId,
-        buffer: Versioned<RuntimeBuffer>,
+        buffer: WithRevision<RuntimeBuffer>,
     ) -> Result<(), RuntimeBufferError> {
         if !self.buffers.contains_key(&id) {
             return Err(RuntimeBufferError::unknown_buffer(id));
@@ -94,7 +94,7 @@ impl Default for RuntimeBufferStore {
 mod tests {
     use alloc::vec;
 
-    use lpc_model::{FrameId, Versioned};
+    use lpc_model::{Revision, WithRevision};
 
     use super::{RuntimeBufferError, RuntimeBufferStore};
     use crate::runtime_buffer::{
@@ -106,8 +106,8 @@ mod tests {
     fn store_inserts_and_retrieves_versioned_texture() {
         let mut store = RuntimeBufferStore::new();
         let buf = RuntimeBuffer::texture_rgba16(2, 2, vec![0xab; 16]);
-        let frame = FrameId::new(3);
-        let id = store.insert(Versioned::new(frame, buf.clone()));
+        let frame = Revision::new(3);
+        let id = store.insert(WithRevision::new(frame, buf.clone()));
 
         let got = store.get(id).expect("inserted");
         assert_eq!(got.changed_frame(), frame);
@@ -130,11 +130,11 @@ mod tests {
     #[test]
     fn store_replace_preserves_new_versioned_frame() {
         let mut store = RuntimeBufferStore::new();
-        let id = store.insert(Versioned::new(FrameId::new(1), RuntimeBuffer::raw(vec![1])));
+        let id = store.insert(WithRevision::new(Revision::new(1), RuntimeBuffer::raw(vec![1])));
         let replacement = RuntimeBuffer::raw(vec![2, 3]);
-        let new_frame = FrameId::new(9);
+        let new_frame = Revision::new(9);
         store
-            .replace(id, Versioned::new(new_frame, replacement.clone()))
+            .replace(id, WithRevision::new(new_frame, replacement.clone()))
             .expect("replace existing");
 
         let got = store.get(id).expect("still present");
@@ -145,15 +145,15 @@ mod tests {
     #[test]
     fn store_mut_marks_updated_frame() {
         let mut store = RuntimeBufferStore::new();
-        let id = store.insert(Versioned::new(FrameId::new(1), RuntimeBuffer::raw(vec![1])));
+        let id = store.insert(WithRevision::new(Revision::new(1), RuntimeBuffer::raw(vec![1])));
 
         let buffer = store
-            .get_mut_mark_updated(id, FrameId::new(7))
+            .get_mut_mark_updated(id, Revision::new(7))
             .expect("existing buffer");
         buffer.bytes.push(2);
 
         let got = store.get(id).expect("still present");
-        assert_eq!(got.changed_frame(), FrameId::new(7));
+        assert_eq!(got.changed_frame(), Revision::new(7));
         assert_eq!(got.value().bytes, vec![1, 2]);
     }
 
@@ -164,7 +164,7 @@ mod tests {
         let err = store
             .replace(
                 missing,
-                Versioned::new(FrameId::new(0), RuntimeBuffer::raw(vec![])),
+                WithRevision::new(Revision::new(0), RuntimeBuffer::raw(vec![])),
             )
             .expect_err("unknown id");
         assert_eq!(err, RuntimeBufferError::UnknownBuffer { id: missing });

@@ -1,6 +1,6 @@
 use crate::{
-    FieldSlot, FrameId, LpValue, SlotDataAccess, SlotShape, SlotValueAccess, Versioned,
-    current_state_version,
+    FieldSlot, Revision, LpValue, SlotDataAccess, SlotShape, SlotValueAccess, WithRevision,
+    current_revision,
 };
 use alloc::string::String;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -10,25 +10,25 @@ use super::source_path::path_shape;
 /// Versioned path to an authored artifact file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtifactPathSlot {
-    inner: Versioned<String>,
+    inner: WithRevision<String>,
 }
 
 impl ArtifactPathSlot {
     pub fn new(value: String) -> Self {
-        Self::with_version(current_state_version(), value)
+        Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: FrameId, value: String) -> Self {
+    pub fn with_version(frame: Revision, value: String) -> Self {
         Self {
-            inner: Versioned::new(frame, value),
+            inner: WithRevision::new(frame, value),
         }
     }
 
     pub fn set(&mut self, value: String) {
-        self.inner.set(current_state_version(), value);
+        self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> FrameId {
+    pub fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 
@@ -38,7 +38,7 @@ impl ArtifactPathSlot {
 }
 
 impl SlotValueAccess for ArtifactPathSlot {
-    fn changed_frame(&self) -> FrameId {
+    fn changed_frame(&self) -> Revision {
         self.inner.changed_frame()
     }
 

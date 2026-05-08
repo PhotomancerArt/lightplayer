@@ -1,5 +1,5 @@
 use lpc_model::{
-    FrameId, SlotAccess, SlotData, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
+    Revision, SlotAccess, SlotData, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
 };
 use lpc_view::SlotMirrorView;
 use lpc_wire::{WireSlotChange, WireSlotPatch};
@@ -39,7 +39,7 @@ impl Harness {
         println!("client full sync applied");
     }
 
-    pub fn sync_diff(&mut self, root_name: &str, since: FrameId) -> Vec<WireSlotPatch> {
+    pub fn sync_diff(&mut self, root_name: &str, since: Revision) -> Vec<WireSlotPatch> {
         println!(
             "syncing diff for {root_name} since frame {}",
             since.as_i64()

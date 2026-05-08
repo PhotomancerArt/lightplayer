@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use hashbrown::HashMap;
-use lpc_model::{FrameId, TreePath};
+use lpc_model::{Revision, TreePath};
 use lpc_shared::error::OutputError;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
@@ -78,8 +78,8 @@ impl RuntimeServices {
     /// them through [`OutputProvider`] for `config`'s GPIO pin.
     ///
     /// Insert the backing [`crate::runtime_buffer::RuntimeBuffer`] with
-    /// [`Versioned::new`](lpc_model::Versioned::new)([`FrameId::default`](FrameId::default), …)
-    /// so untouched sinks do not match the post-tick frame id until the fixture mutates them.
+    /// [`WithRevision::new`](lpc_model::WithRevision::new)([`Revision::default`], …)
+    /// so untouched sinks do not match the post-tick revision until the fixture mutates them.
     pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
         let pin = pin_from_output_config(config);
         let display_options = display_options_from_output_config(config);
@@ -97,20 +97,20 @@ impl RuntimeServices {
         );
     }
 
-    /// Flush sinks whose backing buffer [`Versioned::changed_frame`] equals `frame_id`.
+    /// Flush sinks whose backing buffer [`WithRevision::revision`] equals `revision`.
     ///
     /// Temporarily removes the boxed [`OutputProvider`] from `self` so sinks can be mutated without
     /// violating borrow rules.
     pub fn flush_dirty_output_sinks(
         &mut self,
-        frame_id: FrameId,
+        revision: Revision,
         buffers: &RuntimeBufferStore,
     ) -> Result<(), OutputFlushError> {
         let Some(mut boxed) = self.output_provider.take() else {
             return Ok(());
         };
         let result =
-            flush_registered_sinks(boxed.as_mut(), frame_id, buffers, &mut self.output_sinks);
+            flush_registered_sinks(boxed.as_mut(), revision, buffers, &mut self.output_sinks);
         self.output_provider = Some(boxed);
         result
     }
@@ -170,7 +170,7 @@ fn driver_options_from_cfg(cfg: &OutputDriverOptionsConfig) -> OutputDriverOptio
 
 fn flush_registered_sinks(
     provider: &mut dyn OutputProvider,
-    frame_id: FrameId,
+    revision: Revision,
     buffers: &RuntimeBufferStore,
     sinks: &mut HashMap<RuntimeBufferId, OutputSinkBinding>,
 ) -> Result<(), OutputFlushError> {
@@ -178,7 +178,7 @@ fn flush_registered_sinks(
         let Some(versioned) = buffers.get(*buffer_id) else {
             continue;
         };
-        if versioned.changed_frame() != frame_id {
+        if versioned.changed_frame() != revision {
             continue;
         }
 
@@ -250,7 +250,7 @@ mod tests {
     use alloc::rc::Rc;
     use alloc::vec;
 
-    use lpc_model::{FrameId, TreePath, Versioned};
+    use lpc_model::{Revision, TreePath, WithRevision};
     use lpc_shared::error::OutputError;
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -270,14 +270,14 @@ mod tests {
         )))));
 
         let mut buffers = RuntimeBufferStore::new();
-        let buffer_id = buffers.insert(Versioned::new(
-            FrameId::new(1),
+        let buffer_id = buffers.insert(WithRevision::new(
+            Revision::new(1),
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
         services.register_output_sink(buffer_id, &OutputDef::new(4));
 
         services
-            .flush_dirty_output_sinks(FrameId::new(1), &buffers)
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("flush opens output channel");
         assert!(provider.is_pin_open(4));
 

@@ -6,7 +6,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId, TreePath};
+use lpc_model::{Revision, NodeId, TreePath};
 use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus};
 
 /// Mirror of wire/node tree metadata (`NodeEntry` on engine) without node payloads.
@@ -24,9 +24,9 @@ pub struct TreeEntryView {
     pub status: WireNodeStatus,
     pub state: WireEntryState,
 
-    pub created_frame: FrameId,
-    pub change_frame: FrameId,
-    pub children_ver: FrameId,
+    pub created_frame: Revision,
+    pub change_frame: Revision,
+    pub children_ver: Revision,
     // Coming soon (mirrors NodeEntry future fields):
     // pub config: NodeConfig,
     // pub value_cache: BTreeMap<ValuePath, (LpsValue, FrameId)>,
@@ -42,9 +42,9 @@ impl TreeEntryView {
         child_kind: Option<WireChildKind>,
         status: WireNodeStatus,
         state: WireEntryState,
-        created_frame: FrameId,
-        change_frame: FrameId,
-        children_ver: FrameId,
+        created_frame: Revision,
+        change_frame: Revision,
+        children_ver: Revision,
     ) -> Self {
         Self {
             id,

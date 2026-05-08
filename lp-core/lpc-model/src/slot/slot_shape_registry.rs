@@ -4,7 +4,7 @@
 //! register here. The registry is versioned so clients can sync shape additions,
 //! removals, and replacements before applying slot data patches.
 
-use crate::{FrameId, SlotShape, SlotShapeId, current_state_version};
+use crate::{Revision, SlotShape, SlotShapeId, current_revision};
 use alloc::collections::BTreeMap;
 
 /// Shape root plus the frame where that root last changed.
@@ -12,14 +12,14 @@ use alloc::collections::BTreeMap;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct VersionedSlotShape {
     pub node: SlotShape,
-    pub changed_frame: FrameId,
+    pub changed_frame: Revision,
 }
 
 /// Registry of id-addressed slot shape roots.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistry {
-    pub ids_changed_frame: FrameId,
+    pub ids_changed_frame: Revision,
     shapes: BTreeMap<SlotShapeId, VersionedSlotShape>,
 }
 
@@ -34,12 +34,12 @@ impl SlotShapeRegistry {
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
-        self.register_root_with_version(current_state_version(), root, shape)
+        self.register_root_with_version(current_revision(), root, shape)
     }
 
     pub fn register_root_with_version(
         &mut self,
-        frame: FrameId,
+        frame: Revision,
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
@@ -68,12 +68,12 @@ impl SlotShapeRegistry {
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
-        self.ensure_root_with_version(current_state_version(), root, shape)
+        self.ensure_root_with_version(current_revision(), root, shape)
     }
 
     pub fn ensure_root_with_version(
         &mut self,
-        frame: FrameId,
+        frame: Revision,
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
@@ -101,12 +101,12 @@ impl SlotShapeRegistry {
     /// Runtime-owned shapes whose structure varies by artifact or instance use
     /// this path when their shape changes.
     pub fn replace_root(&mut self, root: SlotShapeId, shape: SlotShape) {
-        self.replace_root_with_version(current_state_version(), root, shape);
+        self.replace_root_with_version(current_revision(), root, shape);
     }
 
     pub fn replace_root_with_version(
         &mut self,
-        frame: FrameId,
+        frame: Revision,
         root: SlotShapeId,
         shape: SlotShape,
     ) {
@@ -121,10 +121,10 @@ impl SlotShapeRegistry {
     }
 
     pub fn unregister_root(&mut self, root: &SlotShapeId) {
-        self.unregister_root_with_version(current_state_version(), root);
+        self.unregister_root_with_version(current_revision(), root);
     }
 
-    pub fn unregister_root_with_version(&mut self, frame: FrameId, root: &SlotShapeId) {
+    pub fn unregister_root_with_version(&mut self, frame: Revision, root: &SlotShapeId) {
         if self.shapes.remove(root).is_some() {
             self.ids_changed_frame = frame;
         }
@@ -158,7 +158,7 @@ impl SlotShapeRegistry {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistrySnapshot {
-    pub ids_changed_frame: FrameId,
+    pub ids_changed_frame: Revision,
     pub shapes: BTreeMap<SlotShapeId, VersionedSlotShape>,
 }
 

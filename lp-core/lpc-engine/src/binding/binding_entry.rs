@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use lpc_model::{ChannelName, FrameId, Kind, LpValue, NodeId, SlotPath};
+use lpc_model::{ChannelName, Revision, Kind, LpValue, NodeId, SlotPath};
 
 use super::BindingId;
 
@@ -12,7 +12,7 @@ pub struct BindingEntry {
     pub target: BindingTarget,
     pub priority: BindingPriority,
     pub kind: Kind,
-    pub version: FrameId,
+    pub version: Revision,
     pub owner: NodeId,
 }
 

@@ -13,7 +13,7 @@ use lpc_engine::{
     ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, RuntimeProduct, SessionHostResolver,
     SessionResolveError, TickContext, TickResolver,
 };
-use lpc_model::{FrameId, Kind, LpValue, NodeId, SlotPath, bus::ChannelName};
+use lpc_model::{Revision, Kind, LpValue, NodeId, SlotPath, bus::ChannelName};
 use lpc_source::ArtifactLocator;
 use lpc_model::node::node_invocation::NodeInvocation;
 use lps_shared::LpsValueF32;
@@ -24,24 +24,24 @@ use lps_shared::LpsValueF32;
 fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount() {
     let mut mgr: ArtifactManager<String> = ArtifactManager::new();
     let location = ArtifactLocation::file("dummy/test.lp");
-    let r = mgr.acquire_location(location, FrameId::new(1));
+    let r = mgr.acquire_location(location, Revision::new(1));
 
     assert_eq!(mgr.refcount(&r), Some(1));
-    assert_eq!(mgr.content_frame(&r), Some(FrameId::new(1)));
+    assert_eq!(mgr.content_frame(&r), Some(Revision::new(1)));
 
-    mgr.load_with(&r, FrameId::new(20), |location| {
+    mgr.load_with(&r, Revision::new(20), |location| {
         let ArtifactLocation::File(path) = location;
         Ok(format!("loaded:{}", path.as_str()))
     })
     .unwrap();
 
-    assert_eq!(mgr.content_frame(&r), Some(FrameId::new(20)));
+    assert_eq!(mgr.content_frame(&r), Some(Revision::new(20)));
     let ent = mgr.entry(&r).expect("entry");
     assert!(
         matches!(&ent.state, ArtifactState::Loaded(payload) if payload == "loaded:dummy/test.lp")
     );
 
-    mgr.release(&r, FrameId::new(2)).unwrap();
+    mgr.release(&r, Revision::new(2)).unwrap();
     let ent = mgr.entry(&r).expect("idle entry kept");
     assert_eq!(ent.refcount, 0);
     assert!(matches!(&ent.state, ArtifactState::Idle(s) if s == "loaded:dummy/test.lp"));
@@ -51,7 +51,7 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
 fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let channel = ChannelName(String::from("live"));
     let mut registry = BindingRegistry::new();
-    let frame = FrameId::new(99);
+    let frame = Revision::new(99);
     registry
         .register(
             BindingDraft {
@@ -70,9 +70,9 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
     let ar = mgr.acquire_location(
         ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap()).unwrap(),
-        FrameId::new(0),
+        Revision::new(0),
     );
-    mgr.load_with(&ar, FrameId::new(40), |_location| Ok(7u8))
+    mgr.load_with(&ar, Revision::new(40), |_location| Ok(7u8))
         .unwrap();
     let content_frame = mgr.content_frame(&ar).expect("content_frame");
 
@@ -117,8 +117,8 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     node.tick(&mut ctx).unwrap();
     assert_eq!(node.last, Some(2.0));
 
-    assert!(ctx.artifact_changed_since(FrameId::new(39)));
-    assert!(!ctx.artifact_changed_since(FrameId::new(40)));
+    assert!(ctx.artifact_changed_since(Revision::new(39)));
+    assert!(!ctx.artifact_changed_since(Revision::new(40)));
 }
 
 #[test]
@@ -168,20 +168,20 @@ impl Node for TickProbeNode {
 struct EmptyProps;
 
 impl lpc_engine::ProducedSlotAccess for EmptyProps {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
-        _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        _since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(alloc::vec::Vec::new().into_iter())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(alloc::vec::Vec::new().into_iter())
     }
 }

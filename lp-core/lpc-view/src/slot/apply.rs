@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use lpc_model::{
-    FrameId, LpType, LpValue, ModelStructMember, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
+    Revision, LpType, LpValue, ModelStructMember, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
     SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};
@@ -49,7 +49,7 @@ pub(super) fn shape_version_for_root(
     root: &str,
     root_shapes: &BTreeMap<String, SlotShapeId>,
     registry: &SlotShapeRegistry,
-) -> Result<FrameId, SlotMirrorError> {
+) -> Result<Revision, SlotMirrorError> {
     let shape_id = root_shapes.get(root).ok_or(SlotMirrorError::UnknownRoot)?;
     Ok(registry
         .entry(shape_id)
@@ -62,7 +62,7 @@ pub(super) fn data_version_at(
     shape_id: &SlotShapeId,
     path: &SlotPath,
     registry: &SlotShapeRegistry,
-) -> Result<FrameId, SlotMirrorError> {
+) -> Result<Revision, SlotMirrorError> {
     let (_, data) = resolve_path(root, shape_id, path, registry)?;
     match data {
         SlotData::Unit { changed_frame } => Ok(*changed_frame),

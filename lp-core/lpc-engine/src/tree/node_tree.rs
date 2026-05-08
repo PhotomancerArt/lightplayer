@@ -4,7 +4,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId, NodeInvocation, NodeName, NodePathSegment, TreePath};
+use lpc_model::{Revision, NodeId, NodeInvocation, NodeName, NodePathSegment, TreePath};
 use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
@@ -27,7 +27,7 @@ pub struct NodeTree<N> {
 
 impl<N> NodeTree<N> {
     /// Create a new tree with a root node at the given path and frame.
-    pub fn new(root_path: TreePath, frame: FrameId) -> Self {
+    pub fn new(root_path: TreePath, frame: Revision) -> Self {
         let root_id = NodeId::new(0);
         let root_entry = NodeEntry::new(root_id, root_path.clone(), None, None, frame);
 
@@ -94,7 +94,7 @@ impl<N> NodeTree<N> {
         child_kind: WireChildKind,
         config: NodeInvocation,
         artifact: ArtifactId,
-        frame: FrameId,
+        frame: Revision,
     ) -> Result<NodeId, TreeError> {
         // Validate parent exists and is in the tree
         let parent_path = self
@@ -154,7 +154,7 @@ impl<N> NodeTree<N> {
     /// Remove a subtree (depth-first, children-first).
     ///
     /// Tombstones every descendant slot. Forbidden on root.
-    pub fn remove_subtree(&mut self, id: NodeId, frame: FrameId) -> Result<(), TreeError> {
+    pub fn remove_subtree(&mut self, id: NodeId, frame: Revision) -> Result<(), TreeError> {
         if id == self.root {
             return Err(TreeError::RootMutation);
         }
@@ -220,12 +220,12 @@ mod tests {
     use crate::artifact::ArtifactId;
     use crate::tree::test_placeholder_spine;
     use alloc::vec::Vec;
-    use lpc_model::{FrameId, NodeId, NodeName, TreePath};
+    use lpc_model::{Revision, NodeId, NodeName, TreePath};
     use lpc_model::{ArtifactLocator, NodeInvocation};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     fn make_tree() -> NodeTree<()> {
-        NodeTree::new(TreePath::parse("/root.show").unwrap(), FrameId::new(0))
+        NodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
     }
 
     fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
@@ -248,7 +248,7 @@ mod tests {
                 },
                 cfg.clone(),
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         let entry = tree.get(child).unwrap();
@@ -281,7 +281,7 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         assert_eq!(tree.len(), 2);
@@ -296,7 +296,7 @@ mod tests {
     fn tree_add_child_bumps_parent_children_ver() {
         let mut tree = make_tree();
         let root = tree.root();
-        let frame = FrameId::new(5);
+        let frame = Revision::new(5);
         let (cfg, art) = spine_placeholder();
         tree.add_child(
             root,
@@ -329,7 +329,7 @@ mod tests {
             WireChildKind::Sidecar { name: name.clone() },
             cfg1,
             art1,
-            FrameId::new(1),
+            Revision::new(1),
         )
         .unwrap();
 
@@ -341,7 +341,7 @@ mod tests {
             WireChildKind::Sidecar { name: name.clone() },
             cfg2,
             art2,
-            FrameId::new(2),
+            Revision::new(2),
         );
         assert!(result.is_err());
     }
@@ -361,7 +361,7 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
@@ -383,7 +383,7 @@ mod tests {
                 WireChildKind::Sidecar { name: name.clone() },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
@@ -406,11 +406,11 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
-        tree.remove_subtree(child, FrameId::new(2)).unwrap();
+        tree.remove_subtree(child, Revision::new(2)).unwrap();
         assert!(tree.get(child).is_none());
         assert_eq!(tree.len(), 1); // Only root remains
     }
@@ -430,11 +430,11 @@ mod tests {
                 },
                 cfg,
                 art,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
-        tree.remove_subtree(child, FrameId::new(10)).unwrap();
+        tree.remove_subtree(child, Revision::new(10)).unwrap();
         let root_entry = tree.get(root).unwrap();
         assert_eq!(root_entry.children_ver.0, 10);
         assert!(root_entry.children.is_empty());
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn tree_cannot_remove_root() {
         let mut tree = make_tree();
-        let result = tree.remove_subtree(tree.root(), FrameId::new(1));
+        let result = tree.remove_subtree(tree.root(), Revision::new(1));
         assert!(result.is_err());
     }
 
@@ -464,7 +464,7 @@ mod tests {
                 },
                 cfg_p,
                 art_p,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
 
@@ -479,14 +479,14 @@ mod tests {
                 },
                 cfg_g,
                 art_g,
-                FrameId::new(2),
+                Revision::new(2),
             )
             .unwrap();
 
         assert_eq!(tree.len(), 3);
 
         // Remove the middle node - should also remove grandchild
-        tree.remove_subtree(child, FrameId::new(3)).unwrap();
+        tree.remove_subtree(child, Revision::new(3)).unwrap();
 
         assert!(tree.get(child).is_none());
         assert!(tree.get(grandchild).is_none());
@@ -509,7 +509,7 @@ mod tests {
                 },
                 cfg_a,
                 art_a,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         let (cfg_b, art_b) = spine_placeholder();
@@ -523,11 +523,11 @@ mod tests {
                 },
                 cfg_b,
                 art_b,
-                FrameId::new(2),
+                Revision::new(2),
             )
             .unwrap();
 
-        tree.remove_subtree(a, FrameId::new(3)).unwrap();
+        tree.remove_subtree(a, Revision::new(3)).unwrap();
 
         let ids: Vec<NodeId> = tree.entries().map(|e| e.id).collect();
         assert_eq!(ids.len(), 2); // root + b
@@ -552,12 +552,12 @@ mod tests {
                 },
                 cfg_a,
                 art_a,
-                FrameId::new(1),
+                Revision::new(1),
             )
             .unwrap();
         assert_eq!(a.0, 1);
 
-        tree.remove_subtree(a, FrameId::new(2)).unwrap();
+        tree.remove_subtree(a, Revision::new(2)).unwrap();
 
         let (cfg_b, art_b) = spine_placeholder();
         let b = tree
@@ -570,7 +570,7 @@ mod tests {
                 },
                 cfg_b,
                 art_b,
-                FrameId::new(3),
+                Revision::new(3),
             )
             .unwrap();
         // b should get a new id, not reuse 1

@@ -117,7 +117,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        FrameId, LpType, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, Versioned,
+        Revision, LpType, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, WithRevision,
     };
     use lpc_wire::{WireSlotChange, WireSlotRootSnapshot};
 
@@ -136,11 +136,11 @@ mod tests {
             .unwrap();
 
         assert!(view.is_pending(id));
-        assert_eq!(request.expected_shape_version, FrameId::new(1));
-        assert_eq!(request.expected_data_version, FrameId::new(3));
+        assert_eq!(request.expected_shape_version, Revision::new(1));
+        assert_eq!(request.expected_data_version, Revision::new(3));
         assert_eq!(
             exposure_value(&view),
-            &Versioned::new(FrameId::new(3), LpValue::F32(1.0))
+            &WithRevision::new(Revision::new(3), LpValue::F32(1.0))
         );
     }
 
@@ -165,7 +165,7 @@ mod tests {
         assert!(view.error(id).is_none());
         assert_eq!(
             exposure_value(&view),
-            &Versioned::new(FrameId::new(3), LpValue::F32(1.0))
+            &WithRevision::new(Revision::new(3), LpValue::F32(1.0))
         );
     }
 
@@ -184,7 +184,7 @@ mod tests {
         view.apply_mutation_response(WireSlotMutationResponse {
             id,
             result: WireSlotMutationResult::Rejected(WireSlotMutationRejection::DataConflict {
-                current_version: FrameId::new(4),
+                current_version: Revision::new(4),
             }),
         });
 
@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(
             view.error(id),
             Some(&WireSlotMutationRejection::DataConflict {
-                current_version: FrameId::new(4)
+                current_version: Revision::new(4)
             })
         );
     }
@@ -203,8 +203,8 @@ mod tests {
         view.apply_patches(&[WireSlotPatch {
             root: String::from("engine.shader_node"),
             path: SlotPath::parse("params.exposure").unwrap(),
-            change: WireSlotChange::Replace(SlotData::Value(Versioned::new(
-                FrameId::new(4),
+            change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
+                Revision::new(4),
                 LpValue::F32(2.0),
             ))),
         }])
@@ -212,7 +212,7 @@ mod tests {
 
         assert_eq!(
             exposure_value(&view),
-            &Versioned::new(FrameId::new(4), LpValue::F32(2.0))
+            &WithRevision::new(Revision::new(4), LpValue::F32(2.0))
         );
     }
 
@@ -236,7 +236,7 @@ mod tests {
         let shape_id = SlotShapeId::from_static_name("engine.shader_node");
         let mut registry = SlotShapeRegistry::default();
         registry
-            .register_root_with_version(FrameId::new(1), shape_id, shader_node_shape())
+            .register_root_with_version(Revision::new(1), shape_id, shader_node_shape())
             .unwrap();
 
         let mut view = SlotMirrorView::new();
@@ -275,24 +275,24 @@ mod tests {
 
     fn shader_node_data() -> SlotData {
         SlotData::Record(SlotRecord::with_version(
-            FrameId::new(1),
+            Revision::new(1),
             vec![
                 SlotData::Record(SlotRecord::with_version(
-                    FrameId::new(1),
-                    vec![SlotData::Value(Versioned::new(
-                        FrameId::new(3),
+                    Revision::new(1),
+                    vec![SlotData::Value(WithRevision::new(
+                        Revision::new(3),
                         LpValue::F32(1.0),
                     ))],
                 )),
-                SlotData::Value(Versioned::new(
-                    FrameId::new(1),
+                SlotData::Value(WithRevision::new(
+                    Revision::new(1),
                     LpValue::String(String::from("warning")),
                 )),
             ],
         ))
     }
 
-    fn exposure_value(view: &SlotMirrorView) -> &Versioned<LpValue> {
+    fn exposure_value(view: &SlotMirrorView) -> &WithRevision<LpValue> {
         let SlotData::Record(root) = view.roots.get("engine.shader_node").unwrap() else {
             panic!("root record");
         };

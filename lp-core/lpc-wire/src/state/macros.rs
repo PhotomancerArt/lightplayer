@@ -85,11 +85,11 @@ macro_rules! impl_state_serialization {
         /// Wrapper for serializing $state_name with a since_frame context
         pub struct $wrapper_name<'a> {
             state: &'a $state_name,
-            since_frame: ::lpc_model::project::FrameId,
+            since_frame: ::lpc_model::project::Revision,
         }
 
         impl<'a> $wrapper_name<'a> {
-            pub fn new(state: &'a $state_name, since_frame: ::lpc_model::project::FrameId) -> Self {
+            pub fn new(state: &'a $state_name, since_frame: ::lpc_model::project::Revision) -> Self {
                 Self { state, since_frame }
             }
         }
@@ -99,7 +99,7 @@ macro_rules! impl_state_serialization {
             where
                 S: Serializer,
             {
-                let is_initial_sync = self.since_frame == ::lpc_model::project::FrameId::default();
+                let is_initial_sync = self.since_frame == ::lpc_model::project::Revision::default();
                 let field_count = impl_state_serialization!(@count $($field_spec)*);
                 let mut state = serializer.serialize_struct(stringify!($state_name), field_count)?;
 
@@ -148,14 +148,14 @@ macro_rules! impl_state_serialization {
 
                 impl_state_serialization!(@deserialize_helper $state_name, deserializer, helper);
 
-                let frame_id = ::lpc_model::project::FrameId::default();
-                let mut state = $state_name::new(frame_id);
+                let revision = ::lpc_model::project::Revision::default();
+                let mut state = $state_name::new(revision);
 
                 $(
                     impl_state_serialization!(@deserialize_field
                         helper,
                         state,
-                        frame_id,
+                        revision,
                         $field_spec
                     );
                 )*
@@ -317,12 +317,12 @@ macro_rules! impl_state_serialization {
     };
 
     // Deserialize field - base64 case
-    (@deserialize_field $helper:expr, $state:ident, $frame_id:expr, (#[base64] $field:ident: Vec<u8>)) => {
+    (@deserialize_field $helper:expr, $state:ident, $revision:expr, (#[base64] $field:ident: Vec<u8>)) => {
         if let Some(encoded) = $helper.$field {
             use base64::Engine;
             match base64::engine::general_purpose::STANDARD.decode(&encoded) {
                 Ok(decoded) => {
-                    $state.$field.set($frame_id, decoded);
+                    $state.$field.set($revision, decoded);
                 }
                 Err(_) => {
                     // Invalid base64, leave as default
@@ -331,9 +331,9 @@ macro_rules! impl_state_serialization {
         }
     };
     // Deserialize field - normal case
-    (@deserialize_field $helper:expr, $state:ident, $frame_id:expr, ($field:ident: $field_type:ty)) => {
+    (@deserialize_field $helper:expr, $state:ident, $revision:expr, ($field:ident: $field_type:ty)) => {
         if let Some(val) = $helper.$field {
-            $state.$field.set($frame_id, val);
+            $state.$field.set($revision, val);
         }
     };
 

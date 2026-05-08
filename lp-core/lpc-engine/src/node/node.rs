@@ -94,7 +94,7 @@ mod tests {
         resolve_trace::ResolveLogLevel,
     };
     use crate::runtime_product::RuntimeProduct;
-    use lpc_model::{FrameId, NodeId, SlotPath};
+    use lpc_model::{Revision, NodeId, SlotPath};
     use lps_shared::LpsValueF32;
 
     struct EmptyResolveHost;
@@ -112,7 +112,7 @@ mod tests {
     }
 
     struct DummyProps {
-        values: Vec<(SlotPath, RuntimeProduct, FrameId)>,
+        values: Vec<(SlotPath, RuntimeProduct, Revision)>,
     }
 
     impl Default for DummyProps {
@@ -122,7 +122,7 @@ mod tests {
     }
 
     impl ProducedSlotAccess for DummyProps {
-        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
             self.values
                 .iter()
                 .find(|(p, _, _)| p == path)
@@ -131,8 +131,8 @@ mod tests {
 
         fn iter_changed_since<'a>(
             &'a self,
-            since: FrameId,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+            since: Revision,
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
             Box::new(
                 self.values
                     .iter()
@@ -143,7 +143,7 @@ mod tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
             Box::new(
                 self.values
                     .iter()
@@ -163,7 +163,7 @@ mod tests {
             props.values.push((
                 path,
                 RuntimeProduct::Value(LpsValueF32::F32(0.25)),
-                FrameId::new(1),
+                Revision::new(1),
             ));
             Self { props }
         }
@@ -210,7 +210,7 @@ mod tests {
 
         let registry = crate::binding::BindingRegistry::new();
         let mut res = Resolver::new();
-        let frame = FrameId::new(0);
+        let frame = Revision::new(0);
         let mut session = ResolveSession::new(
             frame,
             &mut res,
@@ -227,7 +227,7 @@ mod tests {
             NodeId::new(0),
             frame,
             ArtifactId::from_raw(1),
-            FrameId::new(0),
+            Revision::new(0),
             &mut bridge as &mut dyn TickResolver,
         );
         let mut dyn_node: Box<dyn Node> = Box::new(DummyNode::new());

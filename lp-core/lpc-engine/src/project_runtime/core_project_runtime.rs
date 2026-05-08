@@ -5,7 +5,7 @@ use alloc::string::String;
 use hashbrown::HashMap;
 
 use lpc_model::lp_path::{LpPath, LpPathBuf};
-use lpc_model::{FrameId, NodeId, TreePath};
+use lpc_model::{Revision, NodeId, TreePath};
 use lpfs::FsChange;
 
 use crate::engine::{Engine, EngineError};
@@ -58,8 +58,8 @@ impl CoreProjectRuntime {
         &mut self.source_authoring
     }
 
-    pub fn frame_id(&self) -> FrameId {
-        self.engine.frame_id()
+    pub fn revision(&self) -> Revision {
+        self.engine.revision()
     }
 
     /// Engine [`NodeId`] for a node artifact path, if loaded.
@@ -75,10 +75,10 @@ impl CoreProjectRuntime {
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
         let result = (|| {
             self.engine.tick(delta_ms)?;
-            let frame_id = self.engine.frame_id();
+            let revision = self.engine.revision();
             let buffers = self.engine.runtime_buffers();
             self.services
-                .flush_dirty_output_sinks(frame_id, buffers)
+                .flush_dirty_output_sinks(revision, buffers)
                 .map_err(|e| EngineError::OutputFlush {
                     message: alloc::format!("{e}"),
                 })?;
@@ -129,9 +129,11 @@ mod tests {
         let path = TreePath::parse("/demo.show").expect("path");
         let services = RuntimeServices::new(path.clone());
         let mut rt = CoreProjectRuntime::new(path, services);
-        assert_eq!(rt.engine().frame_id().as_i64(), 0);
+        assert_eq!(rt.engine().frame_num().raw(), 0);
+        assert_eq!(rt.engine().revision().as_i64(), 0);
         rt.tick(7).expect("tick");
-        assert_eq!(rt.engine().frame_id().as_i64(), 1);
+        assert_eq!(rt.engine().frame_num().raw(), 1);
+        assert!(rt.engine().revision().as_i64() >= 1);
         assert_eq!(rt.engine().frame_time().delta_ms, 7);
     }
 
@@ -168,7 +170,7 @@ mod output_sink_flush_tests {
     use crate::runtime_product::RuntimeProduct as RpEnum;
     use crate::tree::test_placeholder_spine;
     use lpc_model::SlotPath;
-    use lpc_model::{FrameId, Kind, LpValue, TreePath, Versioned};
+    use lpc_model::{Revision, Kind, LpValue, TreePath, WithRevision};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
@@ -211,11 +213,11 @@ mod output_sink_flush_tests {
     struct SolidFixtureOutputs {
         path: SlotPath,
         rid: crate::render_product::RenderProductId,
-        last_frame: FrameId,
+        last_frame: Revision,
     }
 
     impl ProducedSlotAccess for SolidFixtureOutputs {
-        fn get(&self, path: &SlotPath) -> Option<(RpEnum, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RpEnum, Revision)> {
             if path == &self.path {
                 Some((RpEnum::render(self.rid), self.last_frame))
             } else {
@@ -225,8 +227,8 @@ mod output_sink_flush_tests {
 
         fn iter_changed_since<'a>(
             &'a self,
-            since: FrameId,
-        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, FrameId)> + 'a> {
+            since: Revision,
+        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, Revision)> + 'a> {
             if self.last_frame.as_i64() > since.as_i64() {
                 alloc::boxed::Box::new(core::iter::once((
                     self.path.clone(),
@@ -240,7 +242,7 @@ mod output_sink_flush_tests {
 
         fn snapshot<'a>(
             &'a self,
-        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, FrameId)> + 'a> {
+        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, Revision)> + 'a> {
             alloc::boxed::Box::new(core::iter::once((
                 self.path.clone(),
                 RpEnum::render(self.rid),
@@ -257,7 +259,7 @@ mod output_sink_flush_tests {
     impl Node for SolidFixtureProducer {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            self.out.last_frame = ctx.frame_id();
+            self.out.last_frame = ctx.revision();
             Ok(())
         }
 
@@ -289,7 +291,7 @@ mod output_sink_flush_tests {
         let mut rt = CoreProjectRuntime::new(path, services);
 
         let ticks = Arc::new(AtomicU32::new(0));
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = rt.engine().tree().root();
         let (spine, artifact) = test_placeholder_spine();
 
@@ -356,8 +358,8 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let sink = rt.engine_mut().runtime_buffers_mut().insert(Versioned::new(
-            FrameId::default(),
+        let sink = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
+            Revision::default(),
             RuntimeBuffer::raw(alloc::vec![0u8; 6]),
         ));
 
@@ -452,7 +454,7 @@ mod output_sink_flush_tests {
         let mut rt = CoreProjectRuntime::new(path, services);
 
         let ticks = Arc::new(AtomicU32::new(0));
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = rt.engine().tree().root();
         let (spine, artifact) = test_placeholder_spine();
 
@@ -519,13 +521,13 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let sink_written = rt.engine_mut().runtime_buffers_mut().insert(Versioned::new(
-            FrameId::default(),
+        let sink_written = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
+            Revision::default(),
             RuntimeBuffer::raw(alloc::vec![0u8; 6]),
         ));
 
-        let _sink_idle = rt.engine_mut().runtime_buffers_mut().insert(Versioned::new(
-            FrameId::default(),
+        let _sink_idle = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
+            Revision::default(),
             RuntimeBuffer::raw(alloc::vec![0xffu8; 6]),
         ));
 
@@ -622,7 +624,7 @@ mod output_sink_flush_tests {
         let mut rt = CoreProjectRuntime::new(path, services);
 
         let ticks = Arc::new(AtomicU32::new(0));
-        let frame = FrameId::new(1);
+        let frame = Revision::new(1);
         let root = rt.engine().tree().root();
         let (spine, artifact) = test_placeholder_spine();
 
@@ -689,8 +691,8 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let sink = rt.engine_mut().runtime_buffers_mut().insert(Versioned::new(
-            FrameId::default(),
+        let sink = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
+            Revision::default(),
             RuntimeBuffer::raw(alloc::vec![0u8; 6]),
         ));
 
@@ -773,7 +775,7 @@ mod output_sink_flush_tests {
             .changed_frame();
         assert_eq!(
             ver_frame.as_i64(),
-            rt.engine().frame_id().as_i64(),
+            rt.engine().revision().as_i64(),
             "fixture write should bump buffer version to current frame before flush runs",
         );
 

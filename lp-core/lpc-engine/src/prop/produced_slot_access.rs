@@ -7,22 +7,22 @@
 
 use alloc::boxed::Box;
 
-use lpc_model::{FrameId, SlotPath};
+use lpc_model::{Revision, SlotPath};
 
 use crate::runtime_product::RuntimeProduct;
 
 /// One produced slot value and the frame when it last changed.
-pub type ProducedSlotEntry = (SlotPath, RuntimeProduct, FrameId);
+pub type ProducedSlotEntry = (SlotPath, RuntimeProduct, Revision);
 
 /// Access to the values produced by a runtime node.
 pub trait ProducedSlotAccess {
     /// Get the current produced product at `path`, if any.
-    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)>;
+    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)>;
 
     /// Iterate produced slots whose `changed_frame > since`.
     fn iter_changed_since<'a>(
         &'a self,
-        since: FrameId,
+        since: Revision,
     ) -> Box<dyn Iterator<Item = ProducedSlotEntry> + 'a>;
 
     /// All produced slots' current products and frames.
@@ -34,13 +34,13 @@ pub trait ProducedSlotAccess {
 pub struct EmptyProducedSlots;
 
 impl ProducedSlotAccess for EmptyProducedSlots {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
-        _since: FrameId,
+        _since: Revision,
     ) -> Box<dyn Iterator<Item = ProducedSlotEntry> + 'a> {
         Box::new(core::iter::empty())
     }
@@ -76,7 +76,7 @@ mod tests {
     }
 
     impl ProducedSlotAccess for DummyProducedSlots {
-        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
             self.values
                 .iter()
                 .find(|(p, _, _)| p == path)
@@ -85,7 +85,7 @@ mod tests {
 
         fn iter_changed_since<'a>(
             &'a self,
-            since: FrameId,
+            since: Revision,
         ) -> Box<dyn Iterator<Item = ProducedSlotEntry> + 'a> {
             Box::new(
                 self.values
@@ -116,7 +116,7 @@ mod tests {
         slots.values.push((
             path.clone(),
             RuntimeProduct::try_value(LpsValueF32::F32(0.5)).unwrap(),
-            FrameId::new(1),
+            Revision::new(1),
         ));
 
         let result = slots.get(&path);
@@ -134,15 +134,15 @@ mod tests {
         slots.values.push((
             path1,
             RuntimeProduct::try_value(LpsValueF32::F32(1.0)).unwrap(),
-            FrameId::new(1),
+            Revision::new(1),
         ));
         slots.values.push((
             path2.clone(),
             RuntimeProduct::try_value(LpsValueF32::F32(2.0)).unwrap(),
-            FrameId::new(5),
+            Revision::new(5),
         ));
 
-        let changed: Vec<_> = slots.iter_changed_since(FrameId::new(2)).collect();
+        let changed: Vec<_> = slots.iter_changed_since(Revision::new(2)).collect();
         assert_eq!(changed.len(), 1);
         assert_eq!(changed[0].0, path2);
     }
@@ -153,12 +153,12 @@ mod tests {
         slots.values.push((
             SlotPath::parse("outputs.a").unwrap(),
             RuntimeProduct::try_value(LpsValueF32::F32(1.0)).unwrap(),
-            FrameId::new(1),
+            Revision::new(1),
         ));
         slots.values.push((
             SlotPath::parse("state.value").unwrap(),
             RuntimeProduct::try_value(LpsValueF32::I32(42)).unwrap(),
-            FrameId::new(2),
+            Revision::new(2),
         ));
 
         let snapshot: Vec<_> = slots.snapshot().collect();

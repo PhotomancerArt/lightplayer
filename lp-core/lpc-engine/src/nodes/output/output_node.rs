@@ -5,7 +5,7 @@ use alloc::boxed::Box;
 
 use alloc::vec::Vec;
 
-use lpc_model::{FrameId, SlotPath, Versioned};
+use lpc_model::{Revision, SlotPath, WithRevision};
 
 use crate::node::{
     DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
@@ -19,20 +19,20 @@ use crate::runtime_product::RuntimeProduct;
 struct EmptyProps;
 
 impl ProducedSlotAccess for EmptyProps {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, FrameId)> {
+    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
         None
     }
 
     fn iter_changed_since<'a>(
         &'a self,
-        _since: FrameId,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+        _since: Revision,
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::empty())
     }
 
     fn snapshot<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, FrameId)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::empty())
     }
 }
@@ -62,8 +62,8 @@ impl Node for OutputNode {
         if self.channel_buffer_id.is_some() {
             return Ok(());
         }
-        let id = ctx.insert_runtime_buffer(Versioned::new(
-            FrameId::default(),
+        let id = ctx.insert_runtime_buffer(WithRevision::new(
+            Revision::default(),
             RuntimeBuffer::output_channels_u16(0, Vec::new()),
         ));
         self.channel_buffer_id = Some(id);

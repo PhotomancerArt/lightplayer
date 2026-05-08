@@ -5,7 +5,7 @@ use alloc::collections::BTreeMap;
 
 use core::any::Any;
 
-use lpc_model::FrameId;
+use lpc_model::Revision;
 
 use super::{RenderProductId, RenderSampleBatch, RenderSampleBatchResult, TextureRenderProduct};
 
@@ -51,7 +51,7 @@ pub struct RenderProductStore {
     next_id: u32,
     products: BTreeMap<RenderProductId, Box<dyn RenderProduct>>,
     /// Last engine frame where this id's backing product contents were replaced.
-    changed_at: BTreeMap<RenderProductId, FrameId>,
+    changed_at: BTreeMap<RenderProductId, Revision>,
 }
 
 impl RenderProductStore {
@@ -69,7 +69,7 @@ impl RenderProductStore {
         let id = RenderProductId::new(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.products.insert(id, product);
-        self.changed_at.insert(id, FrameId::default());
+        self.changed_at.insert(id, Revision::default());
         id
     }
 
@@ -82,11 +82,11 @@ impl RenderProductStore {
         self.products.keys().copied()
     }
 
-    pub fn changed_frame(&self, id: RenderProductId) -> FrameId {
+    pub fn changed_frame(&self, id: RenderProductId) -> Revision {
         self.changed_at
             .get(&id)
             .copied()
-            .unwrap_or(FrameId::default())
+            .unwrap_or(Revision::default())
     }
 
     /// Replace an existing product id, e.g. after re-rendering into a texture-backed product.
@@ -94,7 +94,7 @@ impl RenderProductStore {
         &mut self,
         id: RenderProductId,
         product: Box<dyn RenderProduct>,
-        changed_frame: FrameId,
+        changed_frame: Revision,
     ) -> Result<(), RenderProductError> {
         if !self.products.contains_key(&id) {
             return Err(RenderProductError::unknown_product(id));
@@ -209,7 +209,7 @@ mod tests {
     use alloc::boxed::Box;
     use alloc::vec;
 
-    use lpc_model::FrameId;
+    use lpc_model::Revision;
 
     use super::{
         CoordinateProduct, RenderProduct, RenderProductError, RenderProductStore,
@@ -271,7 +271,7 @@ mod tests {
                 Box::new(SolidColorProduct {
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
-                FrameId::new(1),
+                Revision::new(1),
             )
             .expect("replace");
         let request = RenderSampleBatch {
