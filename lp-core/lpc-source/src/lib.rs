@@ -1,4 +1,4 @@
-//! LightPlayer **authored source** model: on-disk artifacts, slots, bindings, and value specs.
+//! LightPlayer **authored source** model: on-disk artifacts and artifact loading.
 
 #![no_std]
 
@@ -11,7 +11,6 @@ pub mod artifact;
 pub mod legacy;
 pub mod node;
 pub mod presentation;
-pub mod prop;
 pub mod schema;
 pub mod slot_shapes {
     include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
@@ -23,7 +22,3 @@ pub use artifact::{
 };
 pub use node::{NodeDef, NodeInvocation, ProjectDef};
 pub use presentation::Presentation;
-pub use prop::{
-    BindingResolver, FromTomlError, LoadCtx, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec,
-    SrcValueSpec, kind_default_presentation,
-};

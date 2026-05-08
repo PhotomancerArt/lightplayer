@@ -55,10 +55,9 @@ pub use render_product::{
     TextureRenderProductError,
 };
 pub use resolver::{
-    BindingKind, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
-    ResolveSession, ResolveSource, ResolveTrace, ResolveTraceError, ResolveTraceEvent,
-    ResolvedSlot, Resolver, ResolverCache, SessionHostResolver, SessionResolveError,
-    SlotResolverCache, TickResolver, TraceGuard,
+    Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
+    ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
+    SessionHostResolver, SessionResolveError, TickResolver, TraceGuard,
 };
 pub use runtime_buffer::{
     RuntimeBuffer, RuntimeBufferError, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,

@@ -177,8 +177,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec;
     use lpc_model::SlotPath;
-    use lpc_model::{ChannelName, Kind, NodeId};
-    use lpc_source::SrcValueSpec;
+    use lpc_model::{ChannelName, Kind, LpValue, NodeId};
 
     fn ch(s: &str) -> ChannelName {
         ChannelName(String::from(s))
@@ -195,9 +194,7 @@ mod tests {
         let id = reg
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
-                        1.0,
-                    ))),
+                    source: BindingSource::Literal(LpValue::F32(1.0)),
                     target: BindingTarget::BusChannel(ch("out/a")),
                     priority: BindingPriority::new(0),
                     kind: Kind::Amplitude,
@@ -233,9 +230,7 @@ mod tests {
         let id = reg
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
-                        0.0,
-                    ))),
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::BusChannel(ch("bus/z")),
                     priority: BindingPriority::new(10),
                     kind: Kind::Ratio,
@@ -282,7 +277,7 @@ mod tests {
         let c = ch("shared");
         reg.register(
             BindingDraft {
-                source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(1.0))),
+                source: BindingSource::Literal(LpValue::F32(1.0)),
                 target: BindingTarget::BusChannel(c.clone()),
                 priority: BindingPriority::new(0),
                 kind: Kind::Amplitude,
@@ -316,7 +311,7 @@ mod tests {
         let c = ch("x");
         reg.register(
             BindingDraft {
-                source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(1.0))),
+                source: BindingSource::Literal(LpValue::F32(1.0)),
                 target: BindingTarget::BusChannel(c.clone()),
                 priority: BindingPriority::new(7),
                 kind: Kind::Phase,
@@ -328,9 +323,7 @@ mod tests {
         let err = reg
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
-                        2.0,
-                    ))),
+                    source: BindingSource::Literal(LpValue::F32(2.0)),
                     target: BindingTarget::BusChannel(c.clone()),
                     priority: BindingPriority::new(7),
                     kind: Kind::Phase,
@@ -352,9 +345,7 @@ mod tests {
         let id = reg
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::LpValue::Bool(true),
-                    )),
+                    source: BindingSource::Literal(LpValue::Bool(true)),
                     target: BindingTarget::BusChannel(ch("b")),
                     priority: BindingPriority::new(0),
                     kind: Kind::Bool,
@@ -368,9 +359,7 @@ mod tests {
         let id2 = reg
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(
-                        lpc_model::LpValue::Bool(false),
-                    )),
+                    source: BindingSource::Literal(LpValue::Bool(false)),
                     target: BindingTarget::BusChannel(ch("b2")),
                     priority: BindingPriority::new(0),
                     kind: Kind::Bool,

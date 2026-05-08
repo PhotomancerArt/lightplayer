@@ -7,7 +7,6 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use lpc_model::{ChannelName, FrameId, Kind, NodeId, NodeName, SlotPath, TreePath};
-use lpc_source::SrcValueSpec;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
@@ -271,9 +270,9 @@ impl OutputSpec {
 impl TestBindingSource {
     fn into_binding_source(self, labels: &BTreeMap<String, NodeId>) -> BindingSource {
         match self {
-            Self::Literal(value) => BindingSource::Literal(SrcValueSpec::Literal(
-                lpc_model::LpValue::F32(f32_value(value)),
-            )),
+            Self::Literal(value) => {
+                BindingSource::Literal(lpc_model::LpValue::F32(f32_value(value)))
+            }
             Self::ProducedSlot { label, slot } => BindingSource::ProducedSlot {
                 node: *labels.get(&label).expect("produced slot label"),
                 slot,

@@ -5,10 +5,6 @@
 //! v0 is an **enum only** (no per-variant config); constraints already carry
 //! range/step/choices. Log scale, format strings, and similar are deferred
 //! until a concrete need (`quantity.md` §9 “v0 is enum-only”).
-//!
-//! When a [`SrcSlot`](crate::prop::src_shape::SrcSlot)’s `present` is `None`, tools use
-//! [`kind_default_presentation`](crate::prop::kind_defaults::kind_default_presentation)
-//! (`quantity.md` §9 table).
 
 /// A **widget kind** for inspector / panel generation. Values serialize as
 /// snake_case strings (see module tests).

@@ -1,5 +1,3 @@
-use crate::prop::src_shape::SrcSlot;
-
 /// Metadata for a **versioned, on-disk** LightPlayer artifact: pattern, effect,
 /// transition, stack, live, or playlist, each with its own `KIND` string and
 /// schema `CURRENT_VERSION` (`docs/roadmaps/2026-04-22-lp-domain/overview.md`
@@ -15,10 +13,4 @@ pub trait SrcArtifact {
 
     /// On-disk `schema_version` field after load (validated against [`CURRENT_VERSION`](Self::CURRENT_VERSION) by the loader).
     fn schema_version(&self) -> u32;
-
-    /// Visit every top-level [`SrcSlot`] this artifact owns for load-time default wiring.
-    ///
-    /// Visuals with a `[params]` table walk the inner params-table root [`SrcSlot`];
-    /// nested fields are reached via [`SrcSlot::default_value`](crate::prop::src_shape::SrcSlot::default_value).
-    fn walk_slots<F: FnMut(&SrcSlot)>(&self, _f: F) {}
 }

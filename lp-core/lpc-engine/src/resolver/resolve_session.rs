@@ -10,7 +10,7 @@ use crate::resolver::resolve_error::SessionResolveError;
 use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::resolver::resolver::Resolver;
-use crate::resolver::resolver::materialize_src_value_literal;
+use crate::resolver::resolver::materialize_literal_value;
 use lpc_model::{ChannelName, FrameId, NodeId, SlotPath};
 
 /// Active resolution session for one frame (or nested test scope).
@@ -144,13 +144,9 @@ impl<'a> ResolveSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         match source {
             BindingSource::Literal(spec) => {
-                let versioned =
-                    materialize_src_value_literal(spec, self.frame_id).map_err(|e| {
-                        SessionResolveError::other(format!(
-                            "literal materialization: {}",
-                            e.message
-                        ))
-                    })?;
+                let versioned = materialize_literal_value(spec, self.frame_id).map_err(|e| {
+                    SessionResolveError::other(format!("literal materialization: {}", e.message))
+                })?;
                 Ok(Production::value(versioned, ProductionSource::Literal)?)
             }
             BindingSource::ProducedSlot { node, slot } => {
@@ -225,8 +221,7 @@ mod tests {
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::{ChannelName, Versioned};
-    use lpc_source::SrcValueSpec;
+    use lpc_model::{ChannelName, LpValue, Versioned};
     use lps_shared::LpsValueF32;
 
     fn ch(s: &str) -> ChannelName {
@@ -321,9 +316,7 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
-                        1.0,
-                    ))),
+                    source: BindingSource::Literal(LpValue::F32(1.0)),
                     target: BindingTarget::BusChannel(c.clone()),
                     priority: BindingPriority::new(1),
                     kind: Kind::Amplitude,
@@ -335,9 +328,7 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
-                        9.0,
-                    ))),
+                    source: BindingSource::Literal(LpValue::F32(9.0)),
                     target: BindingTarget::BusChannel(c.clone()),
                     priority: BindingPriority::new(10),
                     kind: Kind::Amplitude,
@@ -365,7 +356,7 @@ mod tests {
     fn equal_priority_bus_providers_return_ambiguous_error() {
         let e1 = BindingEntry {
             id: BindingId::new(1),
-            source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(1.0))),
+            source: BindingSource::Literal(LpValue::F32(1.0)),
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
             kind: Kind::Amplitude,
@@ -374,7 +365,7 @@ mod tests {
         };
         let e2 = BindingEntry {
             id: BindingId::new(2),
-            source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(2.0))),
+            source: BindingSource::Literal(LpValue::F32(2.0)),
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
             kind: Kind::Amplitude,
@@ -411,9 +402,7 @@ mod tests {
         registry
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(lpc_model::LpValue::F32(
-                        3.25,
-                    ))),
+                    source: BindingSource::Literal(LpValue::F32(3.25)),
                     target: BindingTarget::BusChannel(inner.clone()),
                     priority: BindingPriority::new(0),
                     kind: Kind::Amplitude,

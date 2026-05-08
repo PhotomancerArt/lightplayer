@@ -173,7 +173,6 @@ mod output_sink_flush_tests {
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
     };
-    use lpc_source::SrcValueSpec;
     use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
     use lpc_source::node::output::OutputDef;
     use lpc_source::node::texture::TextureDef;
@@ -416,7 +415,7 @@ mod output_sink_flush_tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),
@@ -587,7 +586,7 @@ mod output_sink_flush_tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),
@@ -749,7 +748,7 @@ mod output_sink_flush_tests {
             .bindings_mut()
             .register(
                 BindingDraft {
-                    source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(0.0))),
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),

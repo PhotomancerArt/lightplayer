@@ -15,7 +15,7 @@ use super::toml_parse::{
 };
 
 /// Map authoring string → `I32` tag for `Color.*.space` / gradient method / similar.
-pub(super) fn colorspace_id(s: &str) -> Result<i32, FromTomlError> {
+pub(crate) fn colorspace_id(s: &str) -> Result<i32, FromTomlError> {
     let s = s.to_lowercase();
     let id = match s.as_str() {
         "oklch" => 0,
@@ -32,7 +32,7 @@ pub(super) fn colorspace_id(s: &str) -> Result<i32, FromTomlError> {
 }
 
 /// Inverse of [`colorspace_id`] for TOML output (snake_case strings, `docs/design/color.md` §4).
-pub(super) fn colorspace_name(id: i32) -> Result<&'static str, FromTomlError> {
+pub(crate) fn colorspace_name(id: i32) -> Result<&'static str, FromTomlError> {
     match id {
         0 => Ok("oklch"),
         1 => Ok("oklab"),
@@ -45,7 +45,7 @@ pub(super) fn colorspace_name(id: i32) -> Result<&'static str, FromTomlError> {
 }
 
 /// Function name for CSS-style `Color` TOML serialization: `name(a b c)`.
-pub(super) fn colorspace_css_serialize_name(id: i32) -> Result<&'static str, FromTomlError> {
+pub(crate) fn colorspace_css_serialize_name(id: i32) -> Result<&'static str, FromTomlError> {
     match id {
         0 => Ok("oklch"),
         1 => Ok("oklab"),
@@ -250,7 +250,7 @@ fn parse_css_color_string(s: &str) -> Result<(i32, [f32; 3]), FromTomlError> {
 }
 
 /// Trim trailing zeros for a compact TOML/CSS representation.
-pub(super) fn fmt_css_coord(f: f32) -> String {
+pub(crate) fn fmt_css_coord(f: f32) -> String {
     let f = if f == 0.0f32 { 0.0f32 } else { f };
     let mut s = format!("{f:.6}");
     while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
@@ -280,7 +280,7 @@ fn interp_method_name(id: i32) -> Result<&'static str, FromTomlError> {
     }
 }
 
-pub(super) fn model_value_color(v: &toml::Value) -> Result<LpValue, FromTomlError> {
+pub(crate) fn model_value_color(v: &toml::Value) -> Result<LpValue, FromTomlError> {
     match v {
         toml::Value::String(s) => {
             let (id, c) = parse_css_color_string(s)?;
@@ -313,7 +313,7 @@ fn model_value_color_table(
     })
 }
 
-pub(super) fn model_value_color_palette(
+pub(crate) fn model_value_color_palette(
     t: &toml::map::Map<String, toml::Value>,
 ) -> Result<LpValue, FromTomlError> {
     let space = t
@@ -357,7 +357,7 @@ pub(super) fn model_value_color_palette(
     })
 }
 
-pub(super) fn model_value_gradient(
+pub(crate) fn model_value_gradient(
     t: &toml::map::Map<String, toml::Value>,
 ) -> Result<LpValue, FromTomlError> {
     let space = t
@@ -438,7 +438,7 @@ fn gradient_stop_default() -> LpValue {
 }
 
 /// Parse `LpValue` for struct kinds (Color, ColorPalette, Gradient).
-pub(super) fn from_toml_struct_kind(
+pub(crate) fn from_toml_struct_kind(
     value: &toml::Value,
     k: Kind,
 ) -> Result<LpValue, FromTomlError> {
@@ -460,7 +460,7 @@ pub(super) fn from_toml_struct_kind(
     }
 }
 
-pub(super) fn wire_color_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
+pub(crate) fn wire_color_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
         return Err(FromTomlError::msg("Color literal must be a struct LpValue"));
     };
@@ -480,7 +480,7 @@ pub(super) fn wire_color_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlErr
     Ok(toml::Value::String(s))
 }
 
-pub(super) fn wire_color_palette_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
+pub(crate) fn wire_color_palette_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
         return Err(FromTomlError::msg("ColorPalette must be a struct LpValue"));
     };
@@ -504,7 +504,7 @@ pub(super) fn wire_color_palette_to_toml(v: &LpValue) -> Result<toml::Value, Fro
     Ok(toml::Value::Table(m))
 }
 
-pub(super) fn wire_gradient_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
+pub(crate) fn wire_gradient_to_toml(v: &LpValue) -> Result<toml::Value, FromTomlError> {
     let LpValue::Struct { name, fields } = v else {
         return Err(FromTomlError::msg("Gradient must be a struct LpValue"));
     };

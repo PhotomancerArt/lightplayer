@@ -47,7 +47,6 @@ mod tests {
 
     use lpc_model::{FrameId, LpPath, LpPathBuf};
     use lpc_source::ArtifactLocator;
-    use lpc_source::SrcSlot;
 
     use crate::artifact::{ArtifactManager, ArtifactState};
 
@@ -64,8 +63,6 @@ mod tests {
         fn schema_version(&self) -> u32 {
             self.schema_version
         }
-
-        fn walk_slots<F: FnMut(&SrcSlot)>(&self, _f: F) {}
     }
 
     struct MockFs {

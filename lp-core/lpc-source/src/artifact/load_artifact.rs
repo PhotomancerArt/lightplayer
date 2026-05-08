@@ -1,11 +1,7 @@
 //! TOML artifact loader.
 //!
 //! Reads a `.toml` file via [`ArtifactReadRoot`], deserializes it into a typed [`SrcArtifact`]
-//! struct, validates `schema_version`, and walks the loaded artifact to
-//! materialize its [`SrcValueSpec`](crate::prop::src_value_spec::SrcValueSpec) defaults at load
-//! time (per `docs/design/lightplayer/quantity.md` §7 and non-negotiable §6).
-//! Materialization uses [`LoadCtx`]; this module verifies
-//! that [`SrcSlot::default_value`](crate::prop::src_shape::SrcSlot::default_value) completes.
+//! struct, and validates `schema_version`.
 //!
 //! # Errors
 //!
@@ -19,13 +15,11 @@
 //! per call.
 
 use crate::artifact::src_artifact::SrcArtifact;
-use crate::prop::src_value_spec::LoadCtx;
 use lpc_model::error::DomainError;
 use lpc_model::lp_path::LpPath;
 
 /// Load a TOML artifact through [`ArtifactReadRoot`] and validate its `schema_version`
-/// against `T::CURRENT_VERSION`. Materializes embedded default values via a
-/// throwaway [`LoadCtx`].
+/// against `T::CURRENT_VERSION`.
 pub fn load_artifact<T, R>(fs: &R, path: &LpPath) -> Result<T, LoadError<R::Err>>
 where
     T: SrcArtifact + serde::de::DeserializeOwned,
@@ -43,9 +37,6 @@ where
             found,
         });
     }
-
-    let mut ctx = LoadCtx::default();
-    walk_and_materialize(&loaded, &mut ctx);
 
     Ok(loaded)
 }
@@ -97,12 +88,6 @@ impl<E> From<DomainError> for LoadError<E> {
     fn from(e: DomainError) -> Self {
         LoadError::Domain(e)
     }
-}
-
-fn walk_and_materialize<T: SrcArtifact>(artifact: &T, ctx: &mut LoadCtx) {
-    artifact.walk_slots(|slot| {
-        let _ = slot.default_value(ctx);
-    });
 }
 
 #[cfg(test)]

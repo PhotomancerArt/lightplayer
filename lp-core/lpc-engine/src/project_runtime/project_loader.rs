@@ -11,7 +11,7 @@ use lpc_source::ArtifactReadRoot;
 use lpc_source::node::{
     NodeKind, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
 };
-use lpc_source::{ArtifactLocator, NodeInvocation, ProjectDef, SrcValueSpec};
+use lpc_source::{ArtifactLocator, NodeInvocation, ProjectDef};
 use lpc_wire::{WireChildKind, WireSlotIndex};
 
 use crate::artifact::ArtifactLocation;
@@ -317,9 +317,7 @@ impl CoreProjectLoader {
                     .bindings_mut()
                     .register(
                         BindingDraft {
-                            source: BindingSource::Literal(SrcValueSpec::Literal(LpValue::F32(
-                                0.0,
-                            ))),
+                            source: BindingSource::Literal(LpValue::F32(0.0)),
                             target: BindingTarget::ConsumedSlot {
                                 node: node.id,
                                 slot: demand_input_path(),

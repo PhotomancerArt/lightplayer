@@ -1,4 +1,4 @@
-//! TOML helpers shared by [`crate::prop::src_value_spec::SrcValueSpec`] and color/palette/gradient parsing.
+//! TOML helpers retained with the legacy color, palette, and gradient parser.
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use lpc_model::LpValue;
 
-/// Error from `SrcValueSpec::from_toml_for_kind` / `SrcValueSpec::from_toml_for_shape` and their inverses.
+/// Error from legacy TOML value parsing and serialization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FromTomlError(pub String);
 

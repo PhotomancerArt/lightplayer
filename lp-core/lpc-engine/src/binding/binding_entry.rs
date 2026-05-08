@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 
-use lpc_model::{ChannelName, FrameId, Kind, NodeId, SlotPath};
-use lpc_source::SrcValueSpec;
+use lpc_model::{ChannelName, FrameId, Kind, LpValue, NodeId, SlotPath};
 
 use super::BindingId;
 
@@ -31,7 +30,7 @@ pub struct BindingDraft {
 /// Where a binding reads from.
 #[derive(Clone, Debug)]
 pub enum BindingSource {
-    Literal(SrcValueSpec),
+    Literal(LpValue),
     ProducedSlot { node: NodeId, slot: SlotPath },
     BusChannel(ChannelName),
 }
