@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Versioned resource reference.
+/// Revision-tracked resource reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceRefSlot {
     inner: WithRevision<ResourceRef>,
@@ -16,9 +16,9 @@ impl ResourceRefSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: ResourceRef) -> Self {
+    pub fn with_version(revision: Revision, value: ResourceRef) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -26,8 +26,8 @@ impl ResourceRefSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &ResourceRef {
@@ -36,8 +36,8 @@ impl ResourceRefSlot {
 }
 
 impl SlotValueAccess for ResourceRefSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

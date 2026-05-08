@@ -48,14 +48,14 @@ pub fn snapshot_slot_shape(
     match (shape, data) {
         (SlotShape::Ref { id }, data) => snapshot_slot_root(id, data, registry),
         (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => SlotData::Unit {
-            changed_frame: frame,
+            revision: frame,
         },
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
-            SlotData::Value(WithRevision::new(value.changed_frame(), value.value()))
+            SlotData::Value(WithRevision::new(value.changed_at(), value.value()))
         }
         (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
-            SlotData::Record(lpc_model::SlotRecord::with_version(
-                record.fields_changed_frame(),
+            SlotData::Record(lpc_model::SlotRecord::with_revision(
+                record.fields_revision(),
                 fields
                     .iter()
                     .enumerate()
@@ -77,7 +77,7 @@ pub fn snapshot_slot_shape(
                     snapshot_slot_shape(value, map.get(&key).expect("map entry exists"), registry),
                 );
             }
-            SlotData::Map(SlotMapDyn::with_version(map.keys_changed_frame(), entries))
+            SlotData::Map(SlotMapDyn::with_revision(map.keys_revision(), entries))
         }
         (SlotShape::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
             let variant = variants
@@ -85,18 +85,18 @@ pub fn snapshot_slot_shape(
                 .find(|variant| variant.name.as_str() == en.variant())
                 .expect("enum variant exists in shape");
             SlotData::Enum(lpc_model::SlotEnum::with_version(
-                en.variant_changed_frame(),
+                en.variant_revision(),
                 SlotName::parse(en.variant()).expect("enum variant is a slot name"),
                 snapshot_slot_shape(&variant.shape, en.data(), registry),
             ))
         }
         (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => match option.data() {
             Some(data) => SlotData::Option(SlotOptionDyn::some_with_version(
-                option.presence_changed_frame(),
+                option.presence_revision(),
                 snapshot_slot_shape(some, data, registry),
             )),
             None => SlotData::Option(SlotOptionDyn::none_with_version(
-                option.presence_changed_frame(),
+                option.presence_revision(),
             )),
         },
         _ => panic!("slot shape/data mismatch"),
@@ -155,25 +155,25 @@ fn collect_diff_shape(
                     root: root_name.to_string(),
                     path,
                     change: WireSlotChange::Replace(SlotData::Unit {
-                        changed_frame: frame,
+                        revision: frame,
                     }),
                 });
             }
         }
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
-            if value.changed_frame() > since {
+            if value.changed_at() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
                     change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
-                        value.changed_frame(),
+                        value.changed_at(),
                         value.value(),
                     ))),
                 });
             }
         }
         (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
-            if record.fields_changed_frame() > since {
+            if record.fields_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
@@ -195,7 +195,7 @@ fn collect_diff_shape(
             }
         }
         (SlotShape::Map { value, .. }, SlotDataAccess::Map(map)) => {
-            if map.keys_changed_frame() > since {
+            if map.keys_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
@@ -221,7 +221,7 @@ fn collect_diff_shape(
                 .iter()
                 .find(|variant| variant.name.as_str() == en.variant())
                 .expect("enum variant exists in shape");
-            if en.variant_changed_frame() > since {
+            if en.variant_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
@@ -239,7 +239,7 @@ fn collect_diff_shape(
             );
         }
         (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => {
-            if option.presence_changed_frame() > since {
+            if option.presence_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),

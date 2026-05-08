@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use lpc_model::{Revision, SlotPath, WithRevision};
 
 use crate::node::{
-    DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
+    DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, NodeResourceInitContext, PressureLevel,
     TickContext,
 };
 use crate::prop::ProducedSlotAccess;
@@ -57,7 +57,7 @@ impl OutputNode {
     }
 }
 
-impl Node for OutputNode {
+impl NodeRuntime for OutputNode {
     fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
         if self.channel_buffer_id.is_some() {
             return Ok(());

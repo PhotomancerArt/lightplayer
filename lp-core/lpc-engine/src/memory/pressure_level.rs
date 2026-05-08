@@ -1,4 +1,5 @@
-//! Memory pressure level communicated to [`super::Node::handle_memory_pressure`](super::Node).
+//! Memory pressure level communicated to
+//! [`NodeRuntime::handle_memory_pressure`](crate::node::NodeRuntime::handle_memory_pressure).
 
 /// Coarse memory pressure tier for runtime shedding decisions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]

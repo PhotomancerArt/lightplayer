@@ -6,7 +6,7 @@ use crate::{
 use alloc::string::ToString;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Versioned relative node reference.
+/// Revision-tracked relative node reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelativeNodeRefSlot {
     inner: WithRevision<RelativeNodeRef>,
@@ -17,9 +17,9 @@ impl RelativeNodeRefSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: RelativeNodeRef) -> Self {
+    pub fn with_version(revision: Revision, value: RelativeNodeRef) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -27,8 +27,8 @@ impl RelativeNodeRefSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &RelativeNodeRef {
@@ -37,8 +37,8 @@ impl RelativeNodeRefSlot {
 }
 
 impl SlotValueAccess for RelativeNodeRefSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

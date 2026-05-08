@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpc_model::Revision;
 use lpc_wire::WireTreeDelta;
 
-use super::{NodeEntry, NodeTree};
+use crate::node::{NodeEntry, NodeTree};
 
 /// Generate tree deltas since a given frame.
 ///
@@ -47,23 +47,23 @@ where
 
     // Pass 2: ChildrenChanged (children_ver > since, but not newly created)
     for entry in &entries {
-        if entry.children_ver.0 > since.0 && !created_ids.contains(&entry.id) {
+        if entry.children_changed_at().0 > since.0 && !created_ids.contains(&entry.id) {
             deltas.push(WireTreeDelta::ChildrenChanged {
                 id: entry.id,
-                children: entry.children.clone(),
-                children_ver: entry.children_ver,
+                children: entry.children.value().clone(),
+                children_ver: entry.children_changed_at(),
             });
         }
     }
 
     // Pass 3: EntryChanged (change_frame > since, but not newly created)
     for entry in &entries {
-        if entry.change_frame.0 > since.0 && !created_ids.contains(&entry.id) {
+        if entry.changed_at().0 > since.0 && !created_ids.contains(&entry.id) {
             deltas.push(WireTreeDelta::EntryChanged {
                 id: entry.id,
-                status: entry.status.clone(),
-                state: (&entry.state).into(),
-                change_frame: entry.change_frame,
+                status: entry.status.value().clone(),
+                state: entry.state.value().into(),
+                change_frame: entry.changed_at(),
             });
         }
     }
@@ -84,24 +84,24 @@ fn collect_created_deltas<N>(
     N: Clone,
 {
     if let Some(entry) = tree.get(id) {
-        let include = since.0 == 0 || entry.created_frame.0 > since.0;
+        let include = since.0 == 0 || entry.created_at.0 > since.0;
         if include {
             deltas.push(WireTreeDelta::Created {
                 id: entry.id,
                 path: entry.path.clone(),
                 parent: entry.parent,
                 child_kind: entry.child_kind.clone(),
-                children: entry.children.clone(),
-                status: entry.status.clone(),
-                state: (&entry.state).into(),
-                created_frame: entry.created_frame,
-                change_frame: entry.change_frame,
-                children_ver: entry.children_ver,
+                children: entry.children.value().clone(),
+                status: entry.status.value().clone(),
+                state: entry.state.value().into(),
+                created_frame: entry.created_at,
+                change_frame: entry.changed_at(),
+                children_ver: entry.children_changed_at(),
             });
         }
 
         // Recurse to children (depth-first pre-order)
-        let children: Vec<lpc_model::NodeId> = entry.children.clone();
+        let children: Vec<lpc_model::NodeId> = entry.children.value().clone();
         for child_id in children {
             collect_created_deltas(tree, child_id, since, deltas);
         }
@@ -112,12 +112,12 @@ fn collect_created_deltas<N>(
 mod tests {
     use super::tree_deltas_since;
     use crate::artifact::ArtifactId;
-    use crate::tree::test_placeholder_spine;
-    use crate::tree::{EntryState, NodeTree};
+    use crate::node::test_placeholder_spine;
+    use crate::node::{NodeEntryState, NodeTree};
     use alloc::vec;
     use alloc::vec::Vec;
-    use lpc_model::{Revision, NodeId, NodeName, TreePath};
     use lpc_model::NodeInvocation;
+    use lpc_model::{NodeId, NodeName, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
     fn make_tree() -> NodeTree<()> {
@@ -483,7 +483,7 @@ mod tests {
         server_tree.remove_subtree(a, Revision::new(5)).unwrap();
         {
             let b_entry = server_tree.get_mut(b).unwrap();
-            b_entry.set_state(EntryState::Alive(()), Revision::new(5));
+            b_entry.set_state(NodeEntryState::Alive(()), Revision::new(5));
             b_entry.set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
         }
 

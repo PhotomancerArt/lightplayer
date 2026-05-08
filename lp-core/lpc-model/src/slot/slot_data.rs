@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SlotData {
-    Unit { changed_frame: Revision },
+    Unit { revision: Revision },
     Value(WithRevision<LpValue>),
     Record(SlotRecord),
     Map(SlotMapDyn),
@@ -30,18 +30,18 @@ pub enum SlotData {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotRecord {
-    pub fields_changed_frame: Revision,
+    pub fields_revision: Revision,
     pub fields: Vec<SlotData>,
 }
 
 impl SlotRecord {
     pub fn new(fields: Vec<SlotData>) -> Self {
-        Self::with_version(current_revision(), fields)
+        Self::with_revision(current_revision(), fields)
     }
 
-    pub fn with_version(fields_changed_frame: Revision, fields: Vec<SlotData>) -> Self {
+    pub fn with_revision(fields_revision: Revision, fields: Vec<SlotData>) -> Self {
         Self {
-            fields_changed_frame,
+            fields_revision,
             fields,
         }
     }
@@ -51,21 +51,21 @@ impl SlotRecord {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotMapDyn {
-    pub keys_changed_frame: Revision,
+    pub keys_revision: Revision,
     pub entries: BTreeMap<SlotMapKey, SlotData>,
 }
 
 impl SlotMapDyn {
     pub fn new(entries: BTreeMap<SlotMapKey, SlotData>) -> Self {
-        Self::with_version(current_revision(), entries)
+        Self::with_revision(current_revision(), entries)
     }
 
-    pub fn with_version(
-        keys_changed_frame: Revision,
+    pub fn with_revision(
+        keys_revision: Revision,
         entries: BTreeMap<SlotMapKey, SlotData>,
     ) -> Self {
         Self {
-            keys_changed_frame,
+            keys_revision,
             entries,
         }
     }
@@ -87,7 +87,7 @@ pub enum SlotMapKey {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotEnum {
-    pub variant_changed_frame: Revision,
+    pub variant_revision: Revision,
     pub variant: SlotName,
     pub data: Box<SlotData>,
 }
@@ -97,9 +97,9 @@ impl SlotEnum {
         Self::with_version(current_revision(), variant, data)
     }
 
-    pub fn with_version(variant_changed_frame: Revision, variant: SlotName, data: SlotData) -> Self {
+    pub fn with_version(variant_revision: Revision, variant: SlotName, data: SlotData) -> Self {
         Self {
-            variant_changed_frame,
+            variant_revision,
             variant,
             data: Box::new(data),
         }
@@ -110,7 +110,7 @@ impl SlotEnum {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotOptionDyn {
-    pub presence_changed_frame: Revision,
+    pub presence_revision: Revision,
     pub data: Option<Box<SlotData>>,
 }
 
@@ -123,16 +123,16 @@ impl SlotOptionDyn {
         Self::some_with_version(current_revision(), data)
     }
 
-    pub fn none_with_version(presence_changed_frame: Revision) -> Self {
+    pub fn none_with_version(presence_revision: Revision) -> Self {
         Self {
-            presence_changed_frame,
+            presence_revision,
             data: None,
         }
     }
 
-    pub fn some_with_version(presence_changed_frame: Revision, data: SlotData) -> Self {
+    pub fn some_with_version(presence_revision: Revision, data: SlotData) -> Self {
         Self {
-            presence_changed_frame,
+            presence_revision,
             data: Some(Box::new(data)),
         }
     }
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn slot_data_serializes_unit_leaf() {
         let data = SlotData::Unit {
-            changed_frame: Revision::new(5),
+            revision: Revision::new(5),
         };
 
         let json = serde_json::to_string(&data).unwrap();

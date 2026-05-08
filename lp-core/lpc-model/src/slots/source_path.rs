@@ -5,7 +5,7 @@ use crate::{
 use alloc::string::String;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Versioned path to an authored source file.
+/// Revision-tracked path to an authored source file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourcePathSlot {
     inner: WithRevision<String>,
@@ -16,9 +16,9 @@ impl SourcePathSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: String) -> Self {
+    pub fn with_version(revision: Revision, value: String) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -26,8 +26,8 @@ impl SourcePathSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &String {
@@ -36,8 +36,8 @@ impl SourcePathSlot {
 }
 
 impl SlotValueAccess for SourcePathSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

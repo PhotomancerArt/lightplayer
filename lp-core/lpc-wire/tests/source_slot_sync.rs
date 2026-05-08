@@ -58,7 +58,7 @@ fn real_source_defs_sync_as_slot_roots() {
             "nodes[shader].artifact"
         ),
         &SlotData::Value(lpc_model::WithRevision::new(
-            project.nodes.entries["shader"].artifact.changed_frame(),
+            project.nodes.entries["shader"].artifact.revision(),
             LpValue::String(String::from("./shader.toml")),
         )),
     );

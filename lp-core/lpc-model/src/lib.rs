@@ -37,7 +37,6 @@ pub mod serial;
 pub mod slot_shapes {
     include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
 }
-pub mod tree;
 
 pub mod project;
 pub mod resource;
@@ -99,7 +98,7 @@ pub use slot::{
     SlotOptionDyn, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotRecord,
     SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeId, SlotShapeIdError,
     SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess,
-    SlotVariantShape, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, VersionedSlotShape,
+    SlotShapeEntry, SlotVariantShape, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot,
 };
-pub use tree::tree_path::{NodePathSegment, PathError, TreePath};
+pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use value::value_path::ValuePath;

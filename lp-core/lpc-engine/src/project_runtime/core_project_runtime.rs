@@ -162,13 +162,13 @@ mod output_sink_flush_tests {
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::default_demand_input_path;
-    use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+    use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
     use crate::nodes::{FixtureNode, TextureNode, shader_texture_output_path};
     use crate::prop::ProducedSlotAccess;
     use crate::render_product::SolidColorProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
-    use crate::tree::test_placeholder_spine;
+    use crate::node::test_placeholder_spine;
     use lpc_model::SlotPath;
     use lpc_model::{Revision, Kind, LpValue, TreePath, WithRevision};
     use lpc_shared::output::{
@@ -256,7 +256,7 @@ mod output_sink_flush_tests {
         ticks: Arc<AtomicU32>,
     }
 
-    impl Node for SolidFixtureProducer {
+    impl NodeRuntime for SolidFixtureProducer {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
             self.out.last_frame = ctx.revision();
@@ -772,7 +772,7 @@ mod output_sink_flush_tests {
             .runtime_buffers()
             .get(sink)
             .expect("sink")
-            .changed_frame();
+            .changed_at();
         assert_eq!(
             ver_frame.as_i64(),
             rt.engine().revision().as_i64(),

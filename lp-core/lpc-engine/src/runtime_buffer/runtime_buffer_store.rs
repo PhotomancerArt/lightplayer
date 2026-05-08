@@ -110,7 +110,7 @@ mod tests {
         let id = store.insert(WithRevision::new(frame, buf.clone()));
 
         let got = store.get(id).expect("inserted");
-        assert_eq!(got.changed_frame(), frame);
+        assert_eq!(got.changed_at(), frame);
         assert_eq!(got.value(), &buf);
         assert_eq!(got.value().kind, RuntimeBufferKind::Texture);
         match &got.value().metadata {
@@ -138,7 +138,7 @@ mod tests {
             .expect("replace existing");
 
         let got = store.get(id).expect("still present");
-        assert_eq!(got.changed_frame(), new_frame);
+        assert_eq!(got.changed_at(), new_frame);
         assert_eq!(got.value(), &replacement);
     }
 
@@ -153,7 +153,7 @@ mod tests {
         buffer.bytes.push(2);
 
         let got = store.get(id).expect("still present");
-        assert_eq!(got.changed_frame(), Revision::new(7));
+        assert_eq!(got.changed_at(), Revision::new(7));
         assert_eq!(got.value().bytes, vec![1, 2]);
     }
 

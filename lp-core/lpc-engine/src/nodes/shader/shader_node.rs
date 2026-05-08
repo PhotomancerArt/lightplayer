@@ -16,7 +16,7 @@ use lps_shared::TextureBuffer;
 
 use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::node::{
-    DestroyCtx, MemPressureCtx, Node, NodeError, NodeResourceInitContext, PressureLevel,
+    DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, NodeResourceInitContext, PressureLevel,
     ShaderProjectionWire, TickContext,
 };
 use crate::prop::ProducedSlotAccess;
@@ -78,7 +78,7 @@ impl ProducedSlotAccess for ShaderProducedSlots {
     }
 }
 
-/// Shader producer wired to the core engine; allocates a [`RenderProductId`] during [`Node::init_resources`].
+/// Shader producer wired to the core engine; allocates a [`RenderProductId`] during [`NodeRuntime::init_resources`].
 pub struct ShaderNode {
     node_id: NodeId,
     texture_node_id: NodeId,
@@ -151,7 +151,7 @@ impl ShaderNode {
     }
 }
 
-impl Node for ShaderNode {
+impl NodeRuntime for ShaderNode {
     fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
         if self.resources_initialized {
             return Ok(());
@@ -401,7 +401,7 @@ mod tests {
     use crate::render_product::{RenderProductStore, RenderSampleBatch, RenderSamplePoint};
     use crate::resolver::ResolveLogLevel;
     use crate::runtime_buffer::RuntimeBufferStore;
-    use crate::tree::test_placeholder_spine;
+    use crate::node::test_placeholder_spine;
     use lpc_model::TreePath;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 

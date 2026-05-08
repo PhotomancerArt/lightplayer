@@ -14,23 +14,23 @@ use super::{RingLampCounts, ring_lamp_counts_shape};
 pub enum FixtureMapping {
     Disabled {
         #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: Revision,
+        variant_revision: Revision,
     },
     Circle {
         #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: Revision,
+        variant_revision: Revision,
         center: XySlot,
         radius: PositiveF32Slot,
     },
     Square {
         #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: Revision,
+        variant_revision: Revision,
         origin: XySlot,
         size: XySlot,
     },
     PathPoints {
         #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: Revision,
+        variant_revision: Revision,
         points: MapSlot<u32, MappingPoint>,
         path: PathSpec,
     },
@@ -49,27 +49,27 @@ pub struct MappingPoint {
 pub enum PathSpec {
     RingArray {
         #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: Revision,
+        variant_revision: Revision,
         ring_lamp_counts: ValueSlot<Vec<u32>>,
         semantic_ring_lamp_counts: ValueSlot<RingLampCounts>,
         clockwise: ValueSlot<bool>,
     },
     Manual {
         #[serde(skip, default = "current_state_version")]
-        variant_changed_frame: Revision,
+        variant_revision: Revision,
     },
 }
 
 impl FixtureMapping {
     pub fn disabled() -> Self {
         Self::Disabled {
-            variant_changed_frame: current_revision(),
+            variant_revision: current_revision(),
         }
     }
 
     pub fn circle() -> Self {
         Self::Circle {
-            variant_changed_frame: current_revision(),
+            variant_revision: current_revision(),
             center: XySlot::new([0.5, 0.5]),
             radius: PositiveF32Slot::new(0.4),
         }
@@ -77,7 +77,7 @@ impl FixtureMapping {
 
     pub fn square() -> Self {
         Self::Square {
-            variant_changed_frame: current_revision(),
+            variant_revision: current_revision(),
             origin: XySlot::new([0.1, 0.2]),
             size: XySlot::new([0.8, 0.7]),
         }
@@ -89,7 +89,7 @@ impl FixtureMapping {
         points.insert(2, MappingPoint::new([0.4, 0.8], 0.75));
 
         Self::PathPoints {
-            variant_changed_frame: current_revision(),
+            variant_revision: current_revision(),
             points: MapSlot::new(points),
             path: PathSpec::ring_array(vec![1, 96], true),
         }
@@ -110,23 +110,23 @@ impl SlotEnumShape for FixtureMapping {
 }
 
 impl SlotEnumAccess for FixtureMapping {
-    fn variant_changed_frame(&self) -> Revision {
+    fn variant_revision(&self) -> Revision {
         match self {
             Self::Disabled {
-                variant_changed_frame,
+                variant_revision,
             }
             | Self::Circle {
-                variant_changed_frame,
+                variant_revision,
                 ..
             }
             | Self::Square {
-                variant_changed_frame,
+                variant_revision,
                 ..
             }
             | Self::PathPoints {
-                variant_changed_frame,
+                variant_revision,
                 ..
-            } => *variant_changed_frame,
+            } => *variant_revision,
         }
     }
 
@@ -142,8 +142,8 @@ impl SlotEnumAccess for FixtureMapping {
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
             Self::Disabled {
-                variant_changed_frame,
-            } => SlotDataAccess::Unit(*variant_changed_frame),
+                variant_revision,
+            } => SlotDataAccess::Unit(*variant_revision),
             Self::Circle { .. } | Self::Square { .. } | Self::PathPoints { .. } => {
                 SlotDataAccess::Record(self)
             }
@@ -202,7 +202,7 @@ impl MappingPoint {
 impl PathSpec {
     fn ring_array(ring_lamp_counts: Vec<u32>, clockwise: bool) -> Self {
         Self::RingArray {
-            variant_changed_frame: current_revision(),
+            variant_revision: current_revision(),
             semantic_ring_lamp_counts: ValueSlot::new(RingLampCounts::new(
                 ring_lamp_counts.clone(),
             )),
@@ -230,15 +230,15 @@ impl SlotEnumShape for PathSpec {
 }
 
 impl SlotEnumAccess for PathSpec {
-    fn variant_changed_frame(&self) -> Revision {
+    fn variant_revision(&self) -> Revision {
         match self {
             Self::RingArray {
-                variant_changed_frame,
+                variant_revision,
                 ..
             }
             | Self::Manual {
-                variant_changed_frame,
-            } => *variant_changed_frame,
+                variant_revision,
+            } => *variant_revision,
         }
     }
 
@@ -253,8 +253,8 @@ impl SlotEnumAccess for PathSpec {
         match self {
             Self::RingArray { .. } => SlotDataAccess::Record(self),
             Self::Manual {
-                variant_changed_frame,
-            } => SlotDataAccess::Unit(*variant_changed_frame),
+                variant_revision,
+            } => SlotDataAccess::Unit(*variant_revision),
         }
     }
 }

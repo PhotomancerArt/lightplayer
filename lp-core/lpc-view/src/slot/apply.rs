@@ -54,7 +54,7 @@ pub(super) fn shape_version_for_root(
     Ok(registry
         .entry(shape_id)
         .ok_or(SlotMirrorError::MissingShape(*shape_id))?
-        .changed_frame)
+        .changed_at())
 }
 
 pub(super) fn data_version_at(
@@ -65,12 +65,12 @@ pub(super) fn data_version_at(
 ) -> Result<Revision, SlotMirrorError> {
     let (_, data) = resolve_path(root, shape_id, path, registry)?;
     match data {
-        SlotData::Unit { changed_frame } => Ok(*changed_frame),
-        SlotData::Value(value) => Ok(value.changed_frame()),
-        SlotData::Record(record) => Ok(record.fields_changed_frame),
-        SlotData::Map(map) => Ok(map.keys_changed_frame),
-        SlotData::Enum(en) => Ok(en.variant_changed_frame),
-        SlotData::Option(option) => Ok(option.presence_changed_frame),
+        SlotData::Unit { revision } => Ok(*revision),
+        SlotData::Value(value) => Ok(value.changed_at()),
+        SlotData::Record(record) => Ok(record.fields_revision),
+        SlotData::Map(map) => Ok(map.keys_revision),
+        SlotData::Enum(en) => Ok(en.variant_revision),
+        SlotData::Option(option) => Ok(option.presence_revision),
     }
 }
 

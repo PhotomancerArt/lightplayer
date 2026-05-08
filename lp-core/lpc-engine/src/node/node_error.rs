@@ -1,4 +1,4 @@
-//! Errors returned from [`super::Node`] lifecycle hooks.
+//! Errors returned from [`super::NodeRuntime`] lifecycle hooks.
 
 use alloc::string::String;
 

@@ -1,4 +1,4 @@
-//! Engine spine [`Node`] trait: tick, destroy, memory pressure, and produced props.
+//! Engine spine [`NodeRuntime`] trait: tick, destroy, memory pressure, and produced props.
 
 use crate::prop::{
     EMPTY_PRODUCED_SLOTS, EMPTY_RUNTIME_STATE, ProducedSlotAccess, RuntimeStateAccess,
@@ -11,26 +11,10 @@ use lpc_model::NodeId;
 
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
-use super::pressure_level::PressureLevel;
-
-/// Runtime buffer identifiers owned by this node, used by resource projection.
-#[derive(Clone, Copy, Debug)]
-pub struct FixtureProjectionInfo {
-    pub lamp_colors_buffer_id: Option<RuntimeBufferId>,
-    pub output_sink_buffer_id: RuntimeBufferId,
-    pub texture_node_id: NodeId,
-}
-
-/// M4.1 shader detail projection (`glsl_code`, error text, semantic render-product ref).
-#[derive(Clone, Copy, Debug)]
-pub struct ShaderProjectionWire<'a> {
-    pub glsl_source: &'a str,
-    pub compilation_error: Option<&'a str>,
-    pub render_product_id: Option<RenderProductId>,
-}
+use crate::memory::pressure_level::PressureLevel;
 
 /// Runtime node instance for the demand-driven engine spine.
-pub trait Node {
+pub trait NodeRuntime {
     /// Allocate [`RenderProductId`] / [`RuntimeBufferId`] slots owned by this node before first tick.
     ///
     /// Default: no-op. [`crate::engine::Engine::attach_runtime_node`] invokes this immediately
@@ -80,6 +64,22 @@ pub trait Node {
     fn shader_projection_wire(&self) -> Option<ShaderProjectionWire<'_>> {
         None
     }
+}
+
+/// Runtime buffer identifiers owned by this node, used by resource projection.
+#[derive(Clone, Copy, Debug)]
+pub struct FixtureProjectionInfo {
+    pub lamp_colors_buffer_id: Option<RuntimeBufferId>,
+    pub output_sink_buffer_id: RuntimeBufferId,
+    pub texture_node_id: NodeId,
+}
+
+/// M4.1 shader detail projection (`glsl_code`, error text, semantic render-product ref).
+#[derive(Clone, Copy, Debug)]
+pub struct ShaderProjectionWire<'a> {
+    pub glsl_source: &'a str,
+    pub compilation_error: Option<&'a str>,
+    pub render_product_id: Option<RenderProductId>,
 }
 
 #[cfg(test)]
@@ -169,7 +169,7 @@ mod tests {
         }
     }
 
-    impl Node for DummyNode {
+    impl NodeRuntime for DummyNode {
         fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             Ok(())
         }
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn node_trait_is_object_safe() {
-        let node: Box<dyn Node> = Box::new(DummyNode::new());
+        let node: Box<dyn NodeRuntime> = Box::new(DummyNode::new());
         assert!(core::mem::size_of_val(&node) > 0);
     }
 
@@ -230,7 +230,7 @@ mod tests {
             Revision::new(0),
             &mut bridge as &mut dyn TickResolver,
         );
-        let mut dyn_node: Box<dyn Node> = Box::new(DummyNode::new());
+        let mut dyn_node: Box<dyn NodeRuntime> = Box::new(DummyNode::new());
         dyn_node.tick(&mut tick).expect("tick");
 
         let from_dyn = dyn_node.produced().get(&path);

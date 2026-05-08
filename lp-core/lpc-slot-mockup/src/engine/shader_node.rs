@@ -89,10 +89,10 @@ impl ShaderNode {
         let index = self.param_index(name);
         self.param_names.remove(index);
         self.params.fields.remove(index);
-        self.params.fields_changed_frame = current_revision();
+        self.params.fields_revision = current_revision();
     }
 
-    pub fn param_changed_frame(&self, name: &str) -> Option<Revision> {
+    pub fn param_revision(&self, name: &str) -> Option<Revision> {
         let index = self
             .param_names
             .iter()
@@ -100,7 +100,7 @@ impl ShaderNode {
         let SlotData::Value(value) = self.params.fields.get(index)? else {
             return None;
         };
-        Some(value.changed_frame())
+        Some(value.changed_at())
     }
 
     pub fn param_lp_type(&self, name: &str) -> Option<LpType> {

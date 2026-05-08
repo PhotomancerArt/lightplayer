@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Versioned render ordering value.
+/// Revision-tracked render ordering value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderOrderSlot {
     inner: WithRevision<i32>,
@@ -16,9 +16,9 @@ impl RenderOrderSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: i32) -> Self {
+    pub fn with_version(revision: Revision, value: i32) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -26,8 +26,8 @@ impl RenderOrderSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &i32 {
@@ -36,8 +36,8 @@ impl RenderOrderSlot {
 }
 
 impl SlotValueAccess for RenderOrderSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

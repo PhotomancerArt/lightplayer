@@ -9,7 +9,7 @@ use alloc::string::String;
 use lpc_engine::node::NodeError;
 use lpc_engine::{
     ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingPriority,
-    BindingRegistry, BindingSource, BindingTarget, Node, Production, QueryKey, ResolveHost,
+    BindingRegistry, BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost,
     ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, RuntimeProduct, SessionHostResolver,
     SessionResolveError, TickContext, TickResolver,
 };
@@ -123,11 +123,11 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
 #[test]
 fn runtime_spine_node_export_is_reachable() {
-    fn assert_spine_ptr(_: Option<&dyn Node>) {}
+    fn assert_spine_ptr(_: Option<&dyn NodeRuntime>) {}
 
     assert_spine_ptr(None);
 
-    let _: Option<fn(&dyn lpc_engine::node::Node)> = None;
+    let _: Option<fn(&dyn lpc_engine::node::NodeRuntime)> = None;
 }
 
 // --- Helpers ---
@@ -137,7 +137,7 @@ struct TickProbeNode {
     last: Option<f32>,
 }
 
-impl Node for TickProbeNode {
+impl NodeRuntime for TickProbeNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
             .resolve(self.query.clone())

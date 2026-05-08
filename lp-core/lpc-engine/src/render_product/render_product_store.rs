@@ -82,7 +82,7 @@ impl RenderProductStore {
         self.products.keys().copied()
     }
 
-    pub fn changed_frame(&self, id: RenderProductId) -> Revision {
+    pub fn revision(&self, id: RenderProductId) -> Revision {
         self.changed_at
             .get(&id)
             .copied()
@@ -94,13 +94,13 @@ impl RenderProductStore {
         &mut self,
         id: RenderProductId,
         product: Box<dyn RenderProduct>,
-        changed_frame: Revision,
+        revision: Revision,
     ) -> Result<(), RenderProductError> {
         if !self.products.contains_key(&id) {
             return Err(RenderProductError::unknown_product(id));
         }
         self.products.insert(id, product);
-        self.changed_at.insert(id, changed_frame);
+        self.changed_at.insert(id, revision);
         Ok(())
     }
 

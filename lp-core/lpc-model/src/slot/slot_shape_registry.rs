@@ -4,24 +4,18 @@
 //! register here. The registry is versioned so clients can sync shape additions,
 //! removals, and replacements before applying slot data patches.
 
-use crate::{Revision, SlotShape, SlotShapeId, current_revision};
+use crate::{Revision, SlotShape, SlotShapeId, current_revision, WithRevision};
 use alloc::collections::BTreeMap;
-
-/// Shape root plus the frame where that root last changed.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct VersionedSlotShape {
-    pub node: SlotShape,
-    pub changed_frame: Revision,
-}
 
 /// Registry of id-addressed slot shape roots.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistry {
-    pub ids_changed_frame: Revision,
-    shapes: BTreeMap<SlotShapeId, VersionedSlotShape>,
+    pub ids_revision: Revision,
+    shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
 }
+
+pub type SlotShapeEntry = WithRevision<SlotShape>;
 
 impl SlotShapeRegistry {
     /// Register a new shape root.
@@ -39,21 +33,15 @@ impl SlotShapeRegistry {
 
     pub fn register_root_with_version(
         &mut self,
-        frame: Revision,
+        revision: Revision,
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
         if self.shapes.contains_key(&root) {
             return Err(SlotShapeRegistryError::DuplicateShapeId(root));
         }
-        self.shapes.insert(
-            root,
-            VersionedSlotShape {
-                node: shape,
-                changed_frame: frame,
-            },
-        );
-        self.ids_changed_frame = frame;
+        self.shapes.insert(root, SlotShapeEntry::new(revision, shape));
+        self.ids_revision = revision;
         Ok(())
     }
 
@@ -73,26 +61,20 @@ impl SlotShapeRegistry {
 
     pub fn ensure_root_with_version(
         &mut self,
-        frame: Revision,
+        revision: Revision,
         root: SlotShapeId,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
         if let Some(existing) = self.shapes.get(&root) {
-            return if existing.node == shape {
+            return if existing.value() == &shape {
                 Ok(false)
             } else {
                 Err(SlotShapeRegistryError::ShapeIdConflict(root))
             };
         }
 
-        self.shapes.insert(
-            root,
-            VersionedSlotShape {
-                node: shape,
-                changed_frame: frame,
-            },
-        );
-        self.ids_changed_frame = frame;
+        self.shapes.insert(root, SlotShapeEntry::new(revision, shape));
+        self.ids_revision = revision;
         Ok(true)
     }
 
@@ -106,27 +88,21 @@ impl SlotShapeRegistry {
 
     pub fn replace_root_with_version(
         &mut self,
-        frame: Revision,
+        revision: Revision,
         root: SlotShapeId,
         shape: SlotShape,
     ) {
-        self.shapes.insert(
-            root,
-            VersionedSlotShape {
-                node: shape,
-                changed_frame: frame,
-            },
-        );
-        self.ids_changed_frame = frame;
+        self.shapes.insert(root, SlotShapeEntry::new(revision, shape));
+        self.ids_revision = revision;
     }
 
     pub fn unregister_root(&mut self, root: &SlotShapeId) {
         self.unregister_root_with_version(current_revision(), root);
     }
 
-    pub fn unregister_root_with_version(&mut self, frame: Revision, root: &SlotShapeId) {
+    pub fn unregister_root_with_version(&mut self, revision: Revision, root: &SlotShapeId) {
         if self.shapes.remove(root).is_some() {
-            self.ids_changed_frame = frame;
+            self.ids_revision = revision;
         }
     }
 
@@ -135,22 +111,22 @@ impl SlotShapeRegistry {
     }
 
     pub fn get(&self, id: &SlotShapeId) -> Option<&SlotShape> {
-        self.shapes.get(id).map(|entry| &entry.node)
+        self.shapes.get(id).map(WithRevision::value)
     }
 
-    pub fn entry(&self, id: &SlotShapeId) -> Option<&VersionedSlotShape> {
+    pub fn entry(&self, id: &SlotShapeId) -> Option<&SlotShapeEntry> {
         self.shapes.get(id)
     }
 
     pub fn snapshot(&self) -> SlotShapeRegistrySnapshot {
         SlotShapeRegistrySnapshot {
-            ids_changed_frame: self.ids_changed_frame,
+            ids_revision: self.ids_revision,
             shapes: self.shapes.clone(),
         }
     }
 
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
-        self.ids_changed_frame = snapshot.ids_changed_frame;
+        self.ids_revision = snapshot.ids_revision;
         self.shapes = snapshot.shapes;
     }
 }
@@ -158,8 +134,8 @@ impl SlotShapeRegistry {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistrySnapshot {
-    pub ids_changed_frame: Revision,
-    pub shapes: BTreeMap<SlotShapeId, VersionedSlotShape>,
+    pub ids_revision: Revision,
+    pub shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

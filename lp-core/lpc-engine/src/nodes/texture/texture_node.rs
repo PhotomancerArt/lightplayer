@@ -9,7 +9,7 @@ use lpc_model::SlotPath;
 use lpc_model::nodes::texture::{TextureDef, TextureFormat};
 use lps_shared::LpsValueF32;
 
-use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;
 use crate::runtime_product::RuntimeProduct;
 
@@ -181,7 +181,7 @@ impl TextureNode {
     }
 }
 
-impl Node for TextureNode {
+impl NodeRuntime for TextureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.props
             .sync(&self.config, self.pixel_format, ctx.revision());
@@ -211,7 +211,7 @@ mod tests {
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     use crate::resolver::{QueryKey, ResolveLogLevel};
-    use crate::tree::test_placeholder_spine;
+    use crate::node::test_placeholder_spine;
     use lpc_model::TreePath;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 

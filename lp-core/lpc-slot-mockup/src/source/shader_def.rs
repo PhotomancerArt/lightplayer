@@ -74,18 +74,18 @@ impl ShaderDef {
         param.set_label(label);
     }
 
-    pub fn param_label_changed_frame(&self, name: &str) -> Option<Revision> {
+    pub fn param_label_revision(&self, name: &str) -> Option<Revision> {
         self.param_defs
             .entries
             .get(name)
-            .map(ShaderParamDef::label_changed_frame)
+            .map(ShaderParamDef::label_revision)
     }
 
-    pub fn param_default_changed_frame(&self, name: &str) -> Option<Revision> {
+    pub fn param_default_revision(&self, name: &str) -> Option<Revision> {
         self.param_defs
             .entries
             .get(name)
-            .map(ShaderParamDef::default_changed_frame)
+            .map(ShaderParamDef::default_revision)
     }
 }
 
@@ -131,12 +131,12 @@ impl ShaderParamDef {
         self.label.set(label.to_string());
     }
 
-    fn label_changed_frame(&self) -> Revision {
-        self.label.changed_frame()
+    fn label_revision(&self) -> Revision {
+        self.label.revision()
     }
 
-    fn default_changed_frame(&self) -> Revision {
-        self.default.changed_frame()
+    fn default_revision(&self) -> Revision {
+        self.default.revision()
     }
 }
 

@@ -4,12 +4,12 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{Revision, NodeId, NodeInvocation, NodeName, NodePathSegment, TreePath};
+use lpc_model::{NodeId, NodeInvocation, NodeName, NodePathSegment, Revision, TreePath};
 use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
 
-use super::{NodeEntry, TreeError};
+use crate::node::{NodeEntry, TreeError};
 
 /// The node tree container.
 ///
@@ -144,8 +144,8 @@ impl<N> NodeTree<N> {
 
         // Add to parent's children list and bump parent's children_ver
         if let Some(p) = self.get_mut(parent) {
-            p.children.push(child_id);
-            p.children_ver = frame;
+            p.children.get_mut().push(child_id);
+            p.children.mark_updated(frame);
         }
 
         Ok(child_id)
@@ -162,7 +162,11 @@ impl<N> NodeTree<N> {
         // Collect the fields we need up front to avoid borrow issues
         let (children_to_remove, parent, path) = {
             let entry = self.get(id).ok_or(TreeError::UnknownNode(id))?;
-            (entry.children.clone(), entry.parent, entry.path.clone())
+            (
+                entry.children.value().clone(),
+                entry.parent,
+                entry.path.clone(),
+            )
         };
 
         // Recursively remove children first (depth-first)
@@ -187,8 +191,8 @@ impl<N> NodeTree<N> {
         // Remove from parent's children list and bump parent's children_ver
         if let Some(parent_id) = parent {
             if let Some(p) = self.get_mut(parent_id) {
-                p.children.retain(|&cid| cid != id);
-                p.children_ver = frame;
+                p.children.get_mut().retain(|&cid| cid != id);
+                p.children.mark_updated(frame);
             }
         }
 
@@ -218,10 +222,10 @@ impl<N> NodeTree<N> {
 mod tests {
     use super::NodeTree;
     use crate::artifact::ArtifactId;
-    use crate::tree::test_placeholder_spine;
+    use crate::node::test_placeholder_spine;
     use alloc::vec::Vec;
-    use lpc_model::{Revision, NodeId, NodeName, TreePath};
     use lpc_model::{ArtifactLocator, NodeInvocation};
+    use lpc_model::{NodeId, NodeName, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     fn make_tree() -> NodeTree<()> {
@@ -311,7 +315,7 @@ mod tests {
         )
         .unwrap();
         let root_entry = tree.get(root).unwrap();
-        assert_eq!(root_entry.children_ver.0, 5);
+        assert_eq!(root_entry.children_changed_at().0, 5);
     }
 
     #[test]
@@ -436,8 +440,8 @@ mod tests {
 
         tree.remove_subtree(child, Revision::new(10)).unwrap();
         let root_entry = tree.get(root).unwrap();
-        assert_eq!(root_entry.children_ver.0, 10);
-        assert!(root_entry.children.is_empty());
+        assert_eq!(root_entry.children_changed_at().0, 10);
+        assert!(root_entry.children.value().is_empty());
     }
 
     #[test]

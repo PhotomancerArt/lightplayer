@@ -19,7 +19,7 @@ pub trait ProducedSlotAccess {
     /// Get the current produced product at `path`, if any.
     fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)>;
 
-    /// Iterate produced slots whose `changed_frame > since`.
+    /// Iterate produced slots whose `revision > since`.
     fn iter_changed_since<'a>(
         &'a self,
         since: Revision,

@@ -21,7 +21,7 @@ use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget
 use crate::engine::Engine;
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
 use crate::runtime_buffer::RuntimeBufferId;
-use crate::tree::TreeError;
+use crate::node::TreeError;
 
 use super::{CoreProjectRuntime, RuntimeServices};
 
@@ -700,11 +700,17 @@ mod tests {
 
         for id in [tex_id, sh_id, out_id, fix_id] {
             let entry = rt.engine().tree().get(id).expect("entry");
-            assert!(entry.state.is_alive(), "node {id:?} should be alive",);
+            assert!(
+                entry.state.value().is_alive(),
+                "node {id:?} should be alive",
+            );
         }
 
         let root_entry = rt.engine().tree().get(root).expect("root entry");
-        assert!(root_entry.state.is_alive(), "project root should be alive");
+        assert!(
+            root_entry.state.value().is_alive(),
+            "project root should be alive"
+        );
         assert_eq!(
             rt.engine()
                 .tree()

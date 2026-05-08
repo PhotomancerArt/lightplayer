@@ -4,7 +4,7 @@ use alloc::string::String;
 
 use crate::node::NodeError;
 use crate::resolver::SessionResolveError;
-use crate::tree::TreeError;
+use crate::node::TreeError;
 use lpc_model::NodeId;
 
 /// Engine-level failures (tree, node hooks, demand resolution).

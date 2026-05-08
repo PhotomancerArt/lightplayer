@@ -15,7 +15,7 @@ mod tests {
         SrcBinding, SrcShape, SrcSlot, SrcTextureSpec, SrcValueSpec, Stack, Transition,
         TransitionRef, TreePath, VisualInput,
     };
-    use lpc_model::tree::tree_path::NodePathSegment;
+    use lpc_model::node::tree_path::NodePathSegment;
 
     macro_rules! assert_schema_compiles {
         ($t:ty) => {{

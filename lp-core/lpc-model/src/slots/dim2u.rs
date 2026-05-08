@@ -14,7 +14,7 @@ pub struct Dim2u {
     pub height: u32,
 }
 
-/// Versioned unsigned 2D dimensions.
+/// Revision-tracked unsigned 2D dimensions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dim2uSlot {
     inner: WithRevision<Dim2u>,
@@ -25,9 +25,9 @@ impl Dim2uSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: Dim2u) -> Self {
+    pub fn with_version(revision: Revision, value: Dim2u) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -35,8 +35,8 @@ impl Dim2uSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &Dim2u {
@@ -45,8 +45,8 @@ impl Dim2uSlot {
 }
 
 impl SlotValueAccess for Dim2uSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

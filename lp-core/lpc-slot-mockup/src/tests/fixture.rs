@@ -57,13 +57,13 @@ impl Harness {
         let snapshot = self.runtime.registry.snapshot();
         println!(
             "registry frame={} shapes={}",
-            snapshot.ids_changed_frame.as_i64(),
+            snapshot.ids_revision.as_i64(),
             snapshot.shapes.len()
         );
         for (shape_id, shape) in &snapshot.shapes {
             println!(
-                "  shape {shape_id} changed_frame={} node={:?}",
-                shape.changed_frame.as_i64(),
+                "  shape {shape_id} revision={} node={:?}",
+                shape.revision.as_i64(),
                 shape.node
             );
         }
@@ -74,8 +74,8 @@ impl Harness {
     pub fn print_client_shape(&self, shape_id: SlotShapeId) {
         let shape = self.client.registry.entry(&shape_id).expect("client shape");
         println!(
-            "client shape {shape_id} changed_frame={} node={:?}",
-            shape.changed_frame.as_i64(),
+            "client shape {shape_id} revision={} node={:?}",
+            shape.revision.as_i64(),
             shape.node
         );
     }

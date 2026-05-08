@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::source_path::path_shape;
 
-/// Versioned path to an authored artifact file.
+/// Revision-tracked path to an authored artifact file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtifactPathSlot {
     inner: WithRevision<String>,
@@ -18,9 +18,9 @@ impl ArtifactPathSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: String) -> Self {
+    pub fn with_version(revision: Revision, value: String) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -28,8 +28,8 @@ impl ArtifactPathSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &String {
@@ -38,8 +38,8 @@ impl ArtifactPathSlot {
 }
 
 impl SlotValueAccess for ArtifactPathSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

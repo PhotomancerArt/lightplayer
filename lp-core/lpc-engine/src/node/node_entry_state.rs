@@ -4,13 +4,13 @@
 
 use alloc::string::String;
 
-/// Server-side lifecycle state of a `NodeEntry`.
+/// Lifecycle state of a `NodeEntry`.
 ///
 /// Generic over `N` — the payload type when the entry is `Alive`. In M3 this
 /// is `()` (no Node trait yet). When the Node trait lands, this becomes
 /// `Box<dyn Node>`.
 #[derive(Debug)]
-pub enum EntryState<N> {
+pub enum NodeEntryState<N> {
     /// Artifact handle resolved + refcounted; node not yet instantiated.
     Pending,
     /// Node instantiated and ticking.
@@ -19,30 +19,30 @@ pub enum EntryState<N> {
     Failed { reason: String },
 }
 
-impl<N> EntryState<N> {
+impl<N> NodeEntryState<N> {
     /// Returns `true` if this state is `Alive`.
     pub fn is_alive(&self) -> bool {
-        matches!(self, EntryState::Alive(_))
+        matches!(self, NodeEntryState::Alive(_))
     }
 
     /// Returns `true` if this state is `Pending`.
     pub fn is_pending(&self) -> bool {
-        matches!(self, EntryState::Pending)
+        matches!(self, NodeEntryState::Pending)
     }
 
     /// Returns `true` if this state is `Failed`.
     pub fn is_failed(&self) -> bool {
-        matches!(self, EntryState::Failed { .. })
+        matches!(self, NodeEntryState::Failed { .. })
     }
 }
 
 /// Convert server-side `EntryState<N>` to wire-side `WireEntryState`.
-impl<N> From<&EntryState<N>> for lpc_wire::WireEntryState {
-    fn from(state: &EntryState<N>) -> Self {
+impl<N> From<&NodeEntryState<N>> for lpc_wire::WireEntryState {
+    fn from(state: &NodeEntryState<N>) -> Self {
         match state {
-            EntryState::Pending => lpc_wire::WireEntryState::Pending,
-            EntryState::Alive(_) => lpc_wire::WireEntryState::Alive,
-            EntryState::Failed { reason } => lpc_wire::WireEntryState::Failed {
+            NodeEntryState::Pending => lpc_wire::WireEntryState::Pending,
+            NodeEntryState::Alive(_) => lpc_wire::WireEntryState::Alive,
+            NodeEntryState::Failed { reason } => lpc_wire::WireEntryState::Failed {
                 reason: reason.clone(),
             },
         }
@@ -51,14 +51,14 @@ impl<N> From<&EntryState<N>> for lpc_wire::WireEntryState {
 
 #[cfg(test)]
 mod tests {
-    use super::EntryState;
+    use super::NodeEntryState;
     use alloc::string::String;
 
     #[test]
     fn entry_state_discriminants() {
-        let pending: EntryState<()> = EntryState::Pending;
-        let alive: EntryState<()> = EntryState::Alive(());
-        let failed: EntryState<()> = EntryState::Failed {
+        let pending: NodeEntryState<()> = NodeEntryState::Pending;
+        let alive: NodeEntryState<()> = NodeEntryState::Alive(());
+        let failed: NodeEntryState<()> = NodeEntryState::Failed {
             reason: String::from("oom"),
         };
 

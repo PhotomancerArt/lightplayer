@@ -44,7 +44,7 @@ pub mod shape {
     };
 }
 pub use slot_shape_registry::{
-    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, VersionedSlotShape,
+    SlotShapeEntry, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
 };
 
 pub use crate::slots::{

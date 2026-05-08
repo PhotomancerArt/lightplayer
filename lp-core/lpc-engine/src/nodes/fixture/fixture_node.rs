@@ -22,7 +22,7 @@ use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
-    DestroyCtx, FixtureProjectionInfo, MemPressureCtx, Node, NodeError, NodeResourceInitContext,
+    DestroyCtx, FixtureProjectionInfo, MemPressureCtx, NodeRuntime, NodeError, NodeResourceInitContext,
     PressureLevel, TickContext,
 };
 use crate::prop::ProducedSlotAccess;
@@ -102,7 +102,7 @@ impl FixtureNode {
     }
 }
 
-impl Node for FixtureNode {
+impl NodeRuntime for FixtureNode {
     fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
         if self.lamp_colors_buffer_id.is_some() {
             return Ok(());
@@ -524,7 +524,7 @@ mod tests {
     use crate::render_product::SolidColorProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
-    use crate::tree::test_placeholder_spine;
+    use crate::node::test_placeholder_spine;
 
     #[derive(Clone)]
     struct FixtureTickCountSolidProducerOutputs {
@@ -573,7 +573,7 @@ mod tests {
         ticks: Arc<AtomicU32>,
     }
 
-    impl Node for FixtureTickCountSolidProducer {
+    impl NodeRuntime for FixtureTickCountSolidProducer {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
             self.out.last_frame = ctx.revision();

@@ -1,4 +1,4 @@
-//! Narrow contexts passed into [`super::Node`] hooks.
+//! Narrow contexts passed into [`super::NodeRuntime`] hooks.
 //!
 //! [`TickContext`] resolves through the active [`ResolveSession`] and [`ResolveHost`] using
 //! [`QueryKey`] (not the legacy slot resolver cache).
@@ -23,7 +23,7 @@ use super::node_error::NodeError;
 
 /// Narrow store access for allocating node-owned render products and runtime buffers at attach time.
 ///
-/// Passed to [`super::super::Node::init_resources`] before the node payload is [`crate::tree::EntryState::Alive`].
+/// Passed to [`super::super::NodeRuntime::init_resources`] before the node payload is [`crate::node::NodeEntryState::Alive`].
 pub struct NodeResourceInitContext<'a> {
     render_products: &'a mut RenderProductStore,
     runtime_buffers: &'a mut RuntimeBufferStore,
@@ -50,10 +50,10 @@ impl<'a> NodeResourceInitContext<'a> {
 }
 
 /// Pending uploads to [`crate::render_product::RenderProductStore`] applied after the current
-/// node's [`super::Node::tick`](super::Node::tick) returns (see [`TickContext::defer_render_product_replace`]).
+/// node's [`super::Node::tick`](super::NodeRuntime::tick) returns (see [`TickContext::defer_render_product_replace`]).
 pub type PendingRenderProductReplaces<'r> = &'r mut Vec<(RenderProductId, Box<dyn RenderProduct>)>;
 
-/// Context for [`super::Node::tick`](super::Node::tick).
+/// Context for [`super::Node::tick`](super::NodeRuntime::tick).
 ///
 /// Demand-style reads go through [`TickResolver`] (typically [`crate::resolver::SessionHostResolver`]).
 pub struct TickContext<'r> {
@@ -200,7 +200,7 @@ impl<'r> TickContext<'r> {
     }
 }
 
-/// Context for [`super::Node::destroy`](super::Node::destroy).
+/// Context for [`super::Node::destroy`](super::NodeRuntime::destroy).
 pub struct DestroyCtx<'a> {
     node_id: NodeId,
     revision: Revision,
@@ -233,7 +233,7 @@ impl<'a> DestroyCtx<'a> {
     }
 }
 
-/// Context for [`super::Node::handle_memory_pressure`](super::Node::handle_memory_pressure).
+/// Context for [`super::Node::handle_memory_pressure`](super::NodeRuntime::handle_memory_pressure).
 pub struct MemPressureCtx<'a> {
     node_id: NodeId,
     revision: Revision,
@@ -272,7 +272,7 @@ mod tests {
     use crate::binding::{
         BindingDraft, BindingPriority, BindingRegistry, BindingSource, BindingTarget,
     };
-    use crate::node::Node;
+    use crate::node::NodeRuntime;
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use crate::resolver::{
         Production, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
@@ -473,13 +473,13 @@ mod tests {
         }
     }
 
-    /// Dummy node that uses [`TickContext::resolve`](TickContext::resolve) from [`super::super::Node::tick`].
+    /// Dummy node that uses [`TickContext::resolve`](TickContext::resolve) from [`super::super::NodeRuntime::tick`].
     struct QueryResolvingNode {
         query: QueryKey,
         resolved_value: Option<f32>,
     }
 
-    impl super::super::Node for QueryResolvingNode {
+    impl super::super::NodeRuntime for QueryResolvingNode {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), crate::node::NodeError> {
             let pv = ctx.resolve(self.query.clone()).map_err(|e| {
                 crate::node::NodeError::msg(alloc::format!("resolve failed: {}", e.message))

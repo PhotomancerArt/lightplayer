@@ -90,7 +90,7 @@ pub(crate) fn summarize_runtime_buffers_if_requested(
     }
 
     for (id, ver) in buffers.iter() {
-        push_buffer_summary(out, ver.value(), ver.changed_frame(), id);
+        push_buffer_summary(out, ver.value(), ver.changed_at(), id);
     }
 }
 
@@ -105,7 +105,7 @@ fn push_buffer_summary(
         Err(reason) => {
             out.push(WireResourceSummary {
                 resource_ref: ResourceRef::runtime_buffer(id),
-                changed_frame: changed,
+                revision: changed,
                 kind: WireResourceKindSummary::RuntimeBuffer(WireRuntimeBufferKind::Raw),
                 metadata: WireResourceMetadataSummary::Raw,
                 byte_length_hint: None,
@@ -116,7 +116,7 @@ fn push_buffer_summary(
     };
     out.push(WireResourceSummary {
         resource_ref: ResourceRef::runtime_buffer(id),
-        changed_frame: changed,
+        revision: changed,
         kind: WireResourceKindSummary::RuntimeBuffer(kind),
         metadata: meta,
         byte_length_hint: Some(buf.bytes.len() as u64),
@@ -214,7 +214,7 @@ pub(crate) fn summarize_render_products_if_requested(
     }
 
     for id in products.ids() {
-        let changed = products.changed_frame(id);
+        let changed = products.revision(id);
         push_render_product_summary(out, products.get(id), id, changed);
     }
 }
@@ -232,7 +232,7 @@ fn push_render_product_summary(
     let Some(tex) = product.as_any().downcast_ref::<TextureRenderProduct>() else {
         out.push(WireResourceSummary {
             resource_ref: ResourceRef::render_product(id),
-            changed_frame: changed,
+            revision: changed,
             kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
             metadata: WireResourceMetadataSummary::Texture {
                 width: 0,
@@ -259,7 +259,7 @@ fn push_render_product_summary(
 
     out.push(WireResourceSummary {
         resource_ref: ResourceRef::render_product(id),
-        changed_frame: changed,
+        revision: changed,
         kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
         metadata: WireResourceMetadataSummary::Texture {
             width: tex.width(),
@@ -278,7 +278,7 @@ pub(crate) fn runtime_buffer_payloads_for_request(
     out: &mut Vec<WireRuntimeBufferPayload>,
 ) {
     for (id, ver) in buffers.iter() {
-        if !interest.wants(id) || !resource_changed_since(since_frame, ver.changed_frame()) {
+        if !interest.wants(id) || !resource_changed_since(since_frame, ver.changed_at()) {
             continue;
         }
 
@@ -286,7 +286,7 @@ pub(crate) fn runtime_buffer_payloads_for_request(
             Ok(meta) => {
                 out.push(WireRuntimeBufferPayload {
                     resource_ref: ResourceRef::runtime_buffer(id),
-                    changed_frame: ver.changed_frame(),
+                    revision: ver.changed_at(),
                     metadata: meta,
                     bytes: ver.value().bytes.clone(),
                 });
@@ -294,7 +294,7 @@ pub(crate) fn runtime_buffer_payloads_for_request(
             Err(_) => {
                 out.push(WireRuntimeBufferPayload {
                     resource_ref: ResourceRef::runtime_buffer(id),
-                    changed_frame: ver.changed_frame(),
+                    revision: ver.changed_at(),
                     metadata: WireRuntimeBufferMetadataPayload::Raw,
                     bytes: ver.value().bytes.clone(),
                 });
@@ -341,14 +341,14 @@ pub(crate) fn render_product_payloads_for_request(
 ) {
     let ids: Vec<_> = products.ids().collect();
     for id in ids {
-        if !interest.wants(id) || !resource_changed_since(since_frame, products.changed_frame(id)) {
+        if !interest.wants(id) || !resource_changed_since(since_frame, products.revision(id)) {
             continue;
         }
         match products.try_materialize_native_texture_payload(id) {
             Ok((w, h, bytes, _fmt)) => {
                 out.push(WireRenderProductPayload {
                     resource_ref: ResourceRef::render_product(id),
-                    changed_frame: products.changed_frame(id),
+                    revision: products.revision(id),
                     width: w,
                     height: h,
                     format: WireTextureFormat::Rgba16,

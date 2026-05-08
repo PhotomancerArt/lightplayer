@@ -142,7 +142,7 @@ pub enum WireResourceAvailability {
 pub struct WireResourceSummary {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
-    pub changed_frame: Revision,
+    pub revision: Revision,
     pub kind: WireResourceKindSummary,
     pub metadata: WireResourceMetadataSummary,
     pub byte_length_hint: Option<u64>,
@@ -154,7 +154,7 @@ pub struct WireResourceSummary {
 pub struct WireRuntimeBufferPayload {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
-    pub changed_frame: Revision,
+    pub revision: Revision,
     pub metadata: WireRuntimeBufferMetadataPayload,
     #[serde(with = "crate::serde_base64")]
     pub bytes: Vec<u8>,
@@ -184,7 +184,7 @@ pub enum WireRuntimeBufferMetadataPayload {
 pub struct WireRenderProductPayload {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
-    pub changed_frame: Revision,
+    pub revision: Revision,
     pub width: u32,
     pub height: u32,
     pub format: WireTextureFormat,

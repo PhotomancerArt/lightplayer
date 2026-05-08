@@ -274,10 +274,10 @@ mod tests {
     }
 
     fn shader_node_data() -> SlotData {
-        SlotData::Record(SlotRecord::with_version(
+        SlotData::Record(SlotRecord::with_revision(
             Revision::new(1),
             vec![
-                SlotData::Record(SlotRecord::with_version(
+                SlotData::Record(SlotRecord::with_revision(
                     Revision::new(1),
                     vec![SlotData::Value(WithRevision::new(
                         Revision::new(3),

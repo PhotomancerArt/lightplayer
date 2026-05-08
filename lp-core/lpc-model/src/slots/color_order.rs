@@ -64,7 +64,7 @@ impl<'de> Deserialize<'de> for ColorOrderValue {
     }
 }
 
-/// Versioned RGB channel order.
+/// Revision-tracked RGB channel order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColorOrderSlot {
     inner: WithRevision<ColorOrderValue>,
@@ -75,9 +75,9 @@ impl ColorOrderSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: ColorOrderValue) -> Self {
+    pub fn with_version(revision: Revision, value: ColorOrderValue) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -85,8 +85,8 @@ impl ColorOrderSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &ColorOrderValue {
@@ -95,8 +95,8 @@ impl ColorOrderSlot {
 }
 
 impl SlotValueAccess for ColorOrderSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

@@ -1,6 +1,6 @@
 //! Source authoring snapshots keyed by runtime node id.
 //!
-//! The core engine tree stores runtime nodes as [`crate::node::Node`] trait objects without a
+//! The core engine tree stores runtime nodes as [`crate::node::NodeRuntime`] trait objects without a
 //! direct source-definition owner. The loader captures the typed definitions it read from disk and
 //! indexes them here keyed by [`lpc_model::NodeId`] so canonical project sync can expose source
 //! slot roots.

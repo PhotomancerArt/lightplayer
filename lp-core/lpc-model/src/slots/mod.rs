@@ -1,6 +1,6 @@
 //! Concrete semantic slot field types.
 //!
-//! [`ValueSlot`](crate::ValueSlot) is the generic versioned leaf storage.
+//! [`ValueSlot`](crate::ValueSlot) is the generic revision-tracked leaf storage.
 //! Types in this module are domain-specific leaves that own their shape,
 //! metadata, editor hints, and conversion semantics.
 
@@ -82,9 +82,9 @@ mod tests {
         let expected_version = current_revision();
         let decoded: SemanticSlots = toml::from_str(&authored).unwrap();
 
-        assert_eq!(decoded.ratio.changed_frame(), expected_version);
-        assert_eq!(decoded.dim.changed_frame(), expected_version);
-        assert_eq!(decoded.transform.changed_frame(), expected_version);
+        assert_eq!(decoded.ratio.revision(), expected_version);
+        assert_eq!(decoded.dim.revision(), expected_version);
+        assert_eq!(decoded.transform.revision(), expected_version);
         assert_eq!(decoded.color_order.value(), &ColorOrderValue::Grb);
         assert_eq!(
             decoded.resource.value(),

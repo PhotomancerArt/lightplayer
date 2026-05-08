@@ -31,7 +31,7 @@ impl Affine2d {
     }
 }
 
-/// Versioned 2D affine transform.
+/// Revision-tracked 2D affine transform.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Affine2dSlot {
     inner: WithRevision<Affine2d>,
@@ -42,9 +42,9 @@ impl Affine2dSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: Affine2d) -> Self {
+    pub fn with_version(revision: Revision, value: Affine2d) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -52,8 +52,8 @@ impl Affine2dSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &Affine2d {
@@ -62,8 +62,8 @@ impl Affine2dSlot {
 }
 
 impl SlotValueAccess for Affine2dSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

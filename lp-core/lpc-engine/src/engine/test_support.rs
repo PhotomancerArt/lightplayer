@@ -12,13 +12,13 @@ use lps_shared::LpsValueF32;
 
 use crate::binding::{BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
-use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;
 use crate::resolver::{
     Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
 };
 use crate::runtime_product::RuntimeProduct;
-use crate::tree::test_placeholder_spine;
+use crate::node::test_placeholder_spine;
 
 use super::engine::default_demand_input_path;
 use super::resolve_with_engine_host;
@@ -159,7 +159,7 @@ impl EngineTestBuilder {
         }
     }
 
-    fn attach_node(&mut self, label: &str, ty: &str, node: Box<dyn Node>) -> NodeId {
+    fn attach_node(&mut self, label: &str, ty: &str, node: Box<dyn NodeRuntime>) -> NodeId {
         let root = self.engine.tree().root();
         let (cfg, artifact) = test_placeholder_spine();
         let node_id = self
@@ -370,7 +370,7 @@ impl DummyShaderNode {
     }
 }
 
-impl Node for DummyShaderNode {
+impl NodeRuntime for DummyShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.tick_count.fetch_add(1, Ordering::Relaxed);
         self.props.mark_all_updated(ctx.revision());
@@ -410,7 +410,7 @@ impl DummyFixtureNode {
     }
 }
 
-impl Node for DummyFixtureNode {
+impl NodeRuntime for DummyFixtureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
             .resolve(QueryKey::ConsumedSlot {
@@ -455,7 +455,7 @@ impl DummyOutputNode {
     }
 }
 
-impl Node for DummyOutputNode {
+impl NodeRuntime for DummyOutputNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
             .resolve(QueryKey::ConsumedSlot {

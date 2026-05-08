@@ -6,12 +6,13 @@ use alloc::format;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lpc_model::{advance_revision, Revision, NodeId, SlotPath, TreePath, WithRevision};
+use lpc_model::{NodeId, Revision, SlotPath, TreePath, WithRevision, advance_revision};
 
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
 use crate::gfx::LpGraphics;
-use crate::node::{Node, NodeResourceInitContext, TickContext};
+use crate::node::{NodeEntryState, NodeTree};
+use crate::node::{NodeResourceInitContext, NodeRuntime, TickContext};
 use crate::render_product::{
     RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch, RenderSampleBatchResult,
 };
@@ -22,7 +23,6 @@ use crate::resolver::{
 use crate::runtime::frame_num::FrameNum;
 use crate::runtime::frame_time::FrameTime;
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
-use crate::tree::{EntryState, NodeTree};
 
 use super::EngineError;
 
@@ -36,7 +36,7 @@ pub struct Engine {
     frame_num: FrameNum,
     revision: Revision,
     frame_time: FrameTime,
-    tree: NodeTree<Box<dyn Node>>,
+    tree: NodeTree<Box<dyn NodeRuntime>>,
     bindings: BindingRegistry,
     resolver: Resolver,
     render_products: RenderProductStore,
@@ -76,11 +76,11 @@ impl Engine {
         self.frame_time
     }
 
-    pub fn tree(&self) -> &NodeTree<Box<dyn Node>> {
+    pub fn tree(&self) -> &NodeTree<Box<dyn NodeRuntime>> {
         &self.tree
     }
 
-    pub fn tree_mut(&mut self) -> &mut NodeTree<Box<dyn Node>> {
+    pub fn tree_mut(&mut self) -> &mut NodeTree<Box<dyn NodeRuntime>> {
         &mut self.tree
     }
 
@@ -141,14 +141,14 @@ impl Engine {
         self.graphics.as_ref()
     }
 
-    /// Attach a runtime [`Node`] to an existing tree entry (typically `Pending`).
+    /// Attach a runtime [`NodeRuntime`] to an existing tree entry (typically `Pending`).
     ///
-    /// Runs [`Node::init_resources`] on `runtime` first so nodes can allocate store-backed ids before
-    /// becoming [`EntryState::Alive`].
+    /// Runs [`NodeRuntime::init_resources`] on `runtime` first so nodes can allocate store-backed ids before
+    /// becoming [`NodeEntryState::Alive`].
     pub fn attach_runtime_node(
         &mut self,
         id: NodeId,
-        mut runtime: Box<dyn Node>,
+        mut runtime: Box<dyn NodeRuntime>,
         frame: Revision,
     ) -> Result<(), EngineError> {
         let mut ctx =
@@ -157,22 +157,22 @@ impl Engine {
             .init_resources(&mut ctx)
             .map_err(|e| EngineError::node(id, e))?;
         let entry = self.tree.get_mut(id).ok_or(EngineError::UnknownNode(id))?;
-        entry.set_state(EntryState::Alive(runtime), frame);
+        entry.set_state(NodeEntryState::Alive(runtime), frame);
         Ok(())
     }
 
     pub fn runtime_output_sink_buffer_id(&self, node_id: NodeId) -> Option<RuntimeBufferId> {
         let entry = self.tree.get(node_id)?;
-        match &entry.state {
-            EntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
+        match entry.state.value() {
+            NodeEntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
             _ => None,
         }
     }
 
     pub fn primary_render_product_id_for_node(&self, node_id: NodeId) -> Option<RenderProductId> {
         let entry = self.tree.get(node_id)?;
-        match &entry.state {
-            EntryState::Alive(node) => node.primary_render_product_id(),
+        match entry.state.value() {
+            NodeEntryState::Alive(node) => node.primary_render_product_id(),
             _ => None,
         }
     }
@@ -257,7 +257,7 @@ fn apply_deferred_render_replaces(
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`ResolveSession`].
 struct EngineResolveHost<'a> {
-    tree: &'a mut NodeTree<Box<dyn Node>>,
+    tree: &'a mut NodeTree<Box<dyn NodeRuntime>>,
     artifacts: &'a ArtifactManager<()>,
     producers_ticked: &'a mut BTreeSet<NodeId>,
     render_products: &'a mut RenderProductStore,
@@ -288,11 +288,15 @@ impl EngineResolveHost<'_> {
                 .content_frame(&artifact_id)
                 .unwrap_or_default();
 
-            let stolen = core::mem::replace(&mut entry.state, EntryState::Pending);
-            let node_runtime = match stolen {
-                EntryState::Alive(n) => n,
+            let old_changed_at = entry.state.changed_at();
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, NodeEntryState::Pending),
+            );
+            let node_runtime = match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
                 other => {
-                    entry.state = other;
+                    entry.state = WithRevision::new(old_changed_at, other);
                     return Err(SessionResolveError::other(format!(
                         "produce: node {node_id:?} not alive"
                     )));
@@ -326,7 +330,7 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
         })?;
-        entry.set_state(EntryState::Alive(node_runtime), restore_frame);
+        entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
         match tick_result {
             Ok(()) => {
@@ -353,8 +357,8 @@ impl ResolveHost for EngineResolveHost<'_> {
                 let entry = self.tree.get(*node).ok_or_else(|| {
                     SessionResolveError::other(format!("read output: unknown node {node:?}"))
                 })?;
-                let n = match &entry.state {
-                    EntryState::Alive(n) => n,
+                let n = match entry.state.value() {
+                    NodeEntryState::Alive(n) => n,
                     _ => {
                         return Err(SessionResolveError::other(format!(
                             "read output: node {node:?} not alive"
@@ -382,8 +386,8 @@ impl ResolveHost for EngineResolveHost<'_> {
                         slot: slot.clone(),
                     }
                 })?;
-                let n = match &entry.state {
-                    EntryState::Alive(n) => n,
+                let n = match entry.state.value() {
+                    NodeEntryState::Alive(n) => n,
                     _ => {
                         return Err(SessionResolveError::UnresolvedConsumedSlot {
                             node: *node,
@@ -460,11 +464,15 @@ fn tick_tree_node(
             .content_frame(&artifact_id)
             .unwrap_or_default();
 
-        let stolen = core::mem::replace(&mut entry.state, EntryState::Pending);
-        let node_runtime = match stolen {
-            EntryState::Alive(n) => n,
+        let old_changed_at = entry.state.changed_at();
+        let stolen = core::mem::replace(
+            &mut entry.state,
+            WithRevision::new(old_changed_at, NodeEntryState::Pending),
+        );
+        let node_runtime = match stolen.into_value() {
+            NodeEntryState::Alive(n) => n,
             other => {
-                entry.state = other;
+                entry.state = WithRevision::new(old_changed_at, other);
                 return Err(EngineError::NotAlive(node_id));
             }
         };
@@ -497,7 +505,7 @@ fn tick_tree_node(
         .tree
         .get_mut(node_id)
         .ok_or(EngineError::UnknownNode(node_id))?;
-    entry.set_state(EntryState::Alive(node_runtime), restore_frame);
+    entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
     match tick_result {
         Ok(()) => {
@@ -688,10 +696,7 @@ mod tests {
                 .expect("value")
                 .eq(second.as_value().expect("value"))
         );
-        assert_eq!(
-            first.product.changed_frame(),
-            second.product.changed_frame()
-        );
+        assert_eq!(first.product.changed_at(), second.product.changed_at());
 
         assert_eq!(h.shader_ticks("shader"), 1);
     }
@@ -802,7 +807,7 @@ mod tests {
             .insert(WithRevision::new(frame, payload.clone()));
         let buffers = engine.runtime_buffers();
         let got = buffers.get(id).expect("inserted buffer");
-        assert_eq!(got.changed_frame(), frame);
+        assert_eq!(got.changed_at(), frame);
         assert_eq!(got.value(), &payload);
     }
 }

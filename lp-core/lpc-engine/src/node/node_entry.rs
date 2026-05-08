@@ -3,12 +3,11 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::{ArtifactLocator, Revision, NodeId, NodeInvocation, TreePath};
+use lpc_model::{ArtifactLocator, NodeId, NodeInvocation, Revision, TreePath, WithRevision};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
-
-use super::EntryState;
+use crate::node::node_entry_state::NodeEntryState;
 
 /// Server-side metadata for a node instance.
 ///
@@ -22,19 +21,16 @@ pub struct NodeEntry<N> {
     pub path: TreePath,
     pub parent: Option<NodeId>,
     pub child_kind: Option<WireChildKind>, // None for root; immutable for entry's lifetime
-    pub children: Vec<NodeId>,             // ordered
+    pub children: WithRevision<Vec<NodeId>>, // ordered
 
-    pub status: WireNodeStatus,
-    pub state: EntryState<N>,
+    pub status: WithRevision<WireNodeStatus>,
+    pub state: WithRevision<NodeEntryState<N>>,
 
-    // Three frame counters per entry (12 bytes/entry); see design/01-tree.md
-    // "Frame versioning" for why three (not five).
-    pub created_frame: Revision, // set on insert; never bumped
-    pub change_frame: Revision,  // bumped on status / state / (future: config) change
-    pub children_ver: Revision,  // bumped on children-list mutation
+    pub created_at: Revision,
 
     /// Authored per-instance config (artifact spec + overrides).
     pub config: NodeInvocation,
+
     /// Runtime handle into [`crate::artifact::ArtifactManager`].
     pub artifact: ArtifactId,
 }
@@ -45,7 +41,8 @@ impl<N> NodeEntry<N> {
     /// Spine placeholder artifact path: empty authored `""` normalizes to `/` (`lpc_model::LpPathBuf`).
     pub(crate) const PLACEHOLDER_ARTIFACT_PATH: &'static str = "/";
 
-    /// Create a new entry. Sets `created_frame = change_frame = children_ver = frame`.
+    /// Create a new entry. Sets `created_at`, `changed_at`, and
+    /// `children_changed_at` to `revision`.
     ///
     /// Fills spine fields with placeholders: root-normalized artifact path (`/`), handle `0`.
     pub fn new(
@@ -53,7 +50,7 @@ impl<N> NodeEntry<N> {
         path: TreePath,
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
-        frame: Revision,
+        revision: Revision,
     ) -> Self {
         Self::new_spine(
             id,
@@ -62,7 +59,7 @@ impl<N> NodeEntry<N> {
             child_kind,
             NodeInvocation::new(ArtifactLocator::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
             ArtifactId::from_raw(0),
-            frame,
+            revision,
         )
     }
 
@@ -74,49 +71,55 @@ impl<N> NodeEntry<N> {
         child_kind: Option<WireChildKind>,
         config: NodeInvocation,
         artifact: ArtifactId,
-        frame: Revision,
+        revision: Revision,
     ) -> Self {
         Self {
             id,
             path,
             parent,
             child_kind,
-            children: Vec::new(),
-            status: WireNodeStatus::Created,
-            state: EntryState::Pending,
-            created_frame: frame,
-            change_frame: frame,
-            children_ver: frame,
+            children: WithRevision::new(revision, Vec::new()),
+            status: WithRevision::new(revision, WireNodeStatus::Created),
+            state: WithRevision::new(revision, NodeEntryState::Pending),
+            created_at: revision,
             config,
             artifact,
         }
     }
 
-    /// Set status and bump `change_frame`.
-    pub fn set_status(&mut self, status: WireNodeStatus, frame: Revision) {
-        self.status = status;
-        self.change_frame = frame;
+    /// Set status and bump `changed_at`.
+    pub fn set_status(&mut self, status: WireNodeStatus, revision: Revision) {
+        self.status.set(revision, status);
     }
 
-    /// Set state and bump `change_frame`.
-    pub fn set_state(&mut self, state: EntryState<N>, frame: Revision) {
-        self.state = state;
-        self.change_frame = frame;
+    /// Set state and bump `changed_at`.
+    pub fn set_state(&mut self, state: NodeEntryState<N>, revision: Revision) {
+        self.state.set(revision, state);
     }
 
-    /// Returns true if this entry has any frame version newer than `since`.
+    /// The latest revision for this entry's non-structural metadata.
+    pub fn changed_at(&self) -> Revision {
+        core::cmp::max(self.status.changed_at(), self.state.changed_at())
+    }
+
+    /// The latest revision for this entry's ordered child list.
+    pub fn children_changed_at(&self) -> Revision {
+        self.children.changed_at()
+    }
+
+    /// Returns true if this entry has any revision marker newer than `since`.
     pub fn is_dirty_since(&self, since: Revision) -> bool {
-        self.created_frame.0 > since.0
-            || self.change_frame.0 > since.0
-            || self.children_ver.0 > since.0
+        self.created_at.0 > since.0
+            || self.changed_at().0 > since.0
+            || self.children_changed_at().0 > since.0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::NodeEntry;
-    use lpc_model::{Revision, NodeId, TreePath};
     use lpc_model::{ArtifactLocator, NodeInvocation};
+    use lpc_model::{NodeId, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
     #[test]
@@ -129,11 +132,11 @@ mod tests {
             None,
             frame,
         );
-        assert_eq!(entry.created_frame.0, 5);
-        assert_eq!(entry.change_frame.0, 5);
-        assert_eq!(entry.children_ver.0, 5);
-        assert_eq!(entry.status, WireNodeStatus::Created);
-        assert!(entry.state.is_pending());
+        assert_eq!(entry.created_at.0, 5);
+        assert_eq!(entry.changed_at().0, 5);
+        assert_eq!(entry.children_changed_at().0, 5);
+        assert_eq!(*entry.status.value(), WireNodeStatus::Created);
+        assert!(entry.state.value().is_pending());
     }
 
     #[test]
@@ -147,11 +150,11 @@ mod tests {
             frame,
         );
         entry.set_status(WireNodeStatus::Ok, Revision::new(10));
-        assert_eq!(entry.status, WireNodeStatus::Ok);
-        assert_eq!(entry.change_frame.0, 10);
+        assert_eq!(*entry.status.value(), WireNodeStatus::Ok);
+        assert_eq!(entry.changed_at().0, 10);
         // created_frame and children_ver unchanged
-        assert_eq!(entry.created_frame.0, 5);
-        assert_eq!(entry.children_ver.0, 5);
+        assert_eq!(entry.created_at.0, 5);
+        assert_eq!(entry.children_changed_at().0, 5);
     }
 
     #[test]

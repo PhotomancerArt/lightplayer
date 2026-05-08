@@ -15,7 +15,7 @@ pub trait PropAccessView {
     /// Get the current value at `path`, if any.
     fn get(&self, path: &ValuePath) -> Option<(&LpValue, Revision)>;
 
-    /// Iterate entries whose `changed_frame > since`.
+    /// Iterate entries whose `revision > since`.
     fn iter_changed_since<'a>(
         &'a self,
         since: Revision,

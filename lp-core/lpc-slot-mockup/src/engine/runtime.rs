@@ -213,7 +213,7 @@ impl MockRuntime {
             shape_version: self.root_shape_version(self.shader_node.shape_id())?,
             data_version: self
                 .shader_node
-                .param_changed_frame(name)
+                .param_revision(name)
                 .ok_or(WireSlotMutationRejection::UnknownPath)?,
             ty: self
                 .shader_node
@@ -232,7 +232,7 @@ impl MockRuntime {
                 shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
                 data_version: self
                     .shader_def
-                    .param_label_changed_frame("exposure")
+                    .param_label_revision("exposure")
                     .ok_or(WireSlotMutationRejection::UnknownPath)?,
                 ty: LpType::String,
             }),
@@ -241,7 +241,7 @@ impl MockRuntime {
                 shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
                 data_version: self
                     .shader_def
-                    .param_default_changed_frame("exposure")
+                    .param_default_revision("exposure")
                     .ok_or(WireSlotMutationRejection::UnknownPath)?,
                 ty: LpType::F32,
             }),
@@ -255,7 +255,7 @@ impl MockRuntime {
     ) -> Result<Revision, WireSlotMutationRejection> {
         self.registry
             .entry(&shape_id)
-            .map(|entry| entry.changed_frame)
+            .map(|entry| entry.revision)
             .ok_or(WireSlotMutationRejection::UnknownRoot)
     }
 }

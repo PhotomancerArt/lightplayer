@@ -90,7 +90,7 @@ fn incremental_changes_patch_client_state() {
             "mapping.disabled",
         ),
         &lpc_model::SlotData::Unit {
-            changed_frame: Revision::new(8),
+            revision: Revision::new(8),
         },
     );
 }

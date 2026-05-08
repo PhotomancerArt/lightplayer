@@ -21,7 +21,7 @@ impl Production {
         value: WithRevision<LpsValueF32>,
         source: ProductionSource,
     ) -> Result<Self, RuntimeProductError> {
-        let frame = value.changed_frame();
+        let frame = value.changed_at();
         let product = RuntimeProduct::try_value(value.into_value())?;
         Ok(Self::new(WithRevision::new(frame, product), source))
     }
@@ -84,7 +84,7 @@ mod tests {
             RuntimeProduct::Value(inner) if inner.eq(&LpsValueF32::F32(1.25))
         ));
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(1.25)));
-        assert_eq!(pv.product.changed_frame(), Revision::new(3));
+        assert_eq!(pv.product.changed_at(), Revision::new(3));
         assert_eq!(
             pv.source,
             ProductionSource::ProducedSlot {
@@ -110,11 +110,11 @@ mod tests {
     }
 
     #[test]
-    fn production_value_preserves_changed_frame() {
+    fn production_value_preserves_revision() {
         let frame = Revision::new(42);
         let v = WithRevision::new(frame, LpsValueF32::F32(-0.5));
         let pv = Production::value(v, ProductionSource::Literal).expect("production");
-        assert_eq!(pv.product.changed_frame(), frame);
+        assert_eq!(pv.product.changed_at(), frame);
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(-0.5)));
     }
 }

@@ -17,7 +17,7 @@ use crate::Revision;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WithRevision<T> {
     value: T,
-    revision: Revision,
+    changed_at: Revision,
 }
 
 impl<T> WithRevision<T> {
@@ -25,7 +25,7 @@ impl<T> WithRevision<T> {
     pub fn new(revision: Revision, value: T) -> Self {
         Self {
             value,
-            revision,
+            changed_at: revision,
         }
     }
 
@@ -46,7 +46,7 @@ impl<T> WithRevision<T> {
     /// Set the value and update its change revision.
     pub fn set(&mut self, revision: Revision, value: T) {
         self.value = value;
-        self.revision = revision;
+        self.changed_at = revision;
     }
 
     /// Mark this value as changed without replacing the value.
@@ -54,19 +54,12 @@ impl<T> WithRevision<T> {
     /// Useful when the value was modified via [`Self::get_mut`] and you
     /// want to track the change.
     pub fn mark_updated(&mut self, revision: Revision) {
-        self.revision = revision;
+        self.changed_at = revision;
     }
 
     /// Return the revision at which this value last changed.
-    pub fn changed_revision(&self) -> Revision {
-        self.revision
-    }
-
-    /// Return the revision at which this value last changed.
-    ///
-    /// Kept while older resource and wire code still uses frame-oriented names.
-    pub fn changed_frame(&self) -> Revision {
-        self.changed_revision()
+    pub fn changed_at(&self) -> Revision {
+        self.changed_at
     }
 
     /// Get a reference to the value (alias for [`Self::get`]).
@@ -94,7 +87,7 @@ mod tests {
     fn new_stores_value_and_revision() {
         let field = WithRevision::new(Revision::new(10), 42);
         assert_eq!(field.get(), &42);
-        assert_eq!(field.changed_frame(), Revision::new(10));
+        assert_eq!(field.changed_at(), Revision::new(10));
     }
 
     #[test]
@@ -102,7 +95,7 @@ mod tests {
         let mut field = WithRevision::new(Revision::new(5), 10);
         field.set(Revision::new(20), 30);
         assert_eq!(field.get(), &30);
-        assert_eq!(field.changed_frame(), Revision::new(20));
+        assert_eq!(field.changed_at(), Revision::new(20));
     }
 
     #[test]
@@ -111,7 +104,7 @@ mod tests {
         *field.get_mut() = 20;
         field.mark_updated(Revision::new(15));
         assert_eq!(field.get(), &20);
-        assert_eq!(field.changed_frame(), Revision::new(15));
+        assert_eq!(field.changed_at(), Revision::new(15));
     }
 
     #[test]

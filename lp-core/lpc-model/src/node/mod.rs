@@ -12,8 +12,9 @@ pub mod relative_node_ref;
 pub mod kind;
 pub mod node_def;
 pub mod node_invocation;
+pub mod tree_path;
 
-pub use crate::tree::tree_path::TreePath;
+pub use tree_path::TreePath;
 pub use kind::NodeKind;
 pub use node_def::NodeDef;
 pub use node_id::NodeId;

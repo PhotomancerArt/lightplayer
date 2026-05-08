@@ -1,4 +1,4 @@
-//! Minimal [`crate::node::Node`] stubs for M4 source loading before real core nodes land.
+//! Minimal [`crate::node::NodeRuntime`] stubs for M4 source loading before real core nodes land.
 
 use alloc::boxed::Box;
 
@@ -6,7 +6,7 @@ use lpc_model::Revision;
 use lpc_model::SlotPath;
 use lpc_model::NodeKind;
 
-use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
+use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;
 use crate::runtime_product::RuntimeProduct;
 
@@ -55,7 +55,7 @@ impl CorePlaceholderNode {
     }
 }
 
-impl Node for CorePlaceholderNode {
+impl NodeRuntime for CorePlaceholderNode {
     fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         Ok(())
     }

@@ -63,7 +63,7 @@ impl BindingDef {
 }
 
 impl SlotValueAccess for BindingDef {
-    fn changed_frame(&self) -> Revision {
+    fn changed_at(&self) -> Revision {
         crate::current_revision()
     }
 

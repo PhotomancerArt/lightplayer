@@ -4,7 +4,7 @@ use crate::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Versioned 2D XY coordinate.
+/// Revision-tracked 2D XY coordinate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct XySlot {
     inner: WithRevision<[f32; 2]>,
@@ -15,9 +15,9 @@ impl XySlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: [f32; 2]) -> Self {
+    pub fn with_version(revision: Revision, value: [f32; 2]) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -25,8 +25,8 @@ impl XySlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &[f32; 2] {
@@ -35,8 +35,8 @@ impl XySlot {
 }
 
 impl SlotValueAccess for XySlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

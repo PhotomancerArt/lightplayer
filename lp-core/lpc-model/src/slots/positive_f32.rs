@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 //       a seperate PositiveF32Slot. More like F32Slot.positive()
 //
 
-/// Versioned non-negative floating point value.
+/// Revision-tracked non-negative floating point value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PositiveF32Slot {
     inner: WithRevision<f32>,
@@ -21,9 +21,9 @@ impl PositiveF32Slot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: f32) -> Self {
+    pub fn with_version(revision: Revision, value: f32) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -32,7 +32,7 @@ impl PositiveF32Slot {
     }
 
     pub fn changed_revision(&self) -> Revision {
-        self.inner.changed_frame()
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &f32 {
@@ -41,8 +41,8 @@ impl PositiveF32Slot {
 }
 
 impl SlotValueAccess for PositiveF32Slot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {

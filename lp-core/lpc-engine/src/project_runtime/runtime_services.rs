@@ -178,7 +178,7 @@ fn flush_registered_sinks(
         let Some(versioned) = buffers.get(*buffer_id) else {
             continue;
         };
-        if versioned.changed_frame() != revision {
+        if versioned.changed_at() != revision {
             continue;
         }
 

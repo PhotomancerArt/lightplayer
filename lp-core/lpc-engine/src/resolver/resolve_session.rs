@@ -301,7 +301,7 @@ mod tests {
                 .as_value()
                 .expect("value"))
         );
-        assert_eq!(a.product.changed_frame(), b.product.changed_frame());
+        assert_eq!(a.product.changed_at(), b.product.changed_at());
         assert_eq!(host.produce_calls, 1);
     }
 

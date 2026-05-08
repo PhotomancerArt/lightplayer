@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Versioned floating point ratio in the inclusive `0.0..=1.0` domain.
+/// Revision-tracked floating point ratio in the inclusive `0.0..=1.0` domain.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RatioSlot {
     inner: WithRevision<f32>,
@@ -16,9 +16,9 @@ impl RatioSlot {
         Self::with_version(current_revision(), value)
     }
 
-    pub fn with_version(frame: Revision, value: f32) -> Self {
+    pub fn with_version(revision: Revision, value: f32) -> Self {
         Self {
-            inner: WithRevision::new(frame, value),
+            inner: WithRevision::new(revision, value),
         }
     }
 
@@ -26,8 +26,8 @@ impl RatioSlot {
         self.inner.set(current_revision(), value);
     }
 
-    pub fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    pub fn revision(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     pub fn value(&self) -> &f32 {
@@ -36,8 +36,8 @@ impl RatioSlot {
 }
 
 impl SlotValueAccess for RatioSlot {
-    fn changed_frame(&self) -> Revision {
-        self.inner.changed_frame()
+    fn changed_at(&self) -> Revision {
+        self.inner.changed_at()
     }
 
     fn value(&self) -> LpValue {
