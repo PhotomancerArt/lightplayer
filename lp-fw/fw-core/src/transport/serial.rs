@@ -16,7 +16,7 @@ use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, json, message::ClientMessage};
 
 /// Serial transport implementation
@@ -54,7 +54,7 @@ impl<Io: SerialIo> ser_write_json::SerWrite for SerialIoSerWrite<'_, Io> {
 }
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
-    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
 
         #[cfg(feature = "emu")]
@@ -66,7 +66,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             let mut writer = SerialIoSerWrite(&mut self.io);
             ser_write_json::ser::to_writer(&mut writer, &msg).map_err(|e| {
                 TransportError::Serialization(alloc::format!(
-                    "Failed to serialize LegacyServerMessage: {e}"
+                    "Failed to serialize WireServerMessage: {e}"
                 ))
             })?;
             self.io
@@ -80,11 +80,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         #[cfg(not(feature = "emu"))]
         {
-            // Buffered serialization (legacy path)
+            // Buffered serialization path for hardware builds.
             let json = json::to_string(&msg).map_err(|e| {
-                TransportError::Serialization(format!(
-                    "Failed to serialize LegacyServerMessage: {e}"
-                ))
+                TransportError::Serialization(format!("Failed to serialize WireServerMessage: {e}"))
             })?;
             let message = format!("M!{json}\n");
             let message_bytes = message.as_bytes();
@@ -312,7 +310,7 @@ mod tests {
         let mock_io = MockSerialIo::new();
         let mut transport = SerialTransport::new(mock_io);
 
-        let msg = LegacyServerMessage {
+        let msg = WireServerMessage {
             id: 1,
             msg: lpc_wire::server::ServerMsgBody::UnloadProject,
         };

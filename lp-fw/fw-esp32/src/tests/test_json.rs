@@ -13,7 +13,7 @@ extern crate alloc;
 
 use alloc::vec;
 use lpc_model::lp_path::AsLpPathBuf;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
@@ -40,7 +40,7 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
     loop {
         let now = embassy_time::Instant::now();
         if now.duration_since(last_send).as_millis() >= 1000 {
-            let msg = LegacyServerMessage {
+            let msg = WireServerMessage {
                 id: 0,
                 msg: ServerMsgBody::Heartbeat {
                     fps: SampleStats {

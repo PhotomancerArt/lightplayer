@@ -35,12 +35,8 @@ pub enum ClientRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::{
-        LegacyWireNodeSpecifier, RenderProductPayloadRequest, ResourceSummarySpecifier,
-        RuntimeBufferPayloadSpecifier, WireProjectRequest,
-    };
+    use crate::project::WireProjectRequest;
     use lpc_model::lp_path::AsLpPathBuf;
-    use lpc_model::project::FrameId;
 
     #[test]
     fn test_nested_filesystem_request() {
@@ -94,42 +90,14 @@ mod tests {
     fn test_project_request() {
         let req = ClientRequest::ProjectRequest {
             handle: WireProjectHandle::new(1),
-            request: WireProjectRequest::GetChanges {
-                since_frame: FrameId::default(),
-                legacy_detail_specifier: LegacyWireNodeSpecifier::All,
-                slot_watch_specifier: Default::default(),
-                resource_summary_specifier: ResourceSummarySpecifier::default(),
-                runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
-                render_product_payload_request: RenderProductPayloadRequest::default(),
-            },
+            request: WireProjectRequest::SyncDisabled,
         };
         let json = crate::json::to_string(&req).unwrap();
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ProjectRequest { handle, request } => {
                 assert_eq!(handle.id(), 1);
-                match request {
-                    WireProjectRequest::GetChanges {
-                        since_frame,
-                        legacy_detail_specifier,
-                        slot_watch_specifier: _,
-                        resource_summary_specifier,
-                        runtime_buffer_payload_specifier,
-                        render_product_payload_request,
-                    } => {
-                        assert_eq!(since_frame, FrameId::default());
-                        assert_eq!(legacy_detail_specifier, LegacyWireNodeSpecifier::All);
-                        assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::None);
-                        assert_eq!(
-                            runtime_buffer_payload_specifier,
-                            RuntimeBufferPayloadSpecifier::None
-                        );
-                        assert_eq!(
-                            render_product_payload_request,
-                            RenderProductPayloadRequest::default()
-                        );
-                    }
-                }
+                assert_eq!(request, WireProjectRequest::SyncDisabled);
             }
             _ => panic!("Wrong request type"),
         }

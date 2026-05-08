@@ -3,7 +3,7 @@
 //! Defines the async interface for client-side transport implementations.
 //! Messages are consumed (moved) on send, and receive operations are async.
 
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
 
 /// Trait for client-side transport implementations
@@ -19,7 +19,7 @@ use lpc_wire::{TransportError, message::ClientMessage};
 /// ```rust,no_run
 /// use lpa_client::ClientTransport;
 /// use lpc_wire::{ClientMessage, TransportError};
-/// use lpc_wire::legacy::LegacyServerMessage;
+/// use lpc_wire::WireServerMessage;
 ///
 /// struct MyTransport;
 ///
@@ -30,7 +30,7 @@ use lpc_wire::{TransportError, message::ClientMessage};
 ///         Ok(())
 ///     }
 ///
-///     async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
+///     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
 ///         // Receive message (transport handles deserialization)
 ///         // This will wait until a message is available
 ///         # Err(TransportError::ConnectionLost)
@@ -67,10 +67,10 @@ pub trait ClientTransport: Send {
     ///
     /// # Returns
     ///
-    /// * `Ok(LegacyServerMessage)` if a message was received
+    /// * `Ok(WireServerMessage)` if a message was received
     /// * `Err(TransportError::ConnectionLost)` if the transport is closed
     /// * `Err(TransportError)` for other receiving errors
-    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError>;
+    async fn receive(&mut self) -> Result<WireServerMessage, TransportError>;
 
     /// Close the transport connection
     ///

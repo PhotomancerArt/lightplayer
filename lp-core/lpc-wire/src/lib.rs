@@ -8,7 +8,6 @@ extern crate alloc;
 extern crate std;
 
 pub mod json;
-pub mod legacy;
 pub mod message;
 pub mod project;
 pub mod serde_base64;
@@ -20,10 +19,10 @@ pub mod tree;
 
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
 pub use project::{
-    LegacyWireNodeSpecifier, RenderProductPayloadOptions, RenderProductPayloadRequest,
-    RenderProductPayloadSpecifier, ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier,
-    WireChannelSampleFormat, WireColorLayout, WireNodeSlotRoot, WireNodeStatus, WireProjectHandle,
-    WireProjectRequest, WireRenderProductKind, WireRenderProductPayload, WireResourceAvailability,
+    RenderProductPayloadOptions, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireChannelSampleFormat,
+    WireColorLayout, WireNodeSlotRoot, WireNodeStatus, WireProjectHandle, WireProjectRequest,
+    WireRenderProductKind, WireRenderProductPayload, WireResourceAvailability,
     WireResourceKindSummary, WireResourceMetadataSummary, WireResourceSummary,
     WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
     WireSlotRootKind, WireSlotWatchSpecifier, WireTextureFormat,
@@ -40,3 +39,10 @@ pub use slot::{
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
+
+/// Temporary project-response-free message envelope used between M2.2 demolition and M3 sync.
+pub type WireMessage = Message<NoDomain>;
+/// Temporary project-response-free server message used between M2.2 demolition and M3 sync.
+pub type WireServerMessage = ServerMessage<NoDomain>;
+/// Temporary project-response-free server message body used between M2.2 demolition and M3 sync.
+pub type WireServerMsgBody = ServerMsgBody<NoDomain>;

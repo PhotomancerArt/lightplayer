@@ -5,7 +5,7 @@
 
 use crate::transport::ClientTransport;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
 use tokio::sync::mpsc;
 
@@ -17,7 +17,7 @@ pub struct AsyncLocalClientTransport {
     /// Sender for client messages (client -> server)
     client_tx: Option<mpsc::UnboundedSender<ClientMessage>>,
     /// Receiver for server messages (server -> client)
-    client_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
+    client_rx: mpsc::UnboundedReceiver<WireServerMessage>,
     /// Whether the transport is closed
     closed: bool,
 }
@@ -31,7 +31,7 @@ impl AsyncLocalClientTransport {
     /// * `client_rx` - Receiver for server messages
     pub fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
-        client_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
+        client_rx: mpsc::UnboundedReceiver<WireServerMessage>,
     ) -> Self {
         Self {
             client_tx: Some(client_tx),
@@ -54,7 +54,7 @@ impl ClientTransport for AsyncLocalClientTransport {
         }
     }
 
-    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -83,7 +83,7 @@ impl ClientTransport for AsyncLocalClientTransport {
 /// Provides async receive via `receive()`.
 pub struct AsyncLocalServerTransport {
     /// Sender for server messages (server -> client)
-    server_tx: Option<mpsc::UnboundedSender<LegacyServerMessage>>,
+    server_tx: Option<mpsc::UnboundedSender<WireServerMessage>>,
     /// Receiver for client messages (client -> server)
     server_rx: mpsc::UnboundedReceiver<ClientMessage>,
     /// Whether the transport is closed
@@ -98,7 +98,7 @@ impl AsyncLocalServerTransport {
     /// * `server_tx` - Sender for server messages
     /// * `server_rx` - Receiver for client messages
     pub fn new(
-        server_tx: mpsc::UnboundedSender<LegacyServerMessage>,
+        server_tx: mpsc::UnboundedSender<WireServerMessage>,
         server_rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Self {
         Self {
@@ -110,7 +110,7 @@ impl AsyncLocalServerTransport {
 }
 
 impl ServerTransport for AsyncLocalServerTransport {
-    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -178,7 +178,7 @@ pub fn create_local_transport_pair() -> (AsyncLocalClientTransport, AsyncLocalSe
 mod tests {
     use super::*;
     use lpc_wire::ClientRequest;
-    use lpc_wire::legacy::LegacyServerMessage;
+    use lpc_wire::WireServerMessage;
 
     #[tokio::test]
     async fn test_create_transport_pair() {
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(received_msg.id, 1);
 
         // Send response from server
-        let server_msg = LegacyServerMessage {
+        let server_msg = WireServerMessage {
             id: 1,
             msg: lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
         };

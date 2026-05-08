@@ -46,8 +46,8 @@ pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use legacy::output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
 pub use project_runtime::{
-    CompatibilityProjection, CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime,
-    OutputFlushError, RuntimeServices,
+    CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, LoadedNodeDef, OutputFlushError,
+    RuntimeServices, SourceAuthoringIndex,
 };
 pub use prop::{ProducedSlotAccess, RuntimeStateAccess};
 pub use render_product::{

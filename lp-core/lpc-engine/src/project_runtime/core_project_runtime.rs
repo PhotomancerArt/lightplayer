@@ -1,7 +1,6 @@
 //! [`CoreProjectRuntime`] — owns [`crate::engine::Engine`] plus project services.
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::string::String;
 
 use hashbrown::HashMap;
 
@@ -9,31 +8,15 @@ use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{FrameId, NodeId, TreePath};
 use lpfs::FsChange;
 
-use lpc_wire::legacy::{LegacyNodeChange, LegacyProjectResponse};
-use lpc_wire::{
-    LegacyWireNodeSpecifier, RenderProductPayloadRequest, ResourceSummarySpecifier,
-    RuntimeBufferPayloadSpecifier, WireNodeStatus,
-};
-
 use crate::engine::{Engine, EngineError};
 
-use super::{
-    CompatibilityProjection, RuntimeServices,
-    detail_projection::build_node_detail_map,
-    kind::legacy_node_kind_from_tree_path,
-    resource_projection::{
-        buffer_payload_interest, render_payload_interest, render_product_payloads_for_request,
-        runtime_buffer_payloads_for_request, summarize_render_products_if_requested,
-        summarize_runtime_buffers_if_requested,
-    },
-};
+use super::{RuntimeServices, SourceAuthoringIndex};
 
-/// Project-level owner: core [`Engine`] plus [`RuntimeServices`] and compatibility
-/// projection for the M4 stack.
+/// Project-level owner: core [`Engine`] plus [`RuntimeServices`] and source authoring snapshots.
 pub struct CoreProjectRuntime {
     engine: Engine,
     services: RuntimeServices,
-    compatibility: CompatibilityProjection,
+    source_authoring: SourceAuthoringIndex,
     artifact_nodes: HashMap<String, NodeId>,
 }
 
@@ -46,7 +29,7 @@ impl CoreProjectRuntime {
         Self {
             engine: Engine::new(root_path),
             services,
-            compatibility: CompatibilityProjection::new(),
+            source_authoring: SourceAuthoringIndex::new(),
             artifact_nodes: HashMap::new(),
         }
     }
@@ -67,12 +50,12 @@ impl CoreProjectRuntime {
         &mut self.services
     }
 
-    pub fn compatibility(&self) -> &CompatibilityProjection {
-        &self.compatibility
+    pub fn source_authoring(&self) -> &SourceAuthoringIndex {
+        &self.source_authoring
     }
 
-    pub(crate) fn compatibility_mut(&mut self) -> &mut CompatibilityProjection {
-        &mut self.compatibility
+    pub(crate) fn source_authoring_mut(&mut self) -> &mut SourceAuthoringIndex {
+        &mut self.source_authoring
     }
 
     pub fn frame_id(&self) -> FrameId {
@@ -113,123 +96,13 @@ impl CoreProjectRuntime {
         Ok(())
     }
 
-    /// M4.1+: projects tree membership, statuses, incremental changes, compatibility node details,
-    /// and optionally resource summaries plus buffer/render-product payloads per request specifiers.
-    pub fn get_changes(
-        &self,
-        since_frame: FrameId,
-        legacy_detail_specifier: &LegacyWireNodeSpecifier,
-        resource_summary_specifier: ResourceSummarySpecifier,
-        runtime_buffer_payload_specifier: &RuntimeBufferPayloadSpecifier,
-        render_product_payload_request: &RenderProductPayloadRequest,
-        theoretical_fps: Option<f32>,
-    ) -> Result<LegacyProjectResponse, EngineError> {
-        let mut node_handles = Vec::new();
-        let mut node_changes = Vec::new();
-
-        for entry in self.engine.tree().entries() {
-            if entry.id == self.engine.tree().root() {
-                continue;
-            }
-
-            let Some(kind) = legacy_node_kind_from_tree_path(&entry.path) else {
-                continue;
-            };
-
-            node_handles.push(entry.id);
-
-            if entry.created_frame.as_i64() > since_frame.as_i64() {
-                node_changes.push(LegacyNodeChange::Created {
-                    handle: entry.id,
-                    path: self
-                        .compatibility
-                        .node_path_for(entry.id)
-                        .cloned()
-                        .unwrap_or_else(|| LpPathBuf::from(entry.path.to_string())),
-                    kind,
-                });
-                node_changes.push(LegacyNodeChange::ConfigUpdated {
-                    handle: entry.id,
-                    config_ver: entry.created_frame,
-                });
-            }
-
-            if entry.change_frame.as_i64() > since_frame.as_i64() {
-                node_changes.push(LegacyNodeChange::StateUpdated {
-                    handle: entry.id,
-                    state_ver: entry.change_frame,
-                });
-            }
-
-            if entry.change_frame.as_i64() > since_frame.as_i64()
-                || since_frame == FrameId::default()
-            {
-                node_changes.push(LegacyNodeChange::StatusChanged {
-                    handle: entry.id,
-                    status: projected_status(entry.status.clone()),
-                });
-            }
+    /// Project sync is disabled until M3 canonical project sync is rebuilt.
+    pub fn project_sync_disabled(&self) -> EngineError {
+        EngineError::ProjectSyncDisabled {
+            message: alloc::string::String::from(
+                "project sync is disabled until M3 canonical project sync",
+            ),
         }
-
-        let node_details = build_node_detail_map(
-            self.engine(),
-            self.compatibility(),
-            legacy_detail_specifier,
-            self.frame_id(),
-        );
-
-        let mut resource_summaries = alloc::vec::Vec::new();
-        summarize_runtime_buffers_if_requested(
-            since_frame,
-            resource_summary_specifier,
-            self.engine.runtime_buffers(),
-            &mut resource_summaries,
-        );
-        summarize_render_products_if_requested(
-            since_frame,
-            resource_summary_specifier,
-            self.engine.render_products(),
-            &mut resource_summaries,
-        );
-
-        let mut runtime_buffer_payloads = alloc::vec::Vec::new();
-        if let Some(ref interest) = buffer_payload_interest(runtime_buffer_payload_specifier) {
-            runtime_buffer_payloads_for_request(
-                since_frame,
-                interest,
-                self.engine.runtime_buffers(),
-                &mut runtime_buffer_payloads,
-            );
-        }
-
-        let mut render_product_payloads = alloc::vec::Vec::new();
-        if let Some(ref interest) = render_payload_interest(render_product_payload_request) {
-            render_product_payloads_for_request(
-                since_frame,
-                interest,
-                self.engine.render_products(),
-                &mut render_product_payloads,
-            );
-        }
-
-        Ok(LegacyProjectResponse::GetChanges {
-            current_frame: self.frame_id(),
-            since_frame,
-            node_handles,
-            node_changes,
-            node_details,
-            theoretical_fps,
-            resource_summaries,
-            runtime_buffer_payloads,
-            render_product_payloads,
-        })
-    }
-}
-
-fn projected_status(status: WireNodeStatus) -> WireNodeStatus {
-    match status {
-        WireNodeStatus::Created => WireNodeStatus::Ok,
-        other => other,
     }
 }
 
@@ -268,12 +141,12 @@ mod tests {
         let services = RuntimeServices::new(path.clone());
         let mut rt = CoreProjectRuntime::new(path, services);
         let svc_ptr = ptr::from_ref(rt.services());
-        let compat_ptr = ptr::from_ref(rt.compatibility());
+        let source_authoring_ptr = ptr::from_ref(rt.source_authoring());
         assert_eq!(ptr::from_ref(rt.services()), svc_ptr);
-        assert_eq!(ptr::from_ref(rt.compatibility()), compat_ptr);
+        assert_eq!(ptr::from_ref(rt.source_authoring()), source_authoring_ptr);
         let _ = rt.engine_mut();
         assert_eq!(ptr::from_ref(rt.services()), svc_ptr);
-        assert_eq!(ptr::from_ref(rt.compatibility()), compat_ptr);
+        assert_eq!(ptr::from_ref(rt.source_authoring()), source_authoring_ptr);
     }
 }
 

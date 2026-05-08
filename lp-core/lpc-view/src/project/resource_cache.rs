@@ -1,16 +1,15 @@
-//! Client-side cache for store-backed resource summaries and payloads (M4.1).
+//! Client-side cache for store-backed resource summaries and payloads.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
 use lpc_model::{ResourceDomain, ResourceRef};
-use lpc_wire::legacy::compatibility::LegacyCompatBytesField;
 use lpc_wire::{
     WireChannelSampleFormat, WireRenderProductPayload, WireResourceSummary,
     WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
 };
 
-/// Cached resource summaries and payload bytes from `GetChanges`.
+/// Cached resource summaries and payload bytes from project sync.
 #[derive(Debug, Default)]
 pub struct ClientResourceCache {
     summaries: BTreeMap<ResourceRef, WireResourceSummary>,
@@ -99,6 +98,54 @@ impl ClientResourceCache {
         }
     }
 
+    /// Cached bytes for a runtime buffer, if the client requested its payload.
+    #[must_use]
+    pub fn runtime_buffer_bytes(&self, resource_ref: ResourceRef) -> Option<&[u8]> {
+        self.runtime_buffer_bytes
+            .get(&resource_ref)
+            .map(Vec::as_slice)
+    }
+
+    /// Cached output-channel bytes projected for simple byte-oriented previews.
+    pub fn output_channel_preview_bytes(
+        &self,
+        resource_ref: ResourceRef,
+    ) -> Result<Vec<u8>, alloc::string::String> {
+        if resource_ref.domain != ResourceDomain::RuntimeBuffer {
+            return Err(alloc::format!(
+                "expected runtime-buffer resource, got {:?}/{}",
+                resource_ref.domain,
+                resource_ref.id
+            ));
+        }
+
+        let bytes = self
+            .runtime_buffer_bytes
+            .get(&resource_ref)
+            .ok_or_else(|| {
+                alloc::format!(
+                    "no cached runtime-buffer payload for ref {:?}/{}",
+                    resource_ref.domain,
+                    resource_ref.id
+                )
+            })?;
+        match self.runtime_buffer_metadata.get(&resource_ref) {
+            Some(WireRuntimeBufferMetadataPayload::OutputChannels {
+                sample_format: WireChannelSampleFormat::U16,
+                ..
+            }) => Ok(bytes
+                .chunks_exact(2)
+                .map(|chunk| chunk[1])
+                .collect::<Vec<_>>()),
+            Some(WireRuntimeBufferMetadataPayload::OutputChannels {
+                sample_format: WireChannelSampleFormat::U8,
+                ..
+            })
+            | None => Ok(bytes.clone()),
+            Some(_) => Ok(bytes.clone()),
+        }
+    }
+
     /// Cached bytes for a materialized render product, if the client requested its payload.
     #[must_use]
     pub fn render_product_bytes(&self, resource_ref: ResourceRef) -> Option<&[u8]> {
@@ -108,102 +155,12 @@ impl ClientResourceCache {
     }
 }
 
-/// Resolve output-channel data as legacy UI RGB bytes.
-///
-/// Runtime output buffers are stored as native payloads. For `U16` output channels this helper
-/// returns the high byte per sample to preserve the historic `ProjectView::get_output_data`
-/// contract used by the debug UI and firmware tests.
-pub fn resolve_output_channel_bytes(
-    field: &LegacyCompatBytesField,
-    cache: &ClientResourceCache,
-) -> Result<Vec<u8>, alloc::string::String> {
-    let inline = field.inline_bytes();
-    if !inline.is_empty() {
-        return Ok(inline.to_vec());
-    }
-
-    let Some(resource_ref) = field.resource_ref() else {
-        return Ok(Vec::new());
-    };
-
-    if resource_ref.domain != ResourceDomain::RuntimeBuffer {
-        return resolve_legacy_compat_bytes(field, cache);
-    }
-
-    let bytes = cache
-        .runtime_buffer_bytes
-        .get(&resource_ref)
-        .ok_or_else(|| {
-            alloc::format!(
-                "no cached runtime-buffer payload for ref {:?}/{}",
-                resource_ref.domain,
-                resource_ref.id
-            )
-        })?;
-    match cache.runtime_buffer_metadata.get(&resource_ref) {
-        Some(WireRuntimeBufferMetadataPayload::OutputChannels {
-            sample_format: WireChannelSampleFormat::U16,
-            ..
-        }) => Ok(bytes
-            .chunks_exact(2)
-            .map(|chunk| chunk[1])
-            .collect::<Vec<_>>()),
-        Some(WireRuntimeBufferMetadataPayload::OutputChannels {
-            sample_format: WireChannelSampleFormat::U8,
-            ..
-        })
-        | None => Ok(bytes.clone()),
-        Some(_) => Ok(bytes.clone()),
-    }
-}
-
-/// Resolve inline compatibility bytes or cache-backed payload for a legacy heavy field.
-pub fn resolve_legacy_compat_bytes(
-    field: &LegacyCompatBytesField,
-    cache: &ClientResourceCache,
-) -> Result<Vec<u8>, alloc::string::String> {
-    use alloc::format;
-
-    let inline = field.inline_bytes();
-    if !inline.is_empty() {
-        return Ok(inline.to_vec());
-    }
-
-    let Some(resource_ref) = field.resource_ref() else {
-        return Ok(Vec::new());
-    };
-
-    match resource_ref.domain {
-        ResourceDomain::RuntimeBuffer => cache
-            .runtime_buffer_bytes
-            .get(&resource_ref)
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "no cached runtime-buffer payload for ref {:?}/{}",
-                    resource_ref.domain, resource_ref.id
-                )
-            }),
-        ResourceDomain::RenderProduct => cache
-            .render_product_bytes
-            .get(&resource_ref)
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "no cached render-product payload for ref {:?}/{}",
-                    resource_ref.domain, resource_ref.id
-                )
-            }),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec::Vec;
     use lpc_model::project::FrameId;
     use lpc_model::{RenderProductId, RuntimeBufferId};
-    use lpc_wire::legacy::compatibility::LegacyCompatBytesField;
     use lpc_wire::{
         WireChannelSampleFormat, WireRenderProductKind, WireRenderProductPayload,
         WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
@@ -250,11 +207,9 @@ mod tests {
             bytes: Vec::from([1u8, 2, 3]),
         }]);
 
-        let mut field = LegacyCompatBytesField::new(FrameId::default());
-        field.set_resource(FrameId::new(1), r);
         assert_eq!(
-            resolve_legacy_compat_bytes(&field, &cache).unwrap(),
-            Vec::from([1u8, 2, 3])
+            cache.runtime_buffer_bytes(r),
+            Some(Vec::from([1u8, 2, 3]).as_slice())
         );
     }
 
@@ -284,11 +239,9 @@ mod tests {
             bytes: Vec::from([9u8, 9, 9]),
         }]);
 
-        let mut field = LegacyCompatBytesField::new(FrameId::default());
-        field.set_resource(FrameId::new(1), r);
         assert_eq!(
-            resolve_legacy_compat_bytes(&field, &cache).unwrap(),
-            Vec::from([9u8, 9, 9])
+            cache.render_product_bytes(r),
+            Some(Vec::from([9u8, 9, 9]).as_slice())
         );
     }
 
@@ -306,15 +259,13 @@ mod tests {
             bytes: Vec::from([7u8, 8]),
         }]);
 
-        let mut field = LegacyCompatBytesField::new(FrameId::default());
-        field.set_resource(FrameId::new(1), ref_b);
         assert_eq!(
-            resolve_legacy_compat_bytes(&field, &cache).unwrap(),
-            Vec::from([7u8, 8])
+            cache.runtime_buffer_bytes(ref_b),
+            Some(Vec::from([7u8, 8]).as_slice())
         );
 
         cache.apply_summaries(&[sample_buffer_summary(1, 2)]);
-        assert!(resolve_legacy_compat_bytes(&field, &cache).is_err());
+        assert!(cache.runtime_buffer_bytes(ref_b).is_none());
     }
 
     #[test]
@@ -332,10 +283,8 @@ mod tests {
             bytes: Vec::from([7u8, 10, 0, 20]),
         }]);
 
-        let mut field = LegacyCompatBytesField::new(FrameId::default());
-        field.set_resource(FrameId::new(1), r);
         assert_eq!(
-            resolve_output_channel_bytes(&field, &cache).unwrap(),
+            cache.output_channel_preview_bytes(r).unwrap(),
             Vec::from([10u8, 20])
         );
     }

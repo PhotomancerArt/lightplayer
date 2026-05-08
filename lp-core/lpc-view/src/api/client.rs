@@ -1,11 +1,5 @@
-use lpc_wire::WireProjectRequest;
-use lpc_wire::legacy::LegacyProjectResponse;
-
-/// Client API trait - implemented by server connection
+/// Client API trait shell retained until canonical project sync is rebuilt.
 pub trait ClientApi {
-    /// Get changes from server
-    fn get_changes(
-        &self,
-        request: WireProjectRequest,
-    ) -> Result<LegacyProjectResponse, alloc::string::String>;
+    /// Project sync is intentionally unavailable until M3/M4 canonical sync/view rebuild.
+    fn project_sync_disabled(&self) -> Result<(), alloc::string::String>;
 }

@@ -5,14 +5,14 @@ extern crate alloc;
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
 use crate::server::MemoryStatsFn;
-use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
+use alloc::{format, rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::LpGraphics;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::legacy::{LegacyServerMessage, LegacyServerMsgBody as ServerMessagePayload};
 use lpc_wire::{
+    WireServerMessage, WireServerMsgBody as ServerMessagePayload,
     message::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
@@ -42,7 +42,7 @@ pub fn handle_client_message(
     graphics: Arc<dyn LpGraphics>,
     client_msg: ClientMessage,
     theoretical_fps: Option<f32>,
-) -> Result<LegacyServerMessage, ServerError> {
+) -> Result<WireServerMessage, ServerError> {
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
@@ -75,7 +75,7 @@ pub fn handle_client_message(
         }
     };
 
-    Ok(LegacyServerMessage { id, msg: response })
+    Ok(WireServerMessage { id, msg: response })
 }
 
 /// Handle a filesystem request
@@ -171,55 +171,15 @@ fn handle_project_request(
     request: lpc_wire::WireProjectRequest,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
-    let project = project_manager
+    let _project = project_manager
         .get_project_mut(handle)
         .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
+    let _ = theoretical_fps;
 
     match request {
-        lpc_wire::WireProjectRequest::GetChanges {
-            since_frame,
-            legacy_detail_specifier,
-            slot_watch_specifier: _,
-            resource_summary_specifier,
-            runtime_buffer_payload_specifier,
-            render_product_payload_request,
-        } => {
-            let current_frame_before = project.runtime().frame_id();
-            log::debug!(
-                "handle_project_request: GetChanges request (since_frame: {}, current_frame: {})",
-                since_frame.as_i64(),
-                current_frame_before.as_i64()
-            );
-            let response = project
-                .runtime_mut()
-                .get_changes(
-                    since_frame,
-                    &legacy_detail_specifier,
-                    resource_summary_specifier,
-                    &runtime_buffer_payload_specifier,
-                    &render_product_payload_request,
-                    theoretical_fps,
-                )
-                .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
-
-            let response_frame = match &response {
-                lpc_wire::legacy::LegacyProjectResponse::GetChanges { current_frame, .. } => {
-                    *current_frame
-                }
-            };
-            log::debug!(
-                "handle_project_request: GetChanges response (current_frame: {})",
-                response_frame.as_i64()
-            );
-
-            let serializable_response = response
-                .to_serializable()
-                .map_err(|e| ServerError::Core(format!("Failed to serialize response: {e}")))?;
-
-            Ok(ServerMessagePayload::ProjectRequest {
-                response: serializable_response,
-            })
-        }
+        lpc_wire::WireProjectRequest::SyncDisabled => Err(ServerError::Core(String::from(
+            "project sync is disabled until M3 canonical project sync",
+        ))),
     }
 }
 

@@ -31,7 +31,7 @@ use lpc_shared::fps::FpsTracker;
 use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::legacy::{LegacyMessage, LegacyServerMessage};
+use lpc_wire::{WireMessage, WireServerMessage};
 
 use crate::time::Esp32TimeProvider;
 
@@ -76,7 +76,7 @@ pub async fn run_server_loop<T: ServerTransport>(
         loop {
             match transport.receive().await {
                 Ok(Some(msg)) => {
-                    incoming_messages.push(LegacyMessage::Client(msg));
+                    incoming_messages.push(WireMessage::Client(msg));
                 }
                 Ok(None) => {
                     // No more messages available
@@ -103,7 +103,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                 let tick_done = time_provider.now_ms();
                 // Send responses
                 for response in responses {
-                    if let LegacyMessage::Server(server_msg) = response {
+                    if let WireMessage::Server(server_msg) = response {
                         if let Err(e) = transport.send(server_msg).await {
                             log::warn!("run_server_loop: Failed to send response: {e:?}");
                             // Transport error - continue with next message
@@ -181,7 +181,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             });
 
             // Create heartbeat message
-            let heartbeat_msg = LegacyServerMessage {
+            let heartbeat_msg = WireServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
                 msg: lpc_wire::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,

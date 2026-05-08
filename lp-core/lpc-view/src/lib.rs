@@ -12,7 +12,6 @@ pub mod api;
 pub mod project;
 pub mod prop;
 pub mod slot;
-pub mod test_util;
 pub mod tree;
 
 pub use api::ClientApi;

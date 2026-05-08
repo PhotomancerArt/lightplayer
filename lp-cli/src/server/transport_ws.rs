@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -21,7 +21,7 @@ type ConnectionId = u64;
 /// Connection state for a single websocket client
 struct Connection {
     /// Channel sender for sending messages to this connection
-    sender: mpsc::UnboundedSender<LegacyServerMessage>,
+    sender: mpsc::UnboundedSender<WireServerMessage>,
     /// Channel receiver for receiving messages from this connection
     /// Note: Currently unused as messages are received via the async task,
     /// but kept for potential future use or debugging
@@ -170,7 +170,7 @@ impl WebSocketServerTransport {
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
         // Create channels for communication with sync code
-        let (client_tx, mut client_rx) = mpsc::unbounded_channel::<LegacyServerMessage>();
+        let (client_tx, mut client_rx) = mpsc::unbounded_channel::<WireServerMessage>();
         let (_server_tx, server_rx) = mpsc::unbounded_channel::<ClientMessage>();
 
         // Register connection
@@ -272,12 +272,12 @@ impl WebSocketServerTransport {
 }
 
 impl ServerTransport for WebSocketServerTransport {
-    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         // Send to the first available connection
         // TODO: In phase 7, we'll need to route messages to the correct connection
         // based on the request ID or connection tracking
         // For now, serialize the message and send to first connection
-        // (we can't clone LegacyServerMessage, so we serialize/deserialize for each connection)
+        // (we can't clone WireServerMessage, so we serialize/deserialize for each connection)
 
         let json = serde_json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
@@ -296,7 +296,7 @@ impl ServerTransport for WebSocketServerTransport {
         let mut connection_id_to_remove = None;
         for (connection_id, connection) in state.connections.iter() {
             // Deserialize the message for this connection
-            let msg_clone: LegacyServerMessage = match serde_json::from_str(&json) {
+            let msg_clone: WireServerMessage = match serde_json::from_str(&json) {
                 Ok(m) => m,
                 Err(e) => {
                     return Err(TransportError::Deserialization(format!(

@@ -8,7 +8,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lpc_wire::{TransportError, legacy::LegacyServerMessage, message::ClientMessage};
+use lpc_wire::{TransportError, WireServerMessage, message::ClientMessage};
 
 /// Trait for server-side transport implementations
 ///
@@ -27,12 +27,12 @@ use lpc_wire::{TransportError, legacy::LegacyServerMessage, message::ClientMessa
 /// ```rust,no_run
 /// use lpc_shared::transport::ServerTransport;
 /// use lpc_wire::{ClientMessage, TransportError};
-/// use lpc_wire::legacy::LegacyServerMessage;
+/// use lpc_wire::WireServerMessage;
 ///
 /// struct MyTransport;
 ///
 /// impl ServerTransport for MyTransport {
-///     async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
+///     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
 ///         // Send message (transport handles serialization)
 ///         let _ = msg;
 ///         Ok(())
@@ -56,7 +56,7 @@ use lpc_wire::{TransportError, legacy::LegacyServerMessage, message::ClientMessa
 #[allow(async_fn_in_trait, reason = "trait async fn stable in Rust 1.75+")]
 pub trait ServerTransport {
     /// Send a server message (consumes the message)
-    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError>;
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError>;
 
     /// Receive a client message (non-blocking). Returns `Ok(None)` if no message is available.
     async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError>;

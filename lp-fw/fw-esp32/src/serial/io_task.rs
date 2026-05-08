@@ -29,18 +29,15 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// When StreamingMessageRouterTransport is used, server loop sends ServerMessage here.
 /// io_task receives, serializes with ser-write-json directly to serial, never buffers full JSON.
 #[cfg(feature = "server")]
-static OUTGOING_SERVER_MSG: Channel<
-    CriticalSectionRawMutex,
-    lpc_wire::legacy::LegacyServerMessage,
-    1,
-> = Channel::new();
+static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
+    Channel::new();
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
 /// is likely gone. Short enough to detect disconnects, long enough for USB.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Chunk size for large writes. Small enough to avoid timeout on slow USB,
-/// large enough to avoid excessive syscalls. GetChanges can be 10KB+.
+/// large enough to avoid excessive syscalls. Resource snapshots can be 10KB+.
 const WRITE_CHUNK_SIZE: usize = 256;
 
 /// Async write with timeout. Returns false if the write timed out or errored.
@@ -53,7 +50,7 @@ async fn timed_write<W: Write>(tx: &mut W, data: &[u8]) -> bool {
 }
 
 /// Write all data in chunks with per-chunk timeout. Prevents large messages
-/// (e.g. GetChanges) from timing out mid-write and corrupting the stream
+/// (e.g. resource snapshots) from timing out mid-write and corrupting the stream
 /// by concatenating with the next message. Uses write_all per chunk to
 /// handle partial writes.
 async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
@@ -233,7 +230,7 @@ pub fn get_message_channels() -> (
 /// Get reference to OUTGOING_SERVER_MSG channel for StreamingMessageRouterTransport
 #[cfg(feature = "server")]
 pub fn get_server_msg_channel()
--> &'static Channel<CriticalSectionRawMutex, lpc_wire::legacy::LegacyServerMessage, 1> {
+-> &'static Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> {
     &OUTGOING_SERVER_MSG
 }
 

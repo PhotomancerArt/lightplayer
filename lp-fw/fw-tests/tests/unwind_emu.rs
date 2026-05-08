@@ -45,13 +45,12 @@ fn test_unwind_caught_in_emulator() {
     emu.serial_write(b"__test_unwind\n");
     emu.run_until_yield(50_000_000).unwrap_or_else(|e| {
         println!("{}", emu.dump_state());
-        panic!("Emulator error: {:?}", e);
+        panic!("Emulator error: {e:?}");
     });
 
     let output = emu.serial_read_line();
     assert_eq!(
         output, "unwind: ok",
-        "catch_unwind should have caught the panic; got: {:?}",
-        output
+        "catch_unwind should have caught the panic; got: {output:?}"
     );
 }

@@ -13,7 +13,7 @@ use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickC
 use super::node_error::NodeError;
 use super::pressure_level::PressureLevel;
 
-/// M4.1 client sync: identifiers needed to wire [`lpc_wire::legacy::FixtureState`] refs.
+/// Runtime buffer identifiers owned by this node, used by resource projection.
 #[derive(Clone, Copy, Debug)]
 pub struct FixtureProjectionInfo {
     pub lamp_colors_buffer_id: Option<RuntimeBufferId>,

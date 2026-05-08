@@ -1,7 +1,7 @@
 //! MessageRouter-based transport implementation
 //!
 //! Wraps `MessageRouter` and implements `ServerTransport` trait.
-//! Converts between `String` messages (router) and `ClientMessage`/`LegacyServerMessage` (transport).
+//! Converts between `String` messages (router) and `ClientMessage`/`WireServerMessage` (transport).
 
 extern crate alloc;
 
@@ -9,13 +9,13 @@ use alloc::format;
 
 use crate::message_router::MessageRouter;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, json, message::ClientMessage};
 
 /// Transport implementation using MessageRouter
 ///
 /// Wraps a `MessageRouter` and implements `ServerTransport` by converting
-/// between `String` messages (used by router) and `ClientMessage`/`LegacyServerMessage`
+/// between `String` messages (used by router) and `ClientMessage`/`WireServerMessage`
 /// (used by transport interface).
 pub struct MessageRouterTransport {
     /// Message router for task communication
@@ -30,9 +30,9 @@ impl MessageRouterTransport {
 }
 
 impl ServerTransport for MessageRouterTransport {
-    async fn send(&mut self, msg: LegacyServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let json = json::to_string(&msg).map_err(|e| {
-            TransportError::Serialization(format!("Failed to serialize LegacyServerMessage: {e}"))
+            TransportError::Serialization(format!("Failed to serialize WireServerMessage: {e}"))
         })?;
         let message = alloc::format!("M!{json}\n");
         self.router.send(message).map_err(|_| {
@@ -124,7 +124,7 @@ mod tests {
         let (router, _, outgoing) = create_test_router();
         let mut transport = MessageRouterTransport::new(router);
 
-        let msg = LegacyServerMessage {
+        let msg = WireServerMessage {
             id: 1,
             msg: lpc_wire::server::ServerMsgBody::UnloadProject,
         };

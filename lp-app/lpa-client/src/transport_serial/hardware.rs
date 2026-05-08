@@ -4,7 +4,7 @@
 //! The serial I/O runs on a separate thread that loops continuously.
 
 use log;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
 use std::thread;
 use std::time::Duration;
@@ -18,7 +18,7 @@ fn serial_thread_loop(
     port_name: String,
     baud_rate: u32,
     mut client_rx: mpsc::UnboundedReceiver<ClientMessage>,
-    server_tx: mpsc::UnboundedSender<LegacyServerMessage>,
+    server_tx: mpsc::UnboundedSender<WireServerMessage>,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) {
     // Open serial port
@@ -119,7 +119,7 @@ fn serial_thread_loop(
             // Check for M! prefix
             if let Some(json_str) = line_str.strip_prefix("M!") {
                 // Parse JSON message (strip M! prefix)
-                match lpc_wire::json::from_str::<LegacyServerMessage>(json_str) {
+                match lpc_wire::json::from_str::<WireServerMessage>(json_str) {
                     Ok(msg) => {
                         log::debug!(
                             "Serial thread: Parsed server message id={} ({} bytes)",

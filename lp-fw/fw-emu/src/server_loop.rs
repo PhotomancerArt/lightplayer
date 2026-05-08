@@ -14,7 +14,7 @@ use lp_riscv_emu_guest::sys_yield;
 use lpa_server::LpServer;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::legacy::LegacyMessage;
+use lpc_wire::WireMessage;
 
 /// Block on a future until completion. Uses sys_yield when pending.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -65,7 +65,7 @@ pub fn run_server_loop(
                         msg.id,
                         receive_calls
                     );
-                    incoming_messages.push(LegacyMessage::Client(msg));
+                    incoming_messages.push(WireMessage::Client(msg));
                 }
                 Ok(None) => {
                     if receive_calls > 1 {
@@ -102,7 +102,7 @@ pub fn run_server_loop(
                 );
                 // Send responses
                 for response in responses {
-                    if let LegacyMessage::Server(server_msg) = response {
+                    if let WireMessage::Server(server_msg) = response {
                         log::debug!(
                             "run_server_loop: Sending response message id={}",
                             server_msg.id

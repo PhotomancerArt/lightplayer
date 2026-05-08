@@ -8,7 +8,6 @@ use alloc::vec::Vec;
 use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{FrameId, Kind, LpValue, NodeId, NodeName, SlotPath};
 use lpc_source::ArtifactReadRoot;
-use lpc_source::node::node_def::NodeDef;
 use lpc_source::node::{
     NodeKind, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
 };
@@ -58,33 +57,24 @@ struct LoadedNode {
     name: NodeName,
     artifact_path: LpPathBuf,
     id: NodeId,
-    config: LoadedNodeConfig,
+    config: LoadedNodeDef,
 }
 
 #[derive(Clone)]
-pub(super) enum LoadedNodeConfig {
+pub enum LoadedNodeDef {
     Texture(TextureDef),
     Shader(ShaderDef),
     Output(OutputDef),
     Fixture(FixtureDef),
 }
 
-impl LoadedNodeConfig {
-    pub(super) fn clone_as_node_config_box(&self) -> Box<dyn NodeDef> {
-        match self {
-            LoadedNodeConfig::Texture(c) => Box::new(c.clone()),
-            LoadedNodeConfig::Shader(c) => Box::new(c.clone()),
-            LoadedNodeConfig::Output(c) => Box::new(c.clone()),
-            LoadedNodeConfig::Fixture(c) => Box::new(c.clone()),
-        }
-    }
-
+impl LoadedNodeDef {
     fn kind_name(&self) -> &'static str {
         match self {
-            LoadedNodeConfig::Texture(_) => "texture",
-            LoadedNodeConfig::Shader(_) => "shader",
-            LoadedNodeConfig::Output(_) => "output",
-            LoadedNodeConfig::Fixture(_) => "fixture",
+            LoadedNodeDef::Texture(_) => "texture",
+            LoadedNodeDef::Shader(_) => "shader",
+            LoadedNodeDef::Output(_) => "output",
+            LoadedNodeDef::Fixture(_) => "fixture",
         }
     }
 }
@@ -198,7 +188,7 @@ impl CoreProjectLoader {
         Self::attach_loaded_nodes(root, &mut runtime, &loaded_nodes, frame)?;
 
         for node in &loaded_nodes {
-            runtime.compatibility_mut().record_authoring_snapshot(
+            runtime.source_authoring_mut().record_authoring_snapshot(
                 node.id,
                 node.artifact_path.clone(),
                 node.config.clone(),
@@ -219,7 +209,7 @@ impl CoreProjectLoader {
         R::Err: core::fmt::Debug,
     {
         for node in loaded_nodes {
-            if let LoadedNodeConfig::Texture(config) = &node.config {
+            if let LoadedNodeDef::Texture(config) = &node.config {
                 runtime
                     .engine_mut()
                     .attach_runtime_node(
@@ -235,7 +225,7 @@ impl CoreProjectLoader {
         }
 
         for node in loaded_nodes {
-            if let LoadedNodeConfig::Output(config) = &node.config {
+            if let LoadedNodeDef::Output(config) = &node.config {
                 runtime
                     .engine_mut()
                     .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
@@ -255,7 +245,7 @@ impl CoreProjectLoader {
         }
 
         for node in loaded_nodes {
-            if let LoadedNodeConfig::Shader(config) = &node.config {
+            if let LoadedNodeDef::Shader(config) = &node.config {
                 let texture_node =
                     resolve_node_loc(loaded_nodes, node, config.texture_loc(), "texture")?;
                 let shader_path =
@@ -284,7 +274,7 @@ impl CoreProjectLoader {
         }
 
         for node in loaded_nodes {
-            if let LoadedNodeConfig::Fixture(config) = &node.config {
+            if let LoadedNodeDef::Fixture(config) = &node.config {
                 let texture_node =
                     resolve_node_loc(loaded_nodes, node, config.texture_loc(), "texture")?;
                 let shader_node = find_shader_for_texture(loaded_nodes, texture_node.id)
@@ -373,7 +363,7 @@ where
     Ok(def)
 }
 
-fn load_node_def<R>(root: &R, path: &LpPath) -> Result<LoadedNodeConfig, CoreProjectLoadError>
+fn load_node_def<R>(root: &R, path: &LpPath) -> Result<LoadedNodeDef, CoreProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
@@ -386,10 +376,10 @@ where
         })?;
 
     match probe.kind.as_str() {
-        "texture" => parse_node_def(path, &text).map(LoadedNodeConfig::Texture),
-        "shader" => parse_node_def(path, &text).map(LoadedNodeConfig::Shader),
-        "output" => parse_node_def(path, &text).map(LoadedNodeConfig::Output),
-        "fixture" => parse_node_def(path, &text).map(LoadedNodeConfig::Fixture),
+        "texture" => parse_node_def(path, &text).map(LoadedNodeDef::Texture),
+        "shader" => parse_node_def(path, &text).map(LoadedNodeDef::Shader),
+        "output" => parse_node_def(path, &text).map(LoadedNodeDef::Output),
+        "fixture" => parse_node_def(path, &text).map(LoadedNodeDef::Fixture),
         other => Err(CoreProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
             suffix: other.to_string(),
@@ -472,10 +462,7 @@ fn resolve_path_relative_to_file(
         })
 }
 
-fn node_kind_name(
-    config: &LoadedNodeConfig,
-    path: &LpPath,
-) -> Result<NodeName, CoreProjectLoadError> {
+fn node_kind_name(config: &LoadedNodeDef, path: &LpPath) -> Result<NodeName, CoreProjectLoadError> {
     NodeName::parse(config.kind_name()).map_err(|e| CoreProjectLoadError::InvalidNodeName {
         path: path.as_str().to_string(),
         reason: format!("{e}"),
@@ -530,7 +517,7 @@ fn find_shader_for_texture<'a>(
     loaded_nodes
         .iter()
         .filter(|node| {
-            let LoadedNodeConfig::Shader(config) = &node.config else {
+            let LoadedNodeDef::Shader(config) = &node.config else {
                 return false;
             };
             find_node_by_loc(loaded_nodes, node, config.texture_loc())
@@ -539,11 +526,11 @@ fn find_shader_for_texture<'a>(
         })
         .max_by(|a, b| {
             let ar = match &a.config {
-                LoadedNodeConfig::Shader(config) => config.render_order(),
+                LoadedNodeDef::Shader(config) => config.render_order(),
                 _ => 0,
             };
             let br = match &b.config {
-                LoadedNodeConfig::Shader(config) => config.render_order(),
+                LoadedNodeDef::Shader(config) => config.render_order(),
                 _ => 0,
             };
             ar.cmp(&br)
@@ -554,7 +541,7 @@ fn find_shader_for_texture<'a>(
 fn placeholder_texture_dimensions_for_shader(
     texture_node: &LoadedNode,
 ) -> Result<(u32, u32), CoreProjectLoadError> {
-    let LoadedNodeConfig::Texture(config) = &texture_node.config else {
+    let LoadedNodeDef::Texture(config) = &texture_node.config else {
         return Err(CoreProjectLoadError::InvalidSourcePath {
             path: texture_node.artifact_path.as_str().to_string(),
             reason: String::from("shader texture loc did not reference a texture node"),

@@ -13,7 +13,7 @@ use lpc_engine::LpGraphics;
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::legacy::{LegacyMessage, LegacyServerMessage};
+use lpc_wire::{WireMessage, WireServerMessage};
 use lpfs::{FsChange, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
@@ -106,7 +106,7 @@ impl LpServer {
     ///
     /// # Returns
     ///
-    /// * `Ok(Vec<LegacyMessage>)` - Vector of response messages (all `LegacyMessage::Server` variants)
+    /// * `Ok(Vec<WireMessage>)` - Vector of response messages (all `WireMessage::Server` variants)
     /// * `Err(ServerError)` - If processing failed
     ///
     /// # Example
@@ -114,7 +114,7 @@ impl LpServer {
     /// ```rust,no_run
     /// extern crate alloc;
     /// use lpc_model::AsLpPath;
-    /// use lpc_wire::legacy::LegacyMessage;
+    /// use lpc_wire::WireMessage;
     /// use lpa_server::LpServer;
     /// use lpfs::LpFsMemory;
     /// use lpc_shared::output::MemoryOutputProvider;
@@ -138,8 +138,8 @@ impl LpServer {
     pub fn tick(
         &mut self,
         delta_ms: u32,
-        incoming: Vec<LegacyMessage>,
-    ) -> Result<Vec<LegacyMessage>, ServerError> {
+        incoming: Vec<WireMessage>,
+    ) -> Result<Vec<WireMessage>, ServerError> {
         // Process filesystem changes for all loaded projects
         // Collect project info first to avoid borrowing issues
         let project_info: Vec<_> = self
@@ -266,7 +266,7 @@ impl LpServer {
         let mut responses = Vec::new();
         for message in incoming {
             match message {
-                LegacyMessage::Client(client_msg) => {
+                WireMessage::Client(client_msg) => {
                     // Process client message and generate response
                     let theoretical_fps = self.theoretical_fps();
                     let msg_id = client_msg.id;
@@ -281,11 +281,11 @@ impl LpServer {
                         theoretical_fps,
                     ) {
                         Ok(response) => {
-                            responses.push(LegacyMessage::Server(response));
+                            responses.push(WireMessage::Server(response));
                         }
                         Err(e) => {
                             // Send error response for this message
-                            responses.push(LegacyMessage::Server(LegacyServerMessage {
+                            responses.push(WireMessage::Server(WireServerMessage {
                                 id: msg_id,
                                 msg: lpc_wire::server::ServerMsgBody::Error {
                                     error: format!("{e}"),
@@ -294,7 +294,7 @@ impl LpServer {
                         }
                     }
                 }
-                LegacyMessage::Server(_) => {
+                WireMessage::Server(_) => {
                     // Server messages shouldn't be sent to the server
                     // Log or ignore
                     return Err(ServerError::Core(

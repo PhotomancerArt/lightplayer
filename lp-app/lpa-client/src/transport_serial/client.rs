@@ -4,7 +4,7 @@
 //! Works with both emulator and hardware serial (future) via factory functions.
 
 use crate::transport::ClientTransport;
-use lpc_wire::legacy::LegacyServerMessage;
+use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, message::ClientMessage};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ pub struct AsyncSerialClientTransport {
     /// Sender for client messages (client -> backend thread)
     client_tx: Option<mpsc::UnboundedSender<ClientMessage>>,
     /// Receiver for server messages (backend thread -> client)
-    server_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
+    server_rx: mpsc::UnboundedReceiver<WireServerMessage>,
     /// Shutdown signal sender (client -> backend thread)
     shutdown_tx: Option<oneshot::Sender<()>>,
     /// Handle to the backend thread
@@ -45,7 +45,7 @@ impl AsyncSerialClientTransport {
     #[cfg(any(feature = "serial", test))]
     pub(crate) fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
-        server_rx: mpsc::UnboundedReceiver<LegacyServerMessage>,
+        server_rx: mpsc::UnboundedReceiver<WireServerMessage>,
         shutdown_tx: oneshot::Sender<()>,
         thread_handle: JoinHandle<()>,
     ) -> Self {
@@ -72,7 +72,7 @@ impl ClientTransport for AsyncSerialClientTransport {
         }
     }
 
-    async fn receive(&mut self) -> Result<LegacyServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -163,7 +163,7 @@ mod tests {
     async fn test_transport_creation() {
         // Create dummy channels and thread handle
         let (client_tx, _client_rx) = mpsc::unbounded_channel::<ClientMessage>();
-        let (_server_tx, server_rx) = mpsc::unbounded_channel::<LegacyServerMessage>();
+        let (_server_tx, server_rx) = mpsc::unbounded_channel::<WireServerMessage>();
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
 
         // Create a dummy thread that just exits immediately

@@ -1,12 +1,10 @@
 //! Wire-facing project types (`Wire*` where applicable).
 
-mod legacy_wire_node_specifier;
 mod resource_sync;
 mod wire_project_handle;
 mod wire_project_request;
 mod wire_slot_watch_specifier;
 
-pub use legacy_wire_node_specifier::LegacyWireNodeSpecifier;
 pub use resource_sync::{
     RenderProductPayloadOptions, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
     ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireChannelSampleFormat,

@@ -35,9 +35,5 @@ lpc-view = { path = "../../lp-core/lpc-view" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 test-log = { workspace = true }
 
-[[test]]
-name = "scene_render_emu_async"
-required-features = ["serial"]
-
 [lints]
 workspace = true

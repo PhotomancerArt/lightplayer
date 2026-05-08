@@ -1,62 +1,22 @@
-//! Main UI state and egui App implementation
+//! Minimal debug UI shell between legacy demolition and generic slot UI rebuild.
 
-use crate::client::{
-    LpClient, ProjectGetChangesOptions, serializable_response_to_project_response,
-};
-use crate::debug_ui::panels;
+use crate::client::LpClient;
 use eframe::egui;
-use lpc_model::{NodeId, project::FrameId};
-use lpc_view::project::ProjectView;
-use lpc_wire::{WireProjectHandle as ProjectHandle, legacy::LegacySerializableProjectResponse};
-use std::collections::BTreeSet;
+use lpc_wire::WireProjectHandle as ProjectHandle;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use tokio::sync::oneshot;
 
-/// Debug UI application state
+/// Debug UI application state.
 pub struct DebugUiState {
-    /// Project view (shared between sync and UI)
-    project_view: Arc<Mutex<ProjectView>>,
-    /// Project handle
+    project_view: Arc<Mutex<lpc_view::project::ProjectView>>,
     project_handle: ProjectHandle,
-    /// Async client for syncing (shared via Arc<Mutex<>>)
-    async_client: Arc<tokio::sync::Mutex<LpClient>>,
-    /// Nodes we're tracking detail for
-    legacy_detail_nodes: BTreeSet<NodeId>,
-    /// "All legacy detail" checkbox state
-    all_legacy_detail: bool,
-    /// Whether a sync is currently in progress
-    sync_in_progress: bool,
-    /// Pending sync result receiver (if sync is in progress)
-    /// Contains SerializableProjectResponse which can be sent across threads
-    pending_sync:
-        Option<oneshot::Receiver<Result<LegacySerializableProjectResponse, anyhow::Error>>>,
-    /// Track if legacy_detail_nodes changed since last sync (to trigger immediate sync)
-    legacy_detail_nodes_changed: bool,
-    /// Tokio runtime handle for spawning async tasks
-    runtime_handle: tokio::runtime::Handle,
-    /// Last frame time for UI FPS calculation
-    last_frame_time: Option<Instant>,
-    /// Last server frame ID (for server FPS calculation)
-    last_server_frame_id: Option<FrameId>,
-    /// Last time we saw a server frame update (for server FPS calculation)
-    last_server_frame_time: Option<Instant>,
-    /// Server FPS history (last 60 measurements)
-    server_fps_history: Vec<f32>,
-    /// Current theoretical FPS from server (based on frame processing time)
-    theoretical_fps: Option<f32>,
-    /// Texture display options
-    show_texture_background: bool,
-    show_texture_labels: bool,
-    show_texture_strokes: bool,
-    /// Whether connection has been lost (stop syncing and exit)
-    connection_lost: bool,
+    _async_client: LpClient,
+    _runtime_handle: tokio::runtime::Handle,
 }
 
 impl DebugUiState {
-    /// Create new debug UI state
+    /// Create new debug UI state.
     pub fn new(
-        project_view: Arc<Mutex<ProjectView>>,
+        project_view: Arc<Mutex<lpc_view::project::ProjectView>>,
         project_handle: ProjectHandle,
         async_client: LpClient,
         runtime_handle: tokio::runtime::Handle,
@@ -64,270 +24,26 @@ impl DebugUiState {
         Self {
             project_view,
             project_handle,
-            async_client: Arc::new(tokio::sync::Mutex::new(async_client)),
-            legacy_detail_nodes: BTreeSet::new(),
-            all_legacy_detail: true,
-            sync_in_progress: false,
-            pending_sync: None,
-            legacy_detail_nodes_changed: false,
-            runtime_handle,
-            last_frame_time: None,
-            last_server_frame_id: None,
-            last_server_frame_time: None,
-            server_fps_history: Vec::new(),
-            theoretical_fps: None,
-            show_texture_background: false,
-            show_texture_labels: false,
-            show_texture_strokes: false,
-            connection_lost: false,
+            _async_client: async_client,
+            _runtime_handle: runtime_handle,
         }
-    }
-
-    /// Handle sync logic
-    ///
-    /// Checks if sync is in progress, starts new sync if not, and handles completion.
-    /// Uses a channel-based approach to avoid holding locks across await points.
-    /// Returns true if connection was lost and app should exit.
-    fn handle_sync(&mut self) -> bool {
-        // Check if previous sync completed
-        if let Some(mut receiver) = self.pending_sync.take() {
-            match receiver.try_recv() {
-                Ok(Ok(serializable_response)) => {
-                    // Extract theoretical FPS from response before converting
-                    let LegacySerializableProjectResponse::GetChanges {
-                        theoretical_fps, ..
-                    } = &serializable_response;
-                    self.theoretical_fps = *theoretical_fps;
-
-                    // Sync completed successfully - convert and apply changes in UI thread
-                    match serializable_response_to_project_response(serializable_response) {
-                        Ok(project_response) => {
-                            let mut view = self.project_view.lock().unwrap();
-                            match view.apply_changes(&project_response) {
-                                Ok(status_changes) => {
-                                    // Log status changes
-                                    for change in &status_changes {
-                                        match (&change.old_status, &change.new_status) {
-                                            (
-                                                lpc_wire::WireNodeStatus::Ok,
-                                                lpc_wire::WireNodeStatus::Error(msg),
-                                            ) => {
-                                                println!(
-                                                    "[{}] Status changed: Ok -> Error(\"{}\")",
-                                                    change.path.as_str(),
-                                                    msg
-                                                );
-                                            }
-                                            (
-                                                lpc_wire::WireNodeStatus::Error(old_msg),
-                                                lpc_wire::WireNodeStatus::Ok,
-                                            ) => {
-                                                println!(
-                                                    "[{}] Status changed: Error(\"{}\") -> Ok",
-                                                    change.path.as_str(),
-                                                    old_msg
-                                                );
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    // If "All legacy detail" is enabled, track all nodes
-                                    if self.all_legacy_detail && !view.nodes.is_empty() {
-                                        let all_node_handles: BTreeSet<_> =
-                                            view.nodes.keys().copied().collect();
-                                        if self.legacy_detail_nodes != all_node_handles {
-                                            self.legacy_detail_nodes = all_node_handles;
-                                        }
-                                    }
-
-                                    self.sync_in_progress = false;
-                                    // Check if legacy_detail_nodes changed while sync was in progress
-                                    // If so, we need to sync again immediately
-                                    let current_tracked: BTreeSet<_> =
-                                        self.legacy_detail_nodes.iter().copied().collect();
-                                    let view_tracked: BTreeSet<_> =
-                                        view.legacy_detail_tracking.iter().copied().collect();
-                                    if current_tracked != view_tracked {
-                                        self.legacy_detail_nodes_changed = true;
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to apply changes: {e}");
-                                    self.sync_in_progress = false;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to convert response: {e}");
-                            self.sync_in_progress = false;
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    // Sync failed
-                    let error_msg = e.to_string();
-                    // Check if this is a connection lost error
-                    // Error format is "Transport error: Connection lost" from client.rs
-                    if error_msg.contains("Connection lost") {
-                        eprintln!("Connection lost - exiting");
-                        self.connection_lost = true;
-                        self.sync_in_progress = false;
-                        return true;
-                    }
-                    eprintln!("Sync error: {e}");
-                    self.sync_in_progress = false;
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    // Still in progress, put receiver back
-                    self.pending_sync = Some(receiver);
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    // Channel closed (shouldn't happen)
-                    self.sync_in_progress = false;
-                }
-            }
-        }
-
-        // Start new sync if not in progress and connection is still alive
-        // If legacy_detail_nodes changed, we'll sync again after current sync finishes
-        if !self.sync_in_progress && !self.connection_lost {
-            // Update view's legacy_detail_tracking to match legacy_detail_nodes and get sync parameters
-            let (since_frame, legacy_detail_specifier) = {
-                let mut view = self.project_view.lock().unwrap();
-                let is_initial_sync = view.nodes.is_empty();
-
-                view.legacy_detail_tracking.clear();
-                view.legacy_detail_tracking
-                    .extend(self.legacy_detail_nodes.iter().copied());
-
-                let since_frame = view.frame_id;
-                // For initial sync (empty view), request all nodes to populate the list
-                // Otherwise use normal legacy_detail_specifier
-                let legacy_detail_specifier = if is_initial_sync {
-                    lpc_wire::LegacyWireNodeSpecifier::All
-                } else {
-                    view.legacy_detail_specifier()
-                };
-                (since_frame, legacy_detail_specifier)
-            };
-
-            // Spawn async task to do sync (without holding view lock)
-            let client = Arc::clone(&self.async_client);
-            let handle = self.project_handle;
-            let runtime_handle = self.runtime_handle.clone();
-
-            let (tx, rx) = oneshot::channel();
-            self.pending_sync = Some(rx);
-            self.sync_in_progress = true;
-
-            runtime_handle.spawn(async move {
-                // Do async sync call (no view lock held)
-                let result = {
-                    let client_guard = client.lock().await;
-                    client_guard
-                        .project_sync_internal(
-                            handle,
-                            Some(since_frame),
-                            legacy_detail_specifier,
-                            ProjectGetChangesOptions::dev_demo_full_resources(),
-                        )
-                        .await
-                };
-
-                // Send result back to UI thread (SerializableProjectResponse is Send)
-                match result {
-                    Ok(serializable_response) => {
-                        // Send the serializable response back - UI thread will convert and apply it
-                        let _ = tx.send(Ok(serializable_response));
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                    }
-                }
-            });
-        }
-
-        false
     }
 }
 
 impl eframe::App for DebugUiState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Calculate FPS
-        let now = Instant::now();
-        self.last_frame_time = Some(now);
-
-        // Handle sync - exit if connection lost
-        if self.handle_sync() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-
-        // Request repaint to keep loop running
-        ctx.request_repaint_after(std::time::Duration::from_millis(16)); // ~60 FPS
-
-        // Get view snapshot for rendering
-        let view = self.project_view.lock().unwrap();
-
-        // Calculate server FPS based on frame_id progression
-        let current_frame_id = view.frame_id;
-        if let Some(prev_frame_id) = self.last_server_frame_id {
-            if current_frame_id != prev_frame_id {
-                // Server frame advanced - calculate FPS
-                if let Some(prev_time) = self.last_server_frame_time {
-                    let frame_delta = current_frame_id.as_i64() - prev_frame_id.as_i64();
-                    let time_delta = now.duration_since(prev_time);
-                    if frame_delta > 0 && !time_delta.is_zero() {
-                        let server_fps = frame_delta as f32 / time_delta.as_secs_f32();
-                        self.server_fps_history.push(server_fps);
-                        if self.server_fps_history.len() > 60 {
-                            self.server_fps_history.remove(0);
-                        }
-                    }
-                }
-                self.last_server_frame_time = Some(now);
-            }
-        } else {
-            // First time seeing a server frame
-            self.last_server_frame_time = Some(now);
-        }
-        self.last_server_frame_id = Some(current_frame_id);
-
-        // Status panel (top)
-        egui::TopBottomPanel::top("status_panel").show(ctx, |ui| {
-            panels::render_status_panel(
-                ui,
-                view.frame_id,
-                self.server_fps_history.last().copied().unwrap_or(0.0),
-                if !self.server_fps_history.is_empty() {
-                    self.server_fps_history.iter().sum::<f32>()
-                        / self.server_fps_history.len() as f32
-                } else {
-                    0.0
-                },
-                self.theoretical_fps,
-                self.sync_in_progress,
-            );
-        });
-
-        // Right panel for all node details (scrollable)
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    let nodes_changed = panels::render_all_nodes_panel(
-                        ui,
-                        &view,
-                        &mut self.legacy_detail_nodes,
-                        &mut self.all_legacy_detail,
-                        &mut self.show_texture_background,
-                        &mut self.show_texture_labels,
-                        &mut self.show_texture_strokes,
-                    );
-                    if nodes_changed {
-                        self.legacy_detail_nodes_changed = true;
-                    }
-                });
+            ui.heading("LightPlayer Dev UI");
+            ui.label("Canonical slot debug UI will be rebuilt in M5.");
+            ui.separator();
+            ui.label(format!("Project handle: {}", self.project_handle.id()));
+            if let Ok(view) = self.project_view.lock() {
+                ui.label(format!("Cached nodes: {}", view.nodes.len()));
+                ui.label(format!(
+                    "Watched slot roots: {}",
+                    view.slot_watch_roots.len()
+                ));
+            }
         });
     }
 }

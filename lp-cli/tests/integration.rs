@@ -14,7 +14,7 @@ use core::cell::RefCell;
 use lpa_server::LpServer;
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_wire::legacy::LegacyMessage;
+use lpc_wire::WireMessage;
 use lpfs::{LpFs, LpFsMemory};
 
 // Placeholder types for compilation - these tests are ignored
@@ -37,7 +37,7 @@ fn setup_server_and_client(
     todo!("Rewrite for async LpClient")
 }
 
-/// Extract ClientMessage from LegacyMessage envelope and send via transport
+/// Extract ClientMessage from WireMessage envelope and send via transport
 #[allow(
     dead_code,
     unused_variables,
@@ -45,7 +45,7 @@ fn setup_server_and_client(
 )]
 fn send_client_message(
     _transport: &mut LocalTransport,
-    _msg: LegacyMessage,
+    _msg: WireMessage,
 ) -> Result<(), ClientError> {
     todo!("Rewrite for async LpClient")
 }

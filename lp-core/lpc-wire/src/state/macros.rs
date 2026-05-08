@@ -116,7 +116,7 @@ macro_rules! impl_state_serialization {
             }
         }
 
-        // Direct `Serialize` on `$state_name`: legacy compatibility shape used when `NodeState`
+        // Direct `Serialize` on `$state_name`: compatibility shape used when state enums
         // is serialized without `since_frame` (unit tests and standalone payloads). For sync,
         // `Serializable*State::new(_, since_frame)` omits unchanged fields on the wire.
         impl Serialize for $state_name {

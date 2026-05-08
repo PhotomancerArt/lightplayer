@@ -3,12 +3,11 @@
 //! Provides async methods for filesystem and project operations.
 
 use anyhow::{Error, Result};
-use lpc_model::{LpPath, LpPathBuf, project::FrameId};
-use lpc_wire::legacy::{LegacySerializableProjectResponse, LegacyServerMessage};
+use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    LegacyWireNodeSpecifier, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
-    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle,
-    WireProjectRequest,
+    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
+    RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
+    WireServerMessage,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
@@ -19,9 +18,9 @@ use tokio::time::timeout;
 
 use crate::transport::ClientTransport;
 
-/// Extra `GetChanges` fields beyond node detail selection (`WireProjectRequest::GetChanges`).
+/// Resource interest options reserved for M3 canonical project sync.
 ///
-/// Sent on every sync request; the server does not retain subscription state between calls.
+/// The server does not retain subscription state between calls.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectGetChangesOptions {
     pub resource_summary_specifier: ResourceSummarySpecifier,
@@ -103,7 +102,7 @@ impl LpClient {
     /// Helper method that generates a request ID, sends the request, and waits for the response.
     /// Correlates messages by ID to handle heartbeats and other interstitial messages.
     /// If the server returns an Error response, converts it to an Err.
-    async fn send_request(&self, request: ClientRequest) -> Result<LegacyServerMessage> {
+    async fn send_request(&self, request: ClientRequest) -> Result<WireServerMessage> {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let msg = ClientMessage { id, msg: request };
 
@@ -441,56 +440,17 @@ impl LpClient {
         }
     }
 
-    /// Get project changes since a specific frame
-    ///
-    /// # Arguments
-    ///
-    /// * `handle` - Project handle
-    /// * `since_frame` - Frame ID to get changes since (None for all changes)
-    /// * `legacy_detail_specifier` - Which nodes to include in the response
-    /// * `resource_options` - Resource summary / payload specifiers for `GetChanges`
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(SerializableProjectResponse)` if the request succeeded
-    /// * `Err` if the request failed or transport error occurred
-    pub async fn project_sync_internal(
-        &self,
-        handle: ProjectHandle,
-        since_frame: Option<FrameId>,
-        legacy_detail_specifier: LegacyWireNodeSpecifier,
-        resource_options: ProjectGetChangesOptions,
-    ) -> Result<LegacySerializableProjectResponse> {
-        // Use FrameId::default() if since_frame is None (get all changes)
-        let since_frame = since_frame.unwrap_or_default();
-
-        let ProjectGetChangesOptions {
-            resource_summary_specifier,
-            runtime_buffer_payload_specifier,
-            render_product_payload_request,
-        } = resource_options;
-
+    /// Project sync is disabled until M3 canonical project sync is rebuilt.
+    pub async fn project_sync_disabled(&self, handle: ProjectHandle) -> Result<()> {
         let request = ClientRequest::ProjectRequest {
             handle,
-            request: WireProjectRequest::GetChanges {
-                since_frame,
-                legacy_detail_specifier,
-                slot_watch_specifier: Default::default(),
-                resource_summary_specifier,
-                runtime_buffer_payload_specifier,
-                render_product_payload_request,
-            },
+            request: WireProjectRequest::SyncDisabled,
         };
 
-        let response = self.send_request(request).await?;
-
-        match response.msg {
-            ServerMsgBody::ProjectRequest { response } => Ok(response),
-            _ => Err(Error::msg(format!(
-                "Unexpected response type for project_sync_internal: {:?}",
-                response.msg
-            ))),
-        }
+        let _ = self.send_request(request).await?;
+        Err(Error::msg(
+            "project sync is disabled until M3 canonical project sync",
+        ))
     }
 
     /// List available projects on the server filesystem
@@ -552,326 +512,6 @@ impl LpClient {
                 "Unexpected response type for stop_all_projects: {:?}",
                 response.msg
             ))),
-        }
-    }
-}
-
-/// Convert SerializableProjectResponse to ProjectResponse
-///
-/// This is a helper function for converting the serializable response
-/// to the engine client's ProjectResponse type.
-pub fn serializable_response_to_project_response(
-    response: LegacySerializableProjectResponse,
-) -> Result<lpc_wire::legacy::LegacyProjectResponse, Error> {
-    match response {
-        LegacySerializableProjectResponse::GetChanges {
-            current_frame,
-            since_frame,
-            node_handles,
-            node_changes,
-            node_details,
-            theoretical_fps,
-            resource_summaries,
-            runtime_buffer_payloads,
-            render_product_payloads,
-        } => {
-            use lpc_wire::legacy::{
-                LegacyNodeDetail, LegacyProjectResponse, LegacySerializableNodeDetail,
-            };
-            use std::collections::BTreeMap;
-
-            // Convert Vec<(NodeHandle, SerializableNodeDetail)> to BTreeMap<NodeHandle, NodeDetail>
-            let mut node_details_map = BTreeMap::new();
-            for (handle, serializable_detail) in node_details {
-                let detail = match serializable_detail {
-                    LegacySerializableNodeDetail::Texture {
-                        path,
-                        config,
-                        state,
-                    } => LegacyNodeDetail {
-                        path,
-                        config: Box::new(config),
-                        state,
-                    },
-                    LegacySerializableNodeDetail::Shader {
-                        path,
-                        config,
-                        state,
-                    } => LegacyNodeDetail {
-                        path,
-                        config: Box::new(config),
-                        state,
-                    },
-                    LegacySerializableNodeDetail::Output {
-                        path,
-                        config,
-                        state,
-                    } => LegacyNodeDetail {
-                        path,
-                        config: Box::new(config),
-                        state,
-                    },
-                    LegacySerializableNodeDetail::Fixture {
-                        path,
-                        config,
-                        state,
-                    } => LegacyNodeDetail {
-                        path,
-                        config: Box::new(config),
-                        state,
-                    },
-                };
-                node_details_map.insert(handle, detail);
-            }
-
-            Ok(LegacyProjectResponse::GetChanges {
-                current_frame,
-                since_frame,
-                node_handles,
-                node_changes,
-                node_details: node_details_map,
-                theoretical_fps,
-                resource_summaries,
-                runtime_buffer_payloads,
-                render_product_payloads,
-            })
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::local::create_local_transport_pair;
-    use lpc_model::{LpPathBuf, project::FrameId};
-    use lpc_shared::transport::ServerTransport;
-    use lpc_wire::{
-        LegacyWireNodeSpecifier, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-        RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
-        server::{LoadedProject, SampleStats, ServerMsgBody},
-    };
-    use tokio::task;
-
-    #[tokio::test]
-    async fn test_send_request_with_heartbeat() {
-        // Create transport pair
-        let (client_transport, mut server_transport) = create_local_transport_pair();
-        let client = LpClient::new(Box::new(client_transport));
-
-        // Spawn a task to simulate server sending heartbeat then response
-        let server_task = task::spawn(async move {
-            // Wait a bit for client to send request
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-            // Receive client request
-            let client_msg = server_transport.receive().await.unwrap();
-            assert!(client_msg.is_some());
-            let request_id = client_msg.unwrap().id;
-
-            // Send heartbeat first (id: 0)
-            let heartbeat = LegacyServerMessage {
-                id: 0,
-                msg: ServerMsgBody::Heartbeat {
-                    fps: SampleStats {
-                        avg: 60.0,
-                        sdev: 0.0,
-                        min: 60.0,
-                        max: 60.0,
-                    },
-                    frame_count: 100,
-                    loaded_projects: vec![],
-                    uptime_ms: 2000,
-                    memory: None,
-                },
-            };
-            server_transport.send(heartbeat).await.unwrap();
-
-            // Send actual response
-            let response = LegacyServerMessage {
-                id: request_id,
-                msg: ServerMsgBody::StopAllProjects,
-            };
-            server_transport.send(response).await.unwrap();
-        });
-
-        // Send request - should handle heartbeat and get response
-        let result = client.stop_all_projects().await;
-        assert!(result.is_ok());
-
-        server_task.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_send_request_multiple_heartbeats() {
-        // Create transport pair
-        let (client_transport, mut server_transport) = create_local_transport_pair();
-        let client = LpClient::new(Box::new(client_transport));
-
-        // Spawn a task to simulate server sending multiple heartbeats then response
-        let server_task = task::spawn(async move {
-            // Wait a bit for client to send request
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-            // Receive client request
-            let client_msg = server_transport.receive().await.unwrap();
-            assert!(client_msg.is_some());
-            let request_id = client_msg.unwrap().id;
-
-            // Send multiple heartbeats
-            for i in 0..3 {
-                let fps_val = (60 + i) as f32;
-                let heartbeat = LegacyServerMessage {
-                    id: 0,
-                    msg: ServerMsgBody::Heartbeat {
-                        fps: SampleStats {
-                            avg: fps_val,
-                            sdev: 0.0,
-                            min: fps_val,
-                            max: fps_val,
-                        },
-                        frame_count: 100 + i as u64,
-                        loaded_projects: vec![],
-                        uptime_ms: 2000 + i as u64 * 1000,
-                        memory: None,
-                    },
-                };
-                server_transport.send(heartbeat).await.unwrap();
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-            }
-
-            // Send actual response
-            let response = LegacyServerMessage {
-                id: request_id,
-                msg: ServerMsgBody::StopAllProjects,
-            };
-            server_transport.send(response).await.unwrap();
-        });
-
-        // Send request - should handle all heartbeats and get response
-        let result = client.stop_all_projects().await;
-        assert!(result.is_ok());
-
-        server_task.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_send_request_heartbeat_with_projects() {
-        // Create transport pair
-        let (client_transport, mut server_transport) = create_local_transport_pair();
-        let client = LpClient::new(Box::new(client_transport));
-
-        // Spawn a task to simulate server sending heartbeat with projects then response
-        let server_task = task::spawn(async move {
-            // Wait a bit for client to send request
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-            // Receive client request
-            let client_msg = server_transport.receive().await.unwrap();
-            assert!(client_msg.is_some());
-            let request_id = client_msg.unwrap().id;
-
-            // Send heartbeat with projects
-            let heartbeat = LegacyServerMessage {
-                id: 0,
-                msg: ServerMsgBody::Heartbeat {
-                    fps: SampleStats {
-                        avg: 95.0,
-                        sdev: 0.0,
-                        min: 95.0,
-                        max: 95.0,
-                    },
-                    frame_count: 154,
-                    loaded_projects: vec![LoadedProject {
-                        handle: ProjectHandle::new(1),
-                        path: LpPathBuf::from("/projects/test-project"),
-                    }],
-                    uptime_ms: 4680,
-                    memory: None,
-                },
-            };
-            server_transport.send(heartbeat).await.unwrap();
-
-            // Send actual response
-            let response = LegacyServerMessage {
-                id: request_id,
-                msg: ServerMsgBody::StopAllProjects,
-            };
-            server_transport.send(response).await.unwrap();
-        });
-
-        // Send request - should handle heartbeat and get response
-        let result = client.stop_all_projects().await;
-        assert!(result.is_ok());
-
-        server_task.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_send_request_non_correlated_message() {
-        // Create transport pair
-        let (client_transport, mut server_transport) = create_local_transport_pair();
-        let client = LpClient::new(Box::new(client_transport));
-
-        // Spawn a task to simulate server sending wrong ID then correct response
-        let server_task = task::spawn(async move {
-            // Wait a bit for client to send request
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-            // Receive client request
-            let client_msg = server_transport.receive().await.unwrap();
-            assert!(client_msg.is_some());
-            let request_id = client_msg.unwrap().id;
-
-            // Send response with wrong ID (shouldn't happen, but test handling)
-            let wrong_response = LegacyServerMessage {
-                id: request_id + 100,
-                msg: ServerMsgBody::StopAllProjects,
-            };
-            server_transport.send(wrong_response).await.unwrap();
-
-            // Send correct response
-            let response = LegacyServerMessage {
-                id: request_id,
-                msg: ServerMsgBody::StopAllProjects,
-            };
-            server_transport.send(response).await.unwrap();
-        });
-
-        // Send request - should skip wrong ID and get correct response
-        let result = client.stop_all_projects().await;
-        assert!(result.is_ok());
-
-        server_task.await.unwrap();
-    }
-
-    #[test]
-    fn dev_demo_full_resources_matches_demo_wire_shape() {
-        let opts = ProjectGetChangesOptions::dev_demo_full_resources();
-        let req = WireProjectRequest::GetChanges {
-            since_frame: FrameId::default(),
-            legacy_detail_specifier: LegacyWireNodeSpecifier::All,
-            slot_watch_specifier: Default::default(),
-            resource_summary_specifier: opts.resource_summary_specifier,
-            runtime_buffer_payload_specifier: opts.runtime_buffer_payload_specifier,
-            render_product_payload_request: opts.render_product_payload_request,
-        };
-        match req {
-            WireProjectRequest::GetChanges {
-                resource_summary_specifier,
-                runtime_buffer_payload_specifier,
-                render_product_payload_request,
-                ..
-            } => {
-                assert_eq!(resource_summary_specifier, ResourceSummarySpecifier::All);
-                assert_eq!(
-                    runtime_buffer_payload_specifier,
-                    RuntimeBufferPayloadSpecifier::All
-                );
-                assert_eq!(
-                    render_product_payload_request.specifier,
-                    RenderProductPayloadSpecifier::All
-                );
-            }
         }
     }
 }
