@@ -4,7 +4,8 @@
 //! project in projects/ directory.
 
 use lpa_server::LpServer;
-use lpc_model::{lp_config::LightplayerConfig, LpPathBuf};
+use lpc_model::LpPathBuf;
+use lpc_model::server::server_config::ServerConfig;
 use lpfs::lp_path::AsLpPath;
 use lpfs::LpFs;
 
@@ -14,7 +15,7 @@ const CONFIG_PATH: &str = "/lightplayer.json";
 /// Read LightplayerConfig from /lightplayer.json.
 ///
 /// Returns None if file is missing, unreadable, or invalid JSON.
-pub fn read_config(fs: &dyn LpFs) -> Option<LightplayerConfig> {
+pub fn read_config(fs: &dyn LpFs) -> Option<ServerConfig> {
     let data = fs.read_file(CONFIG_PATH.as_path()).ok()?;
     lpc_wire::json::from_slice(&data).ok()
 }

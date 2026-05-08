@@ -34,7 +34,6 @@ fn map_load_error<E: core::fmt::Debug>(err: LoadError<E>) -> ArtifactError {
         } => ArtifactError::Load(format!(
             "schema version mismatch for {artifact_kind}: expected {expected}, found {found}"
         )),
-        LoadError::Domain(d) => ArtifactError::Load(format!("{d}")),
     }
 }
 

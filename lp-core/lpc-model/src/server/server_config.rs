@@ -5,9 +5,9 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-/// Application configuration (lightplayer.json)
+/// Application/server configuration (lightplayer.json)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct LightplayerConfig {
+pub struct ServerConfig {
     /// Project to load at startup; if None, use lexical-first available project
     #[serde(default)]
     pub startup_project: Option<String>,

@@ -23,7 +23,6 @@ pub mod __private {
 // --- Foundation -------------------------------------------------------------------------------
 
 pub mod binding;
-pub mod error;
 pub mod node;
 pub mod slot;
 pub mod value;
@@ -31,8 +30,7 @@ pub mod value;
 // --- Shared surface (non-wire) ---------------------------------------------------------------
 
 pub mod bus;
-pub mod lp_config;
-pub mod serial;
+pub mod config;
 pub mod slot_shapes {
     include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
 }
@@ -43,6 +41,7 @@ pub mod artifact;
 pub mod nodes;
 pub mod slots;
 pub mod sync;
+pub mod server;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 pub use value::constraint;
@@ -55,8 +54,6 @@ pub use binding::{
 };
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
-/// Cross-cutting error for domain property access and validation.
-pub use error::DomainError;
 /// Legacy semantic value kind used by the pre-slot property model.
 ///
 /// New slot-model code should prefer typed slot leaf descriptors whose semantic
@@ -65,7 +62,7 @@ pub use kind::Kind;
 pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelStructMember};
 
-pub use lp_config::LightplayerConfig;
+pub use server::server_config::ServerConfig;
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::{
@@ -80,7 +77,7 @@ pub use nodes::{
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
-pub use serial::DEFAULT_SERIAL_BAUD_RATE;
+pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use slot::{
     affine2d_shape, artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
     render_order_shape, render_product_resource_shape, resource_ref_shape, runtime_buffer_resource_shape, source_path_shape, u32_list_shape,

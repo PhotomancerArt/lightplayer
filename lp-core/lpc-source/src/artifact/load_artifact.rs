@@ -9,13 +9,11 @@
 //! - [`LoadError::Utf8`] — file bytes are not UTF-8.
 //! - [`LoadError::Parse`] — TOML does not match `T`’s serde shape.
 //! - [`LoadError::SchemaVersion`] — on-disk `schema_version` ≠ `T::CURRENT_VERSION`.
-//! - [`LoadError::Domain`] — reserved for domain validation during load (unused in this stub).
 //!
 //! Cross-artifact resolution (e.g. stack references) is out of scope; one file
 //! per call.
 
 use crate::artifact::src_artifact::SrcArtifact;
-use lpc_model::error::DomainError;
 use lpfs::lp_path::LpPath;
 
 /// Load a TOML artifact through [`ArtifactReadRoot`] and validate its `schema_version`
@@ -43,8 +41,8 @@ where
 
 /// Narrow filesystem surface for [`load_artifact`].
 ///
-/// Implemented for [`lpfs::LpFs`] in the `lpfs` crate so `lpc-source`
-/// does not depend on `lpfs` (avoids cycles).
+/// Implemented for [`lpfs::LpFs`] in this crate so `lpfs` stays below the
+/// source/model layer.
 pub trait ArtifactReadRoot {
     /// Low-level error returned when reading bytes fails.
     type Err;
@@ -68,8 +66,6 @@ pub enum LoadError<E> {
         expected: u32,
         found: u32,
     },
-    /// Domain-layer error during materialization or validation.
-    Domain(DomainError),
 }
 
 impl<E> From<core::str::Utf8Error> for LoadError<E> {
@@ -81,12 +77,6 @@ impl<E> From<core::str::Utf8Error> for LoadError<E> {
 impl<E> From<toml::de::Error> for LoadError<E> {
     fn from(e: toml::de::Error) -> Self {
         LoadError::Parse(e)
-    }
-}
-
-impl<E> From<DomainError> for LoadError<E> {
-    fn from(e: DomainError) -> Self {
-        LoadError::Domain(e)
     }
 }
 
