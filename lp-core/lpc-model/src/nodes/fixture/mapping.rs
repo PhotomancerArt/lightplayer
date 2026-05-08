@@ -1,12 +1,13 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{
-    FieldSlot, FrameId, FromLpValue, LpType, LpValue, MapSlot, PositiveF32Slot, SlotDataAccess,
-    SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta,
-    SlotRecordAccess, SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError, ValueSlot, XySlot, current_state_version,
-};
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    current_state_version, FieldSlot, FrameId, FromLpValue, LpType, LpValue, MapSlot,
+    PositiveF32Slot, SlotDataAccess, SlotEnumAccess, SlotEnumOption, SlotEnumShape,
+    SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess, SlotShape, SlotShapeId,
+    SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, XySlot,
+};
 
 /// Fixture-to-texture mapping authored on a fixture definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -295,7 +296,7 @@ impl SlotValue for RingOrder {
 }
 
 fn mapping_shape() -> SlotShape {
-    use lpc_model::slot::shape::{field, leaf, map, record, variant};
+    use crate::slot::shape::{field, leaf, map, record, variant};
 
     SlotShape::Enum {
         meta: SlotMeta::empty(),
@@ -309,22 +310,22 @@ fn mapping_shape() -> SlotShape {
                         <PathSpec as SlotEnumShape>::slot_enum_shape()
                     ),
                 ),
-                field("sample_diameter", leaf(lpc_model::positive_f32_shape())),
+                field("sample_diameter", leaf(crate::positive_f32_shape())),
             ]),
         )],
     }
 }
 
 fn path_spec_shape() -> SlotShape {
-    use lpc_model::slot::shape::{field, leaf, map, record, value, variant};
+    use crate::slot::shape::{field, leaf, map, record, value, variant};
 
     SlotShape::Enum {
         meta: SlotMeta::empty(),
         variants: alloc::vec![variant(
             "ring_array",
             record(alloc::vec![
-                field("center", leaf(lpc_model::xy_shape())),
-                field("diameter", leaf(lpc_model::positive_f32_shape())),
+                field("center", leaf(crate::xy_shape())),
+                field("diameter", leaf(crate::positive_f32_shape())),
                 field("start_ring_inclusive", value(LpType::U32)),
                 field("end_ring_exclusive", value(LpType::U32)),
                 field(

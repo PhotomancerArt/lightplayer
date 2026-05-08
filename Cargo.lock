@@ -4146,6 +4146,7 @@ name = "lpc-model"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "lpc-slot-codegen",
  "lpc-slot-macros",
  "schemars",
  "serde",
@@ -4203,7 +4204,6 @@ name = "lpc-source"
 version = "40.0.0"
 dependencies = [
  "lpc-model",
- "lpc-slot-codegen",
  "schemars",
  "serde",
  "serde_json",

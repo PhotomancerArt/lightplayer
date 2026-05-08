@@ -1,9 +1,11 @@
 use lpc_model::{
     LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
 };
-use lpc_source::node::{
-    ProjectDef, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
-};
+use lpc_model::nodes::fixture::FixtureDef;
+use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
+use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_wire::build_slot_full_sync;
 
 #[test]
@@ -15,7 +17,7 @@ fn real_source_defs_sync_as_slot_roots() {
     let fixture: FixtureDef = read_basic_toml("fixture.toml");
 
     let mut registry = SlotShapeRegistry::default();
-    lpc_source::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
+    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
 
     println!("server loaded");
     print_root(

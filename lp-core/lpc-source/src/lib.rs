@@ -9,16 +9,14 @@ extern crate std;
 
 pub mod artifact;
 pub mod legacy;
-pub mod node;
 pub mod presentation;
 pub mod schema;
 pub mod slot_shapes {
-    include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
+    pub use lpc_model::slot_shapes::*;
 }
 
 pub use artifact::{
-    ArtifactLocator, ArtifactReadRoot, LoadError, Migration, Registry, SrcArtifact,
-    SrcArtifactLibRef, load_artifact,
+    load_artifact, ArtifactLocator, ArtifactReadRoot, LoadError, Migration, Registry,
+    SrcArtifact, SrcArtifactLibRef,
 };
-pub use node::{NodeDef, NodeInvocation, ProjectDef};
 pub use presentation::Presentation;

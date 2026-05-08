@@ -8,7 +8,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::{FrameId, NodeId, SlotPath};
-use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
@@ -19,7 +19,7 @@ use crate::nodes::fixture::mapping::{
 use crate::nodes::shader::shader_node::shader_texture_output_path;
 use crate::nodes::texture::texture_node::texture_dimension_query_targets;
 use lpc_model::Versioned;
-use lpc_source::node::texture::TextureFormat;
+use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
     DestroyCtx, FixtureProjectionInfo, MemPressureCtx, Node, NodeError, NodeResourceInitContext,
@@ -513,8 +513,8 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::{Kind, LpValue, TreePath, Versioned};
-    use lpc_source::node::fixture::{PathSpec, RingOrder};
-    use lpc_source::node::texture::TextureDef;
+    use lpc_model::nodes::fixture::{PathSpec, RingOrder};
+    use lpc_model::nodes::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};

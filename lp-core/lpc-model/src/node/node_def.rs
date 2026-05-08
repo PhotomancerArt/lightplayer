@@ -1,5 +1,5 @@
-use crate::node::NodeKind;
 use core::any::Any;
+use crate::node::kind::NodeKind;
 
 /// Authored body of a node artifact.
 ///

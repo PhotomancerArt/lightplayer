@@ -1,9 +1,9 @@
 use lpc_model::{BindingEndpoint, RelativeNodeRef};
-use lpc_source::ProjectDef;
-use lpc_source::node::fixture::FixtureDef;
-use lpc_source::node::output::OutputDef;
-use lpc_source::node::shader::ShaderDef;
-use lpc_source::node::texture::TextureDef;
+use lpc_model::nodes::project::project_def::ProjectDef;
+use lpc_model::nodes::fixture::FixtureDef;
+use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
 
 #[test]
 fn flat_basic_example_artifacts_parse_as_source_defs() {

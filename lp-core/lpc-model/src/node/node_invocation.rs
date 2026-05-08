@@ -5,11 +5,11 @@
 //! field merges are reserved for richer invocation forms.
 
 use crate::artifact::artifact_loc::ArtifactLocator;
+use crate::ArtifactPathSlot;
 use alloc::string::ToString;
-use lpc_model::ArtifactPathSlot;
 
 /// Parent-owned child node invocation.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_model::SlotRecord)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodeInvocation {
     /// Artifact to load for this child node definition.

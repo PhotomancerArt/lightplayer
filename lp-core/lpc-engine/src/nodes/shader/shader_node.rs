@@ -9,8 +9,8 @@ use lp_shader::LpsTextureBuf;
 use lpc_model::FrameId;
 use lpc_model::NodeId;
 use lpc_model::SlotPath;
-use lpc_source::legacy::glsl_opts::{AddSubMode, DivMode, MulMode};
-use lpc_source::node::shader::ShaderDef;
+use lpc_model::{AddSubMode, DivMode, GlslOpts, MulMode};
+use lpc_model::nodes::shader::ShaderDef;
 use lps_shared::LpsValueF32;
 use lps_shared::TextureBuffer;
 
@@ -358,7 +358,7 @@ impl ShaderNode {
 }
 
 fn map_model_q32_options(
-    opts: &lpc_source::legacy::glsl_opts::GlslOpts,
+    opts: &GlslOpts,
 ) -> lps_q32::q32_options::Q32Options {
     lps_q32::q32_options::Q32Options {
         add_sub: match opts.add_sub.value() {
@@ -429,7 +429,7 @@ mod tests {
             )
             .expect("texture");
 
-        let tex = TextureNode::new(tex_id, lpc_source::node::texture::TextureDef::new(8, 8));
+        let tex = TextureNode::new(tex_id, lpc_model::nodes::texture::TextureDef::new(8, 8));
         engine
             .attach_runtime_node(tex_id, Box::new(tex), frame)
             .expect("attach tex");

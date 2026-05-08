@@ -173,9 +173,9 @@ mod output_sink_flush_tests {
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
     };
-    use lpc_source::node::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
-    use lpc_source::node::output::OutputDef;
-    use lpc_source::node::texture::TextureDef;
+    use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+    use lpc_model::nodes::output::OutputDef;
+    use lpc_model::nodes::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use super::{CoreProjectRuntime, RuntimeServices};

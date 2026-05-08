@@ -5,6 +5,11 @@ use crate::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+
+// TODO: We probably want a builder pattern for slots not
+//       a seperate PositiveF32Slot. More like F32Slot.positive()
+//
+
 /// Versioned non-negative floating point value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PositiveF32Slot {

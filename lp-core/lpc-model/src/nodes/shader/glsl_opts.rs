@@ -1,7 +1,7 @@
 //! GLSL compilation options (per-shader-node)
 
 use alloc::string::{String, ToString};
-use lpc_model::{
+use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
     ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };

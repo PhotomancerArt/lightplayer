@@ -1,16 +1,17 @@
-use crate::node::NodeKind;
-use crate::node::fixture::mapping::MappingConfig;
-use crate::node::node_def::NodeDef;
 use alloc::string::ToString;
-use lpc_model::{
+use serde::{Deserialize, Serialize};
+
+use crate::node::kind::NodeKind;
+use crate::node::node_def::NodeDef;
+use crate::nodes::fixture::MappingConfig;
+use crate::{
     Affine2dSlot, BindingDefs, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,
     RelativeNodeRefSlot, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError,
     ValueSlot,
 };
-use serde::{Deserialize, Serialize};
 
 /// Authored fixture node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
 #[slot(root)]
 pub struct FixtureDef {
     /// Output node locator.
@@ -235,16 +236,15 @@ impl SlotValue for ColorOrder {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
 
     fn value_shape() -> SlotValueShape {
-        lpc_model::color_order_shape()
+        crate::color_order_shape()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::fixture::mapping::{PathSpec, RingOrder};
     use alloc::collections::BTreeMap;
-    use lpc_model::{Affine2d, MapSlot};
+    use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
 
     #[test]
     fn test_fixture_def_kind() {

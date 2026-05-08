@@ -117,7 +117,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_source::NodeInvocation;
+    use lpc_model::NodeInvocation;
     use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
     fn make_tree() -> NodeTree<()> {

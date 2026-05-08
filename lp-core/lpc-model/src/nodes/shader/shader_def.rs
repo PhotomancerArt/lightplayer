@@ -1,14 +1,15 @@
-use crate::legacy::glsl_opts::GlslOpts;
-use crate::node::NodeKind;
-use crate::node::node_def::NodeDef;
-use crate::node::shader::ShaderParamDef;
 use alloc::string::String;
-use lpc_model::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot};
-use lpc_model::{RenderOrderSlot, SourcePathSlot};
 use serde::{Deserialize, Serialize};
 
+use crate::node::kind::NodeKind;
+use crate::node::node_def::NodeDef;
+use crate::nodes::shader::{GlslOpts, ShaderParamDef};
+use crate::{
+    AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot,
+};
+
 /// Authored shader node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
 #[slot(root)]
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
@@ -60,7 +61,7 @@ impl NodeDef for ShaderDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::legacy::glsl_opts::{AddSubMode, DivMode, MulMode};
+    use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
 
     #[test]
     fn test_shader_def_kind() {

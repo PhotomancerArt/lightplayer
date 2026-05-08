@@ -6,7 +6,7 @@ use alloc::vec;
 use lpc_model::FrameId;
 use lpc_model::NodeId;
 use lpc_model::SlotPath;
-use lpc_source::node::texture::{TextureDef, TextureFormat};
+use lpc_model::nodes::texture::{TextureDef, TextureFormat};
 use lps_shared::LpsValueF32;
 
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};

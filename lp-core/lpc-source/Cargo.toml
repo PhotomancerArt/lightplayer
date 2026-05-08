@@ -17,9 +17,6 @@ serde = { workspace = true, features = ["derive"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }
 
-[build-dependencies]
-lpc-slot-codegen = { path = "../lpc-slot-codegen" }
-
 [dev-dependencies]
 serde_json = { workspace = true }
 toml = { workspace = true, features = ["display"] }

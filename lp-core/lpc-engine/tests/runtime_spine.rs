@@ -15,7 +15,7 @@ use lpc_engine::{
 };
 use lpc_model::{FrameId, Kind, LpValue, NodeId, SlotPath, bus::ChannelName};
 use lpc_source::ArtifactLocator;
-use lpc_source::node::node_invocation::NodeInvocation;
+use lpc_model::node::node_invocation::NodeInvocation;
 use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---

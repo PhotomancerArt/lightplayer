@@ -1,13 +1,16 @@
-use crate::node::{NodeDef, NodeInvocation, NodeKind};
 use alloc::string::String;
-use lpc_model::{MapSlot, OptionSlot, ValueSlot};
+
+use crate::node::kind::NodeKind;
+use crate::node::node_def::NodeDef;
+use crate::node::node_invocation::NodeInvocation;
+use crate::{MapSlot, OptionSlot, ValueSlot};
 
 /// Authored root project node definition.
 ///
 /// A project is a node artifact with `kind = "project"`. Its `nodes` table is
 /// the explicit source of child node invocations; the runtime no longer
 /// discovers children from filesystem directories.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_model::SlotRecord)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord)]
 #[slot(root)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
@@ -43,7 +46,7 @@ impl NodeDef for ProjectDef {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::nodes::project::project_def::ProjectDef;
 
     #[test]
     fn project_def_deserializes_named_nodes() {

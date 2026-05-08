@@ -1,10 +1,11 @@
-use crate::node::NodeKind;
-use crate::node::node_def::NodeDef;
-use lpc_model::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 use serde::{Deserialize, Serialize};
 
+use crate::node::kind::NodeKind;
+use crate::node::node_def::NodeDef;
+use crate::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+
 /// Authored GPIO output node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
 #[slot(root)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
@@ -41,7 +42,7 @@ impl NodeDef for OutputDef {
 }
 
 /// Authored output driver options for the display pipeline.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
 pub struct OutputDriverOptionsConfig {
     /// Gamma exponent for luminance curve.
     #[serde(default = "default_lum_power_slot")]
@@ -94,6 +95,7 @@ fn default_true_slot() -> ValueSlot<bool> {
 
 #[cfg(test)]
 mod tests {
+    use crate::node::kind::NodeKind;
     use super::*;
 
     #[test]

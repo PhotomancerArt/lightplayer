@@ -3,8 +3,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId, TreePath};
-use lpc_source::{ArtifactLocator, NodeInvocation};
+use lpc_model::{ArtifactLocator, FrameId, NodeId, NodeInvocation, TreePath};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
@@ -117,7 +116,7 @@ impl<N> NodeEntry<N> {
 mod tests {
     use super::NodeEntry;
     use lpc_model::{FrameId, NodeId, TreePath};
-    use lpc_source::{ArtifactLocator, NodeInvocation};
+    use lpc_model::{ArtifactLocator, NodeInvocation};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
     #[test]

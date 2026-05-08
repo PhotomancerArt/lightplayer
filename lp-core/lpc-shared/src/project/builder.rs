@@ -8,13 +8,11 @@ use lpc_model::{
     Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
     RelativeNodeRefSlot, RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
-use lpc_source::legacy::glsl_opts::GlslOpts;
-use lpc_source::node::{
-    fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder},
-    output::{OutputDef, OutputDriverOptionsConfig},
-    shader::ShaderDef,
-    texture::TextureDef,
-};
+use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
+use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
+use lpc_model::GlslOpts;
 use lpfs::LpFs;
 
 /// Builder for creating test projects
@@ -480,7 +478,7 @@ fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_source::ProjectDef;
+    use lpc_model::nodes::project::project_def::ProjectDef;
     use lpfs::LpFsMemory;
 
     #[test]

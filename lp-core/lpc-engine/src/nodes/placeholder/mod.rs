@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 
 use lpc_model::FrameId;
 use lpc_model::SlotPath;
-use lpc_source::node::NodeKind;
+use lpc_model::NodeKind;
 
 use crate::node::{DestroyCtx, MemPressureCtx, Node, NodeError, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;

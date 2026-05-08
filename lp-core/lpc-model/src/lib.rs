@@ -2,17 +2,17 @@
 //! addressing, portable values, and slot-shaped data. Wire/protocol shapes live
 //! in `lpc-wire`.
 //!
-//! Authored node definitions (Project / Texture / Shader / Output / Fixture)
-//! live in `lpc-source`.
+//! Authored node definitions live here too. The slot model is the shared domain
+//! language for source artifacts, wire sync, runtime inspection, and UI editing.
 
 #![no_std]
 
 extern crate alloc;
+extern crate self as lpc_model;
 
 #[cfg(feature = "std")]
 extern crate std;
 
-#[cfg(feature = "derive")]
 pub use lpc_slot_macros::SlotRecord;
 
 #[doc(hidden)]
@@ -35,16 +35,22 @@ pub mod bus;
 pub mod lp_config;
 pub mod lp_path;
 pub mod serial;
+pub mod slot_shapes {
+    include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
+}
 pub mod tree;
 
 pub mod project;
 pub mod resource;
 mod versioned;
+pub mod artifact;
+pub mod nodes;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 pub use value::constraint;
 pub use value::kind;
 
+pub use artifact::{ArtifactLocator, SrcArtifactLibRef};
 pub use binding::{
     BindingDef, BindingDefError, BindingDefs, BindingEndpoint, BindingEndpointError, BusSlotRef,
     BusSlotRefError, NodeSlotRef, NodeSlotRefError,
@@ -65,7 +71,13 @@ pub use lp_config::LightplayerConfig;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::{
-    NodeId, NodeName, NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeDef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError, RelativeNodeRef,
+    RelativeNodeRefError, RelativeNodeRefSrc,
+};
+pub use nodes::{
+    AddSubMode, ColorOrder, DivMode, FixtureDef, GlslOpts, MappingConfig, MulMode, OutputDef,
+    OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder, ScalarHint, ShaderDef,
+    ShaderParamDef, TextureDef, TextureFormat,
 };
 pub use project::{FrameId, ProjectConfig};
 pub use project::{advance_state_version, current_state_version, set_current_state_version};

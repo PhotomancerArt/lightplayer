@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use libm;
 use lpc_model::FrameId;
-use lpc_source::node::fixture::MappingConfig;
+use lpc_model::nodes::fixture::MappingConfig;
 use lps_q32::q32::Q32;
 
 use super::entry::PixelMappingEntry;

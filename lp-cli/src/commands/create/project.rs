@@ -10,12 +10,10 @@ use lpc_model::{
     Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
     RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
-use lpc_source::node::{
-    fixture::{ColorOrder, FixtureDef, MappingConfig},
-    output::OutputDef,
-    shader::ShaderDef,
-    texture::TextureDef,
-};
+use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
+use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
 use lpfs::LpFs;
 
 use crate::messages;
@@ -80,7 +78,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
         render_order: RenderOrderSlot::new(0),
         bindings: bus_output_binding_defs("visual.out"),
-        glsl_opts: lpc_source::legacy::glsl_opts::GlslOpts::default(),
+        glsl_opts: lpc_model::GlslOpts::default(),
         param_defs: MapSlot::default(),
     };
     let shader_toml = with_kind(

@@ -4,8 +4,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{FrameId, NodeId, NodeName, NodePathSegment, TreePath};
-use lpc_source::NodeInvocation;
+use lpc_model::{FrameId, NodeId, NodeInvocation, NodeName, NodePathSegment, TreePath};
 use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
@@ -222,7 +221,7 @@ mod tests {
     use crate::tree::test_placeholder_spine;
     use alloc::vec::Vec;
     use lpc_model::{FrameId, NodeId, NodeName, TreePath};
-    use lpc_source::{ArtifactLocator, NodeInvocation};
+    use lpc_model::{ArtifactLocator, NodeInvocation};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     fn make_tree() -> NodeTree<()> {

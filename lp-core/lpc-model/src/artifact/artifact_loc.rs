@@ -1,10 +1,10 @@
 use alloc::string::String;
 use core::fmt;
 
-use lpc_model::LpPathBuf;
+use crate::LpPathBuf;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::src_artifact_lib_ref::SrcArtifactLibRef;
+use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
 /// Author-facing locator for a loadable artifact carried in source as a string.
 ///
@@ -90,7 +90,7 @@ mod tests {
     use alloc::string::ToString;
 
     use super::ArtifactLocator;
-    use crate::artifact::SrcArtifactLibRef;
+    use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
     #[test]
     fn display_normalizes_path() {

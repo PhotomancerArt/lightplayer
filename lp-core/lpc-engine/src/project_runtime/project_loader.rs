@@ -5,13 +5,15 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{BindingDefs, BindingEndpoint, FrameId, Kind, LpValue, NodeId, NodeName, SlotPath};
+use lpc_model::lp_path::{LpPath, LpPathBuf};
+use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
+use lpc_model::nodes::fixture::FixtureDef;
+use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::project::project_def::ProjectDef;
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
 use lpc_source::ArtifactReadRoot;
-use lpc_source::node::{
-    NodeKind, fixture::FixtureDef, output::OutputDef, shader::ShaderDef, texture::TextureDef,
-};
-use lpc_source::{ArtifactLocator, NodeInvocation, ProjectDef};
 use lpc_wire::{WireChildKind, WireSlotIndex};
 
 use crate::artifact::ArtifactLocation;
