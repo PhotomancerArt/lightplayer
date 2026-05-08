@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::LpPathBuf;
+use lpfs::LpPathBuf;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;

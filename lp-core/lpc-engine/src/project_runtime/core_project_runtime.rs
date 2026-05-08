@@ -4,7 +4,7 @@ use alloc::string::String;
 
 use hashbrown::HashMap;
 
-use lpc_model::lp_path::{LpPath, LpPathBuf};
+use lpfs::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{Revision, NodeId, TreePath};
 use lpfs::FsChange;
 

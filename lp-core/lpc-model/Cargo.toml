@@ -19,6 +19,7 @@ serde = { workspace = true, features = ["derive"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }
 lpc-slot-macros = { path = "../lpc-slot-macros" }
+lpfs = { path = "../../lp-base/lpfs", default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }

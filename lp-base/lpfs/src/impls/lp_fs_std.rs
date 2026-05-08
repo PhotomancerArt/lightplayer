@@ -9,7 +9,7 @@ use crate::{
 use alloc::{format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_model::lp_path::{LpPath, LpPathBuf};
+use crate::{LpPath, LpPathBuf};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -477,7 +477,7 @@ impl LpFs for LpFsStd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::AsLpPath;
+    use crate::AsLpPath;
     use std::fs;
     use tempfile::TempDir;
 
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn test_validate_path_for_deletion() {
         // Test the validation helper function (without attempting deletion)
-        use lpc_model::AsLpPath;
+        use crate::AsLpPath;
         assert!(LpFsStd::validate_path_for_deletion("/".as_path()).is_err());
         assert!(LpFsStd::validate_path_for_deletion("/file.txt".as_path()).is_ok());
         assert!(LpFsStd::validate_path_for_deletion("/dir".as_path()).is_ok());

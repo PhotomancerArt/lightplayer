@@ -305,7 +305,7 @@ mod ser_write_json_tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::convert::Infallible;
-    use lpc_model::lp_path::AsLpPathBuf;
+    use lpfs::lp_path::AsLpPathBuf;
     use ser_write_json::SerWrite;
     use ser_write_json::ser::to_writer;
     use serde::Serialize;

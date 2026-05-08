@@ -11,6 +11,8 @@ pub mod artifact;
 pub mod legacy;
 pub mod presentation;
 pub mod schema;
+mod artifact_read_root;
+
 pub mod slot_shapes {
     pub use lpc_model::slot_shapes::*;
 }

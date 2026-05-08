@@ -9,10 +9,10 @@
 //! - `cargo test -p lpv-model --features std --test round_trip`
 //! - `cargo test -p lpv-model --features std,schema-gen --test round_trip`
 
-use lpc_model::lp_path::LpPathBuf;
+use lpfs::lp_path::LpPathBuf;
 #[cfg(feature = "schema-gen")]
 use lpc_source::artifact::src_artifact::SrcArtifact;
-use lpfs::lp_fs_std::LpFsStd;
+use lpfs::impls::lp_fs_std::LpFsStd;
 use lpv_model::load_artifact;
 use lpv_model::visual::{Effect, Live, Pattern, Playlist, Stack, Transition};
 use std::path::PathBuf;

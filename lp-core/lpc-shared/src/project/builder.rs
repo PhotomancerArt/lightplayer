@@ -2,7 +2,7 @@
 
 use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
-use lpc_model::lp_path::LpPathBuf;
+use lpfs::lp_path::LpPathBuf;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
     Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,

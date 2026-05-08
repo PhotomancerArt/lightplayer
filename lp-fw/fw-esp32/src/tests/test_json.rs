@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::vec;
-use lpc_model::lp_path::AsLpPathBuf;
+use lpfs::lp_path::AsLpPathBuf;
 use lpc_wire::WireServerMessage;
 use lpc_wire::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
 

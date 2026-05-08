@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{BindingDefs, BindingEndpoint, Revision, Kind, LpValue, NodeId, NodeName, SlotPath};
-use lpc_model::lp_path::{LpPath, LpPathBuf};
+use lpfs::lp_path::{LpPath, LpPathBuf};
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::output::OutputDef;
@@ -653,7 +653,7 @@ where
 mod tests {
     use lpc_model::NodeName;
     use lpc_model::TreePath;
-    use lpc_model::lp_path::AsLpPath;
+    use lpfs::lp_path::AsLpPath;
     use lpfs::{LpFs, LpFsMemory};
 
     use super::*;

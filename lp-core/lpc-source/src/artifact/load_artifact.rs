@@ -16,7 +16,7 @@
 
 use crate::artifact::src_artifact::SrcArtifact;
 use lpc_model::error::DomainError;
-use lpc_model::lp_path::LpPath;
+use lpfs::lp_path::LpPath;
 
 /// Load a TOML artifact through [`ArtifactReadRoot`] and validate its `schema_version`
 /// against `T::CURRENT_VERSION`.
@@ -94,7 +94,7 @@ impl<E> From<DomainError> for LoadError<E> {
 mod tests {
     use super::*;
     use alloc::string::{String, ToString};
-    use lpc_model::lp_path::LpPathBuf;
+    use lpfs::lp_path::LpPathBuf;
 
     /// Minimal deserialize target for loader tests (visual `Pattern` lives in `lpv-model`).
     #[derive(Debug, serde::Deserialize)]

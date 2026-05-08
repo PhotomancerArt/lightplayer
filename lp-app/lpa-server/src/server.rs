@@ -345,7 +345,7 @@ impl LpServer {
     /// Avoids multiple borrows when caller needs to pass base_fs, output_provider, etc.
     pub fn load_project(
         &mut self,
-        path: &lpc_model::lp_path::LpPath,
+        path: &lpfs::lp_path::LpPath,
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
         self.project_manager.load_project(
             path,

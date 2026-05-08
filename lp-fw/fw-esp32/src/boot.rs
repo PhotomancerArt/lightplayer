@@ -4,7 +4,8 @@
 //! project in projects/ directory.
 
 use lpa_server::LpServer;
-use lpc_model::{LpPathBuf, lp_config::LightplayerConfig, lp_path::AsLpPath};
+use lpc_model::{lp_config::LightplayerConfig, LpPathBuf};
+use lpfs::lp_path::AsLpPath;
 use lpfs::LpFs;
 
 /// Config file path at filesystem root

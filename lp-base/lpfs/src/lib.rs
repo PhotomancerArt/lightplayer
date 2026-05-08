@@ -13,21 +13,20 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-mod lpc_model_artifact;
-
 pub mod error;
 pub mod fs_event;
 pub mod lp_fs;
-pub mod lp_fs_mem;
-#[cfg(feature = "std")]
-pub mod lp_fs_std;
 pub mod lp_fs_view;
+pub mod lp_path;
+pub mod impls;
+
+pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 
 pub use error::FsError;
 pub use fs_event::{ChangeType, FsChange, FsVersion};
 pub use lp_fs::LpFs;
-pub use lp_fs_mem::LpFsMemory;
+pub use impls::lp_fs_mem::LpFsMemory;
 pub use lp_fs_view::LpFsView;
 
 #[cfg(feature = "std")]
-pub use lp_fs_std::LpFsStd;
+pub use impls::lp_fs_std::LpFsStd;

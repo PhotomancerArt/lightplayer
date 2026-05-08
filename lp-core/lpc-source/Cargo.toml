@@ -8,11 +8,12 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["lpc-model/std", "toml/std", "toml/preserve_order"]
+std = ["lpc-model/std", "lpfs/std", "toml/std", "toml/preserve_order"]
 schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
 
 [dependencies]
 lpc-model = { path = "../lpc-model", default-features = false, features = ["derive"] }
+lpfs = { path = "../../lp-base/lpfs", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }

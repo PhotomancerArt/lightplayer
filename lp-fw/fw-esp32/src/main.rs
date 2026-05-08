@@ -187,7 +187,6 @@ use {
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
     lpa_server::{Graphics, LpGraphics, LpServer},
-    lpc_model::lp_path::AsLpPath,
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::Esp32OutputProvider,
@@ -195,6 +194,16 @@ use {
     server_loop::run_server_loop,
     time::Esp32TimeProvider,
 };
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
+use lpfs::lp_path::AsLpPath;
 
 #[cfg(feature = "test_rmt")]
 mod tests {
