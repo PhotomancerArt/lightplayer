@@ -1,10 +1,8 @@
 use crate::{
-    FieldSlot, Revision, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
-    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision,
-    current_revision,
+    FieldSlot, LpType, LpValue, OrderedF32, Revision, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision, current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 
 // TODO: We probably want a builder pattern for slots not
 //       a seperate PositiveF32Slot. More like F32Slot.positive()

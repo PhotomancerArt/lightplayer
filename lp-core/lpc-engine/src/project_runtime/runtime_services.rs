@@ -9,10 +9,10 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use hashbrown::HashMap;
+use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{Revision, TreePath};
 use lpc_shared::error::OutputError;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
-use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 
@@ -250,13 +250,13 @@ mod tests {
     use alloc::rc::Rc;
     use alloc::vec;
 
+    use lpc_model::nodes::output::OutputDef;
     use lpc_model::{Revision, TreePath, WithRevision};
     use lpc_shared::error::OutputError;
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
     };
-    use lpc_model::nodes::output::OutputDef;
 
     use super::RuntimeServices;
     use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferStore};

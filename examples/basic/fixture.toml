@@ -5,7 +5,7 @@ brightness = 255
 gamma_correction = false
 
 [bindings.input]
-source = "..texture#output"
+source = "bus#visual.out"
 
 [transform]
 m00 = 1.0
@@ -14,6 +14,10 @@ m10 = 0.0
 m11 = 1.0
 tx = 0.0
 ty = 0.0
+
+[render_size]
+width = 16
+height = 16
 
 [mapping]
 kind = "path_points"

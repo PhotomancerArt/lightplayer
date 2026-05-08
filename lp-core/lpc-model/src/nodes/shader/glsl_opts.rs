@@ -1,10 +1,10 @@
 //! GLSL compilation options (per-shader-node)
 
-use alloc::string::{String, ToString};
 use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
     ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
+use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
 
 /// Mode for Q32 add/sub: saturating (builtin) or wrapping (inline iadd/isub)

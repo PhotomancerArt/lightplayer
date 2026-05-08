@@ -13,9 +13,9 @@ use lpc_engine::{
     ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, RuntimeProduct, SessionHostResolver,
     SessionResolveError, TickContext, TickResolver,
 };
-use lpc_model::{Revision, Kind, LpValue, NodeId, SlotPath, bus::ChannelName};
-use lpc_source::ArtifactLocator;
 use lpc_model::node::node_invocation::NodeInvocation;
+use lpc_model::{Kind, LpValue, NodeId, Revision, SlotPath, bus::ChannelName};
+use lpc_source::ArtifactLocator;
 use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---

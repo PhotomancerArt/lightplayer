@@ -3,13 +3,13 @@
 use alloc::boxed::Box;
 use alloc::vec;
 
-use lpc_model::Revision;
 use lpc_model::NodeId;
+use lpc_model::Revision;
 use lpc_model::SlotPath;
 use lpc_model::nodes::texture::{TextureDef, TextureFormat};
 use lps_shared::LpsValueF32;
 
-use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
+use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;
 use crate::runtime_product::RuntimeProduct;
 
@@ -23,13 +23,6 @@ fn height_path() -> SlotPath {
 
 fn format_path() -> SlotPath {
     SlotPath::parse("format").expect("format path")
-}
-
-/// [`NodeId`] of the texture and conventional prop paths for width/height (used by shader nodes).
-pub(crate) fn texture_dimension_query_targets(
-    texture_node_id: NodeId,
-) -> (NodeId, SlotPath, SlotPath) {
-    (texture_node_id, width_path(), height_path())
 }
 
 fn texture_format_tag(f: TextureFormat) -> u32 {
@@ -210,8 +203,8 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
-    use crate::resolver::{QueryKey, ResolveLogLevel};
     use crate::node::test_placeholder_spine;
+    use crate::resolver::{QueryKey, ResolveLogLevel};
     use lpc_model::TreePath;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 

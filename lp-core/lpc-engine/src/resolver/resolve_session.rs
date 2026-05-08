@@ -11,7 +11,7 @@ use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::resolver::resolver::Resolver;
 use crate::resolver::resolver::materialize_literal_value;
-use lpc_model::{ChannelName, Revision, NodeId, SlotPath};
+use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 
 /// Active resolution session for one frame (or nested test scope).
 pub struct ResolveSession<'a> {

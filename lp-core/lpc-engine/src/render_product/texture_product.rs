@@ -6,6 +6,7 @@ use lps_shared::TextureStorageFormat;
 
 use super::{
     RenderProduct, RenderProductError, RenderSample, RenderSampleBatch, RenderSampleBatchResult,
+    RenderTextureRequest,
 };
 
 /// Invalid [`TextureRenderProduct`] construction input.
@@ -119,6 +120,21 @@ impl RenderProduct for TextureRenderProduct {
             samples.push(RenderSample { color });
         }
         Ok(RenderSampleBatchResult { samples })
+    }
+
+    fn render_texture(
+        &mut self,
+        request: &RenderTextureRequest,
+        _graphics: Option<&dyn crate::gfx::LpGraphics>,
+    ) -> Result<TextureRenderProduct, RenderProductError> {
+        if self.width == request.width
+            && self.height == request.height
+            && self.format == request.format
+        {
+            Ok(self.clone())
+        } else {
+            Err(RenderProductError::NotRenderable)
+        }
     }
 
     fn as_any(&self) -> &dyn core::any::Any {

@@ -54,7 +54,9 @@ impl RuntimeBufferStore {
     }
 
     /// Iterate all buffers in deterministic id order (for M4.1 resource summaries).
-    pub fn iter(&self) -> impl Iterator<Item = (RuntimeBufferId, &WithRevision<RuntimeBuffer>)> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (RuntimeBufferId, &WithRevision<RuntimeBuffer>)> + '_ {
         self.buffers.iter().map(|(&id, buf)| (id, buf))
     }
 
@@ -130,7 +132,10 @@ mod tests {
     #[test]
     fn store_replace_preserves_new_versioned_frame() {
         let mut store = RuntimeBufferStore::new();
-        let id = store.insert(WithRevision::new(Revision::new(1), RuntimeBuffer::raw(vec![1])));
+        let id = store.insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::raw(vec![1]),
+        ));
         let replacement = RuntimeBuffer::raw(vec![2, 3]);
         let new_frame = Revision::new(9);
         store
@@ -145,7 +150,10 @@ mod tests {
     #[test]
     fn store_mut_marks_updated_frame() {
         let mut store = RuntimeBufferStore::new();
-        let id = store.insert(WithRevision::new(Revision::new(1), RuntimeBuffer::raw(vec![1])));
+        let id = store.insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::raw(vec![1]),
+        ));
 
         let buffer = store
             .get_mut_mark_updated(id, Revision::new(7))

@@ -5,23 +5,25 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::{BindingDefs, BindingEndpoint, Revision, Kind, LpValue, NodeId, NodeName, SlotPath};
-use lpfs::lp_path::{LpPath, LpPathBuf};
-use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
+use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
+use lpc_model::{
+    BindingDefs, BindingEndpoint, ChannelName, Kind, LpValue, NodeId, NodeName, Revision, SlotPath,
+};
 use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
+use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::ArtifactLocation;
 use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
+use crate::node::TreeError;
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
 use crate::runtime_buffer::RuntimeBufferId;
-use crate::node::TreeError;
 
 use super::{CoreProjectRuntime, RuntimeServices};
 
@@ -248,43 +250,33 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let LoadedNodeDef::Shader(config) = &node.config {
-                let texture_node = resolve_shader_texture_node(loaded_nodes, node, config)?;
                 let shader_path =
                     resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
                 let glsl_source = read_utf8_file(root, shader_path.as_path())?;
-                let placeholder_dims = placeholder_texture_dimensions_for_shader(texture_node)?;
                 runtime
                     .engine_mut()
                     .attach_runtime_node(
                         node.id,
-                        Box::new(ShaderNode::new(
-                            node.id,
-                            texture_node.id,
-                            config.clone(),
-                            glsl_source,
-                            placeholder_dims.0,
-                            placeholder_dims.1,
-                        )),
+                        Box::new(ShaderNode::new(node.id, config.clone(), glsl_source)),
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach shader runtime: {e}"),
                     })?;
+                register_target_binding(
+                    runtime.engine_mut(),
+                    loaded_nodes,
+                    node,
+                    "output",
+                    &config.bindings,
+                    frame,
+                )?;
             }
         }
 
         for node in loaded_nodes {
             if let LoadedNodeDef::Fixture(config) = &node.config {
-                let texture_node = resolve_fixture_texture_node(loaded_nodes, node, config)?;
-                let shader_node = find_shader_for_texture(loaded_nodes, texture_node.id)
-                    .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!(
-                            "no shader targets texture node `{}`",
-                            texture_node.name.as_str()
-                        ),
-                    })?;
                 let output_node =
                     resolve_node_loc(loaded_nodes, node, config.output_loc(), "output")?;
                 let sink_id = output_sink_for(
@@ -299,8 +291,8 @@ impl CoreProjectLoader {
                         node.id,
                         Box::new(FixtureNode::new(
                             node.id,
-                            texture_node.id,
-                            shader_node.id,
+                            config.render_width(),
+                            config.render_height(),
                             config.mapping.clone(),
                             frame,
                             sink_id,
@@ -334,6 +326,14 @@ impl CoreProjectLoader {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("bind fixture demand slot: {e}"),
                     })?;
+                register_source_binding(
+                    runtime.engine_mut(),
+                    loaded_nodes,
+                    node,
+                    "input",
+                    &config.bindings,
+                    frame,
+                )?;
                 runtime.engine_mut().add_demand_root(node.id);
             }
         }
@@ -500,79 +500,6 @@ fn demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("valid demand input path")
 }
 
-fn resolve_shader_texture_node<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    current: &'a LoadedNode,
-    config: &ShaderDef,
-) -> Result<&'a LoadedNode, CoreProjectLoadError> {
-    let target = binding_target(&config.bindings, "output").ok_or_else(|| {
-        CoreProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: String::from("shader output binding is missing"),
-        }
-    })?;
-
-    match target {
-        BindingEndpoint::Bus(bus) => {
-            find_texture_consuming_bus(loaded_nodes, bus).ok_or_else(|| {
-                CoreProjectLoadError::InvalidSourcePath {
-                    path: current.artifact_path.as_str().to_string(),
-                    reason: format!("no texture consumes shader output bus `{bus}`"),
-                }
-            })
-        }
-        BindingEndpoint::Node(node_slot) => {
-            resolve_node_loc(loaded_nodes, current, node_slot.node(), "texture")
-        }
-        BindingEndpoint::Literal(_) => Err(CoreProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: String::from("shader output target cannot be a literal"),
-        }),
-    }
-}
-
-fn resolve_fixture_texture_node<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    current: &'a LoadedNode,
-    config: &FixtureDef,
-) -> Result<&'a LoadedNode, CoreProjectLoadError> {
-    let source = binding_source(&config.bindings, "input").ok_or_else(|| {
-        CoreProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: String::from("fixture input binding is missing"),
-        }
-    })?;
-
-    match source {
-        BindingEndpoint::Node(node_slot) => {
-            resolve_node_loc(loaded_nodes, current, node_slot.node(), "texture")
-        }
-        BindingEndpoint::Bus(bus) => Err(CoreProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: format!("fixture input bus `{bus}` cannot be resolved to a texture yet"),
-        }),
-        BindingEndpoint::Literal(_) => Err(CoreProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: String::from("fixture input source cannot be a literal"),
-        }),
-    }
-}
-
-fn find_texture_consuming_bus<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    bus: &lpc_model::BusSlotRef,
-) -> Option<&'a LoadedNode> {
-    loaded_nodes.iter().find(|node| {
-        let LoadedNodeDef::Texture(config) = &node.config else {
-            return false;
-        };
-        matches!(
-            binding_source(&config.bindings, "input"),
-            Some(BindingEndpoint::Bus(candidate)) if candidate == bus
-        )
-    })
-}
-
 fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
     bindings.entries().get(slot)?.source.as_ref()
 }
@@ -581,44 +508,128 @@ fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a Bindi
     bindings.entries().get(slot)?.target.as_ref()
 }
 
-fn find_shader_for_texture<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    texture_id: NodeId,
-) -> Option<&'a LoadedNode> {
-    loaded_nodes
-        .iter()
-        .filter(|node| {
-            let LoadedNodeDef::Shader(config) = &node.config else {
-                return false;
-            };
-            resolve_shader_texture_node(loaded_nodes, node, config)
-                .map(|candidate| candidate.id == texture_id)
-                .unwrap_or(false)
-        })
-        .max_by(|a, b| {
-            let ar = match &a.config {
-                LoadedNodeDef::Shader(config) => config.render_order(),
-                _ => 0,
-            };
-            let br = match &b.config {
-                LoadedNodeDef::Shader(config) => config.render_order(),
-                _ => 0,
-            };
-            ar.cmp(&br)
-                .then_with(|| a.artifact_path.as_str().cmp(b.artifact_path.as_str()))
-        })
+fn register_source_binding(
+    engine: &mut Engine,
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    slot_name: &str,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), CoreProjectLoadError> {
+    let source = binding_source(bindings, slot_name).ok_or_else(|| {
+        CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("{slot_name} source binding is missing"),
+        }
+    })?;
+    let source = binding_source_endpoint(loaded_nodes, current, source)?;
+    let target_slot =
+        SlotPath::parse(slot_name).map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("invalid target slot `{slot_name}`: {e}"),
+        })?;
+    engine
+        .bindings_mut()
+        .register(
+            BindingDraft {
+                source,
+                target: BindingTarget::ConsumedSlot {
+                    node: current.id,
+                    slot: target_slot,
+                },
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register {slot_name} source binding: {e}"),
+        })?;
+    Ok(())
 }
 
-fn placeholder_texture_dimensions_for_shader(
-    texture_node: &LoadedNode,
-) -> Result<(u32, u32), CoreProjectLoadError> {
-    let LoadedNodeDef::Texture(config) = &texture_node.config else {
-        return Err(CoreProjectLoadError::InvalidSourcePath {
-            path: texture_node.artifact_path.as_str().to_string(),
-            reason: String::from("shader texture loc did not reference a texture node"),
-        });
+fn register_target_binding(
+    engine: &mut Engine,
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    slot_name: &str,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), CoreProjectLoadError> {
+    let Some(target) = binding_target(bindings, slot_name) else {
+        return Ok(());
     };
-    Ok((config.width(), config.height()))
+    let target = binding_target_endpoint(loaded_nodes, current, target)?;
+    let source_slot =
+        SlotPath::parse(slot_name).map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("invalid source slot `{slot_name}`: {e}"),
+        })?;
+    engine
+        .bindings_mut()
+        .register(
+            BindingDraft {
+                source: BindingSource::ProducedSlot {
+                    node: current.id,
+                    slot: source_slot,
+                },
+                target,
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register {slot_name} target binding: {e}"),
+        })?;
+    Ok(())
+}
+
+fn binding_source_endpoint(
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    endpoint: &BindingEndpoint,
+) -> Result<BindingSource, CoreProjectLoadError> {
+    match endpoint {
+        BindingEndpoint::Literal(value) => Ok(BindingSource::Literal(value.clone())),
+        BindingEndpoint::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
+            bus.slot().to_string(),
+        ))),
+        BindingEndpoint::Node(node_slot) => {
+            let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding source")?;
+            Ok(BindingSource::ProducedSlot {
+                node: node.id,
+                slot: node_slot.slot().clone(),
+            })
+        }
+    }
+}
+
+fn binding_target_endpoint(
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    endpoint: &BindingEndpoint,
+) -> Result<BindingTarget, CoreProjectLoadError> {
+    match endpoint {
+        BindingEndpoint::Literal(_) => Err(CoreProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("binding target cannot be a literal"),
+        }),
+        BindingEndpoint::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
+            bus.slot().to_string(),
+        ))),
+        BindingEndpoint::Node(node_slot) => {
+            let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding target")?;
+            Ok(BindingTarget::ConsumedSlot {
+                node: node.id,
+                slot: node_slot.slot().clone(),
+            })
+        }
+    }
 }
 
 fn output_sink_for(
@@ -854,9 +865,9 @@ order = "inner_first"
             matches!(
                 err,
                 CoreProjectLoadError::InvalidSourcePath { ref reason, .. }
-                    if reason.contains("unknown texture node ref `..missing`")
+                    if reason.contains("unknown binding source node ref `..missing`")
             ),
-            "expected missing texture ref, got {err:?}"
+            "expected missing binding source ref, got {err:?}"
         );
     }
 

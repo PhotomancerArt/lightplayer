@@ -3,10 +3,10 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    current_revision, FieldSlot, Revision, FromLpValue, LpType, LpValue, MapSlot,
-    PositiveF32Slot, SlotDataAccess, SlotEnumAccess, SlotEnumOption, SlotEnumShape,
-    SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess, SlotShape, SlotShapeId,
-    SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, XySlot,
+    FieldSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32Slot, Revision, SlotDataAccess,
+    SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta,
+    SlotRecordAccess, SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
+    ValueEditorHint, ValueRootError, ValueSlot, XySlot, current_revision,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -76,8 +76,7 @@ impl SlotEnumAccess for MappingConfig {
     fn variant_revision(&self) -> Revision {
         match self {
             Self::PathPoints {
-                variant_revision,
-                ..
+                variant_revision, ..
             } => *variant_revision,
         }
     }
@@ -182,8 +181,7 @@ impl SlotEnumAccess for PathSpec {
     fn variant_revision(&self) -> Revision {
         match self {
             Self::RingArray {
-                variant_revision,
-                ..
+                variant_revision, ..
             } => *variant_revision,
         }
     }

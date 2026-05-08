@@ -1,4 +1,4 @@
-use crate::{Revision, LpValue, SlotName, WithRevision, current_revision};
+use crate::{LpValue, Revision, SlotName, WithRevision, current_revision};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -60,10 +60,7 @@ impl SlotMapDyn {
         Self::with_revision(current_revision(), entries)
     }
 
-    pub fn with_revision(
-        keys_revision: Revision,
-        entries: BTreeMap<SlotMapKey, SlotData>,
-    ) -> Self {
+    pub fn with_revision(keys_revision: Revision, entries: BTreeMap<SlotMapKey, SlotData>) -> Self {
         Self {
             keys_revision,
             entries,

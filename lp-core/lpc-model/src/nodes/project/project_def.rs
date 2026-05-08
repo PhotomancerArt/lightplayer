@@ -10,7 +10,9 @@ use crate::{MapSlot, OptionSlot, ValueSlot};
 /// A project is a node artifact with `kind = "project"`. Its `nodes` table is
 /// the explicit source of child node invocations; the runtime no longer
 /// discovers children from filesystem directories.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord,
+)]
 #[slot(root)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {

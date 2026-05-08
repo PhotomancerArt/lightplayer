@@ -2,6 +2,7 @@
 
 use crate::render_product::{
     NativeTexturePayload, RenderProductId, RenderSampleBatch, RenderSampleBatchResult,
+    RenderTextureRequest, TextureRenderProduct,
 };
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
@@ -20,6 +21,12 @@ pub trait TickResolver {
         id: RenderProductId,
         batch: &RenderSampleBatch,
     ) -> Result<RenderSampleBatchResult, ResolveError>;
+
+    fn render_texture(
+        &mut self,
+        id: RenderProductId,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, ResolveError>;
 
     fn with_native_texture_payload(
         &mut self,
@@ -58,6 +65,16 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<RenderSampleBatchResult, ResolveError> {
         self.host
             .sample_render_product(id, batch)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn render_texture(
+        &mut self,
+        id: RenderProductId,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, ResolveError> {
+        self.host
+            .render_texture(id, request)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 

@@ -7,8 +7,8 @@ use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpc_model::{Revision, NodeId, SlotPath};
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+use lpc_model::{NodeId, Revision, SlotPath};
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
@@ -16,24 +16,28 @@ use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators,
 };
-use crate::nodes::shader::shader_node::shader_texture_output_path;
-use crate::nodes::texture::texture_node::texture_dimension_query_targets;
 use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
-    DestroyCtx, FixtureProjectionInfo, MemPressureCtx, NodeRuntime, NodeError, NodeResourceInitContext,
-    PressureLevel, TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
+    TickContext,
 };
 use crate::prop::ProducedSlotAccess;
-use crate::render_product::{RenderSample, RenderSampleBatch, RenderSamplePoint};
+use crate::render_product::{
+    RenderProduct, RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest,
+    TextureRenderProduct,
+};
 use crate::resolver::QueryKey;
 use crate::runtime_buffer::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat,
 };
 
 use crate::runtime_product::RuntimeProduct;
-use lps_shared::LpsValueF32;
+
+pub fn fixture_input_path() -> SlotPath {
+    SlotPath::parse("input").expect("fixture input path")
+}
 
 #[derive(Clone, Copy)]
 struct FixtureScalarProps;
@@ -60,8 +64,8 @@ impl ProducedSlotAccess for FixtureScalarProps {
 /// Fixture demand root: resolves a shader texture render handle, batches UV samples via the render
 /// product API, applies legacy mapping accumulation, writes output channel buffer bytes.
 pub struct FixtureNode {
-    texture_node_id: NodeId,
-    shader_node_id: NodeId,
+    render_width: u32,
+    render_height: u32,
     mapping: MappingConfig,
     mapping_version: Revision,
     output_sink: RuntimeBufferId,
@@ -77,8 +81,8 @@ pub struct FixtureNode {
 impl FixtureNode {
     pub fn new(
         _fixture_id: NodeId,
-        texture_node_id: NodeId,
-        shader_node_id: NodeId,
+        render_width: u32,
+        render_height: u32,
         mapping: MappingConfig,
         mapping_version: Revision,
         output_sink: RuntimeBufferId,
@@ -87,8 +91,8 @@ impl FixtureNode {
         gamma_correction: bool,
     ) -> Self {
         Self {
-            texture_node_id,
-            shader_node_id,
+            render_width,
+            render_height,
             mapping,
             mapping_version,
             output_sink,
@@ -117,60 +121,20 @@ impl NodeRuntime for FixtureNode {
         Ok(())
     }
 
-    fn fixture_projection_info(&self) -> Option<FixtureProjectionInfo> {
-        Some(FixtureProjectionInfo {
-            lamp_colors_buffer_id: self.lamp_colors_buffer_id,
-            output_sink_buffer_id: self.output_sink,
-            texture_node_id: self.texture_node_id,
-        })
-    }
-
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let (tn, wpath, hpath) = texture_dimension_query_targets(self.texture_node_id);
-        let w_prod = ctx
-            .resolve(QueryKey::ConsumedSlot {
-                node: tn,
-                slot: wpath,
-            })
-            .map_err(|e| NodeError::msg(format!("resolve texture width: {}", e.message)))?;
-        let h_prod = ctx
-            .resolve(QueryKey::ConsumedSlot {
-                node: tn,
-                slot: hpath,
-            })
-            .map_err(|e| NodeError::msg(format!("resolve texture height: {}", e.message)))?;
-
-        let width = match w_prod.as_value() {
-            Some(LpsValueF32::I32(v)) if *v > 0 => *v as u32,
-            Some(LpsValueF32::U32(v)) if *v > 0 => *v,
-            _ => {
-                return Err(NodeError::msg(
-                    "texture width missing or invalid (expected positive I32/U32)",
-                ));
-            }
-        };
-        let height = match h_prod.as_value() {
-            Some(LpsValueF32::I32(v)) if *v > 0 => *v as u32,
-            Some(LpsValueF32::U32(v)) if *v > 0 => *v,
-            _ => {
-                return Err(NodeError::msg(
-                    "texture height missing or invalid (expected positive I32/U32)",
-                ));
-            }
-        };
-
-        let out_path = shader_texture_output_path();
         let prod = ctx
-            .resolve(QueryKey::ProducedSlot {
-                node: self.shader_node_id,
-                slot: out_path,
+            .resolve(QueryKey::ConsumedSlot {
+                node: ctx.node_id(),
+                slot: fixture_input_path(),
             })
-            .map_err(|e| NodeError::msg(format!("resolve shader render product: {}", e.message)))?;
+            .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
 
         let rid =
             prod.product.get().as_render().ok_or_else(|| {
-                NodeError::msg("fixture expected RuntimeProduct::Render from shader")
+                NodeError::msg("fixture expected RuntimeProduct::Render from input")
             })?;
+        let width = self.render_width;
+        let height = self.render_height;
 
         let ver = ctx.revision();
         let mapping_ver = self.mapping_version;
@@ -201,7 +165,21 @@ impl NodeRuntime for FixtureNode {
             .ok_or_else(|| NodeError::msg("fixture internal: missing cached mapping"))?
             .3;
 
-        let accumulators = accumulate_fixture_channels(ctx, rid, mapping_entries, width, height)?;
+        let texture = ctx.render_texture(
+            rid,
+            &RenderTextureRequest {
+                width,
+                height,
+                format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                time_seconds: ctx.time_seconds(),
+            },
+        )?;
+        let accumulators = accumulate_fixture_channels_from_texture_product(
+            &texture,
+            mapping_entries,
+            width,
+            height,
+        )?;
 
         push_fixture_output(
             ctx,
@@ -237,46 +215,30 @@ impl NodeRuntime for FixtureNode {
     }
 }
 
-fn accumulate_fixture_channels(
-    ctx: &mut TickContext<'_>,
-    rid: crate::render_product::RenderProductId,
+fn accumulate_fixture_channels_from_texture_product(
+    texture: &TextureRenderProduct,
     mapping_entries: &[PixelMappingEntry],
     width: u32,
     height: u32,
 ) -> Result<ChannelAccumulators, NodeError> {
-    let mut native_accumulators = None;
-    let mut visit_native =
-        |(texture_width, texture_height, texture_data, texture_format): crate::render_product::NativeTexturePayload<
-            '_,
-        >| {
-            if texture_format == lps_shared::TextureStorageFormat::Rgba16Unorm
-                && texture_width == width
-                && texture_height == height
-            {
-                native_accumulators = Some(accumulate_from_mapping(
-                    mapping_entries,
-                    texture_data,
-                    TextureFormat::Rgba16,
-                    texture_width,
-                    texture_height,
-                ));
-            }
-        };
-    let _ = ctx.with_native_texture_payload(rid, &mut visit_native);
-    if let Some(accumulators) = native_accumulators {
-        return Ok(accumulators);
+    if texture.storage_format() == lps_shared::TextureStorageFormat::Rgba16Unorm
+        && texture.width() == width
+        && texture.height() == height
+        && let Some(bytes) = texture.try_raw_bytes()
+    {
+        return Ok(accumulate_from_mapping(
+            mapping_entries,
+            bytes,
+            TextureFormat::Rgba16,
+            width,
+            height,
+        ));
     }
 
     let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
-    if ctx.revision().as_i64() % 60 == 0 {
-        log::info!(
-            "[fixture] frame={} sampling {} points from {} mapping entries via generic render product path",
-            ctx.revision().as_i64(),
-            batch.points.len(),
-            mapping_entries.len()
-        );
-    }
-    let sample_result = ctx.sample_render_product(rid, &batch)?;
+    let sample_result = texture
+        .sample_batch(&batch)
+        .map_err(|e| NodeError::msg(format!("sample rendered texture: {e:?}")))?;
     accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
 
@@ -512,19 +474,20 @@ mod tests {
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use lpc_model::{Kind, LpValue, TreePath, WithRevision};
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
     use lpc_model::nodes::texture::TextureDef;
+    use lpc_model::{Kind, LpValue, TreePath, WithRevision};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
+    use crate::node::test_placeholder_spine;
     use crate::nodes::TextureNode;
+    use crate::nodes::shader_output_path;
     use crate::prop::ProducedSlotAccess;
     use crate::render_product::SolidColorProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
-    use crate::node::test_placeholder_spine;
 
     #[derive(Clone)]
     struct FixtureTickCountSolidProducerOutputs {
@@ -649,7 +612,7 @@ mod tests {
             )
             .unwrap();
 
-        let out_path = shader_texture_output_path();
+        let out_path = shader_output_path();
         engine
             .attach_runtime_node(
                 sh_id,
@@ -703,8 +666,8 @@ mod tests {
                 fix_id,
                 Box::new(FixtureNode::new(
                     fix_id,
-                    tex_id,
-                    sh_id,
+                    4,
+                    4,
                     mapping,
                     frame,
                     sink,
@@ -724,6 +687,22 @@ mod tests {
                         node: sh_id,
                         slot: out_path.clone(),
                     },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .bindings_mut()
+            .register(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
                         node: fix_id,
                         slot: default_demand_input_path(),
@@ -793,7 +772,7 @@ mod tests {
             )
             .unwrap();
 
-        let out_path = shader_texture_output_path();
+        let out_path = shader_output_path();
         engine
             .attach_runtime_node(
                 sh_id,
@@ -847,8 +826,8 @@ mod tests {
                 fix_id,
                 Box::new(FixtureNode::new(
                     fix_id,
-                    tex_id,
-                    sh_id,
+                    4,
+                    4,
                     mapping,
                     frame,
                     sink,
@@ -856,6 +835,25 @@ mod tests {
                     255,
                     false,
                 )),
+                frame,
+            )
+            .unwrap();
+        engine
+            .bindings_mut()
+            .register(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path.clone(),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
                 frame,
             )
             .unwrap();

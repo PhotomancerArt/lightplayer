@@ -3,7 +3,7 @@
 use crate::bus::bus_error::BusError;
 use crate::bus::channel_entry::ChannelEntry;
 use alloc::collections::BTreeMap;
-use lpc_model::{ChannelName, Revision, Kind, NodeId, SlotPath};
+use lpc_model::{ChannelName, Kind, NodeId, Revision, SlotPath};
 use lps_shared::LpsValueF32;
 
 /// Runtime registry of bus channels.
@@ -94,7 +94,7 @@ impl Bus {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bus, BusError, ChannelName, Revision, Kind, NodeId};
+    use super::{Bus, BusError, ChannelName, Kind, NodeId, Revision};
     use lpc_model::SlotPath;
     use lps_shared::LpsValueF32;
 

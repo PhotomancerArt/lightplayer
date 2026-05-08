@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, Revision, LpValue, SlotDataAccess, SlotShape, SlotValueAccess, WithRevision,
+    FieldSlot, LpValue, Revision, SlotDataAccess, SlotShape, SlotValueAccess, WithRevision,
     current_revision,
 };
 use alloc::string::String;

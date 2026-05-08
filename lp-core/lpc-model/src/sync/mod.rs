@@ -6,6 +6,6 @@
 //! changed. This keeps sync/change tracking separate from schema or file-format
 //! versions.
 
-pub mod with_revision;
-pub mod revision;
 pub mod current_revision;
+pub mod revision;
+pub mod with_revision;

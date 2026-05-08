@@ -45,8 +45,8 @@ mod tests {
     use super::{Production, ProductionSource};
     use crate::binding::BindingId;
     use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
-    use lpc_model::Revision;
     use lpc_model::NodeId;
+    use lpc_model::Revision;
     use lpc_model::SlotPath;
     use lpc_model::WithRevision;
     use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32};

@@ -53,8 +53,8 @@ mod tests {
     use crate::resolver::production::ProductionSource;
     use crate::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
     use lpc_model::ChannelName;
-    use lpc_model::Revision;
     use lpc_model::NodeId;
+    use lpc_model::Revision;
     use lpc_model::SlotPath;
     use lpc_model::WithRevision;
     use lps_shared::LpsValueF32;

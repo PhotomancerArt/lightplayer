@@ -12,11 +12,11 @@ use crate::bus::Bus;
 use crate::gfx::LpGraphics;
 use crate::render_product::{
     NativeTexturePayload, RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch,
-    RenderSampleBatchResult,
+    RenderSampleBatchResult, RenderTextureRequest, TextureRenderProduct,
 };
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
-use lpc_model::{Revision, NodeId, WithRevision, bus::ChannelName};
+use lpc_model::{NodeId, Revision, WithRevision, bus::ChannelName};
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -44,7 +44,10 @@ impl<'a> NodeResourceInitContext<'a> {
         self.render_products.insert(product)
     }
 
-    pub fn insert_runtime_buffer(&mut self, buffer: WithRevision<RuntimeBuffer>) -> RuntimeBufferId {
+    pub fn insert_runtime_buffer(
+        &mut self,
+        buffer: WithRevision<RuntimeBuffer>,
+    ) -> RuntimeBufferId {
         self.runtime_buffers.insert(buffer)
     }
 }
@@ -169,6 +172,17 @@ impl<'r> TickContext<'r> {
         self.resolver.sample_render_product(id, batch).map_err(|e| {
             NodeError::msg(alloc::format!("render product sample_batch: {}", e.message))
         })
+    }
+
+    /// Materializes a render product into a full texture through the engine-owned store.
+    pub fn render_texture(
+        &mut self,
+        id: RenderProductId,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError> {
+        self.resolver
+            .render_texture(id, request)
+            .map_err(|e| NodeError::msg(alloc::format!("render texture: {}", e.message)))
     }
 
     /// Borrows a CPU-backed native texture payload when the render product can expose one.

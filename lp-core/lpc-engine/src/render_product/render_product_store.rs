@@ -7,7 +7,12 @@ use core::any::Any;
 
 use lpc_model::Revision;
 
-use super::{RenderProductId, RenderSampleBatch, RenderSampleBatchResult, TextureRenderProduct};
+use crate::gfx::LpGraphics;
+
+use super::{
+    RenderProductId, RenderSampleBatch, RenderSampleBatchResult, RenderTextureRequest,
+    TextureRenderProduct,
+};
 
 pub type NativeTexturePayload<'a> = (u32, u32, &'a [u8], lps_shared::TextureStorageFormat);
 
@@ -16,6 +21,8 @@ pub type NativeTexturePayload<'a> = (u32, u32, &'a [u8], lps_shared::TextureStor
 pub enum RenderProductError {
     UnknownProduct { id: RenderProductId },
     SampleCountMismatch,
+    NotRenderable,
+    RenderFailed { message: alloc::string::String },
 }
 
 /// Full/native RGBA payload materialization failed for wire sync (M4.1).
@@ -38,6 +45,16 @@ pub trait RenderProduct {
         &self,
         request: &RenderSampleBatch,
     ) -> Result<RenderSampleBatchResult, RenderProductError>;
+
+    /// Render this product into a complete texture when it supports full-frame materialization.
+    fn render_texture(
+        &mut self,
+        request: &RenderTextureRequest,
+        graphics: Option<&dyn LpGraphics>,
+    ) -> Result<TextureRenderProduct, RenderProductError> {
+        let _ = (request, graphics);
+        Err(RenderProductError::NotRenderable)
+    }
 
     /// For downcasting to concrete products (texture materialization, diagnostics).
     fn as_any(&self) -> &dyn Any;
@@ -120,6 +137,18 @@ impl RenderProductStore {
         Ok(result)
     }
 
+    pub fn render_texture(
+        &mut self,
+        id: RenderProductId,
+        request: &RenderTextureRequest,
+        graphics: Option<&dyn LpGraphics>,
+    ) -> Result<TextureRenderProduct, RenderProductError> {
+        self.products
+            .get_mut(&id)
+            .ok_or_else(|| RenderProductError::unknown_product(id))?
+            .render_texture(request, graphics)
+    }
+
     /// Full/native RGBA16 wire payload when the backing product is [`TextureRenderProduct`] in RGBA16.
     pub fn try_materialize_native_texture_payload(
         &self,
@@ -174,9 +203,65 @@ impl RenderProduct for SolidColorProduct {
         Ok(RenderSampleBatchResult { samples })
     }
 
+    fn render_texture(
+        &mut self,
+        request: &super::RenderTextureRequest,
+        _graphics: Option<&dyn crate::gfx::LpGraphics>,
+    ) -> Result<TextureRenderProduct, RenderProductError> {
+        let mut pixels = alloc::vec::Vec::new();
+        let px_count = usize::try_from(request.width)
+            .ok()
+            .and_then(|w| {
+                usize::try_from(request.height)
+                    .ok()
+                    .map(|h| w.saturating_mul(h))
+            })
+            .ok_or_else(|| RenderProductError::RenderFailed {
+                message: alloc::format!(
+                    "texture dimensions {}x{} overflow usize",
+                    request.width,
+                    request.height
+                ),
+            })?;
+        pixels.reserve(px_count.saturating_mul(request.format.bytes_per_pixel()));
+        let rgba = [
+            f32_to_unorm16(self.color[0]),
+            f32_to_unorm16(self.color[1]),
+            f32_to_unorm16(self.color[2]),
+            f32_to_unorm16(self.color[3]),
+        ];
+        for _ in 0..px_count {
+            match request.format {
+                lps_shared::TextureStorageFormat::Rgba16Unorm => {
+                    for channel in rgba {
+                        pixels.extend_from_slice(&channel.to_le_bytes());
+                    }
+                }
+                lps_shared::TextureStorageFormat::Rgb16Unorm => {
+                    for channel in &rgba[0..3] {
+                        pixels.extend_from_slice(&channel.to_le_bytes());
+                    }
+                }
+                lps_shared::TextureStorageFormat::R16Unorm => {
+                    pixels.extend_from_slice(&rgba[0].to_le_bytes());
+                }
+            }
+        }
+        TextureRenderProduct::new(request.width, request.height, request.format, pixels).map_err(
+            |e| RenderProductError::RenderFailed {
+                message: alloc::format!("solid color texture product: {e}"),
+            },
+        )
+    }
+
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
+}
+
+#[cfg(test)]
+fn f32_to_unorm16(value: f32) -> u16 {
+    libm::floorf(value.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16
 }
 
 /// Test double that returns `[x, y, 0.0, 1.0]` from each [`RenderSamplePoint`].

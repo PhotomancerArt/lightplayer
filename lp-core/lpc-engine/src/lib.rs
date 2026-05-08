@@ -17,6 +17,7 @@ pub mod bus;
 pub mod engine;
 pub mod error;
 pub mod gfx;
+pub mod memory;
 pub mod node;
 pub mod nodes;
 pub mod output;
@@ -29,7 +30,6 @@ pub mod runtime;
 pub mod runtime_buffer;
 pub mod runtime_product;
 pub mod wire_bridge;
-pub mod memory;
 
 pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactManager, ArtifactState,
@@ -43,8 +43,8 @@ pub use engine::{Engine, EngineError};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use node::{
-    DestroyCtx, NodeEntryState, MemPressureCtx, NodeRuntime, NodeEntry, NodeError, NodeTree, PressureLevel,
-    TickContext, TreeError, tree_deltas_since,
+    DestroyCtx, MemPressureCtx, NodeEntry, NodeEntryState, NodeError, NodeRuntime, NodeTree,
+    PressureLevel, TickContext, TreeError, tree_deltas_since,
 };
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project_runtime::{
@@ -54,8 +54,8 @@ pub use project_runtime::{
 pub use prop::{ProducedSlotAccess, RuntimeStateAccess};
 pub use render_product::{
     RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
-    RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, TextureRenderProduct,
-    TextureRenderProductError,
+    RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, RenderTextureRequest,
+    TextureRenderProduct, TextureRenderProductError,
 };
 pub use resolver::{
     Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,

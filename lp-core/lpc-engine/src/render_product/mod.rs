@@ -2,6 +2,7 @@
 
 mod render_product_id;
 mod render_product_store;
+mod render_texture_request;
 mod sample_request;
 mod sample_result;
 mod texture_product;
@@ -11,8 +12,10 @@ pub use render_product_store::{
     NativeTexturePayload, RenderProduct, RenderProductError, RenderProductMaterializeError,
     RenderProductStore,
 };
+pub use render_texture_request::RenderTextureRequest;
 pub use sample_request::{RenderSampleBatch, RenderSamplePoint};
 pub use sample_result::{RenderSample, RenderSampleBatchResult};
+pub use crate::nodes::shader::shader_render_product::ShaderRenderProduct;
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 
 #[cfg(test)]

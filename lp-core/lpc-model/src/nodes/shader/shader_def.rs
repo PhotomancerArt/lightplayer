@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::node::kind::NodeKind;
 use crate::node::node_def::NodeDef;
 use crate::nodes::shader::{GlslOpts, ShaderParamDef};
-use crate::{
-    AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot,
-};
+use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot};
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]

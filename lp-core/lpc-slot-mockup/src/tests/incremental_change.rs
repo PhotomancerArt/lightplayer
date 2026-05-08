@@ -1,4 +1,4 @@
-use lpc_model::{Revision, LpValue, SlotMapKey};
+use lpc_model::{LpValue, Revision, SlotMapKey};
 
 use super::fixture::{
     Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks, select,

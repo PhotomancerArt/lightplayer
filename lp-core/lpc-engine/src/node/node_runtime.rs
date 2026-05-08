@@ -7,8 +7,6 @@ use crate::prop::{
 use crate::render_product::RenderProductId;
 use crate::runtime_buffer::RuntimeBufferId;
 
-use lpc_model::NodeId;
-
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
 use crate::memory::pressure_level::PressureLevel;
@@ -52,34 +50,6 @@ pub trait NodeRuntime {
     fn primary_render_product_id(&self) -> Option<RenderProductId> {
         None
     }
-
-    /// Fixture-only: lamp-colors buffer handle, fixture output sink buffer, sampled texture node.
-    ///
-    /// Default `None`; [`crate::nodes::FixtureNode`] supplies values for legacy detail projection.
-    fn fixture_projection_info(&self) -> Option<FixtureProjectionInfo> {
-        None
-    }
-
-    /// Shader-only: textual source/error plus optional initialized render-product id for wire sync.
-    fn shader_projection_wire(&self) -> Option<ShaderProjectionWire<'_>> {
-        None
-    }
-}
-
-/// Runtime buffer identifiers owned by this node, used by resource projection.
-#[derive(Clone, Copy, Debug)]
-pub struct FixtureProjectionInfo {
-    pub lamp_colors_buffer_id: Option<RuntimeBufferId>,
-    pub output_sink_buffer_id: RuntimeBufferId,
-    pub texture_node_id: NodeId,
-}
-
-/// M4.1 shader detail projection (`glsl_code`, error text, semantic render-product ref).
-#[derive(Clone, Copy, Debug)]
-pub struct ShaderProjectionWire<'a> {
-    pub glsl_source: &'a str,
-    pub compilation_error: Option<&'a str>,
-    pub render_product_id: Option<RenderProductId>,
 }
 
 #[cfg(test)]
@@ -94,7 +64,7 @@ mod tests {
         resolve_trace::ResolveLogLevel,
     };
     use crate::runtime_product::RuntimeProduct;
-    use lpc_model::{Revision, NodeId, SlotPath};
+    use lpc_model::{NodeId, Revision, SlotPath};
     use lps_shared::LpsValueF32;
 
     struct EmptyResolveHost;

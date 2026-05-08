@@ -44,7 +44,7 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec::Vec;
 
-    use lpc_model::{Revision, LpPath, LpPathBuf};
+    use lpc_model::{LpPath, LpPathBuf, Revision};
     use lpc_source::ArtifactLocator;
 
     use crate::artifact::{ArtifactManager, ArtifactState};

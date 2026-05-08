@@ -1,4 +1,4 @@
-use lpc_model::{Revision, LpValue, SlotPath};
+use lpc_model::{LpValue, Revision, SlotPath};
 use lpc_wire::{
     WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,

@@ -95,8 +95,8 @@ fn default_true_slot() -> ValueSlot<bool> {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::kind::NodeKind;
     use super::*;
+    use crate::node::kind::NodeKind;
 
     #[test]
     fn test_output_def_kind() {

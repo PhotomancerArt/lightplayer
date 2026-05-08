@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use lpc_model::{ChannelName, Revision, Kind, LpValue, NodeId, SlotPath};
+use lpc_model::{ChannelName, Kind, LpValue, NodeId, Revision, SlotPath};
 
 use super::BindingId;
 

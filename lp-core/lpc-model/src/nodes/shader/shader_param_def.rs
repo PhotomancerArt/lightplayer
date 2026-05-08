@@ -1,8 +1,8 @@
 //! Authored shader parameter metadata.
 
+use crate::{LpValue, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
-use crate::{LpValue, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 /// Authored definition for one shader parameter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]

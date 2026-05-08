@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use crate::{BindingDefs, Dim2u, Dim2uSlot};
 use crate::node::kind::NodeKind;
 use crate::node::node_def::NodeDef;
+use crate::{BindingDefs, Dim2u, Dim2uSlot};
+use serde::{Deserialize, Serialize};
 
 /// Authored texture node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]

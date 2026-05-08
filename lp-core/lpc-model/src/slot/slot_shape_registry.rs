@@ -4,7 +4,7 @@
 //! register here. The registry is versioned so clients can sync shape additions,
 //! removals, and replacements before applying slot data patches.
 
-use crate::{Revision, SlotShape, SlotShapeId, current_revision, WithRevision};
+use crate::{Revision, SlotShape, SlotShapeId, WithRevision, current_revision};
 use alloc::collections::BTreeMap;
 
 /// Registry of id-addressed slot shape roots.
@@ -40,7 +40,8 @@ impl SlotShapeRegistry {
         if self.shapes.contains_key(&root) {
             return Err(SlotShapeRegistryError::DuplicateShapeId(root));
         }
-        self.shapes.insert(root, SlotShapeEntry::new(revision, shape));
+        self.shapes
+            .insert(root, SlotShapeEntry::new(revision, shape));
         self.ids_revision = revision;
         Ok(())
     }
@@ -73,7 +74,8 @@ impl SlotShapeRegistry {
             };
         }
 
-        self.shapes.insert(root, SlotShapeEntry::new(revision, shape));
+        self.shapes
+            .insert(root, SlotShapeEntry::new(revision, shape));
         self.ids_revision = revision;
         Ok(true)
     }
@@ -92,7 +94,8 @@ impl SlotShapeRegistry {
         root: SlotShapeId,
         shape: SlotShape,
     ) {
-        self.shapes.insert(root, SlotShapeEntry::new(revision, shape));
+        self.shapes
+            .insert(root, SlotShapeEntry::new(revision, shape));
         self.ids_revision = revision;
     }
 

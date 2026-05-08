@@ -1,6 +1,6 @@
 //! ChannelEntry — per-channel state on the bus.
 
-use lpc_model::{Revision, Kind, NodeId, SlotPath};
+use lpc_model::{Kind, NodeId, Revision, SlotPath};
 use lps_shared::LpsValueF32;
 
 /// Per-channel state on the bus.

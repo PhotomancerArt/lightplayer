@@ -1,250 +1,250 @@
 # M2.4 Runtime Node Truth Pass Notes
 
-> These notes now assume M2.3 (`authored slot bindings`) lands first.
-> M2.4 should consume that authored binding model rather than inventing or
-> settle it inside the runtime refactor.
-
 ## Scope Of Work
 
-M2.4 is a runtime cleanup and refactor milestone before canonical project sync
-work resumes. The goal is to make the runtime node graph reflect the domain
-model we actually want, now that the old UI/message burden is gone.
+M2.4 is a local runtime cleanup/refactor milestone before canonical sync and UI
+work resumes. The goal is to make the engine node graph reflect the domain model
+we actually want, now that M2.3 authored bindings exist and the old project sync
+surface has been gutted.
 
 In scope:
 
-- Remove leftover legacy projection hooks and node-specific sync shims from the
-  runtime node surface.
-- Rewire node flow so the runtime graph reflects the actual dataflow, using
-  the authored binding model established by M2.3:
-  - shader produces a render product on an `output` slot
-  - texture consumes that render product and materializes a texture-backed
-    runtime buffer / render target
-  - fixture consumes texture output through a proper binding/consumed slot
-  - output flow uses the established runtime/resource patterns instead of ad hoc
-    projection helpers
-- Clean up `lpc-engine` module organization and naming where directly touched by
-  this refactor.
-- Add local unit/integration tests that validate the new runtime flow in
-  process.
-- Update `examples/basic` and other example/test source artifacts last, after
-  the new runtime shape is validated.
+- Remove dead legacy projection hooks from the runtime node surface.
+- Make runtime node responsibilities match authored slot bindings:
+  - shader produces render data/capability on an `output` slot
+  - fixture consumes shader output through its `input` slot and remains a
+    demand root
+  - fixture owns the concrete full-texture materialization needed for mapping
+  - output remains an IO sink/flush boundary
+- Clean up runtime node naming and slot naming while directly touched.
+- Update local engine/project-loader tests to validate the new runtime flow.
+- Update `examples/basic` last, after runtime tests prove the shape.
 
 Out of scope:
 
 - Canonical wire/project sync redesign.
-- Client/view/frontend work.
-- Runtime slot root exposure for sync/UI.
+- Client/view/frontend rebuild.
+- Runtime node slot-root exposure for sync/UI.
 - Artifact/source mutation.
-- Broad engine API cleanup not directly required for the node truth pass.
+- Formal input/middle/output node taxonomy.
+- Texture-node many-to-many materialization/caching support.
+- Turning `OutputNode` into a generic consumer.
 
 ## User Notes
 
-- This forked chat is now the official cleanup/refactoring thread; M3 planning
+- This forked chat is the official cleanup/refactoring thread. M3 planning
   continues separately.
-- The old nodes are no longer considered disposable legacy code. The decision
-  is to keep them and grow them into the final ones.
-- M2.4 is no longer the place to decide the authored binding language. That is
-  M2.3 work; M2.4 should assume bindings already exist on source defs and focus
-  on making runtime nodes honor them truthfully.
-- The current runtime shape is wrong in a few important ways:
-  - `legacy/nodes` was the wrong home for real fixture logic
-  - leftover projection hooks in `Node` are legacy sync artifacts
-- We should validate the runtime shape with local tests before resuming new
-  API/frontend work.
-- Example/source updates should happen last; temporary breakage there is fine
-  during the refactor.
-- Refined direction:
-  - keep `TextureNode` for now
-  - shaders produce render products
-  - `TextureNode` becomes a real render-target node with input and output
-  - start with one render-product flavor: on-demand producer, full-texture
-    render only
-  - shaders do not own textures in this stepping-stone model
-  - later, some fixtures may consume render products directly, but that is not
-    required now
-- Outputs are intentionally different from middle nodes:
-  - no planned “fixture render product” abstraction for outputs
-  - outputs are directly written to and then flushed
-  - fixtures are demand roots and always tick to drive data flow
-  - outputs are IO nodes that also tick, but mostly exist as sink/flush
-    boundaries
-  - future input nodes may also have special runtime behavior
-- Longer-term runtime taxonomy may become something like input / middle /
-  output node classes, but M2.4 does not need to formalize that yet.
+- The old nodes are no longer disposable legacy code; keep them and grow them
+  into the final runtime nodes.
+- `TextureNode` is a meaningful concept for more complex many-to-many
+  fixture/visual relationships, but it is not necessary for the MVP render
+  flow because there is no first-class texture resource yet.
+- M2.4 should use the simpler MVP flow: shader produces a real render product,
+  fixture owns full-texture materialization for sampling, and output remains a
+  sink.
+- There are future render-product categories:
+  - on-demand render products: render when asked, eventually possibly partial
+  - texture-backed render products: producer-owned texture already exists
+- For now, focus on one useful flavor: lazy execution, full-texture only.
+- Fixtures are demand roots and always tick to drive dataflow.
+- Outputs are IO nodes; they are directly written to and flushed. There is no
+  plan for a generic “fixture render product” that outputs consume.
+- Example/source changes should happen late in the milestone.
 
 ## Current Code State
 
-### Module Layout
+### Recent Cleanup Already Done
 
-- `lp-core/lpc-engine/src/nodes/` has already been partially refactored:
-  - `nodes/fixture/*`
-  - `nodes/shader/*`
-  - `nodes/output/*`
-  - `nodes/texture/*`
-  - `nodes/placeholder/*`
-- The old `legacy/nodes/*` files were moved into `nodes/fixture/*`, and the
-  crate root no longer exports `legacy`.
-- `nodes/mod.rs` now re-exports the concrete runtime node types.
+- Runtime tree files now live under `lp-core/lpc-engine/src/node/`.
+- `Node` was renamed to `NodeRuntime`.
+- `PressureLevel` moved under `lp-core/lpc-engine/src/memory/`.
+- `NodeEntry` now wraps `status`, `state`, and `children` in
+  `WithRevision`.
+- `LpPath`/`LpPathBuf` moved into `lpfs`; `lpc-model` re-exports them.
+- `lpc-model/src/resource.rs` was split into `resource/*`.
+- `DomainError` was deleted from `lpc-model`.
+
+### Runtime Node Surface
+
+Relevant file: `lp-core/lpc-engine/src/node/node_runtime.rs`
+
+`NodeRuntime` is mostly clean, but still carries legacy-specific hooks:
+
+- `runtime_output_sink_buffer_id()` is active and used for output flushing.
+- `primary_render_product_id()` is active in tests/API helpers.
+- `fixture_projection_info()` appears dead and should be removed.
+- `shader_projection_wire()` appears dead and should be removed.
+- The projection structs `FixtureProjectionInfo` and `ShaderProjectionWire`
+  should disappear with those hooks.
 
 ### Runtime Flow Today
 
-- `ShaderNode` currently depends on a `texture_node_id`.
-- `TextureNode` produces width/height/format metadata as produced slots:
+Relevant files:
+
+- `lp-core/lpc-engine/src/nodes/shader/shader_node.rs`
+- `lp-core/lpc-engine/src/nodes/texture/texture_node.rs`
+- `lp-core/lpc-engine/src/nodes/fixture/fixture_node.rs`
+- `lp-core/lpc-engine/src/project_runtime/project_loader.rs`
+
+Current behavior:
+
+- `ShaderNode` stores `texture_node_id`.
+- `ShaderNode::tick()` resolves width/height from `TextureNode`, renders into
+  its own output buffer, replaces a `RenderProductId`, and publishes that
+  render product on slot `texture`.
+- `TextureNode` only exposes metadata produced slots:
   - `width`
   - `height`
   - `format`
-- `ShaderNode::tick()` resolves width/height from `TextureNode`, allocates an
-  output buffer to match those dimensions, renders into it, and publishes a
-  `RuntimeProduct::Render` at produced slot path `texture`.
-- `FixtureNode` currently depends on:
-  - `texture_node_id` for width/height metadata
-  - `shader_node_id` for the shader render product
-  - `output_sink` `RuntimeBufferId`
-- `FixtureNode::tick()` resolves:
-  - width/height from `TextureNode`
-  - render product from `ShaderNode`
-  then samples the render product and writes directly into:
-  - its own lamp-colors runtime buffer
-  - the output sink runtime buffer
-- `OutputNode` is mostly a passive sink allocator:
-  - allocates an output-channels runtime buffer
-  - exposes `runtime_output_sink_buffer_id()`
-  - does not consume any binding-driven input
-- `RuntimeServices` flushes registered output sink buffers after engine tick.
+- `FixtureNode` stores both `texture_node_id` and `shader_node_id`.
+- `FixtureNode::tick()` resolves width/height from texture, resolves shader
+  render product directly from shader, samples/materializes it, and writes lamp
+  colors plus output sink data.
+- `OutputNode` allocates an output-channel runtime buffer and remains passive.
+- `RuntimeServices` flushes dirty output sink buffers after `Engine::tick()`.
 
-### Loader Wiring Today
+This means texture is still not a real consumer/materialization node. Because
+there is no first-class texture resource, making texture “own the texture” would
+be forced. M2.4 should remove texture from the MVP runtime flow instead of
+pretending it owns a resource that does not exist.
 
-- `CoreProjectLoader` still loads `TextureDef` artifacts and attaches a
-  `TextureNode` runtime instance for each one before shaders/fixtures.
-- `LoadedNodeDef` still includes `Texture(TextureDef)`.
-- `ShaderDef` now declares produced output bindings instead of `texture_loc`.
-- `TextureDef` now declares a consumed input binding.
-- `FixtureDef` now declares a consumed input binding instead of `texture_loc`,
-  while `output_loc` remains for output sink registration.
-- `CoreProjectLoader` resolves:
-  - shader output binding -> texture input binding
-  - fixture input binding -> texture node
-  - fixture -> output node
-  - fixture -> shader node via the texture binding relationship
-- This means the source model and runtime flow are both still organized around
-  the texture node as an intermediate object, but runtime behavior is still not
-  truthful: shader currently renders “through” texture sizing while texture
-  itself does not act like a real render-target consumer.
+### Authored Defs And Loader
 
-### Node Trait Surface
+Relevant files:
 
-- `Node` still has these non-core hooks:
-  - `runtime_output_sink_buffer_id()`
-  - `primary_render_product_id()`
-  - `fixture_projection_info()`
-  - `shader_projection_wire()`
-- `fixture_projection_info()` and `shader_projection_wire()` appear to be dead
-  legacy-sync leftovers. Current `rg` only finds them in the trait and node
-  impls, not in active sync/projection consumers.
-- `runtime_output_sink_buffer_id()` and `primary_render_product_id()` are still
-  active through `Engine` and `project_loader`.
+- `lp-core/lpc-model/src/nodes/shader/shader_def.rs`
+- `lp-core/lpc-model/src/nodes/texture/texture_def.rs`
+- `lp-core/lpc-model/src/nodes/fixture/fixture_def.rs`
+- `examples/basic/*.toml`
 
-### Source Artifacts Today
+Current authored shape:
 
-- `TextureDef` is still an authored node def with `size` and `bindings`.
-- `ShaderDef` publishes its `output` slot through `bindings`.
-- `FixtureDef` consumes texture output through `bindings.input` and still has
-  `output_loc` for output sink registration.
-- `examples/basic` uses bus-first shader -> texture binding and direct
-  texture -> fixture binding.
+- `ShaderDef` has `bindings`; canonical example binds `output` to
+  `bus#visual.out`.
+- `TextureDef` has `bindings`; canonical example consumes `input` from
+  `bus#visual.out`.
+- `FixtureDef` has `bindings.input` and still has `output_loc`.
+- `CoreProjectLoader` currently interprets authored bindings enough to infer:
+  - shader -> texture through bus/direct binding
+  - fixture -> texture through direct binding
+  - fixture -> output through `output_loc`
+  - fixture -> shader by finding the shader that targets the texture
+
+M2.4 should simplify this: fixture input should resolve to the shader render
+product directly. `TextureDef` / `TextureNode` can remain in the codebase if
+useful, but examples and loader tests should no longer require texture as the
+main visual path.
+
+### Render Product API Today
+
+Relevant files:
+
+- `lp-core/lpc-engine/src/render_product/render_product_store.rs`
+- `lp-core/lpc-engine/src/runtime_product/runtime_product.rs`
+- `lp-core/lpc-engine/src/node/contexts.rs`
+- `lp-core/lpc-engine/src/resolver/resolve_host.rs`
+
+Current render product model:
+
+- `RuntimeProduct::Render(RenderProductId)` is an id handle.
+- `RenderProduct` trait supports:
+  - `sample_batch(&self, ...)`
+  - `as_any()`
+- `TickContext` supports:
+  - `sample_render_product`
+  - `with_native_texture_payload`
+  - `defer_render_product_replace`
+  - `with_runtime_buffer_mut`
+- `ShaderNode` currently renders during `tick()` and stores the rendered texture
+  in `RenderProductStore`.
+
+Important implication: current `RenderProduct` represents an already-sampleable
+product. M2.4 needs a real lazy-execute shader render product so shader output
+is not synonymous with a texture-backed resource.
 
 ### Tests
 
-- `ShaderNode`, `FixtureNode`, and `TextureNode` each have local unit tests.
-- `CoreProjectRuntime` and `project_loader` tests construct full runtime scenes
-  using `TextureNode`.
-- This is good news for M2.4: there is already a local validation surface that
-  can be updated without any wire/UI work.
+There is already a strong local validation surface:
+
+- `cargo test -p lpc-engine node::`
+- `cargo test -p lpc-engine engine::`
+- `cargo test -p lpc-engine --test runtime_spine`
+- `project_loader` tests under `lpc-engine`
+- `CoreProjectRuntime` output sink flush tests
+
+One observed cleanup issue while reading current code:
+
+- `core_project_runtime.rs` has test support code that appears duplicated in one
+  spot (`fn get` repeated in `SolidFixtureOutputs`). This should be cleaned up
+  during M2.4 validation if it is still present.
 
 ## Open Questions
 
-### Q1. What Is The Stepping-Stone Render Product Model For M2.4?
+### Q1. How Far Should M2.4 Push The Render Product API?
 
-Context: the previous draft assumed `TextureNode` should go away, but the
-refined direction is to keep it and give it a real role. The user clarified the
-intended render-product split:
+Context: the desired truth is shader produces an on-demand full-texture render
+capability. Current `RenderProduct` is already sampleable/materializable and
+`ShaderNode` owns rendering/replacement.
 
-- on-demand render products: nothing rendered yet; can render when asked
-- texture-backed render products: producer-owned texture already exists
+User answer: M2.4 needs the real render-product model. If the shader still
+creates the texture-backed product, the texture node has no coherent job. Some
+cleanup can happen first, but real render products are the heart of this flow.
 
-Suggested answer: M2.4 should support one render-product flavor only:
-on-demand, full-texture rendering. In this model, `ShaderNode` produces a
-render product capability, `TextureNode` owns the texture target, and the
-texture node asks the shader product to render into the full texture.
+Updated direction: M2.4 must introduce a render-product abstraction where the
+shader produces a lazy render capability and the fixture owns concrete
+full-texture materialization for the MVP flow.
 
-### Q2. What Should The Truthful Runtime Flow Be In M2.4?
+This likely means:
 
-Context: M2.3 should already have moved authored connectivity onto source-side
-slot bindings, so M2.4 can treat loader wiring as interpretation of those
-bindings rather than bespoke `texture_loc` / `output_loc` fields. The new
-stepping-stone model is not “shader owns texture” and not yet “fixture consumes
-render product directly.”
+- `ShaderNode` owns GLSL compilation and produces an on-demand render product.
+- The render product can be asked to render/fill a full texture target for a
+  requested size/format.
+- `FixtureNode` consumes that product, requests a full-texture render at its
+  configured/effective size, then maps/samples it.
+- `TextureNode` is not part of the MVP runtime path.
 
-Suggested answer:
+The render-product API should stay narrow for M2.4:
 
-- shader produces render product on its output slot
-- texture consumes render product on an input slot and materializes texture
-  storage / texture-backed runtime state
-- fixture consumes texture output
-- output remains downstream of fixture as today
+- full-texture render only
+- no partial point rendering yet
+- no producer-owned texture-backed products yet except transient
+  `TextureRenderProduct` values returned from a render request
 
-This is a much cleaner stepping stone and minimizes churn.
+### Q2. What Should The Slot Names Be?
 
-### Q3. Should `OutputNode` Become A Real Consumer Now?
-
-Context: today `OutputNode` is a passive sink allocator and `FixtureNode`
-writes output bytes directly into the output sink buffer. If we are making the
-runtime graph truthful, there are two reasonable models:
-
-- fixture remains the node that materializes output-channel data and writes the
-  sink buffer directly
-- or output becomes a real consumer node that takes fixture-produced channel
-  data through bindings
-
-Suggested answer: if one-plan scope is the goal, keep `OutputNode` as a sink
-boundary for M2.4 and focus on removing `TextureNode` plus making
-shader->texture->fixture truthful. Turning output into a full consumer is appealing,
-but it is a second semantic refactor and could easily balloon the plan.
-
-User answer: yes. Outputs are intentionally different IO nodes, not generic
-product consumers. Fixtures remain demand roots that drive the graph, and
-outputs remain direct-write sink boundaries that flush after tick.
-
-### Q4. Can We Remove All Node Projection Hooks In M2.4?
-
-Context: `fixture_projection_info()` and `shader_projection_wire()` look dead.
-`runtime_output_sink_buffer_id()` and `primary_render_product_id()` are still
-used by `Engine` and `project_loader`.
+Context: `ShaderNode` currently exposes `shader_texture_output_path()` returning
+`texture`, but authored bindings use `output`. Fixture consumes `input`.
 
 Suggested answer:
 
-- remove `fixture_projection_info()` and `shader_projection_wire()` now
-- keep the resource-id hooks that are still structurally live
-- revisit those remaining hooks after the node-flow refactor, once we know what
-  resource ownership API we actually want
+- Shader produced slot: `output`
+- Fixture consumed slot: `input`
+- Fixture demand trigger remains internal convention `in` for now
 
-### Q5. Does `TextureNode` Stay As A First-Class Runtime Node?
+### Q3. Does TextureNode Stay In The MVP Runtime Flow?
 
-Context: after refinement, the answer appears to be yes.
+Context: `TextureNode` is important for future many-to-many visual/fixture
+relationships, but without a first-class texture resource it does not have a
+coherent ownership boundary in the MVP flow.
 
-Suggested answer: yes. `TextureNode` stays, but it changes from a metadata stub
-into a real render-target node with an input binding and output dataflow role.
+User answer: choose the simpler MVP flow. Remove texture from the main runtime
+flow now if needed, and bring it back later when texture resources or
+many-to-many materialization/caching are in scope. Leaving the old texture node
+around is acceptable, but it should not be central to M2.4.
 
+### Q4. Can Projection Hooks Be Removed Before The Flow Refactor?
 
-## Dependency On M2.3
+Context: `fixture_projection_info()` and `shader_projection_wire()` look unused
+outside trait impls. They are legacy sync leftovers.
 
-M2.4 should start from these assumptions after M2.3:
+Suggested answer: yes. Remove them in the first phase to simplify the runtime
+surface before touching flow.
 
-- source defs carry a shared authored binding container
-- produced vs consumed binding direction is explicit in authored TOML
-- bus-first bindings are the idiomatic source shape
-- direct node-slot refs remain available for explicit local wiring
-- the loader can read authored bindings as the source of runtime edge intent
+### Q5. Should `primary_render_product_id()` Stay?
 
-If those assumptions are not true yet, M2.4 scope is premature and should not
-quietly absorb them.
+Context: `primary_render_product_id()` is still used by `Engine` and shader
+tests. It is not obviously legacy projection, but it is still node-specific.
+
+Suggested answer: keep it for M2.4 unless it naturally disappears after texture
+becomes the render-product owner. Do not block this milestone on a perfect
+resource ownership API.

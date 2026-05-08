@@ -1,5 +1,5 @@
 use crate::{
-    FieldSlot, Revision, LpType, LpValue, RelativeNodeRef, SlotDataAccess, SlotMeta, SlotShape,
+    FieldSlot, LpType, LpValue, RelativeNodeRef, Revision, SlotDataAccess, SlotMeta, SlotShape,
     SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
     ValueRootError, WithRevision, current_revision,
 };

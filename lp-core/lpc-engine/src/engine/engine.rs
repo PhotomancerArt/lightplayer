@@ -15,6 +15,7 @@ use crate::node::{NodeEntryState, NodeTree};
 use crate::node::{NodeResourceInitContext, NodeRuntime, TickContext};
 use crate::render_product::{
     RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch, RenderSampleBatchResult,
+    RenderTextureRequest, TextureRenderProduct,
 };
 use crate::resolver::{
     Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
@@ -419,6 +420,16 @@ impl ResolveHost for EngineResolveHost<'_> {
     ) -> Result<RenderSampleBatchResult, SessionResolveError> {
         self.render_products
             .sample_batch(id, batch)
+            .map_err(SessionResolveError::from)
+    }
+
+    fn render_texture(
+        &mut self,
+        id: RenderProductId,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, SessionResolveError> {
+        self.render_products
+            .render_texture(id, request, self.graphics.as_deref())
             .map_err(SessionResolveError::from)
     }
 

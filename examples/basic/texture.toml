@@ -1,7 +1,0 @@
-kind = "texture"
-[size]
-width = 16
-height = 16
-
-[bindings.input]
-source = "bus#visual.out"

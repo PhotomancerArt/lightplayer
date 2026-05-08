@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    Revision, LpValue, MapSlot, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
-    RelativeNodeRefSlot, RenderOrderSlot, SourcePathSlot, ValueSlot,
+    LpValue, MapSlot, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef, RelativeNodeRefSlot,
+    RenderOrderSlot, Revision, SourcePathSlot, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]

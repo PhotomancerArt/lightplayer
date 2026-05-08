@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use lpc_model::{Revision, SlotPath, WithRevision};
 
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, NodeResourceInitContext, PressureLevel,
+    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
     TickContext,
 };
 use crate::prop::ProducedSlotAccess;

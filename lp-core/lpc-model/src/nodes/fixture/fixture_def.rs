@@ -5,7 +5,7 @@ use crate::node::kind::NodeKind;
 use crate::node::node_def::NodeDef;
 use crate::nodes::fixture::MappingConfig;
 use crate::{
-    Affine2dSlot, BindingDefs, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,
+    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,
     RelativeNodeRefSlot, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError,
     ValueSlot,
 };
@@ -16,6 +16,9 @@ use crate::{
 pub struct FixtureDef {
     /// Output node locator.
     pub output_loc: RelativeNodeRefSlot,
+    /// Full-frame render size used when materializing the fixture input.
+    #[serde(default = "default_render_size")]
+    pub render_size: Dim2uSlot,
     /// Authored slot bindings for fixture inputs.
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
@@ -37,6 +40,14 @@ pub struct FixtureDef {
 impl FixtureDef {
     pub fn output_loc(&self) -> &RelativeNodeRef {
         self.output_loc.value()
+    }
+
+    pub fn render_width(&self) -> u32 {
+        self.render_size.value().width
+    }
+
+    pub fn render_height(&self) -> u32 {
+        self.render_size.value().height
     }
 
     pub fn color_order(&self) -> ColorOrder {
@@ -71,6 +82,13 @@ impl FixtureDef {
 
 fn default_brightness() -> OptionSlot<ValueSlot<u32>> {
     OptionSlot::some(ValueSlot::new(64))
+}
+
+fn default_render_size() -> Dim2uSlot {
+    Dim2uSlot::new(Dim2u {
+        width: 16,
+        height: 16,
+    })
 }
 
 fn default_gamma_correction() -> OptionSlot<ValueSlot<bool>> {
@@ -243,9 +261,9 @@ impl SlotValue for ColorOrder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
-    use crate::{Affine2d, MapSlot};
     use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
+    use crate::{Affine2d, MapSlot};
+    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_fixture_def_kind() {
@@ -266,6 +284,7 @@ mod tests {
         );
         let def = FixtureDef {
             output_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..out_output").unwrap()),
+            render_size: default_render_size(),
             bindings: BindingDefs::default(),
             mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
             color_order: ValueSlot::new(ColorOrder::Rgb),

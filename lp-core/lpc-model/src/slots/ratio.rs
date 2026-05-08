@@ -1,7 +1,6 @@
 use crate::{
-    FieldSlot, Revision, LpType, LpValue, OrderedF32, SlotDataAccess, SlotMeta, SlotShape,
-    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision,
-    current_revision,
+    FieldSlot, LpType, LpValue, OrderedF32, Revision, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision, current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

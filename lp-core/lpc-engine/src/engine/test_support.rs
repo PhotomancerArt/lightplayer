@@ -6,19 +6,19 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use lpc_model::{ChannelName, Revision, Kind, NodeId, NodeName, SlotPath, TreePath};
+use lpc_model::{ChannelName, Kind, NodeId, NodeName, Revision, SlotPath, TreePath};
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
 use crate::binding::{BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
-use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
+use crate::node::test_placeholder_spine;
+use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;
 use crate::resolver::{
     Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
 };
 use crate::runtime_product::RuntimeProduct;
-use crate::node::test_placeholder_spine;
 
 use super::engine::default_demand_input_path;
 use super::resolve_with_engine_host;

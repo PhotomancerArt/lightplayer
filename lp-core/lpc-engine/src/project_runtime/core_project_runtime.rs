@@ -4,9 +4,9 @@ use alloc::string::String;
 
 use hashbrown::HashMap;
 
-use lpfs::lp_path::{LpPath, LpPathBuf};
-use lpc_model::{Revision, NodeId, TreePath};
+use lpc_model::{NodeId, Revision, TreePath};
 use lpfs::FsChange;
+use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::engine::{Engine, EngineError};
 
@@ -162,22 +162,24 @@ mod output_sink_flush_tests {
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::default_demand_input_path;
-    use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
-    use crate::nodes::{FixtureNode, TextureNode, shader_texture_output_path};
+    use crate::node::test_placeholder_spine;
+    use crate::node::{
+        DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext,
+    };
+    use crate::nodes::{FixtureNode, TextureNode, fixture_input_path, shader_output_path};
     use crate::prop::ProducedSlotAccess;
     use crate::render_product::SolidColorProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
-    use crate::node::test_placeholder_spine;
     use lpc_model::SlotPath;
-    use lpc_model::{Revision, Kind, LpValue, TreePath, WithRevision};
+    use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+    use lpc_model::nodes::output::OutputDef;
+    use lpc_model::nodes::texture::TextureDef;
+    use lpc_model::{Kind, LpValue, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
     };
-    use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
-    use lpc_model::nodes::output::OutputDef;
-    use lpc_model::nodes::texture::TextureDef;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use super::{CoreProjectRuntime, RuntimeServices};
@@ -342,7 +344,7 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let out_path = shader_texture_output_path();
+        let out_path = shader_output_path();
         rt.engine_mut()
             .attach_runtime_node(
                 sh_id,
@@ -358,10 +360,13 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let sink = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
-            Revision::default(),
-            RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-        ));
+        let sink = rt
+            .engine_mut()
+            .runtime_buffers_mut()
+            .insert(WithRevision::new(
+                Revision::default(),
+                RuntimeBuffer::raw(alloc::vec![0u8; 6]),
+            ));
 
         rt.services_mut()
             .register_output_sink(sink, &OutputDef::new(pin));
@@ -400,8 +405,8 @@ mod output_sink_flush_tests {
                 fix_id,
                 Box::new(FixtureNode::new(
                     fix_id,
-                    tex_id,
-                    sh_id,
+                    4,
+                    4,
                     mapping,
                     frame,
                     sink,
@@ -409,6 +414,25 @@ mod output_sink_flush_tests {
                     255,
                     false,
                 )),
+                frame,
+            )
+            .unwrap();
+        rt.engine_mut()
+            .bindings_mut()
+            .register(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path.clone(),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
                 frame,
             )
             .unwrap();
@@ -505,7 +529,7 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let out_path = shader_texture_output_path();
+        let out_path = shader_output_path();
         rt.engine_mut()
             .attach_runtime_node(
                 sh_id,
@@ -521,15 +545,21 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let sink_written = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
-            Revision::default(),
-            RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-        ));
+        let sink_written = rt
+            .engine_mut()
+            .runtime_buffers_mut()
+            .insert(WithRevision::new(
+                Revision::default(),
+                RuntimeBuffer::raw(alloc::vec![0u8; 6]),
+            ));
 
-        let _sink_idle = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
-            Revision::default(),
-            RuntimeBuffer::raw(alloc::vec![0xffu8; 6]),
-        ));
+        let _sink_idle = rt
+            .engine_mut()
+            .runtime_buffers_mut()
+            .insert(WithRevision::new(
+                Revision::default(),
+                RuntimeBuffer::raw(alloc::vec![0xffu8; 6]),
+            ));
 
         rt.services_mut()
             .register_output_sink(sink_written, &OutputDef::new(pin_written));
@@ -571,8 +601,8 @@ mod output_sink_flush_tests {
                 fix_id,
                 Box::new(FixtureNode::new(
                     fix_id,
-                    tex_id,
-                    sh_id,
+                    4,
+                    4,
                     mapping,
                     frame,
                     sink_written,
@@ -580,6 +610,25 @@ mod output_sink_flush_tests {
                     255,
                     false,
                 )),
+                frame,
+            )
+            .unwrap();
+        rt.engine_mut()
+            .bindings_mut()
+            .register(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path.clone(),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
                 frame,
             )
             .unwrap();
@@ -675,7 +724,7 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let out_path = shader_texture_output_path();
+        let out_path = shader_output_path();
         rt.engine_mut()
             .attach_runtime_node(
                 sh_id,
@@ -691,10 +740,13 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        let sink = rt.engine_mut().runtime_buffers_mut().insert(WithRevision::new(
-            Revision::default(),
-            RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-        ));
+        let sink = rt
+            .engine_mut()
+            .runtime_buffers_mut()
+            .insert(WithRevision::new(
+                Revision::default(),
+                RuntimeBuffer::raw(alloc::vec![0u8; 6]),
+            ));
 
         rt.services_mut()
             .register_output_sink(sink, &OutputDef::new(99));
@@ -733,8 +785,8 @@ mod output_sink_flush_tests {
                 fix_id,
                 Box::new(FixtureNode::new(
                     fix_id,
-                    tex_id,
-                    sh_id,
+                    4,
+                    4,
                     mapping,
                     frame,
                     sink,
@@ -742,6 +794,25 @@ mod output_sink_flush_tests {
                     255,
                     false,
                 )),
+                frame,
+            )
+            .unwrap();
+        rt.engine_mut()
+            .bindings_mut()
+            .register(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path.clone(),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
                 frame,
             )
             .unwrap();

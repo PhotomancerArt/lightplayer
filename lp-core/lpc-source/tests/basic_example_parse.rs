@@ -1,16 +1,15 @@
-use lpc_model::{BindingEndpoint, RelativeNodeRef};
-use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::nodes::texture::TextureDef;
+use lpc_model::{BindingEndpoint, RelativeNodeRef};
 
 #[test]
 fn flat_basic_example_artifacts_parse_as_source_defs() {
     let project: ProjectDef = read_basic_toml("project.toml");
     assert_eq!(project.kind, ProjectDef::KIND);
     assert_eq!(project.name(), Some("basic"));
-    assert_eq!(project.nodes.entries.len(), 4);
+    assert_eq!(project.nodes.entries.len(), 3);
     assert_eq!(
         project
             .nodes
@@ -21,14 +20,6 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
             .value(),
         "./shader.toml"
     );
-
-    let texture: TextureDef = read_basic_toml("texture.toml");
-    assert_eq!(texture.width(), 16);
-    assert_eq!(texture.height(), 16);
-    assert!(matches!(
-        texture.bindings.entries()["input"].source,
-        Some(BindingEndpoint::Bus(_))
-    ));
 
     let shader: ShaderDef = read_basic_toml("shader.toml");
     assert_eq!(shader.glsl_path.value(), "shader.glsl");
@@ -46,9 +37,11 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
         fixture.output_loc(),
         &RelativeNodeRef::parse("..output").unwrap()
     );
+    assert_eq!(fixture.render_width(), 16);
+    assert_eq!(fixture.render_height(), 16);
     assert!(matches!(
         fixture.bindings.entries()["input"].source,
-        Some(BindingEndpoint::Node(_))
+        Some(BindingEndpoint::Bus(_))
     ));
 }
 

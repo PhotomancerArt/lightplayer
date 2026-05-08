@@ -63,8 +63,8 @@ impl Harness {
         for (shape_id, shape) in &snapshot.shapes {
             println!(
                 "  shape {shape_id} revision={} node={:?}",
-                shape.revision.as_i64(),
-                shape.node
+                shape.changed_at().as_i64(),
+                shape.value()
             );
         }
         self.client.apply_registry_snapshot(snapshot);
@@ -75,8 +75,8 @@ impl Harness {
         let shape = self.client.registry.entry(&shape_id).expect("client shape");
         println!(
             "client shape {shape_id} revision={} node={:?}",
-            shape.revision.as_i64(),
-            shape.node
+            shape.changed_at().as_i64(),
+            shape.value()
         );
     }
 

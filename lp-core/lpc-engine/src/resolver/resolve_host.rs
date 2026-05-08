@@ -3,7 +3,7 @@
 
 use crate::render_product::{
     NativeTexturePayload, RenderProductError, RenderProductId, RenderSampleBatch,
-    RenderSampleBatchResult,
+    RenderSampleBatchResult, RenderTextureRequest, TextureRenderProduct,
 };
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
@@ -28,6 +28,17 @@ pub trait ResolveHost {
         let _ = (id, batch);
         Err(SessionResolveError::other(
             "resolve host has no render product sampler",
+        ))
+    }
+
+    fn render_texture(
+        &mut self,
+        id: RenderProductId,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, SessionResolveError> {
+        let _ = (id, request);
+        Err(SessionResolveError::other(
+            "resolve host has no render texture access",
         ))
     }
 

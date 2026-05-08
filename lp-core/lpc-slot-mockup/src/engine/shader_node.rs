@@ -1,6 +1,6 @@
 use crate::source::ShaderDef;
 use lpc_model::{
-    Revision, LpType, LpValue, ModelStructMember, SlotAccess, SlotData, SlotDataAccess, SlotName,
+    LpType, LpValue, ModelStructMember, Revision, SlotAccess, SlotData, SlotDataAccess, SlotName,
     SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, WithRevision,
     current_revision,
     slot::shape::{field, option, record, value},

@@ -1,5 +1,5 @@
 use lpc_model::{
-    Revision, LpType, LpValue, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
+    LpType, LpValue, Revision, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
     StaticSlotShape, set_current_revision,
 };
 use lpc_wire::{
@@ -255,7 +255,7 @@ impl MockRuntime {
     ) -> Result<Revision, WireSlotMutationRejection> {
         self.registry
             .entry(&shape_id)
-            .map(|entry| entry.revision)
+            .map(|entry| entry.changed_at())
             .ok_or(WireSlotMutationRejection::UnknownRoot)
     }
 }

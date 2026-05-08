@@ -2,11 +2,11 @@
 
 use alloc::boxed::Box;
 
+use lpc_model::NodeKind;
 use lpc_model::Revision;
 use lpc_model::SlotPath;
-use lpc_model::NodeKind;
 
-use crate::node::{DestroyCtx, MemPressureCtx, NodeRuntime, NodeError, PressureLevel, TickContext};
+use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 use crate::prop::ProducedSlotAccess;
 use crate::runtime_product::RuntimeProduct;
 

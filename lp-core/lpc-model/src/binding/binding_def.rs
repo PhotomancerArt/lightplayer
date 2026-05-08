@@ -1,6 +1,6 @@
 use super::BindingEndpoint;
 use crate::{
-    FieldSlot, Revision, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotShape,
+    FieldSlot, LpType, LpValue, ModelStructMember, Revision, SlotDataAccess, SlotShape,
     SlotValueAccess,
 };
 use alloc::string::{String, ToString};

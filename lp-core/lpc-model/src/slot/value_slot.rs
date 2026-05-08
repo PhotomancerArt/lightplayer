@@ -1,4 +1,4 @@
-use crate::{Revision, LpValue, SlotMapKeyShape, SlotShape, WithRevision, current_revision};
+use crate::{LpValue, Revision, SlotMapKeyShape, SlotShape, WithRevision, current_revision};
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -603,9 +603,6 @@ mod tests {
 
         assert_eq!(decoded.presence_revision(), expected_version);
         assert_eq!(decoded.data.as_ref().unwrap().value(), &6);
-        assert_eq!(
-            decoded.data.as_ref().unwrap().revision(),
-            expected_version
-        );
+        assert_eq!(decoded.data.as_ref().unwrap().revision(), expected_version);
     }
 }

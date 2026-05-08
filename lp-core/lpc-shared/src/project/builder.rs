@@ -2,18 +2,18 @@
 
 use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
-use lpfs::lp_path::LpPathBuf;
+use lpc_model::GlslOpts;
+use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
+use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
     Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
     RelativeNodeRefSlot, RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
-use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
-use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::nodes::texture::TextureDef;
-use lpc_model::GlslOpts;
 use lpfs::LpFs;
+use lpfs::lp_path::LpPathBuf;
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {
@@ -381,6 +381,10 @@ impl FixtureBuilder {
 
         let config = FixtureDef {
             output_loc: RelativeNodeRefSlot::new(output_loc),
+            render_size: lpc_model::Dim2uSlot::new(lpc_model::Dim2u {
+                width: 16,
+                height: 16,
+            }),
             bindings: texture_input_binding_defs(texture_loc),
             mapping: self.mapping,
             color_order: ValueSlot::new(self.color_order),

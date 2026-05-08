@@ -1,6 +1,5 @@
 use lpc_model::{
-    Revision, LpValue, SlotAccess, SlotData, SlotShapeId, SlotShapeRegistry,
-    set_current_revision,
+    LpValue, Revision, SlotAccess, SlotData, SlotShapeId, SlotShapeRegistry, set_current_revision,
 };
 use lpc_view::SlotMirrorView;
 use lpc_wire::build_slot_full_sync;

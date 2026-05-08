@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FieldSlot, Revision, MapSlot, PositiveF32Slot, RatioSlot, SlotDataAccess, SlotEnumAccess,
+    FieldSlot, MapSlot, PositiveF32Slot, RatioSlot, Revision, SlotDataAccess, SlotEnumAccess,
     SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotRecordAccess, SlotRecordShape,
     SlotShape, ValueSlot, XySlot, current_revision,
 };
@@ -13,23 +13,23 @@ use super::{RingLampCounts, ring_lamp_counts_shape};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FixtureMapping {
     Disabled {
-        #[serde(skip, default = "current_state_version")]
+        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
     },
     Circle {
-        #[serde(skip, default = "current_state_version")]
+        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         center: XySlot,
         radius: PositiveF32Slot,
     },
     Square {
-        #[serde(skip, default = "current_state_version")]
+        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         origin: XySlot,
         size: XySlot,
     },
     PathPoints {
-        #[serde(skip, default = "current_state_version")]
+        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         points: MapSlot<u32, MappingPoint>,
         path: PathSpec,
@@ -48,14 +48,14 @@ pub struct MappingPoint {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PathSpec {
     RingArray {
-        #[serde(skip, default = "current_state_version")]
+        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         ring_lamp_counts: ValueSlot<Vec<u32>>,
         semantic_ring_lamp_counts: ValueSlot<RingLampCounts>,
         clockwise: ValueSlot<bool>,
     },
     Manual {
-        #[serde(skip, default = "current_state_version")]
+        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
     },
 }
@@ -112,20 +112,15 @@ impl SlotEnumShape for FixtureMapping {
 impl SlotEnumAccess for FixtureMapping {
     fn variant_revision(&self) -> Revision {
         match self {
-            Self::Disabled {
-                variant_revision,
-            }
+            Self::Disabled { variant_revision }
             | Self::Circle {
-                variant_revision,
-                ..
+                variant_revision, ..
             }
             | Self::Square {
-                variant_revision,
-                ..
+                variant_revision, ..
             }
             | Self::PathPoints {
-                variant_revision,
-                ..
+                variant_revision, ..
             } => *variant_revision,
         }
     }
@@ -141,9 +136,7 @@ impl SlotEnumAccess for FixtureMapping {
 
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
-            Self::Disabled {
-                variant_revision,
-            } => SlotDataAccess::Unit(*variant_revision),
+            Self::Disabled { variant_revision } => SlotDataAccess::Unit(*variant_revision),
             Self::Circle { .. } | Self::Square { .. } | Self::PathPoints { .. } => {
                 SlotDataAccess::Record(self)
             }
@@ -233,12 +226,9 @@ impl SlotEnumAccess for PathSpec {
     fn variant_revision(&self) -> Revision {
         match self {
             Self::RingArray {
-                variant_revision,
-                ..
+                variant_revision, ..
             }
-            | Self::Manual {
-                variant_revision,
-            } => *variant_revision,
+            | Self::Manual { variant_revision } => *variant_revision,
         }
     }
 
@@ -252,9 +242,7 @@ impl SlotEnumAccess for PathSpec {
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
             Self::RingArray { .. } => SlotDataAccess::Record(self),
-            Self::Manual {
-                variant_revision,
-            } => SlotDataAccess::Unit(*variant_revision),
+            Self::Manual { variant_revision } => SlotDataAccess::Unit(*variant_revision),
         }
     }
 }
