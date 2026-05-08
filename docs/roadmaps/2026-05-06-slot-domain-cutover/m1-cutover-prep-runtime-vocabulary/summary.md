@@ -27,5 +27,4 @@
 - **Decision:** `WireSlotWatchSpecifier` selects node/root pairs, plus `AllState` and `All` conveniences.
 - **Why:** Root-level watches match the slot/version boundary without committing to deep mutation syntax yet.
 - **Rejected alternatives:** Reusing legacy node-detail selectors; encoding watches as unstructured strings.
-- **Revisit when:** M3 starts the project slot sync bridge.
-
+- **Revisit when:** M2.2/M3 deletes the old project sync path and rebuilds canonical slot-first messages.

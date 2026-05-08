@@ -5,7 +5,7 @@
 In scope:
 
 - Add `SlotMeta::writable` with positive wording and conservative default.
-- Document conventional root names and M1 bridge decisions.
+- Document conventional root names and M1 transitional decisions.
 - Clarify `RuntimeProduct` docs.
 - Audit `Kind` and old prop vocabulary, marking it transitional where appropriate.
 
@@ -62,4 +62,3 @@ cargo test -p lpc-model
 cargo check -p lpc-model --features schema-gen
 cargo check -p lpc-engine
 ```
-

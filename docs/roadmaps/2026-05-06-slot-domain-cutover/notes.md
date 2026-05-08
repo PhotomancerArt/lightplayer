@@ -167,13 +167,17 @@ Why: source/engine/view migration needs a bridge period unless we do one huge ri
 
 User answer: yes, with a strong cleanup milestone at the end so the temporary bridge does not become the new permanent mess.
 
+Updated decision after tag `2026-05-07-pre-legacy-remove`: do not bridge the old project messages. The tag/worktree preserve the legacy implementation as reference material. From M2.2 onward, delete the legacy project sync/detail/UI path and rebuild canonical slot-first messages, client view, and debug UI.
+
 ## Initial Roadmap Shape
 
-Likely phases:
+Updated phases:
 
 1. Prep: settle project-level slot watch requests, resource payload selection, root naming, and runtime `SlotPath` cleanup.
 2. Source cutover: real node defs implement static slot access and register source shapes.
-3. Project wire/view slot sync: project responses carry slot registry/root patches and the client mirrors them.
-4. Engine state/params/output exposure: runtime nodes expose slot roots; legacy detail projection starts shrinking.
-5. Generic debug UI: render watched slot roots and resource skeletons/payload previews.
-6. Compatibility deletion and validation: remove legacy node detail/state paths and validate examples/tests.
+3. M2.1/M2.x prep: value leaves, inline values, and legacy project sync demolition.
+4. M3: rebuild canonical project sync messages around slots, node lifecycle, and resource summaries/payload interest.
+5. M4: rebuild project view/client state around `SlotMirrorView`, node index, and resource cache.
+6. M5: rebuild generic debug UI over canonical slot sync and opt-in resources.
+7. M6: expose runtime node state/params/output as slot roots.
+8. M7: cleanup and validation.

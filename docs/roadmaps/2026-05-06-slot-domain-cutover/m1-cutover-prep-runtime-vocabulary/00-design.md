@@ -60,7 +60,7 @@ Runtime slot identity uses `SlotPath`. Nested data inside an atomic slot value r
 
 Legacy source-binding resolution remains on `ValuePath` for this milestone. That includes `NodePropSpec`, `NodeInvocation.overrides`, `ResolverContext`, `resolve_slot`, and `SlotResolverCache`.
 
-Project sync keeps legacy detail requests during the bridge but introduces explicit slot watch vocabulary:
+Project sync kept legacy detail requests during M1 but introduced explicit slot watch vocabulary:
 
 ```rust
 pub enum WireSlotRootKind {
@@ -83,7 +83,7 @@ pub enum WireSlotWatchSpecifier {
 }
 ```
 
-`WireProjectRequest::GetChanges` carries both `legacy_detail_specifier` and `slot_watch_specifier`. M1 does not need to make the engine honor `slot_watch_specifier`; that belongs to the project sync bridge milestone.
+`WireProjectRequest::GetChanges` carries both `legacy_detail_specifier` and `slot_watch_specifier`. M1 did not need to make the engine honor `slot_watch_specifier`; after tag `2026-05-07-pre-legacy-remove`, M2.2/M3 replaces that bridge-oriented request shape with canonical slot-first project sync.
 
 Generic UI metadata gets one positive editability flag:
 
@@ -108,4 +108,3 @@ Default `writable = false` keeps unknown slots read-only in debug UI until a sha
 - Existing tests should parse slot paths with `SlotPath::parse(...)`.
 - Legacy project detail names should keep `legacy` in type, method, and field names.
 - `WireSlotWatchSpecifier` should round-trip through serde and default to `None`.
-

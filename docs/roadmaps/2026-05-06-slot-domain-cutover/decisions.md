@@ -23,12 +23,12 @@
 - **Why:** Real devices need low-bandwidth sync, and UI previews should request bytes only when needed.
 - **Rejected alternatives:** Always include texture/buffer bytes with state; hide resources behind node-specific detail.
 
-#### Bridge Then Delete
+#### Hard Legacy Removal After Reference Tag
 
-- **Decision:** Add slot sync alongside current project sync first, then remove legacy detail projection after parity.
-- **Why:** A temporary bridge makes the migration reviewable, but it must not become permanent.
-- **Rejected alternatives:** One huge replacement; permanent dual sync models.
-- **Revisit when:** Milestone 6 starts and parity gaps are known.
+- **Decision:** After tag `2026-05-07-pre-legacy-remove`, delete the legacy project sync/detail/UI path and rebuild canonical project sync around slots.
+- **Why:** There are no external users, the old debug UI and messages are being rebuilt, and keeping legacy alive would force new slot-domain work through the wrong conceptual shape.
+- **Rejected alternatives:** Promote `LegacyProjectResponse` into the new protocol; keep bridge fields working until parity; maintain permanent dual sync models.
+- **Revisit when:** A deleted legacy path turns out to contain behavior that is not recoverable from the reference tag/worktree.
 
 #### Mutation Is Future Work
 
@@ -48,4 +48,3 @@
 - **Decision:** Add only the metadata needed for debug generic rendering during this cutover.
 - **Why:** The UI must prove the model without prematurely designing the final product UI vocabulary.
 - **Rejected alternatives:** Keep fully node-specific panels; design a full semantic editor system now.
-

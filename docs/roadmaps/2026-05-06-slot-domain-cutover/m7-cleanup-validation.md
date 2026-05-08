@@ -18,6 +18,7 @@ In scope:
 - Remove temporary TODOs or move them into explicit future work.
 - Audit crate exports for old vocabulary leaks.
 - Confirm low-bandwidth resource behavior.
+- Remove or clearly quarantine any remaining legacy project sync/debug UI reference code.
 
 Out of scope:
 
@@ -28,20 +29,19 @@ Out of scope:
 ## Key Decisions
 
 - This milestone is required, not optional.
-- The roadmap is not complete until temporary bridge code and mockup leftovers are either gone or explicitly justified.
+- The roadmap is not complete until temporary scaffold code and mockup leftovers are either gone or explicitly justified.
 
 ## Deliverables
 
 - Passing validation commands documented in the plan for this milestone.
 - Updated examples and docs.
-- Final cleanup diff removing temporary bridge/scaffold residue.
+- Final cleanup diff removing temporary scaffold residue.
 - A concise list of remaining future work.
 
 ## Dependencies
 
-- Milestone 6 legacy detail removal.
+- Milestone 6 runtime node slot roots.
 
 ## Execution Strategy
 
 Full plan. The final sweep spans many crates and should be explicit about validation and cleanup boundaries.
-
