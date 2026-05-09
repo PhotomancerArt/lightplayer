@@ -1,23 +1,30 @@
 //! Read-only resolver-backed view of [`lpc_model::TextureDef`].
 
 use crate::node::{NodeError, TickContext};
-use lpc_model::{Dim2u, SlotPath};
+use lpc_model::{Dim2u, SlotAccessorError, SlotShapeRegistry};
 
 /// Typed helper for reading texture definition fields through the resolver.
-pub struct TextureDefView<'a, 'ctx> {
-    ctx: &'a mut TickContext<'ctx>,
+pub struct TextureDefView {
+    inner: lpc_model::TextureDefView,
 }
 
-impl<'a, 'ctx> TextureDefView<'a, 'ctx> {
-    pub fn new(ctx: &'a mut TickContext<'ctx>) -> Self {
-        Self { ctx }
+impl TextureDefView {
+    /// Compile view accessors against the current shape registry revision.
+    pub fn compile(registry: &SlotShapeRegistry) -> Result<Self, SlotAccessorError> {
+        Ok(Self {
+            inner: lpc_model::TextureDefView::compile(registry)?,
+        })
     }
 
-    pub fn size(&mut self) -> Result<Dim2u, NodeError> {
-        self.ctx.resolve_consumed_slot_value(&size_path())
+    pub fn registry_revision(&self) -> lpc_model::Revision {
+        self.inner.registry_revision()
     }
-}
 
-fn size_path() -> SlotPath {
-    SlotPath::parse("size").expect("texture size slot path is valid")
+    pub fn is_valid_for(&self, registry: &SlotShapeRegistry) -> bool {
+        self.inner.is_valid_for(registry)
+    }
+
+    pub fn size(&self, ctx: &mut TickContext<'_>) -> Result<Dim2u, NodeError> {
+        ctx.resolve_consumed_slot_accessor_value(self.inner.size())
+    }
 }

@@ -32,6 +32,7 @@ pub struct TextureNode {
     node_id: NodeId,
     pixel_format: TextureFormat,
     state: TextureState,
+    def_view: Option<TextureDefView>,
 }
 
 impl TextureNode {
@@ -41,6 +42,7 @@ impl TextureNode {
             node_id,
             pixel_format,
             state: TextureState::new(0, 0, texture_format_tag(pixel_format)),
+            def_view: None,
         }
     }
 
@@ -51,11 +53,28 @@ impl TextureNode {
     pub fn pixel_format(&self) -> TextureFormat {
         self.pixel_format
     }
+
+    fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&TextureDefView, NodeError> {
+        let needs_compile = self
+            .def_view
+            .as_ref()
+            .is_none_or(|view| !view.is_valid_for(ctx.slot_shapes()));
+        if needs_compile {
+            self.def_view =
+                Some(TextureDefView::compile(ctx.slot_shapes()).map_err(|e| {
+                    NodeError::msg(alloc::format!("compile texture def view: {e}"))
+                })?);
+        }
+        Ok(self
+            .def_view
+            .as_ref()
+            .expect("texture def view was just compiled"))
+    }
 }
 
 impl NodeRuntime for TextureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let size = TextureDefView::new(ctx).size()?;
+        let size = self.def_view(ctx)?.size(ctx)?;
         self.state.sync_with_revision(
             ctx.revision(),
             i32::try_from(size.width).unwrap_or(i32::MAX),

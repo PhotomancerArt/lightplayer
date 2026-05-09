@@ -4,6 +4,7 @@
 //! inside the value exposed at that slot; it is not part of the slot identity.
 
 mod slot_access;
+mod slot_accessor;
 mod slot_data;
 mod slot_enum_shape;
 mod slot_lookup;
@@ -24,6 +25,7 @@ pub use slot_access::{
     FieldSlot, MapSlotAccess, SlotAccess, SlotDataAccess, SlotEnumAccess, SlotOptionAccess,
     SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
 };
+pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;
 pub use slot_lookup::{SlotLookupError, lookup_slot_data};

@@ -50,4 +50,17 @@ fn derive_generates_record_shape_access_and_root_registration() {
     assert!(registry.get(&DerivedRecord::SHAPE_ID).is_some());
 }
 
+#[test]
+fn derive_generates_compiled_view_for_root_records() {
+    let mut registry = SlotShapeRegistry::default();
+    DerivedRecord::ensure_registered(&mut registry).unwrap();
+
+    let view = DerivedRecordView::compile(&registry).unwrap();
+
+    assert_eq!(view.registry_revision(), registry.revision());
+    assert!(view.is_valid_for(&registry));
+    assert_eq!(view.enabled().path().to_string(), "enabled");
+    assert_eq!(view.nested().path().to_string(), "nested");
+}
+
 fn assert_static_slot_access<T: StaticSlotAccess>() {}

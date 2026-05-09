@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, Result, parse2};
 
 use crate::attr::{self, FieldShapeAttr};
@@ -19,6 +19,9 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
     let mut shape_fields = Vec::new();
     let mut access_arms = Vec::new();
+    let mut view_fields = Vec::new();
+    let mut view_compilers = Vec::new();
+    let mut view_accessors = Vec::new();
     let mut access_index = 0usize;
 
     for field in fields.named {
@@ -45,15 +48,33 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
         if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
         {
+            let accessor_ident = format_ident!("{}_accessor", field_ident);
             let index = syn::Index::from(access_index);
             access_arms.push(quote! {
                 #index => Some(#access),
+            });
+            view_fields.push(quote! {
+                #accessor_ident: ::lpc_model::SlotAccessor,
+            });
+            view_compilers.push(quote! {
+                #accessor_ident: ::lpc_model::SlotAccessor::compile(
+                    <#ident as ::lpc_model::StaticSlotShape>::SHAPE_ID,
+                    ::lpc_model::SlotPath::parse(#field_name)
+                        .expect("derived slot field path is valid"),
+                    registry,
+                )?,
+            });
+            view_accessors.push(quote! {
+                pub fn #field_ident(&self) -> &::lpc_model::SlotAccessor {
+                    &self.#accessor_ident
+                }
             });
             access_index += 1;
         }
     }
 
     let root_impls = if container_attrs.root || container_attrs.shape_id.is_some() {
+        let view_ident = format_ident!("{}View", ident);
         let shape_id = if let Some(shape_id) = container_attrs.shape_id {
             quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
         } else {
@@ -85,6 +106,32 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
 
             impl ::lpc_model::StaticSlotAccess for #ident {}
+
+            pub struct #view_ident {
+                registry_revision: ::lpc_model::Revision,
+                #(#view_fields)*
+            }
+
+            impl #view_ident {
+                pub fn compile(
+                    registry: &::lpc_model::SlotShapeRegistry,
+                ) -> Result<Self, ::lpc_model::SlotAccessorError> {
+                    Ok(Self {
+                        registry_revision: registry.revision(),
+                        #(#view_compilers)*
+                    })
+                }
+
+                pub fn registry_revision(&self) -> ::lpc_model::Revision {
+                    self.registry_revision
+                }
+
+                pub fn is_valid_for(&self, registry: &::lpc_model::SlotShapeRegistry) -> bool {
+                    self.registry_revision == registry.revision()
+                }
+
+                #(#view_accessors)*
+            }
         }
     } else {
         quote! {}

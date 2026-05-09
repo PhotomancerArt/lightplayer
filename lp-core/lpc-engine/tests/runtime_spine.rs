@@ -98,6 +98,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     }
 
     let mut host = NoProduceHost;
+    let slot_shapes = lpc_model::SlotShapeRegistry::default();
     let mut node = TickProbeNode {
         query: QueryKey::Bus(channel),
         last: None,
@@ -113,6 +114,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         ar,
         content_frame,
         &mut bridge as &mut dyn TickResolver,
+        &slot_shapes,
     );
 
     node.tick(&mut ctx).unwrap();

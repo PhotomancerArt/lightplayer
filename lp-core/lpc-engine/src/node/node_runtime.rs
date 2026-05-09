@@ -63,7 +63,7 @@ mod tests {
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
     };
-    use lpc_model::{NodeId, Revision, SlotDataAccess};
+    use lpc_model::{NodeId, Revision, SlotDataAccess, SlotShapeRegistry};
 
     struct EmptyResolveHost;
 
@@ -129,6 +129,7 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let mut host = EmptyResolveHost;
+        let slot_shapes = SlotShapeRegistry::default();
 
         let mut bridge = SessionHostResolver {
             session: &mut session,
@@ -140,6 +141,7 @@ mod tests {
             ArtifactId::from_raw(1),
             Revision::new(0),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
         let mut dyn_node: Box<dyn NodeRuntime> = Box::new(DummyNode::new());
         dyn_node.tick(&mut tick).expect("tick");

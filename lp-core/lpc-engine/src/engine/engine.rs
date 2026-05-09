@@ -7,8 +7,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    LpValue, NodeId, Revision, SlotDataAccess, SlotPath, SlotShapeRegistry, TreePath, WithRevision,
-    advance_revision, current_revision, lookup_slot_data,
+    LpValue, NodeId, Revision, SlotAccessor, SlotDataAccess, SlotPath, SlotShapeRegistry, TreePath,
+    WithRevision, advance_revision, current_revision, lookup_slot_data,
 };
 
 use crate::artifact::{ArtifactState, ArtifactStore};
@@ -353,6 +353,7 @@ impl EngineResolveHost<'_> {
 
         let gfx = self.graphics.clone();
         let time_s = self.frame_time_seconds;
+        let slot_shapes = self.slot_shapes;
         let tick_result = {
             let mut bridge = SessionHostResolver {
                 session,
@@ -365,6 +366,7 @@ impl EngineResolveHost<'_> {
                 artifact_id,
                 content_frame,
                 resolver_dyn,
+                slot_shapes,
                 gfx,
                 time_s,
             );
@@ -433,6 +435,21 @@ impl ResolveHost for EngineResolveHost<'_> {
                     .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
                         node: *node,
                         slot: slot.clone(),
+                    })?;
+                Ok(Production::new(product, ProductionSource::Default))
+            }
+            QueryKey::ConsumedSlotAccessor { node, accessor } => {
+                let entry = self.tree.get(*node).ok_or_else(|| {
+                    SessionResolveError::UnresolvedConsumedSlot {
+                        node: *node,
+                        slot: accessor.path().clone(),
+                    }
+                })?;
+                let product = self
+                    .read_authored_def_product_by_accessor(&entry.def_handle, accessor)
+                    .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
+                        node: *node,
+                        slot: accessor.path().clone(),
                     })?;
                 Ok(Production::new(product, ProductionSource::Default))
             }
@@ -513,6 +530,49 @@ impl EngineResolveHost<'_> {
         let SlotDataAccess::Value(value) = data else {
             return Err(SessionResolveError::other(format!(
                 "authored def slot {slot:?} is not a value"
+            )));
+        };
+        Ok(WithRevision::new(
+            value.changed_at(),
+            runtime_product_from_lp_value(value.value())?,
+        ))
+    }
+
+    fn read_authored_def_product_by_accessor(
+        &self,
+        handle: &crate::node::NodeDefHandle,
+        accessor: &SlotAccessor,
+    ) -> Result<WithRevision<RuntimeProduct>, SessionResolveError> {
+        if !handle.is_artifact_root() {
+            return Err(SessionResolveError::other(format!(
+                "non-root node def handles are not supported yet: {}",
+                handle.path()
+            )));
+        }
+        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
+            SessionResolveError::other(format!(
+                "node def artifact {:?} is not loaded",
+                handle.artifact()
+            ))
+        })?;
+        let def = match &entry.state {
+            ArtifactState::Loaded(def)
+            | ArtifactState::Prepared(def)
+            | ArtifactState::Idle(def) => def,
+            other => {
+                return Err(SessionResolveError::other(format!(
+                    "node def artifact {:?} has no loaded payload: {other:?}",
+                    handle.artifact()
+                )));
+            }
+        };
+        let data = accessor
+            .access(def, self.slot_shapes)
+            .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
+        let SlotDataAccess::Value(value) = data else {
+            return Err(SessionResolveError::other(format!(
+                "authored def slot {:?} is not a value",
+                accessor.path()
             )));
         };
         Ok(WithRevision::new(
@@ -653,6 +713,7 @@ fn tick_tree_node(
 
     let gfx = host.graphics.clone();
     let time_s = host.frame_time_seconds;
+    let slot_shapes = host.slot_shapes;
     let tick_result = {
         let mut bridge = SessionHostResolver {
             session,
@@ -665,6 +726,7 @@ fn tick_tree_node(
             artifact_id,
             content_frame,
             resolver_dyn,
+            slot_shapes,
             gfx,
             time_s,
         );

@@ -85,6 +85,9 @@ impl<'a> EngineSession<'a> {
             QueryKey::ConsumedSlot { node, slot } => {
                 self.resolve_consumed_slot(host, *node, slot.clone(), &query)
             }
+            QueryKey::ConsumedSlotAccessor { node, accessor } => {
+                self.resolve_consumed_slot(host, *node, accessor.path().clone(), &query)
+            }
             QueryKey::ProducedSlot { .. } => {
                 self.trace
                     .record_event(ResolveTraceEvent::ProduceStart(query.clone()));

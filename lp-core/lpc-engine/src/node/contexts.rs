@@ -12,7 +12,10 @@ use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderPr
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use crate::wire_bridge::lps_value_f32_to_model_value;
-use lpc_model::{FromLpValue, NodeId, Revision, SlotPath, WithRevision, bus::ChannelName};
+use lpc_model::{
+    FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
+    bus::ChannelName,
+};
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -46,6 +49,7 @@ pub struct TickContext<'r> {
     artifact_ref: ArtifactId,
     artifact_content_frame: Revision,
     resolver: &'r mut dyn TickResolver,
+    slot_shapes: &'r SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
     frame_time_seconds: f32,
 }
@@ -57,6 +61,7 @@ impl<'r> TickContext<'r> {
         artifact_ref: ArtifactId,
         artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
+        slot_shapes: &'r SlotShapeRegistry,
     ) -> Self {
         Self::with_render_services(
             node_id,
@@ -64,6 +69,7 @@ impl<'r> TickContext<'r> {
             artifact_ref,
             artifact_content_frame,
             resolver,
+            slot_shapes,
             None,
             0.0,
         )
@@ -76,6 +82,7 @@ impl<'r> TickContext<'r> {
         artifact_ref: ArtifactId,
         artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
+        slot_shapes: &'r SlotShapeRegistry,
         graphics: Option<Arc<dyn LpGraphics>>,
         frame_time_seconds: f32,
     ) -> Self {
@@ -85,6 +92,7 @@ impl<'r> TickContext<'r> {
             artifact_ref,
             artifact_content_frame,
             resolver,
+            slot_shapes,
             graphics,
             frame_time_seconds,
         }
@@ -128,6 +136,49 @@ impl<'r> TickContext<'r> {
                 "consumed slot {slot} has incompatible value: {e}"
             ))
         })
+    }
+
+    /// Resolve one of this node's consumed slots through a compiled accessor.
+    pub fn resolve_consumed_slot_accessor_value<T>(
+        &mut self,
+        accessor: &SlotAccessor,
+    ) -> Result<T, NodeError>
+    where
+        T: FromLpValue,
+    {
+        let production = self
+            .resolve(QueryKey::ConsumedSlotAccessor {
+                node: self.node_id,
+                accessor: accessor.clone(),
+            })
+            .map_err(|e| {
+                NodeError::msg(alloc::format!(
+                    "resolve consumed slot {}: {e:?}",
+                    accessor.path()
+                ))
+            })?;
+        let value = production.product.value().as_value().ok_or_else(|| {
+            NodeError::msg(alloc::format!(
+                "consumed slot {} is not a value",
+                accessor.path()
+            ))
+        })?;
+        let value = lps_value_f32_to_model_value(value).map_err(|e| {
+            NodeError::msg(alloc::format!(
+                "consumed slot {} cannot be read as a portable model value: {e:?}",
+                accessor.path()
+            ))
+        })?;
+        T::from_lp_value(value).map_err(|e| {
+            NodeError::msg(alloc::format!(
+                "consumed slot {} has incompatible value: {e}",
+                accessor.path()
+            ))
+        })
+    }
+
+    pub fn slot_shapes(&self) -> &SlotShapeRegistry {
+        self.slot_shapes
     }
 
     pub fn artifact_ref(&self) -> ArtifactId {
@@ -303,7 +354,7 @@ mod tests {
     };
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::SlotPath;
+    use lpc_model::{SlotPath, SlotShapeRegistry};
 
     struct PanicProduceHost;
 
@@ -339,6 +390,7 @@ mod tests {
         let frame = Revision::new(10);
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
+        let slot_shapes = SlotShapeRegistry::default();
         let artifact_ref = ArtifactId::from_raw(1);
 
         let mut bridge = SessionHostResolver {
@@ -351,6 +403,7 @@ mod tests {
             artifact_ref,
             Revision::new(5),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
 
         assert_eq!(ctx.node_id(), NodeId::new(7));
@@ -380,6 +433,7 @@ mod tests {
         let mut resolver = Resolver::new();
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
+        let slot_shapes = SlotShapeRegistry::default();
         let mut bridge = SessionHostResolver {
             session: &mut session,
             host: &mut host,
@@ -390,6 +444,7 @@ mod tests {
             ArtifactId::from_raw(1),
             Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
         let pv = ctx
             .resolve(QueryKey::Bus(channel.clone()))
@@ -422,6 +477,7 @@ mod tests {
         let mut resolver = Resolver::new();
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
+        let slot_shapes = SlotShapeRegistry::default();
         let mut bridge = SessionHostResolver {
             session: &mut session,
             host: &mut host,
@@ -432,6 +488,7 @@ mod tests {
             ArtifactId::from_raw(1),
             Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
 
         let pv = ctx
@@ -450,6 +507,7 @@ mod tests {
         let frame = Revision::new(10);
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
+        let slot_shapes = SlotShapeRegistry::default();
 
         let mut bridge = SessionHostResolver {
             session: &mut session,
@@ -461,6 +519,7 @@ mod tests {
             ArtifactId::from_raw(1),
             Revision::new(5),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
 
         assert!(ctx.artifact_changed_since(Revision::new(4)));
@@ -549,6 +608,7 @@ mod tests {
         let mut resolver = Resolver::new();
         let mut session = session_bundle(&mut resolver, &registry, frame);
         let mut host = PanicProduceHost;
+        let slot_shapes = SlotShapeRegistry::default();
 
         let mut node = QueryResolvingNode {
             query: QueryKey::Bus(channel),
@@ -565,6 +625,7 @@ mod tests {
             ArtifactId::from_raw(1),
             Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
 
         node.tick(&mut ctx).expect("tick should succeed");
@@ -584,6 +645,7 @@ mod tests {
             node: node_id,
             out_path: input_path.clone(),
         };
+        let slot_shapes = SlotShapeRegistry::default();
 
         let mut node = QueryResolvingNode {
             query: QueryKey::ConsumedSlot {
@@ -603,6 +665,7 @@ mod tests {
             ArtifactId::from_raw(1),
             Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
         );
 
         node.tick(&mut ctx).expect("tick should succeed");

@@ -113,6 +113,11 @@ impl SlotShapeRegistry {
         self.shapes.contains_key(id)
     }
 
+    /// Current registry-wide revision for conservative accessor invalidation.
+    pub fn revision(&self) -> Revision {
+        self.ids_revision
+    }
+
     pub fn get(&self, id: &SlotShapeId) -> Option<&SlotShape> {
         self.shapes.get(id).map(WithRevision::value)
     }
