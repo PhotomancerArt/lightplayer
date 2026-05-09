@@ -1,18 +1,18 @@
 //! Read-only resolver-backed view of [`lpc_model::TextureDef`].
 
 use crate::node::{NodeError, TickContext};
-use lpc_model::{Dim2u, SlotAccessorError, SlotShapeRegistry, SlotViewRoot};
+use lpc_model::{Dim2u, SlotAccessorError, SlotShapeRegistry};
 
 /// Typed helper for reading texture definition fields through the resolver.
 pub struct TextureDefView {
-    inner: lpc_model::TextureDefSlotView,
+    inner: lpc_model::TextureDefView,
 }
 
 impl TextureDefView {
     /// Compile view accessors against the current shape registry revision.
     pub fn compile(registry: &SlotShapeRegistry) -> Result<Self, SlotAccessorError> {
         Ok(Self {
-            inner: lpc_model::TextureDef::compile_slot_view(registry)?,
+            inner: lpc_model::TextureDefView::compile(registry)?,
         })
     }
 

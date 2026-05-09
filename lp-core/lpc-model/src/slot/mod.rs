@@ -18,7 +18,6 @@ mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
 mod slot_value;
-mod slot_view_root;
 mod value_ref;
 mod value_slot;
 
@@ -51,7 +50,6 @@ pub mod shape {
 pub use slot_shape_registry::{
     SlotShapeEntry, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
 };
-pub use slot_view_root::SlotViewRoot;
 
 pub use crate::slots::{
     Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
