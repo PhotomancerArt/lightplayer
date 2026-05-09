@@ -4,6 +4,8 @@
 
 use alloc::string::String;
 
+use super::NodeCallKey;
+
 /// Lifecycle state of a `NodeEntry`.
 ///
 /// Generic over `N` — the payload type when the entry is `Alive`. In M3 this
@@ -15,6 +17,8 @@ pub enum NodeEntryState<N> {
     Pending,
     /// Node instantiated and ticking.
     Alive(N),
+    /// Node payload is temporarily moved out for an engine-dispatched call.
+    Executing { call: NodeCallKey },
     /// Instantiation failed; resolution falls through to slot defaults.
     Failed { reason: String },
 }
@@ -34,6 +38,11 @@ impl<N> NodeEntryState<N> {
     pub fn is_failed(&self) -> bool {
         matches!(self, NodeEntryState::Failed { .. })
     }
+
+    /// Returns `true` if this state is an active engine-dispatched call.
+    pub fn is_executing(&self) -> bool {
+        matches!(self, NodeEntryState::Executing { .. })
+    }
 }
 
 /// Convert server-side `EntryState<N>` to wire-side `WireEntryState`.
@@ -42,6 +51,7 @@ impl<N> From<&NodeEntryState<N>> for lpc_wire::WireEntryState {
         match state {
             NodeEntryState::Pending => lpc_wire::WireEntryState::Pending,
             NodeEntryState::Alive(_) => lpc_wire::WireEntryState::Alive,
+            NodeEntryState::Executing { .. } => lpc_wire::WireEntryState::Alive,
             NodeEntryState::Failed { reason } => lpc_wire::WireEntryState::Failed {
                 reason: reason.clone(),
             },

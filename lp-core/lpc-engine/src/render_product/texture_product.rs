@@ -1,12 +1,12 @@
-//! CPU-backed texture storage as an opaque, sampleable [`super::RenderProduct`].
+//! CPU-backed texture storage as an opaque, sampleable [`super::StoredRenderProduct`].
 
 use core::fmt;
 
 use lps_shared::TextureStorageFormat;
 
 use super::{
-    RenderProduct, RenderProductError, RenderSample, RenderSampleBatch, RenderSampleBatchResult,
-    RenderTextureRequest,
+    RenderProductError, RenderSample, RenderSampleBatch, RenderSampleBatchResult,
+    RenderTextureRequest, StoredRenderProduct,
 };
 
 /// Invalid [`TextureRenderProduct`] construction input.
@@ -108,7 +108,7 @@ impl TextureRenderProduct {
     }
 }
 
-impl RenderProduct for TextureRenderProduct {
+impl StoredRenderProduct for TextureRenderProduct {
     fn sample_batch(
         &self,
         request: &RenderSampleBatch,

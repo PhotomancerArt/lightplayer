@@ -3,17 +3,12 @@
 //! [`TickContext`] resolves through the active [`ResolveSession`] and [`ResolveHost`] using
 //! [`QueryKey`] (not the legacy slot resolver cache).
 
-use alloc::boxed::Box;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use crate::artifact::ArtifactId;
 use crate::bus::Bus;
 use crate::gfx::LpGraphics;
-use crate::render_product::{
-    NativeTexturePayload, RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch,
-    RenderSampleBatchResult, RenderTextureRequest, TextureRenderProduct,
-};
+use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{NodeId, Revision, WithRevision, bus::ChannelName};
@@ -25,23 +20,12 @@ use super::node_error::NodeError;
 ///
 /// Passed to [`super::super::NodeRuntime::init_resources`] before the node payload is [`crate::node::NodeEntryState::Alive`].
 pub struct NodeResourceInitContext<'a> {
-    render_products: &'a mut RenderProductStore,
     runtime_buffers: &'a mut RuntimeBufferStore,
 }
 
 impl<'a> NodeResourceInitContext<'a> {
-    pub fn new(
-        render_products: &'a mut RenderProductStore,
-        runtime_buffers: &'a mut RuntimeBufferStore,
-    ) -> Self {
-        Self {
-            render_products,
-            runtime_buffers,
-        }
-    }
-
-    pub fn insert_render_product(&mut self, product: Box<dyn RenderProduct>) -> RenderProductId {
-        self.render_products.insert(product)
+    pub fn new(runtime_buffers: &'a mut RuntimeBufferStore) -> Self {
+        Self { runtime_buffers }
     }
 
     pub fn insert_runtime_buffer(
@@ -52,10 +36,6 @@ impl<'a> NodeResourceInitContext<'a> {
     }
 }
 
-/// Pending uploads to [`crate::render_product::RenderProductStore`] applied after the current
-/// node's [`super::Node::tick`](super::NodeRuntime::tick) returns (see [`TickContext::defer_render_product_replace`]).
-pub type PendingRenderProductReplaces<'r> = &'r mut Vec<(RenderProductId, Box<dyn RenderProduct>)>;
-
 /// Context for [`super::Node::tick`](super::NodeRuntime::tick).
 ///
 /// Demand-style reads go through [`TickResolver`] (typically [`crate::resolver::SessionHostResolver`]).
@@ -65,7 +45,6 @@ pub struct TickContext<'r> {
     artifact_ref: ArtifactId,
     artifact_content_frame: Revision,
     resolver: &'r mut dyn TickResolver,
-    deferred_render_replaces: Option<PendingRenderProductReplaces<'r>>,
     graphics: Option<Arc<dyn LpGraphics>>,
     frame_time_seconds: f32,
 }
@@ -85,19 +64,17 @@ impl<'r> TickContext<'r> {
             artifact_content_frame,
             resolver,
             None,
-            None,
             0.0,
         )
     }
 
-    /// [`TickContext`] with graphics, frame time, and optional deferred render-product replaces.
+    /// [`TickContext`] with graphics and frame time.
     pub fn with_render_services(
         node_id: NodeId,
         frame_id: Revision,
         artifact_ref: ArtifactId,
         artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
-        deferred_render_replaces: Option<PendingRenderProductReplaces<'r>>,
         graphics: Option<Arc<dyn LpGraphics>>,
         frame_time_seconds: f32,
     ) -> Self {
@@ -107,7 +84,6 @@ impl<'r> TickContext<'r> {
             artifact_ref,
             artifact_content_frame,
             resolver,
-            deferred_render_replaces,
             graphics,
             frame_time_seconds,
         }
@@ -148,52 +124,15 @@ impl<'r> TickContext<'r> {
         self.graphics.as_ref().map(|g| g.as_ref())
     }
 
-    /// Stage a texture (or other) render product to replace `id` after this tick returns.
-    pub fn defer_render_product_replace(
-        &mut self,
-        id: RenderProductId,
-        product: Box<dyn RenderProduct>,
-    ) -> Result<(), NodeError> {
-        let Some(buf) = self.deferred_render_replaces.as_deref_mut() else {
-            return Err(NodeError::msg(
-                "tick context cannot defer render products (internal engine bug)",
-            ));
-        };
-        buf.push((id, product));
-        Ok(())
-    }
-
-    /// Samples a [`RenderProductId`] via the engine-owned store (immutable borrow only).
-    pub fn sample_render_product(
-        &mut self,
-        id: RenderProductId,
-        batch: &RenderSampleBatch,
-    ) -> Result<RenderSampleBatchResult, NodeError> {
-        self.resolver.sample_render_product(id, batch).map_err(|e| {
-            NodeError::msg(alloc::format!("render product sample_batch: {}", e.message))
-        })
-    }
-
-    /// Materializes a render product into a full texture through the engine-owned store.
+    /// Materializes a render product into a full texture through the active engine session.
     pub fn render_texture(
         &mut self,
-        id: RenderProductId,
+        product: RenderProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, NodeError> {
         self.resolver
-            .render_texture(id, request)
+            .render_texture(product, request)
             .map_err(|e| NodeError::msg(alloc::format!("render texture: {}", e.message)))
-    }
-
-    /// Borrows a CPU-backed native texture payload when the render product can expose one.
-    pub fn with_native_texture_payload(
-        &mut self,
-        id: RenderProductId,
-        visitor: &mut dyn FnMut(NativeTexturePayload<'_>),
-    ) -> Result<(), NodeError> {
-        self.resolver
-            .with_native_texture_payload(id, visitor)
-            .map_err(|e| NodeError::msg(alloc::format!("native texture payload: {}", e.message)))
     }
 
     /// Mutates a single existing runtime buffer in place and marks it changed for `frame`.
@@ -211,6 +150,48 @@ impl<'r> TickContext<'r> {
             .runtime_buffer_mut(id, frame)
             .map_err(|e| NodeError::msg(alloc::format!("runtime buffer mut: {}", e.message)))?;
         write(buffer)
+    }
+}
+
+/// Context passed to [`super::RenderNode`] materialization hooks.
+pub struct RenderContext<'a> {
+    node_id: NodeId,
+    revision: Revision,
+    graphics: Option<Arc<dyn LpGraphics>>,
+    frame_time_seconds: f32,
+    _marker: core::marker::PhantomData<&'a mut ()>,
+}
+
+impl<'a> RenderContext<'a> {
+    pub fn new(
+        node_id: NodeId,
+        revision: Revision,
+        graphics: Option<Arc<dyn LpGraphics>>,
+        frame_time_seconds: f32,
+    ) -> Self {
+        Self {
+            node_id,
+            revision,
+            graphics,
+            frame_time_seconds,
+            _marker: core::marker::PhantomData,
+        }
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    pub fn revision(&self) -> Revision {
+        self.revision
+    }
+
+    pub fn graphics(&self) -> Option<&dyn LpGraphics> {
+        self.graphics.as_ref().map(|g| g.as_ref())
+    }
+
+    pub fn time_seconds(&self) -> f32 {
+        self.frame_time_seconds
     }
 }
 

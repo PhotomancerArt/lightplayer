@@ -16,7 +16,9 @@ use lpc_wire::{
     WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload, WireTextureFormat,
 };
 
-use crate::render_product::{RenderProduct, RenderProductMaterializeError, TextureRenderProduct};
+use crate::render_product::{
+    RenderProductMaterializeError, StoredRenderProduct, TextureRenderProduct,
+};
 use crate::runtime_buffer::{
     RuntimeBuffer, RuntimeBufferMetadata, RuntimeChannelSampleFormat as RChFmt, RuntimeColorLayout,
     RuntimeTextureFormat,
@@ -221,7 +223,7 @@ pub(crate) fn summarize_render_products_if_requested(
 
 fn push_render_product_summary(
     out: &mut Vec<WireResourceSummary>,
-    product: Option<&dyn RenderProduct>,
+    product: Option<&dyn StoredRenderProduct>,
     id: RenderProductId,
     changed: Revision,
 ) {

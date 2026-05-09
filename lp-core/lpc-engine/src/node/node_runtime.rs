@@ -4,16 +4,16 @@ use crate::prop::{
     EMPTY_PRODUCED_SLOTS, EMPTY_RUNTIME_STATE, ProducedSlotAccess, RuntimeStateAccess,
 };
 
-use crate::render_product::RenderProductId;
 use crate::runtime_buffer::RuntimeBufferId;
 
+use super::RenderNode;
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
 use crate::memory::pressure_level::PressureLevel;
 
 /// Runtime node instance for the demand-driven engine spine.
 pub trait NodeRuntime {
-    /// Allocate [`RenderProductId`] / [`RuntimeBufferId`] slots owned by this node before first tick.
+    /// Allocate [`RuntimeBufferId`] slots owned by this node before first tick.
     ///
     /// Default: no-op. [`crate::engine::Engine::attach_runtime_node`] invokes this immediately
     /// before storing the alive node.
@@ -46,8 +46,8 @@ pub trait NodeRuntime {
         None
     }
 
-    /// Primary render product allocated for shader output (shader nodes only).
-    fn primary_render_product_id(&self) -> Option<RenderProductId> {
+    /// Render capability for nodes whose produced slots can materialize visual products.
+    fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         None
     }
 }

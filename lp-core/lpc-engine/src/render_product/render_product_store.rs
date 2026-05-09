@@ -39,8 +39,12 @@ impl RenderProductError {
     }
 }
 
-/// Sampleable render product; heavy or GPU-backed implementations live behind this boundary.
-pub trait RenderProduct {
+/// Store-backed render product used by legacy resource projection and tests.
+///
+/// Runtime dataflow uses [`super::RenderProduct`] as a graph handle and dispatches
+/// render requests back to the owning node. This trait remains for concrete,
+/// already-materialized products that live in a store.
+pub trait StoredRenderProduct {
     fn sample_batch(
         &self,
         request: &RenderSampleBatch,
@@ -66,7 +70,7 @@ pub trait RenderProduct {
 /// the lifetime of this store.
 pub struct RenderProductStore {
     next_id: u32,
-    products: BTreeMap<RenderProductId, Box<dyn RenderProduct>>,
+    products: BTreeMap<RenderProductId, Box<dyn StoredRenderProduct>>,
     /// Last engine frame where this id's backing product contents were replaced.
     changed_at: BTreeMap<RenderProductId, Revision>,
 }
@@ -82,7 +86,7 @@ impl RenderProductStore {
     }
 
     /// Allocates a new id. Ids increase monotonically and are never reused after allocation.
-    pub fn insert(&mut self, product: Box<dyn RenderProduct>) -> RenderProductId {
+    pub fn insert(&mut self, product: Box<dyn StoredRenderProduct>) -> RenderProductId {
         let id = RenderProductId::new(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.products.insert(id, product);
@@ -90,7 +94,7 @@ impl RenderProductStore {
         id
     }
 
-    pub fn get(&self, id: RenderProductId) -> Option<&dyn RenderProduct> {
+    pub fn get(&self, id: RenderProductId) -> Option<&dyn StoredRenderProduct> {
         self.products.get(&id).map(|b| b.as_ref())
     }
 
@@ -110,7 +114,7 @@ impl RenderProductStore {
     pub fn replace(
         &mut self,
         id: RenderProductId,
-        product: Box<dyn RenderProduct>,
+        product: Box<dyn StoredRenderProduct>,
         revision: Revision,
     ) -> Result<(), RenderProductError> {
         if !self.products.contains_key(&id) {
@@ -190,7 +194,7 @@ pub struct SolidColorProduct {
 }
 
 #[cfg(test)]
-impl RenderProduct for SolidColorProduct {
+impl StoredRenderProduct for SolidColorProduct {
     fn sample_batch(
         &self,
         request: &RenderSampleBatch,
@@ -269,7 +273,7 @@ fn f32_to_unorm16(value: f32) -> u16 {
 pub struct CoordinateProduct;
 
 #[cfg(test)]
-impl RenderProduct for CoordinateProduct {
+impl StoredRenderProduct for CoordinateProduct {
     fn sample_batch(
         &self,
         request: &RenderSampleBatch,
@@ -297,8 +301,8 @@ mod tests {
     use lpc_model::Revision;
 
     use super::{
-        CoordinateProduct, RenderProduct, RenderProductError, RenderProductStore,
-        RenderSampleBatchResult, SolidColorProduct,
+        CoordinateProduct, RenderProductError, RenderProductStore, RenderSampleBatchResult,
+        SolidColorProduct, StoredRenderProduct,
     };
     use crate::render_product::{RenderSampleBatch, RenderSamplePoint};
 
@@ -370,7 +374,7 @@ mod tests {
     fn store_errors_on_sample_count_mismatch() {
         struct BadProduct;
 
-        impl RenderProduct for BadProduct {
+        impl StoredRenderProduct for BadProduct {
             fn sample_batch(
                 &self,
                 _request: &RenderSampleBatch,

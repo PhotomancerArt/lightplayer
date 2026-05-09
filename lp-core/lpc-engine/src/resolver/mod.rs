@@ -3,7 +3,7 @@
 //! This module provides:
 //! - Engine cache types (`ResolverCache` / [`QueryKey`] / [`Production`])
 //! - Error types for resolution failures (`ResolveError`, [`SessionResolveError`])
-//! - Demand session ([`ResolveSession`], [`ResolveHost`]) and [`TickResolver`] bridge ([`SessionHostResolver`])
+//! - Engine session ([`EngineSession`], [`ResolveHost`]) and [`TickResolver`] bridge ([`SessionHostResolver`])
 
 pub mod production;
 pub mod query_key;
@@ -19,7 +19,7 @@ pub use production::{Production, ProductionSource};
 pub use query_key::QueryKey;
 pub use resolve_error::{ResolveError, SessionResolveError};
 pub use resolve_host::ResolveHost;
-pub use resolve_session::ResolveSession;
+pub use resolve_session::{EngineSession, ResolveSession};
 pub use resolve_trace::{
     ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard,
 };

@@ -1,45 +1,44 @@
-//! Core shader node: compile GLSL via [`crate::gfx::LpGraphics`] and expose output as [`RuntimeProduct::Render`].
+//! Core shader node: owns GLSL compilation/rendering and exposes output as [`RuntimeProduct::Render`].
 
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::string::String;
 
-use lpc_model::NodeId;
-use lpc_model::Revision;
-use lpc_model::SlotPath;
 use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::{AddSubMode, DivMode, GlslOpts, MulMode, NodeId, Revision, SlotPath};
+use lps_shared::TextureBuffer;
 
+use crate::gfx::{LpShader, ShaderCompileOptions};
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
     TickContext,
 };
 use crate::prop::ProducedSlotAccess;
-use crate::render_product::{RenderProductId, ShaderRenderProduct};
+use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::runtime_product::RuntimeProduct;
 
-/// Shader producer wired to the core engine; allocates a [`RenderProductId`] during [`NodeRuntime::init_resources`].
+/// Default max semantic errors forwarded from the GLSL to LPIR front end.
+const SHADER_COMPILE_MAX_ERRORS: usize = 20;
+
+/// Shader producer wired to the core engine.
 pub struct ShaderNode {
     node_id: NodeId,
     config: ShaderDef,
     glsl_source: String,
-    render_product_id: RenderProductId,
-    resources_initialized: bool,
-    outputs: ShaderProducedSlots,
+    shader: Option<Box<dyn LpShader>>,
+    compilation_error: Option<String>,
+    output_changed_at: Revision,
 }
 
 impl ShaderNode {
     pub fn new(node_id: NodeId, config: ShaderDef, glsl_source: String) -> Self {
-        let dummy_id = RenderProductId::new(0);
         Self {
             node_id,
             config,
             glsl_source,
-            render_product_id: dummy_id,
-            resources_initialized: false,
-            outputs: ShaderProducedSlots {
-                path: shader_output_path(),
-                render_product_id: dummy_id,
-                last_frame: Revision::default(),
-            },
+            shader: None,
+            compilation_error: None,
+            output_changed_at: Revision::default(),
         }
     }
 
@@ -47,32 +46,76 @@ impl ShaderNode {
         self.node_id
     }
 
-    pub fn render_product_id(&self) -> RenderProductId {
-        self.render_product_id
+    pub fn render_product(&self) -> RenderProduct {
+        RenderProduct::new(self.node_id, 0)
+    }
+
+    pub fn compilation_error(&self) -> Option<&str> {
+        self.compilation_error.as_deref()
+    }
+
+    fn ensure_compiled(&mut self, ctx: &RenderContext<'_>) -> Result<(), NodeError> {
+        if self.shader.is_some() {
+            return Ok(());
+        }
+
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        log::info!(
+            "[shader-node] compilation starting (node={:?}, {} bytes)",
+            self.node_id,
+            self.glsl_source.len()
+        );
+        lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
+        self.compilation_error = None;
+        let compile_opts = ShaderCompileOptions {
+            q32_options: map_model_q32_options(&self.config.glsl_opts),
+            max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
+        };
+
+        #[cfg(feature = "panic-recovery")]
+        let compile_result: Result<Box<dyn LpShader>, String> = {
+            use core::panic::AssertUnwindSafe;
+            use unwinding::panic::catch_unwind;
+            match catch_unwind(AssertUnwindSafe(|| {
+                graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
+            })) {
+                Ok(inner) => inner.map_err(|e| format!("{e}")),
+                Err(_) => Err(String::from("OOM during shader compilation")),
+            }
+        };
+        #[cfg(not(feature = "panic-recovery"))]
+        let compile_result: Result<Box<dyn LpShader>, String> = graphics
+            .compile_shader(self.glsl_source.as_str(), &compile_opts)
+            .map_err(|e| format!("{e}"));
+        lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
+
+        match compile_result {
+            Ok(shader) => {
+                self.shader = Some(shader);
+                log::info!(
+                    "[shader-node] compilation succeeded (node={:?})",
+                    self.node_id
+                );
+                Ok(())
+            }
+            Err(error) => {
+                self.compilation_error = Some(error.clone());
+                self.shader = None;
+                log::warn!(
+                    "[shader-node] compilation failed (node={:?}): {error}",
+                    self.node_id
+                );
+                Err(NodeError::msg(format!("shader compile: {error}")))
+            }
+        }
     }
 }
 
 impl NodeRuntime for ShaderNode {
-    fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
-        if self.resources_initialized {
-            return Ok(());
-        }
-        let rid = ctx.insert_render_product(Box::new(ShaderRenderProduct::new(
-            self.config.clone(),
-            self.glsl_source.clone(),
-        )));
-        self.render_product_id = rid;
-        self.outputs = ShaderProducedSlots {
-            path: shader_output_path(),
-            render_product_id: rid,
-            last_frame: Revision::default(),
-        };
-        self.resources_initialized = true;
-        Ok(())
-    }
-
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        self.outputs.last_frame = ctx.revision();
+        self.output_changed_at = ctx.revision();
         Ok(())
     }
 
@@ -89,11 +132,11 @@ impl NodeRuntime for ShaderNode {
     }
 
     fn produced(&self) -> &dyn ProducedSlotAccess {
-        &self.outputs
+        self
     }
 
-    fn primary_render_product_id(&self) -> Option<RenderProductId> {
-        self.resources_initialized.then_some(self.render_product_id)
+    fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
+        Some(self)
     }
 }
 
@@ -101,19 +144,12 @@ pub fn shader_output_path() -> SlotPath {
     SlotPath::parse("output").expect("shader output path")
 }
 
-#[derive(Clone)]
-struct ShaderProducedSlots {
-    path: SlotPath,
-    render_product_id: RenderProductId,
-    last_frame: Revision,
-}
-
-impl ProducedSlotAccess for ShaderProducedSlots {
+impl ProducedSlotAccess for ShaderNode {
     fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-        if path == &self.path {
+        if path == &shader_output_path() {
             Some((
-                RuntimeProduct::render(self.render_product_id),
-                self.last_frame,
+                RuntimeProduct::render(self.render_product()),
+                self.output_changed_at,
             ))
         } else {
             None
@@ -124,11 +160,11 @@ impl ProducedSlotAccess for ShaderProducedSlots {
         &'a self,
         since: Revision,
     ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        if self.last_frame.as_i64() > since.as_i64() {
+        if self.output_changed_at.as_i64() > since.as_i64() {
             Box::new(core::iter::once((
-                self.path.clone(),
-                RuntimeProduct::render(self.render_product_id),
-                self.last_frame,
+                shader_output_path(),
+                RuntimeProduct::render(self.render_product()),
+                self.output_changed_at,
             )))
         } else {
             Box::new(core::iter::empty())
@@ -139,13 +175,87 @@ impl ProducedSlotAccess for ShaderProducedSlots {
         &'a self,
     ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
         Box::new(core::iter::once((
-            self.path.clone(),
-            RuntimeProduct::render(self.render_product_id),
-            self.last_frame,
+            shader_output_path(),
+            RuntimeProduct::render(self.render_product()),
+            self.output_changed_at,
         )))
     }
 }
 
+impl RenderNode for ShaderNode {
+    fn render_texture(
+        &mut self,
+        product: RenderProduct,
+        request: &RenderTextureRequest,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<TextureRenderProduct, NodeError> {
+        if product.node() != self.node_id {
+            return Err(NodeError::msg(format!(
+                "shader node {:?} cannot render product owned by {:?}",
+                self.node_id,
+                product.node()
+            )));
+        }
+        if product.output() != 0 {
+            return Err(NodeError::msg(format!(
+                "shader node {:?} has no render output {}",
+                self.node_id,
+                product.output()
+            )));
+        }
+
+        self.ensure_compiled(ctx)?;
+        let shader = self
+            .shader
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+        if !shader.has_render() {
+            return Err(NodeError::msg("compiled shader has no render() entry"));
+        }
+
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        let mut texture = graphics
+            .alloc_output_buffer(request.width, request.height)
+            .map_err(|e| NodeError::msg(format!("alloc_output_buffer: {e}")))?;
+        if texture.format() != request.format {
+            return Err(NodeError::msg(format!(
+                "graphics allocated {:?}, requested {:?}",
+                texture.format(),
+                request.format
+            )));
+        }
+        shader
+            .render(&mut texture, request.time_seconds)
+            .map_err(|e| NodeError::msg(format!("shader render: {e}")))?;
+
+        TextureRenderProduct::new(
+            texture.width(),
+            texture.height(),
+            texture.format(),
+            texture.data().to_vec(),
+        )
+        .map_err(|e| NodeError::msg(format!("texture product: {e}")))
+    }
+}
+
+fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
+    lps_q32::q32_options::Q32Options {
+        add_sub: match opts.add_sub.value() {
+            AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
+            AddSubMode::Wrapping => lps_q32::q32_options::AddSubMode::Wrapping,
+        },
+        mul: match opts.mul.value() {
+            MulMode::Saturating => lps_q32::q32_options::MulMode::Saturating,
+            MulMode::Wrapping => lps_q32::q32_options::MulMode::Wrapping,
+        },
+        div: match opts.div.value() {
+            DivMode::Saturating => lps_q32::q32_options::DivMode::Saturating,
+            DivMode::Reciprocal => lps_q32::q32_options::DivMode::Reciprocal,
+        },
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -155,21 +265,19 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
-    use crate::node::NodeResourceInitContext;
     use crate::node::test_placeholder_spine;
     use crate::nodes::TextureNode;
     use crate::render_product::{
-        RenderProduct, RenderProductStore, RenderSampleBatch, RenderSamplePoint,
+        RenderProduct, RenderSampleBatch, RenderSamplePoint, StoredRenderProduct,
     };
     use crate::resolver::QueryKey;
     use crate::resolver::ResolveLogLevel;
-    use crate::runtime_buffer::RuntimeBufferStore;
     use lpc_model::TreePath;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
-    fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, RenderProductId) {
+    fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, RenderProduct) {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
@@ -218,9 +326,7 @@ mod tests {
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
 
-        let rid = engine
-            .primary_render_product_id_for_node(sh_id)
-            .expect("shader render product id");
+        let rid = RenderProduct::new(sh_id, 0);
 
         (engine, tex_id, sh_id, rid)
     }
@@ -228,12 +334,8 @@ mod tests {
     #[test]
     fn shader_render_output_is_on_produced_slot_access() {
         let cfg = ShaderDef::default();
-        let mut render_products = RenderProductStore::new();
-        let mut runtime_buffers = RuntimeBufferStore::new();
-        let mut ctx = NodeResourceInitContext::new(&mut render_products, &mut runtime_buffers);
-        let mut node = ShaderNode::new(NodeId::new(1), cfg, String::new());
-        node.init_resources(&mut ctx).expect("init resources");
-        let rid = node.render_product_id();
+        let node = ShaderNode::new(NodeId::new(1), cfg, String::new());
+        let rid = node.render_product();
         let p = shader_output_path();
         let (prod, _) = node.produced().get(&p).expect("render output");
         assert_eq!(prod.as_render(), Some(rid));
@@ -267,10 +369,8 @@ mod tests {
         };
         resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off).expect("resolve");
 
-        let graphics = engine.graphics().cloned();
         let texture = engine
-            .render_products_mut()
-            .render_texture(
+            .render_texture_for_test(
                 rid,
                 &crate::render_product::RenderTextureRequest {
                     width: 8,
@@ -278,7 +378,6 @@ mod tests {
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
                     time_seconds: 0.5,
                 },
-                graphics.as_deref(),
             )
             .expect("render texture");
         let batch = RenderSampleBatch {

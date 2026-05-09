@@ -6,19 +6,22 @@ use alloc::format;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lpc_model::{NodeId, Revision, SlotPath, TreePath, WithRevision, advance_revision};
+use lpc_model::{
+    NodeId, Revision, SlotPath, TreePath, WithRevision, advance_revision, current_revision,
+};
 
 use crate::artifact::ArtifactManager;
 use crate::binding::{BindingRegistry, BindingTarget};
 use crate::gfx::LpGraphics;
+use crate::node::{
+    NodeCall, NodeCallKey, NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
+};
 use crate::node::{NodeEntryState, NodeTree};
-use crate::node::{NodeResourceInitContext, NodeRuntime, TickContext};
 use crate::render_product::{
-    RenderProduct, RenderProductId, RenderProductStore, RenderSampleBatch, RenderSampleBatchResult,
-    RenderTextureRequest, TextureRenderProduct,
+    RenderProduct, RenderProductStore, RenderTextureRequest, TextureRenderProduct,
 };
 use crate::resolver::{
-    Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
+    EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::runtime::frame_num::FrameNum;
@@ -152,8 +155,7 @@ impl Engine {
         mut runtime: Box<dyn NodeRuntime>,
         frame: Revision,
     ) -> Result<(), EngineError> {
-        let mut ctx =
-            NodeResourceInitContext::new(&mut self.render_products, &mut self.runtime_buffers);
+        let mut ctx = NodeResourceInitContext::new(&mut self.runtime_buffers);
         runtime
             .init_resources(&mut ctx)
             .map_err(|e| EngineError::node(id, e))?;
@@ -166,14 +168,6 @@ impl Engine {
         let entry = self.tree.get(node_id)?;
         match entry.state.value() {
             NodeEntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
-            _ => None,
-        }
-    }
-
-    pub fn primary_render_product_id_for_node(&self, node_id: NodeId) -> Option<RenderProductId> {
-        let entry = self.tree.get(node_id)?;
-        match entry.state.value() {
-            NodeEntryState::Alive(node) => node.primary_render_product_id(),
             _ => None,
         }
     }
@@ -194,7 +188,7 @@ impl Engine {
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
-        let mut session = ResolveSession::new(self.revision, &mut resolver, &self.bindings, trace);
+        let mut session = EngineSession::new(self.revision, &mut resolver, &self.bindings, trace);
 
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
@@ -202,7 +196,6 @@ impl Engine {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
             producers_ticked: &mut producers_ticked,
-            render_products: &mut self.render_products,
             runtime_buffers: &mut self.runtime_buffers,
             graphics: self.graphics.clone(),
             frame_time_seconds: time_s,
@@ -230,6 +223,25 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn render_texture_for_test(
+        &mut self,
+        product: RenderProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, SessionResolveError> {
+        let mut producers_ticked = BTreeSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            artifacts: &self.artifacts,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            graphics: self.graphics.clone(),
+            frame_time_seconds: time_s,
+        };
+        host.render_node_texture(product, request)
+    }
+
     fn consumed_slot_is_bound(&self, node: NodeId, slot: &SlotPath) -> bool {
         self.bindings.iter().any(|e| {
             matches!(
@@ -243,25 +255,11 @@ impl Engine {
     }
 }
 
-fn apply_deferred_render_replaces(
-    store: &mut RenderProductStore,
-    pending: Vec<(RenderProductId, Box<dyn RenderProduct>)>,
-    frame: Revision,
-) -> Result<(), SessionResolveError> {
-    for (id, product) in pending {
-        store
-            .replace(id, product, frame)
-            .map_err(|e| SessionResolveError::other(format!("render product replace: {e:?}")))?;
-    }
-    Ok(())
-}
-
-/// Host adapter with borrows disjoint from the [`Resolver`] handed to [`ResolveSession`].
+/// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 struct EngineResolveHost<'a> {
     tree: &'a mut NodeTree<Box<dyn NodeRuntime>>,
     artifacts: &'a ArtifactManager<()>,
     producers_ticked: &'a mut BTreeSet<NodeId>,
-    render_products: &'a mut RenderProductStore,
     runtime_buffers: &'a mut RuntimeBufferStore,
     graphics: Option<Arc<dyn LpGraphics>>,
     frame_time_seconds: f32,
@@ -271,7 +269,7 @@ impl EngineResolveHost<'_> {
     fn tick_node_once_for_output(
         &mut self,
         node_id: NodeId,
-        session: &mut ResolveSession<'_>,
+        session: &mut EngineSession<'_>,
     ) -> Result<(), SessionResolveError> {
         if self.producers_ticked.contains(&node_id) {
             return Ok(());
@@ -290,12 +288,25 @@ impl EngineResolveHost<'_> {
                 .unwrap_or_default();
 
             let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Tick),
+            };
             let stolen = core::mem::replace(
                 &mut entry.state,
-                WithRevision::new(old_changed_at, NodeEntryState::Pending),
+                WithRevision::new(old_changed_at, executing),
             );
             let node_runtime = match stolen.into_value() {
                 NodeEntryState::Alive(n) => n,
+                NodeEntryState::Executing { call } => {
+                    entry.state = WithRevision::new(
+                        old_changed_at,
+                        NodeEntryState::Executing { call: call.clone() },
+                    );
+                    return Err(SessionResolveError::other(format!(
+                        "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                        call.call.label()
+                    )));
+                }
                 other => {
                     entry.state = WithRevision::new(old_changed_at, other);
                     return Err(SessionResolveError::other(format!(
@@ -308,7 +319,6 @@ impl EngineResolveHost<'_> {
 
         let gfx = self.graphics.clone();
         let time_s = self.frame_time_seconds;
-        let mut pending_replaces = Vec::new();
         let tick_result = {
             let mut bridge = SessionHostResolver {
                 session,
@@ -321,7 +331,6 @@ impl EngineResolveHost<'_> {
                 artifact_id,
                 content_frame,
                 resolver_dyn,
-                Some(&mut pending_replaces),
                 gfx,
                 time_s,
             );
@@ -335,7 +344,6 @@ impl EngineResolveHost<'_> {
 
         match tick_result {
             Ok(()) => {
-                apply_deferred_render_replaces(self.render_products, pending_replaces, revision)?;
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
@@ -350,7 +358,7 @@ impl ResolveHost for EngineResolveHost<'_> {
     fn produce(
         &mut self,
         query: &QueryKey,
-        session: &mut ResolveSession<'_>,
+        session: &mut EngineSession<'_>,
     ) -> Result<Production, SessionResolveError> {
         match query {
             QueryKey::ProducedSlot { node, slot } => {
@@ -413,37 +421,12 @@ impl ResolveHost for EngineResolveHost<'_> {
         }
     }
 
-    fn sample_render_product(
-        &mut self,
-        id: RenderProductId,
-        batch: &RenderSampleBatch,
-    ) -> Result<RenderSampleBatchResult, SessionResolveError> {
-        self.render_products
-            .sample_batch(id, batch)
-            .map_err(SessionResolveError::from)
-    }
-
     fn render_texture(
         &mut self,
-        id: RenderProductId,
+        product: RenderProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
-        self.render_products
-            .render_texture(id, request, self.graphics.as_deref())
-            .map_err(SessionResolveError::from)
-    }
-
-    fn with_native_texture_payload(
-        &mut self,
-        id: RenderProductId,
-        visitor: &mut dyn FnMut(crate::render_product::NativeTexturePayload<'_>),
-    ) -> Result<(), SessionResolveError> {
-        let payload = self
-            .render_products
-            .try_materialize_native_texture_payload(id)
-            .map_err(|e| SessionResolveError::other(format!("render product payload: {e:?}")))?;
-        visitor(payload);
-        Ok(())
+        self.render_node_texture(product, request)
     }
 
     fn runtime_buffer_mut(
@@ -457,8 +440,93 @@ impl ResolveHost for EngineResolveHost<'_> {
     }
 }
 
+impl EngineResolveHost<'_> {
+    fn render_node_texture(
+        &mut self,
+        product: RenderProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, SessionResolveError> {
+        let node_id = product.node();
+        let revision = current_revision();
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!("render: unknown node {node_id:?}"))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Render { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                NodeEntryState::Executing { call } => {
+                    entry.state = WithRevision::new(
+                        old_changed_at,
+                        NodeEntryState::Executing { call: call.clone() },
+                    );
+                    return Err(SessionResolveError::other(format!(
+                        "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                        call.call.label()
+                    )));
+                }
+                other => {
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(format!(
+                        "render: node {node_id:?} not alive"
+                    )));
+                }
+            }
+        };
+
+        let result = {
+            let Some(render_node) = node_runtime.render_node() else {
+                return restore_node_after_failed_render(
+                    self.tree,
+                    node_id,
+                    node_runtime,
+                    revision,
+                    SessionResolveError::other(format!(
+                        "node {node_id:?} cannot render product output {}: NodeRuntime::render_node() returned None",
+                        product.output()
+                    )),
+                );
+            };
+            let mut ctx = RenderContext::new(
+                node_id,
+                revision,
+                self.graphics.clone(),
+                self.frame_time_seconds,
+            );
+            render_node.render_texture(product, request, &mut ctx)
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("render: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+
+        result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
+    }
+}
+
+fn restore_node_after_failed_render(
+    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    node_id: NodeId,
+    node_runtime: Box<dyn NodeRuntime>,
+    revision: Revision,
+    err: SessionResolveError,
+) -> Result<TextureRenderProduct, SessionResolveError> {
+    if let Some(entry) = tree.get_mut(node_id) {
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+    }
+    Err(err)
+}
+
 fn tick_tree_node(
-    session: &mut ResolveSession<'_>,
+    session: &mut EngineSession<'_>,
     host: &mut EngineResolveHost<'_>,
     node_id: NodeId,
 ) -> Result<(), EngineError> {
@@ -476,12 +544,25 @@ fn tick_tree_node(
             .unwrap_or_default();
 
         let old_changed_at = entry.state.changed_at();
+        let executing = NodeEntryState::Executing {
+            call: NodeCallKey::new(node_id, NodeCall::Tick),
+        };
         let stolen = core::mem::replace(
             &mut entry.state,
-            WithRevision::new(old_changed_at, NodeEntryState::Pending),
+            WithRevision::new(old_changed_at, executing),
         );
         let node_runtime = match stolen.into_value() {
             NodeEntryState::Alive(n) => n,
+            NodeEntryState::Executing { call } => {
+                entry.state = WithRevision::new(
+                    old_changed_at,
+                    NodeEntryState::Executing { call: call.clone() },
+                );
+                return Err(EngineError::from(SessionResolveError::other(format!(
+                    "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                    call.call.label()
+                ))));
+            }
             other => {
                 entry.state = WithRevision::new(old_changed_at, other);
                 return Err(EngineError::NotAlive(node_id));
@@ -492,7 +573,6 @@ fn tick_tree_node(
 
     let gfx = host.graphics.clone();
     let time_s = host.frame_time_seconds;
-    let mut pending_replaces = Vec::new();
     let tick_result = {
         let mut bridge = SessionHostResolver {
             session,
@@ -505,7 +585,6 @@ fn tick_tree_node(
             artifact_id,
             content_frame,
             resolver_dyn,
-            Some(&mut pending_replaces),
             gfx,
             time_s,
         );
@@ -519,10 +598,7 @@ fn tick_tree_node(
     entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
     match tick_result {
-        Ok(()) => {
-            apply_deferred_render_replaces(host.render_products, pending_replaces, revision)?;
-            Ok(())
-        }
+        Ok(()) => Ok(()),
         Err(e) => Err(EngineError::node(node_id, e)),
     }
 }
@@ -536,7 +612,7 @@ pub(crate) fn resolve_with_engine_host(
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
-    let mut session = ResolveSession::new(
+    let mut session = EngineSession::new(
         fid,
         &mut resolver_tmp,
         &eng.bindings,
@@ -548,7 +624,6 @@ pub(crate) fn resolve_with_engine_host(
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
         producers_ticked: &mut producers_ticked,
-        render_products: &mut eng.render_products,
         runtime_buffers: &mut eng.runtime_buffers,
         graphics: eng.graphics.clone(),
         frame_time_seconds: time_s,
@@ -568,7 +643,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
-    let mut session = ResolveSession::new(
+    let mut session = EngineSession::new(
         fid,
         &mut resolver_tmp,
         &eng.bindings,
@@ -580,7 +655,6 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
         producers_ticked: &mut producers_ticked,
-        render_products: &mut eng.render_products,
         runtime_buffers: &mut eng.runtime_buffers,
         graphics: eng.graphics.clone(),
         frame_time_seconds: time_s,
@@ -604,7 +678,9 @@ mod tests {
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
-    use crate::render_product::{RenderSampleBatch, RenderSamplePoint, SolidColorProduct};
+    use crate::render_product::{
+        RenderProduct, RenderSampleBatch, RenderSamplePoint, SolidColorProduct,
+    };
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct;
 
@@ -796,8 +872,6 @@ mod tests {
             .insert(Box::new(SolidColorProduct {
                 color: [1.0, 0.5, 0.25, 1.0],
             }));
-        let product = RuntimeProduct::render(id);
-        let id = product.as_render().expect("render product");
         let request = RenderSampleBatch {
             points: alloc::vec![RenderSamplePoint { x: 0.0, y: 0.0 }],
         };
@@ -806,6 +880,15 @@ mod tests {
             .sample_batch(id, &request)
             .expect("sample");
         assert_eq!(result.samples[0].color, [1.0, 0.5, 0.25, 1.0]);
+    }
+
+    #[test]
+    fn runtime_product_render_handle_is_node_owned_value() {
+        let product = RenderProduct::new(NodeId::new(7), 0);
+        let runtime = RuntimeProduct::render(product);
+        assert_eq!(runtime.as_render(), Some(product));
+        assert!(runtime.as_value().is_none());
+        assert!(runtime.as_buffer().is_none());
     }
 
     #[test]

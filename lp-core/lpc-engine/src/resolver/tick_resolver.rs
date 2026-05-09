@@ -1,9 +1,6 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
-use crate::render_product::{
-    NativeTexturePayload, RenderProductId, RenderSampleBatch, RenderSampleBatchResult,
-    RenderTextureRequest, TextureRenderProduct,
-};
+use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::{ResolveError, SessionResolveError};
@@ -16,23 +13,11 @@ use lpc_model::Revision;
 pub trait TickResolver {
     fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError>;
 
-    fn sample_render_product(
-        &mut self,
-        id: RenderProductId,
-        batch: &RenderSampleBatch,
-    ) -> Result<RenderSampleBatchResult, ResolveError>;
-
     fn render_texture(
         &mut self,
-        id: RenderProductId,
+        product: RenderProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, ResolveError>;
-
-    fn with_native_texture_payload(
-        &mut self,
-        id: RenderProductId,
-        visitor: &mut dyn FnMut(NativeTexturePayload<'_>),
-    ) -> Result<(), ResolveError>;
 
     fn runtime_buffer_mut(
         &mut self,
@@ -58,33 +43,13 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 
-    fn sample_render_product(
-        &mut self,
-        id: RenderProductId,
-        batch: &RenderSampleBatch,
-    ) -> Result<RenderSampleBatchResult, ResolveError> {
-        self.host
-            .sample_render_product(id, batch)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
-    }
-
     fn render_texture(
         &mut self,
-        id: RenderProductId,
+        product: RenderProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, ResolveError> {
         self.host
-            .render_texture(id, request)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
-    }
-
-    fn with_native_texture_payload(
-        &mut self,
-        id: RenderProductId,
-        visitor: &mut dyn FnMut(NativeTexturePayload<'_>),
-    ) -> Result<(), ResolveError> {
-        self.host
-            .with_native_texture_payload(id, visitor)
+            .render_texture(product, request)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 

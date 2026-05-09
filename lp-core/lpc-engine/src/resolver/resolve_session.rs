@@ -1,4 +1,4 @@
-//! [`ResolveSession`] — per-frame demand resolution: cache, trace stack, registry, [`ResolveHost`].
+//! [`EngineSession`] — per-frame demand resolution and engine-dispatched work.
 
 use alloc::format;
 use alloc::vec::Vec;
@@ -13,15 +13,24 @@ use crate::resolver::resolver::Resolver;
 use crate::resolver::resolver::materialize_literal_value;
 use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 
-/// Active resolution session for one frame (or nested test scope).
-pub struct ResolveSession<'a> {
+/// Active engine session for one frame (or nested test scope).
+///
+/// The session owns the demand-resolution cache and trace stack. Engine-owned
+/// callbacks such as produced-slot reads and render materialization still pass
+/// through a host adapter so the resolver can be tested without constructing a
+/// full [`crate::engine::Engine`].
+pub struct EngineSession<'a> {
     revision: Revision,
     resolver: &'a mut Resolver,
     registry: &'a BindingRegistry,
     trace: ResolveTrace,
 }
 
-impl<'a> ResolveSession<'a> {
+/// Transitional alias while resolver tests and call sites still use the older
+/// name. New engine-facing code should prefer [`EngineSession`].
+pub type ResolveSession<'a> = EngineSession<'a>;
+
+impl<'a> EngineSession<'a> {
     pub fn new(
         frame_id: Revision,
         resolver: &'a mut Resolver,

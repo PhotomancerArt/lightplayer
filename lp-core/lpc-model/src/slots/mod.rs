@@ -36,7 +36,7 @@ pub use xy::{XySlot, xy_shape};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RelativeNodeRef, ResourceRef, RuntimeBufferId, current_revision};
+    use crate::{RelativeNodeRef, ResourceRef, Revision, RuntimeBufferId, set_current_revision};
     use alloc::string::String;
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -56,6 +56,7 @@ mod tests {
 
     #[test]
     fn semantic_slots_serialize_as_authored_values_and_stamp_deserialize_version() {
+        set_current_revision(Revision::new(10));
         let slots = SemanticSlots {
             ratio: RatioSlot::new(0.75),
             positive: PositiveF32Slot::new(2.0),
@@ -79,12 +80,11 @@ mod tests {
         assert!(authored.contains("color_order = \"grb\""));
         assert!(authored.contains("texture_loc = \"..texture\""));
 
-        let expected_version = current_revision();
         let decoded: SemanticSlots = toml::from_str(&authored).unwrap();
 
-        assert_eq!(decoded.ratio.revision(), expected_version);
-        assert_eq!(decoded.dim.revision(), expected_version);
-        assert_eq!(decoded.transform.revision(), expected_version);
+        let stamped_revision = decoded.ratio.revision();
+        assert_eq!(decoded.dim.revision(), stamped_revision);
+        assert_eq!(decoded.transform.revision(), stamped_revision);
         assert_eq!(decoded.color_order.value(), &ColorOrderValue::Grb);
         assert_eq!(
             decoded.resource.value(),

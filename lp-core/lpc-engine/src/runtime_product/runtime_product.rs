@@ -2,7 +2,7 @@
 
 use lps_shared::LpsValueF32;
 
-use crate::render_product::RenderProductId;
+use crate::render_product::RenderProduct;
 use crate::runtime_buffer::RuntimeBufferId;
 
 /// Building a [`RuntimeProduct`] from an invalid domain-specific value.
@@ -28,7 +28,7 @@ impl core::error::Error for RuntimeProductError {}
 #[derive(Debug, Clone)]
 pub enum RuntimeProduct {
     Value(LpsValueF32),
-    Render(RenderProductId),
+    Render(RenderProduct),
     Buffer(RuntimeBufferId),
 }
 
@@ -47,8 +47,8 @@ impl RuntimeProduct {
     }
 
     #[must_use]
-    pub fn render(id: RenderProductId) -> Self {
-        Self::Render(id)
+    pub fn render(product: RenderProduct) -> Self {
+        Self::Render(product)
     }
 
     #[must_use]
@@ -63,9 +63,9 @@ impl RuntimeProduct {
         }
     }
 
-    pub fn as_render(&self) -> Option<RenderProductId> {
+    pub fn as_render(&self) -> Option<RenderProduct> {
         match self {
-            Self::Render(id) => Some(*id),
+            Self::Render(product) => Some(*product),
             Self::Value(_) | Self::Buffer(_) => None,
         }
     }
@@ -83,8 +83,9 @@ mod tests {
     use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32};
 
     use super::{RuntimeProduct, RuntimeProductError};
-    use crate::render_product::RenderProductId;
+    use crate::render_product::RenderProduct;
     use crate::runtime_buffer::RuntimeBufferId;
+    use lpc_model::NodeId;
 
     #[test]
     fn runtime_product_value_helper_returns_value() {
@@ -95,10 +96,10 @@ mod tests {
     }
 
     #[test]
-    fn runtime_product_render_helper_returns_id() {
-        let id = RenderProductId::new(7);
-        let p = RuntimeProduct::render(id);
-        assert_eq!(p.as_render(), Some(id));
+    fn runtime_product_render_helper_returns_product() {
+        let product = RenderProduct::new(NodeId::new(7), 0);
+        let p = RuntimeProduct::render(product);
+        assert_eq!(p.as_render(), Some(product));
         assert!(p.as_value().is_none());
         assert!(p.as_buffer().is_none());
     }
@@ -132,7 +133,7 @@ mod tests {
 
     #[test]
     fn accessors_do_not_cross_domains_between_render_and_buffer() {
-        let rid = RenderProductId::new(1);
+        let rid = RenderProduct::new(NodeId::new(1), 0);
         let bid = RuntimeBufferId::new(2);
         let render_p = RuntimeProduct::render(rid);
         let buffer_p = RuntimeProduct::buffer(bid);

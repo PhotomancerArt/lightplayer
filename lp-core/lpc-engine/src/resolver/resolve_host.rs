@@ -1,10 +1,7 @@
 //! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::ProducedSlot`] (and
 //! unbound [`crate::resolver::QueryKey::ConsumedSlot`]) production.
 
-use crate::render_product::{
-    NativeTexturePayload, RenderProductError, RenderProductId, RenderSampleBatch,
-    RenderSampleBatchResult, RenderTextureRequest, TextureRenderProduct,
-};
+use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::SessionResolveError;
@@ -20,36 +17,14 @@ pub trait ResolveHost {
         session: &mut ResolveSession<'_>,
     ) -> Result<Production, SessionResolveError>;
 
-    fn sample_render_product(
-        &mut self,
-        id: RenderProductId,
-        batch: &RenderSampleBatch,
-    ) -> Result<RenderSampleBatchResult, SessionResolveError> {
-        let _ = (id, batch);
-        Err(SessionResolveError::other(
-            "resolve host has no render product sampler",
-        ))
-    }
-
     fn render_texture(
         &mut self,
-        id: RenderProductId,
+        product: RenderProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
-        let _ = (id, request);
+        let _ = (product, request);
         Err(SessionResolveError::other(
             "resolve host has no render texture access",
-        ))
-    }
-
-    fn with_native_texture_payload(
-        &mut self,
-        id: RenderProductId,
-        visitor: &mut dyn FnMut(NativeTexturePayload<'_>),
-    ) -> Result<(), SessionResolveError> {
-        let _ = (id, visitor);
-        Err(SessionResolveError::other(
-            "resolve host has no native texture payload access",
         ))
     }
 
@@ -62,11 +37,5 @@ pub trait ResolveHost {
         Err(SessionResolveError::other(
             "resolve host has no runtime buffer writer",
         ))
-    }
-}
-
-impl From<RenderProductError> for SessionResolveError {
-    fn from(value: RenderProductError) -> Self {
-        SessionResolveError::other(alloc::format!("render product: {value:?}"))
     }
 }

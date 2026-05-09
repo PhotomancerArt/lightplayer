@@ -25,7 +25,7 @@ use crate::node::{
 };
 use crate::prop::ProducedSlotAccess;
 use crate::render_product::{
-    RenderProduct, RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest,
+    RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest, StoredRenderProduct,
     TextureRenderProduct,
 };
 use crate::resolver::QueryKey;
@@ -481,25 +481,25 @@ mod tests {
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
-    use crate::node::test_placeholder_spine;
+    use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
     use crate::prop::ProducedSlotAccess;
-    use crate::render_product::SolidColorProduct;
+    use crate::render_product::{RenderProduct, SolidColorProduct};
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct as RpEnum;
 
     #[derive(Clone)]
     struct FixtureTickCountSolidProducerOutputs {
         path: SlotPath,
-        rid: crate::render_product::RenderProductId,
+        product: RenderProduct,
         last_frame: Revision,
     }
 
     impl ProducedSlotAccess for FixtureTickCountSolidProducerOutputs {
         fn get(&self, path: &SlotPath) -> Option<(RpEnum, Revision)> {
             if path == &self.path {
-                Some((RpEnum::render(self.rid), self.last_frame))
+                Some((RpEnum::render(self.product), self.last_frame))
             } else {
                 None
             }
@@ -512,7 +512,7 @@ mod tests {
             if self.last_frame.as_i64() > since.as_i64() {
                 Box::new(core::iter::once((
                     self.path.clone(),
-                    RuntimeProduct::render(self.rid),
+                    RuntimeProduct::render(self.product),
                     self.last_frame,
                 )))
             } else {
@@ -525,7 +525,7 @@ mod tests {
         ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
             Box::new(core::iter::once((
                 self.path.clone(),
-                RuntimeProduct::render(self.rid),
+                RuntimeProduct::render(self.product),
                 self.last_frame,
             )))
         }
@@ -534,6 +534,7 @@ mod tests {
     struct FixtureTickCountSolidProducer {
         out: FixtureTickCountSolidProducerOutputs,
         ticks: Arc<AtomicU32>,
+        color: [f32; 4],
     }
 
     impl NodeRuntime for FixtureTickCountSolidProducer {
@@ -557,6 +558,24 @@ mod tests {
 
         fn produced(&self) -> &dyn ProducedSlotAccess {
             &self.out
+        }
+
+        fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
+            Some(self)
+        }
+    }
+
+    impl RenderNode for FixtureTickCountSolidProducer {
+        fn render_texture(
+            &mut self,
+            _product: RenderProduct,
+            request: &RenderTextureRequest,
+            _ctx: &mut RenderContext<'_>,
+        ) -> Result<TextureRenderProduct, NodeError> {
+            let mut product = SolidColorProduct { color: self.color };
+            product
+                .render_texture(request, None)
+                .map_err(|e| NodeError::msg(format!("solid render: {e:?}")))
         }
     }
 
@@ -591,12 +610,6 @@ mod tests {
             )
             .unwrap();
 
-        let rid = engine
-            .render_products_mut()
-            .insert(Box::new(SolidColorProduct {
-                color: [1.0, 0.0, 0.0, 1.0],
-            }));
-
         let sh_id = engine
             .tree_mut()
             .add_child(
@@ -620,9 +633,10 @@ mod tests {
                     ticks: Arc::clone(&ticks),
                     out: FixtureTickCountSolidProducerOutputs {
                         path: out_path.clone(),
-                        rid,
+                        product: RenderProduct::new(sh_id, 0),
                         last_frame: frame,
                     },
+                    color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
             )
@@ -751,12 +765,6 @@ mod tests {
             )
             .unwrap();
 
-        let rid = engine
-            .render_products_mut()
-            .insert(Box::new(SolidColorProduct {
-                color: [1.0, 0.0, 0.0, 1.0],
-            }));
-
         let sh_id = engine
             .tree_mut()
             .add_child(
@@ -780,9 +788,10 @@ mod tests {
                     ticks: Arc::clone(&ticks),
                     out: FixtureTickCountSolidProducerOutputs {
                         path: out_path.clone(),
-                        rid,
+                        product: RenderProduct::new(sh_id, 0),
                         last_frame: frame,
                     },
+                    color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
             )

@@ -55,11 +55,11 @@ pub use prop::{ProducedSlotAccess, RuntimeStateAccess};
 pub use render_product::{
     RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
     RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, RenderTextureRequest,
-    TextureRenderProduct, TextureRenderProductError,
+    StoredRenderProduct, TextureRenderProduct, TextureRenderProductError,
 };
 pub use resolver::{
-    Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession,
-    ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
+    EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
+    ResolveSession, ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
     SessionHostResolver, SessionResolveError, TickResolver, TraceGuard,
 };
 pub use runtime_buffer::{
