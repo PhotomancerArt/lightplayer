@@ -7,7 +7,7 @@ use alloc::string::String;
 
 use lpc_engine::node::NodeError;
 use lpc_engine::{
-    ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingPriority,
+    ArtifactLocation, ArtifactStore, ArtifactState, BindingDraft, BindingPriority,
     BindingRegistry, BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost,
     ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, SessionHostResolver,
     SessionResolveError, TickContext, TickResolver,
@@ -21,7 +21,7 @@ use lps_shared::LpsValueF32;
 
 #[test]
 fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount() {
-    let mut mgr: ArtifactManager<String> = ArtifactManager::new();
+    let mut mgr: ArtifactStore<String> = ArtifactStore::new();
     let location = ArtifactLocation::file("dummy/test.lp");
     let r = mgr.acquire_location(location, Revision::new(1));
 
@@ -66,7 +66,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
     let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
 
-    let mut mgr: ArtifactManager<u8> = ArtifactManager::new();
+    let mut mgr: ArtifactStore<u8> = ArtifactStore::new();
     let ar = mgr.acquire_location(
         ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap()).unwrap(),
         Revision::new(0),

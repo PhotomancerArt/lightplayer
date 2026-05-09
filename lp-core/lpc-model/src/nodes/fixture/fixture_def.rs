@@ -2,7 +2,7 @@ use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
 use crate::node::kind::NodeKind;
-use crate::node::node_def::NodeDef;
+use crate::nodes::node_def::NodeDef;
 use crate::nodes::fixture::MappingConfig;
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,

@@ -12,6 +12,6 @@ pub use artifact_entry::ArtifactEntry;
 pub use artifact_error::ArtifactError;
 pub use artifact_id::ArtifactId;
 pub use artifact_location::ArtifactLocation;
-pub use artifact_manager::ArtifactManager;
+pub use artifact_manager::ArtifactStore;
 pub use artifact_state::ArtifactState;
 pub use source_loader::load_source_artifact;

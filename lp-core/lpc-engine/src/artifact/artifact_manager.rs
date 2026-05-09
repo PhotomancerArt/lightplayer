@@ -11,13 +11,13 @@ use super::{ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, Artifact
 /// When the refcount of an entry in [`ArtifactState::Resolved`] or an error state reaches zero,
 /// the entry is **removed** from both maps. Payload-bearing states transition to [`ArtifactState::Idle`]
 /// instead so the location continues to resolve to the same handle for future acquires.
-pub struct ArtifactManager<A> {
+pub struct ArtifactStore<A> {
     by_handle: BTreeMap<u32, ArtifactEntry<A>>,
     location_to_handle: BTreeMap<ArtifactLocation, u32>,
     next_handle: u32,
 }
 
-impl<A> ArtifactManager<A> {
+impl<A> ArtifactStore<A> {
     pub fn new() -> Self {
         Self {
             by_handle: BTreeMap::new(),
@@ -150,7 +150,7 @@ impl<A> ArtifactManager<A> {
     }
 }
 
-impl<A> Default for ArtifactManager<A> {
+impl<A> Default for ArtifactStore<A> {
     fn default() -> Self {
         Self::new()
     }
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn acquire_same_location_reuses_handle_and_increments_refcount() {
-        let mut m: ArtifactManager<i32> = ArtifactManager::new();
+        let mut m: ArtifactStore<i32> = ArtifactStore::new();
         let l = location("a.lp");
         let r1 = m.acquire_location(l.clone(), Revision::new(1));
         let r2 = m.acquire_location(l, Revision::new(2));
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn release_decrements_refcount() {
-        let mut m: ArtifactManager<i32> = ArtifactManager::new();
+        let mut m: ArtifactStore<i32> = ArtifactStore::new();
         let r = m.acquire_location(location("b.lp"), Revision::new(1));
         let h = r.handle();
         let r2 = m.acquire_location(location("b.lp"), Revision::new(1));
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn loaded_moves_to_idle_when_refcount_reaches_zero() {
-        let mut m: ArtifactManager<i32> = ArtifactManager::new();
+        let mut m: ArtifactStore<i32> = ArtifactStore::new();
         let r = m.acquire_location(location("c.lp"), Revision::new(1));
         m.load_with(&r, Revision::new(5), |_location| Ok(42))
             .unwrap();
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn load_success_bumps_content_frame() {
-        let mut m: ArtifactManager<i32> = ArtifactManager::new();
+        let mut m: ArtifactStore<i32> = ArtifactStore::new();
         let r = m.acquire_location(location("d.lp"), Revision::new(1));
         m.load_with(&r, Revision::new(10), |_location| Ok(1))
             .unwrap();
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn load_failure_records_load_error() {
-        let mut m: ArtifactManager<i32> = ArtifactManager::new();
+        let mut m: ArtifactStore<i32> = ArtifactStore::new();
         let r = m.acquire_location(location("e.lp"), Revision::new(1));
         let err = m
             .load_with(&r, Revision::new(3), |_location| {
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn unknown_handle_returns_structured_error() {
-        let mut m: ArtifactManager<i32> = ArtifactManager::new();
+        let mut m: ArtifactStore<i32> = ArtifactStore::new();
         let bad = ArtifactId::from_raw(999);
         assert_eq!(
             m.release(&bad, Revision::default()).unwrap_err(),

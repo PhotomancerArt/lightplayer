@@ -1,7 +1,6 @@
 //! **Shared** graph node identifiers and authored node-tree locators.
 
 pub mod kind;
-pub mod node_def;
 pub mod node_id;
 pub mod node_invocation;
 pub mod node_name;
@@ -15,7 +14,7 @@ pub mod relative_node_ref;
 pub mod tree_path;
 
 pub use kind::NodeKind;
-pub use node_def::NodeDef;
+pub use crate::nodes::node_def::NodeDef;
 pub use node_id::NodeId;
 pub use node_invocation::NodeInvocation;
 pub use node_name::{NodeName, NodeNameError};

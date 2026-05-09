@@ -1,7 +1,7 @@
 //! Engine-side orchestration from [`ArtifactLocation`](super::ArtifactLocation) to typed [`SrcArtifact`] loads via
 //! [`lpc_source::load_artifact`], mapping [`lpc_source::LoadError`] into [`ArtifactError`].
 //!
-//! Use with [`super::ArtifactManager::load_with`], e.g.
+//! Use with [`super::ArtifactStore::load_with`], e.g.
 //! `manager.load_with(&artifact_id, frame, |location| load_source_artifact(fs, location))`.
 
 use alloc::format;
@@ -47,7 +47,7 @@ mod tests {
     use lpc_model::{LpPath, LpPathBuf, Revision};
     use lpc_source::ArtifactLocator;
 
-    use crate::artifact::{ArtifactManager, ArtifactState};
+    use crate::artifact::{ArtifactStore, ArtifactState};
 
     #[derive(Debug, serde::Deserialize)]
     struct DummySrcArtifact {
@@ -141,7 +141,7 @@ schema_version = 1
 title = "from-manager"
 "#,
         );
-        let mut m: ArtifactManager<DummySrcArtifact> = ArtifactManager::new();
+        let mut m: ArtifactStore<DummySrcArtifact> = ArtifactStore::new();
         let r = m.acquire_location(ArtifactLocation::file("/eff.toml"), Revision::new(1));
         m.load_with(&r, Revision::new(2), |location| {
             load_source_artifact(&fs, location)

@@ -31,7 +31,7 @@ pub struct NodeEntry<N> {
     /// Authored per-instance config (artifact spec + overrides).
     pub config: NodeInvocation,
 
-    /// Runtime handle into [`crate::artifact::ArtifactManager`].
+    /// Runtime handle into [`crate::artifact::ArtifactStore`].
     pub artifact: ArtifactId,
 }
 

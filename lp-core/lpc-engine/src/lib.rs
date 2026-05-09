@@ -31,7 +31,7 @@ pub mod runtime_product;
 pub mod wire_bridge;
 
 pub use artifact::{
-    ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactManager, ArtifactState,
+    ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactStore, ArtifactState,
 };
 pub use binding::{
     BindingDraft, BindingEntry, BindingError, BindingId, BindingPriority, BindingRegistry,

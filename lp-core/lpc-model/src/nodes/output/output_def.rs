@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::node::kind::NodeKind;
-use crate::node::node_def::NodeDef;
+use crate::nodes::node_def::NodeDef;
 use crate::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 /// Authored GPIO output node definition.

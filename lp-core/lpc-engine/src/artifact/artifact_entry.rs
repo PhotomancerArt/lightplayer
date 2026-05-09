@@ -1,4 +1,4 @@
-//! Single artifact slot in [`super::ArtifactManager`].
+//! Single artifact slot in [`super::ArtifactStore`].
 
 use lpc_model::Revision;
 

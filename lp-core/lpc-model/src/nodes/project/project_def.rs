@@ -1,7 +1,7 @@
 use alloc::string::String;
 
 use crate::node::kind::NodeKind;
-use crate::node::node_def::NodeDef;
+use crate::nodes::node_def::NodeDef;
 use crate::node::node_invocation::NodeInvocation;
 use crate::{MapSlot, OptionSlot, ValueSlot};
 

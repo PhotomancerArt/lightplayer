@@ -11,7 +11,7 @@ use lpc_model::{
     advance_revision, current_revision, lookup_slot_data,
 };
 
-use crate::artifact::ArtifactManager;
+use crate::artifact::ArtifactStore;
 use crate::binding::{BindingRegistry, BindingTarget};
 use crate::gfx::LpGraphics;
 use crate::node::{
@@ -58,7 +58,7 @@ pub struct Engine {
     slot_shapes: SlotShapeRegistry,
     render_products: RenderProductStore,
     runtime_buffers: RuntimeBufferStore,
-    artifacts: ArtifactManager<()>,
+    artifacts: ArtifactStore<()>,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
 }
@@ -79,7 +79,7 @@ impl Engine {
             slot_shapes,
             render_products: RenderProductStore::new(),
             runtime_buffers: RuntimeBufferStore::new(),
-            artifacts: ArtifactManager::new(),
+            artifacts: ArtifactStore::new(),
             demand_roots: Vec::new(),
             graphics: None,
         }
@@ -145,11 +145,11 @@ impl Engine {
         &mut self.runtime_buffers
     }
 
-    pub fn artifacts(&self) -> &ArtifactManager<()> {
+    pub fn artifacts(&self) -> &ArtifactStore<()> {
         &self.artifacts
     }
 
-    pub fn artifacts_mut(&mut self) -> &mut ArtifactManager<()> {
+    pub fn artifacts_mut(&mut self) -> &mut ArtifactStore<()> {
         &mut self.artifacts
     }
 
@@ -291,7 +291,7 @@ impl Engine {
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 struct EngineResolveHost<'a> {
     tree: &'a mut NodeTree<Box<dyn NodeRuntime>>,
-    artifacts: &'a ArtifactManager<()>,
+    artifacts: &'a ArtifactStore<()>,
     producers_ticked: &'a mut BTreeSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,

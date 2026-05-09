@@ -2,7 +2,7 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 use crate::node::kind::NodeKind;
-use crate::node::node_def::NodeDef;
+use crate::nodes::node_def::NodeDef;
 use crate::nodes::shader::{GlslOpts, ShaderParamDef};
 use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot};
 

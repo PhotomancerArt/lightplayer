@@ -1,8 +1,8 @@
-//! Opaque handle to an artifact entry inside [`super::ArtifactManager`].
+//! Opaque handle to an artifact entry inside [`super::ArtifactStore`].
 
-/// Runtime handle returned by [`super::ArtifactManager::acquire_resolved`].
+/// Runtime handle returned by [`super::ArtifactStore::acquire_resolved`].
 ///
-/// Dropping a reference does **not** decrement refcount; call [`super::ArtifactManager::release`].
+/// Dropping a reference does **not** decrement refcount; call [`super::ArtifactStore::release`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArtifactId {
     handle: u32,

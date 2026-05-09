@@ -2,12 +2,12 @@
 
 use alloc::string::String;
 
-/// Errors returned by [`super::ArtifactManager`] and loader closures.
+/// Errors returned by [`super::ArtifactStore`] and loader closures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactError {
     /// No entry exists for this [`super::ArtifactId`] handle.
     UnknownHandle { handle: u32 },
-    /// [`super::ArtifactManager::release`] called when refcount is already zero.
+    /// [`super::ArtifactStore::release`] called when refcount is already zero.
     InvalidRelease { handle: u32 },
     /// Artifact resolution failed (forwarded into [`super::ArtifactState::ResolutionError`] when stored).
     Resolution(String),
