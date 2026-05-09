@@ -28,10 +28,11 @@ pub mod resolver;
 pub mod runtime;
 pub mod runtime_buffer;
 pub mod runtime_product;
+pub mod slot_view;
 pub mod wire_bridge;
 
 pub use artifact::{
-    ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactStore, ArtifactState,
+    ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactState, ArtifactStore,
 };
 pub use binding::{
     BindingDraft, BindingEntry, BindingError, BindingId, BindingPriority, BindingRegistry,
@@ -47,8 +48,7 @@ pub use node::{
 };
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project_runtime::{
-    CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, LoadedNodeDef, OutputFlushError,
-    RuntimeServices, SourceAuthoringIndex,
+    CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, OutputFlushError, RuntimeServices,
 };
 pub use render_product::{
     RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
@@ -65,6 +65,7 @@ pub use runtime_buffer::{
     RuntimeBufferStore, RuntimeChannelSampleFormat, RuntimeColorLayout, RuntimeTextureFormat,
 };
 pub use runtime_product::{RuntimeProduct, RuntimeProductError};
+pub use slot_view::TextureDefView;
 pub use wire_bridge::{
     LpsValueToModelConversionError, lps_value_f32_to_model_value, model_type_to_lps_type,
 };

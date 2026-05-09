@@ -1,5 +1,3 @@
-use crate::node::kind::NodeKind;
-use crate::nodes::node_def::NodeDef;
 use crate::{BindingDefs, Dim2u, Dim2uSlot};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +13,8 @@ pub struct TextureDef {
 }
 
 impl TextureDef {
+    pub const KIND: &'static str = "texture";
+
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             size: Dim2uSlot::new(Dim2u { width, height }),
@@ -29,21 +29,16 @@ impl TextureDef {
     pub fn height(&self) -> u32 {
         self.size.value().height
     }
-}
 
-impl NodeDef for TextureDef {
-    fn kind(&self) -> NodeKind {
-        NodeKind::Texture
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
+    pub fn kind(&self) -> crate::NodeKind {
+        crate::NodeKind::Texture
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NodeKind;
 
     #[test]
     fn test_texture_def_kind() {

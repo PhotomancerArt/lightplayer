@@ -17,6 +17,17 @@ This is ambitious enough to prove the architecture, but bounded enough to avoid 
 
 ## Current Codebase State
 
+Current local changes already made before this plan is finalized:
+
+- `ArtifactManager` has been renamed to `ArtifactStore`, but it is still
+  generic as `ArtifactStore<A>`.
+- `node_def.rs` has moved from `lpc-model/src/node/` to
+  `lpc-model/src/nodes/`, which is the right home for the canonical core
+  node-definition vocabulary.
+- `lpc-model/src/nodes/node_def.rs` still contains the older `NodeDef` trait.
+  This plan should replace that concept with the enum unless a small support
+  trait remains clearly useful.
+
 ### Resolver
 
 Relevant files:

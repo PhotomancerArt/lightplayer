@@ -11,7 +11,7 @@ use lpc_model::{
     advance_revision, current_revision, lookup_slot_data,
 };
 
-use crate::artifact::ArtifactStore;
+use crate::artifact::{ArtifactState, ArtifactStore};
 use crate::binding::{BindingRegistry, BindingTarget};
 use crate::gfx::LpGraphics;
 use crate::node::{
@@ -58,7 +58,7 @@ pub struct Engine {
     slot_shapes: SlotShapeRegistry,
     render_products: RenderProductStore,
     runtime_buffers: RuntimeBufferStore,
-    artifacts: ArtifactStore<()>,
+    artifacts: ArtifactStore,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
 }
@@ -145,11 +145,11 @@ impl Engine {
         &mut self.runtime_buffers
     }
 
-    pub fn artifacts(&self) -> &ArtifactStore<()> {
+    pub fn artifacts(&self) -> &ArtifactStore {
         &self.artifacts
     }
 
-    pub fn artifacts_mut(&mut self) -> &mut ArtifactStore<()> {
+    pub fn artifacts_mut(&mut self) -> &mut ArtifactStore {
         &mut self.artifacts
     }
 
@@ -291,7 +291,7 @@ impl Engine {
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 struct EngineResolveHost<'a> {
     tree: &'a mut NodeTree<Box<dyn NodeRuntime>>,
-    artifacts: &'a ArtifactStore<()>,
+    artifacts: &'a ArtifactStore,
     producers_ticked: &'a mut BTreeSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -315,7 +315,7 @@ impl EngineResolveHost<'_> {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
             })?;
-            let artifact_id = entry.artifact;
+            let artifact_id = entry.artifact();
             let content_frame = self
                 .artifacts
                 .content_frame(&artifact_id)
@@ -422,28 +422,18 @@ impl ResolveHost for EngineResolveHost<'_> {
                 ))
             }
             QueryKey::ConsumedSlot { node, slot } => {
-                self.tick_node_once_for_output(*node, session)?;
                 let entry = self.tree.get(*node).ok_or_else(|| {
                     SessionResolveError::UnresolvedConsumedSlot {
                         node: *node,
                         slot: slot.clone(),
                     }
                 })?;
-                let n = match entry.state.value() {
-                    NodeEntryState::Alive(n) => n,
-                    _ => {
-                        return Err(SessionResolveError::UnresolvedConsumedSlot {
-                            node: *node,
-                            slot: slot.clone(),
-                        });
-                    }
-                };
-                let product = self.read_runtime_state_product(&**n, slot).map_err(|_| {
-                    SessionResolveError::UnresolvedConsumedSlot {
+                let product = self
+                    .read_authored_def_product(&entry.def_handle, slot)
+                    .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
                         node: *node,
                         slot: slot.clone(),
-                    }
-                })?;
+                    })?;
                 Ok(Production::new(product, ProductionSource::Default))
             }
             QueryKey::Bus(_) => Err(SessionResolveError::other(
@@ -482,6 +472,47 @@ impl EngineResolveHost<'_> {
         let SlotDataAccess::Value(value) = data else {
             return Err(SessionResolveError::other(format!(
                 "runtime state slot {slot:?} is not a value"
+            )));
+        };
+        Ok(WithRevision::new(
+            value.changed_at(),
+            runtime_product_from_lp_value(value.value())?,
+        ))
+    }
+
+    fn read_authored_def_product(
+        &self,
+        handle: &crate::node::NodeDefHandle,
+        slot: &SlotPath,
+    ) -> Result<WithRevision<RuntimeProduct>, SessionResolveError> {
+        if !handle.is_artifact_root() {
+            return Err(SessionResolveError::other(format!(
+                "non-root node def handles are not supported yet: {}",
+                handle.path()
+            )));
+        }
+        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
+            SessionResolveError::other(format!(
+                "node def artifact {:?} is not loaded",
+                handle.artifact()
+            ))
+        })?;
+        let def = match &entry.state {
+            ArtifactState::Loaded(def)
+            | ArtifactState::Prepared(def)
+            | ArtifactState::Idle(def) => def,
+            other => {
+                return Err(SessionResolveError::other(format!(
+                    "node def artifact {:?} has no loaded payload: {other:?}",
+                    handle.artifact()
+                )));
+            }
+        };
+        let data = lookup_slot_data(def, self.slot_shapes, slot)
+            .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
+        let SlotDataAccess::Value(value) = data else {
+            return Err(SessionResolveError::other(format!(
+                "authored def slot {slot:?} is not a value"
             )));
         };
         Ok(WithRevision::new(
@@ -586,7 +617,7 @@ fn tick_tree_node(
             .tree
             .get_mut(node_id)
             .ok_or(EngineError::UnknownNode(node_id))?;
-        let artifact_id = entry.artifact;
+        let artifact_id = entry.artifact();
         let content_frame = host
             .artifacts
             .content_frame(&artifact_id)

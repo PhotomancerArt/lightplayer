@@ -5,14 +5,11 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::nodes::fixture::FixtureDef;
-use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::{
-    BindingDefs, BindingEndpoint, ChannelName, Kind, LpValue, NodeId, NodeName, Revision, SlotPath,
+    BindingDefs, BindingEndpoint, ChannelName, Kind, LpValue, NodeDef, NodeId, NodeName, Revision,
+    SlotPath,
 };
 use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -21,7 +18,7 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 use crate::artifact::ArtifactLocation;
 use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::Engine;
-use crate::node::TreeError;
+use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
 use crate::runtime_buffer::RuntimeBufferId;
 
@@ -61,26 +58,7 @@ struct LoadedNode {
     name: NodeName,
     artifact_path: LpPathBuf,
     id: NodeId,
-    config: LoadedNodeDef,
-}
-
-#[derive(Clone)]
-pub enum LoadedNodeDef {
-    Texture(TextureDef),
-    Shader(ShaderDef),
-    Output(OutputDef),
-    Fixture(FixtureDef),
-}
-
-impl LoadedNodeDef {
-    fn kind_name(&self) -> &'static str {
-        match self {
-            LoadedNodeDef::Texture(_) => "texture",
-            LoadedNodeDef::Shader(_) => "shader",
-            LoadedNodeDef::Output(_) => "output",
-            LoadedNodeDef::Fixture(_) => "fixture",
-        }
-    }
+    config: NodeDef,
 }
 
 /// Loads the authored project artifact tree into a core engine-backed runtime.
@@ -118,6 +96,16 @@ impl CoreProjectLoader {
             .engine_mut()
             .artifacts_mut()
             .acquire_location(ArtifactLocation::file(project_path.clone()), frame);
+        runtime
+            .engine_mut()
+            .artifacts_mut()
+            .load_with(&project_artifact, frame, |_location| {
+                Ok(NodeDef::Project(project_def.clone()))
+            })
+            .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+                path: project_path.as_str().to_string(),
+                reason: format!("load project artifact payload: {e:?}"),
+            })?;
         let project_invocation = NodeInvocation::new(project_locator);
 
         {
@@ -127,7 +115,7 @@ impl CoreProjectLoader {
                 .get_mut(root_id)
                 .ok_or(CoreProjectLoadError::Tree(TreeError::UnknownNode(root_id)))?;
             root_entry.config = project_invocation;
-            root_entry.artifact = project_artifact;
+            root_entry.def_handle = NodeDefHandle::artifact_root(project_artifact);
         }
         runtime
             .engine_mut()
@@ -163,6 +151,14 @@ impl CoreProjectLoader {
                 .engine_mut()
                 .artifacts_mut()
                 .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+            runtime
+                .engine_mut()
+                .artifacts_mut()
+                .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
+                .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+                    path: artifact_path.as_str().to_string(),
+                    reason: format!("load node artifact payload: {e:?}"),
+                })?;
             let ty = node_kind_name(&config, artifact_path.as_path())?;
             let leaf_id = runtime
                 .engine_mut()
@@ -191,14 +187,6 @@ impl CoreProjectLoader {
 
         Self::attach_loaded_nodes(root, &mut runtime, &loaded_nodes, frame)?;
 
-        for node in &loaded_nodes {
-            runtime.source_authoring_mut().record_authoring_snapshot(
-                node.id,
-                node.artifact_path.clone(),
-                node.config.clone(),
-            );
-        }
-
         Ok(runtime)
     }
 
@@ -213,14 +201,10 @@ impl CoreProjectLoader {
         R::Err: core::fmt::Debug,
     {
         for node in loaded_nodes {
-            if let LoadedNodeDef::Texture(config) = &node.config {
+            if let NodeDef::Texture(_config) = &node.config {
                 runtime
                     .engine_mut()
-                    .attach_runtime_node(
-                        node.id,
-                        Box::new(TextureNode::new(node.id, config.clone())),
-                        frame,
-                    )
+                    .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach texture runtime: {e}"),
@@ -229,7 +213,7 @@ impl CoreProjectLoader {
         }
 
         for node in loaded_nodes {
-            if let LoadedNodeDef::Output(config) = &node.config {
+            if let NodeDef::Output(config) = &node.config {
                 runtime
                     .engine_mut()
                     .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
@@ -249,7 +233,7 @@ impl CoreProjectLoader {
         }
 
         for node in loaded_nodes {
-            if let LoadedNodeDef::Shader(config) = &node.config {
+            if let NodeDef::Shader(config) = &node.config {
                 let shader_path =
                     resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
                 let glsl_source = read_utf8_file(root, shader_path.as_path())?;
@@ -276,7 +260,7 @@ impl CoreProjectLoader {
         }
 
         for node in loaded_nodes {
-            if let LoadedNodeDef::Fixture(config) = &node.config {
+            if let NodeDef::Fixture(config) = &node.config {
                 let output_node =
                     resolve_node_loc(loaded_nodes, node, config.output_loc(), "output")?;
                 let sink_id = output_sink_for(
@@ -348,56 +332,50 @@ where
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path.as_path())?;
-    let def: ProjectDef = toml::from_str(&text).map_err(|e| CoreProjectLoadError::ProjectToml {
-        file: path.as_str().to_string(),
-        error: format!("{e}"),
-    })?;
-    if !def.is_project_kind() {
-        return Err(CoreProjectLoadError::UnknownKind {
+    match NodeDef::from_toml_str(&text) {
+        Ok(NodeDef::Project(def)) => Ok(def),
+        Ok(other) => Err(CoreProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
-            suffix: def.kind,
-        });
+            suffix: other.kind_name().to_string(),
+        }),
+        Err(lpc_model::NodeDefParseError::UnknownKind { kind }) => {
+            Err(CoreProjectLoadError::UnknownKind {
+                path: path.as_str().to_string(),
+                suffix: kind,
+            })
+        }
+        Err(lpc_model::NodeDefParseError::Toml { error }) => {
+            Err(CoreProjectLoadError::ProjectToml {
+                file: path.as_str().to_string(),
+                error,
+            })
+        }
     }
-    Ok(def)
 }
 
-fn load_node_def<R>(root: &R, path: &LpPath) -> Result<LoadedNodeDef, CoreProjectLoadError>
+fn load_node_def<R>(root: &R, path: &LpPath) -> Result<NodeDef, CoreProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path)?;
-    let probe: NodeKindProbe =
-        toml::from_str(&text).map_err(|e| CoreProjectLoadError::TomlParse {
+    match NodeDef::from_toml_str(&text) {
+        Ok(NodeDef::Project(_)) => Err(CoreProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
-            error: format!("{e}"),
-        })?;
-
-    match probe.kind.as_str() {
-        "texture" => parse_node_def(path, &text).map(LoadedNodeDef::Texture),
-        "shader" => parse_node_def(path, &text).map(LoadedNodeDef::Shader),
-        "output" => parse_node_def(path, &text).map(LoadedNodeDef::Output),
-        "fixture" => parse_node_def(path, &text).map(LoadedNodeDef::Fixture),
-        other => Err(CoreProjectLoadError::UnknownKind {
+            suffix: "project".to_string(),
+        }),
+        Ok(def) => Ok(def),
+        Err(lpc_model::NodeDefParseError::UnknownKind { kind }) => {
+            Err(CoreProjectLoadError::UnknownKind {
+                path: path.as_str().to_string(),
+                suffix: kind,
+            })
+        }
+        Err(lpc_model::NodeDefParseError::Toml { error }) => Err(CoreProjectLoadError::TomlParse {
             path: path.as_str().to_string(),
-            suffix: other.to_string(),
+            error,
         }),
     }
-}
-
-fn parse_node_def<T>(path: &LpPath, text: &str) -> Result<T, CoreProjectLoadError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    toml::from_str(text).map_err(|e| CoreProjectLoadError::TomlParse {
-        path: path.as_str().to_string(),
-        error: format!("{e}"),
-    })
-}
-
-#[derive(serde::Deserialize)]
-struct NodeKindProbe {
-    kind: String,
 }
 
 fn resolve_project_locator(locator: &ArtifactLocator) -> Result<LpPathBuf, CoreProjectLoadError> {
@@ -460,7 +438,7 @@ fn resolve_path_relative_to_file(
         })
 }
 
-fn node_kind_name(config: &LoadedNodeDef, path: &LpPath) -> Result<NodeName, CoreProjectLoadError> {
+fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, CoreProjectLoadError> {
     NodeName::parse(config.kind_name()).map_err(|e| CoreProjectLoadError::InvalidNodeName {
         path: path.as_str().to_string(),
         reason: format!("{e}"),

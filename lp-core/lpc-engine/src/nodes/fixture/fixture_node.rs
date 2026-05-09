@@ -444,7 +444,6 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
-    use lpc_model::nodes::texture::TextureDef;
     use lpc_model::{Kind, LpValue, TreePath, WithRevision};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
@@ -540,11 +539,7 @@ mod tests {
             .unwrap();
 
         engine
-            .attach_runtime_node(
-                tex_id,
-                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
-                frame,
-            )
+            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
             .unwrap();
 
         let sh_id = engine
@@ -691,11 +686,7 @@ mod tests {
             .unwrap();
 
         engine
-            .attach_runtime_node(
-                tex_id,
-                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
-                frame,
-            )
+            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
             .unwrap();
 
         let sh_id = engine

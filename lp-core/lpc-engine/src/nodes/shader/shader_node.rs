@@ -270,7 +270,7 @@ mod tests {
             )
             .expect("texture");
 
-        let tex = TextureNode::new(tex_id, lpc_model::nodes::texture::TextureDef::new(8, 8));
+        let tex = TextureNode::new(tex_id);
         engine
             .attach_runtime_node(tex_id, Box::new(tex), frame)
             .expect("attach tex");

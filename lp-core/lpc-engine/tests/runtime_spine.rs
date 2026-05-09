@@ -2,18 +2,17 @@
 
 extern crate alloc;
 
-use alloc::format;
 use alloc::string::String;
 
 use lpc_engine::node::NodeError;
 use lpc_engine::{
-    ArtifactLocation, ArtifactStore, ArtifactState, BindingDraft, BindingPriority,
-    BindingRegistry, BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost,
-    ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, SessionHostResolver,
-    SessionResolveError, TickContext, TickResolver,
+    ArtifactLocation, ArtifactState, ArtifactStore, BindingDraft, BindingPriority, BindingRegistry,
+    BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost, ResolveLogLevel,
+    ResolveSession, ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickContext,
+    TickResolver,
 };
 use lpc_model::node::node_invocation::NodeInvocation;
-use lpc_model::{Kind, LpValue, NodeId, Revision, bus::ChannelName};
+use lpc_model::{Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName};
 use lpc_source::ArtifactLocator;
 use lps_shared::LpsValueF32;
 
@@ -21,7 +20,7 @@ use lps_shared::LpsValueF32;
 
 #[test]
 fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount() {
-    let mut mgr: ArtifactStore<String> = ArtifactStore::new();
+    let mut mgr = ArtifactStore::new();
     let location = ArtifactLocation::file("dummy/test.lp");
     let r = mgr.acquire_location(location, Revision::new(1));
 
@@ -30,20 +29,23 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
 
     mgr.load_with(&r, Revision::new(20), |location| {
         let ArtifactLocation::File(path) = location;
-        Ok(format!("loaded:{}", path.as_str()))
+        assert_eq!(path.as_str(), "dummy/test.lp");
+        Ok(texture_def(12, 8))
     })
     .unwrap();
 
     assert_eq!(mgr.content_frame(&r), Some(Revision::new(20)));
     let ent = mgr.entry(&r).expect("entry");
     assert!(
-        matches!(&ent.state, ArtifactState::Loaded(payload) if payload == "loaded:dummy/test.lp")
+        matches!(&ent.state, ArtifactState::Loaded(NodeDef::Texture(payload)) if payload.width() == 12)
     );
 
     mgr.release(&r, Revision::new(2)).unwrap();
     let ent = mgr.entry(&r).expect("idle entry kept");
     assert_eq!(ent.refcount, 0);
-    assert!(matches!(&ent.state, ArtifactState::Idle(s) if s == "loaded:dummy/test.lp"));
+    assert!(
+        matches!(&ent.state, ArtifactState::Idle(NodeDef::Texture(payload)) if payload.height() == 8)
+    );
 }
 
 #[test]
@@ -66,12 +68,12 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
     let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
 
-    let mut mgr: ArtifactStore<u8> = ArtifactStore::new();
+    let mut mgr = ArtifactStore::new();
     let ar = mgr.acquire_location(
         ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap()).unwrap(),
         Revision::new(0),
     );
-    mgr.load_with(&ar, Revision::new(40), |_location| Ok(7u8))
+    mgr.load_with(&ar, Revision::new(40), |_location| Ok(texture_def(7, 7)))
         .unwrap();
     let content_frame = mgr.content_frame(&ar).expect("content_frame");
 
@@ -118,6 +120,10 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
     assert!(ctx.artifact_changed_since(Revision::new(39)));
     assert!(!ctx.artifact_changed_since(Revision::new(40)));
+}
+
+fn texture_def(width: u32, height: u32) -> NodeDef {
+    NodeDef::Texture(TextureDef::new(width, height))
 }
 
 #[test]

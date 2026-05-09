@@ -10,13 +10,12 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::engine::{Engine, EngineError};
 
-use super::{RuntimeServices, SourceAuthoringIndex};
+use super::RuntimeServices;
 
-/// Project-level owner: core [`Engine`] plus [`RuntimeServices`] and source authoring snapshots.
+/// Project-level owner: core [`Engine`] plus [`RuntimeServices`].
 pub struct CoreProjectRuntime {
     engine: Engine,
     services: RuntimeServices,
-    source_authoring: SourceAuthoringIndex,
     artifact_nodes: HashMap<String, NodeId>,
 }
 
@@ -29,7 +28,6 @@ impl CoreProjectRuntime {
         Self {
             engine: Engine::new(root_path),
             services,
-            source_authoring: SourceAuthoringIndex::new(),
             artifact_nodes: HashMap::new(),
         }
     }
@@ -48,14 +46,6 @@ impl CoreProjectRuntime {
 
     pub fn services_mut(&mut self) -> &mut RuntimeServices {
         &mut self.services
-    }
-
-    pub fn source_authoring(&self) -> &SourceAuthoringIndex {
-        &self.source_authoring
-    }
-
-    pub(crate) fn source_authoring_mut(&mut self) -> &mut SourceAuthoringIndex {
-        &mut self.source_authoring
     }
 
     pub fn revision(&self) -> Revision {
@@ -143,12 +133,9 @@ mod tests {
         let services = RuntimeServices::new(path.clone());
         let mut rt = CoreProjectRuntime::new(path, services);
         let svc_ptr = ptr::from_ref(rt.services());
-        let source_authoring_ptr = ptr::from_ref(rt.source_authoring());
         assert_eq!(ptr::from_ref(rt.services()), svc_ptr);
-        assert_eq!(ptr::from_ref(rt.source_authoring()), source_authoring_ptr);
         let _ = rt.engine_mut();
         assert_eq!(ptr::from_ref(rt.services()), svc_ptr);
-        assert_eq!(ptr::from_ref(rt.source_authoring()), source_authoring_ptr);
     }
 }
 
@@ -173,7 +160,6 @@ mod output_sink_flush_tests {
     use crate::runtime_buffer::RuntimeBuffer;
     use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
     use lpc_model::nodes::output::OutputDef;
-    use lpc_model::nodes::texture::TextureDef;
     use lpc_model::{
         Kind, LpValue, Revision, ShaderState, SlotAccess, SlotShapeRegistry,
         SlotShapeRegistryError, StaticSlotShape, TreePath, WithRevision,
@@ -302,11 +288,7 @@ mod output_sink_flush_tests {
             .unwrap();
 
         rt.engine_mut()
-            .attach_runtime_node(
-                tex_id,
-                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
-                frame,
-            )
+            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
             .unwrap();
 
         let sh_id = rt
@@ -477,11 +459,7 @@ mod output_sink_flush_tests {
             .unwrap();
 
         rt.engine_mut()
-            .attach_runtime_node(
-                tex_id,
-                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
-                frame,
-            )
+            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
             .unwrap();
 
         let sh_id = rt
@@ -662,11 +640,7 @@ mod output_sink_flush_tests {
             .unwrap();
 
         rt.engine_mut()
-            .attach_runtime_node(
-                tex_id,
-                Box::new(TextureNode::new(tex_id, TextureDef::new(4, 4))),
-                frame,
-            )
+            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
             .unwrap();
 
         let sh_id = rt

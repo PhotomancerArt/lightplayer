@@ -9,6 +9,8 @@ use lpc_wire::{WireChildKind, WireNodeStatus};
 use crate::artifact::ArtifactId;
 use crate::node::node_entry_state::NodeEntryState;
 
+use super::NodeDefHandle;
+
 /// Server-side metadata for a node instance.
 ///
 /// Generic over `N` — the payload type in `EntryState::Alive(N)`. In M3 this
@@ -31,8 +33,8 @@ pub struct NodeEntry<N> {
     /// Authored per-instance config (artifact spec + overrides).
     pub config: NodeInvocation,
 
-    /// Runtime handle into [`crate::artifact::ArtifactStore`].
-    pub artifact: ArtifactId,
+    /// Runtime handle to this node's authored definition.
+    pub def_handle: NodeDefHandle,
 }
 
 impl<N> NodeEntry<N> {
@@ -58,7 +60,7 @@ impl<N> NodeEntry<N> {
             parent,
             child_kind,
             NodeInvocation::new(ArtifactLocator::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
-            ArtifactId::from_raw(0),
+            NodeDefHandle::artifact_root(ArtifactId::from_raw(0)),
             revision,
         )
     }
@@ -70,7 +72,7 @@ impl<N> NodeEntry<N> {
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
         config: NodeInvocation,
-        artifact: ArtifactId,
+        def_handle: NodeDefHandle,
         revision: Revision,
     ) -> Self {
         Self {
@@ -83,8 +85,12 @@ impl<N> NodeEntry<N> {
             state: WithRevision::new(revision, NodeEntryState::Pending),
             created_at: revision,
             config,
-            artifact,
+            def_handle,
         }
+    }
+
+    pub fn artifact(&self) -> ArtifactId {
+        self.def_handle.artifact()
     }
 
     /// Set status and bump `changed_at`.
@@ -118,6 +124,7 @@ impl<N> NodeEntry<N> {
 #[cfg(test)]
 mod tests {
     use super::NodeEntry;
+    use crate::node::NodeDefHandle;
     use lpc_model::{ArtifactLocator, NodeInvocation};
     use lpc_model::{NodeId, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
@@ -193,20 +200,22 @@ mod tests {
     }
 
     #[test]
-    fn node_entry_new_spine_stores_config_and_artifact() {
+    fn node_entry_new_spine_stores_config_and_def_handle() {
         let frame = Revision::new(1);
         let config = NodeInvocation::new(ArtifactLocator::path("./fluid.vis"));
         let artifact = crate::artifact::ArtifactId::from_raw(7);
+        let def_handle = NodeDefHandle::artifact_root(artifact);
         let entry: NodeEntry<()> = NodeEntry::new_spine(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
             None,
             config.clone(),
-            artifact,
+            def_handle.clone(),
             frame,
         );
         assert_eq!(entry.config, config);
-        assert_eq!(entry.artifact, artifact);
+        assert_eq!(entry.def_handle, def_handle);
+        assert_eq!(entry.artifact(), artifact);
     }
 }

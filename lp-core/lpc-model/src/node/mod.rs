@@ -13,8 +13,8 @@ pub mod node_prop_spec;
 pub mod relative_node_ref;
 pub mod tree_path;
 
-pub use kind::NodeKind;
 pub use crate::nodes::node_def::NodeDef;
+pub use kind::NodeKind;
 pub use node_id::NodeId;
 pub use node_invocation::NodeInvocation;
 pub use node_name::{NodeName, NodeNameError};

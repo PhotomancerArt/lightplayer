@@ -5,10 +5,10 @@ use lpc_model::Revision;
 use super::{ArtifactError, ArtifactId, ArtifactLocation, ArtifactState};
 
 /// One artifact record: runtime id, resolved location, refcount, last successful content frame, and state.
-pub struct ArtifactEntry<A> {
+pub struct ArtifactEntry {
     pub id: ArtifactId,
     pub location: ArtifactLocation,
-    pub state: ArtifactState<A>,
+    pub state: ArtifactState,
     pub refcount: u32,
     pub content_frame: Revision,
     /// Secondary slot for errors not represented in [`ArtifactState`] (currently unused; kept for API parity).

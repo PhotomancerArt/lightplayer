@@ -1,8 +1,6 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-use crate::node::kind::NodeKind;
-use crate::nodes::node_def::NodeDef;
 use crate::nodes::shader::{GlslOpts, ShaderParamDef};
 use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot};
 
@@ -37,6 +35,8 @@ impl Default for ShaderDef {
 }
 
 impl ShaderDef {
+    pub const KIND: &'static str = "shader";
+
     pub fn glsl_path_buf(&self) -> LpPathBuf {
         self.glsl_path.value().as_path_buf()
     }
@@ -44,21 +44,16 @@ impl ShaderDef {
     pub fn render_order(&self) -> i32 {
         *self.render_order.value()
     }
-}
 
-impl NodeDef for ShaderDef {
-    fn kind(&self) -> NodeKind {
-        NodeKind::Shader
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
+    pub fn kind(&self) -> crate::NodeKind {
+        crate::NodeKind::Shader
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NodeKind;
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
 
     #[test]

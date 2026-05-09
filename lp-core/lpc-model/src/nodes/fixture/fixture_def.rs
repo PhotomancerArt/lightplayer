@@ -1,8 +1,6 @@
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
-use crate::node::kind::NodeKind;
-use crate::nodes::node_def::NodeDef;
 use crate::nodes::fixture::MappingConfig;
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,
@@ -38,6 +36,8 @@ pub struct FixtureDef {
 }
 
 impl FixtureDef {
+    pub const KIND: &'static str = "fixture";
+
     pub fn output_loc(&self) -> &RelativeNodeRef {
         self.output_loc.value()
     }
@@ -78,6 +78,10 @@ impl FixtureDef {
             [0.0, 0.0, 0.0, 1.0],
         ]
     }
+
+    pub fn kind(&self) -> crate::NodeKind {
+        crate::NodeKind::Fixture
+    }
 }
 
 fn default_brightness() -> OptionSlot<ValueSlot<u32>> {
@@ -93,16 +97,6 @@ fn default_render_size() -> Dim2uSlot {
 
 fn default_gamma_correction() -> OptionSlot<ValueSlot<bool>> {
     OptionSlot::some(ValueSlot::new(true))
-}
-
-impl NodeDef for FixtureDef {
-    fn kind(&self) -> NodeKind {
-        NodeKind::Fixture
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
-    }
 }
 
 /// Color order for RGB channels.
@@ -261,6 +255,7 @@ impl SlotValue for ColorOrder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NodeKind;
     use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
     use crate::{Affine2d, MapSlot};
     use alloc::collections::BTreeMap;

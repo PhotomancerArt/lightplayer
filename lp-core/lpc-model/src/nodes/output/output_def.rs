@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::node::kind::NodeKind;
-use crate::nodes::node_def::NodeDef;
 use crate::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 /// Authored GPIO output node definition.
@@ -15,6 +13,8 @@ pub struct OutputDef {
 }
 
 impl OutputDef {
+    pub const KIND: &'static str = "output";
+
     pub fn new(pin: u32) -> Self {
         Self {
             pin: ValueSlot::new(pin),
@@ -26,18 +26,12 @@ impl OutputDef {
         *self.pin.value()
     }
 
+    pub fn kind(&self) -> crate::NodeKind {
+        crate::NodeKind::Output
+    }
+
     pub fn options(&self) -> Option<&OutputDriverOptionsConfig> {
         self.options.data.as_ref()
-    }
-}
-
-impl NodeDef for OutputDef {
-    fn kind(&self) -> NodeKind {
-        NodeKind::Output
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
     }
 }
 

@@ -11,7 +11,8 @@ use crate::gfx::LpGraphics;
 use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
-use lpc_model::{NodeId, Revision, WithRevision, bus::ChannelName};
+use crate::wire_bridge::lps_value_f32_to_model_value;
+use lpc_model::{FromLpValue, NodeId, Revision, SlotPath, WithRevision, bus::ChannelName};
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -100,6 +101,33 @@ impl<'r> TickContext<'r> {
     /// Resolve a [`QueryKey`] for this frame (cache, bindings, optional host production).
     pub fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError> {
         self.resolver.resolve(query)
+    }
+
+    /// Resolve one of this node's consumed slots and parse it as a typed model value.
+    pub fn resolve_consumed_slot_value<T>(&mut self, slot: &SlotPath) -> Result<T, NodeError>
+    where
+        T: FromLpValue,
+    {
+        let production = self
+            .resolve(QueryKey::ConsumedSlot {
+                node: self.node_id,
+                slot: slot.clone(),
+            })
+            .map_err(|e| NodeError::msg(alloc::format!("resolve consumed slot {slot}: {e:?}")))?;
+        let value =
+            production.product.value().as_value().ok_or_else(|| {
+                NodeError::msg(alloc::format!("consumed slot {slot} is not a value"))
+            })?;
+        let value = lps_value_f32_to_model_value(value).map_err(|e| {
+            NodeError::msg(alloc::format!(
+                "consumed slot {slot} cannot be read as a portable model value: {e:?}"
+            ))
+        })?;
+        T::from_lp_value(value).map_err(|e| {
+            NodeError::msg(alloc::format!(
+                "consumed slot {slot} has incompatible value: {e}"
+            ))
+        })
     }
 
     pub fn artifact_ref(&self) -> ArtifactId {

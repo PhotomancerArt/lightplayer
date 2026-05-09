@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::Revision;
+use lpc_model::{NodeDef, Revision};
 
 use super::{ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactState};
 
@@ -11,13 +11,13 @@ use super::{ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, Artifact
 /// When the refcount of an entry in [`ArtifactState::Resolved`] or an error state reaches zero,
 /// the entry is **removed** from both maps. Payload-bearing states transition to [`ArtifactState::Idle`]
 /// instead so the location continues to resolve to the same handle for future acquires.
-pub struct ArtifactStore<A> {
-    by_handle: BTreeMap<u32, ArtifactEntry<A>>,
+pub struct ArtifactStore {
+    by_handle: BTreeMap<u32, ArtifactEntry>,
     location_to_handle: BTreeMap<ArtifactLocation, u32>,
     next_handle: u32,
 }
 
-impl<A> ArtifactStore<A> {
+impl ArtifactStore {
     pub fn new() -> Self {
         Self {
             by_handle: BTreeMap::new(),
@@ -74,7 +74,7 @@ impl<A> ArtifactStore<A> {
         loader: F,
     ) -> Result<(), ArtifactError>
     where
-        F: FnOnce(&ArtifactLocation) -> Result<A, ArtifactError>,
+        F: FnOnce(&ArtifactLocation) -> Result<NodeDef, ArtifactError>,
     {
         let handle = r.handle();
         let entry = self
@@ -137,7 +137,7 @@ impl<A> ArtifactStore<A> {
         Ok(())
     }
 
-    pub fn entry(&self, r: &ArtifactId) -> Option<&ArtifactEntry<A>> {
+    pub fn entry(&self, r: &ArtifactId) -> Option<&ArtifactEntry> {
         self.by_handle.get(&r.handle())
     }
 
@@ -150,7 +150,7 @@ impl<A> ArtifactStore<A> {
     }
 }
 
-impl<A> Default for ArtifactStore<A> {
+impl Default for ArtifactStore {
     fn default() -> Self {
         Self::new()
     }
@@ -160,6 +160,7 @@ impl<A> Default for ArtifactStore<A> {
 mod tests {
     use super::*;
     use alloc::string::String;
+    use lpc_model::{NodeDef, TextureDef};
 
     fn location(path: &str) -> ArtifactLocation {
         ArtifactLocation::file(path)
@@ -167,7 +168,7 @@ mod tests {
 
     #[test]
     fn acquire_same_location_reuses_handle_and_increments_refcount() {
-        let mut m: ArtifactStore<i32> = ArtifactStore::new();
+        let mut m = ArtifactStore::new();
         let l = location("a.lp");
         let r1 = m.acquire_location(l.clone(), Revision::new(1));
         let r2 = m.acquire_location(l, Revision::new(2));
@@ -177,7 +178,7 @@ mod tests {
 
     #[test]
     fn release_decrements_refcount() {
-        let mut m: ArtifactStore<i32> = ArtifactStore::new();
+        let mut m = ArtifactStore::new();
         let r = m.acquire_location(location("b.lp"), Revision::new(1));
         let h = r.handle();
         let r2 = m.acquire_location(location("b.lp"), Revision::new(1));
@@ -191,40 +192,40 @@ mod tests {
 
     #[test]
     fn loaded_moves_to_idle_when_refcount_reaches_zero() {
-        let mut m: ArtifactStore<i32> = ArtifactStore::new();
+        let mut m = ArtifactStore::new();
         let r = m.acquire_location(location("c.lp"), Revision::new(1));
-        m.load_with(&r, Revision::new(5), |_location| Ok(42))
+        m.load_with(&r, Revision::new(5), |_location| Ok(texture_def(42, 24)))
             .unwrap();
         assert!(matches!(
             m.entry(&r).unwrap().state,
-            ArtifactState::Loaded(42)
+            ArtifactState::Loaded(NodeDef::Texture(_))
         ));
         m.release(&r, Revision::new(1)).unwrap();
         let e = m.entry(&r).unwrap();
         assert_eq!(e.refcount, 0);
-        assert!(matches!(&e.state, ArtifactState::Idle(42)));
+        assert!(matches!(&e.state, ArtifactState::Idle(NodeDef::Texture(_))));
     }
 
     #[test]
     fn load_success_bumps_content_frame() {
-        let mut m: ArtifactStore<i32> = ArtifactStore::new();
+        let mut m = ArtifactStore::new();
         let r = m.acquire_location(location("d.lp"), Revision::new(1));
-        m.load_with(&r, Revision::new(10), |_location| Ok(1))
+        m.load_with(&r, Revision::new(10), |_location| Ok(texture_def(1, 1)))
             .unwrap();
         assert_eq!(m.content_frame(&r), Some(Revision::new(10)));
-        m.load_with(&r, Revision::new(99), |_location| Ok(2))
+        m.load_with(&r, Revision::new(99), |_location| Ok(texture_def(2, 2)))
             .unwrap();
         assert_eq!(m.content_frame(&r), Some(Revision::new(99)));
-        if let ArtifactState::Loaded(v) = &m.entry(&r).unwrap().state {
-            assert_eq!(*v, 2);
+        if let ArtifactState::Loaded(NodeDef::Texture(v)) = &m.entry(&r).unwrap().state {
+            assert_eq!(v.width(), 2);
         } else {
-            panic!("expected Loaded");
+            panic!("expected Loaded texture");
         }
     }
 
     #[test]
     fn load_failure_records_load_error() {
-        let mut m: ArtifactStore<i32> = ArtifactStore::new();
+        let mut m = ArtifactStore::new();
         let r = m.acquire_location(location("e.lp"), Revision::new(1));
         let err = m
             .load_with(&r, Revision::new(3), |_location| {
@@ -241,17 +242,21 @@ mod tests {
 
     #[test]
     fn unknown_handle_returns_structured_error() {
-        let mut m: ArtifactStore<i32> = ArtifactStore::new();
+        let mut m = ArtifactStore::new();
         let bad = ArtifactId::from_raw(999);
         assert_eq!(
             m.release(&bad, Revision::default()).unwrap_err(),
             ArtifactError::UnknownHandle { handle: 999 }
         );
         assert_eq!(
-            m.load_with(&bad, Revision::default(), |_location| Ok(0))
+            m.load_with(&bad, Revision::default(), |_location| Ok(texture_def(0, 0)))
                 .unwrap_err(),
             ArtifactError::UnknownHandle { handle: 999 }
         );
         assert!(m.entry(&bad).is_none());
+    }
+
+    fn texture_def(width: u32, height: u32) -> NodeDef {
+        NodeDef::Texture(TextureDef::new(width, height))
     }
 }

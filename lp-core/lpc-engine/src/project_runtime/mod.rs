@@ -9,9 +9,7 @@ mod project_loader;
 )]
 mod resource_projection;
 mod runtime_services;
-mod source_authoring_index;
 
 pub use core_project_runtime::CoreProjectRuntime;
-pub use project_loader::{CoreProjectLoadError, CoreProjectLoader, LoadedNodeDef};
+pub use project_loader::{CoreProjectLoadError, CoreProjectLoader};
 pub use runtime_services::{OutputFlushError, RuntimeServices};
-pub use source_authoring_index::SourceAuthoringIndex;

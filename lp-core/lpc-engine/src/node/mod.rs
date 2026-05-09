@@ -3,6 +3,7 @@
 
 mod contexts;
 mod node_call;
+mod node_def_handle;
 pub mod node_entry;
 pub mod node_entry_state;
 mod node_error;
@@ -18,6 +19,7 @@ pub use contexts::{
     DestroyCtx, MemPressureCtx, NodeResourceInitContext, RenderContext, TickContext,
 };
 pub use node_call::{NodeCall, NodeCallKey};
+pub use node_def_handle::NodeDefHandle;
 pub use node_entry::NodeEntry;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;

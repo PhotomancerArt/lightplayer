@@ -1,7 +1,5 @@
 use alloc::string::String;
 
-use crate::node::kind::NodeKind;
-use crate::nodes::node_def::NodeDef;
 use crate::node::node_invocation::NodeInvocation;
 use crate::{MapSlot, OptionSlot, ValueSlot};
 
@@ -27,22 +25,16 @@ pub struct ProjectDef {
 impl ProjectDef {
     pub const KIND: &'static str = "project";
 
+    pub fn kind(&self) -> crate::NodeKind {
+        crate::NodeKind::Project
+    }
+
     pub fn is_project_kind(&self) -> bool {
         self.kind == Self::KIND
     }
 
     pub fn name(&self) -> Option<&str> {
         self.name.data.as_ref().map(|name| name.value().as_str())
-    }
-}
-
-impl NodeDef for ProjectDef {
-    fn kind(&self) -> NodeKind {
-        NodeKind::Project
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
     }
 }
 

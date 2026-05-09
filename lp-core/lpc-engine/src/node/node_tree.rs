@@ -9,7 +9,7 @@ use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
 
-use crate::node::{NodeEntry, TreeError};
+use crate::node::{NodeDefHandle, NodeEntry, TreeError};
 
 /// The node tree container.
 ///
@@ -127,7 +127,7 @@ impl<N> NodeTree<N> {
             Some(parent),
             Some(child_kind),
             config,
-            artifact,
+            NodeDefHandle::artifact_root(artifact),
             frame,
         );
 
@@ -257,7 +257,7 @@ mod tests {
             .unwrap();
         let entry = tree.get(child).unwrap();
         assert_eq!(entry.config, cfg);
-        assert_eq!(entry.artifact, art);
+        assert_eq!(entry.artifact(), art);
     }
 
     #[test]
