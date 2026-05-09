@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{Data, DeriveInput, Fields, Result, parse2};
 
 use crate::attr::{self, FieldShapeAttr};
@@ -19,7 +19,6 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
     let mut shape_fields = Vec::new();
     let mut access_arms = Vec::new();
-    let mut view_fields = Vec::new();
     let mut view_compilers = Vec::new();
     let mut view_accessors = Vec::new();
     let mut access_index = 0usize;
@@ -48,25 +47,36 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
         if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
         {
-            let accessor_ident = format_ident!("{}_accessor", field_ident);
             let index = syn::Index::from(access_index);
+            let accessor_kind = match field_attr.shape {
+                FieldShapeAttr::Infer => {
+                    quote! { ::lpc_model::SlotAccessor::compile }
+                }
+                FieldShapeAttr::Value(_) | FieldShapeAttr::Leaf(_) => {
+                    quote! { ::lpc_model::SlotAccessor::compile_value }
+                }
+                FieldShapeAttr::Record
+                | FieldShapeAttr::Map { .. }
+                | FieldShapeAttr::OptionRef(_)
+                | FieldShapeAttr::Enum => {
+                    quote! { ::lpc_model::SlotAccessor::compile }
+                }
+                FieldShapeAttr::Skip => unreachable!("skip was handled before access generation"),
+            };
             access_arms.push(quote! {
                 #index => Some(#access),
             });
-            view_fields.push(quote! {
-                #accessor_ident: ::lpc_model::SlotAccessor,
-            });
             view_compilers.push(quote! {
-                #accessor_ident: ::lpc_model::SlotAccessor::compile(
+                #accessor_kind(
                     <#ident as ::lpc_model::StaticSlotShape>::SHAPE_ID,
                     ::lpc_model::SlotPath::parse(#field_name)
                         .expect("derived slot field path is valid"),
                     registry,
-                )?,
+                )?
             });
             view_accessors.push(quote! {
-                pub fn #field_ident(&self) -> &::lpc_model::SlotAccessor {
-                    &self.#accessor_ident
+                pub fn #field_ident(view: &::lpc_model::SlotView<Self>) -> &::lpc_model::SlotAccessor {
+                    view.accessor(#index)
                 }
             });
             access_index += 1;
@@ -74,7 +84,6 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
     }
 
     let root_impls = if container_attrs.root || container_attrs.shape_id.is_some() {
-        let view_ident = format_ident!("{}View", ident);
         let shape_id = if let Some(shape_id) = container_attrs.shape_id {
             quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
         } else {
@@ -106,28 +115,23 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
 
             impl ::lpc_model::StaticSlotAccess for #ident {}
+        }
+    } else {
+        quote! {}
+    };
 
-            pub struct #view_ident {
-                registry_revision: ::lpc_model::Revision,
-                #(#view_fields)*
-            }
-
-            impl #view_ident {
-                pub fn compile(
+    let view_impl = if container_attrs.view {
+        quote! {
+            impl #ident {
+                pub fn compile_slot_view(
                     registry: &::lpc_model::SlotShapeRegistry,
-                ) -> Result<Self, ::lpc_model::SlotAccessorError> {
-                    Ok(Self {
-                        registry_revision: registry.revision(),
-                        #(#view_compilers)*
-                    })
-                }
-
-                pub fn registry_revision(&self) -> ::lpc_model::Revision {
-                    self.registry_revision
-                }
-
-                pub fn is_valid_for(&self, registry: &::lpc_model::SlotShapeRegistry) -> bool {
-                    self.registry_revision == registry.revision()
+                ) -> Result<::lpc_model::SlotView<Self>, ::lpc_model::SlotAccessorError> {
+                    Ok(::lpc_model::SlotView::new(
+                        registry.revision(),
+                        ::lpc_model::__private::Vec::from([
+                            #(#view_compilers),*
+                        ]).into_boxed_slice(),
+                    ))
                 }
 
                 #(#view_accessors)*
@@ -172,6 +176,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         }
 
         #root_impls
+        #view_impl
     })
 }
 

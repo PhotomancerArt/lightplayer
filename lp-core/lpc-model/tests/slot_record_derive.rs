@@ -6,7 +6,7 @@ use lpc_model::{
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
+#[slot(root, view)]
 struct DerivedRecord {
     enabled: ValueSlot<bool>,
     nested: NestedRecord,
@@ -55,12 +55,12 @@ fn derive_generates_compiled_view_for_root_records() {
     let mut registry = SlotShapeRegistry::default();
     DerivedRecord::ensure_registered(&mut registry).unwrap();
 
-    let view = DerivedRecordView::compile(&registry).unwrap();
+    let view = DerivedRecord::compile_slot_view(&registry).unwrap();
 
     assert_eq!(view.registry_revision(), registry.revision());
     assert!(view.is_valid_for(&registry));
-    assert_eq!(view.enabled().path().to_string(), "enabled");
-    assert_eq!(view.nested().path().to_string(), "nested");
+    assert_eq!(DerivedRecord::enabled(&view).path().to_string(), "enabled");
+    assert_eq!(DerivedRecord::nested(&view).path().to_string(), "nested");
 }
 
 fn assert_static_slot_access<T: StaticSlotAccess>() {}

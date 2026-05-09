@@ -18,6 +18,7 @@ mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
 mod slot_value;
+mod slot_view;
 mod value_ref;
 mod value_slot;
 
@@ -42,6 +43,7 @@ pub use slot_value::{
     FromLpValue, OrderedF32, SlotEnumOption, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint,
     ValueRootError,
 };
+pub use slot_view::SlotView;
 pub mod shape {
     pub use super::slot_shape_builder::{
         field, id, leaf, map, option, record, reference, unit, value, variant,

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Authored texture node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, view)]
 pub struct TextureDef {
     pub size: Dim2uSlot,
     /// Authored slot bindings for texture materialization.
