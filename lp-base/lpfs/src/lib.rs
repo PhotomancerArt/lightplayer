@@ -15,17 +15,17 @@ extern crate std;
 
 pub mod error;
 pub mod fs_event;
+pub mod impls;
 pub mod lp_fs;
 pub mod lp_fs_view;
 pub mod lp_path;
-pub mod impls;
 
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 
 pub use error::FsError;
 pub use fs_event::{ChangeType, FsChange, FsVersion};
-pub use lp_fs::LpFs;
 pub use impls::lp_fs_mem::LpFsMemory;
+pub use lp_fs::LpFs;
 pub use lp_fs_view::LpFsView;
 
 #[cfg(feature = "std")]

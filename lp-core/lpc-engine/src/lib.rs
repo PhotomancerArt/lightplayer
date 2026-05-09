@@ -23,7 +23,6 @@ pub mod nodes;
 pub mod output;
 pub mod panic_node;
 pub mod project_runtime;
-pub mod prop;
 pub mod render_product;
 pub mod resolver;
 pub mod runtime;
@@ -51,7 +50,6 @@ pub use project_runtime::{
     CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, LoadedNodeDef, OutputFlushError,
     RuntimeServices, SourceAuthoringIndex,
 };
-pub use prop::{ProducedSlotAccess, RuntimeStateAccess};
 pub use render_product::{
     RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
     RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, RenderTextureRequest,

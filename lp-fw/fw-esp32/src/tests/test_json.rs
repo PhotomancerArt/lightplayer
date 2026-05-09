@@ -12,9 +12,9 @@
 extern crate alloc;
 
 use alloc::vec;
-use lpfs::lp_path::AsLpPathBuf;
 use lpc_wire::WireServerMessage;
 use lpc_wire::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
+use lpfs::lp_path::AsLpPathBuf;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::output::LedChannel;

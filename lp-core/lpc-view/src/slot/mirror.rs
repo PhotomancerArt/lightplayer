@@ -117,7 +117,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        Revision, LpType, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, WithRevision,
+        LpType, Revision, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, WithRevision,
     };
     use lpc_wire::{WireSlotChange, WireSlotRootSnapshot};
 

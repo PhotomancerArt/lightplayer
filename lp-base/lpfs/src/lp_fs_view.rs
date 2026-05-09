@@ -6,6 +6,7 @@
 use crate::LpFs;
 use crate::error::FsError;
 use crate::fs_event::{FsChange, FsVersion};
+use crate::{LpPath, LpPathBuf};
 use alloc::{
     format,
     rc::Rc,
@@ -13,7 +14,6 @@ use alloc::{
     vec::Vec,
 };
 use core::cell::RefCell;
-use crate::{LpPath, LpPathBuf};
 
 /// A filesystem view that translates paths relative to a prefix
 ///
@@ -271,8 +271,8 @@ impl LpFs for LpFsView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LpFsMemory;
     use crate::AsLpPath;
+    use crate::LpFsMemory;
 
     #[test]
     fn test_lp_fs_view_basic() {

@@ -3,10 +3,13 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use lpc_model::{ChannelName, Kind, NodeId, NodeName, Revision, SlotPath, TreePath};
+use lpc_model::{
+    ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
+    SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, TreePath,
+    ValueSlot,
+};
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
@@ -14,11 +17,9 @@ use crate::binding::{BindingDraft, BindingError, BindingPriority, BindingSource,
 use crate::engine::Engine;
 use crate::node::test_placeholder_spine;
 use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
-use crate::prop::ProducedSlotAccess;
 use crate::resolver::{
     Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
 };
-use crate::runtime_product::RuntimeProduct;
 
 use super::engine::default_demand_input_path;
 use super::resolve_with_engine_host;
@@ -358,22 +359,35 @@ pub(crate) fn trace_has_value_origin_path(
 }
 
 pub(crate) struct DummyShaderNode {
-    props: DummyProps,
+    state: DummyShaderState,
     tick_count: Arc<AtomicU32>,
+}
+
+#[derive(lpc_model::SlotRecord)]
+#[slot(root)]
+pub(crate) struct DummyShaderState {
+    outputs: MapSlot<u32, ValueSlot<f32>>,
 }
 
 impl DummyShaderNode {
     fn new(slot: SlotPath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
-        let mut props = DummyProps::new();
-        props.set(slot, value, Revision::new(0));
-        Self { props, tick_count }
+        let mut outputs = BTreeMap::new();
+        outputs.insert(output_key(&slot), ValueSlot::new(f32_value(value)));
+        Self {
+            state: DummyShaderState {
+                outputs: MapSlot::with_version(Revision::new(0), outputs),
+            },
+            tick_count,
+        }
     }
 }
 
 impl NodeRuntime for DummyShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.tick_count.fetch_add(1, Ordering::Relaxed);
-        self.props.mark_all_updated(ctx.revision());
+        for output in self.state.outputs.entries.values_mut() {
+            output.set_with_version(ctx.revision(), *output.value());
+        }
         Ok(())
     }
 
@@ -389,24 +403,26 @@ impl NodeRuntime for DummyShaderNode {
         Ok(())
     }
 
-    fn produced(&self) -> &dyn ProducedSlotAccess {
-        &self.props
+    fn runtime_state_slots(&self) -> &dyn SlotAccess {
+        &self.state
+    }
+
+    fn register_runtime_state_shapes(
+        &self,
+        registry: &mut SlotShapeRegistry,
+    ) -> Result<(), SlotShapeRegistryError> {
+        DummyShaderState::ensure_registered(registry).map(|_| ())
     }
 }
 
 pub(crate) struct DummyFixtureNode {
     slot: SlotPath,
     record: RecordedValue,
-    props: DummyProps,
 }
 
 impl DummyFixtureNode {
     fn new(slot: SlotPath, record: RecordedValue) -> Self {
-        Self {
-            slot,
-            record,
-            props: DummyProps::new(),
-        }
+        Self { slot, record }
     }
 }
 
@@ -433,25 +449,16 @@ impl NodeRuntime for DummyFixtureNode {
     ) -> Result<(), NodeError> {
         Ok(())
     }
-
-    fn produced(&self) -> &dyn ProducedSlotAccess {
-        &self.props
-    }
 }
 
 pub(crate) struct DummyOutputNode {
     slot: SlotPath,
     record: RecordedValue,
-    props: DummyProps,
 }
 
 impl DummyOutputNode {
     fn new(slot: SlotPath, record: RecordedValue) -> Self {
-        Self {
-            slot,
-            record,
-            props: DummyProps::new(),
-        }
+        Self { slot, record }
     }
 }
 
@@ -478,68 +485,6 @@ impl NodeRuntime for DummyOutputNode {
     ) -> Result<(), NodeError> {
         Ok(())
     }
-
-    fn produced(&self) -> &dyn ProducedSlotAccess {
-        &self.props
-    }
-}
-
-struct DummyProps {
-    values: Vec<(SlotPath, RuntimeProduct, Revision)>,
-}
-
-impl DummyProps {
-    fn new() -> Self {
-        Self { values: Vec::new() }
-    }
-
-    fn set(&mut self, path: SlotPath, value: LpsValueF32, frame: Revision) {
-        if let Some((_, stored, stored_frame)) = self.values.iter_mut().find(|(p, _, _)| p == &path)
-        {
-            *stored = RuntimeProduct::Value(value);
-            *stored_frame = frame;
-        } else {
-            self.values
-                .push((path, RuntimeProduct::Value(value), frame));
-        }
-    }
-
-    fn mark_all_updated(&mut self, frame: Revision) {
-        for (_, _, stored_frame) in &mut self.values {
-            *stored_frame = frame;
-        }
-    }
-}
-
-impl ProducedSlotAccess for DummyProps {
-    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-        self.values
-            .iter()
-            .find(|(p, _, _)| p == path)
-            .map(|(_, v, f)| (v.clone(), *f))
-    }
-
-    fn iter_changed_since<'a>(
-        &'a self,
-        since: Revision,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(
-            self.values
-                .iter()
-                .filter(move |(_, _, frame)| frame.as_i64() > since.as_i64())
-                .map(|(p, v, f)| (p.clone(), v.clone(), *f)),
-        )
-    }
-
-    fn snapshot<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(
-            self.values
-                .iter()
-                .map(|(p, v, f)| (p.clone(), v.clone(), *f)),
-        )
-    }
 }
 
 fn channel_name(name: &str) -> ChannelName {
@@ -551,4 +496,16 @@ fn f32_value(value: LpsValueF32) -> f32 {
         LpsValueF32::F32(v) => v,
         _ => panic!("test literal must be f32"),
     }
+}
+
+fn output_key(path: &SlotPath) -> u32 {
+    let [
+        SlotPathSegment::Field(field),
+        SlotPathSegment::Key(SlotMapKey::U32(key)),
+    ] = path.segments()
+    else {
+        panic!("test shader output path must be outputs[<u32>]");
+    };
+    assert_eq!(field.as_str(), "outputs");
+    *key
 }

@@ -82,6 +82,7 @@ pub enum ValueEditorHint {
     Resource,
     RuntimeBufferResource,
     RenderProductResource,
+    RenderProduct,
     Dropdown {
         options: Vec<SlotEnumOption>,
     },
@@ -307,6 +308,7 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
         LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
         LpType::Resource => "slot.leaf.raw_resource",
+        LpType::RenderProduct => "slot.leaf.raw_render_product",
     })
 }
 

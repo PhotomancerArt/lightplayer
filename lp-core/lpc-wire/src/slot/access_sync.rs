@@ -47,9 +47,7 @@ pub fn snapshot_slot_shape(
 ) -> SlotData {
     match (shape, data) {
         (SlotShape::Ref { id }, data) => snapshot_slot_root(id, data, registry),
-        (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => SlotData::Unit {
-            revision: frame,
-        },
+        (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => SlotData::Unit { revision: frame },
         (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
             SlotData::Value(WithRevision::new(value.changed_at(), value.value()))
         }
@@ -95,9 +93,7 @@ pub fn snapshot_slot_shape(
                 option.presence_revision(),
                 snapshot_slot_shape(some, data, registry),
             )),
-            None => SlotData::Option(SlotOptionDyn::none_with_version(
-                option.presence_revision(),
-            )),
+            None => SlotData::Option(SlotOptionDyn::none_with_version(option.presence_revision())),
         },
         _ => panic!("slot shape/data mismatch"),
     }
@@ -154,9 +150,7 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(SlotData::Unit {
-                        revision: frame,
-                    }),
+                    change: WireSlotChange::Replace(SlotData::Unit { revision: frame }),
                 });
             }
         }

@@ -189,5 +189,6 @@ fn lp_type_for_value(value: &LpValue) -> LpType {
                 .collect(),
         },
         LpValue::Resource(_) => LpType::Resource,
+        LpValue::RenderProduct(_) => LpType::RenderProduct,
     }
 }

@@ -5,15 +5,15 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
+use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
     Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
     RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
-use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
-use lpc_model::nodes::output::OutputDef;
-use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::nodes::texture::TextureDef;
 use lpfs::LpFs;
 
 use crate::messages;

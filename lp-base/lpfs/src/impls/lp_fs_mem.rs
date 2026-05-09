@@ -7,10 +7,10 @@ use crate::{
     fs_event::{FsChange, FsVersion},
     lp_fs_view::LpFsView,
 };
+use crate::{LpPath, LpPathBuf};
 use alloc::{format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use crate::{LpPath, LpPathBuf};
 
 /// In-memory filesystem implementation for testing
 pub struct LpFsMemory {

@@ -1,5 +1,5 @@
 use alloc::string::String;
-use lpc_model::{Revision, LpValue, SlotPath};
+use lpc_model::{LpValue, Revision, SlotPath};
 use serde::{Deserialize, Serialize};
 
 /// Client-visible id for one requested slot mutation.

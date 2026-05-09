@@ -273,7 +273,6 @@ mod tests {
         Production, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
         SessionHostResolver, TickResolver,
     };
-    use crate::runtime_product::RuntimeProduct;
     use alloc::string::String;
     use lpc_model::Kind;
     use lpc_model::SlotPath;
@@ -498,30 +497,6 @@ mod tests {
             _ctx: &mut super::MemPressureCtx<'_>,
         ) -> Result<(), crate::node::NodeError> {
             Ok(())
-        }
-
-        fn produced(&self) -> &dyn crate::prop::ProducedSlotAccess {
-            struct EmptyProps;
-            impl crate::prop::ProducedSlotAccess for EmptyProps {
-                fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-                    None
-                }
-                fn iter_changed_since<'b>(
-                    &'b self,
-                    _since: Revision,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'b>
-                {
-                    alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
-                }
-                fn snapshot<'b>(
-                    &'b self,
-                ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'b>
-                {
-                    alloc::boxed::Box::new(alloc::vec::Vec::new().into_iter())
-                }
-            }
-            static EMPTY_PROPS: EmptyProps = EmptyProps;
-            &EMPTY_PROPS
         }
     }
 

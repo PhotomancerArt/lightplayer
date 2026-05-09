@@ -1,11 +1,11 @@
+use lpc_model::nodes::fixture::FixtureDef;
+use lpc_model::nodes::output::OutputDef;
+use lpc_model::nodes::project::project_def::ProjectDef;
+use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
 };
-use lpc_model::nodes::fixture::FixtureDef;
-use lpc_model::nodes::output::OutputDef;
-use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::nodes::texture::TextureDef;
-use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_wire::build_slot_full_sync;
 
 #[test]

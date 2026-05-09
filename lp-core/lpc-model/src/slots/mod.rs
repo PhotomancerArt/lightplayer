@@ -12,6 +12,7 @@ mod positive_f32;
 mod ratio;
 mod relative_node_ref;
 mod render_order;
+mod render_product;
 mod resource_ref;
 mod source_path;
 mod u32_list;
@@ -25,6 +26,7 @@ pub use positive_f32::{PositiveF32Slot, positive_f32_shape};
 pub use ratio::{RatioSlot, ratio_shape};
 pub use relative_node_ref::{RelativeNodeRefSlot, relative_node_ref_shape};
 pub use render_order::{RenderOrderSlot, render_order_shape};
+pub use render_product::{RenderProductSlot, render_product_shape};
 pub use resource_ref::{
     ResourceRefSlot, render_product_resource_shape, resource_ref_shape,
     runtime_buffer_resource_shape,

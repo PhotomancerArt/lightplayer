@@ -182,6 +182,16 @@ mod lp_fs_flash;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
 )))]
+use lpfs::lp_path::AsLpPath;
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
@@ -194,16 +204,6 @@ use {
     server_loop::run_server_loop,
     time::Esp32TimeProvider,
 };
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-)))]
-use lpfs::lp_path::AsLpPath;
 
 #[cfg(feature = "test_rmt")]
 mod tests {

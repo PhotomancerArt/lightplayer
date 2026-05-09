@@ -6,8 +6,8 @@
 use lpa_server::LpServer;
 use lpc_model::LpPathBuf;
 use lpc_model::server::server_config::ServerConfig;
-use lpfs::lp_path::AsLpPath;
 use lpfs::LpFs;
+use lpfs::lp_path::AsLpPath;
 
 /// Config file path at filesystem root
 const CONFIG_PATH: &str = "/lightplayer.json";

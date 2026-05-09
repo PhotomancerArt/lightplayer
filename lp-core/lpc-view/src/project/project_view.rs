@@ -1,7 +1,7 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 
-use lpc_model::{Revision, LpPathBuf, NodeId};
 use lpc_model::NodeKind;
+use lpc_model::{LpPathBuf, NodeId, Revision};
 use lpc_wire::{WireNodeSlotRoot, WireNodeStatus, WireSlotWatchSpecifier};
 
 use super::resource_cache::ClientResourceCache;

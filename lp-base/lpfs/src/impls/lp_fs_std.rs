@@ -6,10 +6,10 @@ use crate::{
     fs_event::{ChangeType, FsChange, FsVersion},
     lp_fs_view::LpFsView,
 };
+use crate::{LpPath, LpPathBuf};
 use alloc::{format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use crate::{LpPath, LpPathBuf};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;

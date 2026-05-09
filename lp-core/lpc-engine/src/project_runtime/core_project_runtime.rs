@@ -168,16 +168,16 @@ mod output_sink_flush_tests {
         RenderNode, TickContext,
     };
     use crate::nodes::{FixtureNode, TextureNode, fixture_input_path, shader_output_path};
-    use crate::prop::ProducedSlotAccess;
     use crate::render_product::{RenderProduct, RenderTextureRequest, SolidColorProduct};
     use crate::render_product::{StoredRenderProduct, TextureRenderProduct};
     use crate::runtime_buffer::RuntimeBuffer;
-    use crate::runtime_product::RuntimeProduct as RpEnum;
-    use lpc_model::SlotPath;
     use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
     use lpc_model::nodes::output::OutputDef;
     use lpc_model::nodes::texture::TextureDef;
-    use lpc_model::{Kind, LpValue, Revision, TreePath, WithRevision};
+    use lpc_model::{
+        Kind, LpValue, Revision, ShaderState, SlotAccess, SlotShapeRegistry,
+        SlotShapeRegistryError, StaticSlotShape, TreePath, WithRevision,
+    };
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
@@ -213,50 +213,8 @@ mod output_sink_flush_tests {
         }
     }
 
-    #[derive(Clone)]
-    struct SolidFixtureOutputs {
-        path: SlotPath,
-        product: RenderProduct,
-        last_frame: Revision,
-    }
-
-    impl ProducedSlotAccess for SolidFixtureOutputs {
-        fn get(&self, path: &SlotPath) -> Option<(RpEnum, Revision)> {
-            if path == &self.path {
-                Some((RpEnum::render(self.product), self.last_frame))
-            } else {
-                None
-            }
-        }
-
-        fn iter_changed_since<'a>(
-            &'a self,
-            since: Revision,
-        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, Revision)> + 'a> {
-            if self.last_frame.as_i64() > since.as_i64() {
-                alloc::boxed::Box::new(core::iter::once((
-                    self.path.clone(),
-                    RpEnum::render(self.product),
-                    self.last_frame,
-                )))
-            } else {
-                alloc::boxed::Box::new(core::iter::empty())
-            }
-        }
-
-        fn snapshot<'a>(
-            &'a self,
-        ) -> alloc::boxed::Box<dyn Iterator<Item = (SlotPath, RpEnum, Revision)> + 'a> {
-            alloc::boxed::Box::new(core::iter::once((
-                self.path.clone(),
-                RpEnum::render(self.product),
-                self.last_frame,
-            )))
-        }
-    }
-
     struct SolidFixtureProducer {
-        out: SolidFixtureOutputs,
+        state: ShaderState,
         ticks: Arc<AtomicU32>,
         color: [f32; 4],
     }
@@ -264,7 +222,9 @@ mod output_sink_flush_tests {
     impl NodeRuntime for SolidFixtureProducer {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            self.out.last_frame = ctx.revision();
+            self.state
+                .output
+                .set_with_version(ctx.revision(), RenderProduct::new(ctx.node_id(), 0));
             Ok(())
         }
 
@@ -280,8 +240,15 @@ mod output_sink_flush_tests {
             Ok(())
         }
 
-        fn produced(&self) -> &dyn ProducedSlotAccess {
-            &self.out
+        fn runtime_state_slots(&self) -> &dyn SlotAccess {
+            &self.state
+        }
+
+        fn register_runtime_state_shapes(
+            &self,
+            registry: &mut SlotShapeRegistry,
+        ) -> Result<(), SlotShapeRegistryError> {
+            ShaderState::ensure_registered(registry).map(|_| ())
         }
 
         fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -363,12 +330,8 @@ mod output_sink_flush_tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(SolidFixtureProducer {
+                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    out: SolidFixtureOutputs {
-                        path: out_path.clone(),
-                        product: RenderProduct::new(sh_id, 0),
-                        last_frame: frame,
-                    },
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
@@ -542,12 +505,8 @@ mod output_sink_flush_tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(SolidFixtureProducer {
+                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    out: SolidFixtureOutputs {
-                        path: out_path.clone(),
-                        product: RenderProduct::new(sh_id, 0),
-                        last_frame: frame,
-                    },
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
@@ -731,12 +690,8 @@ mod output_sink_flush_tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(SolidFixtureProducer {
+                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    out: SolidFixtureOutputs {
-                        path: out_path.clone(),
-                        product: RenderProduct::new(sh_id, 0),
-                        last_frame: frame,
-                    },
                     color: [0.0, 1.0, 0.0, 1.0],
                 }),
                 frame,

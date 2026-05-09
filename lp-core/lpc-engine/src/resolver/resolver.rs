@@ -46,7 +46,9 @@ pub(crate) fn materialize_literal_value(
 ///
 /// Not every future runtime domain maps 1:1 into `LpsValueF32`; engine demand
 /// resolution may represent other domains as [`RuntimeProduct`](crate::runtime_product::RuntimeProduct).
-fn model_value_to_lps_value_f32(value: &lpc_model::LpValue) -> Result<LpsValueF32, ResolveError> {
+pub(crate) fn model_value_to_lps_value_f32(
+    value: &lpc_model::LpValue,
+) -> Result<LpsValueF32, ResolveError> {
     use lpc_model::LpValue;
 
     match value {
@@ -86,9 +88,11 @@ fn model_value_to_lps_value_f32(value: &lpc_model::LpValue) -> Result<LpsValueF3
                 fields: result_fields,
             })
         }
-        LpValue::String(_) | LpValue::Resource(_) => Err(ResolveError::new(alloc::format!(
-            "model value cannot be resolved as shader value: {value:?}"
-        ))),
+        LpValue::String(_) | LpValue::Resource(_) | LpValue::RenderProduct(_) => {
+            Err(ResolveError::new(alloc::format!(
+                "model value cannot be resolved as shader value: {value:?}"
+            )))
+        }
     }
 }
 

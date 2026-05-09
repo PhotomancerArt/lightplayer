@@ -41,7 +41,7 @@ pub enum WireSlotChange {
 mod tests {
     use super::*;
     use alloc::vec;
-    use lpc_model::{Revision, LpValue, SlotShapeRegistry, WithRevision};
+    use lpc_model::{LpValue, Revision, SlotShapeRegistry, WithRevision};
 
     #[test]
     fn slot_patch_round_trips() {

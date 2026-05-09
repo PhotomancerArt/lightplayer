@@ -5,7 +5,10 @@ use alloc::format;
 use alloc::string::String;
 
 use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::{AddSubMode, DivMode, GlslOpts, MulMode, NodeId, Revision, SlotPath};
+use lpc_model::{
+    AddSubMode, DivMode, GlslOpts, MulMode, NodeId, ShaderState, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+};
 use lps_shared::TextureBuffer;
 
 use crate::gfx::{LpShader, ShaderCompileOptions};
@@ -13,10 +16,7 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
     TickContext,
 };
-use crate::prop::ProducedSlotAccess;
 use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
-use crate::runtime_product::RuntimeProduct;
-
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -27,7 +27,7 @@ pub struct ShaderNode {
     glsl_source: String,
     shader: Option<Box<dyn LpShader>>,
     compilation_error: Option<String>,
-    output_changed_at: Revision,
+    state: ShaderState,
 }
 
 impl ShaderNode {
@@ -38,7 +38,7 @@ impl ShaderNode {
             glsl_source,
             shader: None,
             compilation_error: None,
-            output_changed_at: Revision::default(),
+            state: ShaderState::new(RenderProduct::new(node_id, 0)),
         }
     }
 
@@ -47,7 +47,7 @@ impl ShaderNode {
     }
 
     pub fn render_product(&self) -> RenderProduct {
-        RenderProduct::new(self.node_id, 0)
+        *self.state.output.value()
     }
 
     pub fn compilation_error(&self) -> Option<&str> {
@@ -115,7 +115,9 @@ impl ShaderNode {
 
 impl NodeRuntime for ShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        self.output_changed_at = ctx.revision();
+        self.state
+            .output
+            .set_with_version(ctx.revision(), RenderProduct::new(self.node_id, 0));
         Ok(())
     }
 
@@ -131,8 +133,15 @@ impl NodeRuntime for ShaderNode {
         Ok(())
     }
 
-    fn produced(&self) -> &dyn ProducedSlotAccess {
-        self
+    fn runtime_state_slots(&self) -> &dyn SlotAccess {
+        &self.state
+    }
+
+    fn register_runtime_state_shapes(
+        &self,
+        registry: &mut SlotShapeRegistry,
+    ) -> Result<(), SlotShapeRegistryError> {
+        ShaderState::ensure_registered(registry).map(|_| ())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -142,44 +151,6 @@ impl NodeRuntime for ShaderNode {
 
 pub fn shader_output_path() -> SlotPath {
     SlotPath::parse("output").expect("shader output path")
-}
-
-impl ProducedSlotAccess for ShaderNode {
-    fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-        if path == &shader_output_path() {
-            Some((
-                RuntimeProduct::render(self.render_product()),
-                self.output_changed_at,
-            ))
-        } else {
-            None
-        }
-    }
-
-    fn iter_changed_since<'a>(
-        &'a self,
-        since: Revision,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        if self.output_changed_at.as_i64() > since.as_i64() {
-            Box::new(core::iter::once((
-                shader_output_path(),
-                RuntimeProduct::render(self.render_product()),
-                self.output_changed_at,
-            )))
-        } else {
-            Box::new(core::iter::empty())
-        }
-    }
-
-    fn snapshot<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(core::iter::once((
-            shader_output_path(),
-            RuntimeProduct::render(self.render_product()),
-            self.output_changed_at,
-        )))
-    }
 }
 
 impl RenderNode for ShaderNode {
@@ -272,7 +243,7 @@ mod tests {
     };
     use crate::resolver::QueryKey;
     use crate::resolver::ResolveLogLevel;
-    use lpc_model::TreePath;
+    use lpc_model::{Revision, SlotDataAccess, StaticSlotShape, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
@@ -332,13 +303,22 @@ mod tests {
     }
 
     #[test]
-    fn shader_render_output_is_on_produced_slot_access() {
+    fn shader_render_output_is_on_runtime_state_slot_root() {
         let cfg = ShaderDef::default();
         let node = ShaderNode::new(NodeId::new(1), cfg, String::new());
-        let rid = node.render_product();
-        let p = shader_output_path();
-        let (prod, _) = node.produced().get(&p).expect("render output");
-        assert_eq!(prod.as_render(), Some(rid));
+
+        assert_eq!(node.runtime_state_slots().shape_id(), ShaderState::SHAPE_ID);
+        let SlotDataAccess::Record(record) = node.runtime_state_slots().data() else {
+            panic!("shader runtime state should be a record");
+        };
+        let Some(SlotDataAccess::Value(output)) = record.field(0) else {
+            panic!("shader runtime state output should be a value");
+        };
+
+        assert_eq!(
+            output.value(),
+            lpc_model::LpValue::RenderProduct(node.render_product())
+        );
     }
 
     #[test]

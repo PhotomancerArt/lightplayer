@@ -2,7 +2,6 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 
@@ -10,11 +9,11 @@ use lpc_engine::node::NodeError;
 use lpc_engine::{
     ArtifactLocation, ArtifactManager, ArtifactState, BindingDraft, BindingPriority,
     BindingRegistry, BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost,
-    ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, RuntimeProduct, SessionHostResolver,
+    ResolveLogLevel, ResolveSession, ResolveTrace, Resolver, SessionHostResolver,
     SessionResolveError, TickContext, TickResolver,
 };
 use lpc_model::node::node_invocation::NodeInvocation;
-use lpc_model::{Kind, LpValue, NodeId, Revision, SlotPath, bus::ChannelName};
+use lpc_model::{Kind, LpValue, NodeId, Revision, bus::ChannelName};
 use lpc_source::ArtifactLocator;
 use lps_shared::LpsValueF32;
 
@@ -159,31 +158,4 @@ impl NodeRuntime for TickProbeNode {
     ) -> Result<(), NodeError> {
         Ok(())
     }
-
-    fn produced(&self) -> &dyn lpc_engine::ProducedSlotAccess {
-        &EMPTY_PROPS
-    }
 }
-
-struct EmptyProps;
-
-impl lpc_engine::ProducedSlotAccess for EmptyProps {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-        None
-    }
-
-    fn iter_changed_since<'a>(
-        &'a self,
-        _since: Revision,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(alloc::vec::Vec::new().into_iter())
-    }
-
-    fn snapshot<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(alloc::vec::Vec::new().into_iter())
-    }
-}
-
-static EMPTY_PROPS: EmptyProps = EmptyProps;

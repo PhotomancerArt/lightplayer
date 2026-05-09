@@ -7,5 +7,7 @@ pub mod texture;
 pub use fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 pub use output::{OutputDef, OutputDriverOptionsConfig};
 pub use project::ProjectDef;
-pub use shader::{AddSubMode, DivMode, GlslOpts, MulMode, ScalarHint, ShaderDef, ShaderParamDef};
-pub use texture::{TextureDef, TextureFormat};
+pub use shader::{
+    AddSubMode, DivMode, GlslOpts, MulMode, ScalarHint, ShaderDef, ShaderParamDef, ShaderState,
+};
+pub use texture::{TextureDef, TextureFormat, TextureState};

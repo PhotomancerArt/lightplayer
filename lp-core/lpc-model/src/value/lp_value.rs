@@ -5,7 +5,7 @@
 //! slot tree: the whole payload is versioned, watched, patched, and mutated as
 //! one logical value.
 
-use crate::resource::ResourceRef;
+use crate::resource::{RenderProduct, ResourceRef};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -42,6 +42,7 @@ pub enum LpValue {
         fields: Vec<(String, LpValue)>,
     },
     Resource(ResourceRef),
+    RenderProduct(RenderProduct),
 }
 
 #[cfg(test)]
@@ -61,6 +62,7 @@ mod tests {
             LpValue::Resource(crate::ResourceRef::render_product(
                 crate::RenderProductId::new(9),
             )),
+            LpValue::RenderProduct(crate::RenderProduct::new(crate::NodeId::new(2), 0)),
         ] {
             let json = serde_json::to_string(&v).unwrap();
             let back: LpValue = serde_json::from_str(&json).unwrap();

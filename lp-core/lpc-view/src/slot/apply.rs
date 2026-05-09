@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use lpc_model::{
-    Revision, LpType, LpValue, ModelStructMember, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
+    LpType, LpValue, ModelStructMember, Revision, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
     SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};

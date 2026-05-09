@@ -4,7 +4,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{Revision, NodeId, TreePath};
+use lpc_model::{NodeId, Revision, TreePath};
 
 use super::TreeEntryView;
 

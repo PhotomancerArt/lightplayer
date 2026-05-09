@@ -7,7 +7,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    NodeId, Revision, SlotPath, TreePath, WithRevision, advance_revision, current_revision,
+    LpValue, NodeId, Revision, SlotDataAccess, SlotPath, SlotShapeRegistry, TreePath, WithRevision,
+    advance_revision, current_revision, lookup_slot_data,
 };
 
 use crate::artifact::ArtifactManager;
@@ -20,6 +21,7 @@ use crate::node::{NodeEntryState, NodeTree};
 use crate::render_product::{
     RenderProduct, RenderProductStore, RenderTextureRequest, TextureRenderProduct,
 };
+use crate::resolver::resolver::model_value_to_lps_value_f32;
 use crate::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -27,12 +29,22 @@ use crate::resolver::{
 use crate::runtime::frame_num::FrameNum;
 use crate::runtime::frame_time::FrameTime;
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
+use crate::runtime_product::RuntimeProduct;
 
 use super::EngineError;
 
 /// Conventional demand input used by the M2 engine slice.
 pub(crate) fn default_demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("default demand input slot path")
+}
+
+fn runtime_product_from_lp_value(value: LpValue) -> Result<RuntimeProduct, SessionResolveError> {
+    match value {
+        LpValue::RenderProduct(product) => Ok(RuntimeProduct::render(product)),
+        other => model_value_to_lps_value_f32(&other)
+            .map(RuntimeProduct::Value)
+            .map_err(|e| SessionResolveError::other(e.message)),
+    }
 }
 
 /// Core runtime owner for the demand-driven spine (M2).
@@ -43,6 +55,7 @@ pub struct Engine {
     tree: NodeTree<Box<dyn NodeRuntime>>,
     bindings: BindingRegistry,
     resolver: Resolver,
+    slot_shapes: SlotShapeRegistry,
     render_products: RenderProductStore,
     runtime_buffers: RuntimeBufferStore,
     artifacts: ArtifactManager<()>,
@@ -53,6 +66,9 @@ pub struct Engine {
 impl Engine {
     pub fn new(root_path: TreePath) -> Self {
         let revision = Revision::default();
+        let mut slot_shapes = SlotShapeRegistry::default();
+        lpc_model::slot_shapes::register_all_static_slot_shapes(&mut slot_shapes)
+            .expect("static slot shapes register without conflicts");
         Self {
             frame_num: FrameNum::default(),
             revision,
@@ -60,6 +76,7 @@ impl Engine {
             tree: NodeTree::new(root_path, revision),
             bindings: BindingRegistry::new(),
             resolver: Resolver::new(),
+            slot_shapes,
             render_products: RenderProductStore::new(),
             runtime_buffers: RuntimeBufferStore::new(),
             artifacts: ArtifactManager::new(),
@@ -102,6 +119,14 @@ impl Engine {
 
     pub fn resolver_mut(&mut self) -> &mut Resolver {
         &mut self.resolver
+    }
+
+    pub fn slot_shapes(&self) -> &SlotShapeRegistry {
+        &self.slot_shapes
+    }
+
+    pub fn slot_shapes_mut(&mut self) -> &mut SlotShapeRegistry {
+        &mut self.slot_shapes
     }
 
     pub fn render_products(&self) -> &RenderProductStore {
@@ -159,6 +184,12 @@ impl Engine {
         runtime
             .init_resources(&mut ctx)
             .map_err(|e| EngineError::node(id, e))?;
+        runtime
+            .register_runtime_state_shapes(&mut self.slot_shapes)
+            .map_err(|e| EngineError::Node {
+                node: id,
+                message: format!("runtime state shape registration: {e}"),
+            })?;
         let entry = self.tree.get_mut(id).ok_or(EngineError::UnknownNode(id))?;
         entry.set_state(NodeEntryState::Alive(runtime), frame);
         Ok(())
@@ -197,6 +228,7 @@ impl Engine {
             artifacts: &self.artifacts,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
             frame_time_seconds: time_s,
         };
@@ -236,6 +268,7 @@ impl Engine {
             artifacts: &self.artifacts,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
             frame_time_seconds: time_s,
         };
@@ -261,6 +294,7 @@ struct EngineResolveHost<'a> {
     artifacts: &'a ArtifactManager<()>,
     producers_ticked: &'a mut BTreeSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
+    slot_shapes: &'a SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
     frame_time_seconds: f32,
 }
@@ -374,18 +408,18 @@ impl ResolveHost for EngineResolveHost<'_> {
                         )));
                     }
                 };
-                match n.produced().get(slot) {
-                    Some((product, frame)) => Ok(Production::new(
-                        WithRevision::new(frame, product),
-                        ProductionSource::ProducedSlot {
-                            node: *node,
-                            slot: slot.clone(),
-                        },
-                    )),
-                    None => Err(SessionResolveError::other(format!(
-                        "missing produced slot {slot:?} on {node:?}"
-                    ))),
-                }
+                let product = self.read_runtime_state_product(&**n, slot).map_err(|e| {
+                    SessionResolveError::other(format!(
+                        "missing produced slot {slot:?} on {node:?}: {e}"
+                    ))
+                })?;
+                Ok(Production::new(
+                    product,
+                    ProductionSource::ProducedSlot {
+                        node: *node,
+                        slot: slot.clone(),
+                    },
+                ))
             }
             QueryKey::ConsumedSlot { node, slot } => {
                 self.tick_node_once_for_output(*node, session)?;
@@ -404,16 +438,13 @@ impl ResolveHost for EngineResolveHost<'_> {
                         });
                     }
                 };
-                match n.produced().get(slot) {
-                    Some((product, frame)) => Ok(Production::new(
-                        WithRevision::new(frame, product),
-                        ProductionSource::Default,
-                    )),
-                    None => Err(SessionResolveError::UnresolvedConsumedSlot {
+                let product = self.read_runtime_state_product(&**n, slot).map_err(|_| {
+                    SessionResolveError::UnresolvedConsumedSlot {
                         node: *node,
                         slot: slot.clone(),
-                    }),
-                }
+                    }
+                })?;
+                Ok(Production::new(product, ProductionSource::Default))
             }
             QueryKey::Bus(_) => Err(SessionResolveError::other(
                 "engine host cannot satisfy bus query",
@@ -441,6 +472,24 @@ impl ResolveHost for EngineResolveHost<'_> {
 }
 
 impl EngineResolveHost<'_> {
+    fn read_runtime_state_product(
+        &self,
+        node: &dyn NodeRuntime,
+        slot: &SlotPath,
+    ) -> Result<WithRevision<RuntimeProduct>, SessionResolveError> {
+        let data = lookup_slot_data(node.runtime_state_slots(), self.slot_shapes, slot)
+            .map_err(|e| SessionResolveError::other(format!("runtime state lookup: {e}")))?;
+        let SlotDataAccess::Value(value) = data else {
+            return Err(SessionResolveError::other(format!(
+                "runtime state slot {slot:?} is not a value"
+            )));
+        };
+        Ok(WithRevision::new(
+            value.changed_at(),
+            runtime_product_from_lp_value(value.value())?,
+        ))
+    }
+
     fn render_node_texture(
         &mut self,
         product: RenderProduct,
@@ -625,6 +674,7 @@ pub(crate) fn resolve_with_engine_host(
         artifacts: &eng.artifacts,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
+        slot_shapes: &eng.slot_shapes,
         graphics: eng.graphics.clone(),
         frame_time_seconds: time_s,
     };
@@ -656,6 +706,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         artifacts: &eng.artifacts,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
+        slot_shapes: &eng.slot_shapes,
         graphics: eng.graphics.clone(),
         frame_time_seconds: time_s,
     };
@@ -747,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn produced_slot_scalar_resolves_via_produced_slot_access_after_empty_produced() {
+    fn produced_slot_scalar_resolves_via_runtime_state_slots() {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 2.0))
             .build();

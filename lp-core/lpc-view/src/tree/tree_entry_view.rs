@@ -6,7 +6,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
 use alloc::vec::Vec;
-use lpc_model::{Revision, NodeId, TreePath};
+use lpc_model::{NodeId, Revision, TreePath};
 use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus};
 
 /// Mirror of wire/node tree metadata (`NodeEntry` on engine) without node payloads.

@@ -1,14 +1,12 @@
-//! Engine spine [`NodeRuntime`] trait: tick, destroy, memory pressure, and produced props.
-
-use crate::prop::{
-    EMPTY_PRODUCED_SLOTS, EMPTY_RUNTIME_STATE, ProducedSlotAccess, RuntimeStateAccess,
-};
+//! Engine spine [`NodeRuntime`] trait: tick, destroy, memory pressure, and runtime state.
 
 use crate::runtime_buffer::RuntimeBufferId;
+use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
 use super::RenderNode;
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
+use super::runtime_state_slots::EMPTY_RUNTIME_STATE_SLOTS;
 use crate::memory::pressure_level::PressureLevel;
 
 /// Runtime node instance for the demand-driven engine spine.
@@ -31,14 +29,17 @@ pub trait NodeRuntime {
         ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError>;
 
-    /// Node-owned produced values and runtime products. Default: none.
-    fn produced(&self) -> &dyn ProducedSlotAccess {
-        &EMPTY_PRODUCED_SLOTS
+    /// Node-owned runtime state exposed as a slot root. Default: empty state.
+    fn runtime_state_slots(&self) -> &dyn SlotAccess {
+        &EMPTY_RUNTIME_STATE_SLOTS
     }
 
-    /// Reserved for sync/debug state snapshots. Default: empty [`RuntimeStateAccess`].
-    fn runtime_state(&self) -> &dyn RuntimeStateAccess {
-        &EMPTY_RUNTIME_STATE
+    /// Register any shape roots required by [`Self::runtime_state_slots`].
+    fn register_runtime_state_shapes(
+        &self,
+        _registry: &mut SlotShapeRegistry,
+    ) -> Result<(), SlotShapeRegistryError> {
+        Ok(())
     }
 
     /// Sink buffer backing an [`crate::nodes::OutputNode`] after [`Self::init_resources`] runs.
@@ -56,16 +57,13 @@ pub trait NodeRuntime {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
-    use alloc::vec::Vec;
 
     use crate::artifact::ArtifactId;
     use crate::resolver::{
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
     };
-    use crate::runtime_product::RuntimeProduct;
-    use lpc_model::{NodeId, Revision, SlotPath};
-    use lps_shared::LpsValueF32;
+    use lpc_model::{NodeId, Revision, SlotDataAccess};
 
     struct EmptyResolveHost;
 
@@ -81,61 +79,11 @@ mod tests {
         }
     }
 
-    struct DummyProps {
-        values: Vec<(SlotPath, RuntimeProduct, Revision)>,
-    }
-
-    impl Default for DummyProps {
-        fn default() -> Self {
-            Self { values: Vec::new() }
-        }
-    }
-
-    impl ProducedSlotAccess for DummyProps {
-        fn get(&self, path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-            self.values
-                .iter()
-                .find(|(p, _, _)| p == path)
-                .map(|(_, v, f)| (v.clone(), *f))
-        }
-
-        fn iter_changed_since<'a>(
-            &'a self,
-            since: Revision,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-            Box::new(
-                self.values
-                    .iter()
-                    .filter(move |(_, _, frame)| frame.as_i64() > since.as_i64())
-                    .map(|(p, v, f)| (p.clone(), v.clone(), *f)),
-            )
-        }
-
-        fn snapshot<'a>(
-            &'a self,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-            Box::new(
-                self.values
-                    .iter()
-                    .map(|(p, v, f)| (p.clone(), v.clone(), *f)),
-            )
-        }
-    }
-
-    struct DummyNode {
-        props: DummyProps,
-    }
+    struct DummyNode;
 
     impl DummyNode {
         fn new() -> Self {
-            let mut props = DummyProps::default();
-            let path = SlotPath::parse("out").expect("path");
-            props.values.push((
-                path,
-                RuntimeProduct::Value(LpsValueF32::F32(0.25)),
-                Revision::new(1),
-            ));
-            Self { props }
+            Self
         }
     }
 
@@ -155,10 +103,6 @@ mod tests {
         ) -> Result<(), NodeError> {
             Ok(())
         }
-
-        fn produced(&self) -> &dyn ProducedSlotAccess {
-            &self.props
-        }
     }
 
     #[test]
@@ -168,14 +112,11 @@ mod tests {
     }
 
     #[test]
-    fn props_returns_produced_slot_access() {
+    fn default_runtime_state_is_empty_unit() {
         let node = DummyNode::new();
-        let path = SlotPath::parse("out").expect("path");
-        let got = node.produced().get(&path);
-        assert!(got.is_some());
         assert!(matches!(
-            got.unwrap().0,
-            RuntimeProduct::Value(LpsValueF32::F32(0.25))
+            node.runtime_state_slots().data(),
+            SlotDataAccess::Unit(_)
         ));
 
         let registry = crate::binding::BindingRegistry::new();
@@ -202,12 +143,5 @@ mod tests {
         );
         let mut dyn_node: Box<dyn NodeRuntime> = Box::new(DummyNode::new());
         dyn_node.tick(&mut tick).expect("tick");
-
-        let from_dyn = dyn_node.produced().get(&path);
-        assert!(from_dyn.is_some());
-        assert!(matches!(
-            from_dyn.unwrap().0,
-            RuntimeProduct::Value(LpsValueF32::F32(0.25))
-        ));
     }
 }

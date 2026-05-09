@@ -2,7 +2,6 @@
 //! [`RenderProductStore::sample_batch`], maps channels via legacy accumulation, and pushes u16 RGB
 //! into an output [`crate::runtime_buffer::RuntimeBuffer`] sink.
 
-use alloc::boxed::Box;
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -23,7 +22,6 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
     TickContext,
 };
-use crate::prop::ProducedSlotAccess;
 use crate::render_product::{
     RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest, StoredRenderProduct,
     TextureRenderProduct,
@@ -32,34 +30,6 @@ use crate::resolver::QueryKey;
 use crate::runtime_buffer::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat,
 };
-
-use crate::runtime_product::RuntimeProduct;
-
-pub fn fixture_input_path() -> SlotPath {
-    SlotPath::parse("input").expect("fixture input path")
-}
-
-#[derive(Clone, Copy)]
-struct FixtureScalarProps;
-
-impl ProducedSlotAccess for FixtureScalarProps {
-    fn get(&self, _path: &SlotPath) -> Option<(RuntimeProduct, Revision)> {
-        None
-    }
-
-    fn iter_changed_since<'a>(
-        &'a self,
-        _since: Revision,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(core::iter::empty())
-    }
-
-    fn snapshot<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-        Box::new(core::iter::empty())
-    }
-}
 
 /// Fixture demand root: resolves a shader texture render handle, batches UV samples via the render
 /// product API, applies legacy mapping accumulation, writes output channel buffer bytes.
@@ -70,7 +40,6 @@ pub struct FixtureNode {
     mapping_version: Revision,
     output_sink: RuntimeBufferId,
     lamp_colors_buffer_id: Option<RuntimeBufferId>,
-    scalar_props: FixtureScalarProps,
     color_order: ColorOrder,
     brightness: u8,
     gamma_correction: bool,
@@ -97,13 +66,16 @@ impl FixtureNode {
             mapping_version,
             output_sink,
             lamp_colors_buffer_id: None,
-            scalar_props: FixtureScalarProps,
             color_order,
             brightness,
             gamma_correction,
             precomputed: None,
         }
     }
+}
+
+pub fn fixture_input_path() -> SlotPath {
+    SlotPath::parse("input").expect("fixture input path")
 }
 
 impl NodeRuntime for FixtureNode {
@@ -208,10 +180,6 @@ impl NodeRuntime for FixtureNode {
     ) -> Result<(), NodeError> {
         self.precomputed = None;
         Ok(())
-    }
-
-    fn produced(&self) -> &dyn ProducedSlotAccess {
-        &self.scalar_props
     }
 }
 
@@ -470,6 +438,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
     use alloc::sync::Arc;
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -484,55 +453,14 @@ mod tests {
     use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
-    use crate::prop::ProducedSlotAccess;
     use crate::render_product::{RenderProduct, SolidColorProduct};
     use crate::runtime_buffer::RuntimeBuffer;
-    use crate::runtime_product::RuntimeProduct as RpEnum;
-
-    #[derive(Clone)]
-    struct FixtureTickCountSolidProducerOutputs {
-        path: SlotPath,
-        product: RenderProduct,
-        last_frame: Revision,
-    }
-
-    impl ProducedSlotAccess for FixtureTickCountSolidProducerOutputs {
-        fn get(&self, path: &SlotPath) -> Option<(RpEnum, Revision)> {
-            if path == &self.path {
-                Some((RpEnum::render(self.product), self.last_frame))
-            } else {
-                None
-            }
-        }
-
-        fn iter_changed_since<'a>(
-            &'a self,
-            since: Revision,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-            if self.last_frame.as_i64() > since.as_i64() {
-                Box::new(core::iter::once((
-                    self.path.clone(),
-                    RuntimeProduct::render(self.product),
-                    self.last_frame,
-                )))
-            } else {
-                Box::new(core::iter::empty())
-            }
-        }
-
-        fn snapshot<'a>(
-            &'a self,
-        ) -> Box<dyn Iterator<Item = (SlotPath, RuntimeProduct, Revision)> + 'a> {
-            Box::new(core::iter::once((
-                self.path.clone(),
-                RuntimeProduct::render(self.product),
-                self.last_frame,
-            )))
-        }
-    }
+    use lpc_model::{
+        ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    };
 
     struct FixtureTickCountSolidProducer {
-        out: FixtureTickCountSolidProducerOutputs,
+        state: ShaderState,
         ticks: Arc<AtomicU32>,
         color: [f32; 4],
     }
@@ -540,7 +468,9 @@ mod tests {
     impl NodeRuntime for FixtureTickCountSolidProducer {
         fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            self.out.last_frame = ctx.revision();
+            self.state
+                .output
+                .set_with_version(ctx.revision(), RenderProduct::new(ctx.node_id(), 0));
             Ok(())
         }
 
@@ -556,8 +486,15 @@ mod tests {
             Ok(())
         }
 
-        fn produced(&self) -> &dyn ProducedSlotAccess {
-            &self.out
+        fn runtime_state_slots(&self) -> &dyn SlotAccess {
+            &self.state
+        }
+
+        fn register_runtime_state_shapes(
+            &self,
+            registry: &mut SlotShapeRegistry,
+        ) -> Result<(), SlotShapeRegistryError> {
+            ShaderState::ensure_registered(registry).map(|_| ())
         }
 
         fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -630,12 +567,8 @@ mod tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    out: FixtureTickCountSolidProducerOutputs {
-                        path: out_path.clone(),
-                        product: RenderProduct::new(sh_id, 0),
-                        last_frame: frame,
-                    },
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
@@ -785,12 +718,8 @@ mod tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    out: FixtureTickCountSolidProducerOutputs {
-                        path: out_path.clone(),
-                        product: RenderProduct::new(sh_id, 0),
-                        last_frame: frame,
-                    },
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
