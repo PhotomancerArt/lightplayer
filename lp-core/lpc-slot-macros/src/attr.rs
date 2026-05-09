@@ -6,6 +6,7 @@ use syn::{
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
     pub(crate) root: bool,
+    pub(crate) view: bool,
 }
 
 pub(crate) struct FieldAttrs {
@@ -28,6 +29,7 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
     let mut parsed = ContainerAttrs {
         shape_id: None,
         root: false,
+        view: false,
     };
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
@@ -37,6 +39,9 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
                 Ok(())
             } else if meta.path.is_ident("root") {
                 parsed.root = true;
+                Ok(())
+            } else if meta.path.is_ident("view") {
+                parsed.view = true;
                 Ok(())
             } else {
                 Err(meta.error("unsupported slot container attribute"))

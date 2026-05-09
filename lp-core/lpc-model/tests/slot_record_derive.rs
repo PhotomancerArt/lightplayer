@@ -2,11 +2,11 @@
 
 use lpc_model::{
     SlotAccess, SlotDataAccess, SlotMapValueAccess, SlotRecordAccess, SlotRecordShape, SlotShape,
-    SlotShapeRegistry, StaticSlotAccess, StaticSlotShape, ValueSlot,
+    SlotShapeRegistry, SlotViewRoot, StaticSlotAccess, StaticSlotShape, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
+#[slot(root, view)]
 struct DerivedRecord {
     enabled: ValueSlot<bool>,
     nested: NestedRecord,
@@ -15,6 +15,30 @@ struct DerivedRecord {
 #[derive(lpc_model::SlotRecord)]
 struct NestedRecord {
     count: ValueSlot<u32>,
+}
+
+struct DerivedRecordSlotView {
+    registry_revision: lpc_model::Revision,
+    enabled_accessor: lpc_model::SlotAccessor,
+    nested_accessor: lpc_model::SlotAccessor,
+}
+
+impl DerivedRecordSlotView {
+    fn registry_revision(&self) -> lpc_model::Revision {
+        self.registry_revision
+    }
+
+    fn is_valid_for(&self, registry: &SlotShapeRegistry) -> bool {
+        self.registry_revision == registry.revision()
+    }
+
+    fn enabled(&self) -> &lpc_model::SlotAccessor {
+        &self.enabled_accessor
+    }
+
+    fn nested(&self) -> &lpc_model::SlotAccessor {
+        &self.nested_accessor
+    }
 }
 
 #[test]
@@ -55,7 +79,7 @@ fn derive_generates_compiled_view_for_root_records() {
     let mut registry = SlotShapeRegistry::default();
     DerivedRecord::ensure_registered(&mut registry).unwrap();
 
-    let view = DerivedRecordView::compile(&registry).unwrap();
+    let view = DerivedRecord::compile_slot_view(&registry).unwrap();
 
     assert_eq!(view.registry_revision(), registry.revision());
     assert!(view.is_valid_for(&registry));

@@ -73,8 +73,8 @@ pub use node::{
 pub use nodes::{
     AddSubMode, ColorOrder, DivMode, FixtureDef, GlslOpts, MappingConfig, MulMode,
     NodeDefParseError, OutputDef, OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder,
-    ScalarHint, ShaderDef, ShaderParamDef, ShaderState, TextureDef, TextureDefView, TextureFormat,
-    TextureState,
+    ScalarHint, ShaderDef, ShaderParamDef, ShaderState, TextureDef, TextureDefSlotView,
+    TextureFormat, TextureState,
 };
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};
@@ -98,6 +98,6 @@ pub use slot::{
     SlotPathError, SlotPathSegment, SlotRecord, SlotRecordAccess, SlotRecordShape, SlotRef,
     SlotShape, SlotShapeEntry, SlotShapeId, SlotShapeIdError, SlotShapeRegistry,
     SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess, SlotVariantShape,
-    StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data,
+    SlotViewRoot, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data,
 };
 pub use value::value_path::ValuePath;
