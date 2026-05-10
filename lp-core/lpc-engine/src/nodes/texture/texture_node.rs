@@ -7,11 +7,11 @@ use lpc_model::SlotPath;
 use lpc_model::SlotShapeRegistry;
 use lpc_model::SlotShapeRegistryError;
 use lpc_model::StaticSlotShape;
+use lpc_model::TextureDefView;
 use lpc_model::nodes::texture::TextureFormat;
 use lpc_model::nodes::texture::TextureState;
 
 use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
-use crate::slot_view::TextureDefView;
 
 #[cfg(test)]
 fn size_path() -> SlotPath {
@@ -55,26 +55,15 @@ impl TextureNode {
     }
 
     fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&TextureDefView, NodeError> {
-        let needs_compile = self
-            .def_view
-            .as_ref()
-            .is_none_or(|view| !view.is_valid_for(ctx.slot_shapes()));
-        if needs_compile {
-            self.def_view =
-                Some(TextureDefView::compile(ctx.slot_shapes()).map_err(|e| {
-                    NodeError::msg(alloc::format!("compile texture def view: {e}"))
-                })?);
-        }
-        Ok(self
-            .def_view
-            .as_ref()
-            .expect("texture def view was just compiled"))
+        TextureDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
+            .map_err(|e| NodeError::msg(alloc::format!("compile texture def view: {e}")))
     }
 }
 
 impl NodeRuntime for TextureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let size = self.def_view(ctx)?.size(ctx)?;
+        let size: lpc_model::Dim2u =
+            ctx.resolve_consumed_slot_accessor_value(self.def_view(ctx)?.size())?;
         self.state.sync_with_revision(
             ctx.revision(),
             i32::try_from(size.width).unwrap_or(i32::MAX),

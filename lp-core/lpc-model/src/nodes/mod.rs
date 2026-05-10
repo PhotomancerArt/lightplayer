@@ -12,4 +12,4 @@ pub use project::ProjectDef;
 pub use shader::{
     AddSubMode, DivMode, GlslOpts, MulMode, ScalarHint, ShaderDef, ShaderParamDef, ShaderState,
 };
-pub use texture::{TextureDef, TextureFormat, TextureState};
+pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState};

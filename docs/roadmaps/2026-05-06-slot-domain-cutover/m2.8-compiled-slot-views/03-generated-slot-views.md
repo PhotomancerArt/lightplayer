@@ -2,7 +2,7 @@
 
 ## Scope
 
-Extend `#[derive(SlotRecord)]` to generate simple read-only views for root records.
+Extend the existing `lpc-slot-codegen` build step to generate simple read-only views for root records marked with `#[slot(root, view)]`.
 
 Out of scope:
 
@@ -12,7 +12,7 @@ Out of scope:
 
 ## Implementation Details
 
-In `lpc-slot-macros`, for `#[derive(SlotRecord)]` + `#[slot(root)]`, emit a sibling type:
+In `lpc-slot-codegen`, scan the model crate for `#[derive(SlotRecord)]` + `#[slot(root, view)]` records and emit a type into `OUT_DIR/slot_views.rs`:
 
 ```rust
 pub struct <RecordName>View {
@@ -24,20 +24,15 @@ For each field that is a value leaf and whose Rust type has `FromLpValue`, gener
 
 - A compiled accessor field.
 - A compile-time path based on the slot field name.
-- A typed read method that delegates to `TickContext`.
+- An accessor method used by `TickContext` or client-side dynamic readers.
 
-The first target is `TextureDefView`. If name collision with the hand-authored file is awkward, either:
+The first target is `TextureDefView`. Generated views are re-exported from `lpc-model`, so engine nodes do not need hand-authored wrapper files.
 
-- Move generated-compatible logic into a separate `CompiledTextureDefView`, or
-- Remove the manual `texture_def_view.rs` once macro output owns the type.
+Add tests showing:
 
-Add derive tests showing:
-
-- A root record derives a `*View`.
+- A root record marked with `#[slot(root, view)]` generates a `*View`.
 - The view compiles against a registry.
-- The view field method returns the expected value through a tiny fake context or compile-only API.
-
-If the macro cannot depend on `lpc-engine` types, keep the generated view model in `lpc-model` as accessors-only and let engine-specific extension methods live in `lpc-engine`.
+- Engine code resolves values through the generated accessors and `TickContext`.
 
 ## Validate
 
@@ -45,4 +40,3 @@ If the macro cannot depend on `lpc-engine` types, keep the generated view model 
 cargo test -p lpc-model --test slot_record_derive
 cargo test -p lpc-engine
 ```
-

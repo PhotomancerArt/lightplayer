@@ -34,6 +34,9 @@ pub mod config;
 pub mod slot_shapes {
     include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
 }
+pub mod slot_views {
+    include!(concat!(env!("OUT_DIR"), "/slot_views.rs"));
+}
 
 pub mod artifact;
 pub mod nodes;
@@ -73,7 +76,8 @@ pub use node::{
 pub use nodes::{
     AddSubMode, ColorOrder, DivMode, FixtureDef, GlslOpts, MappingConfig, MulMode,
     NodeDefParseError, OutputDef, OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder,
-    ScalarHint, ShaderDef, ShaderParamDef, ShaderState, TextureDef, TextureFormat, TextureState,
+    ScalarHint, ShaderDef, ShaderParamDef, ShaderState, TextureDef, TextureDefView, TextureFormat,
+    TextureState,
 };
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};
@@ -96,7 +100,7 @@ pub use slot::{
     SlotMeta, SlotName, SlotNameError, SlotOptionAccess, SlotOptionDyn, SlotOwner, SlotPath,
     SlotPathError, SlotPathSegment, SlotRecord, SlotRecordAccess, SlotRecordShape, SlotRef,
     SlotShape, SlotShapeEntry, SlotShapeId, SlotShapeIdError, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess, SlotVariantShape, SlotView,
+    SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess, SlotVariantShape,
     StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data,
 };
 pub use value::value_path::ValuePath;

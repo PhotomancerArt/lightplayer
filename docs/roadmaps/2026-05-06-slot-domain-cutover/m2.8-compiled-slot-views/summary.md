@@ -5,8 +5,9 @@
 - Added `SlotAccessor`, an indexed compiled form of `SlotPath` that is validated against `SlotShapeRegistry::revision()`.
 - Added accessor-based consumed-slot resolution so authored defaults can be read through compiled index paths while bindings still match on semantic `SlotPath`.
 - Extended `TickContext` with `resolve_consumed_slot_accessor_value`.
-- Extended `#[derive(SlotRecord)]` to generate root `*View` types containing compiled accessors.
-- Converted the engine `TextureDefView` wrapper to use the generated `lpc_model::TextureDefView`.
+- Added build-time generation of root `*View` types from `#[slot(root, view)]` records.
+- Generated `TextureDefView` in `lpc-model` alongside the static shape bootstrap output.
+- Removed the engine-owned `TextureDefView` wrapper; texture nodes now cache the model-generated view directly.
 - Cached the texture def view on `TextureNode` and rebuilt it when the registry revision changes.
 
 ## Decisions For Future Reference
@@ -25,18 +26,19 @@
 - **Rejected alternatives:** Replace all resolver keys with accessors immediately.
 - **Revisit when:** Produced slots and binding registries are ready for compact slot identity.
 
-### Generated Views Stay Model-Side
+### Generated Views Stay Model-Side And Build-Time
 
-- **Decision:** The derive macro generates accessors-only `*View` structs in `lpc-model`.
-- **Why:** `lpc-model` cannot depend on `lpc-engine`, so resolver-backed typed reads remain engine wrappers around generated accessors.
-- **Rejected alternatives:** Generate engine-specific `TickContext` methods directly from the model derive.
+- **Decision:** `lpc-model/build.rs` generates accessors-only `*View` structs into `OUT_DIR/slot_views.rs`.
+- **Why:** Build-time generated Rust is visible as a real included file, avoids proc-macro sibling-type IDE edge cases, and keeps resolver-specific reads out of `lpc-model`.
+- **Rejected alternatives:** Proc-macro sibling view types, hand-authored engine wrapper files, and generated engine-specific `TickContext` methods.
 - **Revisit when:** Client-side or engine-side codegen gets its own crate.
 
 ## Validation
 
 - `cargo fmt --check`
+- `cargo test -p lpc-slot-codegen`
 - `cargo test -p lpc-model`
-- `cargo test -p lpc-model --features derive --test slot_accessor --test slot_record_derive`
-- `cargo test -p lpc-engine`
-- `cargo clippy -p lpc-engine -p lpc-model -p lpc-slot-macros --all-targets -- -D warnings`
-
+- `cargo test -p lpc-model --features derive --test slot_record_derive`
+- `cargo test -p lpc-engine texture`
+- `cargo check -p lpc-model --features schema-gen`
+- `cargo clippy -p lpc-engine -p lpc-model -p lpc-slot-codegen -p lpc-slot-macros --all-targets -- -D warnings`

@@ -17,6 +17,12 @@ pub struct SlotShapeCodegenConfig {
     pub out_file: PathBuf,
 }
 
+/// Configuration for generating typed slot-view helpers.
+pub struct SlotViewCodegenConfig {
+    pub crate_root: PathBuf,
+    pub out_file: PathBuf,
+}
+
 /// Generate `slot_shapes.rs` for one crate.
 pub fn generate_slot_shapes(config: SlotShapeCodegenConfig) -> Result<(), SlotShapeCodegenError> {
     let src_dir = config.crate_root.join("src");
@@ -27,6 +33,18 @@ pub fn generate_slot_shapes(config: SlotShapeCodegenConfig) -> Result<(), SlotSh
         fs::create_dir_all(parent).map_err(SlotShapeCodegenError::Io)?;
     }
     fs::write(config.out_file, render_slot_shapes(&roots)).map_err(SlotShapeCodegenError::Io)
+}
+
+/// Generate `slot_views.rs` for `#[slot(root, view)]` records in one crate.
+pub fn generate_slot_views(config: SlotViewCodegenConfig) -> Result<(), SlotShapeCodegenError> {
+    let src_dir = config.crate_root.join("src");
+    let mut views = discover_static_slot_views(&src_dir)?;
+    views.sort_by(|a, b| a.type_path.cmp(&b.type_path));
+
+    if let Some(parent) = config.out_file.parent() {
+        fs::create_dir_all(parent).map_err(SlotShapeCodegenError::Io)?;
+    }
+    fs::write(config.out_file, render_slot_views(&views)).map_err(SlotShapeCodegenError::Io)
 }
 
 #[derive(Debug)]
@@ -69,6 +87,20 @@ struct StaticSlotRoot {
     type_path: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StaticSlotView {
+    type_path: String,
+    view_name: String,
+    fields: Vec<StaticSlotViewField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StaticSlotViewField {
+    method_name: String,
+    slot_name: String,
+    accessor_name: String,
+}
+
 fn discover_static_slot_roots(
     src_dir: &Path,
 ) -> Result<Vec<StaticSlotRoot>, SlotShapeCodegenError> {
@@ -103,6 +135,43 @@ fn discover_static_slot_roots(
     Ok(roots)
 }
 
+fn discover_static_slot_views(
+    src_dir: &Path,
+) -> Result<Vec<StaticSlotView>, SlotShapeCodegenError> {
+    if !src_dir.is_dir() {
+        return Err(SlotShapeCodegenError::MissingSrcDir(src_dir.to_path_buf()));
+    }
+
+    let mut files = Vec::new();
+    collect_rust_files(src_dir, &mut files)?;
+    files.sort();
+
+    let mut views = Vec::new();
+    for path in files {
+        let source = fs::read_to_string(&path).map_err(SlotShapeCodegenError::Io)?;
+        let syntax = syn::parse_file(&source).map_err(|source| SlotShapeCodegenError::Parse {
+            path: path.clone(),
+            source,
+        })?;
+        for item in syntax.items {
+            let syn::Item::Struct(item) = item else {
+                continue;
+            };
+            if !has_slot_record_derive(&item.attrs) || !has_slot_root_view_attr(&item.attrs) {
+                continue;
+            }
+            let type_name = item.ident.to_string();
+            views.push(StaticSlotView {
+                type_path: infer_type_path(src_dir, &path, &type_name)?,
+                view_name: format!("{type_name}View"),
+                fields: slot_view_fields(&item),
+            });
+        }
+    }
+
+    Ok(views)
+}
+
 fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), SlotShapeCodegenError> {
     for entry in fs::read_dir(dir).map_err(SlotShapeCodegenError::Io)? {
         let entry = entry.map_err(SlotShapeCodegenError::Io)?;
@@ -131,15 +200,85 @@ fn has_slot_record_derive(attrs: &[syn::Attribute]) -> bool {
 }
 
 fn has_slot_root_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| slot_attr_has_flags(attr, &["root"]))
+}
+
+fn has_slot_root_view_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("slot") && slot_attr_has_flags(attr, &["root", "view"]))
+}
+
+fn slot_attr_has_flags(attr: &syn::Attribute, required: &[&str]) -> bool {
+    if !attr.path().is_ident("slot") {
+        return false;
+    }
+    let mut found = vec![false; required.len()];
+    let _ = attr.parse_nested_meta(|meta| {
+        for (index, required) in required.iter().enumerate() {
+            if meta.path.is_ident(required) {
+                found[index] = true;
+            }
+        }
+        Ok(())
+    });
+    found.into_iter().all(|flag| flag)
+}
+
+fn slot_view_fields(item: &syn::ItemStruct) -> Vec<StaticSlotViewField> {
+    let syn::Fields::Named(fields) = &item.fields else {
+        return Vec::new();
+    };
+    fields
+        .named
+        .iter()
+        .filter(|field| !has_slot_skip_attr(&field.attrs))
+        .filter_map(|field| {
+            let ident = field.ident.as_ref()?;
+            let method_name = ident.to_string();
+            let slot_name = slot_field_name(field).unwrap_or_else(|| method_name.clone());
+            Some(StaticSlotViewField {
+                accessor_name: format!("{ident}_accessor"),
+                method_name,
+                slot_name,
+            })
+        })
+        .collect()
+}
+
+fn has_slot_skip_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         attr.path().is_ident("slot")
             && attr.meta.require_list().is_ok_and(|meta| {
                 meta.tokens
                     .to_string()
                     .split(',')
-                    .any(|token| token.trim() == "root")
+                    .any(|token| token.trim() == "skip")
             })
     })
+}
+
+fn slot_field_name(field: &syn::Field) -> Option<String> {
+    for attr in &field.attrs {
+        if !attr.path().is_ident("slot") {
+            continue;
+        }
+        let mut name = None;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                let value = meta.value()?;
+                let lit: syn::LitStr = value.parse()?;
+                name = Some(lit.value());
+            }
+            Ok(())
+        });
+        if name.is_some() {
+            return name;
+        }
+    }
+    None
 }
 
 fn infer_type_path(
@@ -253,6 +392,90 @@ fn render_slot_shapes(roots: &[StaticSlotRoot]) -> String {
     out
 }
 
+fn render_slot_views(views: &[StaticSlotView]) -> String {
+    let mut out = String::from("// @generated by lpc-slot-codegen. Do not edit.\n\n");
+    for view in views {
+        render_one_slot_view(&mut out, view);
+    }
+    out
+}
+
+fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
+    out.push_str("pub struct ");
+    out.push_str(&view.view_name);
+    out.push_str(" {\n");
+    out.push_str("    registry_revision: ::lpc_model::Revision,\n");
+    for field in &view.fields {
+        out.push_str("    ");
+        out.push_str(&field.accessor_name);
+        out.push_str(": ::lpc_model::SlotAccessor,\n");
+    }
+    out.push_str("}\n\n");
+
+    out.push_str("impl ");
+    out.push_str(&view.view_name);
+    out.push_str(" {\n");
+    out.push_str("    pub fn compile(\n");
+    out.push_str("        registry: &::lpc_model::SlotShapeRegistry,\n");
+    out.push_str("    ) -> Result<Self, ::lpc_model::SlotAccessorError> {\n");
+    out.push_str("        Ok(Self {\n");
+    out.push_str("            registry_revision: registry.revision(),\n");
+    for field in &view.fields {
+        out.push_str("            ");
+        out.push_str(&field.accessor_name);
+        out.push_str(": ::lpc_model::SlotAccessor::compile(\n");
+        out.push_str("                <");
+        out.push_str(&view.type_path);
+        out.push_str(" as ::lpc_model::StaticSlotShape>::SHAPE_ID,\n");
+        out.push_str("                ::lpc_model::SlotPath::parse(\"");
+        out.push_str(&escape_rust_string(&field.slot_name));
+        out.push_str("\").expect(\"generated slot field path is valid\"),\n");
+        out.push_str("                registry,\n");
+        out.push_str("            )?,\n");
+    }
+    out.push_str("        })\n");
+    out.push_str("    }\n\n");
+
+    out.push_str("    pub fn get_or_compile<'a>(\n");
+    out.push_str("        cache: &'a mut Option<Self>,\n");
+    out.push_str("        registry: &::lpc_model::SlotShapeRegistry,\n");
+    out.push_str("    ) -> Result<&'a Self, ::lpc_model::SlotAccessorError> {\n");
+    out.push_str("        let needs_compile = cache\n");
+    out.push_str("            .as_ref()\n");
+    out.push_str("            .is_none_or(|view| !view.is_valid_for(registry));\n");
+    out.push_str("        if needs_compile {\n");
+    out.push_str("            *cache = Some(Self::compile(registry)?);\n");
+    out.push_str("        }\n");
+    out.push_str("        Ok(cache.as_ref().expect(\"slot view cache was just compiled\"))\n");
+    out.push_str("    }\n\n");
+
+    out.push_str("    pub fn registry_revision(&self) -> ::lpc_model::Revision {\n");
+    out.push_str("        self.registry_revision\n");
+    out.push_str("    }\n\n");
+
+    out.push_str(
+        "    pub fn is_valid_for(&self, registry: &::lpc_model::SlotShapeRegistry) -> bool {\n",
+    );
+    out.push_str("        self.registry_revision == registry.revision()\n");
+    out.push_str("    }\n\n");
+
+    for field in &view.fields {
+        out.push_str("    pub fn ");
+        out.push_str(&field.method_name);
+        out.push_str("(&self) -> &::lpc_model::SlotAccessor {\n");
+        out.push_str("        &self.");
+        out.push_str(&field.accessor_name);
+        out.push('\n');
+        out.push_str("    }\n\n");
+    }
+
+    out.push_str("}\n\n");
+}
+
+fn escape_rust_string(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +550,35 @@ pub struct ProjectDef {}
         assert!(code.contains("ensure_static_slot_shape"));
         assert!(code.contains("<crate::source::ShaderDef as ::lpc_model::StaticSlotShape>"));
         assert!(code.contains("MissingReferencedShape"));
+    }
+
+    #[test]
+    fn generated_view_code_contains_named_view_and_accessors() {
+        let views = vec![StaticSlotView {
+            type_path: String::from("crate::nodes::texture::TextureDef"),
+            view_name: String::from("TextureDefView"),
+            fields: vec![
+                StaticSlotViewField {
+                    method_name: String::from("size"),
+                    slot_name: String::from("size"),
+                    accessor_name: String::from("size_accessor"),
+                },
+                StaticSlotViewField {
+                    method_name: String::from("bindings"),
+                    slot_name: String::from("bindings"),
+                    accessor_name: String::from("bindings_accessor"),
+                },
+            ],
+        }];
+
+        let code = render_slot_views(&views);
+
+        assert!(code.contains("pub struct TextureDefView"));
+        assert!(code.contains("pub fn get_or_compile"));
+        assert!(code.contains("pub fn size(&self) -> &::lpc_model::SlotAccessor"));
+        assert!(
+            code.contains("<crate::nodes::texture::TextureDef as ::lpc_model::StaticSlotShape>")
+        );
     }
 
     #[test]
