@@ -2,10 +2,10 @@
 
 use alloc::string::String;
 
-use crate::binding::BindingError;
+use crate::dataflow::binding::BindingError;
+use crate::dataflow::resolver::SessionResolveError;
 use crate::node::NodeError;
 use crate::node::TreeError;
-use crate::resolver::SessionResolveError;
 use lpc_model::NodeId;
 
 /// Engine-level failures (tree, node hooks, demand resolution).

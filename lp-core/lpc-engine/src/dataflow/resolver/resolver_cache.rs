@@ -1,7 +1,7 @@
 //! Engine-level same-frame resolver cache keyed by [`super::QueryKey`].
 
-use crate::resolver::production::Production;
-use crate::resolver::query_key::QueryKey;
+use crate::dataflow::resolver::production::Production;
+use crate::dataflow::resolver::query_key::QueryKey;
 use alloc::collections::BTreeMap;
 
 /// Per-frame cache of [`Production`] entries addressed by [`QueryKey`].
@@ -49,9 +49,9 @@ impl ResolverCache {
 #[cfg(test)]
 mod tests {
     use super::{Production, QueryKey, ResolverCache};
-    use crate::binding::BindingRef;
-    use crate::resolver::production::ProductionSource;
-    use crate::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
+    use crate::dataflow::binding::BindingRef;
+    use crate::dataflow::resolver::production::ProductionSource;
+    use crate::dataflow::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
     use lpc_model::ChannelName;
     use lpc_model::NodeId;
     use lpc_model::Revision;

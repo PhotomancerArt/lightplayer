@@ -301,12 +301,12 @@ mod tests {
 
     use super::*;
     use crate::artifact::ArtifactLocation;
+    use crate::dataflow::resolver::QueryKey;
+    use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     use crate::nodes::TextureNode;
     use crate::products::visual::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
-    use crate::resolver::QueryKey;
-    use crate::resolver::ResolveLogLevel;
     use lpc_model::{
         ArtifactLocator, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
         TextureDef, TreePath,

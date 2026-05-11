@@ -1,8 +1,8 @@
 //! Resolved slot value plus production provenance for the engine cache.
 
-use crate::binding::BindingRef;
+use crate::dataflow::binding::BindingRef;
+use crate::dataflow::resolver::resolver::model_value_to_lps_value_f32;
 use crate::gfx::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
-use crate::resolver::resolver::model_value_to_lps_value_f32;
 use lpc_model::{LpValue, NodeId, SlotPath, WithRevision};
 use lps_shared::LpsValueF32;
 
@@ -44,7 +44,7 @@ pub enum ProductionSource {
 #[cfg(test)]
 mod tests {
     use super::{Production, ProductionSource};
-    use crate::binding::BindingRef;
+    use crate::dataflow::binding::BindingRef;
     use crate::gfx::LpsValueToModelConversionError;
     use lpc_model::NodeId;
     use lpc_model::Revision;

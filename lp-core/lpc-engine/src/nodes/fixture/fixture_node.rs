@@ -20,6 +20,7 @@ use crate::nodes::fixture::mapping::{
 use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 
+use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError,
     NodeResourceInitContext, NodeRuntime, PressureLevel, TickContext,
@@ -32,7 +33,6 @@ use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSample, VisualSampleBatch,
     VisualSamplePoint,
 };
-use crate::resolver::QueryKey;
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
@@ -491,7 +491,7 @@ mod tests {
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
-    use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
     use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
     use crate::nodes::TextureNode;

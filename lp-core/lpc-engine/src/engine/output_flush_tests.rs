@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::default_demand_input_path;
 use crate::node::test_placeholder_spine;
 use crate::node::{

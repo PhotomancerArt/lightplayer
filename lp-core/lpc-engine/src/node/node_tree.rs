@@ -10,7 +10,7 @@ use lpc_model::{
 use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
-use crate::binding::{BindingDraft, BindingEntry, BindingError, BindingRef};
+use crate::dataflow::binding::{BindingDraft, BindingEntry, BindingError, BindingRef};
 
 use crate::node::node_binding_index::{NodeBindingIndex, binding_by_ref};
 use crate::node::{NodeDefHandle, NodeEntry, TreeError};
@@ -313,7 +313,7 @@ impl<N> NodeTree<N> {
 mod tests {
     use super::NodeTree;
     use crate::artifact::ArtifactId;
-    use crate::binding::{
+    use crate::dataflow::binding::{
         BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget,
     };
     use crate::node::test_placeholder_spine;

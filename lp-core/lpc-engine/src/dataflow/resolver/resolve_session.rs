@@ -2,14 +2,14 @@
 
 use alloc::vec::Vec;
 
-use crate::binding::{BindingEntry, BindingRef, BindingSource};
-use crate::resolver::production::{Production, ProductionSource};
-use crate::resolver::query_key::QueryKey;
-use crate::resolver::resolve_error::SessionResolveError;
-use crate::resolver::resolve_host::ResolveHost;
-use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
-use crate::resolver::resolver::Resolver;
-use crate::resolver::resolver::materialize_literal_product;
+use crate::dataflow::binding::{BindingEntry, BindingRef, BindingSource};
+use crate::dataflow::resolver::production::{Production, ProductionSource};
+use crate::dataflow::resolver::query_key::QueryKey;
+use crate::dataflow::resolver::resolve_error::SessionResolveError;
+use crate::dataflow::resolver::resolve_host::ResolveHost;
+use crate::dataflow::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
+use crate::dataflow::resolver::resolver::Resolver;
+use crate::dataflow::resolver::resolver::materialize_literal_product;
 use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 
 /// Active engine session for one frame (or nested test scope).
@@ -203,10 +203,10 @@ fn select_highest_priority_bus_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::BindingDraft;
-    use crate::binding::BindingPriority;
-    use crate::binding::BindingTarget;
-    use crate::resolver::resolve_trace::ResolveLogLevel;
+    use crate::dataflow::binding::BindingDraft;
+    use crate::dataflow::binding::BindingPriority;
+    use crate::dataflow::binding::BindingTarget;
+    use crate::dataflow::resolver::resolve_trace::ResolveLogLevel;
     use alloc::string::String;
     use lpc_model::Kind;
     use lpc_model::{ChannelName, LpValue, WithRevision};

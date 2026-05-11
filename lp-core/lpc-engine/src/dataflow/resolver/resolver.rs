@@ -1,7 +1,7 @@
 //! Resolver — same-frame demand-resolution cache owner.
 
-use crate::resolver::resolve_error::ResolveError;
-use crate::resolver::resolver_cache::ResolverCache;
+use crate::dataflow::resolver::resolve_error::ResolveError;
+use crate::dataflow::resolver::resolver_cache::ResolverCache;
 use lpc_model::LpValue;
 use lpc_model::Revision;
 use lpc_model::WithRevision;

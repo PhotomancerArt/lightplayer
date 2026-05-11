@@ -13,13 +13,15 @@ use lpc_model::{
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
-use crate::binding::{BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget};
+use crate::dataflow::binding::{
+    BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget,
+};
+use crate::dataflow::resolver::{
+    Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
+};
 use crate::engine::Engine;
 use crate::node::test_placeholder_spine;
 use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
-use crate::resolver::{
-    Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
-};
 
 use super::engine::default_demand_input_path;
 use super::resolve_with_engine_host;

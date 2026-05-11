@@ -7,7 +7,7 @@ use lpc_model::{ArtifactLocator, NodeId, NodeInvocation, Revision, TreePath, Wit
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
-use crate::binding::BindingSet;
+use crate::dataflow::binding::BindingSet;
 use crate::node::node_entry_state::NodeEntryState;
 
 use super::NodeDefHandle;

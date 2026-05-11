@@ -64,7 +64,7 @@ mod tests {
     use alloc::boxed::Box;
 
     use crate::artifact::ArtifactId;
-    use crate::resolver::{
+    use crate::dataflow::resolver::{
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
     };
@@ -75,10 +75,13 @@ mod tests {
     impl ResolveHost for EmptyResolveHost {
         fn produce(
             &mut self,
-            _query: &crate::resolver::QueryKey,
+            _query: &crate::dataflow::resolver::QueryKey,
             _session: &mut ResolveSession<'_>,
-        ) -> Result<crate::resolver::Production, crate::resolver::SessionResolveError> {
-            Err(crate::resolver::SessionResolveError::other(
+        ) -> Result<
+            crate::dataflow::resolver::Production,
+            crate::dataflow::resolver::SessionResolveError,
+        > {
+            Err(crate::dataflow::resolver::SessionResolveError::other(
                 "EmptyResolveHost: unexpected produce",
             ))
         }

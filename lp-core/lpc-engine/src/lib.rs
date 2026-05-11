@@ -12,8 +12,7 @@
 extern crate alloc;
 
 pub mod artifact;
-pub mod binding;
-pub mod bus;
+pub mod dataflow;
 pub mod engine;
 pub mod error;
 pub mod gfx;
@@ -22,18 +21,22 @@ pub mod node;
 pub mod nodes;
 pub mod product;
 pub mod products;
-pub mod resolver;
 pub mod resource;
 pub mod resources;
 
 pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactState, ArtifactStore,
 };
-pub use binding::{
+pub use dataflow::binding::{
     BindingDraft, BindingEntry, BindingError, BindingPriority, BindingRef, BindingSet,
     BindingSource, BindingTarget,
 };
-pub use bus::{Bus, BusError, ChannelEntry};
+pub use dataflow::bus::{Bus, BusError, ChannelEntry};
+pub use dataflow::resolver::{
+    EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
+    ResolveSession, ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
+    SessionHostResolver, SessionResolveError, TickResolver, TraceGuard,
+};
 pub use engine::{
     Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError, ProjectLoadError,
     ProjectLoader,
@@ -52,11 +55,6 @@ pub use product::{
     ControlRenderTarget, ControlSampleFormat, ControlSpan, RenderTextureRequest,
     TextureRenderProduct, TextureRenderProductError, VisualProduct, VisualSample,
     VisualSampleBatch, VisualSampleBatchResult, VisualSamplePoint,
-};
-pub use resolver::{
-    EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
-    ResolveSession, ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
-    SessionHostResolver, SessionResolveError, TickResolver, TraceGuard,
 };
 pub use resource::{
     RuntimeBuffer, RuntimeBufferError, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,

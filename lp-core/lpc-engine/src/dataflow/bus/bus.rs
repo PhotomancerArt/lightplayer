@@ -1,7 +1,7 @@
 //! Bus — runtime registry of bus channels.
 
-use crate::bus::bus_error::BusError;
-use crate::bus::channel_entry::ChannelEntry;
+use crate::dataflow::bus::bus_error::BusError;
+use crate::dataflow::bus::channel_entry::ChannelEntry;
 use alloc::collections::BTreeMap;
 use lpc_model::{ChannelName, Kind, NodeId, Revision, SlotPath};
 use lps_shared::LpsValueF32;

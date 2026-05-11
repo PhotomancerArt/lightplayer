@@ -1,19 +1,19 @@
-//! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::ProducedSlot`] (and
-//! unbound [`crate::resolver::QueryKey::ConsumedSlot`]) production.
+//! [`ResolveHost`] — callback for uncached [`crate::dataflow::resolver::QueryKey::ProducedSlot`] (and
+//! unbound [`crate::dataflow::resolver::QueryKey::ConsumedSlot`]) production.
 
+use crate::dataflow::resolver::production::Production;
+use crate::dataflow::resolver::query_key::QueryKey;
+use crate::dataflow::resolver::resolve_error::SessionResolveError;
+use crate::dataflow::resolver::resolve_session::ResolveSession;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
-use crate::resolver::production::Production;
-use crate::resolver::query_key::QueryKey;
-use crate::resolver::resolve_error::SessionResolveError;
-use crate::resolver::resolve_session::ResolveSession;
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 use alloc::vec::Vec;
 use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 
-use crate::binding::{BindingEntry, BindingRef};
+use crate::dataflow::binding::{BindingEntry, BindingRef};
 
 /// Engine or test fake that can satisfy demand for uncached queries.
 pub trait ResolveHost {

@@ -6,13 +6,13 @@
 use alloc::sync::Arc;
 
 use crate::artifact::ArtifactId;
-use crate::bus::Bus;
+use crate::dataflow::bus::Bus;
+use crate::dataflow::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::gfx::LpGraphics;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
-use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
     FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
@@ -44,7 +44,7 @@ impl<'a> NodeResourceInitContext<'a> {
 
 /// Context for [`super::Node::tick`](super::NodeRuntime::tick).
 ///
-/// Demand-style reads go through [`TickResolver`] (typically [`crate::resolver::SessionHostResolver`]).
+/// Demand-style reads go through [`TickResolver`] (typically [`crate::dataflow::resolver::SessionHostResolver`]).
 pub struct TickContext<'r> {
     node_id: NodeId,
     revision: Revision,
@@ -413,15 +413,15 @@ impl<'a> MemPressureCtx<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::{
+    use crate::dataflow::binding::{
         BindingDraft, BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
     };
-    use crate::node::NodeRuntime;
-    use crate::resolver::resolve_trace::ResolveLogLevel;
-    use crate::resolver::{
+    use crate::dataflow::resolver::resolve_trace::ResolveLogLevel;
+    use crate::dataflow::resolver::{
         Production, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
         SessionHostResolver, TickResolver,
     };
+    use crate::node::NodeRuntime;
     use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::Kind;
@@ -486,8 +486,8 @@ mod tests {
             &mut self,
             _query: &QueryKey,
             _session: &mut ResolveSession<'_>,
-        ) -> Result<Production, crate::resolver::SessionResolveError> {
-            Err(crate::resolver::SessionResolveError::other(
+        ) -> Result<Production, crate::dataflow::resolver::SessionResolveError> {
+            Err(crate::dataflow::resolver::SessionResolveError::other(
                 "unexpected produce in TickContext test",
             ))
         }
@@ -660,17 +660,17 @@ mod tests {
             &mut self,
             query: &QueryKey,
             session: &mut ResolveSession<'_>,
-        ) -> Result<Production, crate::resolver::SessionResolveError> {
+        ) -> Result<Production, crate::dataflow::resolver::SessionResolveError> {
             match query {
                 QueryKey::ConsumedSlot { node, slot }
                     if *node == self.node && *slot == self.out_path =>
                 {
                     Ok(Production::value(
                         lpc_model::WithRevision::new(session.revision(), LpsValueF32::F32(11.0)),
-                        crate::resolver::ProductionSource::Default,
+                        crate::dataflow::resolver::ProductionSource::Default,
                     )?)
                 }
-                _ => Err(crate::resolver::SessionResolveError::other(
+                _ => Err(crate::dataflow::resolver::SessionResolveError::other(
                     "fixture produce mismatch",
                 )),
             }

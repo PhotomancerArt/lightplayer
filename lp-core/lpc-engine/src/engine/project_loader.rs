@@ -16,7 +16,7 @@ use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::ArtifactLocation;
-use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
 

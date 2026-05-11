@@ -5,7 +5,9 @@ use alloc::vec::Vec;
 
 use lpc_model::{ChannelName, Kind, NodeId, SlotPath};
 
-use crate::binding::{BindingEntry, BindingError, BindingRef, BindingTarget, channels_touched};
+use crate::dataflow::binding::{
+    BindingEntry, BindingError, BindingRef, BindingTarget, channels_touched,
+};
 
 use super::NodeEntry;
 

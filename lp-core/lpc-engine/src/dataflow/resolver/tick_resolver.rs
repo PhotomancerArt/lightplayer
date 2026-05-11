@@ -1,14 +1,14 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
+use crate::dataflow::resolver::production::Production;
+use crate::dataflow::resolver::query_key::QueryKey;
+use crate::dataflow::resolver::resolve_error::{ResolveError, SessionResolveError};
+use crate::dataflow::resolver::resolve_host::ResolveHost;
+use crate::dataflow::resolver::resolve_session::ResolveSession;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
-use crate::resolver::production::Production;
-use crate::resolver::query_key::QueryKey;
-use crate::resolver::resolve_error::{ResolveError, SessionResolveError};
-use crate::resolver::resolve_host::ResolveHost;
-use crate::resolver::resolve_session::ResolveSession;
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 use lpc_model::Revision;
 

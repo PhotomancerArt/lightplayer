@@ -1,7 +1,7 @@
 //! Active query stack (correctness) plus optional structured resolver events.
 
-use crate::binding::BindingRef;
-use crate::resolver::query_key::QueryKey;
+use crate::dataflow::binding::BindingRef;
+use crate::dataflow::resolver::query_key::QueryKey;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
@@ -187,8 +187,8 @@ impl ResolveTrace {
 #[cfg(test)]
 mod tests {
     use super::{ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard};
-    use crate::binding::BindingRef;
-    use crate::resolver::query_key::QueryKey;
+    use crate::dataflow::binding::BindingRef;
+    use crate::dataflow::resolver::query_key::QueryKey;
     use lpc_model::NodeId;
     use lpc_model::SlotPath;
 

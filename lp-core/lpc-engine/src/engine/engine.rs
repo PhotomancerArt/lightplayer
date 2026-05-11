@@ -17,7 +17,11 @@ use lpfs::FsChange;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::{ArtifactState, ArtifactStore};
-use crate::binding::{BindingDraft, BindingError, BindingRef};
+use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
+use crate::dataflow::resolver::{
+    EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
+    ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
+};
 use crate::gfx::LpGraphics;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
@@ -26,10 +30,6 @@ use crate::node::{
 use crate::node::{NodeEntryState, NodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
-use crate::resolver::{
-    EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
-    ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
-};
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
 use super::{EngineError, EngineServices};
@@ -516,7 +516,7 @@ impl ResolveHost for EngineResolveHost<'_> {
         &self,
         node: NodeId,
         slot: &SlotPath,
-    ) -> Option<(BindingRef, crate::binding::BindingEntry)> {
+    ) -> Option<(BindingRef, crate::dataflow::binding::BindingEntry)> {
         self.tree
             .binding_for_consumed_slot(node, slot)
             .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
@@ -525,7 +525,7 @@ impl ResolveHost for EngineResolveHost<'_> {
     fn providers_for_bus(
         &self,
         channel: &lpc_model::ChannelName,
-    ) -> Vec<(BindingRef, crate::binding::BindingEntry)> {
+    ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
         self.tree
             .providers_for_bus(channel)
             .into_iter()
@@ -982,7 +982,7 @@ mod tests {
     use alloc::string::String;
     use lps_shared::LpsValueF32;
 
-    use crate::binding::BindingError;
+    use crate::dataflow::binding::BindingError;
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };

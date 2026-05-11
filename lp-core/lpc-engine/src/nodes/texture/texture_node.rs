@@ -100,11 +100,11 @@ impl NodeRuntime for TextureNode {
 mod tests {
     use super::*;
     use crate::artifact::ArtifactLocation;
-    use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     use crate::node::test_placeholder_spine;
-    use crate::resolver::{QueryKey, ResolveLogLevel};
     use alloc::boxed::Box;
     use lpc_model::{Dim2u, Kind, LpValue, NodeDef, Revision, TextureDef, ToLpValue, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
