@@ -1,4 +1,4 @@
-//! M4.1 resource summaries and explicit buffer / render-product payload projection.
+//! Runtime-buffer resource summaries and payload projection.
 
 use alloc::vec::Vec;
 
@@ -6,19 +6,15 @@ use alloc::string::String;
 
 use lpc_model::{
     Revision,
-    resource::{RenderProductId, ResourceRef, RuntimeBufferId},
+    resource::{ResourceRef, RuntimeBufferId},
 };
 use lpc_wire::{
-    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-    RuntimeBufferPayloadSpecifier, WireChannelSampleFormat, WireColorLayout, WireRenderProductKind,
-    WireRenderProductPayload, WireResourceAvailability, WireResourceKindSummary,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireChannelSampleFormat,
+    WireColorLayout, WireResourceAvailability, WireResourceKindSummary,
     WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
     WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload, WireTextureFormat,
 };
 
-use crate::render_product::{
-    RenderProductMaterializeError, StoredRenderProduct, TextureRenderProduct,
-};
 use crate::runtime_buffer::{
     RuntimeBuffer, RuntimeBufferMetadata, RuntimeChannelSampleFormat as RChFmt, RuntimeColorLayout,
     RuntimeTextureFormat,
@@ -46,33 +42,6 @@ pub(crate) fn buffer_payload_interest(
         RuntimeBufferPayloadSpecifier::None => None,
         RuntimeBufferPayloadSpecifier::All => Some(BufferPayloadInterest::All),
         RuntimeBufferPayloadSpecifier::ByIds(ids) => Some(BufferPayloadInterest::Ids(ids.clone())),
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum RenderPayloadInterest {
-    All,
-    Ids(Vec<RenderProductId>),
-}
-
-impl RenderPayloadInterest {
-    fn wants(&self, id: RenderProductId) -> bool {
-        match self {
-            RenderPayloadInterest::All => true,
-            RenderPayloadInterest::Ids(ids) => ids.iter().any(|x| *x == id),
-        }
-    }
-}
-
-pub(crate) fn render_payload_interest(
-    req: &RenderProductPayloadRequest,
-) -> Option<RenderPayloadInterest> {
-    match req.specifier {
-        RenderProductPayloadSpecifier::None => None,
-        RenderProductPayloadSpecifier::All => Some(RenderPayloadInterest::All),
-        RenderProductPayloadSpecifier::ByIds(ref ids) => {
-            Some(RenderPayloadInterest::Ids(ids.clone()))
-        }
     }
 }
 
@@ -204,75 +173,6 @@ fn output_sample_wire_format(f: RChFmt) -> Result<WireChannelSampleFormat, &'sta
     }
 }
 
-pub(crate) fn summarize_render_products_if_requested(
-    _since_frame: Revision,
-    spec: ResourceSummarySpecifier,
-    products: &crate::render_product::RenderProductStore,
-    out: &mut Vec<WireResourceSummary>,
-) {
-    match spec {
-        ResourceSummarySpecifier::None | ResourceSummarySpecifier::RuntimeBuffers => return,
-        ResourceSummarySpecifier::RenderProducts | ResourceSummarySpecifier::All => {}
-    }
-
-    for id in products.ids() {
-        let changed = products.revision(id);
-        push_render_product_summary(out, products.get(id), id, changed);
-    }
-}
-
-fn push_render_product_summary(
-    out: &mut Vec<WireResourceSummary>,
-    product: Option<&dyn StoredRenderProduct>,
-    id: RenderProductId,
-    changed: Revision,
-) {
-    let Some(product) = product else {
-        return;
-    };
-
-    let Some(tex) = product.as_any().downcast_ref::<TextureRenderProduct>() else {
-        out.push(WireResourceSummary {
-            resource_ref: ResourceRef::render_product(id),
-            revision: changed,
-            kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
-            metadata: WireResourceMetadataSummary::Texture {
-                width: 0,
-                height: 0,
-                format: WireTextureFormat::Rgba16,
-            },
-            byte_length_hint: None,
-            availability: WireResourceAvailability::Pending,
-        });
-        return;
-    };
-
-    let fmt = tex.storage_format();
-    let wire_fmt_ok = fmt == lps_shared::TextureStorageFormat::Rgba16Unorm;
-
-    let (avail, wf) = if wire_fmt_ok {
-        (
-            WireResourceAvailability::Available,
-            WireTextureFormat::Rgba16,
-        )
-    } else {
-        (WireResourceAvailability::Pending, WireTextureFormat::Rgb8)
-    };
-
-    out.push(WireResourceSummary {
-        resource_ref: ResourceRef::render_product(id),
-        revision: changed,
-        kind: WireResourceKindSummary::RenderProduct(WireRenderProductKind::Texture),
-        metadata: WireResourceMetadataSummary::Texture {
-            width: tex.width(),
-            height: tex.height(),
-            format: wf,
-        },
-        byte_length_hint: tex.try_raw_bytes().map(|b| b.len() as u64),
-        availability: avail,
-    });
-}
-
 pub(crate) fn runtime_buffer_payloads_for_request(
     since_frame: Revision,
     interest: &BufferPayloadInterest,
@@ -332,34 +232,5 @@ fn wire_runtime_buffer_metadata_payload_for_buffer(
             channels: *channels,
             sample_format: output_sample_wire_format(*sample_format).map_err(|_| ())?,
         }),
-    }
-}
-
-pub(crate) fn render_product_payloads_for_request(
-    since_frame: Revision,
-    interest: &RenderPayloadInterest,
-    products: &crate::render_product::RenderProductStore,
-    out: &mut Vec<WireRenderProductPayload>,
-) {
-    let ids: Vec<_> = products.ids().collect();
-    for id in ids {
-        if !interest.wants(id) || !resource_changed_since(since_frame, products.revision(id)) {
-            continue;
-        }
-        match products.try_materialize_native_texture_payload(id) {
-            Ok((w, h, bytes, _fmt)) => {
-                out.push(WireRenderProductPayload {
-                    resource_ref: ResourceRef::render_product(id),
-                    revision: products.revision(id),
-                    width: w,
-                    height: h,
-                    format: WireTextureFormat::Rgba16,
-                    bytes: bytes.to_vec(),
-                });
-            }
-            Err(RenderProductMaterializeError::NotCpuTextureProduct) => {}
-            Err(RenderProductMaterializeError::UnsupportedTextureFormatForWire) => {}
-            Err(RenderProductMaterializeError::UnknownProduct { .. }) => {}
-        }
     }
 }

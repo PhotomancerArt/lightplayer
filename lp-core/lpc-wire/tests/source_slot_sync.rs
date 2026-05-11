@@ -2,7 +2,6 @@ use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
 };
@@ -11,7 +10,6 @@ use lpc_wire::build_slot_full_sync;
 #[test]
 fn real_source_defs_sync_as_slot_roots() {
     let project: ProjectDef = read_basic_toml("project.toml");
-    let texture: TextureDef = read_basic_toml("texture.toml");
     let shader: ShaderDef = read_basic_toml("shader.toml");
     let output: OutputDef = read_basic_toml("output.toml");
     let fixture: FixtureDef = read_basic_toml("fixture.toml");
@@ -38,7 +36,6 @@ fn real_source_defs_sync_as_slot_roots() {
         &registry,
         [
             ("project", &project as &dyn lpc_model::SlotAccess),
-            ("texture", &texture as &dyn lpc_model::SlotAccess),
             ("shader", &shader as &dyn lpc_model::SlotAccess),
             ("output", &output as &dyn lpc_model::SlotAccess),
             ("fixture", &fixture as &dyn lpc_model::SlotAccess),
@@ -126,21 +123,6 @@ value = 0.0
         ),
         LpValue::String(String::from("Speed")),
     );
-
-    let texture_sync = build_slot_full_sync(
-        &registry,
-        [("texture", &texture as &dyn lpc_model::SlotAccess)],
-    );
-    let texture_data = root_data(&texture_sync, "texture");
-    assert!(matches!(
-        select(
-            texture_data,
-            TextureDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
-            "size"
-        ),
-        SlotData::Value(_)
-    ));
 
     let output_sync = build_slot_full_sync(
         &registry,

@@ -1,13 +1,10 @@
-//! CPU-backed texture storage as an opaque, sampleable [`super::StoredRenderProduct`].
+//! CPU-backed texture result materialized from a [`super::RenderProduct`].
 
 use core::fmt;
 
 use lps_shared::TextureStorageFormat;
 
-use super::{
-    RenderProductError, RenderSample, RenderSampleBatch, RenderSampleBatchResult,
-    RenderTextureRequest, StoredRenderProduct,
-};
+use super::{RenderSample, RenderSampleBatch, RenderSampleBatchResult};
 
 /// Invalid [`TextureRenderProduct`] construction input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,37 +105,15 @@ impl TextureRenderProduct {
     }
 }
 
-impl StoredRenderProduct for TextureRenderProduct {
-    fn sample_batch(
-        &self,
-        request: &RenderSampleBatch,
-    ) -> Result<RenderSampleBatchResult, RenderProductError> {
+impl TextureRenderProduct {
+    pub fn sample_batch(&self, request: &RenderSampleBatch) -> RenderSampleBatchResult {
         let mut samples = alloc::vec::Vec::with_capacity(request.points.len());
         for p in &request.points {
             let (tx, ty) = uv_to_texel(p.x, p.y, self.width, self.height);
             let color = sample_texel(&self.pixels, self.width, self.format, tx, ty);
             samples.push(RenderSample { color });
         }
-        Ok(RenderSampleBatchResult { samples })
-    }
-
-    fn render_texture(
-        &mut self,
-        request: &RenderTextureRequest,
-        _graphics: Option<&dyn crate::gfx::LpGraphics>,
-    ) -> Result<TextureRenderProduct, RenderProductError> {
-        if self.width == request.width
-            && self.height == request.height
-            && self.format == request.format
-        {
-            Ok(self.clone())
-        } else {
-            Err(RenderProductError::NotRenderable)
-        }
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
+        RenderSampleBatchResult { samples }
     }
 }
 
@@ -212,11 +187,10 @@ fn unorm16_to_f32(x: u16) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use alloc::boxed::Box;
     use alloc::vec;
 
     use super::{TextureRenderProduct, TextureRenderProductError};
-    use crate::render_product::{RenderProductStore, RenderSampleBatch, RenderSamplePoint};
+    use crate::render_product::{RenderSampleBatch, RenderSamplePoint};
 
     fn pixel_rgba16(r: u16, g: u16, b: u16, a: u16) -> [u8; 8] {
         let mut out = [0u8; 8];
@@ -245,9 +219,6 @@ mod tests {
         );
         assert_eq!(tex.try_raw_bytes().map(<[_]>::len), Some(32));
 
-        let mut store = RenderProductStore::new();
-        let id = store.insert(Box::new(tex));
-
         let batch = RenderSampleBatch {
             points: vec![
                 RenderSamplePoint { x: 0.0, y: 0.0 },
@@ -256,7 +227,7 @@ mod tests {
                 RenderSamplePoint { x: 0.999, y: 0.999 },
             ],
         };
-        let out = store.sample_batch(id, &batch).expect("sample");
+        let out = tex.sample_batch(&batch);
         assert_eq!(out.samples.len(), 4);
         assert!(approx_eq(out.samples[0].color, [1.0, 0.0, 0.0, 1.0]));
         assert!(approx_eq(out.samples[1].color, [0.0, 1.0, 0.0, 1.0]));

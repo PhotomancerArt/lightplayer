@@ -50,9 +50,8 @@ pub use project_runtime::{
     CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, OutputFlushError, RuntimeServices,
 };
 pub use render_product::{
-    RenderProduct, RenderProductError, RenderProductId, RenderProductStore, RenderSample,
-    RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint, RenderTextureRequest,
-    StoredRenderProduct, TextureRenderProduct, TextureRenderProductError,
+    RenderProduct, RenderSample, RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint,
+    RenderTextureRequest, TextureRenderProduct, TextureRenderProductError,
 };
 pub use resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,

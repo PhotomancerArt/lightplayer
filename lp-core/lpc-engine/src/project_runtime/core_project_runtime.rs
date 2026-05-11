@@ -155,8 +155,7 @@ mod output_sink_flush_tests {
         RenderNode, TickContext,
     };
     use crate::nodes::{FixtureNode, TextureNode, fixture_input_path, shader_output_path};
-    use crate::render_product::{RenderProduct, RenderTextureRequest, SolidColorProduct};
-    use crate::render_product::{StoredRenderProduct, TextureRenderProduct};
+    use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
     use crate::runtime_buffer::RuntimeBuffer;
     use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
     use lpc_model::nodes::output::OutputDef;
@@ -249,11 +248,43 @@ mod output_sink_flush_tests {
             request: &RenderTextureRequest,
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
-            let mut product = SolidColorProduct { color: self.color };
-            product
-                .render_texture(request, None)
-                .map_err(|e| NodeError::msg(alloc::format!("solid render: {e:?}")))
+            solid_texture(request.width, request.height, request.format, self.color)
         }
+    }
+
+    fn solid_texture(
+        width: u32,
+        height: u32,
+        format: lps_shared::TextureStorageFormat,
+        color: [f32; 4],
+    ) -> Result<TextureRenderProduct, NodeError> {
+        let mut pixels = alloc::vec::Vec::new();
+        let px_count = usize::try_from(width)
+            .ok()
+            .and_then(|w| usize::try_from(height).ok().map(|h| w.saturating_mul(h)))
+            .ok_or_else(|| NodeError::msg("solid texture dimensions overflow"))?;
+        for _ in 0..px_count {
+            match format {
+                lps_shared::TextureStorageFormat::Rgba16Unorm => {
+                    for c in color {
+                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
+                        pixels.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                lps_shared::TextureStorageFormat::Rgb16Unorm => {
+                    for c in [color[0], color[1], color[2]] {
+                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
+                        pixels.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                lps_shared::TextureStorageFormat::R16Unorm => {
+                    let v = (color[0].clamp(0.0, 1.0) * 65535.0).round() as u16;
+                    pixels.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
+        TextureRenderProduct::new(width, height, format, pixels)
+            .map_err(|e| NodeError::msg(alloc::format!("solid texture: {e}")))
     }
 
     #[test]

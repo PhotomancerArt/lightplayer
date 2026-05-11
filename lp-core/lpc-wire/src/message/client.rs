@@ -36,7 +36,7 @@ pub enum ClientRequest {
 mod tests {
     use super::*;
     use crate::project::WireProjectRequest;
-    use lpfs::lp_path::AsLpPathBuf;
+    use lpc_model::AsLpPathBuf;
 
     #[test]
     fn test_nested_filesystem_request() {

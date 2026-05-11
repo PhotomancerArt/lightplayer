@@ -1,6 +1,6 @@
-//! Core fixture demand-root: resolves a shader [`RuntimeProduct::Render`], samples through
-//! [`RenderProductStore::sample_batch`], maps channels via legacy accumulation, and pushes u16 RGB
-//! into an output [`crate::runtime_buffer::RuntimeBuffer`] sink.
+//! Core fixture demand-root: resolves a shader [`RuntimeProduct::Render`], materializes a texture,
+//! maps channels via legacy accumulation, and pushes u16 RGB into an output
+//! [`crate::runtime_buffer::RuntimeBuffer`] sink.
 
 use alloc::format;
 use alloc::vec;
@@ -23,8 +23,7 @@ use crate::node::{
     TickContext,
 };
 use crate::render_product::{
-    RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest, StoredRenderProduct,
-    TextureRenderProduct,
+    RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest, TextureRenderProduct,
 };
 use crate::resolver::QueryKey;
 use crate::runtime_buffer::{
@@ -204,9 +203,7 @@ fn accumulate_fixture_channels_from_texture_product(
     }
 
     let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
-    let sample_result = texture
-        .sample_batch(&batch)
-        .map_err(|e| NodeError::msg(format!("sample rendered texture: {e:?}")))?;
+    let sample_result = texture.sample_batch(&batch);
     accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
 
@@ -452,7 +449,7 @@ mod tests {
     use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
-    use crate::render_product::{RenderProduct, SolidColorProduct};
+    use crate::render_product::{RenderProduct, TextureRenderProduct};
     use crate::runtime_buffer::RuntimeBuffer;
     use lpc_model::{
         ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
@@ -508,11 +505,43 @@ mod tests {
             request: &RenderTextureRequest,
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
-            let mut product = SolidColorProduct { color: self.color };
-            product
-                .render_texture(request, None)
-                .map_err(|e| NodeError::msg(format!("solid render: {e:?}")))
+            solid_texture(request.width, request.height, request.format, self.color)
         }
+    }
+
+    fn solid_texture(
+        width: u32,
+        height: u32,
+        format: lps_shared::TextureStorageFormat,
+        color: [f32; 4],
+    ) -> Result<TextureRenderProduct, NodeError> {
+        let mut pixels = alloc::vec::Vec::new();
+        let px_count = usize::try_from(width)
+            .ok()
+            .and_then(|w| usize::try_from(height).ok().map(|h| w.saturating_mul(h)))
+            .ok_or_else(|| NodeError::msg("solid texture dimensions overflow"))?;
+        for _ in 0..px_count {
+            match format {
+                lps_shared::TextureStorageFormat::Rgba16Unorm => {
+                    for c in color {
+                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
+                        pixels.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                lps_shared::TextureStorageFormat::Rgb16Unorm => {
+                    for c in [color[0], color[1], color[2]] {
+                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
+                        pixels.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                lps_shared::TextureStorageFormat::R16Unorm => {
+                    let v = (color[0].clamp(0.0, 1.0) * 65535.0).round() as u16;
+                    pixels.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
+        TextureRenderProduct::new(width, height, format, pixels)
+            .map_err(|e| NodeError::msg(format!("solid texture: {e}")))
     }
 
     #[test]

@@ -18,9 +18,7 @@ use crate::node::{
     NodeCall, NodeCallKey, NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
 };
 use crate::node::{NodeEntryState, NodeTree};
-use crate::render_product::{
-    RenderProduct, RenderProductStore, RenderTextureRequest, TextureRenderProduct,
-};
+use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::resolver::model_value_to_lps_value_f32;
 use crate::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
@@ -56,7 +54,6 @@ pub struct Engine {
     bindings: BindingRegistry,
     resolver: Resolver,
     slot_shapes: SlotShapeRegistry,
-    render_products: RenderProductStore,
     runtime_buffers: RuntimeBufferStore,
     artifacts: ArtifactStore,
     demand_roots: Vec<NodeId>,
@@ -77,7 +74,6 @@ impl Engine {
             bindings: BindingRegistry::new(),
             resolver: Resolver::new(),
             slot_shapes,
-            render_products: RenderProductStore::new(),
             runtime_buffers: RuntimeBufferStore::new(),
             artifacts: ArtifactStore::new(),
             demand_roots: Vec::new(),
@@ -127,14 +123,6 @@ impl Engine {
 
     pub fn slot_shapes_mut(&mut self) -> &mut SlotShapeRegistry {
         &mut self.slot_shapes
-    }
-
-    pub fn render_products(&self) -> &RenderProductStore {
-        &self.render_products
-    }
-
-    pub fn render_products_mut(&mut self) -> &mut RenderProductStore {
-        &mut self.render_products
     }
 
     pub fn runtime_buffers(&self) -> &RuntimeBufferStore {
@@ -822,9 +810,7 @@ mod tests {
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
-    use crate::render_product::{
-        RenderProduct, RenderSampleBatch, RenderSamplePoint, SolidColorProduct,
-    };
+    use crate::render_product::RenderProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct;
 
@@ -1006,24 +992,6 @@ mod tests {
         let versions: Vec<_> = h.engine.bindings().iter().map(|e| e.version).collect();
 
         assert_eq!(versions, alloc::vec![Revision::new(1), Revision::new(1)]);
-    }
-
-    #[test]
-    fn runtime_product_render_handle_can_be_sampled_via_engine_store() {
-        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
-        let id = engine
-            .render_products_mut()
-            .insert(Box::new(SolidColorProduct {
-                color: [1.0, 0.5, 0.25, 1.0],
-            }));
-        let request = RenderSampleBatch {
-            points: alloc::vec![RenderSamplePoint { x: 0.0, y: 0.0 }],
-        };
-        let result = engine
-            .render_products()
-            .sample_batch(id, &request)
-            .expect("sample");
-        assert_eq!(result.samples[0].color, [1.0, 0.5, 0.25, 1.0]);
     }
 
     #[test]

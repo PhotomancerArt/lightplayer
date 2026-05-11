@@ -238,9 +238,7 @@ mod tests {
     use crate::engine::resolve_with_engine_host;
     use crate::node::test_placeholder_spine;
     use crate::nodes::TextureNode;
-    use crate::render_product::{
-        RenderProduct, RenderSampleBatch, RenderSamplePoint, StoredRenderProduct,
-    };
+    use crate::render_product::{RenderProduct, RenderSampleBatch, RenderSamplePoint};
     use crate::resolver::QueryKey;
     use crate::resolver::ResolveLogLevel;
     use lpc_model::{Revision, SlotDataAccess, StaticSlotShape, TreePath};
@@ -363,7 +361,7 @@ mod tests {
         let batch = RenderSampleBatch {
             points: vec![RenderSamplePoint { x: 0.5, y: 0.5 }],
         };
-        let sample = texture.sample_batch(&batch).expect("sample");
+        let sample = texture.sample_batch(&batch);
         assert!(sample.samples[0].color[0] > 0.4);
         assert!(sample.samples[0].color[0] < 0.6);
     }
