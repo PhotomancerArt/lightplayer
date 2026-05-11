@@ -3,7 +3,7 @@ name = "lp-riscv-elf"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license = "Apache-2.0 WITH LLVM-exception"
+license.workspace = true
 description = "RISC-V 32-bit ELF loading and linking utilities"
 
 [lints]
