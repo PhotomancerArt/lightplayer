@@ -1,6 +1,6 @@
 use crate::{
-    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError, ValueSlot, VisualProduct,
+    FromLpValue, LpType, LpValue, ProductKind, ProductRef, SlotMeta, SlotShapeId, SlotValue,
+    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, VisualProduct,
 };
 
 /// Revision-tracked graph visual-product leaf.
@@ -8,14 +8,14 @@ pub type VisualProductSlot = ValueSlot<VisualProduct>;
 
 impl ToLpValue for VisualProduct {
     fn to_lp_value(&self) -> LpValue {
-        LpValue::VisualProduct(*self)
+        LpValue::Product(ProductRef::visual(*self))
     }
 }
 
 impl FromLpValue for VisualProduct {
     fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::VisualProduct(product) => Ok(product),
+            LpValue::Product(ProductRef::Visual(product)) => Ok(product),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected VisualProduct, got {other:?}"
             ))),
@@ -34,7 +34,7 @@ impl SlotValue for VisualProduct {
 pub fn visual_product_shape() -> SlotValueShape {
     SlotValueShape {
         id: VisualProduct::SHAPE_ID,
-        ty: LpType::VisualProduct,
+        ty: LpType::Product(ProductKind::Visual),
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::VisualProduct,
     }
@@ -53,6 +53,9 @@ mod tests {
             VisualProduct::from_lp_value(product.to_lp_value()).unwrap(),
             product
         );
-        assert_eq!(visual_product_shape().ty, LpType::VisualProduct);
+        assert_eq!(
+            visual_product_shape().ty,
+            LpType::Product(ProductKind::Visual)
+        );
     }
 }

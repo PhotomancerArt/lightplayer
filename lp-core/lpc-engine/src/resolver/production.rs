@@ -1,33 +1,34 @@
-//! Resolved value plus production provenance for the engine cache.
+//! Resolved slot value plus production provenance for the engine cache.
 
 use crate::binding::BindingRef;
-use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
-use lpc_model::{NodeId, SlotPath, WithRevision};
+use crate::resolver::resolver::model_value_to_lps_value_f32;
+use crate::wire_bridge::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
+use lpc_model::{LpValue, NodeId, SlotPath, WithRevision};
 use lps_shared::LpsValueF32;
 
-/// One cached production: versioned runtime product and where it came from.
+/// One cached production: versioned slot value and where it came from.
 #[derive(Clone, Debug)]
 pub struct Production {
-    pub product: WithRevision<RuntimeProduct>,
+    pub product: WithRevision<LpValue>,
     pub source: ProductionSource,
 }
 
 impl Production {
-    pub fn new(product: WithRevision<RuntimeProduct>, source: ProductionSource) -> Self {
+    pub fn new(product: WithRevision<LpValue>, source: ProductionSource) -> Self {
         Self { product, source }
     }
 
     pub fn value(
         value: WithRevision<LpsValueF32>,
         source: ProductionSource,
-    ) -> Result<Self, RuntimeProductError> {
-        let frame = value.changed_at();
-        let product = RuntimeProduct::try_value(value.into_value())?;
-        Ok(Self::new(WithRevision::new(frame, product), source))
+    ) -> Result<Self, LpsValueToModelConversionError> {
+        let revision = value.changed_at();
+        let product = lps_value_f32_to_model_value(value.value())?;
+        Ok(Self::new(WithRevision::new(revision, product), source))
     }
 
-    pub fn as_value(&self) -> Option<&LpsValueF32> {
-        self.product.get().as_value()
+    pub fn as_value(&self) -> Option<LpsValueF32> {
+        model_value_to_lps_value_f32(self.product.value()).ok()
     }
 }
 
@@ -44,7 +45,7 @@ pub enum ProductionSource {
 mod tests {
     use super::{Production, ProductionSource};
     use crate::binding::BindingRef;
-    use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
+    use crate::wire_bridge::LpsValueToModelConversionError;
     use lpc_model::NodeId;
     use lpc_model::Revision;
     use lpc_model::SlotPath;
@@ -64,12 +65,12 @@ mod tests {
                 WithRevision::new(Revision::new(1), LpsValueF32::Texture2D(tv)),
                 ProductionSource::Literal,
             ),
-            Err(RuntimeProductError::Texture2dValueNotRuntimeProduct),
+            Err(LpsValueToModelConversionError::Texture2dNotPortable),
         ));
     }
 
     #[test]
-    fn production_holds_versioned_runtime_product_and_source() {
+    fn production_holds_versioned_value_and_source() {
         let v = WithRevision::new(Revision::new(3), LpsValueF32::F32(1.25));
         let pv = Production::value(
             v,
@@ -81,7 +82,7 @@ mod tests {
         .expect("production");
         assert!(matches!(
             pv.product.get(),
-            RuntimeProduct::Value(inner) if inner.eq(&LpsValueF32::F32(1.25))
+            lpc_model::LpValue::F32(inner) if inner.eq(&1.25)
         ));
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(1.25)));
         assert_eq!(pv.product.changed_at(), Revision::new(3));
@@ -106,7 +107,7 @@ mod tests {
                 binding: BindingRef::new(NodeId::new(4), 0),
             }
         );
-        assert!(matches!(pv2.product.get(), RuntimeProduct::Value(_)));
+        assert!(matches!(pv2.product.get(), lpc_model::LpValue::F32(_)));
     }
 
     #[test]

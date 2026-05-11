@@ -101,10 +101,10 @@ impl NodeRuntime for FixtureNode {
             })
             .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
 
-        let visual_product =
-            prod.product.get().as_visual().ok_or_else(|| {
-                NodeError::msg("fixture expected RuntimeProduct::Visual from input")
-            })?;
+        let visual_product = match prod.product.get() {
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
+            _ => return Err(NodeError::msg("fixture expected visual product from input")),
+        };
 
         let def = self.def_view(ctx)?;
         let render_size: Dim2u = def.render_size().get(ctx)?;

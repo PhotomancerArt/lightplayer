@@ -19,7 +19,7 @@
 - [x] Generated def views for shader, fixture, output, and texture defs
 - [x] Shader node reads compile options through resolver-backed def slots
 - [x] Fixture node reads scalar config through resolver-backed def slots
-- [x] Literal bindings can carry rich `LpValue` payloads through `RuntimeProduct::ModelValue`
+- [x] Literal bindings carry rich `LpValue` payloads directly through resolver productions
 - [x] Compiled slot accessors can descend into option payloads via `.some`
 
 ## Mockup Concepts Still To Port

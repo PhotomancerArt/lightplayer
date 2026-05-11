@@ -28,10 +28,7 @@ pub use positive_f32::{PositiveF32Slot, positive_f32_shape};
 pub use ratio::{RatioSlot, ratio_shape};
 pub use relative_node_ref::{RelativeNodeRefSlot, relative_node_ref_shape};
 pub use render_order::{RenderOrderSlot, render_order_shape};
-pub use resource_ref::{
-    ResourceRefSlot, resource_ref_shape, runtime_buffer_resource_shape,
-    visual_product_resource_shape,
-};
+pub use resource_ref::{ResourceRefSlot, resource_ref_shape, runtime_buffer_resource_shape};
 pub use source_path::{SourcePathSlot, source_path_shape};
 pub use u32_list::u32_list_shape;
 pub use visual_product::{VisualProductSlot, visual_product_shape};

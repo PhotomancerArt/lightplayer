@@ -9,7 +9,7 @@ use alloc::string::String;
 use lpc_model::ChannelName;
 use lpc_model::NodeId;
 
-use crate::runtime_product::RuntimeProductError;
+use crate::wire_bridge::LpsValueToModelConversionError;
 
 use super::query_key::QueryKey;
 use super::resolve_trace::ResolveTraceError;
@@ -48,8 +48,8 @@ impl From<ResolveTraceError> for SessionResolveError {
     }
 }
 
-impl From<RuntimeProductError> for SessionResolveError {
-    fn from(err: RuntimeProductError) -> Self {
+impl From<LpsValueToModelConversionError> for SessionResolveError {
+    fn from(err: LpsValueToModelConversionError) -> Self {
         Self::Other(format!("{err}"))
     }
 }

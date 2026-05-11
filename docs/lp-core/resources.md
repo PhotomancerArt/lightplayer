@@ -5,10 +5,9 @@ Resources are registry-owned runtime objects referenced by id.
 They are useful when the payload is too large, mutable, or runtime-specific to
 live directly inside a value.
 
-Current resource-like concepts include:
+Current resource concepts include:
 
 - runtime buffers;
-- visual product ids and refs used by generic value/resource machinery;
 - future texture or protocol buffers.
 
 ## Resources Versus Products

@@ -189,7 +189,9 @@ fn lp_type_for_value(value: &LpValue) -> LpType {
                 .collect(),
         },
         LpValue::Resource(_) => LpType::Resource,
-        LpValue::VisualProduct(_) => LpType::VisualProduct,
-        LpValue::ControlProduct(_) => LpType::ControlProduct,
+        LpValue::Product(product) => match product {
+            lpc_model::ProductRef::Visual(_) => LpType::Product(lpc_model::ProductKind::Visual),
+            lpc_model::ProductRef::Control(_) => LpType::Product(lpc_model::ProductKind::Control),
+        },
     }
 }

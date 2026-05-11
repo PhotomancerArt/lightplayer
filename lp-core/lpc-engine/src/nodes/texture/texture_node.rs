@@ -121,7 +121,7 @@ mod tests {
         let pv = resolve_with_engine_host(&mut engine, w, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
-        assert_dim2u_value(pv.as_value().expect("value"), 64, 48);
+        assert_dim2u_value(&pv.as_value().expect("value"), 64, 48);
     }
 
     #[test]

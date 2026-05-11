@@ -346,11 +346,9 @@ mod tests {
         assert!(a.as_value().expect("value").eq(&LpsValueF32::F32(42.0)));
         assert!(b.as_value().expect("value").eq(&LpsValueF32::F32(42.0)));
         assert!(
-            a.product.get().as_value().expect("value").eq(b
-                .product
-                .get()
-                .as_value()
-                .expect("value"))
+            a.as_value()
+                .expect("value")
+                .eq(&b.as_value().expect("value"))
         );
         assert_eq!(a.product.changed_at(), b.product.changed_at());
         assert_eq!(host.produce_calls, 1);

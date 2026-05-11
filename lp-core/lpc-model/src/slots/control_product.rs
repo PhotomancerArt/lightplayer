@@ -1,6 +1,6 @@
 use crate::{
-    ControlProduct, FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    ControlProduct, FromLpValue, LpType, LpValue, ProductKind, ProductRef, SlotMeta, SlotShapeId,
+    SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Revision-tracked graph control-product leaf.
@@ -8,14 +8,14 @@ pub type ControlProductSlot = ValueSlot<ControlProduct>;
 
 impl ToLpValue for ControlProduct {
     fn to_lp_value(&self) -> LpValue {
-        LpValue::ControlProduct(*self)
+        LpValue::Product(ProductRef::control(*self))
     }
 }
 
 impl FromLpValue for ControlProduct {
     fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::ControlProduct(product) => Ok(product),
+            LpValue::Product(ProductRef::Control(product)) => Ok(product),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected ControlProduct, got {other:?}"
             ))),
@@ -34,7 +34,7 @@ impl SlotValue for ControlProduct {
 pub fn control_product_shape() -> SlotValueShape {
     SlotValueShape {
         id: ControlProduct::SHAPE_ID,
-        ty: LpType::ControlProduct,
+        ty: LpType::Product(ProductKind::Control),
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::ControlProduct,
     }
@@ -53,6 +53,9 @@ mod tests {
             ControlProduct::from_lp_value(product.to_lp_value()).unwrap(),
             product
         );
-        assert_eq!(control_product_shape().ty, LpType::ControlProduct);
+        assert_eq!(
+            control_product_shape().ty,
+            LpType::Product(ProductKind::Control)
+        );
     }
 }

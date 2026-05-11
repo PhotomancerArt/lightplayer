@@ -14,6 +14,18 @@ pub enum LpsValueToModelConversionError {
     Texture2dNotPortable,
 }
 
+impl core::fmt::Display for LpsValueToModelConversionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Texture2dNotPortable => {
+                f.write_str("LpsValueF32::Texture2D cannot be represented as LpValue")
+            }
+        }
+    }
+}
+
+impl core::error::Error for LpsValueToModelConversionError {}
+
 /// Convert a runtime shader value to the portable model/disk shape.
 ///
 /// Returns [`LpsValueToModelConversionError::Texture2dNotPortable`] for

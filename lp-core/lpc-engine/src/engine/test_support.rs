@@ -434,7 +434,7 @@ impl NodeRuntime for DummyFixtureNode {
                 slot: self.slot.clone(),
             })
             .map_err(|e| NodeError::msg(format!("fixture resolve failed: {}", e.message)))?;
-        self.record.record(pv.as_value().expect("value"));
+        self.record.record(&pv.as_value().expect("value"));
         Ok(())
     }
 
@@ -470,7 +470,7 @@ impl NodeRuntime for DummyOutputNode {
                 slot: self.slot.clone(),
             })
             .map_err(|e| NodeError::msg(format!("output resolve failed: {}", e.message)))?;
-        self.record.record(pv.as_value().expect("value"));
+        self.record.record(&pv.as_value().expect("value"));
         Ok(())
     }
 

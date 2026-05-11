@@ -52,11 +52,12 @@ Expected changes:
 
 - Eliminate stale public names like `RenderProductSlot` if possible, replacing
   them with `VisualProductSlot`.
-- Rename `LpValue::RenderProduct` to `LpValue::VisualProduct` if current code
-  still uses the old variant.
+- Route visual products through `LpValue::Product(ProductRef::Visual(_))` if
+  current code still uses a product-specific value variant.
 - Rename `RuntimeProduct::Render` to `RuntimeProduct::Visual` if current code
   still uses the old variant.
-- Rename `ResourceDomain::RenderProduct` to `ResourceDomain::VisualProduct`.
+- Keep visual products out of `ResourceDomain`; products are lazy graph values,
+  not store-backed resources.
 - Update rustdocs and error messages to avoid stale render-product language.
 
 ## Validate

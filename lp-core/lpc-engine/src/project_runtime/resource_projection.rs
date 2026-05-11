@@ -56,7 +56,7 @@ pub(crate) fn summarize_runtime_buffers_if_requested(
     out: &mut Vec<WireResourceSummary>,
 ) {
     match spec {
-        ResourceSummarySpecifier::None | ResourceSummarySpecifier::VisualProducts => return,
+        ResourceSummarySpecifier::None => return,
         ResourceSummarySpecifier::RuntimeBuffers | ResourceSummarySpecifier::All => {}
     }
 

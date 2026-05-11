@@ -9,6 +9,8 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::ProductKind;
+
 /// Structural storage type for portable LightPlayer values.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -43,8 +45,7 @@ pub enum LpType {
         fields: Vec<ModelStructMember>,
     },
     Resource,
-    VisualProduct,
-    ControlProduct,
+    Product(ProductKind),
 }
 
 /// One field in a [`LpType::Struct`].

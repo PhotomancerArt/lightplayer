@@ -32,10 +32,10 @@ Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
 `LpsType` and `ModelValue` / `ModelType`.
 
 **Produced values:** demand-driven resolution caches
-[`resolver::production::Production`]: a versioned
-[`runtime_product::RuntimeProduct`] (`Value` = carried `LpsValueF32`, `Render` =
-engine product handle, `Buffer` = runtime-buffer handle). Nodes expose produced
-values through their runtime state slot roots.
+[`resolver::production::Production`]: a versioned `LpValue` plus provenance.
+Nodes expose produced values through their runtime state slot roots. Shader ABI
+values are converted at node/shader boundaries; lazy graph products travel as
+`LpValue::Product`.
 
 **Naming:** Prefer plain engine/runtime nouns when the crate already owns the
 concept (`Engine`, `ProjectRuntime`, `NodeTree`, `Resolver`).

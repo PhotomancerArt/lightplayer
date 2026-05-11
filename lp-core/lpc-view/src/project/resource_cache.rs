@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpc_model::{ResourceDomain, ResourceRef};
 use lpc_wire::{
     WireChannelSampleFormat, WireResourceSummary, WireRuntimeBufferMetadataPayload,
-    WireRuntimeBufferPayload, WireVisualProductPayload,
+    WireRuntimeBufferPayload,
 };
 
 /// Cached resource summaries and payload bytes from project sync.
@@ -15,7 +15,6 @@ pub struct ClientResourceCache {
     summaries: BTreeMap<ResourceRef, WireResourceSummary>,
     runtime_buffer_bytes: BTreeMap<ResourceRef, Vec<u8>>,
     runtime_buffer_metadata: BTreeMap<ResourceRef, WireRuntimeBufferMetadataPayload>,
-    visual_product_bytes: BTreeMap<ResourceRef, Vec<u8>>,
 }
 
 impl ClientResourceCache {
@@ -70,16 +69,6 @@ impl ClientResourceCache {
             }
             refs.contains(r)
         });
-
-        self.visual_product_bytes.retain(|r, _| {
-            if r.domain != ResourceDomain::VisualProduct {
-                return true;
-            }
-            if !domains.contains(&ResourceDomain::VisualProduct) {
-                return true;
-            }
-            refs.contains(r)
-        });
     }
 
     pub fn apply_runtime_buffer_payloads(&mut self, payloads: &[WireRuntimeBufferPayload]) {
@@ -88,13 +77,6 @@ impl ClientResourceCache {
                 .insert(p.resource_ref, p.bytes.clone());
             self.runtime_buffer_metadata
                 .insert(p.resource_ref, p.metadata.clone());
-        }
-    }
-
-    pub fn apply_visual_product_payloads(&mut self, payloads: &[WireVisualProductPayload]) {
-        for p in payloads {
-            self.visual_product_bytes
-                .insert(p.resource_ref, p.bytes.clone());
         }
     }
 
@@ -145,27 +127,18 @@ impl ClientResourceCache {
             Some(_) => Ok(bytes.clone()),
         }
     }
-
-    /// Cached bytes for a materialized visual product, if the client requested its payload.
-    #[must_use]
-    pub fn visual_product_bytes(&self, resource_ref: ResourceRef) -> Option<&[u8]> {
-        self.visual_product_bytes
-            .get(&resource_ref)
-            .map(Vec::as_slice)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+    use lpc_model::RuntimeBufferId;
     use lpc_model::project::Revision;
-    use lpc_model::{RuntimeBufferId, VisualProductId};
     use lpc_wire::{
         WireChannelSampleFormat, WireResourceAvailability, WireResourceKindSummary,
         WireResourceMetadataSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
-        WireRuntimeBufferPayload, WireTextureFormat, WireVisualProductKind,
-        WireVisualProductPayload,
+        WireRuntimeBufferPayload,
     };
 
     fn sample_buffer_summary(id: u32, frame: i64) -> WireResourceSummary {
@@ -210,38 +183,6 @@ mod tests {
         assert_eq!(
             cache.runtime_buffer_bytes(r),
             Some(Vec::from([1u8, 2, 3]).as_slice())
-        );
-    }
-
-    #[test]
-    fn project_resource_cache_resolves_visual_product_payload() {
-        let mut cache = ClientResourceCache::new();
-        let r = ResourceRef::visual_product(VisualProductId::new(4));
-        cache.apply_summaries(&[WireResourceSummary {
-            resource_ref: r,
-            revision: Revision::new(1),
-            kind: WireResourceKindSummary::VisualProduct(WireVisualProductKind::Texture),
-            metadata: WireResourceMetadataSummary::Texture {
-                width: 2,
-                height: 2,
-                format: WireTextureFormat::Rgb8,
-            },
-            byte_length_hint: Some(12),
-            availability: WireResourceAvailability::Available,
-        }]);
-
-        cache.apply_visual_product_payloads(&[WireVisualProductPayload {
-            resource_ref: r,
-            revision: Revision::new(2),
-            width: 2,
-            height: 2,
-            format: WireTextureFormat::Rgb8,
-            bytes: Vec::from([9u8, 9, 9]),
-        }]);
-
-        assert_eq!(
-            cache.visual_product_bytes(r),
-            Some(Vec::from([9u8, 9, 9]).as_slice())
         );
     }
 

@@ -39,7 +39,7 @@ This is a plan only. Implementation should happen after the design is stable.
 
 - `lpc_model::VisualProduct` is a small graph value:
   `node: NodeId`, `output: u32`.
-- `LpValue::VisualProduct(VisualProduct)` carries it through slot values.
+- `LpValue::Product(ProductRef::Visual(VisualProduct))` carries it through slot values.
 - `RuntimeProduct::Visual(VisualProduct)` carries it through engine resolution.
 - `ShaderState.output` exposes a `VisualProduct` on the shader runtime state
   slot root.

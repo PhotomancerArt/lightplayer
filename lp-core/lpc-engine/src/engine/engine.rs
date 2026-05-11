@@ -21,7 +21,6 @@ use crate::node::{
     NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
 };
 use crate::node::{NodeEntryState, NodeTree};
-use crate::resolver::resolver::model_value_to_lps_value_f32;
 use crate::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -29,7 +28,6 @@ use crate::resolver::{
 use crate::runtime::frame_num::FrameNum;
 use crate::runtime::frame_time::FrameTime;
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
-use crate::runtime_product::RuntimeProduct;
 use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 
 use super::EngineError;
@@ -37,17 +35,6 @@ use super::EngineError;
 /// Conventional demand input used by the M2 engine slice.
 pub(crate) fn default_demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("default demand input slot path")
-}
-
-fn runtime_product_from_lp_value(value: LpValue) -> Result<RuntimeProduct, SessionResolveError> {
-    match value {
-        LpValue::VisualProduct(product) => Ok(RuntimeProduct::visual(product)),
-        LpValue::ControlProduct(product) => Ok(RuntimeProduct::control(product)),
-        other => match model_value_to_lps_value_f32(&other) {
-            Ok(value) => Ok(RuntimeProduct::Value(value)),
-            Err(_) => Ok(RuntimeProduct::model_value(other)),
-        },
-    }
 }
 
 /// Core runtime owner for the demand-driven spine (M2).
@@ -517,7 +504,7 @@ impl EngineResolveHost<'_> {
         &self,
         node: &dyn NodeRuntime,
         slot: &SlotPath,
-    ) -> Result<WithRevision<RuntimeProduct>, SessionResolveError> {
+    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
         let data = lookup_slot_data(node.runtime_state_slots(), self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("runtime state lookup: {e}")))?;
         let SlotDataAccess::Value(value) = data else {
@@ -525,17 +512,14 @@ impl EngineResolveHost<'_> {
                 "runtime state slot {slot:?} is not a value"
             )));
         };
-        Ok(WithRevision::new(
-            value.changed_at(),
-            runtime_product_from_lp_value(value.value())?,
-        ))
+        Ok(WithRevision::new(value.changed_at(), value.value()))
     }
 
     fn read_authored_def_product(
         &self,
         handle: &crate::node::NodeDefHandle,
         slot: &SlotPath,
-    ) -> Result<WithRevision<RuntimeProduct>, SessionResolveError> {
+    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
         if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
                 "non-root node def handles are not supported yet: {}",
@@ -566,17 +550,14 @@ impl EngineResolveHost<'_> {
                 "authored def slot {slot:?} is not a value"
             )));
         };
-        Ok(WithRevision::new(
-            value.changed_at(),
-            runtime_product_from_lp_value(value.value())?,
-        ))
+        Ok(WithRevision::new(value.changed_at(), value.value()))
     }
 
     fn read_authored_def_product_by_accessor(
         &self,
         handle: &crate::node::NodeDefHandle,
         accessor: &SlotAccessor,
-    ) -> Result<WithRevision<RuntimeProduct>, SessionResolveError> {
+    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
         if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
                 "non-root node def handles are not supported yet: {}",
@@ -609,10 +590,7 @@ impl EngineResolveHost<'_> {
                 accessor.path()
             )));
         };
-        Ok(WithRevision::new(
-            value.changed_at(),
-            runtime_product_from_lp_value(value.value())?,
-        ))
+        Ok(WithRevision::new(value.changed_at(), value.value()))
     }
 
     fn render_node_texture(
@@ -947,7 +925,6 @@ mod tests {
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
     use crate::runtime_buffer::RuntimeBuffer;
-    use crate::runtime_product::RuntimeProduct;
     use crate::visual_product::VisualProduct;
 
     #[test]
@@ -1047,7 +1024,7 @@ mod tests {
             first
                 .as_value()
                 .expect("value")
-                .eq(second.as_value().expect("value"))
+                .eq(&second.as_value().expect("value"))
         );
         assert_eq!(first.product.changed_at(), second.product.changed_at());
 
@@ -1131,12 +1108,13 @@ mod tests {
     }
 
     #[test]
-    fn runtime_product_visual_handle_is_node_owned_value() {
+    fn visual_product_handle_is_node_owned_value() {
         let product = VisualProduct::new(NodeId::new(7), 0);
-        let runtime = RuntimeProduct::visual(product);
-        assert_eq!(runtime.as_visual(), Some(product));
-        assert!(runtime.as_value().is_none());
-        assert!(runtime.as_buffer().is_none());
+        let value = LpValue::Product(lpc_model::ProductRef::visual(product));
+        assert_eq!(
+            value,
+            LpValue::Product(lpc_model::ProductRef::Visual(product))
+        );
     }
 
     #[test]

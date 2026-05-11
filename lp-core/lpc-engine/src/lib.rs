@@ -22,12 +22,10 @@ pub mod memory;
 pub mod node;
 pub mod nodes;
 pub mod output;
-pub mod panic_node;
 pub mod project_runtime;
 pub mod resolver;
 pub mod runtime;
 pub mod runtime_buffer;
-pub mod runtime_product;
 pub mod visual_product;
 pub mod wire_bridge;
 
@@ -63,7 +61,6 @@ pub use runtime_buffer::{
     RuntimeBuffer, RuntimeBufferError, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
     RuntimeBufferStore, RuntimeChannelSampleFormat, RuntimeColorLayout, RuntimeTextureFormat,
 };
-pub use runtime_product::{RuntimeProduct, RuntimeProductError};
 pub use visual_product::{
     RenderTextureRequest, TextureRenderProduct, TextureRenderProductError, VisualProduct,
     VisualSample, VisualSampleBatch, VisualSampleBatchResult, VisualSamplePoint,

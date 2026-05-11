@@ -14,7 +14,6 @@ use crate::gfx::LpGraphics;
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
-use crate::wire_bridge::lps_value_f32_to_model_value;
 use lpc_model::{
     FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
     bus::ChannelName,
@@ -125,8 +124,7 @@ impl<'r> TickContext<'r> {
                 slot: slot.clone(),
             })
             .map_err(|e| NodeError::msg(alloc::format!("resolve consumed slot {slot}: {e:?}")))?;
-        let value = runtime_product_to_model_value(production.product.value(), slot)?;
-        T::from_lp_value(value).map_err(|e| {
+        T::from_lp_value(production.product.value().clone()).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {slot} has incompatible value: {e}"
             ))
@@ -152,8 +150,7 @@ impl<'r> TickContext<'r> {
                     accessor.path()
                 ))
             })?;
-        let value = runtime_product_to_model_value(production.product.value(), accessor.path())?;
-        T::from_lp_value(value).map_err(|e| {
+        T::from_lp_value(production.product.value().clone()).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {} has incompatible value: {e}",
                 accessor.path()
@@ -243,23 +240,6 @@ impl lpc_model::SlotReadContext for TickContext<'_> {
             NodeError::Message(message) => message.contains("option slot is none"),
         }
     }
-}
-
-fn runtime_product_to_model_value(
-    product: &crate::runtime_product::RuntimeProduct,
-    slot: &SlotPath,
-) -> Result<lpc_model::LpValue, NodeError> {
-    if let Some(value) = product.as_model_value() {
-        return Ok(value.clone());
-    }
-    let value = product
-        .as_value()
-        .ok_or_else(|| NodeError::msg(alloc::format!("consumed slot {slot} is not a value")))?;
-    lps_value_f32_to_model_value(value).map_err(|e| {
-        NodeError::msg(alloc::format!(
-            "consumed slot {slot} cannot be read as a portable model value: {e:?}"
-        ))
-    })
 }
 
 /// Context passed to [`super::ControlNode`] materialization hooks.
@@ -708,7 +688,7 @@ mod tests {
             let pv = ctx.resolve(self.query.clone()).map_err(|e| {
                 crate::node::NodeError::msg(alloc::format!("resolve failed: {}", e.message))
             })?;
-            if let LpsValueF32::F32(v) = *pv.as_value().expect("value") {
+            if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
                 self.resolved_value = Some(v);
             }
             Ok(())

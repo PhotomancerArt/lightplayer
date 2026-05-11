@@ -1,6 +1,7 @@
 //! New runtime spine contracts (tick/destroy/memory pressure, narrow contexts).
 //! Legacy runtimes live in [`crate::nodes`].
 
+pub mod catch_node_panic;
 mod contexts;
 mod control_node;
 mod node_binding_index;

@@ -2,7 +2,7 @@
 
 use crate::resolver::resolve_error::ResolveError;
 use crate::resolver::resolver_cache::ResolverCache;
-use crate::runtime_product::RuntimeProduct;
+use lpc_model::LpValue;
 use lpc_model::Revision;
 use lpc_model::WithRevision;
 use lps_shared::LpsValueF32;
@@ -33,28 +33,18 @@ impl Resolver {
     }
 }
 
-/// Materialize a direct [`lpc_model::LpValue`] literal to a versioned runtime
-/// product. Shader-compatible values stay in the compact shader ABI shape;
-/// richer editor/domain values remain model values.
+/// Materialize a direct [`lpc_model::LpValue`] literal to a versioned slot value.
 pub(crate) fn materialize_literal_product(
     value: &lpc_model::LpValue,
     frame: Revision,
-) -> WithRevision<RuntimeProduct> {
-    let product = match value {
-        lpc_model::LpValue::VisualProduct(product) => RuntimeProduct::visual(*product),
-        lpc_model::LpValue::ControlProduct(product) => RuntimeProduct::control(*product),
-        other => match model_value_to_lps_value_f32(other) {
-            Ok(value) => RuntimeProduct::Value(value),
-            Err(_) => RuntimeProduct::model_value(other.clone()),
-        },
-    };
-    WithRevision::new(frame, product)
+) -> WithRevision<LpValue> {
+    WithRevision::new(frame, value.clone())
 }
 
 /// Convert [`lpc_model::LpValue`] to [`LpsValueF32`] for shader-compatible literals.
 ///
-/// Not every future runtime domain maps 1:1 into `LpsValueF32`; engine demand
-/// resolution may represent other domains as [`RuntimeProduct`](crate::runtime_product::RuntimeProduct).
+/// Not every runtime domain maps 1:1 into `LpsValueF32`; products and resources
+/// remain [`LpValue`] leaves until a node explicitly consumes their domain.
 pub(crate) fn model_value_to_lps_value_f32(
     value: &lpc_model::LpValue,
 ) -> Result<LpsValueF32, ResolveError> {
@@ -97,12 +87,9 @@ pub(crate) fn model_value_to_lps_value_f32(
                 fields: result_fields,
             })
         }
-        LpValue::String(_)
-        | LpValue::Resource(_)
-        | LpValue::VisualProduct(_)
-        | LpValue::ControlProduct(_) => Err(ResolveError::new(alloc::format!(
-            "model value cannot be resolved as shader value: {value:?}"
-        ))),
+        LpValue::String(_) | LpValue::Resource(_) | LpValue::Product(_) => Err(ResolveError::new(
+            alloc::format!("model value cannot be resolved as shader value: {value:?}"),
+        )),
     }
 }
 

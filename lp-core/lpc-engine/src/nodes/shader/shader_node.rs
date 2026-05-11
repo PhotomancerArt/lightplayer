@@ -1,4 +1,4 @@
-//! Core shader node: owns GLSL compilation/rendering and exposes output as [`RuntimeProduct::Visual`].
+//! Core shader node: owns GLSL compilation/rendering and exposes output as a visual product value.
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -400,12 +400,12 @@ mod tests {
 
         assert_eq!(
             output.value(),
-            lpc_model::LpValue::VisualProduct(node.visual_product())
+            lpc_model::LpValue::Product(lpc_model::ProductRef::visual(node.visual_product()))
         );
     }
 
     #[test]
-    fn shader_core_produces_render_runtime_product() {
+    fn shader_core_produces_visual_product_value() {
         let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(1000).expect("tick");
 
@@ -416,8 +416,10 @@ mod tests {
         let prod = resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
-        let rp = prod.product.get();
-        let got_id = rp.as_visual().expect("visual product");
+        let got_id = match prod.product.get() {
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
+            other => panic!("expected visual product, got {other:?}"),
+        };
         assert_eq!(got_id, rid);
     }
 

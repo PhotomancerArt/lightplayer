@@ -65,10 +65,10 @@ impl NodeRuntime for OutputNode {
             })
             .map_err(|e| NodeError::msg(alloc::format!("resolve output input: {}", e.message)))?;
 
-        let control =
-            prod.product.get().as_control().ok_or_else(|| {
-                NodeError::msg("output expected RuntimeProduct::Control from input")
-            })?;
+        let control = match prod.product.get() {
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Control(product)) => *product,
+            _ => return Err(NodeError::msg("output expected control product from input")),
+        };
 
         let extent = control.preferred_extent();
         let sample_count = extent.sample_count() as usize;

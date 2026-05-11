@@ -81,7 +81,6 @@ pub enum ValueEditorHint {
     Affine2d,
     Resource,
     RuntimeBufferResource,
-    VisualProductResource,
     VisualProduct,
     ControlProduct,
     Dropdown {
@@ -309,8 +308,7 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
         LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
         LpType::Resource => "slot.leaf.raw_resource",
-        LpType::VisualProduct => "slot.leaf.raw_visual_product",
-        LpType::ControlProduct => "slot.leaf.raw_control_product",
+        LpType::Product(_) => "slot.leaf.raw_product",
     })
 }
 
@@ -318,9 +316,9 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
 mod tests {
     use super::*;
     use crate::{
-        Affine2d, ColorOrderValue, Dim2u, FromLpValue, ResourceRef, ToLpValue, VisualProductId,
+        Affine2d, ColorOrderValue, Dim2u, FromLpValue, ResourceRef, RuntimeBufferId, ToLpValue,
         affine2d_shape, color_order_shape, control_product_shape, dim2u_shape,
-        relative_node_ref_shape, runtime_buffer_resource_shape, visual_product_resource_shape,
+        relative_node_ref_shape, runtime_buffer_resource_shape,
     };
 
     #[test]
@@ -334,10 +332,6 @@ mod tests {
         assert!(matches!(
             runtime_buffer_resource_shape().editor,
             ValueEditorHint::RuntimeBufferResource
-        ));
-        assert!(matches!(
-            visual_product_resource_shape().editor,
-            ValueEditorHint::VisualProductResource
         ));
         assert!(matches!(
             control_product_shape().editor,
@@ -369,7 +363,7 @@ mod tests {
             order
         );
 
-        let resource = ResourceRef::visual_product(VisualProductId::new(7));
+        let resource = ResourceRef::runtime_buffer(RuntimeBufferId::new(7));
         assert_eq!(
             ResourceRef::from_lp_value(resource.to_lp_value()).unwrap(),
             resource

@@ -115,12 +115,3 @@ pub fn runtime_buffer_resource_shape() -> SlotValueShape {
         editor: ValueEditorHint::RuntimeBufferResource,
     }
 }
-
-pub fn visual_product_resource_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: SlotShapeId::from_static_name("slot.leaf.visual_product_resource"),
-        ty: LpType::Resource,
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::VisualProductResource,
-    }
-}

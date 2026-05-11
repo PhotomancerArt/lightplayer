@@ -5,7 +5,7 @@
 //! slot tree: the whole payload is versioned, watched, patched, and mutated as
 //! one logical value.
 
-use crate::resource::{ControlProduct, ResourceRef, VisualProduct};
+use crate::{ProductRef, ResourceRef};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -41,9 +41,10 @@ pub enum LpValue {
         name: Option<String>,
         fields: Vec<(String, LpValue)>,
     },
+    /// Store-backed materialized payload.
     Resource(ResourceRef),
-    VisualProduct(VisualProduct),
-    ControlProduct(ControlProduct),
+    /// Lazy node-owned graph product.
+    Product(ProductRef),
 }
 
 #[cfg(test)]
@@ -60,15 +61,18 @@ mod tests {
             LpValue::Bool(true),
             LpValue::Vec2([0.0, 1.0]),
             LpValue::Vec3([1.0, 2.0, 3.0]),
-            LpValue::Resource(crate::ResourceRef::visual_product(
-                crate::VisualProductId::new(9),
+            LpValue::Resource(crate::ResourceRef::runtime_buffer(
+                crate::RuntimeBufferId::new(9),
             )),
-            LpValue::VisualProduct(crate::VisualProduct::new(crate::NodeId::new(2), 0)),
-            LpValue::ControlProduct(crate::ControlProduct::new(
+            LpValue::Product(crate::ProductRef::visual(crate::VisualProduct::new(
+                crate::NodeId::new(2),
+                0,
+            ))),
+            LpValue::Product(crate::ProductRef::control(crate::ControlProduct::new(
                 crate::NodeId::new(3),
                 0,
                 crate::ControlExtent::new(1, 12),
-            )),
+            ))),
         ] {
             let json = serde_json::to_string(&v).unwrap();
             let back: LpValue = serde_json::from_str(&json).unwrap();

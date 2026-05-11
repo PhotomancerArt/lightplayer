@@ -158,7 +158,7 @@ impl NodeRuntime for TickProbeNode {
         let pv = ctx
             .resolve(self.query.clone())
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
-        if let LpsValueF32::F32(v) = *pv.as_value().expect("value") {
+        if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
             self.last = Some(v);
         }
         Ok(())
