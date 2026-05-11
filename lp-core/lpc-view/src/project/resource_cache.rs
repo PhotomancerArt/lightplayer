@@ -23,6 +23,11 @@ impl ClientResourceCache {
         Self::default()
     }
 
+    #[must_use]
+    pub fn summary_count(&self) -> usize {
+        self.summaries.len()
+    }
+
     /// Latest summary for a ref, if cached.
     #[must_use]
     pub fn summary(&self, resource_ref: ResourceRef) -> Option<&WireResourceSummary> {

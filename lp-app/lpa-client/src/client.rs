@@ -28,6 +28,15 @@ pub struct LpClient {
     next_request_id: Arc<AtomicU64>,
 }
 
+impl Clone for LpClient {
+    fn clone(&self) -> Self {
+        Self {
+            transport: Arc::clone(&self.transport),
+            next_request_id: Arc::clone(&self.next_request_id),
+        }
+    }
+}
+
 impl LpClient {
     /// Create a new LpClient with the given transport
     ///
