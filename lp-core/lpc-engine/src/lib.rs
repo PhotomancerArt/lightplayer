@@ -14,7 +14,6 @@ extern crate alloc;
 pub mod artifact;
 pub mod dataflow;
 pub mod engine;
-pub mod error;
 pub mod gfx;
 pub mod memory;
 pub mod node;
@@ -41,14 +40,14 @@ pub use engine::{
     Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError, ProjectLoadError,
     ProjectLoader,
 };
-pub use error::Error;
+pub use engine::error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use gfx::{
-    LpsValueToModelConversionError, lps_value_f32_to_model_value, model_type_to_lps_type,
+    lps_value_f32_to_model_value, model_type_to_lps_type, LpsValueToModelConversionError,
 };
 pub use node::{
-    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeEntry, NodeEntryState,
-    NodeError, NodeRuntime, NodeTree, PressureLevel, TickContext, TreeError, tree_deltas_since,
+    tree_deltas_since, ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeEntry,
+    NodeEntryState, NodeError, NodeRuntime, NodeTree, PressureLevel, TickContext, TreeError,
 };
 pub use product::{
     ControlExtent, ControlHint, ControlLayout, ControlProduct, ControlRenderRequest,

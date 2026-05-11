@@ -14,7 +14,7 @@ use lpvm_wasm::rt_browser::BrowserLpvmEngine;
 
 use super::lp_gfx::LpGraphics;
 use super::lp_shader::{LpShader, ShaderCompileOptions};
-use crate::error::Error;
+use crate::engine::error::Error;
 use crate::gfx::uniforms::build_uniforms;
 
 /// Wasm32 guest shader graphics backed by `lpvm-wasm` + browser host.

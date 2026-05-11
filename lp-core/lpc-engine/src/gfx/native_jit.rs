@@ -12,7 +12,7 @@ use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};
 
 use super::lp_gfx::LpGraphics;
 use super::lp_shader::{LpShader, ShaderCompileOptions};
-use crate::error::Error;
+use crate::engine::error::Error;
 use crate::gfx::uniforms::build_uniforms;
 
 /// Graphics backend using in-process RV32 JIT (no Cranelift, no ELF link).

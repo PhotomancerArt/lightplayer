@@ -1,6 +1,6 @@
 //! Panic boundary helpers for node render paths.
 
-use crate::error::Error;
+use crate::engine::error::Error;
 
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;

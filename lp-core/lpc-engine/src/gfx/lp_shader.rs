@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::engine::error::Error;
 
 /// Backend-agnostic compile options understood by `lp-engine`.
 pub struct ShaderCompileOptions {

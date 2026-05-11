@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::engine::error::Error;
 use crate::gfx::lp_shader::{LpShader, ShaderCompileOptions};
 use alloc::boxed::Box;
 

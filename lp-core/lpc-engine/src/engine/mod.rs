@@ -10,6 +10,7 @@ mod output_flush_tests;
 mod project_loader;
 #[cfg(test)]
 pub(crate) mod test_support;
+pub mod error;
 
 pub use engine::Engine;
 #[cfg(test)]
