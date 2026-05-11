@@ -17,7 +17,7 @@ mod runtime_state_slots;
 pub mod sync;
 pub mod tree_error;
 
-pub use crate::memory::pressure_level::PressureLevel;
+pub use crate::engine::memory_pressure::PressureLevel;
 pub use contexts::{
     ControlRenderContext, ControlRenderServices, DestroyCtx, MemPressureCtx,
     NodeResourceInitContext, RenderContext, TickContext,

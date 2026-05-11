@@ -15,7 +15,6 @@ pub mod artifact;
 pub mod dataflow;
 pub mod engine;
 pub mod gfx;
-pub mod memory;
 pub mod node;
 pub mod nodes;
 pub mod product;
@@ -36,18 +35,18 @@ pub use dataflow::resolver::{
     ResolveSession, ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
     SessionHostResolver, SessionResolveError, TickResolver, TraceGuard,
 };
+pub use engine::error::Error;
 pub use engine::{
     Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError, ProjectLoadError,
     ProjectLoader,
 };
-pub use engine::error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use gfx::{
-    lps_value_f32_to_model_value, model_type_to_lps_type, LpsValueToModelConversionError,
+    LpsValueToModelConversionError, lps_value_f32_to_model_value, model_type_to_lps_type,
 };
 pub use node::{
-    tree_deltas_since, ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeEntry,
-    NodeEntryState, NodeError, NodeRuntime, NodeTree, PressureLevel, TickContext, TreeError,
+    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeEntry, NodeEntryState,
+    NodeError, NodeRuntime, NodeTree, PressureLevel, TickContext, TreeError, tree_deltas_since,
 };
 pub use product::{
     ControlExtent, ControlHint, ControlLayout, ControlProduct, ControlRenderRequest,

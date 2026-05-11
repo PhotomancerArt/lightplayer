@@ -7,7 +7,7 @@ use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickC
 use super::node_error::NodeError;
 use super::runtime_state_slots::EMPTY_RUNTIME_STATE_SLOTS;
 use super::{ControlNode, RenderNode};
-use crate::memory::pressure_level::PressureLevel;
+use crate::engine::memory_pressure::PressureLevel;
 
 /// Runtime node instance for the demand-driven engine spine.
 pub trait NodeRuntime {
