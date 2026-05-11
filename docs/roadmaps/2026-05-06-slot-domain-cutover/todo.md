@@ -12,6 +12,10 @@
 - [x] Resolver fallback from consumed slot to node def slot
 - [x] Generated read-only slot views for root defs
 - [x] Removed engine `RenderProductStore`
+- [x] Moved runtime binding storage/indexes into `NodeTree`
+- [x] Removed standalone `BindingRegistry` and global `BindingId`
+- [x] Resolver reads runtime bindings through the active engine host
+- [x] Runtime loaders register authored bindings directly onto the node tree
 
 ## Mockup Concepts Still To Port
 
@@ -30,6 +34,8 @@
 - [ ] Convert shader node config reads to resolver-backed slot views
 - [ ] Convert fixture node config reads to resolver-backed slot views
 - [ ] Convert output node config reads to resolver-backed slot views
+- [ ] Decide and implement binding override precedence beyond exact target lookup
+- [ ] Rebuild binding indexes incrementally if mutation frequency makes full rebuild too costly
 - [ ] Make dynamic shader params first-class runtime slot roots
 - [ ] Register and update dynamic shader param shapes
 - [ ] Replace old node-specific wire sync with generic slot registry/data sync
@@ -84,3 +90,7 @@
 - [ ] Dynamic shader param shape-change test in real code
 - [ ] Client mutation accept/reject tests
 - [ ] Generic UI smoke test
+
+## User Notes
+
+- [ ] TextureStore?

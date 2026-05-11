@@ -4,11 +4,15 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use lpc_model::{NodeId, NodeInvocation, NodeName, NodePathSegment, Revision, TreePath};
+use lpc_model::{
+    ChannelName, NodeId, NodeInvocation, NodeName, NodePathSegment, Revision, SlotPath, TreePath,
+};
 use lpc_wire::WireChildKind;
 
 use crate::artifact::ArtifactId;
+use crate::binding::{BindingDraft, BindingEntry, BindingError, BindingRef};
 
+use crate::node::node_binding_index::{NodeBindingIndex, binding_by_ref};
 use crate::node::{NodeDefHandle, NodeEntry, TreeError};
 
 /// The node tree container.
@@ -21,6 +25,7 @@ pub struct NodeTree<N> {
     nodes: Vec<Option<NodeEntry<N>>>,
     by_path: BTreeMap<TreePath, NodeId>,
     by_sibling: BTreeMap<(NodeId, NodeName), NodeId>,
+    binding_index: NodeBindingIndex,
     next_id: u32,
     root: NodeId,
 }
@@ -41,6 +46,7 @@ impl<N> NodeTree<N> {
             nodes,
             by_path,
             by_sibling: BTreeMap::new(),
+            binding_index: NodeBindingIndex::default(),
             next_id: 1,
             root: root_id,
         }
@@ -198,7 +204,92 @@ impl<N> NodeTree<N> {
 
         // Also remove from by_path in case the entry was already tombstoned above
         self.by_path.remove(&path);
+        self.rebuild_binding_index()
+            .expect("removing bindings cannot introduce binding conflicts");
 
+        Ok(())
+    }
+
+    /// Add one runtime binding to its owning node and rebuild derived indexes.
+    pub fn add_binding(
+        &mut self,
+        draft: BindingDraft,
+        revision: Revision,
+    ) -> Result<BindingRef, BindingError> {
+        let owner = draft.owner;
+        let entry = self
+            .get_mut(owner)
+            .ok_or(BindingError::UnknownOwner { owner })?;
+        let binding = BindingEntry {
+            source: draft.source,
+            target: draft.target,
+            priority: draft.priority,
+            kind: draft.kind,
+            version: revision,
+            owner,
+        };
+        let index = entry.bindings.get_mut().push(binding);
+        entry.bindings.mark_updated(revision);
+
+        if let Err(err) = self.rebuild_binding_index() {
+            let entry = self
+                .get_mut(owner)
+                .expect("binding owner was validated before insertion");
+            entry.bindings.get_mut().remove_last();
+            entry.bindings.mark_updated(revision);
+            self.rebuild_binding_index()
+                .expect("rolling back failed binding should restore valid index");
+            return Err(err);
+        }
+
+        Ok(BindingRef::new(owner, index))
+    }
+
+    /// Iterate over all node-owned bindings.
+    pub fn bindings(&self) -> impl Iterator<Item = &BindingEntry> {
+        self.entries()
+            .flat_map(|entry| entry.bindings.value().iter())
+    }
+
+    /// Resolve the binding for one consumed slot, if one exists.
+    ///
+    /// When multiple owners bind the same consumed slot, the owner closest to
+    /// the root wins. This keeps project-level defaults authoritative while
+    /// leaving room for deeper node-local overrides later.
+    pub fn binding_for_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Option<(BindingRef, &BindingEntry)> {
+        self.binding_index
+            .consumed_targets(node, slot)
+            .iter()
+            .copied()
+            .filter_map(|binding_ref| {
+                let depth = self
+                    .get(binding_ref.owner)
+                    .map(|entry| entry.path.0.len())
+                    .unwrap_or(usize::MAX);
+                binding_by_ref(&self.nodes, binding_ref).map(|entry| (depth, binding_ref, entry))
+            })
+            .min_by_key(|(depth, _, _)| *depth)
+            .map(|(_, binding_ref, entry)| (binding_ref, entry))
+    }
+
+    /// Resolve all providers for a bus channel.
+    pub fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, &BindingEntry)> {
+        self.binding_index
+            .bus_targets(channel)
+            .iter()
+            .copied()
+            .filter_map(|binding_ref| {
+                binding_by_ref(&self.nodes, binding_ref).map(|entry| (binding_ref, entry))
+            })
+            .collect()
+    }
+
+    fn rebuild_binding_index(&mut self) -> Result<(), BindingError> {
+        self.binding_index = NodeBindingIndex::rebuild(&self.nodes)?;
         Ok(())
     }
 
@@ -222,10 +313,14 @@ impl<N> NodeTree<N> {
 mod tests {
     use super::NodeTree;
     use crate::artifact::ArtifactId;
+    use crate::binding::{
+        BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget,
+    };
     use crate::node::test_placeholder_spine;
+    use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::{ArtifactLocator, NodeInvocation};
-    use lpc_model::{NodeId, NodeName, Revision, TreePath};
+    use lpc_model::{ChannelName, Kind, LpValue, NodeId, NodeName, Revision, SlotPath, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     fn make_tree() -> NodeTree<()> {
@@ -234,6 +329,23 @@ mod tests {
 
     fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
         test_placeholder_spine()
+    }
+
+    fn add_test_child(tree: &mut NodeTree<()>, name: &str) -> NodeId {
+        let root = tree.root();
+        let (cfg, art) = spine_placeholder();
+        tree.add_child(
+            root,
+            NodeName::parse(name).unwrap(),
+            NodeName::parse("node").unwrap(),
+            WireChildKind::Input {
+                source: WireSlotIndex(0),
+            },
+            cfg,
+            art,
+            Revision::new(1),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -316,6 +428,77 @@ mod tests {
         .unwrap();
         let root_entry = tree.get(root).unwrap();
         assert_eq!(root_entry.children_changed_at().0, 5);
+    }
+
+    #[test]
+    fn tree_owns_and_indexes_runtime_bindings() {
+        let mut tree = make_tree();
+        let shader = add_test_child(&mut tree, "shader");
+        let fixture = add_test_child(&mut tree, "fixture");
+        let channel = ChannelName(String::from("visual"));
+        let out = SlotPath::parse("output").unwrap();
+        let input = SlotPath::parse("input").unwrap();
+
+        tree.add_binding(
+            BindingDraft {
+                source: BindingSource::ProducedSlot {
+                    node: shader,
+                    slot: out,
+                },
+                target: BindingTarget::BusChannel(channel.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: shader,
+            },
+            Revision::new(2),
+        )
+        .unwrap();
+        tree.add_binding(
+            BindingDraft {
+                source: BindingSource::BusChannel(channel.clone()),
+                target: BindingTarget::ConsumedSlot {
+                    node: fixture,
+                    slot: input.clone(),
+                },
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: fixture,
+            },
+            Revision::new(3),
+        )
+        .unwrap();
+
+        assert_eq!(tree.providers_for_bus(&channel).len(), 1);
+        let (binding_ref, binding) = tree
+            .binding_for_consumed_slot(fixture, &input)
+            .expect("fixture input binding");
+        assert_eq!(binding_ref.owner, fixture);
+        assert!(matches!(binding.source, BindingSource::BusChannel(_)));
+        assert_eq!(binding.version, Revision::new(3));
+    }
+
+    #[test]
+    fn tree_rejects_duplicate_bus_provider_priority() {
+        let mut tree = make_tree();
+        let a = add_test_child(&mut tree, "a");
+        let b = add_test_child(&mut tree, "b");
+        let channel = ChannelName(String::from("visual"));
+
+        let draft = |owner| BindingDraft {
+            source: BindingSource::Literal(LpValue::F32(1.0)),
+            target: BindingTarget::BusChannel(channel.clone()),
+            priority: BindingPriority::new(0),
+            kind: Kind::Color,
+            owner,
+        };
+
+        tree.add_binding(draft(a), Revision::new(2)).unwrap();
+        let err = tree.add_binding(draft(b), Revision::new(3)).unwrap_err();
+        assert!(matches!(
+            err,
+            BindingError::DuplicateProviderPriority { .. }
+        ));
+        assert_eq!(tree.providers_for_bus(&channel).len(), 1);
     }
 
     #[test]

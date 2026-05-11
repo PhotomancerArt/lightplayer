@@ -119,15 +119,10 @@ mod tests {
             SlotDataAccess::Unit(_)
         ));
 
-        let registry = crate::binding::BindingRegistry::new();
         let mut res = Resolver::new();
         let frame = Revision::new(0);
-        let mut session = ResolveSession::new(
-            frame,
-            &mut res,
-            &registry,
-            ResolveTrace::new(ResolveLogLevel::Off),
-        );
+        let mut session =
+            ResolveSession::new(frame, &mut res, ResolveTrace::new(ResolveLogLevel::Off));
         let mut host = EmptyResolveHost;
         let slot_shapes = SlotShapeRegistry::default();
 

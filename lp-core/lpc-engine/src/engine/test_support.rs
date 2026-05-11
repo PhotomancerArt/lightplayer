@@ -192,7 +192,7 @@ impl EngineTestBuilder {
         priority: i32,
         owner: NodeId,
     ) -> Result<(), BindingError> {
-        self.engine.bindings_mut().register(
+        self.engine.add_binding(
             BindingDraft {
                 source,
                 target,

@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::vec::Vec;
 
-use crate::binding::{BindingEntry, BindingRegistry, BindingSource, BindingTarget};
+use crate::binding::{BindingEntry, BindingRef, BindingSource};
 use crate::resolver::production::{Production, ProductionSource};
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::SessionResolveError;
@@ -22,7 +22,6 @@ use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 pub struct EngineSession<'a> {
     revision: Revision,
     resolver: &'a mut Resolver,
-    registry: &'a BindingRegistry,
     trace: ResolveTrace,
 }
 
@@ -31,16 +30,10 @@ pub struct EngineSession<'a> {
 pub type ResolveSession<'a> = EngineSession<'a>;
 
 impl<'a> EngineSession<'a> {
-    pub fn new(
-        frame_id: Revision,
-        resolver: &'a mut Resolver,
-        registry: &'a BindingRegistry,
-        trace: ResolveTrace,
-    ) -> Self {
+    pub fn new(frame_id: Revision, resolver: &'a mut Resolver, trace: ResolveTrace) -> Self {
         Self {
             revision: frame_id,
             resolver,
-            registry,
             trace,
         }
     }
@@ -53,7 +46,7 @@ impl<'a> EngineSession<'a> {
         &self.trace
     }
 
-    /// Demand-resolve `query` for this frame (cache + cycle stack + registry + host).
+    /// Demand-resolve `query` for this frame (cache + cycle stack + host-owned bindings).
     pub fn resolve<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
@@ -111,13 +104,13 @@ impl<'a> EngineSession<'a> {
         channel: &ChannelName,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        let candidates: Vec<&BindingEntry> = self.registry.providers_for_bus(channel).collect();
+        let candidates = host.providers_for_bus(channel);
         let entry = select_highest_priority_bus_provider(channel, &candidates)?;
         self.trace.record_event(ResolveTraceEvent::SelectBinding {
             query: query.clone(),
-            binding: entry.id,
+            binding: entry.0,
         });
-        self.resolve_binding_source(host, entry.id, &entry.source)
+        self.resolve_binding_source(host, entry.0, &entry.1.source)
     }
 
     fn resolve_consumed_slot(
@@ -127,12 +120,12 @@ impl<'a> EngineSession<'a> {
         slot: SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        if let Some(entry) = find_binding_for_consumed_slot(self.registry, node, &slot) {
+        if let Some(entry) = host.binding_for_consumed_slot(node, &slot) {
             self.trace.record_event(ResolveTraceEvent::SelectBinding {
                 query: query.clone(),
-                binding: entry.id,
+                binding: entry.0,
             });
-            return self.resolve_binding_source(host, entry.id, &entry.source);
+            return self.resolve_binding_source(host, entry.0, &entry.1.source);
         }
         self.trace
             .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
@@ -151,7 +144,7 @@ impl<'a> EngineSession<'a> {
     fn resolve_binding_source(
         &mut self,
         host: &mut (impl ResolveHost + ?Sized),
-        binding_id: crate::binding::BindingId,
+        binding_ref: BindingRef,
         source: &BindingSource,
     ) -> Result<Production, SessionResolveError> {
         match source {
@@ -168,7 +161,7 @@ impl<'a> EngineSession<'a> {
                 };
                 let mut pv = self.resolve(host, key)?;
                 pv.source = ProductionSource::BusBinding {
-                    binding: binding_id,
+                    binding: binding_ref,
                 };
                 Ok(pv)
             }
@@ -176,7 +169,7 @@ impl<'a> EngineSession<'a> {
                 let key = QueryKey::Bus(other.clone());
                 let mut pv = self.resolve(host, key)?;
                 pv.source = ProductionSource::BusBinding {
-                    binding: binding_id,
+                    binding: binding_ref,
                 };
                 Ok(pv)
             }
@@ -184,52 +177,38 @@ impl<'a> EngineSession<'a> {
     }
 }
 
-fn find_binding_for_consumed_slot<'a>(
-    registry: &'a BindingRegistry,
-    node: NodeId,
-    slot: &SlotPath,
-) -> Option<&'a BindingEntry> {
-    registry.iter().find(|e| {
-        matches!(
-            &e.target,
-            BindingTarget::ConsumedSlot { node: n, slot: p } if *n == node && p == slot
-        )
-    })
-}
-
-fn select_highest_priority_bus_provider<'a>(
+fn select_highest_priority_bus_provider(
     channel: &ChannelName,
-    candidates: &[&'a BindingEntry],
-) -> Result<&'a BindingEntry, SessionResolveError> {
+    candidates: &[(BindingRef, BindingEntry)],
+) -> Result<(BindingRef, BindingEntry), SessionResolveError> {
     if candidates.is_empty() {
         return Err(SessionResolveError::NoBusProvider {
             channel: channel.clone(),
         });
     }
-    let Some(max_p) = candidates.iter().map(|e| e.priority).max() else {
+    let Some(max_p) = candidates.iter().map(|(_, e)| e.priority).max() else {
         return Err(SessionResolveError::NoBusProvider {
             channel: channel.clone(),
         });
     };
     let at_max: Vec<_> = candidates
         .iter()
-        .copied()
-        .filter(|e| e.priority == max_p)
+        .filter(|(_, e)| e.priority == max_p)
         .collect();
     if at_max.len() != 1 {
         return Err(SessionResolveError::AmbiguousBusBinding {
             channel: channel.clone(),
         });
     }
-    Ok(at_max[0])
+    Ok(at_max[0].clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::binding::BindingDraft;
-    use crate::binding::BindingId;
     use crate::binding::BindingPriority;
+    use crate::binding::BindingTarget;
     use crate::resolver::resolve_trace::ResolveLogLevel;
     use alloc::string::String;
     use lpc_model::Kind;
@@ -248,6 +227,7 @@ mod tests {
         produce_calls: u32,
         node: NodeId,
         out_path: SlotPath,
+        bindings: TestBindings,
     }
 
     impl CountingHost {
@@ -256,7 +236,59 @@ mod tests {
                 produce_calls: 0,
                 node,
                 out_path,
+                bindings: TestBindings::default(),
             }
+        }
+
+        fn with_bindings(mut self, bindings: TestBindings) -> Self {
+            self.bindings = bindings;
+            self
+        }
+    }
+
+    #[derive(Default)]
+    struct TestBindings {
+        entries: Vec<(BindingRef, BindingEntry)>,
+    }
+
+    impl TestBindings {
+        fn add(&mut self, draft: BindingDraft, revision: Revision) {
+            let binding_ref = BindingRef::new(draft.owner, self.entries.len());
+            self.entries.push((
+                binding_ref,
+                BindingEntry {
+                    source: draft.source,
+                    target: draft.target,
+                    priority: draft.priority,
+                    kind: draft.kind,
+                    version: revision,
+                    owner: draft.owner,
+                },
+            ));
+        }
+
+        fn binding_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Option<(BindingRef, BindingEntry)> {
+            self.entries.iter().find_map(|(binding_ref, entry)| {
+                matches!(
+                    &entry.target,
+                    BindingTarget::ConsumedSlot { node: n, slot: p } if *n == node && p == slot
+                )
+                .then(|| (*binding_ref, entry.clone()))
+            })
+        }
+
+        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+            self.entries
+                .iter()
+                .filter_map(|(binding_ref, entry)| {
+                    matches!(&entry.target, BindingTarget::BusChannel(c) if c == channel)
+                        .then(|| (*binding_ref, entry.clone()))
+                })
+                .collect()
         }
     }
 
@@ -282,12 +314,23 @@ mod tests {
                 _ => Err(SessionResolveError::other("unexpected produce query")),
             }
         }
+
+        fn binding_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Option<(BindingRef, BindingEntry)> {
+            self.bindings.binding_for_consumed_slot(node, slot)
+        }
+
+        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(channel)
+        }
     }
 
     #[test]
     fn same_produced_slot_twice_calls_host_once() {
         let mut resolver = Resolver::new();
-        let registry = BindingRegistry::new();
         let frame = Revision::new(1);
         let node = NodeId::new(7);
         let out = path("color");
@@ -299,7 +342,6 @@ mod tests {
         let mut session = ResolveSession::new(
             frame,
             &mut resolver,
-            &registry,
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let a = session.resolve(&mut host, key.clone()).unwrap();
@@ -320,41 +362,36 @@ mod tests {
     #[test]
     fn bus_channel_selects_highest_priority_binding() {
         let mut resolver = Resolver::new();
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(2);
         let c = ch("video");
         let low_node = NodeId::new(1);
         let high_node = NodeId::new(2);
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(1.0)),
-                    target: BindingTarget::BusChannel(c.clone()),
-                    priority: BindingPriority::new(1),
-                    kind: Kind::Amplitude,
-                    owner: low_node,
-                },
-                frame,
-            )
-            .unwrap();
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(9.0)),
-                    target: BindingTarget::BusChannel(c.clone()),
-                    priority: BindingPriority::new(10),
-                    kind: Kind::Amplitude,
-                    owner: high_node,
-                },
-                frame,
-            )
-            .unwrap();
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::Literal(LpValue::F32(1.0)),
+                target: BindingTarget::BusChannel(c.clone()),
+                priority: BindingPriority::new(1),
+                kind: Kind::Amplitude,
+                owner: low_node,
+            },
+            frame,
+        );
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::Literal(LpValue::F32(9.0)),
+                target: BindingTarget::BusChannel(c.clone()),
+                priority: BindingPriority::new(10),
+                kind: Kind::Amplitude,
+                owner: high_node,
+            },
+            frame,
+        );
 
-        let mut host = CountingHost::new(low_node, path("x"));
+        let mut host = CountingHost::new(low_node, path("x")).with_bindings(bindings);
         let mut session = ResolveSession::new(
             frame,
             &mut resolver,
-            &registry,
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let pv = session
@@ -367,7 +404,6 @@ mod tests {
     #[test]
     fn equal_priority_bus_providers_return_ambiguous_error() {
         let e1 = BindingEntry {
-            id: BindingId::new(1),
             source: BindingSource::Literal(LpValue::F32(1.0)),
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
@@ -376,7 +412,6 @@ mod tests {
             owner: NodeId::new(0),
         };
         let e2 = BindingEntry {
-            id: BindingId::new(2),
             source: BindingSource::Literal(LpValue::F32(2.0)),
             target: BindingTarget::BusChannel(ch("z")),
             priority: BindingPriority::new(5),
@@ -385,7 +420,14 @@ mod tests {
             owner: NodeId::new(1),
         };
         let c = ch("z");
-        let err = select_highest_priority_bus_provider(&c, &[&e1, &e2]).unwrap_err();
+        let err = select_highest_priority_bus_provider(
+            &c,
+            &[
+                (BindingRef::new(NodeId::new(0), 0), e1),
+                (BindingRef::new(NodeId::new(1), 0), e2),
+            ],
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             SessionResolveError::AmbiguousBusBinding { .. }
@@ -395,40 +437,35 @@ mod tests {
     #[test]
     fn bus_to_bus_recursion_resolves_through_both_labels() {
         let mut resolver = Resolver::new();
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(3);
         let outer = ch("a");
         let inner = ch("b");
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::BusChannel(inner.clone()),
-                    target: BindingTarget::BusChannel(outer.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Amplitude,
-                    owner: NodeId::new(0),
-                },
-                frame,
-            )
-            .unwrap();
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(3.25)),
-                    target: BindingTarget::BusChannel(inner.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Amplitude,
-                    owner: NodeId::new(1),
-                },
-                frame,
-            )
-            .unwrap();
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::BusChannel(inner.clone()),
+                target: BindingTarget::BusChannel(outer.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: NodeId::new(0),
+            },
+            frame,
+        );
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::Literal(LpValue::F32(3.25)),
+                target: BindingTarget::BusChannel(inner.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: NodeId::new(1),
+            },
+            frame,
+        );
 
-        let mut host = CountingHost::new(NodeId::new(99), path("noop"));
+        let mut host = CountingHost::new(NodeId::new(99), path("noop")).with_bindings(bindings);
         let mut session = ResolveSession::new(
             frame,
             &mut resolver,
-            &registry,
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let pv = session
@@ -437,7 +474,9 @@ mod tests {
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(3.25)));
     }
 
-    struct NoProduceHost;
+    struct NoProduceHost {
+        bindings: TestBindings,
+    }
 
     impl ResolveHost for NoProduceHost {
         fn produce(
@@ -449,45 +488,44 @@ mod tests {
                 "produce should not run in bus-only cycle test",
             ))
         }
+
+        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(channel)
+        }
     }
 
     #[test]
     fn bus_recursion_cycle_is_detected() {
         let mut resolver = Resolver::new();
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(4);
         let a = ch("loop_a");
         let b = ch("loop_b");
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::BusChannel(b.clone()),
-                    target: BindingTarget::BusChannel(a.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Amplitude,
-                    owner: NodeId::new(0),
-                },
-                frame,
-            )
-            .unwrap();
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::BusChannel(a.clone()),
-                    target: BindingTarget::BusChannel(b.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Amplitude,
-                    owner: NodeId::new(1),
-                },
-                frame,
-            )
-            .unwrap();
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::BusChannel(b.clone()),
+                target: BindingTarget::BusChannel(a.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: NodeId::new(0),
+            },
+            frame,
+        );
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::BusChannel(a.clone()),
+                target: BindingTarget::BusChannel(b.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: NodeId::new(1),
+            },
+            frame,
+        );
 
-        let mut host = NoProduceHost;
+        let mut host = NoProduceHost { bindings };
         let mut session = ResolveSession::new(
             frame,
             &mut resolver,
-            &registry,
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let err = session
@@ -498,6 +536,7 @@ mod tests {
 
     struct TraceHost {
         node: NodeId,
+        bindings: TestBindings,
     }
 
     impl ResolveHost for TraceHost {
@@ -519,35 +558,37 @@ mod tests {
                 _ => Err(SessionResolveError::other("trace host")),
             }
         }
+
+        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(channel)
+        }
     }
 
     #[test]
     fn trace_events_when_logging_basic() {
         let mut resolver = Resolver::new();
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(5);
         let bus = ch("out");
         let node = NodeId::new(3);
         let out = path("rgb");
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::ProducedSlot {
-                        node,
-                        slot: out.clone(),
-                    },
-                    target: BindingTarget::BusChannel(bus.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: node,
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::ProducedSlot {
+                    node,
+                    slot: out.clone(),
                 },
-                frame,
-            )
-            .unwrap();
+                target: BindingTarget::BusChannel(bus.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: node,
+            },
+            frame,
+        );
 
         let trace = ResolveTrace::new(ResolveLogLevel::Basic);
-        let mut host = TraceHost { node };
-        let mut session = ResolveSession::new(frame, &mut resolver, &registry, trace);
+        let mut host = TraceHost { node, bindings };
+        let mut session = ResolveSession::new(frame, &mut resolver, trace);
         session
             .resolve(&mut host, QueryKey::Bus(bus.clone()))
             .unwrap();

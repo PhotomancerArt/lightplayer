@@ -1,15 +1,17 @@
-//! Central **binding registry**: identity and metadata for edges between sources,
-//! node ports, and bus channels. Resolved values live in the engine resolver
-//! cache (later phases), not here.
+//! Runtime binding vocabulary for edges between produced slots, consumed slots,
+//! literals, and bus channels.
+//!
+//! Bindings are stored on node-tree entries. This module defines the data and
+//! validation errors, but it does not own binding lifecycle or allocate global
+//! binding ids.
 
 mod binding_entry;
 mod binding_error;
-mod binding_id;
-mod binding_registry;
+mod binding_set;
 
+pub(crate) use binding_entry::channels_touched;
 pub use binding_entry::{
-    BindingDraft, BindingEntry, BindingPriority, BindingSource, BindingTarget,
+    BindingDraft, BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
 pub use binding_error::BindingError;
-pub use binding_id::BindingId;
-pub use binding_registry::BindingRegistry;
+pub use binding_set::BindingSet;

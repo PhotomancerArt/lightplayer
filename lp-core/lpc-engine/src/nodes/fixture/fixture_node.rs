@@ -651,8 +651,7 @@ mod tests {
             .unwrap();
 
         engine
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::ProducedSlot {
                         node: sh_id,
@@ -670,8 +669,7 @@ mod tests {
             )
             .unwrap();
         engine
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
@@ -797,8 +795,7 @@ mod tests {
             )
             .unwrap();
         engine
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::ProducedSlot {
                         node: sh_id,
@@ -817,8 +814,7 @@ mod tests {
             .unwrap();
 
         engine
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {

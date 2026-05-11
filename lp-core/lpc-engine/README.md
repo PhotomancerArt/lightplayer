@@ -7,17 +7,18 @@ resolution, bindings, produced-slot access, and the boundary between
 shader/runtime values and portable model or wire values.
 
 **Runtime spine:** `engine::Engine` is the core runtime owner for the new
-demand-driven path. It owns the `NodeTree`, `BindingRegistry`, engine-level
-`Resolver`, artifact manager, frame state, and demand roots.
+demand-driven path. It owns the `NodeTree`, engine-level `Resolver`, artifact
+store, frame state, slot shape registry, runtime buffers, and demand roots.
 
-**Bindings and resolution:** `binding::BindingRegistry` owns binding identity,
-metadata, and discovery indexes. Bus names remain useful runtime vocabulary for
-labeled channels, but resolved values are cached by the engine resolver rather
-than by a bus object or `tree::NodeEntry`.
+**Bindings and resolution:** bindings are node-instance data stored on
+`node::NodeEntry` and indexed by `node::NodeTree`. Bus names remain useful
+runtime vocabulary for labeled channels, but resolved values are cached by the
+engine resolver rather than by a bus object.
 
 `resolver::Resolver` owns same-frame query cache state. `ResolveSession` is the
 active per-frame/per-demand object that resolves `QueryKey`s through the
-registry, calls a `ResolveHost` on cache misses, and carries a `ResolveTrace`.
+active `ResolveHost`, calls that host on cache misses, and carries a
+`ResolveTrace`.
 `ResolveTrace` combines cycle detection with optional structured trace events so
 tests and future diagnostics can explain value provenance.
 
@@ -31,16 +32,13 @@ Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
 `LpsType` and `ModelValue` / `ModelType`.
 
 **Produced values:** demand-driven resolution caches
-[`resolver::production::Production`]: a versioned [`runtime_product::RuntimeProduct`]
-(`Value` = carried `LpsValueF32`, `Render` = engine product handle, `Buffer` =
-runtime-buffer handle). Nodes expose produced values through
-[`prop::ProducedSlotAccess`]. The per-node
-[`resolver::resolved_slot::ResolvedSlot`] cascade remains on `LpsValueF32` for
-shader/wire compatibility while the runtime model moves toward generic slot
-products.
+[`resolver::production::Production`]: a versioned
+[`runtime_product::RuntimeProduct`] (`Value` = carried `LpsValueF32`, `Render` =
+engine product handle, `Buffer` = runtime-buffer handle). Nodes expose produced
+values through their runtime state slot roots.
 
 **Naming:** Prefer plain engine/runtime nouns when the crate already owns the
-concept (`Engine`, `ProjectRuntime`, `NodeTree`, `BindingRegistry`, `Resolver`).
+concept (`Engine`, `ProjectRuntime`, `NodeTree`, `Resolver`).
 Use an `Engine*` prefix only when ambiguity with another layer remains high.
 Conversion helpers should name both sides of the boundary (for example functions
 that mention `model_value` / `ModelType` vs `LpsValueF32` / `LpsType`).

@@ -149,8 +149,7 @@ mod tests {
     fn texture_tick_uses_bound_size_override() {
         let (mut engine, tid) = texture_engine(64, 48);
         engine
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::Literal(texture_size_value(7, 9)),
                     target: BindingTarget::ConsumedSlot {

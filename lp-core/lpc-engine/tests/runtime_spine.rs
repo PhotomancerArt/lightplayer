@@ -3,10 +3,11 @@
 extern crate alloc;
 
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use lpc_engine::node::NodeError;
 use lpc_engine::{
-    ArtifactLocation, ArtifactState, ArtifactStore, BindingDraft, BindingPriority, BindingRegistry,
+    ArtifactLocation, ArtifactState, ArtifactStore, BindingEntry, BindingPriority, BindingRef,
     BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveSession, ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickContext,
     TickResolver,
@@ -51,20 +52,15 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
 #[test]
 fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let channel = ChannelName(String::from("live"));
-    let mut registry = BindingRegistry::new();
     let frame = Revision::new(99);
-    registry
-        .register(
-            BindingDraft {
-                source: BindingSource::Literal(LpValue::F32(2.0)),
-                target: BindingTarget::BusChannel(channel.clone()),
-                priority: BindingPriority::new(0),
-                kind: Kind::Ratio,
-                owner: NodeId::new(1),
-            },
-            frame,
-        )
-        .unwrap();
+    let binding = BindingEntry {
+        source: BindingSource::Literal(LpValue::F32(2.0)),
+        target: BindingTarget::BusChannel(channel.clone()),
+        priority: BindingPriority::new(0),
+        kind: Kind::Ratio,
+        version: frame,
+        owner: NodeId::new(1),
+    };
 
     let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
 
@@ -81,11 +77,13 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let mut session = ResolveSession::new(
         frame,
         &mut resolver,
-        &registry,
         ResolveTrace::new(ResolveLogLevel::Off),
     );
 
-    struct NoProduceHost;
+    struct NoProduceHost {
+        channel: ChannelName,
+        binding: BindingEntry,
+    }
 
     impl ResolveHost for NoProduceHost {
         fn produce(
@@ -95,9 +93,20 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         ) -> Result<Production, SessionResolveError> {
             Err(SessionResolveError::other("unexpected produce"))
         }
+
+        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+            if channel == &self.channel {
+                Vec::from([(BindingRef::new(self.binding.owner, 0), self.binding.clone())])
+            } else {
+                Vec::new()
+            }
+        }
     }
 
-    let mut host = NoProduceHost;
+    let mut host = NoProduceHost {
+        channel: channel.clone(),
+        binding,
+    };
     let slot_shapes = lpc_model::SlotShapeRegistry::default();
     let mut node = TickProbeNode {
         query: QueryKey::Bus(channel),

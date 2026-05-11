@@ -2,12 +2,25 @@ use alloc::vec::Vec;
 
 use lpc_model::{ChannelName, Kind, LpValue, NodeId, Revision, SlotPath};
 
-use super::BindingId;
+/// Stable address of a binding owned by a node entry.
+///
+/// Bindings are node-instance data, so their identity is local to the owning
+/// node rather than allocated from a separate registry.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct BindingRef {
+    pub owner: NodeId,
+    pub index: usize,
+}
 
-/// One registered binding: identity, endpoints, priority, kind, and version.
+impl BindingRef {
+    pub fn new(owner: NodeId, index: usize) -> Self {
+        Self { owner, index }
+    }
+}
+
+/// One registered binding: endpoints, priority, kind, and revision.
 #[derive(Clone, Debug)]
 pub struct BindingEntry {
-    pub id: BindingId,
     pub source: BindingSource,
     pub target: BindingTarget,
     pub priority: BindingPriority,
@@ -16,8 +29,7 @@ pub struct BindingEntry {
     pub owner: NodeId,
 }
 
-/// Input to [`crate::binding::BindingRegistry::register`]: all fields of a
-/// [`BindingEntry`] except assigned id and version (the frame sets version).
+/// Authored binding data before it is stored on its owner node.
 #[derive(Clone, Debug)]
 pub struct BindingDraft {
     pub source: BindingSource,

@@ -2,6 +2,7 @@
 
 use alloc::string::String;
 
+use crate::binding::BindingError;
 use crate::node::NodeError;
 use crate::node::TreeError;
 use crate::resolver::SessionResolveError;
@@ -11,6 +12,7 @@ use lpc_model::NodeId;
 #[derive(Debug)]
 pub enum EngineError {
     Tree(TreeError),
+    Binding(BindingError),
     Node {
         node: NodeId,
         message: String,
@@ -34,6 +36,12 @@ impl From<TreeError> for EngineError {
     }
 }
 
+impl From<BindingError> for EngineError {
+    fn from(value: BindingError) -> Self {
+        Self::Binding(value)
+    }
+}
+
 impl From<SessionResolveError> for EngineError {
     fn from(value: SessionResolveError) -> Self {
         Self::Resolve(value)
@@ -44,6 +52,7 @@ impl core::fmt::Display for EngineError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Tree(e) => write!(f, "{e:?}"),
+            Self::Binding(e) => write!(f, "{e}"),
             Self::Node { node, message } => write!(f, "node {node:?}: {message}"),
             Self::Resolve(e) => write!(f, "{e}"),
             Self::UnknownNode(id) => write!(f, "unknown node {id:?}"),

@@ -409,8 +409,7 @@ mod output_sink_flush_tests {
             )
             .unwrap();
         rt.engine_mut()
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::ProducedSlot {
                         node: sh_id,
@@ -429,8 +428,7 @@ mod output_sink_flush_tests {
             .unwrap();
 
         rt.engine_mut()
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
@@ -591,8 +589,7 @@ mod output_sink_flush_tests {
             )
             .unwrap();
         rt.engine_mut()
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::ProducedSlot {
                         node: sh_id,
@@ -611,8 +608,7 @@ mod output_sink_flush_tests {
             .unwrap();
 
         rt.engine_mut()
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {
@@ -761,8 +757,7 @@ mod output_sink_flush_tests {
             )
             .unwrap();
         rt.engine_mut()
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::ProducedSlot {
                         node: sh_id,
@@ -781,8 +776,7 @@ mod output_sink_flush_tests {
             .unwrap();
 
         rt.engine_mut()
-            .bindings_mut()
-            .register(
+            .add_binding(
                 BindingDraft {
                     source: BindingSource::Literal(LpValue::F32(0.0)),
                     target: BindingTarget::ConsumedSlot {

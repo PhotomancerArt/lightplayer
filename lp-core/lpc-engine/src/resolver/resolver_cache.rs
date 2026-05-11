@@ -49,7 +49,7 @@ impl ResolverCache {
 #[cfg(test)]
 mod tests {
     use super::{Production, QueryKey, ResolverCache};
-    use crate::binding::BindingId;
+    use crate::binding::BindingRef;
     use crate::resolver::production::ProductionSource;
     use crate::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
     use lpc_model::ChannelName;
@@ -78,7 +78,7 @@ mod tests {
         let pv = make_produced(
             1,
             ProductionSource::BusBinding {
-                binding: BindingId::new(0),
+                binding: BindingRef::new(NodeId::new(0), 0),
             },
         );
 
@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(
             got.source,
             ProductionSource::BusBinding {
-                binding: BindingId::new(0),
+                binding: BindingRef::new(NodeId::new(0), 0),
             }
         );
 

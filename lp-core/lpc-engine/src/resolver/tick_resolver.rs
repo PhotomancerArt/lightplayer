@@ -28,7 +28,7 @@ pub trait TickResolver {
 
 /// Bridges [`ResolveSession`] + [`ResolveHost`] into a [`TickResolver`].
 ///
-/// `'resolver` is the session's resolver/registry borrow ([`ResolveSession`]'s lifetime parameter).
+/// `'resolver` is the session's resolver borrow ([`ResolveSession`]'s lifetime parameter).
 /// `'sess` is the borrow of that session from the caller (often shorter); splitting them avoids
 /// invariant `'sess == 'resolver` churn when constructing from `&mut ResolveSession<'resolver>`.
 pub struct SessionHostResolver<'sess, 'resolver, 'host> {

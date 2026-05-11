@@ -7,6 +7,7 @@ use lpc_model::{ArtifactLocator, NodeId, NodeInvocation, Revision, TreePath, Wit
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
+use crate::binding::BindingSet;
 use crate::node::node_entry_state::NodeEntryState;
 
 use super::NodeDefHandle;
@@ -27,6 +28,7 @@ pub struct NodeEntry<N> {
 
     pub status: WithRevision<WireNodeStatus>,
     pub state: WithRevision<NodeEntryState<N>>,
+    pub bindings: WithRevision<BindingSet>,
 
     pub created_at: Revision,
 
@@ -83,6 +85,7 @@ impl<N> NodeEntry<N> {
             children: WithRevision::new(revision, Vec::new()),
             status: WithRevision::new(revision, WireNodeStatus::Created),
             state: WithRevision::new(revision, NodeEntryState::Pending),
+            bindings: WithRevision::new(revision, BindingSet::new()),
             created_at: revision,
             config,
             def_handle,

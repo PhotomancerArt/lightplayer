@@ -1,6 +1,6 @@
 //! Active query stack (correctness) plus optional structured resolver events.
 
-use crate::binding::BindingId;
+use crate::binding::BindingRef;
 use crate::resolver::query_key::QueryKey;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -21,11 +21,18 @@ pub enum ResolveLogLevel {
 pub enum ResolveTraceEvent {
     BeginQuery(QueryKey),
     CacheHit(QueryKey),
-    SelectBinding { query: QueryKey, binding: BindingId },
+    SelectBinding {
+        query: QueryKey,
+        binding: BindingRef,
+    },
     ProduceStart(QueryKey),
     ProduceEnd(QueryKey),
-    CycleDetected { query: QueryKey },
-    ResolveError { query: QueryKey },
+    CycleDetected {
+        query: QueryKey,
+    },
+    ResolveError {
+        query: QueryKey,
+    },
 }
 
 /// [`ResolveTraceError`] returns from [`ResolveTrace::enter`] on invalid re-entry.
@@ -180,7 +187,7 @@ impl ResolveTrace {
 #[cfg(test)]
 mod tests {
     use super::{ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard};
-    use crate::binding::BindingId;
+    use crate::binding::BindingRef;
     use crate::resolver::query_key::QueryKey;
     use lpc_model::NodeId;
     use lpc_model::SlotPath;
@@ -244,7 +251,7 @@ mod tests {
             g.record_event(ResolveTraceEvent::CacheHit(q.clone()));
             g.record_event(ResolveTraceEvent::SelectBinding {
                 query: q.clone(),
-                binding: BindingId::new(1),
+                binding: BindingRef::new(NodeId::new(1), 0),
             });
         }
         let ev = t.events();
@@ -259,7 +266,7 @@ mod tests {
         );
         assert!(ev.iter().any(|e| matches!(
             e,
-            ResolveTraceEvent::SelectBinding { query: k, binding } if k == &q && *binding == BindingId::new(1)
+            ResolveTraceEvent::SelectBinding { query: k, binding } if k == &q && *binding == BindingRef::new(NodeId::new(1), 0)
         )));
     }
 

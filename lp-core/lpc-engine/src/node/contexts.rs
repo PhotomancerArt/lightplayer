@@ -344,7 +344,7 @@ impl<'a> MemPressureCtx<'a> {
 mod tests {
     use super::*;
     use crate::binding::{
-        BindingDraft, BindingPriority, BindingRegistry, BindingSource, BindingTarget,
+        BindingDraft, BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
     };
     use crate::node::NodeRuntime;
     use crate::resolver::resolve_trace::ResolveLogLevel;
@@ -353,10 +353,63 @@ mod tests {
         SessionHostResolver, TickResolver,
     };
     use alloc::string::String;
+    use alloc::vec::Vec;
     use lpc_model::Kind;
     use lpc_model::{SlotPath, SlotShapeRegistry};
 
-    struct PanicProduceHost;
+    #[derive(Default)]
+    struct TestBindings {
+        entries: Vec<(BindingRef, BindingEntry)>,
+    }
+
+    impl TestBindings {
+        fn add(&mut self, draft: BindingDraft, revision: Revision) {
+            let binding_ref = BindingRef::new(draft.owner, self.entries.len());
+            self.entries.push((
+                binding_ref,
+                BindingEntry {
+                    source: draft.source,
+                    target: draft.target,
+                    priority: draft.priority,
+                    kind: draft.kind,
+                    version: revision,
+                    owner: draft.owner,
+                },
+            ));
+        }
+
+        fn binding_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Option<(BindingRef, BindingEntry)> {
+            self.entries.iter().find_map(|(binding_ref, entry)| {
+                matches!(
+                    &entry.target,
+                    BindingTarget::ConsumedSlot { node: n, slot: p } if *n == node && p == slot
+                )
+                .then(|| (*binding_ref, entry.clone()))
+            })
+        }
+
+        fn providers_for_bus(
+            &self,
+            channel: &lpc_model::ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.entries
+                .iter()
+                .filter_map(|(binding_ref, entry)| {
+                    matches!(&entry.target, BindingTarget::BusChannel(c) if c == channel)
+                        .then(|| (*binding_ref, entry.clone()))
+                })
+                .collect()
+        }
+    }
+
+    #[derive(Default)]
+    struct PanicProduceHost {
+        bindings: TestBindings,
+    }
 
     impl ResolveHost for PanicProduceHost {
         fn produce(
@@ -368,28 +421,33 @@ mod tests {
                 "unexpected produce in TickContext test",
             ))
         }
+
+        fn binding_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Option<(BindingRef, BindingEntry)> {
+            self.bindings.binding_for_consumed_slot(node, slot)
+        }
+
+        fn providers_for_bus(
+            &self,
+            channel: &lpc_model::ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(channel)
+        }
     }
 
-    fn session_bundle<'a>(
-        resolver: &'a mut Resolver,
-        registry: &'a BindingRegistry,
-        frame: Revision,
-    ) -> ResolveSession<'a> {
-        ResolveSession::new(
-            frame,
-            resolver,
-            registry,
-            ResolveTrace::new(ResolveLogLevel::Off),
-        )
+    fn session_bundle(resolver: &mut Resolver, frame: Revision) -> ResolveSession<'_> {
+        ResolveSession::new(frame, resolver, ResolveTrace::new(ResolveLogLevel::Off))
     }
 
     #[test]
     fn tick_context_accessors() {
-        let registry = BindingRegistry::new();
         let mut resolver = Resolver::new();
         let frame = Revision::new(10);
-        let mut session = session_bundle(&mut resolver, &registry, frame);
-        let mut host = PanicProduceHost;
+        let mut session = session_bundle(&mut resolver, frame);
+        let mut host = PanicProduceHost::default();
         let slot_shapes = SlotShapeRegistry::default();
         let artifact_ref = ArtifactId::from_raw(1);
 
@@ -414,25 +472,23 @@ mod tests {
 
     #[test]
     fn tick_context_resolve_bus_query() {
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(10);
         let channel = lpc_model::ChannelName(String::from("level_bus"));
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::Literal(lpc_model::LpValue::F32(7.8)),
-                    target: BindingTarget::BusChannel(channel.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: lpc_model::Kind::Amplitude,
-                    owner: NodeId::new(1),
-                },
-                frame,
-            )
-            .expect("register");
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::Literal(lpc_model::LpValue::F32(7.8)),
+                target: BindingTarget::BusChannel(channel.clone()),
+                priority: BindingPriority::new(0),
+                kind: lpc_model::Kind::Amplitude,
+                owner: NodeId::new(1),
+            },
+            frame,
+        );
 
         let mut resolver = Resolver::new();
-        let mut session = session_bundle(&mut resolver, &registry, frame);
-        let mut host = PanicProduceHost;
+        let mut session = session_bundle(&mut resolver, frame);
+        let mut host = PanicProduceHost { bindings };
         let slot_shapes = SlotShapeRegistry::default();
         let mut bridge = SessionHostResolver {
             session: &mut session,
@@ -454,29 +510,27 @@ mod tests {
 
     #[test]
     fn tick_context_resolve_consumed_slot_query() {
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(10);
         let node = NodeId::new(3);
         let input = SlotPath::parse("in").unwrap();
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::Literal(lpc_model::LpValue::F32(4.25)),
-                    target: BindingTarget::ConsumedSlot {
-                        node,
-                        slot: input.clone(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Amplitude,
-                    owner: node,
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::Literal(lpc_model::LpValue::F32(4.25)),
+                target: BindingTarget::ConsumedSlot {
+                    node,
+                    slot: input.clone(),
                 },
-                frame,
-            )
-            .expect("register");
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: node,
+            },
+            frame,
+        );
 
         let mut resolver = Resolver::new();
-        let mut session = session_bundle(&mut resolver, &registry, frame);
-        let mut host = PanicProduceHost;
+        let mut session = session_bundle(&mut resolver, frame);
+        let mut host = PanicProduceHost { bindings };
         let slot_shapes = SlotShapeRegistry::default();
         let mut bridge = SessionHostResolver {
             session: &mut session,
@@ -502,11 +556,10 @@ mod tests {
 
     #[test]
     fn tick_context_artifact_changed_since_compares_content_frame() {
-        let registry = BindingRegistry::new();
         let mut resolver = Resolver::new();
         let frame = Revision::new(10);
-        let mut session = session_bundle(&mut resolver, &registry, frame);
-        let mut host = PanicProduceHost;
+        let mut session = session_bundle(&mut resolver, frame);
+        let mut host = PanicProduceHost::default();
         let slot_shapes = SlotShapeRegistry::default();
 
         let mut bridge = SessionHostResolver {
@@ -589,25 +642,23 @@ mod tests {
 
     #[test]
     fn dummy_node_can_resolve_bus_query_from_tick() {
-        let mut registry = BindingRegistry::new();
+        let mut bindings = TestBindings::default();
         let frame = Revision::new(10);
         let channel = lpc_model::ChannelName(String::from("in"));
-        registry
-            .register(
-                BindingDraft {
-                    source: BindingSource::Literal(lpc_model::LpValue::F32(8.8)),
-                    target: BindingTarget::BusChannel(channel.clone()),
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Amplitude,
-                    owner: NodeId::new(2),
-                },
-                frame,
-            )
-            .expect("register");
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::Literal(lpc_model::LpValue::F32(8.8)),
+                target: BindingTarget::BusChannel(channel.clone()),
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: NodeId::new(2),
+            },
+            frame,
+        );
 
         let mut resolver = Resolver::new();
-        let mut session = session_bundle(&mut resolver, &registry, frame);
-        let mut host = PanicProduceHost;
+        let mut session = session_bundle(&mut resolver, frame);
+        let mut host = PanicProduceHost { bindings };
         let slot_shapes = SlotShapeRegistry::default();
 
         let mut node = QueryResolvingNode {
@@ -634,13 +685,12 @@ mod tests {
 
     #[test]
     fn dummy_node_can_resolve_consumed_slot_via_host_from_tick() {
-        let registry = BindingRegistry::new();
         let frame = Revision::new(10);
         let node_id = NodeId::new(2);
         let input_path = SlotPath::parse("fixture_in").unwrap();
 
         let mut resolver = Resolver::new();
-        let mut session = session_bundle(&mut resolver, &registry, frame);
+        let mut session = session_bundle(&mut resolver, frame);
         let mut host = FixtureProduceHost {
             node: node_id,
             out_path: input_path.clone(),

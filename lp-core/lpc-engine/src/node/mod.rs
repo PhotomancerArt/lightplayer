@@ -2,6 +2,7 @@
 //! Legacy runtimes live in [`crate::nodes`].
 
 mod contexts;
+mod node_binding_index;
 mod node_call;
 mod node_def_handle;
 pub mod node_entry;

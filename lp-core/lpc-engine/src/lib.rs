@@ -34,7 +34,7 @@ pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactState, ArtifactStore,
 };
 pub use binding::{
-    BindingDraft, BindingEntry, BindingError, BindingId, BindingPriority, BindingRegistry,
+    BindingDraft, BindingEntry, BindingError, BindingPriority, BindingRef, BindingSet,
     BindingSource, BindingTarget,
 };
 pub use bus::{Bus, BusError, ChannelEntry};

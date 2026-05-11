@@ -292,8 +292,7 @@ impl CoreProjectLoader {
                     })?;
                 runtime
                     .engine_mut()
-                    .bindings_mut()
-                    .register(
+                    .add_binding(
                         BindingDraft {
                             source: BindingSource::Literal(LpValue::F32(0.0)),
                             target: BindingTarget::ConsumedSlot {
@@ -507,8 +506,7 @@ fn register_source_binding(
             reason: format!("invalid target slot `{slot_name}`: {e}"),
         })?;
     engine
-        .bindings_mut()
-        .register(
+        .add_binding(
             BindingDraft {
                 source,
                 target: BindingTarget::ConsumedSlot {
@@ -546,8 +544,7 @@ fn register_target_binding(
             reason: format!("invalid source slot `{slot_name}`: {e}"),
         })?;
     engine
-        .bindings_mut()
-        .register(
+        .add_binding(
             BindingDraft {
                 source: BindingSource::ProducedSlot {
                     node: current.id,

@@ -12,7 +12,7 @@ use lpc_model::{
 };
 
 use crate::artifact::{ArtifactState, ArtifactStore};
-use crate::binding::{BindingRegistry, BindingTarget};
+use crate::binding::{BindingDraft, BindingError, BindingRef};
 use crate::gfx::LpGraphics;
 use crate::node::{
     NodeCall, NodeCallKey, NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
@@ -51,7 +51,6 @@ pub struct Engine {
     revision: Revision,
     frame_time: FrameTime,
     tree: NodeTree<Box<dyn NodeRuntime>>,
-    bindings: BindingRegistry,
     resolver: Resolver,
     slot_shapes: SlotShapeRegistry,
     runtime_buffers: RuntimeBufferStore,
@@ -71,7 +70,6 @@ impl Engine {
             revision,
             frame_time: FrameTime::zero(),
             tree: NodeTree::new(root_path, revision),
-            bindings: BindingRegistry::new(),
             resolver: Resolver::new(),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
@@ -99,14 +97,6 @@ impl Engine {
 
     pub fn tree_mut(&mut self) -> &mut NodeTree<Box<dyn NodeRuntime>> {
         &mut self.tree
-    }
-
-    pub fn bindings(&self) -> &BindingRegistry {
-        &self.bindings
-    }
-
-    pub fn bindings_mut(&mut self) -> &mut BindingRegistry {
-        &mut self.bindings
     }
 
     pub fn resolver(&self) -> &Resolver {
@@ -147,6 +137,14 @@ impl Engine {
 
     pub fn add_demand_root(&mut self, node: NodeId) {
         self.demand_roots.push(node);
+    }
+
+    pub fn add_binding(
+        &mut self,
+        draft: BindingDraft,
+        revision: Revision,
+    ) -> Result<BindingRef, BindingError> {
+        self.tree.add_binding(draft, revision)
     }
 
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
@@ -207,7 +205,7 @@ impl Engine {
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
-        let mut session = EngineSession::new(self.revision, &mut resolver, &self.bindings, trace);
+        let mut session = EngineSession::new(self.revision, &mut resolver, trace);
 
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
@@ -264,15 +262,7 @@ impl Engine {
     }
 
     fn consumed_slot_is_bound(&self, node: NodeId, slot: &SlotPath) -> bool {
-        self.bindings.iter().any(|e| {
-            matches!(
-                &e.target,
-                BindingTarget::ConsumedSlot {
-                    node: n,
-                    slot: p,
-                } if *n == node && p == slot
-            )
-        })
+        self.tree.binding_for_consumed_slot(node, slot).is_some()
     }
 }
 
@@ -445,6 +435,27 @@ impl ResolveHost for EngineResolveHost<'_> {
                 "engine host cannot satisfy bus query",
             )),
         }
+    }
+
+    fn binding_for_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Option<(BindingRef, crate::binding::BindingEntry)> {
+        self.tree
+            .binding_for_consumed_slot(node, slot)
+            .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+    }
+
+    fn providers_for_bus(
+        &self,
+        channel: &lpc_model::ChannelName,
+    ) -> Vec<(BindingRef, crate::binding::BindingEntry)> {
+        self.tree
+            .providers_for_bus(channel)
+            .into_iter()
+            .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+            .collect()
     }
 
     fn render_texture(
@@ -742,12 +753,7 @@ pub(crate) fn resolve_with_engine_host(
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
-    let mut session = EngineSession::new(
-        fid,
-        &mut resolver_tmp,
-        &eng.bindings,
-        ResolveTrace::new(log_level),
-    );
+    let mut session = EngineSession::new(fid, &mut resolver_tmp, ResolveTrace::new(log_level));
     let mut producers_ticked = BTreeSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let mut host = EngineResolveHost {
@@ -777,7 +783,6 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let mut session = EngineSession::new(
         fid,
         &mut resolver_tmp,
-        &eng.bindings,
         ResolveTrace::new(ResolveLogLevel::Off),
     );
     let mut producers_ticked = BTreeSet::new();
@@ -815,11 +820,11 @@ mod tests {
     use crate::runtime_product::RuntimeProduct;
 
     #[test]
-    fn engine_new_has_frame_state_and_empty_registry_resolver_tree_root() {
+    fn engine_new_has_frame_state_empty_bindings_resolver_and_tree_root() {
         let eng = Engine::new(TreePath::parse("/show.t").expect("path"));
         assert_eq!(eng.revision(), Revision::default());
         assert_eq!(eng.frame_time(), FrameTime::zero());
-        assert!(eng.bindings().iter().next().is_none());
+        assert!(eng.tree().bindings().next().is_none());
         assert!(eng.resolver().cache().is_empty());
         assert_eq!(eng.tree().len(), 1);
     }
@@ -982,14 +987,14 @@ mod tests {
     }
 
     #[test]
-    fn binding_registry_versions_are_available_for_debug_list() {
+    fn node_tree_binding_versions_are_available_for_debug_list() {
         let h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.5))
             .fixture("fixture")
             .bind_bus("video", produced_slot("shader", "outputs[0]"))
             .bind_demand_input("fixture", bus("video"))
             .build();
-        let versions: Vec<_> = h.engine.bindings().iter().map(|e| e.version).collect();
+        let versions: Vec<_> = h.engine.tree().bindings().map(|e| e.version).collect();
 
         assert_eq!(versions, alloc::vec![Revision::new(1), Revision::new(1)]);
     }

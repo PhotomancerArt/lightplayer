@@ -1,6 +1,6 @@
 //! Resolved value plus production provenance for the engine cache.
 
-use crate::binding::BindingId;
+use crate::binding::BindingRef;
 use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
 use lpc_model::{NodeId, SlotPath, WithRevision};
 use lps_shared::LpsValueF32;
@@ -37,13 +37,13 @@ pub enum ProductionSource {
     Literal,
     Default,
     ProducedSlot { node: NodeId, slot: SlotPath },
-    BusBinding { binding: BindingId },
+    BusBinding { binding: BindingRef },
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Production, ProductionSource};
-    use crate::binding::BindingId;
+    use crate::binding::BindingRef;
     use crate::runtime_product::{RuntimeProduct, RuntimeProductError};
     use lpc_model::NodeId;
     use lpc_model::Revision;
@@ -96,14 +96,14 @@ mod tests {
         let pv2 = Production::value(
             WithRevision::new(Revision::new(1), LpsValueF32::F32(2.0)),
             ProductionSource::BusBinding {
-                binding: BindingId::new(4),
+                binding: BindingRef::new(NodeId::new(4), 0),
             },
         )
         .expect("production");
         assert_eq!(
             pv2.source,
             ProductionSource::BusBinding {
-                binding: BindingId::new(4),
+                binding: BindingRef::new(NodeId::new(4), 0),
             }
         );
         assert!(matches!(pv2.product.get(), RuntimeProduct::Value(_)));

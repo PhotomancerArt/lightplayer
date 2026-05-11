@@ -1,17 +1,14 @@
 use core::fmt;
 
-use lpc_model::{ChannelName, Kind};
+use lpc_model::{ChannelName, Kind, NodeId};
 
-use super::BindingId;
 use super::BindingPriority;
 
-/// Errors from [`crate::binding::BindingRegistry`] operations.
+/// Errors from validating node-owned runtime bindings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BindingError {
-    /// The registry exhausted its non-zero `u32` id space.
-    IdExhausted,
-    /// No binding with this id (e.g. unregister).
-    UnknownBinding { id: BindingId },
+    /// Binding owner does not exist in the node tree.
+    UnknownOwner { owner: NodeId },
     /// Another binding on the same channel already uses a different [`Kind`].
     KindMismatch {
         channel: ChannelName,
@@ -28,8 +25,7 @@ pub enum BindingError {
 impl fmt::Display for BindingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IdExhausted => f.write_str("binding id space exhausted"),
-            Self::UnknownBinding { id } => write!(f, "unknown binding id {id}"),
+            Self::UnknownOwner { owner } => write!(f, "unknown binding owner {owner:?}"),
             Self::KindMismatch {
                 channel,
                 established,
