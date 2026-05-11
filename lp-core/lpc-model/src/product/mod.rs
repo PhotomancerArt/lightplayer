@@ -5,10 +5,8 @@
 //! target. Resources are different: they are registry-owned payload objects with
 //! ids, summaries, and optional byte payload sync.
 
-pub mod control_product;
 pub mod product_ref;
-pub mod visual_product;
 
-pub use control_product::{ControlExtent, ControlProduct};
+pub use crate::products::control::{ControlExtent, ControlProduct};
+pub use crate::products::visual::VisualProduct;
 pub use product_ref::{ProductKind, ProductRef};
-pub use visual_product::VisualProduct;

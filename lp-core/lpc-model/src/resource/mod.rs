@@ -7,8 +7,7 @@
 
 pub mod resource_domain;
 pub mod resource_ref;
-pub mod runtime_buffer_id;
 
+pub use crate::resources::buffer::RuntimeBufferId;
 pub use resource_domain::ResourceDomain;
 pub use resource_ref::ResourceRef;
-pub use runtime_buffer_id::RuntimeBufferId;

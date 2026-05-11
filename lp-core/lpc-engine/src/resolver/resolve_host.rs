@@ -1,15 +1,15 @@
 //! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::ProducedSlot`] (and
 //! unbound [`crate::resolver::QueryKey::ConsumedSlot`]) production.
 
-use crate::control_product::{
+use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::SessionResolveError;
 use crate::resolver::resolve_session::ResolveSession;
-use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
-use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 use alloc::vec::Vec;
 use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 

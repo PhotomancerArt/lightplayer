@@ -7,13 +7,13 @@ use alloc::sync::Arc;
 
 use crate::artifact::ArtifactId;
 use crate::bus::Bus;
-use crate::control_product::{
+use crate::gfx::LpGraphics;
+use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
-use crate::gfx::LpGraphics;
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
-use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
-use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
     FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
     bus::ChannelName,
@@ -293,7 +293,7 @@ impl<'a> ControlRenderContext<'a> {
     }
 }
 
-/// Services available while materializing a [`crate::control_product::ControlProduct`].
+/// Services available while materializing a [`crate::products::control::ControlProduct`].
 pub trait ControlRenderServices {
     fn render_texture(
         &mut self,

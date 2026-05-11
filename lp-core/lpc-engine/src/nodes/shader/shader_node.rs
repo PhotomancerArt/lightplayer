@@ -16,7 +16,7 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
     TickContext,
 };
-use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -304,9 +304,9 @@ mod tests {
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     use crate::nodes::TextureNode;
+    use crate::products::visual::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
     use crate::resolver::QueryKey;
     use crate::resolver::ResolveLogLevel;
-    use crate::visual_product::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
     use lpc_model::{
         ArtifactLocator, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
         TextureDef, TreePath,
@@ -437,7 +437,7 @@ mod tests {
         let texture = engine
             .render_texture_for_test(
                 rid,
-                &crate::visual_product::RenderTextureRequest {
+                &crate::products::visual::RenderTextureRequest {
                     width: 8,
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,

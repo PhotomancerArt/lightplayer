@@ -20,7 +20,7 @@ impl RuntimeBufferId {
 
 #[cfg(test)]
 mod tests {
-    use crate::resource::runtime_buffer_id::RuntimeBufferId;
+    use crate::resources::buffer::RuntimeBufferId;
 
     #[test]
     fn runtime_buffer_id_round_trips_raw() {

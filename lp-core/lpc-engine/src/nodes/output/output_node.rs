@@ -5,13 +5,13 @@ use alloc::vec::Vec;
 
 use lpc_model::{Revision, SlotPath, WithRevision};
 
-use crate::control_product::{ControlRenderRequest, ControlRenderTarget, ControlSampleFormat};
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
     TickContext,
 };
+use crate::products::control::{ControlRenderRequest, ControlRenderTarget, ControlSampleFormat};
 use crate::resolver::QueryKey;
-use crate::runtime_buffer::{
+use crate::resource::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
     RuntimeChannelSampleFormat,
 };

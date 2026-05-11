@@ -20,20 +20,20 @@ use crate::nodes::fixture::mapping::{
 use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 
-use crate::control_product::{
-    ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
-    ControlSpan,
-};
 use crate::node::{
     ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError,
     NodeResourceInitContext, NodeRuntime, PressureLevel, TickContext,
 };
-use crate::resolver::QueryKey;
-use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
-use crate::visual_product::{
+use crate::products::control::{
+    ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
+    ControlSpan,
+};
+use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSample, VisualSampleBatch,
     VisualSamplePoint,
 };
+use crate::resolver::QueryKey;
+use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
 pub struct FixtureNode {
@@ -496,7 +496,7 @@ mod tests {
     use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
-    use crate::visual_product::{TextureRenderProduct, VisualProduct};
+    use crate::products::visual::{TextureRenderProduct, VisualProduct};
     use lpc_model::{
         ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
     };

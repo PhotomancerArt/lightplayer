@@ -1,6 +1,6 @@
 //! Optional runtime capability for nodes that can materialize control products.
 
-use crate::control_product::{
+use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 

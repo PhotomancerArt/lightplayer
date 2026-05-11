@@ -172,7 +172,7 @@ mod tests {
     use alloc::vec;
 
     use super::{TextureRenderProduct, TextureRenderProductError};
-    use crate::visual_product::{VisualSampleBatch, VisualSamplePoint};
+    use crate::products::visual::{VisualSampleBatch, VisualSamplePoint};
 
     fn pixel_rgba16(r: u16, g: u16, b: u16, a: u16) -> [u8; 8] {
         let mut out = [0u8; 8];

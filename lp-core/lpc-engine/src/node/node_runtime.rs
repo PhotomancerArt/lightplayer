@@ -1,6 +1,6 @@
 //! Engine spine [`NodeRuntime`] trait: tick, destroy, memory pressure, and runtime state.
 
-use crate::runtime_buffer::RuntimeBufferId;
+use crate::resource::RuntimeBufferId;
 use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};

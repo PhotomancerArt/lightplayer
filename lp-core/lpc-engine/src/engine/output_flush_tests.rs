@@ -14,8 +14,8 @@ use crate::node::{
 use crate::nodes::{
     FixtureNode, OutputNode, fixture_input_path, output_input_path, shader_output_path,
 };
-use crate::runtime_buffer::RuntimeBufferId;
-use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::resource::RuntimeBufferId;
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{

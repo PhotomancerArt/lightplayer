@@ -18,19 +18,19 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::{ArtifactState, ArtifactStore};
 use crate::binding::{BindingDraft, BindingError, BindingRef};
-use crate::control_product::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::gfx::LpGraphics;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
     NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
 };
 use crate::node::{NodeEntryState, NodeTree};
+use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
-use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
-use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
 use super::{EngineError, EngineServices};
 use super::{FrameNum, FrameTime};
@@ -552,9 +552,9 @@ impl ResolveHost for EngineResolveHost<'_> {
 
     fn runtime_buffer_mut(
         &mut self,
-        id: crate::runtime_buffer::RuntimeBufferId,
+        id: crate::resource::RuntimeBufferId,
         frame: Revision,
-    ) -> Result<&mut crate::runtime_buffer::RuntimeBuffer, SessionResolveError> {
+    ) -> Result<&mut crate::resource::RuntimeBuffer, SessionResolveError> {
         self.runtime_buffers
             .get_mut_mark_updated(id, frame)
             .map_err(|e| SessionResolveError::other(format!("runtime buffer mut: {e:?}")))
@@ -986,8 +986,8 @@ mod tests {
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
-    use crate::runtime_buffer::RuntimeBuffer;
-    use crate::visual_product::VisualProduct;
+    use crate::products::visual::VisualProduct;
+    use crate::resource::RuntimeBuffer;
 
     #[test]
     fn engine_new_has_frame_state_empty_bindings_resolver_and_tree_root() {

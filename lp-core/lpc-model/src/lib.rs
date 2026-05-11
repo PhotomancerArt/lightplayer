@@ -41,8 +41,10 @@ pub mod slot_views {
 pub mod artifact;
 pub mod nodes;
 pub mod product;
+pub mod products;
 pub mod project;
 pub mod resource;
+pub mod resources;
 pub mod server;
 pub mod slots;
 pub mod sync;

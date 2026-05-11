@@ -1,7 +1,7 @@
 //! Narrow IO/service surface owned by [`super::Engine`].
 //!
 //! Carries project identity, optional [`OutputProvider`] plumbing, and registered
-//! output sinks (fixture-pushed [`crate::runtime_buffer::RuntimeBuffer`] → flush).
+//! output sinks (fixture-pushed [`crate::resource::RuntimeBuffer`] → flush).
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -14,7 +14,7 @@ use lpc_model::{Revision, TreePath};
 use lpc_shared::error::OutputError;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 
-use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
+use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
 /// Per-sink channel state for [`EngineServices`] output flushing.
 #[derive(Debug)]
@@ -77,7 +77,7 @@ impl EngineServices {
     /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush writes
     /// them through [`OutputProvider`] for `config`'s GPIO pin.
     ///
-    /// Insert the backing [`crate::runtime_buffer::RuntimeBuffer`] with
+    /// Insert the backing [`crate::resource::RuntimeBuffer`] with
     /// [`WithRevision::new`](lpc_model::WithRevision::new)([`Revision::default`], …)
     /// so untouched sinks do not match the post-tick revision until the fixture mutates them.
     pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
@@ -257,7 +257,7 @@ mod tests {
     };
 
     use super::EngineServices;
-    use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferStore};
+    use crate::resource::{RuntimeBuffer, RuntimeBufferStore};
 
     #[test]
     fn engine_services_drop_closes_open_output_channels() {

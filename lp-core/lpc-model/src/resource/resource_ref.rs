@@ -1,5 +1,5 @@
 use crate::resource::resource_domain::ResourceDomain;
-use crate::resource::runtime_buffer_id::RuntimeBufferId;
+use crate::resources::buffer::RuntimeBufferId;
 
 /// Stable resource reference: domain plus raw id (no generation).
 ///
@@ -27,7 +27,7 @@ impl ResourceRef {
 mod tests {
     use crate::resource::resource_domain::ResourceDomain;
     use crate::resource::resource_ref::ResourceRef;
-    use crate::resource::runtime_buffer_id::RuntimeBufferId;
+    use crate::resources::buffer::RuntimeBufferId;
 
     #[test]
     fn resource_ref_covers_runtime_buffer() {

@@ -99,7 +99,7 @@ mod tests {
     use lpc_model::{Revision, WithRevision};
 
     use super::{RuntimeBufferError, RuntimeBufferStore};
-    use crate::runtime_buffer::{
+    use crate::resource::{
         RuntimeBuffer, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
         RuntimeTextureFormat,
     };

@@ -5,8 +5,8 @@ use alloc::string::String;
 
 use lpc_model::{NodeId, SlotPath};
 
-use crate::control_product::ControlProduct;
-use crate::visual_product::VisualProduct;
+use crate::products::control::ControlProduct;
+use crate::products::visual::VisualProduct;
 
 /// A kind of engine-dispatched call into a runtime node.
 #[derive(Clone, Debug, PartialEq, Eq)]
