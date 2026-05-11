@@ -3,7 +3,7 @@ name = "lp-riscv-tools"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license = "Apache-2.0 WITH LLVM-exception"
+license.workspace = true
 description = "RISC-V 32-bit emulator and instruction utilities for Light Player (DEPRECATED - use lp-riscv-inst, lp-riscv-emu, lp-riscv-elf)"
 
 [lints]
@@ -26,4 +26,3 @@ target-lexicon = "0.13"
 [[example]]
 name = "simple_codegen"
 required-features = ["std"]
-
