@@ -1,7 +1,6 @@
 //! Test message types for USB serial testing
 //!
-//! Defines command and response types for test protocol using external
-//! discriminators compatible with serde-json-core.
+//! Defines command and response types for the serial test protocol.
 
 extern crate alloc;
 

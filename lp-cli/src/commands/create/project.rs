@@ -11,8 +11,7 @@ use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
-    Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, RelativeNodeRef, RelativeNodeRefSlot,
-    RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
+    Dim2uSlot, MapSlot, OptionSlot, RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -159,6 +158,7 @@ vec4 render(vec2 pos) {
     // Create output node
     let output_config = OutputDef {
         pin: ValueSlot::new(4),
+        bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
     };
     let output_toml = with_kind(
@@ -170,12 +170,11 @@ vec4 render(vec2 pos) {
 
     // Create fixture node
     let fixture_config = FixtureDef {
-        output_loc: RelativeNodeRefSlot::new(
-            RelativeNodeRef::parse("..output").expect("valid node ref"),
-        ),
-        bindings: texture_input_binding_defs(
-            RelativeNodeRef::parse("..texture").expect("valid node ref"),
-        ),
+        render_size: Dim2uSlot::new(Dim2u {
+            width: 16,
+            height: 16,
+        }),
+        bindings: fixture_binding_defs(),
         mapping: MappingConfig::path_points(MapSlot::default(), 2.0),
         color_order: ValueSlot::new(ColorOrder::Rgb),
         transform: Affine2dSlot::new(Affine2d::identity()),
@@ -237,14 +236,21 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     )
 }
 
-fn texture_input_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
-    single_binding_defs(
-        "input",
-        BindingDef::source(BindingEndpoint::Node(NodeSlotRef::new(
-            texture_loc,
-            SlotPath::parse("output").expect("valid texture output slot"),
+fn fixture_binding_defs() -> BindingDefs {
+    let mut entries = std::collections::BTreeMap::new();
+    entries.insert(
+        String::from("input"),
+        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse("visual.out").expect("valid visual bus slot"),
         ))),
-    )
+    );
+    entries.insert(
+        String::from("output"),
+        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse("control.out").expect("valid control bus slot"),
+        ))),
+    );
+    BindingDefs::new(entries)
 }
 
 fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {

@@ -9,7 +9,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{ClientMessage, TransportError};
 
 /// Fake transport that can simulate client messages
 ///

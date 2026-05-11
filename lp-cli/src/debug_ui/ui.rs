@@ -38,11 +38,9 @@ impl eframe::App for DebugUiState {
             ui.separator();
             ui.label(format!("Project handle: {}", self.project_handle.id()));
             if let Ok(view) = self.project_view.lock() {
-                ui.label(format!("Cached nodes: {}", view.nodes.len()));
-                ui.label(format!(
-                    "Watched slot roots: {}",
-                    view.slot_watch_roots.len()
-                ));
+                ui.label(format!("Cached nodes: {}", view.tree.nodes.len()));
+                ui.label(format!("Slot roots: {}", view.slots.roots.len()));
+                ui.label(format!("Shape roots: {}", view.slots.root_shapes.len()));
             }
         });
     }

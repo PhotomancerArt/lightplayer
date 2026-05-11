@@ -11,7 +11,7 @@ use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{ClientMessage, TransportError};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 

@@ -10,7 +10,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, json, message::ClientMessage};
+use lpc_wire::{ClientMessage, TransportError, json};
 
 use crate::serial::io_task;
 

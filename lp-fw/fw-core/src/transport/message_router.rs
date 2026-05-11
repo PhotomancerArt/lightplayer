@@ -10,7 +10,7 @@ use alloc::format;
 use crate::message_router::MessageRouter;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, json, message::ClientMessage};
+use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Transport implementation using MessageRouter
 ///

@@ -196,22 +196,11 @@ mod tests {
         assert!(json.contains("key")); // Plain text in JSON
         assert!(!json.contains("eyJrZXkiOiAidmFsdWUifQ")); // Not base64
 
-        // Verify round-trip serialization
-        // Note: serde-json-core may escape strings differently, so we check that
-        // the data round-trips correctly even if the exact bytes differ
         let deserialized: FsResponse = crate::json::from_str(&json).unwrap();
         match deserialized {
             FsResponse::Read { path, data, error } => {
                 assert_eq!(path.as_str(), "/test.txt");
-                // The data should round-trip, but may have different escaping
-                // Check that it's valid UTF-8 and contains the expected content
-                if let Some(ref data_bytes) = data {
-                    let data_str = core::str::from_utf8(data_bytes).expect("Should be valid UTF-8");
-                    assert!(data_str.contains("key"));
-                    assert!(data_str.contains("value"));
-                } else {
-                    panic!("Expected Some(data)");
-                }
+                assert_eq!(data, Some(original_data));
                 assert_eq!(error, None);
             }
             _ => panic!("Wrong variant"),
@@ -291,12 +280,6 @@ mod tests {
         // Serialize the request
         let request_json = crate::json::to_string(&req).expect("Failed to serialize FsRequest");
 
-        // The issue: when serialize_smart serializes the bytes as a JSON string,
-        // JSON escapes the quotes. So {"uid":"test"} becomes "{\"uid\":\"test\"}" in JSON.
-        // When deserializing, JSON should unescape it back to {"uid":"test"}.
-        // But if serde_json_core doesn't unescape properly, we get {\"uid\":\"test\"} with literal backslashes.
-
-        // Verify round-trip: deserialize the request
         let deserialized: FsRequest =
             crate::json::from_str(&request_json).expect("Failed to deserialize FsRequest");
 
@@ -393,12 +376,8 @@ mod tests {
             _ => panic!("Wrong variant"),
         }
 
-        // Conclusion:
-        // - The escaping is CORRECT and REQUIRED by JSON specification
-        // - Any compliant JSON parser will unescape it correctly
-        // - The previous issue was that serde_json_core::from_slice doesn't unescape,
-        //   but from_slice_escaped does (which we're now using)
-        // - This should work fine with other systems that use standard JSON parsers
+        // Conclusion: quoted data inside a JSON string is normal JSON escaping,
+        // and the standard parser restores the original bytes on deserialize.
     }
 
     #[test]

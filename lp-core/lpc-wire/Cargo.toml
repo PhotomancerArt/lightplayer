@@ -18,13 +18,12 @@ base64 = { workspace = true }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-source = { path = "../lpc-source", default-features = false }
 serde = { workspace = true, features = ["derive"] }
-serde-json-core = { version = "0.6", default-features = false, features = ["custom-error-messages"] }
+serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 lpc-model = { path = "../lpc-model", default-features = false }
-serde_json = { workspace = true }
 toml = { workspace = true }
 
 [lints]

@@ -17,7 +17,7 @@ use crate::serial::SerialIo;
 use log;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, json, message::ClientMessage};
+use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Serial transport implementation
 ///
