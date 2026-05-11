@@ -1,6 +1,6 @@
 //! Bidirectional message envelope.
 
-use super::client::ClientMessage;
+use crate::message::client::ClientMessage;
 use crate::server::ServerMsgBody as ServerMessagePayload;
 use serde::{Deserialize, Serialize};
 

@@ -1,11 +1,9 @@
 //! Engine↔client message envelope and payloads.
 
-mod client;
-mod envelope;
 pub mod project_read;
 
-pub use client::{ClientMessage, ClientRequest};
-pub use envelope::{Message, NoDomain, ServerMessage};
+pub use crate::message::client::{ClientMessage, ClientRequest};
+pub use crate::message::envelope::{Message, NoDomain, ServerMessage};
 pub use project_read::{
     ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery, NodeReadResult,
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
