@@ -264,7 +264,7 @@ fn accumulate_fixture_channels_from_texture_product(
         ));
     }
 
-    let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
+    let batch = uv_batch_for_fixture_entries(mapping_entries, width);
     let sample_result = texture.sample_batch(&batch);
     accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
@@ -272,7 +272,6 @@ fn accumulate_fixture_channels_from_texture_product(
 fn uv_batch_for_fixture_entries(
     entries: &[PixelMappingEntry],
     texture_width: u32,
-    texture_height: u32,
 ) -> VisualSampleBatch {
     let mut points = Vec::new();
     let mut pixel_index = 0_u32;
@@ -285,9 +284,7 @@ fn uv_batch_for_fixture_entries(
 
         let x = pixel_index % texture_width;
         let y = pixel_index / texture_width;
-        let u = x as f32 / texture_width.max(1) as f32;
-        let v = y as f32 / texture_height.max(1) as f32;
-        points.push(VisualSamplePoint { x: u, y: v });
+        points.push(VisualSamplePoint { x, y });
 
         if !entry.has_more() {
             pixel_index = pixel_index.saturating_add(1);
@@ -298,7 +295,7 @@ fn uv_batch_for_fixture_entries(
 }
 
 /// Match legacy [`crate::nodes::fixture::mapping::accumulation`] channel math but source
-/// pixel RGB from normalized [`VisualSample`] colors (converted to legacy u8 like RGBA16 >> 8).
+/// pixel RGB from [`VisualSample`] unorm16 colors (converted to legacy u8 like RGBA16 >> 8).
 fn accumulate_fixture_channels_from_texture_samples(
     entries: &[PixelMappingEntry],
     sample_colors: &[VisualSample],
@@ -320,9 +317,9 @@ fn accumulate_fixture_channels_from_texture_samples(
             .ok_or_else(|| NodeError::msg("fixture sample count did not match mapping entries"))?;
         sample_index += 1;
 
-        let pixel_r = legacy_u8_from_unorm_render_sample(s.color[0]);
-        let pixel_g = legacy_u8_from_unorm_render_sample(s.color[1]);
-        let pixel_b = legacy_u8_from_unorm_render_sample(s.color[2]);
+        let pixel_r = legacy_u8_from_unorm16_sample(s.rgba_unorm16[0]);
+        let pixel_g = legacy_u8_from_unorm16_sample(s.rgba_unorm16[1]);
+        let pixel_b = legacy_u8_from_unorm16_sample(s.rgba_unorm16[2]);
 
         let channel = entry.channel() as usize;
 
@@ -356,9 +353,8 @@ fn accumulate_fixture_channels_from_texture_samples(
     Ok(accumulators)
 }
 
-fn legacy_u8_from_unorm_render_sample(c: f32) -> u8 {
-    let u = libm::floorf(c * 65535.0f32 + 0.5f32).max(0.0).min(65535.0) as u16;
-    (u >> 8) as u8
+fn legacy_u8_from_unorm16_sample(c: u16) -> u8 {
+    (c >> 8) as u8
 }
 
 fn render_fixture_control_target(
@@ -508,7 +504,7 @@ mod tests {
     struct FixtureTickCountSolidProducer {
         state: ShaderState,
         ticks: Arc<AtomicU32>,
-        color: [f32; 4],
+        color: [u16; 4],
     }
 
     impl NodeRuntime for FixtureTickCountSolidProducer {
@@ -563,7 +559,7 @@ mod tests {
         width: u32,
         height: u32,
         format: lps_shared::TextureStorageFormat,
-        color: [f32; 4],
+        color: [u16; 4],
     ) -> Result<TextureRenderProduct, NodeError> {
         let mut pixels = alloc::vec::Vec::new();
         let px_count = usize::try_from(width)
@@ -574,19 +570,16 @@ mod tests {
             match format {
                 lps_shared::TextureStorageFormat::Rgba16Unorm => {
                     for c in color {
-                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
-                        pixels.extend_from_slice(&v.to_le_bytes());
+                        pixels.extend_from_slice(&c.to_le_bytes());
                     }
                 }
                 lps_shared::TextureStorageFormat::Rgb16Unorm => {
                     for c in [color[0], color[1], color[2]] {
-                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
-                        pixels.extend_from_slice(&v.to_le_bytes());
+                        pixels.extend_from_slice(&c.to_le_bytes());
                     }
                 }
                 lps_shared::TextureStorageFormat::R16Unorm => {
-                    let v = (color[0].clamp(0.0, 1.0) * 65535.0).round() as u16;
-                    pixels.extend_from_slice(&v.to_le_bytes());
+                    pixels.extend_from_slice(&color[0].to_le_bytes());
                 }
             }
         }
@@ -696,7 +689,7 @@ mod tests {
                 Box::new(FixtureTickCountSolidProducer {
                     state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    color: [1.0, 0.0, 0.0, 1.0],
+                    color: [u16::MAX, 0, 0, u16::MAX],
                 }),
                 frame,
             )
@@ -827,7 +820,7 @@ mod tests {
                 Box::new(FixtureTickCountSolidProducer {
                     state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    color: [1.0, 0.0, 0.0, 1.0],
+                    color: [u16::MAX, 0, 0, u16::MAX],
                 }),
                 frame,
             )

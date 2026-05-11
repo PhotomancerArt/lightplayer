@@ -20,8 +20,8 @@ mod tests {
     fn sample_batch_holds_points_and_results_hold_samples() {
         let batch = VisualSampleBatch {
             points: vec![
-                VisualSamplePoint { x: 0.0, y: 0.0 },
-                VisualSamplePoint { x: 1.0, y: 1.0 },
+                VisualSamplePoint { x: 0, y: 0 },
+                VisualSamplePoint { x: 1, y: 1 },
             ],
         };
         assert_eq!(batch.points.len(), 2);
@@ -29,14 +29,14 @@ mod tests {
         let result = VisualSampleBatchResult {
             samples: vec![
                 VisualSample {
-                    color: [1.0, 0.0, 0.0, 1.0],
+                    rgba_unorm16: [u16::MAX, 0, 0, u16::MAX],
                 },
                 VisualSample {
-                    color: [0.0, 1.0, 0.0, 1.0],
+                    rgba_unorm16: [0, u16::MAX, 0, u16::MAX],
                 },
             ],
         };
         assert_eq!(result.samples.len(), 2);
-        assert_eq!(result.samples[0].color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(result.samples[0].rgba_unorm16, [u16::MAX, 0, 0, u16::MAX]);
     }
 }

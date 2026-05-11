@@ -2,11 +2,11 @@
 
 use alloc::vec::Vec;
 
-/// Normalized or surface-space sample coordinate; exact interpretation is product-defined.
+/// Integer texel coordinate in the materialized visual surface.
 #[derive(Debug, Clone)]
 pub struct VisualSamplePoint {
-    pub x: f32,
-    pub y: f32,
+    pub x: u32,
+    pub y: u32,
 }
 
 #[derive(Debug, Clone)]

@@ -203,7 +203,7 @@ mod output_sink_flush_tests {
     struct SolidFixtureProducer {
         state: ShaderState,
         ticks: Arc<AtomicU32>,
-        color: [f32; 4],
+        color: [u16; 4],
     }
 
     impl NodeRuntime for SolidFixtureProducer {
@@ -258,7 +258,7 @@ mod output_sink_flush_tests {
         width: u32,
         height: u32,
         format: lps_shared::TextureStorageFormat,
-        color: [f32; 4],
+        color: [u16; 4],
     ) -> Result<TextureRenderProduct, NodeError> {
         let mut pixels = alloc::vec::Vec::new();
         let px_count = usize::try_from(width)
@@ -269,19 +269,16 @@ mod output_sink_flush_tests {
             match format {
                 lps_shared::TextureStorageFormat::Rgba16Unorm => {
                     for c in color {
-                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
-                        pixels.extend_from_slice(&v.to_le_bytes());
+                        pixels.extend_from_slice(&c.to_le_bytes());
                     }
                 }
                 lps_shared::TextureStorageFormat::Rgb16Unorm => {
                     for c in [color[0], color[1], color[2]] {
-                        let v = (c.clamp(0.0, 1.0) * 65535.0).round() as u16;
-                        pixels.extend_from_slice(&v.to_le_bytes());
+                        pixels.extend_from_slice(&c.to_le_bytes());
                     }
                 }
                 lps_shared::TextureStorageFormat::R16Unorm => {
-                    let v = (color[0].clamp(0.0, 1.0) * 65535.0).round() as u16;
-                    pixels.extend_from_slice(&v.to_le_bytes());
+                    pixels.extend_from_slice(&color[0].to_le_bytes());
                 }
             }
         }
@@ -500,7 +497,7 @@ mod output_sink_flush_tests {
                 Box::new(SolidFixtureProducer {
                     state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    color: [1.0, 0.0, 0.0, 1.0],
+                    color: [u16::MAX, 0, 0, u16::MAX],
                 }),
                 frame,
             )
@@ -615,7 +612,7 @@ mod output_sink_flush_tests {
                 Box::new(SolidFixtureProducer {
                     state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    color: [1.0, 0.0, 0.0, 1.0],
+                    color: [u16::MAX, 0, 0, u16::MAX],
                 }),
                 frame,
             )
@@ -745,7 +742,7 @@ mod output_sink_flush_tests {
                 Box::new(SolidFixtureProducer {
                     state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
-                    color: [0.0, 1.0, 0.0, 1.0],
+                    color: [0, u16::MAX, 0, u16::MAX],
                 }),
                 frame,
             )

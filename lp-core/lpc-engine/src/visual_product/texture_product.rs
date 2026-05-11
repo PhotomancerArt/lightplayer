@@ -34,8 +34,8 @@ impl core::error::Error for TextureRenderProductError {}
 
 /// Texture-backed visual product with private byte storage (no `LpsTextureBuf` in the public API).
 ///
-/// Sample coordinates in [`VisualSampleBatch`] are interpreted as normalized UV in \[0, 1\]×\[0, 1\]
-/// with nearest-neighbor filtering and clamp-to-edge behavior.
+/// Sample coordinates in [`VisualSampleBatch`] are interpreted as integer texels with
+/// clamp-to-edge behavior.
 #[derive(Debug, Clone)]
 pub struct TextureRenderProduct {
     width: u32,
@@ -109,28 +109,21 @@ impl TextureRenderProduct {
     pub fn sample_batch(&self, request: &VisualSampleBatch) -> VisualSampleBatchResult {
         let mut samples = alloc::vec::Vec::with_capacity(request.points.len());
         for p in &request.points {
-            let (tx, ty) = uv_to_texel(p.x, p.y, self.width, self.height);
+            let (tx, ty) = clamp_texel(p.x, p.y, self.width, self.height);
             let color = sample_texel(&self.pixels, self.width, self.format, tx, ty);
-            samples.push(VisualSample { color });
+            samples.push(VisualSample {
+                rgba_unorm16: color,
+            });
         }
         VisualSampleBatchResult { samples }
     }
 }
 
-fn uv_to_texel(u: f32, v: f32, width: u32, height: u32) -> (u32, u32) {
-    let sx = if width <= 1 {
-        0
-    } else {
-        let x = libm::floorf(u * width as f32) as i64;
-        x.clamp(0, i64::from(width - 1)) as u32
-    };
-    let sy = if height <= 1 {
-        0
-    } else {
-        let y = libm::floorf(v * height as f32) as i64;
-        y.clamp(0, i64::from(height - 1)) as u32
-    };
-    (sx, sy)
+fn clamp_texel(x: u32, y: u32, width: u32, height: u32) -> (u32, u32) {
+    (
+        x.min(width.saturating_sub(1)),
+        y.min(height.saturating_sub(1)),
+    )
 }
 
 fn sample_texel(
@@ -139,7 +132,7 @@ fn sample_texel(
     format: TextureStorageFormat,
     x: u32,
     y: u32,
-) -> [f32; 4] {
+) -> [u16; 4] {
     let bpp = format.bytes_per_pixel();
     let stride = width as usize * bpp;
     let offset = y as usize * stride + x as usize * bpp;
@@ -147,42 +140,31 @@ fn sample_texel(
     match format {
         TextureStorageFormat::Rgba16Unorm => {
             if slice.len() < 8 {
-                return [0.0; 4];
+                return [0; 4];
             }
             let r = u16::from_le_bytes([slice[0], slice[1]]);
             let g = u16::from_le_bytes([slice[2], slice[3]]);
             let b = u16::from_le_bytes([slice[4], slice[5]]);
             let a = u16::from_le_bytes([slice[6], slice[7]]);
-            [
-                unorm16_to_f32(r),
-                unorm16_to_f32(g),
-                unorm16_to_f32(b),
-                unorm16_to_f32(a),
-            ]
+            [r, g, b, a]
         }
         TextureStorageFormat::Rgb16Unorm => {
             if slice.len() < 6 {
-                return [0.0; 4];
+                return [0; 4];
             }
             let r = u16::from_le_bytes([slice[0], slice[1]]);
             let g = u16::from_le_bytes([slice[2], slice[3]]);
             let b = u16::from_le_bytes([slice[4], slice[5]]);
-            [unorm16_to_f32(r), unorm16_to_f32(g), unorm16_to_f32(b), 1.0]
+            [r, g, b, u16::MAX]
         }
         TextureStorageFormat::R16Unorm => {
             if slice.len() < 2 {
-                return [0.0; 4];
+                return [0; 4];
             }
             let r = u16::from_le_bytes([slice[0], slice[1]]);
-            let v = unorm16_to_f32(r);
-            [v, v, v, 1.0]
+            [r, r, r, u16::MAX]
         }
     }
-}
-
-#[inline]
-fn unorm16_to_f32(x: u16) -> f32 {
-    f32::from(x) * (1.0 / 65535.0)
 }
 
 #[cfg(test)]
@@ -221,25 +203,18 @@ mod tests {
 
         let batch = VisualSampleBatch {
             points: vec![
-                VisualSamplePoint { x: 0.0, y: 0.0 },
-                VisualSamplePoint { x: 0.999, y: 0.0 },
-                VisualSamplePoint { x: 0.0, y: 0.999 },
-                VisualSamplePoint { x: 0.999, y: 0.999 },
+                VisualSamplePoint { x: 0, y: 0 },
+                VisualSamplePoint { x: 1, y: 0 },
+                VisualSamplePoint { x: 0, y: 1 },
+                VisualSamplePoint { x: 1, y: 1 },
             ],
         };
         let out = tex.sample_batch(&batch);
         assert_eq!(out.samples.len(), 4);
-        assert!(approx_eq(out.samples[0].color, [1.0, 0.0, 0.0, 1.0]));
-        assert!(approx_eq(out.samples[1].color, [0.0, 1.0, 0.0, 1.0]));
-        assert!(approx_eq(out.samples[2].color, [0.0, 0.0, 1.0, 1.0]));
-        assert!(approx_eq(out.samples[3].color, [1.0, 1.0, 1.0, 1.0]));
-    }
-
-    fn approx_eq(a: [f32; 4], b: [f32; 4]) -> bool {
-        const EPS: f32 = 1e-4;
-        a.iter()
-            .zip(b.iter())
-            .all(|(x, y)| libm::fabsf(*x - *y) < EPS)
+        assert_eq!(out.samples[0].rgba_unorm16, [65535, 0, 0, 65535]);
+        assert_eq!(out.samples[1].rgba_unorm16, [0, 65535, 0, 65535]);
+        assert_eq!(out.samples[2].rgba_unorm16, [0, 0, 65535, 65535]);
+        assert_eq!(out.samples[3].rgba_unorm16, [65535, 65535, 65535, 65535]);
     }
 
     #[test]

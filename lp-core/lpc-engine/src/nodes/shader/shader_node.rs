@@ -444,10 +444,10 @@ mod tests {
             )
             .expect("render texture");
         let batch = VisualSampleBatch {
-            points: vec![VisualSamplePoint { x: 0.5, y: 0.5 }],
+            points: vec![VisualSamplePoint { x: 4, y: 4 }],
         };
         let sample = texture.sample_batch(&batch);
-        assert!(sample.samples[0].color[0] > 0.4);
-        assert!(sample.samples[0].color[0] < 0.6);
+        assert!(sample.samples[0].rgba_unorm16[0] > 26_000);
+        assert!(sample.samples[0].rgba_unorm16[0] < 40_000);
     }
 }
