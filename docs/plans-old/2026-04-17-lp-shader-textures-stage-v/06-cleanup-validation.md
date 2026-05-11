@@ -34,9 +34,9 @@ phase is the M2.0 closeout.
 
 ### 2. Roadmap sync
 
-- [`docs/roadmaps/2026-04-16-lp-shader-textures/overview.md`](../../roadmaps/2026-04-16-lp-shader-textures/overview.md):
+- [`docs/roadmaps/2026-04-16-lp-shader-textures/overview.md`](../../roadmaps-old/2026-04-16-lp-shader-textures/overview.md):
   mark M2.0 as ✅ complete; link to this stage's plan dir.
-- [`docs/roadmaps/2026-04-16-lp-shader-textures/m2-render-frame.md`](../../roadmaps/2026-04-16-lp-shader-textures/m2-render-frame.md):
+- [`docs/roadmaps/2026-04-16-lp-shader-textures/m2-render-frame.md`](../../roadmaps-old/2026-04-16-lp-shader-textures/m2-render-frame.md):
   add an "Implemented in" footer pointing at this plan dir.
 - Verify M3 (texture *reads*) and M4 (consumer migration) plan
   files reference the M2.0 deliverables correctly. No code

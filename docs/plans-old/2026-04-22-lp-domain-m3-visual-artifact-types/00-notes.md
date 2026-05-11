@@ -1,6 +1,6 @@
 # M3 — Visual artifact types + canonical examples + TOML grammar — notes
 
-Roadmap milestone: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md).
+Roadmap milestone: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps-old/2026-04-22-lp-domain/m3-visual-artifact-types.md).
 
 Authoritative design refs that this plan implements:
 

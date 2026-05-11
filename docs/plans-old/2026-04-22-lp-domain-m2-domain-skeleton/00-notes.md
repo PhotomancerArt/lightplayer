@@ -15,7 +15,7 @@ Authoritative design references this milestone implements:
   recipes for `Color`, `ColorPalette`, `Gradient`.
 - [`docs/design/q32.md`](../../design/q32.md) — Q16.16 fallback
   (relevant for storage discussions; F32-only in v0).
-- [`docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md`](../../roadmaps/2026-04-22-lp-domain/notes-quantity.md)
+- [`docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md`](../../roadmaps-old/2026-04-22-lp-domain/notes-quantity.md)
   — historical Q&A trail (Q1–Q9) that produced the design above.
 
 ## Scope of work

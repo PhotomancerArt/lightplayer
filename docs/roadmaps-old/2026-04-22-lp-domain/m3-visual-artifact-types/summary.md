@@ -1,7 +1,7 @@
 # M3 — Visual artifact types + canonical examples + TOML grammar — summary
 
-Roadmap: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps-old/2026-04-22-lp-domain/m3-visual-artifact-types.md)  
-Plan: this directory. Design + working notes: [`00-design.md`](./00-design.md), [`00-notes.md`](./00-notes.md).
+Roadmap: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md)  
+Plan: this directory. Design + working notes: [`00-design.md`](00-design.md), [`00-notes.md`](00-notes.md).
 
 ### What was built
 
@@ -97,7 +97,7 @@ Plan: this directory. Design + working notes: [`00-design.md`](./00-design.md), 
 
 ## Deferred to later milestones
 
-- `Live` `[selection]` and richer switching — deferred (see [`00-design.md`](./00-design.md)); Live stays barebones.
+- `Live` `[selection]` and richer switching — deferred (see [`00-design.md`](00-design.md)); Live stays barebones.
 - Per-entry `Playlist` transition overrides — deferred; single default `transition` for v1.
 - Cross-artifact resolution, binding-key parsing / validation — artifact-resolution / binding work.
 - Further audio/signal Kinds — add when an example needs them.

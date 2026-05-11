@@ -1,6 +1,6 @@
 # Phase 10 — Round-trip + schema-drift integration tests
 
-> Read [`00-notes.md`](./00-notes.md) and [`00-design.md`](./00-design.md)
+> Read [`00-notes.md`](00-notes.md) and [`00-design.md`](00-design.md)
 > before starting.
 >
 > **Depends on:** Phases 08 (loader) and 09 (corpus) merged.
@@ -23,7 +23,7 @@ Two paired assertions per example file:
    `JsonSchema` drift, which would otherwise only show up as
    bad editor completions.
 
-Reference: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps-old/2026-04-22-lp-domain/m3-visual-artifact-types.md)
+Reference: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md)
 "Round-trip tests".
 
 **In scope:**

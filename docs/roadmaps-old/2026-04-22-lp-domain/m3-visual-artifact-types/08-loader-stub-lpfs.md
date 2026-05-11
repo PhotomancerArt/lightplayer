@@ -1,6 +1,6 @@
 # Phase 08 — `LpFs`-based artifact loader stub
 
-> Read [`00-notes.md`](./00-notes.md) and [`00-design.md`](./00-design.md)
+> Read [`00-notes.md`](00-notes.md) and [`00-design.md`](00-design.md)
 > before starting.
 >
 > **Depends on:** Phase 07 merged. `cargo test -p lp-domain` passing.
@@ -17,7 +17,7 @@ generic loader entry point that reads a TOML file via the
 `lpfs::LpFs` trait, deserializes it into a typed Visual struct, and
 materializes any `ValueSpec` defaults via `LoadCtx`.
 
-Reference: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps-old/2026-04-22-lp-domain/m3-visual-artifact-types.md)
+Reference: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md)
 "LpFs-based loader stub". Loader file conventions follow
 [`docs/design/lpfx/overview.md`](../../design/lpfx/overview.md).
 

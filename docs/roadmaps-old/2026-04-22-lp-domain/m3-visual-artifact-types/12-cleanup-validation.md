@@ -1,6 +1,6 @@
 # Phase 12 — Final cleanup, workspace validation, summary
 
-> Read [`00-notes.md`](./00-notes.md) and [`00-design.md`](./00-design.md)
+> Read [`00-notes.md`](00-notes.md) and [`00-design.md`](00-design.md)
 > before starting.
 >
 > **Depends on:** every prior phase (01–11) merged. This is the
@@ -196,7 +196,7 @@ any extra evidence the actual implementation produced.
 ```markdown
 # M3 — Visual artifact types + canonical examples + TOML grammar — summary
 
-Roadmap: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps-old/2026-04-22-lp-domain/m3-visual-artifact-types.md)
+Roadmap: [`docs/roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md`](../../roadmaps/2026-04-22-lp-domain/m3-visual-artifact-types.md)
 Plan dir: this directory.
 
 ## What shipped

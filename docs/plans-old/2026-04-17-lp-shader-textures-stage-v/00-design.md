@@ -21,7 +21,7 @@ Three changes happen together:
    so the public type is monomorphic and `LpsEngine::compile_px`
    stops leaking `<E::Module>` to callers.
 
-Closes M2.0 in [`docs/roadmaps/2026-04-16-lp-shader-textures/m2-render-frame.md`](../../roadmaps/2026-04-16-lp-shader-textures/m2-render-frame.md).
+Closes M2.0 in [`docs/roadmaps/2026-04-16-lp-shader-textures/m2-render-frame.md`](../../roadmaps-old/2026-04-16-lp-shader-textures/m2-render-frame.md).
 
 ## Background
 
