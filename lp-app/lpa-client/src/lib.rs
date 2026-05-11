@@ -14,7 +14,7 @@ pub mod transport_serial;
 pub mod transport_ws;
 
 // Re-export main types
-pub use client::{LpClient, ProjectGetChangesOptions};
+pub use client::LpClient;
 pub use local::{
     AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,
 };

@@ -1,16 +1,14 @@
 //! Wire-visible project request / node status types.
 
+use super::ProjectReadRequest;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// Project-scoped request from client.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WireProjectRequest {
-    /// Project sync is intentionally disabled between M2.2 demolition and M3 canonical sync.
-    ///
-    /// TODO(M3 canonical project sync): replace this placeholder with the slot-first project
-    /// sync request vocabulary.
-    SyncDisabled,
+    /// Stateless project read.
+    Read(ProjectReadRequest),
 }
 
 /// Node lifecycle / health status on the wire.
@@ -34,8 +32,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wire_project_sync_is_disabled_until_canonical_sync() {
-        let request = WireProjectRequest::SyncDisabled;
+    fn wire_project_read_round_trips() {
+        let request = WireProjectRequest::Read(ProjectReadRequest::default_debug(None));
         let json = crate::json::to_string(&request).unwrap();
         let decoded: WireProjectRequest = crate::json::from_str(&json).unwrap();
         assert_eq!(decoded, request);

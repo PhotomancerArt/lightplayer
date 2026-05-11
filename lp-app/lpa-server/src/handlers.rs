@@ -5,7 +5,7 @@ extern crate alloc;
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
 use crate::server::MemoryStatsFn;
-use alloc::{format, rc::Rc, string::String, sync::Arc, vec::Vec};
+use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::LpGraphics;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
@@ -171,15 +171,15 @@ fn handle_project_request(
     request: lpc_wire::WireProjectRequest,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
-    let _project = project_manager
+    let project = project_manager
         .get_project_mut(handle)
         .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
     let _ = theoretical_fps;
 
     match request {
-        lpc_wire::WireProjectRequest::SyncDisabled => Err(ServerError::Core(String::from(
-            "project sync is disabled until M3 canonical project sync",
-        ))),
+        lpc_wire::WireProjectRequest::Read(request) => Ok(ServerMessagePayload::ProjectRequest {
+            response: project.engine().read_project(request),
+        }),
     }
 }
 

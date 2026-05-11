@@ -19,10 +19,7 @@ use crate::node::{NodeEntry, NodeTree};
 /// the initial sync to work correctly even though root is created at frame 0.
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
-pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTreeDelta>
-where
-    N: Clone,
-{
+pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
     let mut deltas = Vec::new();
 
     // First pass: collect all live entries
@@ -80,9 +77,7 @@ fn collect_created_deltas<N>(
     id: lpc_model::NodeId,
     since: Revision,
     deltas: &mut Vec<WireTreeDelta>,
-) where
-    N: Clone,
-{
+) {
     if let Some(entry) = tree.get(id) {
         let include = since.0 == 0 || entry.created_at.0 > since.0;
         if include {

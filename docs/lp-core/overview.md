@@ -25,6 +25,8 @@ to hardware or protocol writes.
 - [Resources](resources.md) are registry-owned runtime objects referenced by id.
 - [Products](products.md) are lazy graph values that can be materialized on
   demand.
+- [Probes](probes.md) are explicit, request-scoped diagnostics over runtime
+  values, products, and systems.
 
 ## Why This Shape
 

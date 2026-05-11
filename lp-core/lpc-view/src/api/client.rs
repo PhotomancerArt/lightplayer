@@ -1,5 +1,8 @@
-/// Client API trait shell retained until canonical project sync is rebuilt.
+/// Client API trait shell for stateless project reads.
 pub trait ClientApi {
-    /// Project sync is intentionally unavailable until M3/M4 canonical sync/view rebuild.
-    fn project_sync_disabled(&self) -> Result<(), alloc::string::String>;
+    /// Request a stateless project read.
+    fn project_read(
+        &self,
+        request: lpc_wire::ProjectReadRequest,
+    ) -> Result<lpc_wire::ProjectReadResponse, alloc::string::String>;
 }

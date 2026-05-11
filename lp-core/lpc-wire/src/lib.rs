@@ -19,11 +19,15 @@ pub mod tree;
 
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
 pub use project::{
-    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireChannelSampleFormat,
-    WireColorLayout, WireNodeSlotRoot, WireNodeStatus, WireProjectHandle, WireProjectRequest,
+    ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery, NodeReadResult,
+    NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
+    ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation, WireChannelSampleFormat,
+    WireColorLayout, WireNodeStatus, WireProjectHandle, WireProjectRequest,
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
-    WireRuntimeBufferPayload, WireSlotRootKind, WireSlotWatchSpecifier, WireTextureFormat,
+    WireRuntimeBufferPayload, WireTextureFormat,
 };
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
@@ -38,9 +42,9 @@ pub use slot::{
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
-/// Temporary project-response-free message envelope used between M2.2 demolition and M3 sync.
-pub type WireMessage = Message<NoDomain>;
-/// Temporary project-response-free server message used between M2.2 demolition and M3 sync.
-pub type WireServerMessage = ServerMessage<NoDomain>;
-/// Temporary project-response-free server message body used between M2.2 demolition and M3 sync.
-pub type WireServerMsgBody = ServerMsgBody<NoDomain>;
+/// Canonical project-read message envelope.
+pub type WireMessage = Message<ProjectReadResponse>;
+/// Canonical project-read server message.
+pub type WireServerMessage = ServerMessage<ProjectReadResponse>;
+/// Canonical project-read server message body.
+pub type WireServerMsgBody = ServerMsgBody<ProjectReadResponse>;

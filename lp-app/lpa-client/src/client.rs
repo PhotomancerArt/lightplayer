@@ -5,7 +5,7 @@
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle,
+    ProjectReadRequest, ProjectReadResponse, WireProjectHandle as ProjectHandle,
     WireProjectRequest, WireServerMessage,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
@@ -16,34 +16,6 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 use crate::transport::ClientTransport;
-
-/// Resource interest options reserved for M3 canonical project sync.
-///
-/// The server does not retain subscription state between calls.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectGetChangesOptions {
-    pub resource_summary_specifier: ResourceSummarySpecifier,
-    pub runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier,
-}
-
-impl Default for ProjectGetChangesOptions {
-    fn default() -> Self {
-        Self {
-            resource_summary_specifier: ResourceSummarySpecifier::default(),
-            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
-        }
-    }
-}
-
-impl ProjectGetChangesOptions {
-    /// Local dev UI (`just demo`): summaries plus full runtime-buffer payloads.
-    pub fn dev_demo_full_resources() -> Self {
-        Self {
-            resource_summary_specifier: ResourceSummarySpecifier::All,
-            runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::All,
-        }
-    }
-}
 
 /// Standalone client for communicating with LpServer
 ///
@@ -433,17 +405,34 @@ impl LpClient {
         }
     }
 
-    /// Project sync is disabled until M3 canonical project sync is rebuilt.
-    pub async fn project_sync_disabled(&self, handle: ProjectHandle) -> Result<()> {
+    /// Read the current project state using the stateless project read API.
+    pub async fn project_read(
+        &self,
+        handle: ProjectHandle,
+        read: ProjectReadRequest,
+    ) -> Result<ProjectReadResponse> {
         let request = ClientRequest::ProjectRequest {
             handle,
-            request: WireProjectRequest::SyncDisabled,
+            request: WireProjectRequest::Read(read),
         };
 
-        let _ = self.send_request(request).await?;
-        Err(Error::msg(
-            "project sync is disabled until M3 canonical project sync",
-        ))
+        let response = self.send_request(request).await?;
+        match response.msg {
+            ServerMsgBody::ProjectRequest { response } => Ok(response),
+            _ => Err(Error::msg(format!(
+                "Unexpected response type for project_read: {:?}",
+                response.msg
+            ))),
+        }
+    }
+
+    /// Read the standard developer/debug project view.
+    pub async fn project_read_default_debug(
+        &self,
+        handle: ProjectHandle,
+    ) -> Result<ProjectReadResponse> {
+        self.project_read(handle, ProjectReadRequest::default_debug(None))
+            .await
     }
 
     /// List available projects on the server filesystem

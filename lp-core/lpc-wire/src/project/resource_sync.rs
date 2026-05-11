@@ -1,36 +1,11 @@
-//! Resource summary / payload sync specifiers for project sync.
+//! Resource summary / payload types for stateless project reads.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::project::Revision;
-use lpc_model::resource::{ResourceRef, RuntimeBufferId};
+use lpc_model::resource::ResourceRef;
 use serde::{Deserialize, Serialize};
-
-/// Domains requested for project resource summaries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ResourceSummarySpecifier {
-    #[default]
-    None,
-    RuntimeBuffers,
-    All,
-}
-
-/// Runtime-buffer payloads to include on `GetChanges`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeBufferPayloadSpecifier {
-    None,
-    All,
-    ByIds(Vec<RuntimeBufferId>),
-}
-
-impl Default for RuntimeBufferPayloadSpecifier {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Classification line in a [`WireResourceSummary`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,25 +120,18 @@ pub enum WireRuntimeBufferMetadataPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
+    use lpc_model::RuntimeBufferId;
 
     #[test]
-    fn resource_summary_specifier_round_trips_snake_case() {
-        let s = crate::json::to_string(&ResourceSummarySpecifier::All).unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&s).unwrap(),
-            serde_json::Value::String(String::from("all"))
-        );
-        let _: ResourceSummarySpecifier = crate::json::from_str(&s).unwrap();
-    }
-
-    #[test]
-    fn runtime_buffer_payload_by_ids_wire_shape() {
-        let spec = RuntimeBufferPayloadSpecifier::ByIds(vec![
-            RuntimeBufferId::new(3),
-            RuntimeBufferId::new(99),
-        ]);
-        let j = serde_json::to_string(&spec).unwrap();
-        let _: RuntimeBufferPayloadSpecifier = serde_json::from_str(&j).unwrap();
+    fn runtime_buffer_payload_round_trips_base64_bytes() {
+        let payload = WireRuntimeBufferPayload {
+            resource_ref: ResourceRef::runtime_buffer(RuntimeBufferId::new(3)),
+            revision: Revision::new(2),
+            metadata: WireRuntimeBufferMetadataPayload::Raw,
+            bytes: Vec::from([1u8, 2, 3]),
+        };
+        let j = serde_json::to_string(&payload).unwrap();
+        let back: WireRuntimeBufferPayload = serde_json::from_str(&j).unwrap();
+        assert_eq!(back, payload);
     }
 }

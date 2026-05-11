@@ -90,14 +90,21 @@ mod tests {
     fn test_project_request() {
         let req = ClientRequest::ProjectRequest {
             handle: WireProjectHandle::new(1),
-            request: WireProjectRequest::SyncDisabled,
+            request: WireProjectRequest::Read(crate::project::ProjectReadRequest::default_debug(
+                None,
+            )),
         };
         let json = crate::json::to_string(&req).unwrap();
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ProjectRequest { handle, request } => {
                 assert_eq!(handle.id(), 1);
-                assert_eq!(request, WireProjectRequest::SyncDisabled);
+                assert_eq!(
+                    request,
+                    WireProjectRequest::Read(crate::project::ProjectReadRequest::default_debug(
+                        None
+                    ))
+                );
             }
             _ => panic!("Wrong request type"),
         }

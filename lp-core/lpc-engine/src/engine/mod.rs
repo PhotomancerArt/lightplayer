@@ -10,6 +10,11 @@ pub mod memory_pressure;
 #[cfg(test)]
 mod output_flush_tests;
 mod project_loader;
+mod project_read;
+mod project_read_nodes;
+mod project_read_probes;
+mod project_read_resources;
+mod project_read_shapes;
 #[cfg(test)]
 pub(crate) mod test_support;
 

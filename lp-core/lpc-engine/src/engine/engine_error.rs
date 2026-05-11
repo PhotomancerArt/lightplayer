@@ -24,10 +24,6 @@ pub enum EngineError {
     OutputFlush {
         message: String,
     },
-    /// Project sync was requested while canonical sync is being rebuilt.
-    ProjectSyncDisabled {
-        message: String,
-    },
 }
 
 impl From<TreeError> for EngineError {
@@ -58,7 +54,6 @@ impl core::fmt::Display for EngineError {
             Self::UnknownNode(id) => write!(f, "unknown node {id:?}"),
             Self::NotAlive(id) => write!(f, "node {id:?} is not alive"),
             Self::OutputFlush { message } => write!(f, "output flush: {message}"),
-            Self::ProjectSyncDisabled { message } => write!(f, "{message}"),
         }
     }
 }

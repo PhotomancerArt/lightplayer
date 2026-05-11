@@ -286,15 +286,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Project sync is disabled until canonical project sync is rebuilt.
-    pub fn project_sync_disabled(&self) -> EngineError {
-        EngineError::ProjectSyncDisabled {
-            message: alloc::string::String::from(
-                "project sync is disabled until canonical project sync",
-            ),
-        }
-    }
-
     #[cfg(test)]
     pub(crate) fn render_texture_for_test(
         &mut self,

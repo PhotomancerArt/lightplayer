@@ -205,7 +205,7 @@ impl LpServer {
                 if let Err(_e) = project.engine_mut().handle_fs_changes(&project_changes) {
                     // Log error but continue with other projects
                     // Note: In no_std context, errors are silently ignored
-                    // Errors will be visible when clients sync or query project state
+                    // Errors will be visible when clients read project state.
                 } else {
                     // Update last processed version to current_version.next() (one more than the next version)
                     // This ensures that get_changes_since(current_version.next()) will return nothing next time
@@ -217,8 +217,8 @@ impl LpServer {
         }
 
         // Tick all loaded projects
-        // Tick each project's runtime BEFORE processing incoming messages
-        // This ensures GetChanges requests see the current frame's data
+        // Tick each project's runtime BEFORE processing incoming messages.
+        // This ensures project read requests see the current frame's data.
         log::debug!("LpServer::tick: Ticking {} projects", project_info.len());
         for (handle, path) in &project_info {
             if let Some(project) = self.project_manager.get_project_mut(*handle) {
@@ -261,8 +261,8 @@ impl LpServer {
             }
         }
 
-        // Process incoming messages AFTER ticking projects
-        // This ensures GetChanges requests see the current frame's data
+        // Process incoming messages AFTER ticking projects.
+        // This ensures project read requests see the current frame's data.
         let mut responses = Vec::new();
         for message in incoming {
             match message {

@@ -1,7 +1,6 @@
 //! Local mirror of a node entry for tree sync (`NodeTreeView`).
 //!
-//! This type is distinct from [`NodeEntryView`](crate::project::NodeEntryView), which holds
-//! full model config/state from `ProjectResponse`.
+//! This type is the client-side mirror of node tree metadata.
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/07-sync.md`.
 
