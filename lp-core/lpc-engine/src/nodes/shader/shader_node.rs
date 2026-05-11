@@ -4,11 +4,11 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 
-use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::{
     AddSubMode, DivMode, GlslOpts, MulMode, NodeId, ShaderState, SlotAccess, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
 };
+use lpc_model::{ShaderDef, SlotAccessor};
 use lps_shared::TextureBuffer;
 
 use crate::gfx::{LpShader, ShaderCompileOptions};
@@ -23,19 +23,21 @@ const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 /// Shader producer wired to the core engine.
 pub struct ShaderNode {
     node_id: NodeId,
-    config: ShaderDef,
     glsl_source: String,
+    glsl_opts: GlslOpts,
+    config_accessors: Option<ShaderConfigAccessors>,
     shader: Option<Box<dyn LpShader>>,
     compilation_error: Option<String>,
     state: ShaderState,
 }
 
 impl ShaderNode {
-    pub fn new(node_id: NodeId, config: ShaderDef, glsl_source: String) -> Self {
+    pub fn new(node_id: NodeId, glsl_source: String) -> Self {
         Self {
             node_id,
-            config,
             glsl_source,
+            glsl_opts: GlslOpts::default(),
+            config_accessors: None,
             shader: None,
             compilation_error: None,
             state: ShaderState::new(RenderProduct::new(node_id, 0)),
@@ -70,7 +72,7 @@ impl ShaderNode {
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
         let compile_opts = ShaderCompileOptions {
-            q32_options: map_model_q32_options(&self.config.glsl_opts),
+            q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
         };
 
@@ -111,10 +113,36 @@ impl ShaderNode {
             }
         }
     }
+
+    fn update_config_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let accessors =
+            ShaderConfigAccessors::get_or_compile(&mut self.config_accessors, ctx.slot_shapes())
+                .map_err(|e| NodeError::msg(format!("compile shader config view: {e}")))?;
+        let next_opts = GlslOpts {
+            add_sub: lpc_model::ValueSlot::with_version(
+                ctx.revision(),
+                ctx.resolve_consumed_slot_accessor_value(&accessors.add_sub)?,
+            ),
+            mul: lpc_model::ValueSlot::with_version(
+                ctx.revision(),
+                ctx.resolve_consumed_slot_accessor_value(&accessors.mul)?,
+            ),
+            div: lpc_model::ValueSlot::with_version(
+                ctx.revision(),
+                ctx.resolve_consumed_slot_accessor_value(&accessors.div)?,
+            ),
+        };
+        if next_opts != self.glsl_opts {
+            self.glsl_opts = next_opts;
+            self.shader = None;
+        }
+        Ok(())
+    }
 }
 
 impl NodeRuntime for ShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        self.update_config_from_view(ctx)?;
         self.state
             .output
             .set_with_version(ctx.revision(), RenderProduct::new(self.node_id, 0));
@@ -147,6 +175,50 @@ impl NodeRuntime for ShaderNode {
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         Some(self)
     }
+}
+
+struct ShaderConfigAccessors {
+    registry_revision: lpc_model::Revision,
+    add_sub: SlotAccessor,
+    mul: SlotAccessor,
+    div: SlotAccessor,
+}
+
+impl ShaderConfigAccessors {
+    fn compile(registry: &SlotShapeRegistry) -> Result<Self, lpc_model::SlotAccessorError> {
+        Ok(Self {
+            registry_revision: registry.revision(),
+            add_sub: compile_shader_config_value_accessor("glsl_opts.add_sub", registry)?,
+            mul: compile_shader_config_value_accessor("glsl_opts.mul", registry)?,
+            div: compile_shader_config_value_accessor("glsl_opts.div", registry)?,
+        })
+    }
+
+    fn get_or_compile<'a>(
+        cache: &'a mut Option<Self>,
+        registry: &SlotShapeRegistry,
+    ) -> Result<&'a Self, lpc_model::SlotAccessorError> {
+        let needs_compile = cache
+            .as_ref()
+            .is_none_or(|view| view.registry_revision != registry.revision());
+        if needs_compile {
+            *cache = Some(Self::compile(registry)?);
+        }
+        Ok(cache
+            .as_ref()
+            .expect("shader config accessors were just compiled"))
+    }
+}
+
+fn compile_shader_config_value_accessor(
+    path: &str,
+    registry: &SlotShapeRegistry,
+) -> Result<SlotAccessor, lpc_model::SlotAccessorError> {
+    SlotAccessor::compile_value(
+        ShaderDef::SHAPE_ID,
+        SlotPath::parse(path).expect("shader config accessor path is valid"),
+        registry,
+    )
 }
 
 pub fn shader_output_path() -> SlotPath {
@@ -234,14 +306,17 @@ mod tests {
     use alloc::vec;
 
     use super::*;
+    use crate::artifact::ArtifactLocation;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
-    use crate::node::test_placeholder_spine;
     use crate::nodes::TextureNode;
     use crate::render_product::{RenderProduct, RenderSampleBatch, RenderSamplePoint};
     use crate::resolver::QueryKey;
     use crate::resolver::ResolveLogLevel;
-    use lpc_model::{Revision, SlotDataAccess, StaticSlotShape, TreePath};
+    use lpc_model::{
+        ArtifactLocator, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
+        TextureDef, TreePath,
+    };
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
@@ -251,7 +326,26 @@ mod tests {
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, artifact) = test_placeholder_spine();
+        let tex_invocation = NodeInvocation::new(ArtifactLocator::path("tex.toml"));
+        let tex_artifact = engine
+            .artifacts_mut()
+            .acquire_location(ArtifactLocation::file("tex.toml"), frame);
+        engine
+            .artifacts_mut()
+            .load_with(&tex_artifact, frame, |_| {
+                Ok(NodeDef::Texture(TextureDef::new(8, 8)))
+            })
+            .expect("load texture artifact");
+        let shader_invocation = NodeInvocation::new(ArtifactLocator::path("shader.toml"));
+        let shader_artifact = engine
+            .artifacts_mut()
+            .acquire_location(ArtifactLocation::file("shader.toml"), frame);
+        engine
+            .artifacts_mut()
+            .load_with(&shader_artifact, frame, |_| {
+                Ok(NodeDef::Shader(ShaderDef::default()))
+            })
+            .expect("load shader artifact");
 
         let tex_id = engine
             .tree_mut()
@@ -262,8 +356,8 @@ mod tests {
                 WireChildKind::Input {
                     source: WireSlotIndex(0),
                 },
-                spine.clone(),
-                artifact,
+                tex_invocation,
+                tex_artifact,
                 frame,
             )
             .expect("texture");
@@ -282,15 +376,13 @@ mod tests {
                 WireChildKind::Input {
                     source: WireSlotIndex(0),
                 },
-                spine,
-                artifact,
+                shader_invocation,
+                shader_artifact,
                 frame,
             )
             .expect("shader");
 
-        let cfg = ShaderDef::default();
-
-        let sh = ShaderNode::new(sh_id, cfg, String::from(DEMO_GLSL));
+        let sh = ShaderNode::new(sh_id, String::from(DEMO_GLSL));
         engine
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
@@ -302,8 +394,7 @@ mod tests {
 
     #[test]
     fn shader_render_output_is_on_runtime_state_slot_root() {
-        let cfg = ShaderDef::default();
-        let node = ShaderNode::new(NodeId::new(1), cfg, String::new());
+        let node = ShaderNode::new(NodeId::new(1), String::new());
 
         assert_eq!(node.runtime_state_slots().shape_id(), ShaderState::SHAPE_ID);
         let SlotDataAccess::Record(record) = node.runtime_state_slots().data() else {

@@ -7,7 +7,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
-use lpc_model::{NodeId, Revision, SlotPath};
+use lpc_model::{
+    Dim2u, FixtureDef, FixtureDefView, Revision, SlotAccessor, SlotPath, StaticSlotShape,
+};
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
@@ -33,43 +35,86 @@ use crate::runtime_buffer::{
 /// Fixture demand root: resolves a shader texture render handle, batches UV samples via the render
 /// product API, applies legacy mapping accumulation, writes output channel buffer bytes.
 pub struct FixtureNode {
-    render_width: u32,
-    render_height: u32,
     mapping: MappingConfig,
     mapping_version: Revision,
     output_sink: RuntimeBufferId,
     lamp_colors_buffer_id: Option<RuntimeBufferId>,
-    color_order: ColorOrder,
-    brightness: u8,
-    gamma_correction: bool,
+    def_view: Option<FixtureDefView>,
+    option_accessors: Option<FixtureOptionAccessors>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
 }
 
 impl FixtureNode {
     pub fn new(
-        _fixture_id: NodeId,
-        render_width: u32,
-        render_height: u32,
         mapping: MappingConfig,
         mapping_version: Revision,
         output_sink: RuntimeBufferId,
-        color_order: ColorOrder,
-        brightness: u8,
-        gamma_correction: bool,
     ) -> Self {
         Self {
-            render_width,
-            render_height,
             mapping,
             mapping_version,
             output_sink,
             lamp_colors_buffer_id: None,
-            color_order,
-            brightness,
-            gamma_correction,
+            def_view: None,
+            option_accessors: None,
             precomputed: None,
         }
+    }
+
+    fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FixtureDefView, NodeError> {
+        FixtureDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
+            .map_err(|e| NodeError::msg(format!("compile fixture def view: {e}")))
+    }
+
+    fn option_accessors(
+        &mut self,
+        ctx: &TickContext<'_>,
+    ) -> Result<&FixtureOptionAccessors, NodeError> {
+        FixtureOptionAccessors::get_or_compile(&mut self.option_accessors, ctx.slot_shapes())
+            .map_err(|e| NodeError::msg(format!("compile fixture option accessors: {e}")))
+    }
+}
+
+struct FixtureOptionAccessors {
+    registry_revision: Revision,
+    brightness: SlotAccessor,
+    gamma_correction: SlotAccessor,
+}
+
+impl FixtureOptionAccessors {
+    fn get_or_compile<'a>(
+        cache: &'a mut Option<Self>,
+        registry: &lpc_model::SlotShapeRegistry,
+    ) -> Result<&'a Self, lpc_model::SlotAccessorError> {
+        let needs_compile = cache
+            .as_ref()
+            .is_none_or(|accessors| accessors.registry_revision != registry.revision());
+        if needs_compile {
+            *cache = Some(Self::compile(registry)?);
+        }
+        Ok(cache
+            .as_ref()
+            .expect("fixture accessors were just compiled"))
+    }
+
+    fn compile(
+        registry: &lpc_model::SlotShapeRegistry,
+    ) -> Result<Self, lpc_model::SlotAccessorError> {
+        Ok(Self {
+            registry_revision: registry.revision(),
+            brightness: SlotAccessor::compile_value(
+                FixtureDef::SHAPE_ID,
+                SlotPath::parse("brightness.some").expect("fixture brightness slot path"),
+                registry,
+            )?,
+            gamma_correction: SlotAccessor::compile_value(
+                FixtureDef::SHAPE_ID,
+                SlotPath::parse("gamma_correction.some")
+                    .expect("fixture gamma correction slot path"),
+                registry,
+            )?,
+        })
     }
 }
 
@@ -104,8 +149,15 @@ impl NodeRuntime for FixtureNode {
             prod.product.get().as_render().ok_or_else(|| {
                 NodeError::msg("fixture expected RuntimeProduct::Render from input")
             })?;
-        let width = self.render_width;
-        let height = self.render_height;
+        let render_size: Dim2u =
+            ctx.resolve_consumed_slot_accessor_value(self.def_view(ctx)?.render_size())?;
+        let color_order: ColorOrder =
+            ctx.resolve_consumed_slot_accessor_value(self.def_view(ctx)?.color_order())?;
+        let brightness = resolve_optional_brightness(ctx, &self.option_accessors(ctx)?.brightness)?;
+        let gamma_correction =
+            resolve_optional_gamma_correction(ctx, &self.option_accessors(ctx)?.gamma_correction)?;
+        let width = render_size.width;
+        let height = render_size.height;
 
         let ver = ctx.revision();
         let mapping_ver = self.mapping_version;
@@ -162,9 +214,9 @@ impl NodeRuntime for FixtureNode {
             })?,
             ver,
             &accumulators,
-            self.color_order,
-            self.brightness,
-            self.gamma_correction,
+            color_order,
+            brightness,
+            gamma_correction,
         )
     }
 
@@ -179,6 +231,34 @@ impl NodeRuntime for FixtureNode {
     ) -> Result<(), NodeError> {
         self.precomputed = None;
         Ok(())
+    }
+}
+
+fn resolve_optional_brightness(
+    ctx: &mut TickContext<'_>,
+    accessor: &SlotAccessor,
+) -> Result<u8, NodeError> {
+    match ctx.resolve_consumed_slot_accessor_value::<u32>(accessor) {
+        Ok(value) => Ok(u8::try_from(value).unwrap_or(u8::MAX)),
+        Err(err) if is_optional_none_error(&err) => Ok(64),
+        Err(err) => Err(err),
+    }
+}
+
+fn resolve_optional_gamma_correction(
+    ctx: &mut TickContext<'_>,
+    accessor: &SlotAccessor,
+) -> Result<bool, NodeError> {
+    match ctx.resolve_consumed_slot_accessor_value::<bool>(accessor) {
+        Ok(value) => Ok(value),
+        Err(err) if is_optional_none_error(&err) => Ok(true),
+        Err(err) => Err(err),
+    }
+}
+
+fn is_optional_none_error(err: &NodeError) -> bool {
+    match err {
+        NodeError::Message(message) => message.contains("option slot is none"),
     }
 }
 
@@ -441,7 +521,7 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
-    use lpc_model::{Kind, LpValue, TreePath, WithRevision};
+    use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath, WithRevision};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -544,6 +624,59 @@ mod tests {
             .map_err(|e| NodeError::msg(format!("solid texture: {e}")))
     }
 
+    fn bind_fixture_def_defaults(engine: &mut Engine, fix_id: lpc_model::NodeId, frame: Revision) {
+        bind_fixture_def_slot(
+            engine,
+            fix_id,
+            frame,
+            "render_size",
+            Dim2u {
+                width: 4,
+                height: 4,
+            }
+            .to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            engine,
+            fix_id,
+            frame,
+            "color_order",
+            ColorOrder::Rgb.to_lp_value(),
+        );
+        bind_fixture_def_slot(engine, fix_id, frame, "brightness.some", LpValue::U32(255));
+        bind_fixture_def_slot(
+            engine,
+            fix_id,
+            frame,
+            "gamma_correction.some",
+            LpValue::Bool(false),
+        );
+    }
+
+    fn bind_fixture_def_slot(
+        engine: &mut Engine,
+        fix_id: lpc_model::NodeId,
+        frame: Revision,
+        slot: &str,
+        value: LpValue,
+    ) {
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(value),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: SlotPath::parse(slot).unwrap(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Choice,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn fixture_demand_resolve_and_tick_share_one_shader_producer_tick_via_resolver_cache() {
         let ticks = Arc::new(AtomicU32::new(0));
@@ -635,20 +768,11 @@ mod tests {
         engine
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    4,
-                    4,
-                    mapping,
-                    frame,
-                    sink,
-                    ColorOrder::Rgb,
-                    255,
-                    false,
-                )),
+                Box::new(FixtureNode::new(mapping, frame, sink)),
                 frame,
             )
             .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
 
         engine
             .add_binding(
@@ -780,20 +904,11 @@ mod tests {
         engine
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    4,
-                    4,
-                    mapping,
-                    frame,
-                    sink,
-                    ColorOrder::Rgb,
-                    255,
-                    false,
-                )),
+                Box::new(FixtureNode::new(mapping, frame, sink)),
                 frame,
             )
             .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
         engine
             .add_binding(
                 BindingDraft {

@@ -160,8 +160,8 @@ mod output_sink_flush_tests {
     use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
     use lpc_model::nodes::output::OutputDef;
     use lpc_model::{
-        Kind, LpValue, Revision, ShaderState, SlotAccess, SlotShapeRegistry,
-        SlotShapeRegistryError, StaticSlotShape, TreePath, WithRevision,
+        Dim2u, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath, SlotShapeRegistry,
+        SlotShapeRegistryError, StaticSlotShape, ToLpValue, TreePath, WithRevision,
     };
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -287,6 +287,63 @@ mod output_sink_flush_tests {
             .map_err(|e| NodeError::msg(alloc::format!("solid texture: {e}")))
     }
 
+    fn bind_fixture_def_defaults(
+        rt: &mut CoreProjectRuntime,
+        fix_id: lpc_model::NodeId,
+        frame: Revision,
+    ) {
+        bind_fixture_def_slot(
+            rt,
+            fix_id,
+            frame,
+            "render_size",
+            Dim2u {
+                width: 4,
+                height: 4,
+            }
+            .to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            rt,
+            fix_id,
+            frame,
+            "color_order",
+            ColorOrder::Rgb.to_lp_value(),
+        );
+        bind_fixture_def_slot(rt, fix_id, frame, "brightness.some", LpValue::U32(255));
+        bind_fixture_def_slot(
+            rt,
+            fix_id,
+            frame,
+            "gamma_correction.some",
+            LpValue::Bool(false),
+        );
+    }
+
+    fn bind_fixture_def_slot(
+        rt: &mut CoreProjectRuntime,
+        fix_id: lpc_model::NodeId,
+        frame: Revision,
+        slot: &str,
+        value: LpValue,
+    ) {
+        rt.engine_mut()
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(value),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: SlotPath::parse(slot).unwrap(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Choice,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn project_runtime_output_sink_flush_writes_expected_rgb_via_memory_provider() {
         let mem = Rc::new(MemoryOutputProvider::new());
@@ -394,20 +451,11 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    4,
-                    4,
-                    mapping,
-                    frame,
-                    sink,
-                    ColorOrder::Rgb,
-                    255,
-                    false,
-                )),
+                Box::new(FixtureNode::new(mapping, frame, sink)),
                 frame,
             )
             .unwrap();
+        bind_fixture_def_defaults(&mut rt, fix_id, frame);
         rt.engine_mut()
             .add_binding(
                 BindingDraft {
@@ -574,20 +622,11 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    4,
-                    4,
-                    mapping,
-                    frame,
-                    sink_written,
-                    ColorOrder::Rgb,
-                    255,
-                    false,
-                )),
+                Box::new(FixtureNode::new(mapping, frame, sink_written)),
                 frame,
             )
             .unwrap();
+        bind_fixture_def_defaults(&mut rt, fix_id, frame);
         rt.engine_mut()
             .add_binding(
                 BindingDraft {
@@ -742,20 +781,11 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    4,
-                    4,
-                    mapping,
-                    frame,
-                    sink,
-                    ColorOrder::Rgb,
-                    255,
-                    false,
-                )),
+                Box::new(FixtureNode::new(mapping, frame, sink)),
                 frame,
             )
             .unwrap();
+        bind_fixture_def_defaults(&mut rt, fix_id, frame);
         rt.engine_mut()
             .add_binding(
                 BindingDraft {

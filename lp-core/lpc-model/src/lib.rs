@@ -74,10 +74,10 @@ pub use node::{
     RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ColorOrder, DivMode, FixtureDef, GlslOpts, MappingConfig, MulMode,
-    NodeDefParseError, OutputDef, OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder,
-    ScalarHint, ShaderDef, ShaderParamDef, ShaderState, TextureDef, TextureDefView, TextureFormat,
-    TextureState,
+    AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, GlslOpts, MappingConfig, MulMode,
+    NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig, PathSpec, ProjectDef,
+    RingOrder, ScalarHint, ShaderDef, ShaderDefView, ShaderParamDef, ShaderState, TextureDef,
+    TextureDefView, TextureFormat, TextureState,
 };
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};

@@ -39,9 +39,10 @@ pub(crate) fn default_demand_input_path() -> SlotPath {
 fn runtime_product_from_lp_value(value: LpValue) -> Result<RuntimeProduct, SessionResolveError> {
     match value {
         LpValue::RenderProduct(product) => Ok(RuntimeProduct::render(product)),
-        other => model_value_to_lps_value_f32(&other)
-            .map(RuntimeProduct::Value)
-            .map_err(|e| SessionResolveError::other(e.message)),
+        other => match model_value_to_lps_value_f32(&other) {
+            Ok(value) => Ok(RuntimeProduct::Value(value)),
+            Err(_) => Ok(RuntimeProduct::model_value(other)),
+        },
     }
 }
 

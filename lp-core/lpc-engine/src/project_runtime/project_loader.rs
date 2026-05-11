@@ -241,7 +241,7 @@ impl CoreProjectLoader {
                     .engine_mut()
                     .attach_runtime_node(
                         node.id,
-                        Box::new(ShaderNode::new(node.id, config.clone(), glsl_source)),
+                        Box::new(ShaderNode::new(node.id, glsl_source)),
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
@@ -273,17 +273,7 @@ impl CoreProjectLoader {
                     .engine_mut()
                     .attach_runtime_node(
                         node.id,
-                        Box::new(FixtureNode::new(
-                            node.id,
-                            config.render_width(),
-                            config.render_height(),
-                            config.mapping.clone(),
-                            frame,
-                            sink_id,
-                            config.color_order(),
-                            config.brightness_u8(),
-                            config.gamma_correction(),
-                        )),
+                        Box::new(FixtureNode::new(config.mapping.clone(), frame, sink_id)),
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {

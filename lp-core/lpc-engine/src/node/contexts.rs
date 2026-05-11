@@ -122,15 +122,7 @@ impl<'r> TickContext<'r> {
                 slot: slot.clone(),
             })
             .map_err(|e| NodeError::msg(alloc::format!("resolve consumed slot {slot}: {e:?}")))?;
-        let value =
-            production.product.value().as_value().ok_or_else(|| {
-                NodeError::msg(alloc::format!("consumed slot {slot} is not a value"))
-            })?;
-        let value = lps_value_f32_to_model_value(value).map_err(|e| {
-            NodeError::msg(alloc::format!(
-                "consumed slot {slot} cannot be read as a portable model value: {e:?}"
-            ))
-        })?;
+        let value = runtime_product_to_model_value(production.product.value(), slot)?;
         T::from_lp_value(value).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {slot} has incompatible value: {e}"
@@ -157,18 +149,7 @@ impl<'r> TickContext<'r> {
                     accessor.path()
                 ))
             })?;
-        let value = production.product.value().as_value().ok_or_else(|| {
-            NodeError::msg(alloc::format!(
-                "consumed slot {} is not a value",
-                accessor.path()
-            ))
-        })?;
-        let value = lps_value_f32_to_model_value(value).map_err(|e| {
-            NodeError::msg(alloc::format!(
-                "consumed slot {} cannot be read as a portable model value: {e:?}",
-                accessor.path()
-            ))
-        })?;
+        let value = runtime_product_to_model_value(production.product.value(), accessor.path())?;
         T::from_lp_value(value).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {} has incompatible value: {e}",
@@ -230,6 +211,23 @@ impl<'r> TickContext<'r> {
             .map_err(|e| NodeError::msg(alloc::format!("runtime buffer mut: {}", e.message)))?;
         write(buffer)
     }
+}
+
+fn runtime_product_to_model_value(
+    product: &crate::runtime_product::RuntimeProduct,
+    slot: &SlotPath,
+) -> Result<lpc_model::LpValue, NodeError> {
+    if let Some(value) = product.as_model_value() {
+        return Ok(value.clone());
+    }
+    let value = product
+        .as_value()
+        .ok_or_else(|| NodeError::msg(alloc::format!("consumed slot {slot} is not a value")))?;
+    lps_value_f32_to_model_value(value).map_err(|e| {
+        NodeError::msg(alloc::format!(
+            "consumed slot {slot} cannot be read as a portable model value: {e:?}"
+        ))
+    })
 }
 
 /// Context passed to [`super::RenderNode`] materialization hooks.

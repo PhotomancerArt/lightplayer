@@ -2,6 +2,7 @@
 
 use crate::resolver::resolve_error::ResolveError;
 use crate::resolver::resolver_cache::ResolverCache;
+use crate::runtime_product::RuntimeProduct;
 use lpc_model::Revision;
 use lpc_model::WithRevision;
 use lps_shared::LpsValueF32;
@@ -32,14 +33,21 @@ impl Resolver {
     }
 }
 
-/// Materialize a direct [`lpc_model::LpValue`] literal to a versioned
-/// [`LpsValueF32`] for call sites that still need the shader-value shape.
-pub(crate) fn materialize_literal_value(
+/// Materialize a direct [`lpc_model::LpValue`] literal to a versioned runtime
+/// product. Shader-compatible values stay in the compact shader ABI shape;
+/// richer editor/domain values remain model values.
+pub(crate) fn materialize_literal_product(
     value: &lpc_model::LpValue,
     frame: Revision,
-) -> Result<WithRevision<LpsValueF32>, ResolveError> {
-    let lps_value = model_value_to_lps_value_f32(value)?;
-    Ok(WithRevision::new(frame, lps_value))
+) -> WithRevision<RuntimeProduct> {
+    let product = match value {
+        lpc_model::LpValue::RenderProduct(product) => RuntimeProduct::render(*product),
+        other => match model_value_to_lps_value_f32(other) {
+            Ok(value) => RuntimeProduct::Value(value),
+            Err(_) => RuntimeProduct::model_value(other.clone()),
+        },
+    };
+    WithRevision::new(frame, product)
 }
 
 /// Convert [`lpc_model::LpValue`] to [`LpsValueF32`] for shader-compatible literals.

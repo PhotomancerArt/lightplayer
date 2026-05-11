@@ -16,6 +16,11 @@
 - [x] Removed standalone `BindingRegistry` and global `BindingId`
 - [x] Resolver reads runtime bindings through the active engine host
 - [x] Runtime loaders register authored bindings directly onto the node tree
+- [x] Generated def views for shader, fixture, output, and texture defs
+- [x] Shader node reads compile options through resolver-backed def slots
+- [x] Fixture node reads scalar config through resolver-backed def slots
+- [x] Literal bindings can carry rich `LpValue` payloads through `RuntimeProduct::ModelValue`
+- [x] Compiled slot accessors can descend into option payloads via `.some`
 
 ## Mockup Concepts Still To Port
 
@@ -30,10 +35,11 @@
 
 ## Real Code Remaining
 
-- [ ] Apply generated slot views beyond `TextureDef`
-- [ ] Convert shader node config reads to resolver-backed slot views
-- [ ] Convert fixture node config reads to resolver-backed slot views
+- [x] Apply generated slot views beyond `TextureDef`
+- [x] Convert shader node config reads to resolver-backed slot views
+- [x] Convert fixture node config reads to resolver-backed slot views
 - [ ] Convert output node config reads to resolver-backed slot views
+- [ ] Generate typed accessors for option payloads instead of hand-authored `.some` accessors
 - [ ] Decide and implement binding override precedence beyond exact target lookup
 - [ ] Rebuild binding indexes incrementally if mutation frequency makes full rebuild too costly
 - [ ] Make dynamic shader params first-class runtime slot roots

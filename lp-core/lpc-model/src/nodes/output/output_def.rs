@@ -4,7 +4,7 @@ use crate::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 /// Authored GPIO output node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, view)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     /// Optional display pipeline options.
@@ -91,6 +91,7 @@ fn default_true_slot() -> ValueSlot<bool> {
 mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
+    use crate::{OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
 
     #[test]
     fn test_output_def_kind() {
@@ -115,5 +116,18 @@ dithering_enabled = false
         assert!((*opts.brightness.value() - 0.25).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
         assert!(*opts.interpolation_enabled.value());
+    }
+
+    #[test]
+    fn generated_output_def_view_compiles() {
+        let mut registry = SlotShapeRegistry::default();
+        OutputDef::ensure_registered(&mut registry).expect("output shape");
+
+        let view = OutputDefView::compile(&registry).expect("output def view");
+
+        assert_eq!(view.registry_revision(), registry.revision());
+        assert!(view.is_valid_for(&registry));
+        assert_eq!(view.pin().path(), &SlotPath::parse("pin").unwrap());
+        assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
     }
 }

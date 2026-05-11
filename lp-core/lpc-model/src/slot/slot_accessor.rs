@@ -28,6 +28,8 @@ pub struct SlotAccessor {
 pub enum SlotAccessorStep {
     /// Record field access by stable field index.
     RecordField { index: usize, name: SlotName },
+    /// Option payload access through the conventional `some` field.
+    OptionSome,
 }
 
 /// Error returned while compiling or using a [`SlotAccessor`].
@@ -64,6 +66,12 @@ impl SlotAccessor {
                         name: name.clone(),
                     });
                     shape = resolve_ref_shape(&field.shape, registry)?;
+                }
+                (SlotShape::Option { some, .. }, SlotPathSegment::Field(name))
+                    if name.as_str() == "some" =>
+                {
+                    steps.push(SlotAccessorStep::OptionSome);
+                    shape = resolve_ref_shape(some, registry)?;
                 }
                 (_, SlotPathSegment::Field(name)) => {
                     return Err(SlotAccessorError::new(format!(
@@ -146,6 +154,16 @@ impl SlotAccessor {
                         "slot path field {name} cannot descend into current slot data"
                     )));
                 }
+                (SlotAccessorStep::OptionSome, SlotDataAccess::Option(option)) => {
+                    data = option
+                        .data()
+                        .ok_or_else(|| SlotAccessorError::new("option slot is none"))?;
+                }
+                (SlotAccessorStep::OptionSome, _) => {
+                    return Err(SlotAccessorError::new(
+                        "slot path field some cannot descend into current slot data",
+                    ));
+                }
             }
         }
         Ok(data)
@@ -186,6 +204,9 @@ impl SlotAccessor {
                     })?;
                     shape = resolve_ref_shape(&field.shape, registry)?;
                 }
+                (SlotShape::Option { some, .. }, SlotAccessorStep::OptionSome) => {
+                    shape = resolve_ref_shape(some, registry)?;
+                }
                 _ => {
                     return Err(SlotAccessorError::new(
                         "compiled accessor no longer matches current shape",
@@ -223,4 +244,50 @@ fn resolve_ref_shape<'a>(
             .ok_or_else(|| SlotAccessorError::new(format!("missing referenced slot shape {id}")))?;
     }
     Ok(shape)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SlotAccessor;
+    use crate::{
+        OptionSlot, SlotDataAccess, SlotPath, SlotShapeRegistry, StaticSlotShape, ValueSlot,
+        lookup_slot_data,
+    };
+
+    #[test]
+    fn compile_value_can_descend_into_option_some_payload() {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry)
+            .expect("static slot shapes");
+        OptionRoot::ensure_registered(&mut registry).expect("option root shape");
+
+        let accessor = SlotAccessor::compile_value(
+            OptionRoot::SHAPE_ID,
+            SlotPath::parse("item.some").unwrap(),
+            &registry,
+        )
+        .expect("item.some accessor");
+
+        let root = OptionRoot {
+            item: OptionSlot::some(ValueSlot::new(64)),
+        };
+        let data = accessor.access(&root, &registry).expect("access data");
+        assert!(matches!(
+            data,
+            SlotDataAccess::Value(value) if value.value() == crate::LpValue::U32(64)
+        ));
+
+        let lookup = lookup_slot_data(&root, &registry, &SlotPath::parse("item.some").unwrap())
+            .expect("lookup data");
+        assert!(matches!(
+            lookup,
+            SlotDataAccess::Value(value) if value.value() == crate::LpValue::U32(64)
+        ));
+    }
+
+    #[derive(crate::SlotRecord)]
+    #[slot(root)]
+    struct OptionRoot {
+        item: OptionSlot<ValueSlot<u32>>,
+    }
 }

@@ -10,7 +10,7 @@ use crate::{
 
 /// Authored fixture node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, view)]
 pub struct FixtureDef {
     /// Output node locator.
     pub output_loc: RelativeNodeRefSlot,
@@ -257,7 +257,7 @@ mod tests {
     use super::*;
     use crate::NodeKind;
     use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
-    use crate::{Affine2d, MapSlot};
+    use crate::{Affine2d, FixtureDefView, MapSlot, SlotPath, SlotShapeRegistry, StaticSlotShape};
     use alloc::collections::BTreeMap;
 
     #[test]
@@ -327,5 +327,32 @@ mod tests {
     fn test_color_order_write_rgb_bounds_check() {
         let mut buffer = [0u8; 2];
         ColorOrder::Rgb.write_rgb(&mut buffer, 0, 100, 200, 255);
+    }
+
+    #[test]
+    fn generated_fixture_def_view_compiles() {
+        let mut registry = SlotShapeRegistry::default();
+        FixtureDef::ensure_registered(&mut registry).expect("fixture shape");
+
+        let view = FixtureDefView::compile(&registry).expect("fixture def view");
+
+        assert_eq!(view.registry_revision(), registry.revision());
+        assert!(view.is_valid_for(&registry));
+        assert_eq!(
+            view.render_size().path(),
+            &SlotPath::parse("render_size").unwrap()
+        );
+        assert_eq!(
+            view.color_order().path(),
+            &SlotPath::parse("color_order").unwrap()
+        );
+        assert_eq!(
+            view.brightness().path(),
+            &SlotPath::parse("brightness").unwrap()
+        );
+        assert_eq!(
+            view.gamma_correction().path(),
+            &SlotPath::parse("gamma_correction").unwrap()
+        );
     }
 }

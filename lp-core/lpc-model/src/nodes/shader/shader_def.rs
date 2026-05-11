@@ -6,7 +6,7 @@ use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, Sourc
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, view)]
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: SourcePathSlot,
@@ -53,8 +53,8 @@ impl ShaderDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NodeKind;
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
+    use crate::{NodeKind, ShaderDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
 
     #[test]
     fn test_shader_def_kind() {
@@ -76,5 +76,28 @@ mod tests {
         assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Saturating);
         assert_eq!(*def.glsl_opts.mul.value(), MulMode::Saturating);
         assert_eq!(*def.glsl_opts.div.value(), DivMode::Saturating);
+    }
+
+    #[test]
+    fn generated_shader_def_view_compiles() {
+        let mut registry = SlotShapeRegistry::default();
+        ShaderDef::ensure_registered(&mut registry).expect("shader shape");
+
+        let view = ShaderDefView::compile(&registry).expect("shader def view");
+
+        assert_eq!(view.registry_revision(), registry.revision());
+        assert!(view.is_valid_for(&registry));
+        assert_eq!(
+            view.glsl_path().path(),
+            &SlotPath::parse("glsl_path").unwrap()
+        );
+        assert_eq!(
+            view.render_order().path(),
+            &SlotPath::parse("render_order").unwrap()
+        );
+        assert_eq!(
+            view.glsl_opts().path(),
+            &SlotPath::parse("glsl_opts").unwrap()
+        );
     }
 }

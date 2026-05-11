@@ -1,6 +1,5 @@
 //! [`EngineSession`] — per-frame demand resolution and engine-dispatched work.
 
-use alloc::format;
 use alloc::vec::Vec;
 
 use crate::binding::{BindingEntry, BindingRef, BindingSource};
@@ -10,7 +9,7 @@ use crate::resolver::resolve_error::SessionResolveError;
 use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::resolver::resolver::Resolver;
-use crate::resolver::resolver::materialize_literal_value;
+use crate::resolver::resolver::materialize_literal_product;
 use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 
 /// Active engine session for one frame (or nested test scope).
@@ -149,10 +148,8 @@ impl<'a> EngineSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         match source {
             BindingSource::Literal(spec) => {
-                let versioned = materialize_literal_value(spec, self.revision).map_err(|e| {
-                    SessionResolveError::other(format!("literal materialization: {}", e.message))
-                })?;
-                Ok(Production::value(versioned, ProductionSource::Literal)?)
+                let product = materialize_literal_product(spec, self.revision);
+                Ok(Production::new(product, ProductionSource::Literal))
             }
             BindingSource::ProducedSlot { node, slot } => {
                 let key = QueryKey::ProducedSlot {

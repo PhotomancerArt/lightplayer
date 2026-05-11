@@ -1,5 +1,6 @@
-//! Engine-time product of resolution: direct shader value or render-product handle.
+//! Engine-time product of resolution: model values, shader values, and engine handles.
 
+use lpc_model::LpValue;
 use lps_shared::LpsValueF32;
 
 use crate::render_product::RenderProduct;
@@ -24,9 +25,11 @@ impl core::fmt::Display for RuntimeProductError {
 
 impl core::error::Error for RuntimeProductError {}
 
-/// Payload for produced runtime values: GLSL-compatible data or engine-owned product handles.
+/// Payload for produced runtime values: portable model data, GLSL-compatible data,
+/// or engine-owned product handles.
 #[derive(Debug, Clone)]
 pub enum RuntimeProduct {
+    ModelValue(LpValue),
     Value(LpsValueF32),
     Render(RenderProduct),
     Buffer(RuntimeBufferId),
@@ -47,6 +50,11 @@ impl RuntimeProduct {
     }
 
     #[must_use]
+    pub fn model_value(value: LpValue) -> Self {
+        Self::ModelValue(value)
+    }
+
+    #[must_use]
     pub fn render(product: RenderProduct) -> Self {
         Self::Render(product)
     }
@@ -59,21 +67,28 @@ impl RuntimeProduct {
     pub fn as_value(&self) -> Option<&LpsValueF32> {
         match self {
             Self::Value(v) => Some(v),
-            Self::Render(_) | Self::Buffer(_) => None,
+            Self::ModelValue(_) | Self::Render(_) | Self::Buffer(_) => None,
+        }
+    }
+
+    pub fn as_model_value(&self) -> Option<&LpValue> {
+        match self {
+            Self::ModelValue(value) => Some(value),
+            Self::Value(_) | Self::Render(_) | Self::Buffer(_) => None,
         }
     }
 
     pub fn as_render(&self) -> Option<RenderProduct> {
         match self {
             Self::Render(product) => Some(*product),
-            Self::Value(_) | Self::Buffer(_) => None,
+            Self::ModelValue(_) | Self::Value(_) | Self::Buffer(_) => None,
         }
     }
 
     pub fn as_buffer(&self) -> Option<RuntimeBufferId> {
         match self {
             Self::Buffer(id) => Some(*id),
-            Self::Value(_) | Self::Render(_) => None,
+            Self::ModelValue(_) | Self::Value(_) | Self::Render(_) => None,
         }
     }
 }
@@ -91,6 +106,20 @@ mod tests {
     fn runtime_product_value_helper_returns_value() {
         let p = RuntimeProduct::value(LpsValueF32::F32(3.14)).expect("scalar value");
         assert!(matches!(p.as_value(), Some(LpsValueF32::F32(_))));
+        assert!(p.as_render().is_none());
+        assert!(p.as_buffer().is_none());
+    }
+
+    #[test]
+    fn runtime_product_model_value_helper_returns_model_value() {
+        let p = RuntimeProduct::model_value(lpc_model::LpValue::String(
+            alloc::string::String::from("saturating"),
+        ));
+        assert!(matches!(
+            p.as_model_value(),
+            Some(lpc_model::LpValue::String(value)) if value == "saturating"
+        ));
+        assert!(p.as_value().is_none());
         assert!(p.as_render().is_none());
         assert!(p.as_buffer().is_none());
     }
@@ -141,5 +170,7 @@ mod tests {
         assert!(buffer_p.as_render().is_none());
         assert!(render_p.as_value().is_none());
         assert!(buffer_p.as_value().is_none());
+        assert!(render_p.as_model_value().is_none());
+        assert!(buffer_p.as_model_value().is_none());
     }
 }
