@@ -14,6 +14,7 @@ extern crate alloc;
 pub mod artifact;
 pub mod binding;
 pub mod bus;
+pub mod control_product;
 pub mod engine;
 pub mod error;
 pub mod gfx;
@@ -23,11 +24,11 @@ pub mod nodes;
 pub mod output;
 pub mod panic_node;
 pub mod project_runtime;
-pub mod render_product;
 pub mod resolver;
 pub mod runtime;
 pub mod runtime_buffer;
 pub mod runtime_product;
+pub mod visual_product;
 pub mod wire_bridge;
 
 pub use artifact::{
@@ -38,20 +39,20 @@ pub use binding::{
     BindingSource, BindingTarget,
 };
 pub use bus::{Bus, BusError, ChannelEntry};
+pub use control_product::{
+    ControlExtent, ControlHint, ControlLayout, ControlProduct, ControlRenderRequest,
+    ControlRenderTarget, ControlSampleFormat, ControlSpan,
+};
 pub use engine::{Engine, EngineError};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use node::{
-    DestroyCtx, MemPressureCtx, NodeEntry, NodeEntryState, NodeError, NodeRuntime, NodeTree,
-    PressureLevel, TickContext, TreeError, tree_deltas_since,
+    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeEntry, NodeEntryState,
+    NodeError, NodeRuntime, NodeTree, PressureLevel, TickContext, TreeError, tree_deltas_since,
 };
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project_runtime::{
     CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, OutputFlushError, RuntimeServices,
-};
-pub use render_product::{
-    RenderProduct, RenderSample, RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint,
-    RenderTextureRequest, TextureRenderProduct, TextureRenderProductError,
 };
 pub use resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
@@ -63,6 +64,10 @@ pub use runtime_buffer::{
     RuntimeBufferStore, RuntimeChannelSampleFormat, RuntimeColorLayout, RuntimeTextureFormat,
 };
 pub use runtime_product::{RuntimeProduct, RuntimeProductError};
+pub use visual_product::{
+    RenderTextureRequest, TextureRenderProduct, TextureRenderProductError, VisualProduct,
+    VisualSample, VisualSampleBatch, VisualSampleBatchResult, VisualSamplePoint,
+};
 pub use wire_bridge::{
     LpsValueToModelConversionError, lps_value_f32_to_model_value, model_type_to_lps_type,
 };

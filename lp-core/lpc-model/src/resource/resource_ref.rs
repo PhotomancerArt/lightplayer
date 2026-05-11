@@ -1,6 +1,6 @@
-use crate::resource::render_product_id::RenderProductId;
 use crate::resource::resource_domain::ResourceDomain;
 use crate::resource::runtime_buffer_id::RuntimeBufferId;
+use crate::resource::visual_product_id::VisualProductId;
 
 /// Stable resource reference: domain plus raw id (no generation).
 ///
@@ -24,9 +24,9 @@ impl ResourceRef {
     }
 
     #[must_use]
-    pub const fn render_product(product_id: RenderProductId) -> Self {
+    pub const fn visual_product(product_id: VisualProductId) -> Self {
         Self {
-            domain: ResourceDomain::RenderProduct,
+            domain: ResourceDomain::VisualProduct,
             id: product_id.as_u32(),
         }
     }
@@ -34,21 +34,21 @@ impl ResourceRef {
 
 #[cfg(test)]
 mod tests {
-    use crate::resource::render_product_id::RenderProductId;
     use crate::resource::resource_domain::ResourceDomain;
     use crate::resource::resource_ref::ResourceRef;
     use crate::resource::runtime_buffer_id::RuntimeBufferId;
+    use crate::resource::visual_product_id::VisualProductId;
 
     #[test]
-    fn resource_ref_covers_buffer_and_render_product() {
+    fn resource_ref_covers_buffer_and_visual_product() {
         let buf = RuntimeBufferId::new(7);
         let rbuf = ResourceRef::runtime_buffer(buf);
         assert_eq!(rbuf.domain, ResourceDomain::RuntimeBuffer);
         assert_eq!(rbuf.id, 7);
 
-        let prod = RenderProductId::new(11);
-        let rprod = ResourceRef::render_product(prod);
-        assert_eq!(rprod.domain, ResourceDomain::RenderProduct);
+        let prod = VisualProductId::new(11);
+        let rprod = ResourceRef::visual_product(prod);
+        assert_eq!(rprod.domain, ResourceDomain::VisualProduct);
         assert_eq!(rprod.id, 11);
     }
 }

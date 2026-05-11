@@ -5,14 +5,16 @@ use alloc::string::String;
 
 use lpc_model::{NodeId, SlotPath};
 
-use crate::render_product::RenderProduct;
+use crate::control_product::ControlProduct;
+use crate::visual_product::VisualProduct;
 
 /// A kind of engine-dispatched call into a runtime node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeCall {
     Tick,
     ProduceSlot { slot: SlotPath },
-    Render { product: RenderProduct },
+    Visual { product: VisualProduct },
+    Control { product: ControlProduct },
 }
 
 impl NodeCall {
@@ -20,7 +22,10 @@ impl NodeCall {
         match self {
             Self::Tick => String::from("tick"),
             Self::ProduceSlot { slot } => format!("produce slot {slot:?}"),
-            Self::Render { product } => format!("render output {}", product.output()),
+            Self::Visual { product } => format!("render output {}", product.output()),
+            Self::Control { product } => {
+                format!("render control output {}", product.output())
+            }
         }
     }
 }

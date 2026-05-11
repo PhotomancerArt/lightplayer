@@ -1,12 +1,15 @@
 //! [`ResolveHost`] — callback for uncached [`crate::resolver::QueryKey::ProducedSlot`] (and
 //! unbound [`crate::resolver::QueryKey::ConsumedSlot`]) production.
 
-use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
+use crate::control_product::{
+    ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
+};
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::SessionResolveError;
 use crate::resolver::resolve_session::ResolveSession;
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
+use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use alloc::vec::Vec;
 use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 
@@ -34,12 +37,24 @@ pub trait ResolveHost {
 
     fn render_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
         let _ = (product, request);
         Err(SessionResolveError::other(
             "resolve host has no render texture access",
+        ))
+    }
+
+    fn render_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, SessionResolveError> {
+        let _ = (product, request, target);
+        Err(SessionResolveError::other(
+            "resolve host has no render control access",
         ))
     }
 

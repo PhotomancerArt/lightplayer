@@ -19,13 +19,13 @@ pub mod tree;
 
 pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
 pub use project::{
-    RenderProductPayloadOptions, RenderProductPayloadRequest, RenderProductPayloadSpecifier,
-    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, WireChannelSampleFormat,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, VisualProductPayloadOptions,
+    VisualProductPayloadRequest, VisualProductPayloadSpecifier, WireChannelSampleFormat,
     WireColorLayout, WireNodeSlotRoot, WireNodeStatus, WireProjectHandle, WireProjectRequest,
-    WireRenderProductKind, WireRenderProductPayload, WireResourceAvailability,
-    WireResourceKindSummary, WireResourceMetadataSummary, WireResourceSummary,
-    WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
-    WireSlotRootKind, WireSlotWatchSpecifier, WireTextureFormat,
+    WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
+    WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
+    WireRuntimeBufferPayload, WireSlotRootKind, WireSlotWatchSpecifier, WireTextureFormat,
+    WireVisualProductKind, WireVisualProductPayload,
 };
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,

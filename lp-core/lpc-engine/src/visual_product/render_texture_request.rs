@@ -1,4 +1,4 @@
-//! Request for materializing a render product into a complete texture.
+//! Request for materializing a visual product into a complete texture.
 
 use lps_shared::TextureStorageFormat;
 

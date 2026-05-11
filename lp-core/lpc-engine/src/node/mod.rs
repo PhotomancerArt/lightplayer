@@ -2,6 +2,7 @@
 //! Legacy runtimes live in [`crate::nodes`].
 
 mod contexts;
+mod control_node;
 mod node_binding_index;
 mod node_call;
 mod node_def_handle;
@@ -17,8 +18,10 @@ pub mod tree_error;
 
 pub use crate::memory::pressure_level::PressureLevel;
 pub use contexts::{
-    DestroyCtx, MemPressureCtx, NodeResourceInitContext, RenderContext, TickContext,
+    ControlRenderContext, ControlRenderServices, DestroyCtx, MemPressureCtx,
+    NodeResourceInitContext, RenderContext, TickContext,
 };
+pub use control_node::ControlNode;
 pub use node_call::{NodeCall, NodeCallKey};
 pub use node_def_handle::NodeDefHandle;
 pub use node_entry::NodeEntry;

@@ -1,10 +1,10 @@
-//! CPU-backed texture result materialized from a [`super::RenderProduct`].
+//! CPU-backed texture result materialized from a [`super::VisualProduct`].
 
 use core::fmt;
 
 use lps_shared::TextureStorageFormat;
 
-use super::{RenderSample, RenderSampleBatch, RenderSampleBatchResult};
+use super::{VisualSample, VisualSampleBatch, VisualSampleBatchResult};
 
 /// Invalid [`TextureRenderProduct`] construction input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,9 +32,9 @@ impl fmt::Display for TextureRenderProductError {
 
 impl core::error::Error for TextureRenderProductError {}
 
-/// Texture-backed render product with private byte storage (no `LpsTextureBuf` in the public API).
+/// Texture-backed visual product with private byte storage (no `LpsTextureBuf` in the public API).
 ///
-/// Sample coordinates in [`RenderSampleBatch`] are interpreted as normalized UV in \[0, 1\]×\[0, 1\]
+/// Sample coordinates in [`VisualSampleBatch`] are interpreted as normalized UV in \[0, 1\]×\[0, 1\]
 /// with nearest-neighbor filtering and clamp-to-edge behavior.
 #[derive(Debug, Clone)]
 pub struct TextureRenderProduct {
@@ -106,14 +106,14 @@ impl TextureRenderProduct {
 }
 
 impl TextureRenderProduct {
-    pub fn sample_batch(&self, request: &RenderSampleBatch) -> RenderSampleBatchResult {
+    pub fn sample_batch(&self, request: &VisualSampleBatch) -> VisualSampleBatchResult {
         let mut samples = alloc::vec::Vec::with_capacity(request.points.len());
         for p in &request.points {
             let (tx, ty) = uv_to_texel(p.x, p.y, self.width, self.height);
             let color = sample_texel(&self.pixels, self.width, self.format, tx, ty);
-            samples.push(RenderSample { color });
+            samples.push(VisualSample { color });
         }
-        RenderSampleBatchResult { samples }
+        VisualSampleBatchResult { samples }
     }
 }
 
@@ -190,7 +190,7 @@ mod tests {
     use alloc::vec;
 
     use super::{TextureRenderProduct, TextureRenderProductError};
-    use crate::render_product::{RenderSampleBatch, RenderSamplePoint};
+    use crate::visual_product::{VisualSampleBatch, VisualSamplePoint};
 
     fn pixel_rgba16(r: u16, g: u16, b: u16, a: u16) -> [u8; 8] {
         let mut out = [0u8; 8];
@@ -219,12 +219,12 @@ mod tests {
         );
         assert_eq!(tex.try_raw_bytes().map(<[_]>::len), Some(32));
 
-        let batch = RenderSampleBatch {
+        let batch = VisualSampleBatch {
             points: vec![
-                RenderSamplePoint { x: 0.0, y: 0.0 },
-                RenderSamplePoint { x: 0.999, y: 0.0 },
-                RenderSamplePoint { x: 0.0, y: 0.999 },
-                RenderSamplePoint { x: 0.999, y: 0.999 },
+                VisualSamplePoint { x: 0.0, y: 0.0 },
+                VisualSamplePoint { x: 0.999, y: 0.0 },
+                VisualSamplePoint { x: 0.0, y: 0.999 },
+                VisualSamplePoint { x: 0.999, y: 0.999 },
             ],
         };
         let out = tex.sample_batch(&batch);

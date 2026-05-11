@@ -1,15 +1,15 @@
 //! Engine-time product of resolution: model values, shader values, and engine handles.
 
-use lpc_model::LpValue;
+use lpc_model::{ControlProduct, LpValue};
 use lps_shared::LpsValueF32;
 
-use crate::render_product::RenderProduct;
 use crate::runtime_buffer::RuntimeBufferId;
+use crate::visual_product::VisualProduct;
 
 /// Building a [`RuntimeProduct`] from an invalid domain-specific value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeProductError {
-    /// [`LpsValueF32::Texture2D`] is shader ABI only; use [`RuntimeProduct::Buffer`] or render handles.
+    /// [`LpsValueF32::Texture2D`] is shader ABI only; use [`RuntimeProduct::Buffer`] or visual product handles.
     Texture2dValueNotRuntimeProduct,
 }
 
@@ -31,7 +31,8 @@ impl core::error::Error for RuntimeProductError {}
 pub enum RuntimeProduct {
     ModelValue(LpValue),
     Value(LpsValueF32),
-    Render(RenderProduct),
+    Visual(VisualProduct),
+    Control(ControlProduct),
     Buffer(RuntimeBufferId),
 }
 
@@ -55,8 +56,13 @@ impl RuntimeProduct {
     }
 
     #[must_use]
-    pub fn render(product: RenderProduct) -> Self {
-        Self::Render(product)
+    pub fn visual(product: VisualProduct) -> Self {
+        Self::Visual(product)
+    }
+
+    #[must_use]
+    pub fn control(product: ControlProduct) -> Self {
+        Self::Control(product)
     }
 
     #[must_use]
@@ -67,28 +73,35 @@ impl RuntimeProduct {
     pub fn as_value(&self) -> Option<&LpsValueF32> {
         match self {
             Self::Value(v) => Some(v),
-            Self::ModelValue(_) | Self::Render(_) | Self::Buffer(_) => None,
+            Self::ModelValue(_) | Self::Visual(_) | Self::Control(_) | Self::Buffer(_) => None,
         }
     }
 
     pub fn as_model_value(&self) -> Option<&LpValue> {
         match self {
             Self::ModelValue(value) => Some(value),
-            Self::Value(_) | Self::Render(_) | Self::Buffer(_) => None,
+            Self::Value(_) | Self::Visual(_) | Self::Control(_) | Self::Buffer(_) => None,
         }
     }
 
-    pub fn as_render(&self) -> Option<RenderProduct> {
+    pub fn as_visual(&self) -> Option<VisualProduct> {
         match self {
-            Self::Render(product) => Some(*product),
-            Self::ModelValue(_) | Self::Value(_) | Self::Buffer(_) => None,
+            Self::Visual(product) => Some(*product),
+            Self::ModelValue(_) | Self::Value(_) | Self::Control(_) | Self::Buffer(_) => None,
+        }
+    }
+
+    pub fn as_control(&self) -> Option<ControlProduct> {
+        match self {
+            Self::Control(product) => Some(*product),
+            Self::ModelValue(_) | Self::Value(_) | Self::Visual(_) | Self::Buffer(_) => None,
         }
     }
 
     pub fn as_buffer(&self) -> Option<RuntimeBufferId> {
         match self {
             Self::Buffer(id) => Some(*id),
-            Self::ModelValue(_) | Self::Value(_) | Self::Render(_) => None,
+            Self::ModelValue(_) | Self::Value(_) | Self::Visual(_) | Self::Control(_) => None,
         }
     }
 }
@@ -98,15 +111,15 @@ mod tests {
     use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32};
 
     use super::{RuntimeProduct, RuntimeProductError};
-    use crate::render_product::RenderProduct;
     use crate::runtime_buffer::RuntimeBufferId;
-    use lpc_model::NodeId;
+    use crate::visual_product::VisualProduct;
+    use lpc_model::{ControlExtent, ControlProduct, NodeId};
 
     #[test]
     fn runtime_product_value_helper_returns_value() {
         let p = RuntimeProduct::value(LpsValueF32::F32(3.14)).expect("scalar value");
         assert!(matches!(p.as_value(), Some(LpsValueF32::F32(_))));
-        assert!(p.as_render().is_none());
+        assert!(p.as_visual().is_none());
         assert!(p.as_buffer().is_none());
     }
 
@@ -120,16 +133,26 @@ mod tests {
             Some(lpc_model::LpValue::String(value)) if value == "saturating"
         ));
         assert!(p.as_value().is_none());
-        assert!(p.as_render().is_none());
+        assert!(p.as_visual().is_none());
         assert!(p.as_buffer().is_none());
     }
 
     #[test]
-    fn runtime_product_render_helper_returns_product() {
-        let product = RenderProduct::new(NodeId::new(7), 0);
-        let p = RuntimeProduct::render(product);
-        assert_eq!(p.as_render(), Some(product));
+    fn runtime_product_visual_helper_returns_product() {
+        let product = VisualProduct::new(NodeId::new(7), 0);
+        let p = RuntimeProduct::visual(product);
+        assert_eq!(p.as_visual(), Some(product));
         assert!(p.as_value().is_none());
+        assert!(p.as_buffer().is_none());
+    }
+
+    #[test]
+    fn runtime_product_control_helper_returns_product() {
+        let product = ControlProduct::new(NodeId::new(7), 0, ControlExtent::new(1, 3));
+        let p = RuntimeProduct::control(product);
+        assert_eq!(p.as_control(), Some(product));
+        assert!(p.as_value().is_none());
+        assert!(p.as_visual().is_none());
         assert!(p.as_buffer().is_none());
     }
 
@@ -139,7 +162,7 @@ mod tests {
         let p = RuntimeProduct::buffer(id);
         assert_eq!(p.as_buffer(), Some(id));
         assert!(p.as_value().is_none());
-        assert!(p.as_render().is_none());
+        assert!(p.as_visual().is_none());
     }
 
     #[test]
@@ -161,16 +184,22 @@ mod tests {
     }
 
     #[test]
-    fn accessors_do_not_cross_domains_between_render_and_buffer() {
-        let rid = RenderProduct::new(NodeId::new(1), 0);
+    fn accessors_do_not_cross_domains_between_visual_control_and_buffer() {
+        let vid = VisualProduct::new(NodeId::new(1), 0);
+        let cid = ControlProduct::new(NodeId::new(3), 0, ControlExtent::new(1, 3));
         let bid = RuntimeBufferId::new(2);
-        let render_p = RuntimeProduct::render(rid);
+        let visual_p = RuntimeProduct::visual(vid);
+        let control_p = RuntimeProduct::control(cid);
         let buffer_p = RuntimeProduct::buffer(bid);
-        assert!(render_p.as_buffer().is_none());
-        assert!(buffer_p.as_render().is_none());
-        assert!(render_p.as_value().is_none());
+        assert!(visual_p.as_buffer().is_none());
+        assert!(control_p.as_buffer().is_none());
+        assert!(buffer_p.as_visual().is_none());
+        assert!(buffer_p.as_control().is_none());
+        assert!(visual_p.as_value().is_none());
+        assert!(control_p.as_value().is_none());
         assert!(buffer_p.as_value().is_none());
-        assert!(render_p.as_model_value().is_none());
+        assert!(visual_p.as_model_value().is_none());
+        assert!(control_p.as_model_value().is_none());
         assert!(buffer_p.as_model_value().is_none());
     }
 }

@@ -39,11 +39,8 @@ This is a plan only. Implementation should happen after the design is stable.
 
 - `lpc_model::VisualProduct` is a small graph value:
   `node: NodeId`, `output: u32`.
-- `LpValue::RenderProduct(VisualProduct)` still carries it through slot values
-  in the current worktree. This variant should be renamed as part of cleanup.
-- `RuntimeProduct::Render(VisualProduct)` still carries it through engine
-  resolution in the current worktree. This variant should be renamed as part of
-  cleanup.
+- `LpValue::VisualProduct(VisualProduct)` carries it through slot values.
+- `RuntimeProduct::Visual(VisualProduct)` carries it through engine resolution.
 - `ShaderState.output` exposes a `VisualProduct` on the shader runtime state
   slot root.
 - `RenderNode` is an optional `NodeRuntime` capability. `ShaderNode` implements
@@ -55,40 +52,34 @@ This is a plan only. Implementation should happen after the design is stable.
 
 ### Fixture/output path
 
-- `FixtureNode` is currently a demand root.
-- `FixtureNode::tick` resolves its `input` visual product, materializes the
-  texture, computes channel data, and pushes bytes into an output sink
-  `RuntimeBufferId`.
-- `FixtureNode::new(mapping, mapping_revision, output_sink)` receives the
-  output sink id from the loader.
+- `OutputNode` is the demand root.
+- `FixtureNode::tick` resolves its `input` visual product and exposes a
+  lightweight `ControlProduct`.
+- `OutputNode::tick` consumes the `ControlProduct` and asks the fixture to
+  render into output-owned `unorm16` samples.
 - `OutputNode` allocates an output channel `RuntimeBuffer` and exposes it via
   `runtime_output_sink_buffer_id`.
 - `RuntimeServices` registers output sink buffers with `OutputDef` and flushes
   buffers whose revision matches the current engine revision after each engine
   tick.
-- `OutputNode::tick` is currently a no-op and output nodes are not demand roots.
-- `CoreProjectLoader` resolves `FixtureDef.output_loc`, finds the output
-  node's sink buffer, constructs `FixtureNode` with that sink, binds fixture
-  input, and adds the fixture as a demand root.
+- `CoreProjectLoader` binds output input and fixture output through normal
+  authored `BindingDefs`; fixture no longer names an output directly.
 
 ### Binding/authored shape
 
 - `ShaderDef.bindings.output` can bind shader output to a bus/target.
 - `FixtureDef.bindings.input` can bind fixture input from a bus/source.
-- `FixtureDef.output_loc` directly names the output node. This is a remaining
-  special-case connection outside the binding model.
-- `OutputDef` currently has no input binding field and does not consume fixture
-  output through the resolver.
+- `FixtureDef.bindings.output` can bind fixture output to a bus/target.
+- `OutputDef.bindings.input` can consume fixture control through the resolver.
 
 ### Current friction
 
-- Fixture and output are tightly coupled through a concrete `RuntimeBufferId`.
-- Fixture acts as the demand root even though output hardware is the real sink.
-- Runtime service flushing is outside normal node demand flow.
+- Runtime service flushing still mirrors the output-owned control samples into a
+  `RuntimeBuffer` for the existing provider API.
 - The buffer path mixes logical graph value, materialized control data, and output
   IO storage.
-- The visual rename has started but still needs cleanup in variants, slot type
-  names, editor hints, resource domains, and docs.
+- The visual rename is complete for public product/value/resource names; concrete
+  rendered texture payload types still use `TextureRenderProduct`.
 
 ## Product Vocabulary Decisions
 
@@ -96,7 +87,8 @@ This is a plan only. Implementation should happen after the design is stable.
   it; fixtures consume it.
 - `ControlProduct`: graph value for logical `u8` device-control data. Fixtures
   or future device nodes produce it; output nodes consume it.
-- `ControlFrame`: materialized control bytes plus layout hints.
+- `ControlRenderTarget`: output-owned materialization target.
+- `ControlLayout`: layout hints produced alongside materialization.
 - `Dmx`, `E131`, and `ArtNet`: protocol/output-adapter vocabulary. These names
   should appear below `ControlFrame`, not at the graph product boundary.
 - `ChannelProduct`: rejected because future audio output makes "channel"
@@ -123,9 +115,11 @@ This is a plan only. Implementation should happen after the design is stable.
 
 ## Relevant Files
 
-- `lp-core/lpc-model/src/resource/render_product.rs`
+- `lp-core/lpc-model/src/resource/visual_product.rs`
+- `lp-core/lpc-model/src/resource/control_product.rs`
 - `lp-core/lpc-model/src/value/lp_value.rs`
-- `lp-core/lpc-model/src/slots/render_product.rs`
+- `lp-core/lpc-model/src/slots/visual_product.rs`
+- `lp-core/lpc-model/src/slots/control_product.rs`
 - `lp-core/lpc-engine/src/runtime_product/runtime_product.rs`
 - `lp-core/lpc-engine/src/node/render_node.rs`
 - `lp-core/lpc-engine/src/node/node_call.rs`

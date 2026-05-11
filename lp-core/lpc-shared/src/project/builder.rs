@@ -10,7 +10,7 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
     Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
-    RelativeNodeRefSlot, RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
+    RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -61,7 +61,6 @@ pub struct OutputBuilder {
 
 /// Builder for fixture nodes
 pub struct FixtureBuilder {
-    output_path: LpPathBuf,
     texture_path: LpPathBuf,
     mapping: MappingConfig,
     color_order: ColorOrder,
@@ -130,9 +129,12 @@ impl ProjectBuilder {
     }
 
     /// Start building a fixture node
-    pub fn fixture(&mut self, output_path: &LpPathBuf, texture_path: &LpPathBuf) -> FixtureBuilder {
+    pub fn fixture(
+        &mut self,
+        _output_path: &LpPathBuf,
+        texture_path: &LpPathBuf,
+    ) -> FixtureBuilder {
         FixtureBuilder {
-            output_path: output_path.clone(),
             texture_path: texture_path.clone(),
             mapping: default_mapping(),
             color_order: ColorOrder::Rgb,
@@ -321,6 +323,7 @@ impl OutputBuilder {
 
         let config = OutputDef {
             pin: ValueSlot::new(self.pin),
+            bindings: bus_input_binding_defs("control.out"),
             options: OptionSlot::some(self.options),
         };
 
@@ -376,16 +379,14 @@ impl FixtureBuilder {
 
         let node_name = numbered_node_name("fixture", id);
         let path = artifact_path_for_node(&node_name);
-        let output_loc = builder.node_loc_for_path(&self.output_path);
         let texture_loc = builder.node_loc_for_path(&self.texture_path);
 
         let config = FixtureDef {
-            output_loc: RelativeNodeRefSlot::new(output_loc),
             render_size: lpc_model::Dim2uSlot::new(lpc_model::Dim2u {
                 width: 16,
                 height: 16,
             }),
-            bindings: texture_input_binding_defs(texture_loc),
+            bindings: fixture_binding_defs(texture_loc),
             mapping: self.mapping,
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
@@ -431,14 +432,22 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     )
 }
 
-fn texture_input_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
-    single_binding_defs(
-        "input",
+fn fixture_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
+    let mut entries = BTreeMap::new();
+    entries.insert(
+        String::from("input"),
         BindingDef::source(BindingEndpoint::Node(NodeSlotRef::new(
             texture_loc,
             SlotPath::parse("output").expect("valid texture output slot"),
         ))),
-    )
+    );
+    entries.insert(
+        String::from("output"),
+        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+            SlotPath::parse("control.out").expect("valid bus slot path"),
+        ))),
+    );
+    BindingDefs::new(entries)
 }
 
 fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {

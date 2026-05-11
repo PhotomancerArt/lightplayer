@@ -5,7 +5,9 @@ pub mod project;
 pub mod shader;
 pub mod texture;
 
-pub use fixture::{ColorOrder, FixtureDef, FixtureDefView, MappingConfig, PathSpec, RingOrder};
+pub use fixture::{
+    ColorOrder, FixtureDef, FixtureDefView, FixtureState, MappingConfig, PathSpec, RingOrder,
+};
 pub use node_def::{NodeDef, NodeDefParseError};
 pub use output::{OutputDef, OutputDefView, OutputDriverOptionsConfig};
 pub use project::ProjectDef;

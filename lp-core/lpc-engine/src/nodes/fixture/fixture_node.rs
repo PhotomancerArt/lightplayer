@@ -1,13 +1,15 @@
-//! Core fixture demand-root: resolves a shader [`RuntimeProduct::Render`], materializes a texture,
-//! maps channels via legacy accumulation, and pushes u16 RGB into an output
-//! [`crate::runtime_buffer::RuntimeBuffer`] sink.
+//! Core fixture node: resolves visual input, publishes a control product, and renders control
+//! samples into output-owned targets on demand.
 
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
-use lpc_model::{Dim2u, FixtureDefView, Revision, SlotPath};
+use lpc_model::{
+    ControlExtent, ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+};
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
@@ -18,42 +20,49 @@ use crate::nodes::fixture::mapping::{
 use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 
-use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
-    TickContext,
+use crate::control_product::{
+    ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
+    ControlSpan,
 };
-use crate::render_product::{
-    RenderSample, RenderSampleBatch, RenderSamplePoint, RenderTextureRequest, TextureRenderProduct,
+use crate::node::{
+    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError,
+    NodeResourceInitContext, NodeRuntime, PressureLevel, TickContext,
 };
 use crate::resolver::QueryKey;
-use crate::runtime_buffer::{
-    RuntimeBuffer, RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat,
+use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
+use crate::visual_product::{
+    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSample, VisualSampleBatch,
+    VisualSamplePoint,
 };
 
-/// Fixture demand root: resolves a shader texture render handle, batches UV samples via the render
-/// product API, applies legacy mapping accumulation, writes output channel buffer bytes.
+/// Fixture node: resolves a shader visual product and exposes a control product for outputs.
 pub struct FixtureNode {
+    state: FixtureState,
     mapping: MappingConfig,
     mapping_version: Revision,
-    output_sink: RuntimeBufferId,
     lamp_colors_buffer_id: Option<RuntimeBufferId>,
     def_view: Option<FixtureDefView>,
+    last_visual_product: Option<VisualProduct>,
+    last_settings: Option<FixtureRenderSettings>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
 }
 
 impl FixtureNode {
     pub fn new(
+        node_id: lpc_model::NodeId,
         mapping: MappingConfig,
         mapping_version: Revision,
-        output_sink: RuntimeBufferId,
     ) -> Self {
+        let preferred_extent = fixture_control_extent(&mapping);
         Self {
+            state: FixtureState::new(node_id, 0, preferred_extent),
             mapping,
             mapping_version,
-            output_sink,
             lamp_colors_buffer_id: None,
             def_view: None,
+            last_visual_product: None,
+            last_settings: None,
             precomputed: None,
         }
     }
@@ -92,10 +101,11 @@ impl NodeRuntime for FixtureNode {
             })
             .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
 
-        let rid =
-            prod.product.get().as_render().ok_or_else(|| {
-                NodeError::msg("fixture expected RuntimeProduct::Render from input")
+        let visual_product =
+            prod.product.get().as_visual().ok_or_else(|| {
+                NodeError::msg("fixture expected RuntimeProduct::Visual from input")
             })?;
+
         let def = self.def_view(ctx)?;
         let render_size: Dim2u = def.render_size().get(ctx)?;
         let color_order: ColorOrder = def.color_order().get(ctx)?;
@@ -133,36 +143,20 @@ impl NodeRuntime for FixtureNode {
             .ok_or_else(|| NodeError::msg("fixture internal: missing cached mapping"))?
             .3;
 
-        let texture = ctx.render_texture(
-            rid,
-            &RenderTextureRequest {
-                width,
-                height,
-                format: lps_shared::TextureStorageFormat::Rgba16Unorm,
-                time_seconds: ctx.time_seconds(),
-            },
-        )?;
-        let accumulators = accumulate_fixture_channels_from_texture_product(
-            &texture,
-            mapping_entries,
+        let _ = mapping_entries;
+        self.last_visual_product = Some(visual_product);
+        self.last_settings = Some(FixtureRenderSettings {
             width,
             height,
-        )?;
-
-        push_fixture_output(
-            ctx,
-            self.output_sink,
-            self.lamp_colors_buffer_id.ok_or_else(|| {
-                NodeError::msg(
-                    "fixture lamp colors buffer not initialized (missing init_resources)",
-                )
-            })?,
-            ver,
-            &accumulators,
             color_order,
             brightness,
             gamma_correction,
-        )
+        });
+        self.state.output.set_with_version(
+            ver,
+            ControlProduct::new(ctx.node_id(), 0, fixture_control_extent(&self.mapping)),
+        );
+        Ok(())
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
@@ -176,6 +170,77 @@ impl NodeRuntime for FixtureNode {
     ) -> Result<(), NodeError> {
         self.precomputed = None;
         Ok(())
+    }
+
+    fn runtime_state_slots(&self) -> &dyn SlotAccess {
+        &self.state
+    }
+
+    fn register_runtime_state_shapes(
+        &self,
+        registry: &mut SlotShapeRegistry,
+    ) -> Result<(), SlotShapeRegistryError> {
+        FixtureState::ensure_registered(registry).map(|_| ())
+    }
+
+    fn control_node(&mut self) -> Option<&mut dyn ControlNode> {
+        Some(self)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FixtureRenderSettings {
+    width: u32,
+    height: u32,
+    color_order: ColorOrder,
+    brightness: u8,
+    gamma_correction: bool,
+}
+
+impl ControlNode for FixtureNode {
+    fn render_control(
+        &mut self,
+        _product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<ControlLayout, NodeError> {
+        let visual_product = self
+            .last_visual_product
+            .ok_or_else(|| NodeError::msg("fixture control render requested before tick"))?;
+        let settings = self
+            .last_settings
+            .ok_or_else(|| NodeError::msg("fixture control render missing cached settings"))?;
+        let mapping_entries = &self
+            .precomputed
+            .as_ref()
+            .ok_or_else(|| NodeError::msg("fixture control render missing cached mapping"))?
+            .3;
+
+        let texture = ctx.render_texture(
+            visual_product,
+            &RenderTextureRequest {
+                width: settings.width,
+                height: settings.height,
+                format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                time_seconds: ctx.time_seconds(),
+            },
+        )?;
+        let accumulators = accumulate_fixture_channels_from_texture_product(
+            &texture,
+            mapping_entries,
+            settings.width,
+            settings.height,
+        )?;
+
+        render_fixture_control_target(
+            request,
+            target,
+            &accumulators,
+            settings.color_order,
+            settings.brightness,
+            settings.gamma_correction,
+        )
     }
 }
 
@@ -208,7 +273,7 @@ fn uv_batch_for_fixture_entries(
     entries: &[PixelMappingEntry],
     texture_width: u32,
     texture_height: u32,
-) -> RenderSampleBatch {
+) -> VisualSampleBatch {
     let mut points = Vec::new();
     let mut pixel_index = 0_u32;
 
@@ -222,21 +287,21 @@ fn uv_batch_for_fixture_entries(
         let y = pixel_index / texture_width;
         let u = x as f32 / texture_width.max(1) as f32;
         let v = y as f32 / texture_height.max(1) as f32;
-        points.push(RenderSamplePoint { x: u, y: v });
+        points.push(VisualSamplePoint { x: u, y: v });
 
         if !entry.has_more() {
             pixel_index = pixel_index.saturating_add(1);
         }
     }
 
-    RenderSampleBatch { points }
+    VisualSampleBatch { points }
 }
 
 /// Match legacy [`crate::nodes::fixture::mapping::accumulation`] channel math but source
-/// pixel RGB from normalized [`RenderSample`] colors (converted to legacy u8 like RGBA16 >> 8).
+/// pixel RGB from normalized [`VisualSample`] colors (converted to legacy u8 like RGBA16 >> 8).
 fn accumulate_fixture_channels_from_texture_samples(
     entries: &[PixelMappingEntry],
-    sample_colors: &[RenderSample],
+    sample_colors: &[VisualSample],
 ) -> Result<ChannelAccumulators, NodeError> {
     fn u8_to_q32_normalized(v: u8) -> Q32 {
         Q32(((v as i64) * 65536 / 255) as i32)
@@ -296,21 +361,46 @@ fn legacy_u8_from_unorm_render_sample(c: f32) -> u8 {
     (u >> 8) as u8
 }
 
-fn push_fixture_output(
-    ctx: &mut TickContext<'_>,
-    output_sink: RuntimeBufferId,
-    lamp_colors: RuntimeBufferId,
-    frame: Revision,
+fn render_fixture_control_target(
+    request: &ControlRenderRequest,
+    target: ControlRenderTarget<'_>,
     accumulators: &ChannelAccumulators,
     color_order: ColorOrder,
     brightness_u8: u8,
     gamma_correction: bool,
-) -> Result<(), NodeError> {
+) -> Result<ControlLayout, NodeError> {
+    if request.sample_format != ControlSampleFormat::Unorm16
+        || target.sample_format != ControlSampleFormat::Unorm16
+    {
+        return Err(NodeError::msg(
+            "fixture only supports unorm16 control targets",
+        ));
+    }
+    if request.extent != target.extent {
+        return Err(NodeError::msg(
+            "control render target extent does not match request",
+        ));
+    }
+
+    let expected_samples = request.extent.sample_count() as usize;
+    if target.samples.len() < expected_samples {
+        return Err(NodeError::msg(
+            "control render target is smaller than requested extent",
+        ));
+    }
+
+    target.samples.fill(0);
+
     let max_channel = accumulators.max_channel as usize;
     let brightness = brightness_u8.to_q32() / 255.to_q32();
+    let mut written_samples = 0usize;
 
-    let mut logical_rgb16 = Vec::with_capacity(max_channel.saturating_add(1));
     for channel_idx in 0usize..=max_channel {
+        let base = channel_idx.saturating_mul(3);
+        if base + 3 > expected_samples {
+            break;
+        }
+
         let r_q = accumulators.r[channel_idx] * brightness;
         let g_q = accumulators.g[channel_idx] * brightness;
         let b_q = accumulators.b[channel_idx] * brightness;
@@ -325,73 +415,37 @@ fn push_fixture_output(
             b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
         }
 
-        logical_rgb16.push((r, g, b));
+        let ordered = ordered_rgb_u16(color_order, r, g, b);
+        target.samples[base..base + 3].copy_from_slice(&ordered);
+        written_samples = base + 3;
     }
 
-    ctx.with_runtime_buffer_mut(output_sink, frame, |buffer| {
-        buffer.kind = crate::runtime_buffer::RuntimeBufferKind::OutputChannels;
-        buffer.metadata = RuntimeBufferMetadata::OutputChannels {
-            channels: (max_channel + 1) as u32,
-            sample_format: RuntimeChannelSampleFormat::U16,
-        };
-        let byte_len = (max_channel + 1).saturating_mul(3).saturating_mul(2);
-        buffer.bytes.resize(byte_len, 0);
-
-        for (channel_idx, (r, g, b)) in logical_rgb16.iter().copied().enumerate() {
-            write_ordered_rgb_u16_le(
-                &mut buffer.bytes,
-                channel_idx.saturating_mul(6),
+    Ok(ControlLayout {
+        spans: vec![ControlSpan {
+            row: 0,
+            start: 0,
+            len: written_samples as u32,
+            hint: ControlHint::RgbPixels {
+                count: (written_samples / 3) as u32,
                 color_order,
-                r,
-                g,
-                b,
-            );
-        }
-
-        Ok(())
-    })?;
-
-    ctx.with_runtime_buffer_mut(lamp_colors, frame, |buffer| {
-        let byte_len = (max_channel + 1).saturating_mul(3);
-        buffer.bytes.resize(byte_len, 0);
-
-        for (channel_idx, (r, g, b)) in logical_rgb16.iter().copied().enumerate() {
-            let off = channel_idx.saturating_mul(3);
-            if off + 3 <= buffer.bytes.len() {
-                buffer.bytes[off] = (r >> 8) as u8;
-                buffer.bytes[off + 1] = (g >> 8) as u8;
-                buffer.bytes[off + 2] = (b >> 8) as u8;
-            }
-        }
-
-        Ok(())
-    })?;
-    Ok(())
+            },
+        }],
+    })
 }
 
-fn write_ordered_rgb_u16_le(
-    bytes: &mut [u8],
-    offset: usize,
-    color_order: ColorOrder,
-    r: u16,
-    g: u16,
-    b: u16,
-) {
-    let ordered = match color_order {
+fn ordered_rgb_u16(color_order: ColorOrder, r: u16, g: u16, b: u16) -> [u16; 3] {
+    match color_order {
         ColorOrder::Rgb => [r, g, b],
         ColorOrder::Grb => [g, r, b],
         ColorOrder::Rbg => [r, b, g],
         ColorOrder::Gbr => [g, b, r],
         ColorOrder::Brg => [b, r, g],
         ColorOrder::Bgr => [b, g, r],
-    };
-
-    for (i, word) in ordered.iter().enumerate() {
-        let start = offset.saturating_add(i.saturating_mul(2));
-        if start + 2 <= bytes.len() {
-            bytes[start..start + 2].copy_from_slice(&word.to_le_bytes());
-        }
     }
+}
+
+fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
+    ControlExtent::new(1, fixture_lamp_channel_count(config).saturating_mul(3))
 }
 
 fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
@@ -438,7 +492,7 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
-    use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath, WithRevision};
+    use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -446,8 +500,7 @@ mod tests {
     use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
-    use crate::render_product::{RenderProduct, TextureRenderProduct};
-    use crate::runtime_buffer::RuntimeBuffer;
+    use crate::visual_product::{TextureRenderProduct, VisualProduct};
     use lpc_model::{
         ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
     };
@@ -463,7 +516,7 @@ mod tests {
             self.ticks.fetch_add(1, Ordering::Relaxed);
             self.state
                 .output
-                .set_with_version(ctx.revision(), RenderProduct::new(ctx.node_id(), 0));
+                .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
             Ok(())
         }
 
@@ -498,7 +551,7 @@ mod tests {
     impl RenderNode for FixtureTickCountSolidProducer {
         fn render_texture(
             &mut self,
-            _product: RenderProduct,
+            _product: VisualProduct,
             request: &RenderTextureRequest,
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
@@ -641,18 +694,13 @@ mod tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(FixtureTickCountSolidProducer {
-                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
             )
             .unwrap();
-
-        let sink = engine.runtime_buffers_mut().insert(WithRevision::new(
-            frame,
-            RuntimeBuffer::raw(alloc::vec![0u8; 24]),
-        ));
 
         let mapping = MappingConfig::path_points_vec(
             vec![PathSpec::ring_array_counts(
@@ -685,7 +733,7 @@ mod tests {
         engine
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(mapping, frame, sink)),
+                Box::new(FixtureNode::new(fix_id, mapping, frame)),
                 frame,
             )
             .unwrap();
@@ -777,18 +825,13 @@ mod tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(FixtureTickCountSolidProducer {
-                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
             )
             .unwrap();
-
-        let sink = engine.runtime_buffers_mut().insert(WithRevision::new(
-            frame,
-            RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-        ));
 
         let mapping = MappingConfig::path_points_vec(
             vec![PathSpec::ring_array_counts(
@@ -821,7 +864,7 @@ mod tests {
         engine
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(mapping, frame, sink)),
+                Box::new(FixtureNode::new(fix_id, mapping, frame)),
                 frame,
             )
             .unwrap();
@@ -864,16 +907,16 @@ mod tests {
         engine.add_demand_root(fix_id);
         engine.tick(10).unwrap();
 
-        let got = engine
-            .runtime_buffers()
-            .get(sink)
-            .unwrap()
-            .value()
-            .bytes
-            .clone();
-        assert_eq!(got.len(), 6);
-        assert_eq!(&got[0..2], &65535u16.to_le_bytes());
-        assert_eq!(&got[2..4], &0u16.to_le_bytes());
-        assert_eq!(&got[4..6], &0u16.to_le_bytes());
+        let extent = ControlExtent::new(1, 3);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = engine
+            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .expect("control render");
+
+        assert_eq!(samples, vec![65535u16, 0, 0]);
+        assert_eq!(layout.spans.len(), 1);
+        assert_eq!(layout.spans[0].len, 3);
     }
 }

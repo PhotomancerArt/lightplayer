@@ -154,7 +154,7 @@ pub enum Kind {
     /// Opaque **texture** semantic kind: portable struct storage (`width` /
     /// `height` / `handle` / …) describes serialization and GPU-oriented
     /// layout intent—not the same thing as a full-frame
-    /// engine-managed visual product (`RuntimeProduct::Render` in `lpc-engine`).
+    /// engine-managed visual product (`RuntimeProduct::Visual` in `lpc-engine`).
     Texture,
 
     /// Audio frequency-band levels (low / mid / high) as F32 RMS values.

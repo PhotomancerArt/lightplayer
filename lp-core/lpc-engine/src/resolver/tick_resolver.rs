@@ -1,12 +1,15 @@
 //! Node-facing demand resolution facade ([`TickResolver`]) backed by session + host.
 
-use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
+use crate::control_product::{
+    ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
+};
 use crate::resolver::production::Production;
 use crate::resolver::query_key::QueryKey;
 use crate::resolver::resolve_error::{ResolveError, SessionResolveError};
 use crate::resolver::resolve_host::ResolveHost;
 use crate::resolver::resolve_session::ResolveSession;
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId};
+use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use lpc_model::Revision;
 
 /// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
@@ -15,9 +18,16 @@ pub trait TickResolver {
 
     fn render_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, ResolveError>;
+
+    fn render_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, ResolveError>;
 
     fn runtime_buffer_mut(
         &mut self,
@@ -43,9 +53,20 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 
+    fn render_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, ResolveError> {
+        self.host
+            .render_control(product, request, target)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
     fn render_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, ResolveError> {
         self.host

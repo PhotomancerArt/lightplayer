@@ -74,24 +74,27 @@ pub use node::{
     RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, GlslOpts, MappingConfig, MulMode,
-    NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig, PathSpec, ProjectDef,
-    RingOrder, ScalarHint, ShaderDef, ShaderDefView, ShaderParamDef, ShaderState, TextureDef,
-    TextureDefView, TextureFormat, TextureState,
+    AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, FixtureState, GlslOpts,
+    MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    PathSpec, ProjectDef, RingOrder, ScalarHint, ShaderDef, ShaderDefView, ShaderParamDef,
+    ShaderState, TextureDef, TextureDefView, TextureFormat, TextureState,
 };
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};
-pub use resource::{RenderProduct, RenderProductId, ResourceDomain, ResourceRef, RuntimeBufferId};
+pub use resource::{
+    ControlExtent, ControlProduct, ResourceDomain, ResourceRef, RuntimeBufferId, VisualProduct,
+    VisualProductId,
+};
 pub use server::server_config::ServerConfig;
 pub use slot::{
-    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
-    RenderProductSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError, XySlot,
-    affine2d_shape, artifact_path_shape, color_order_shape, dim2u_shape, positive_f32_shape,
-    ratio_shape, relative_node_ref_shape, render_order_shape, render_product_resource_shape,
-    render_product_shape, resource_ref_shape, runtime_buffer_resource_shape, source_path_shape,
-    u32_list_shape, xy_shape,
+    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, ControlProductSlot,
+    Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot,
+    RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
+    SlotValueShape, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot,
+    XySlot, affine2d_shape, artifact_path_shape, color_order_shape, control_product_shape,
+    dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape, render_order_shape,
+    resource_ref_shape, runtime_buffer_resource_shape, source_path_shape, u32_list_shape,
+    visual_product_resource_shape, visual_product_shape, xy_shape,
 };
 pub use slot::{
     FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotAccessor,

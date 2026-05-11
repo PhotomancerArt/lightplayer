@@ -41,7 +41,8 @@ pub(crate) fn materialize_literal_product(
     frame: Revision,
 ) -> WithRevision<RuntimeProduct> {
     let product = match value {
-        lpc_model::LpValue::RenderProduct(product) => RuntimeProduct::render(*product),
+        lpc_model::LpValue::VisualProduct(product) => RuntimeProduct::visual(*product),
+        lpc_model::LpValue::ControlProduct(product) => RuntimeProduct::control(*product),
         other => match model_value_to_lps_value_f32(other) {
             Ok(value) => RuntimeProduct::Value(value),
             Err(_) => RuntimeProduct::model_value(other.clone()),
@@ -96,11 +97,12 @@ pub(crate) fn model_value_to_lps_value_f32(
                 fields: result_fields,
             })
         }
-        LpValue::String(_) | LpValue::Resource(_) | LpValue::RenderProduct(_) => {
-            Err(ResolveError::new(alloc::format!(
-                "model value cannot be resolved as shader value: {value:?}"
-            )))
-        }
+        LpValue::String(_)
+        | LpValue::Resource(_)
+        | LpValue::VisualProduct(_)
+        | LpValue::ControlProduct(_) => Err(ResolveError::new(alloc::format!(
+            "model value cannot be resolved as shader value: {value:?}"
+        ))),
     }
 }
 

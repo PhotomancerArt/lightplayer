@@ -7,10 +7,13 @@ use alloc::sync::Arc;
 
 use crate::artifact::ArtifactId;
 use crate::bus::Bus;
+use crate::control_product::{
+    ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
+};
 use crate::gfx::LpGraphics;
-use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::{Production, QueryKey, ResolveError, TickResolver};
 use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
+use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::wire_bridge::lps_value_f32_to_model_value;
 use lpc_model::{
     FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
@@ -20,7 +23,7 @@ use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
 
-/// Narrow store access for allocating node-owned render products and runtime buffers at attach time.
+/// Narrow store access for allocating node-owned visual products and runtime buffers at attach time.
 ///
 /// Passed to [`super::super::NodeRuntime::init_resources`] before the node payload is [`crate::node::NodeEntryState::Alive`].
 pub struct NodeResourceInitContext<'a> {
@@ -184,15 +187,27 @@ impl<'r> TickContext<'r> {
         self.graphics.as_ref().map(|g| g.as_ref())
     }
 
-    /// Materializes a render product into a full texture through the active engine session.
+    /// Materializes a visual product into a full texture through the active engine session.
     pub fn render_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, NodeError> {
         self.resolver
             .render_texture(product, request)
             .map_err(|e| NodeError::msg(alloc::format!("render texture: {}", e.message)))
+    }
+
+    /// Renders a control product into an output-owned target through the active engine session.
+    pub fn render_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, NodeError> {
+        self.resolver
+            .render_control(product, request, target)
+            .map_err(|e| NodeError::msg(alloc::format!("render control: {}", e.message)))
     }
 
     /// Mutates a single existing runtime buffer in place and marks it changed for `frame`.
@@ -245,6 +260,66 @@ fn runtime_product_to_model_value(
             "consumed slot {slot} cannot be read as a portable model value: {e:?}"
         ))
     })
+}
+
+/// Context passed to [`super::ControlNode`] materialization hooks.
+pub struct ControlRenderContext<'a> {
+    node_id: NodeId,
+    revision: Revision,
+    graphics: Option<Arc<dyn LpGraphics>>,
+    frame_time_seconds: f32,
+    services: &'a mut dyn ControlRenderServices,
+}
+
+impl<'a> ControlRenderContext<'a> {
+    pub fn new(
+        node_id: NodeId,
+        revision: Revision,
+        graphics: Option<Arc<dyn LpGraphics>>,
+        frame_time_seconds: f32,
+        services: &'a mut dyn ControlRenderServices,
+    ) -> Self {
+        Self {
+            node_id,
+            revision,
+            graphics,
+            frame_time_seconds,
+            services,
+        }
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    pub fn revision(&self) -> Revision {
+        self.revision
+    }
+
+    pub fn graphics(&self) -> Option<&dyn LpGraphics> {
+        self.graphics.as_ref().map(|g| g.as_ref())
+    }
+
+    pub fn time_seconds(&self) -> f32 {
+        self.frame_time_seconds
+    }
+
+    pub fn render_texture(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError> {
+        self.services.render_texture(product, request)
+    }
+}
+
+/// Services available while materializing a [`crate::control_product::ControlProduct`].
+pub trait ControlRenderServices {
+    fn render_texture(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError>;
 }
 
 /// Context passed to [`super::RenderNode`] materialization hooks.

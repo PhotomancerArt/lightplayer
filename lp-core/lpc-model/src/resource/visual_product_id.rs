@@ -1,12 +1,12 @@
-/// Small, copyable identifier for a render product; suitable as a map key.
+/// Small, copyable identifier for a visual product; suitable as a map key.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
-pub struct RenderProductId(u32);
+pub struct VisualProductId(u32);
 
-impl RenderProductId {
+impl VisualProductId {
     #[must_use]
     pub const fn new(raw: u32) -> Self {
         Self(raw)
@@ -19,12 +19,12 @@ impl RenderProductId {
 }
 #[cfg(test)]
 mod tests {
-    use crate::resource::render_product_id::RenderProductId;
+    use crate::resource::visual_product_id::VisualProductId;
 
     #[test]
-    fn render_product_id_round_trips_raw() {
-        let id = RenderProductId::new(42);
+    fn visual_product_id_round_trips_raw() {
+        let id = VisualProductId::new(42);
         assert_eq!(id.as_u32(), 42);
-        assert_eq!(RenderProductId::new(id.as_u32()), id);
+        assert_eq!(VisualProductId::new(id.as_u32()), id);
     }
 }

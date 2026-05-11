@@ -1,38 +1,37 @@
-//! Render-product handle and minimal sample request/result shapes.
+//! Visual-product handle and minimal sample request/result shapes.
 
-mod render_product;
 mod render_texture_request;
 mod sample_request;
 mod sample_result;
 mod texture_product;
 
-pub use render_product::RenderProduct;
+pub use lpc_model::VisualProduct;
 pub use render_texture_request::RenderTextureRequest;
-pub use sample_request::{RenderSampleBatch, RenderSamplePoint};
-pub use sample_result::{RenderSample, RenderSampleBatchResult};
+pub use sample_request::{VisualSampleBatch, VisualSamplePoint};
+pub use sample_result::{VisualSample, VisualSampleBatchResult};
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 #[cfg(test)]
 mod tests {
     use alloc::vec;
 
-    use super::{RenderSample, RenderSampleBatch, RenderSampleBatchResult, RenderSamplePoint};
+    use super::{VisualSample, VisualSampleBatch, VisualSampleBatchResult, VisualSamplePoint};
 
     #[test]
     fn sample_batch_holds_points_and_results_hold_samples() {
-        let batch = RenderSampleBatch {
+        let batch = VisualSampleBatch {
             points: vec![
-                RenderSamplePoint { x: 0.0, y: 0.0 },
-                RenderSamplePoint { x: 1.0, y: 1.0 },
+                VisualSamplePoint { x: 0.0, y: 0.0 },
+                VisualSamplePoint { x: 1.0, y: 1.0 },
             ],
         };
         assert_eq!(batch.points.len(), 2);
 
-        let result = RenderSampleBatchResult {
+        let result = VisualSampleBatchResult {
             samples: vec![
-                RenderSample {
+                VisualSample {
                     color: [1.0, 0.0, 0.0, 1.0],
                 },
-                RenderSample {
+                VisualSample {
                     color: [0.0, 1.0, 0.0, 1.0],
                 },
             ],

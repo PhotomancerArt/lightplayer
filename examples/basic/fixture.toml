@@ -1,11 +1,13 @@
 kind = "fixture"
-output_loc = "..output"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
 
 [bindings.input]
 source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
 
 [transform]
 m00 = 1.0

@@ -20,7 +20,6 @@ use crate::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget
 use crate::engine::Engine;
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
-use crate::runtime_buffer::RuntimeBufferId;
 
 use super::{CoreProjectRuntime, RuntimeServices};
 
@@ -229,6 +228,34 @@ impl CoreProjectLoader {
                         reason: String::from("output runtime node produced no sink buffer"),
                     })?;
                 runtime.services_mut().register_output_sink(sink_id, config);
+                runtime
+                    .engine_mut()
+                    .add_binding(
+                        BindingDraft {
+                            source: BindingSource::Literal(LpValue::F32(0.0)),
+                            target: BindingTarget::ConsumedSlot {
+                                node: node.id,
+                                slot: demand_input_path(),
+                            },
+                            priority: BindingPriority::new(0),
+                            kind: Kind::Color,
+                            owner: node.id,
+                        },
+                        frame,
+                    )
+                    .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("bind output demand slot: {e}"),
+                    })?;
+                register_source_binding(
+                    runtime.engine_mut(),
+                    loaded_nodes,
+                    node,
+                    "input",
+                    &config.bindings,
+                    frame,
+                )?;
+                runtime.engine_mut().add_demand_root(node.id);
             }
         }
 
@@ -261,43 +288,16 @@ impl CoreProjectLoader {
 
         for node in loaded_nodes {
             if let NodeDef::Fixture(config) = &node.config {
-                let output_node =
-                    resolve_node_loc(loaded_nodes, node, config.output_loc(), "output")?;
-                let sink_id = output_sink_for(
-                    runtime.engine(),
-                    output_node.id,
-                    output_node.artifact_path.as_path(),
-                )?;
-
                 runtime
                     .engine_mut()
                     .attach_runtime_node(
                         node.id,
-                        Box::new(FixtureNode::new(config.mapping.clone(), frame, sink_id)),
+                        Box::new(FixtureNode::new(node.id, config.mapping.clone(), frame)),
                         frame,
                     )
                     .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach fixture runtime: {e}"),
-                    })?;
-                runtime
-                    .engine_mut()
-                    .add_binding(
-                        BindingDraft {
-                            source: BindingSource::Literal(LpValue::F32(0.0)),
-                            target: BindingTarget::ConsumedSlot {
-                                node: node.id,
-                                slot: demand_input_path(),
-                            },
-                            priority: BindingPriority::new(0),
-                            kind: Kind::Color,
-                            owner: node.id,
-                        },
-                        frame,
-                    )
-                    .map_err(|e| CoreProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("bind fixture demand slot: {e}"),
                     })?;
                 register_source_binding(
                     runtime.engine_mut(),
@@ -307,7 +307,14 @@ impl CoreProjectLoader {
                     &config.bindings,
                     frame,
                 )?;
-                runtime.engine_mut().add_demand_root(node.id);
+                register_target_binding(
+                    runtime.engine_mut(),
+                    loaded_nodes,
+                    node,
+                    "output",
+                    &config.bindings,
+                    frame,
+                )?;
             }
         }
 
@@ -597,19 +604,6 @@ fn binding_target_endpoint(
     }
 }
 
-fn output_sink_for(
-    engine: &Engine,
-    output_node_id: NodeId,
-    output_dir: &LpPath,
-) -> Result<RuntimeBufferId, CoreProjectLoadError> {
-    engine
-        .runtime_output_sink_buffer_id(output_node_id)
-        .ok_or_else(|| CoreProjectLoadError::InvalidSourcePath {
-            path: output_dir.as_str().to_string(),
-            reason: String::from("output node has no sink buffer"),
-        })
-}
-
 fn read_utf8_file<R>(root: &R, path: &LpPath) -> Result<String, CoreProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
@@ -698,8 +692,12 @@ mod tests {
         );
 
         assert!(
-            rt.engine().demand_roots().contains(&fix_id),
-            "fixture must be demand root"
+            rt.engine().demand_roots().contains(&out_id),
+            "output must be demand root"
+        );
+        assert!(
+            !rt.engine().demand_roots().contains(&fix_id),
+            "fixture is driven by output demand"
         );
         assert!(
             !rt.engine().demand_roots().contains(&tex_id),
@@ -785,13 +783,15 @@ artifact = "./weird.toml"
             "/fixture.toml".as_path(),
             br#"
 kind = "fixture"
-output_loc = "..output"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
 
 [bindings.input]
 source = "..missing#output"
+
+[bindings.output]
+target = "bus#control.out"
 
 [transform]
 m00 = 1.0
@@ -843,13 +843,15 @@ order = "inner_first"
             "/fixture.toml".as_path(),
             br#"
 kind = "fixture"
-output_loc = "..output"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
 
 [bindings.input]
 source = "/texture#output"
+
+[bindings.output]
+target = "bus#control.out"
 
 [transform]
 m00 = 1.0
@@ -950,6 +952,9 @@ target = "bus#visual.out"
             br#"
 kind = "output"
 pin = 4
+
+[bindings.input]
+source = "bus#control.out"
 "#,
         )
         .expect("output.toml");
@@ -957,13 +962,15 @@ pin = 4
             "/fixture.toml".as_path(),
             br#"
 kind = "fixture"
-output_loc = "..output"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
 
 [bindings.input]
-source = "..texture#output"
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
 
 [transform]
 m00 = 1.0

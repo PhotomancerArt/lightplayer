@@ -1,4 +1,4 @@
-//! Core shader node: owns GLSL compilation/rendering and exposes output as [`RuntimeProduct::Render`].
+//! Core shader node: owns GLSL compilation/rendering and exposes output as [`RuntimeProduct::Visual`].
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -16,7 +16,7 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
     TickContext,
 };
-use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
+use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -40,7 +40,7 @@ impl ShaderNode {
             config_accessors: None,
             shader: None,
             compilation_error: None,
-            state: ShaderState::new(RenderProduct::new(node_id, 0)),
+            state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
 
@@ -48,7 +48,7 @@ impl ShaderNode {
         self.node_id
     }
 
-    pub fn render_product(&self) -> RenderProduct {
+    pub fn visual_product(&self) -> VisualProduct {
         *self.state.output.value()
     }
 
@@ -139,7 +139,7 @@ impl NodeRuntime for ShaderNode {
         self.update_config_from_view(ctx)?;
         self.state
             .output
-            .set_with_version(ctx.revision(), RenderProduct::new(self.node_id, 0));
+            .set_with_version(ctx.revision(), VisualProduct::new(self.node_id, 0));
         Ok(())
     }
 
@@ -222,13 +222,13 @@ pub fn shader_output_path() -> SlotPath {
 impl RenderNode for ShaderNode {
     fn render_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
         ctx: &mut RenderContext<'_>,
     ) -> Result<TextureRenderProduct, NodeError> {
         if product.node() != self.node_id {
             return Err(NodeError::msg(format!(
-                "shader node {:?} cannot render product owned by {:?}",
+                "shader node {:?} cannot visual product owned by {:?}",
                 self.node_id,
                 product.node()
             )));
@@ -304,9 +304,9 @@ mod tests {
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
     use crate::nodes::TextureNode;
-    use crate::render_product::{RenderProduct, RenderSampleBatch, RenderSamplePoint};
     use crate::resolver::QueryKey;
     use crate::resolver::ResolveLogLevel;
+    use crate::visual_product::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
     use lpc_model::{
         ArtifactLocator, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
         TextureDef, TreePath,
@@ -315,7 +315,7 @@ mod tests {
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
-    fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, RenderProduct) {
+    fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, VisualProduct) {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
@@ -381,7 +381,7 @@ mod tests {
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
 
-        let rid = RenderProduct::new(sh_id, 0);
+        let rid = VisualProduct::new(sh_id, 0);
 
         (engine, tex_id, sh_id, rid)
     }
@@ -400,7 +400,7 @@ mod tests {
 
         assert_eq!(
             output.value(),
-            lpc_model::LpValue::RenderProduct(node.render_product())
+            lpc_model::LpValue::VisualProduct(node.visual_product())
         );
     }
 
@@ -417,12 +417,12 @@ mod tests {
             .expect("resolve")
             .0;
         let rp = prod.product.get();
-        let got_id = rp.as_render().expect("render product");
+        let got_id = rp.as_visual().expect("visual product");
         assert_eq!(got_id, rid);
     }
 
     #[test]
-    fn shader_core_render_product_is_sampleable_red_channel() {
+    fn shader_core_visual_product_is_sampleable_red_channel() {
         let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(500).expect("tick");
 
@@ -435,7 +435,7 @@ mod tests {
         let texture = engine
             .render_texture_for_test(
                 rid,
-                &crate::render_product::RenderTextureRequest {
+                &crate::visual_product::RenderTextureRequest {
                     width: 8,
                     height: 8,
                     format: lps_shared::TextureStorageFormat::Rgba16Unorm,
@@ -443,8 +443,8 @@ mod tests {
                 },
             )
             .expect("render texture");
-        let batch = RenderSampleBatch {
-            points: vec![RenderSamplePoint { x: 0.5, y: 0.5 }],
+        let batch = VisualSampleBatch {
+            points: vec![VisualSamplePoint { x: 0.5, y: 0.5 }],
         };
         let sample = texture.sample_batch(&batch);
         assert!(sample.samples[0].color[0] > 0.4);

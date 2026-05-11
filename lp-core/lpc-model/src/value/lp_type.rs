@@ -43,7 +43,8 @@ pub enum LpType {
         fields: Vec<ModelStructMember>,
     },
     Resource,
-    RenderProduct,
+    VisualProduct,
+    ControlProduct,
 }
 
 /// One field in a [`LpType::Struct`].

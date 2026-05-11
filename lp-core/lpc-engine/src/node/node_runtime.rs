@@ -3,10 +3,10 @@
 use crate::runtime_buffer::RuntimeBufferId;
 use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
-use super::RenderNode;
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
 use super::runtime_state_slots::EMPTY_RUNTIME_STATE_SLOTS;
+use super::{ControlNode, RenderNode};
 use crate::memory::pressure_level::PressureLevel;
 
 /// Runtime node instance for the demand-driven engine spine.
@@ -49,6 +49,11 @@ pub trait NodeRuntime {
 
     /// Render capability for nodes whose produced slots can materialize visual products.
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
+        None
+    }
+
+    /// Control capability for nodes whose produced slots can render device-control samples.
+    fn control_node(&mut self) -> Option<&mut dyn ControlNode> {
         None
     }
 }

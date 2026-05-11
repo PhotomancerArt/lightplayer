@@ -81,8 +81,9 @@ pub enum ValueEditorHint {
     Affine2d,
     Resource,
     RuntimeBufferResource,
-    RenderProductResource,
-    RenderProduct,
+    VisualProductResource,
+    VisualProduct,
+    ControlProduct,
     Dropdown {
         options: Vec<SlotEnumOption>,
     },
@@ -308,7 +309,8 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
         LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
         LpType::Resource => "slot.leaf.raw_resource",
-        LpType::RenderProduct => "slot.leaf.raw_render_product",
+        LpType::VisualProduct => "slot.leaf.raw_visual_product",
+        LpType::ControlProduct => "slot.leaf.raw_control_product",
     })
 }
 
@@ -316,9 +318,9 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
 mod tests {
     use super::*;
     use crate::{
-        Affine2d, ColorOrderValue, Dim2u, FromLpValue, RenderProductId, ResourceRef, ToLpValue,
-        affine2d_shape, color_order_shape, dim2u_shape, relative_node_ref_shape,
-        render_product_resource_shape, runtime_buffer_resource_shape,
+        Affine2d, ColorOrderValue, Dim2u, FromLpValue, ResourceRef, ToLpValue, VisualProductId,
+        affine2d_shape, color_order_shape, control_product_shape, dim2u_shape,
+        relative_node_ref_shape, runtime_buffer_resource_shape, visual_product_resource_shape,
     };
 
     #[test]
@@ -334,8 +336,12 @@ mod tests {
             ValueEditorHint::RuntimeBufferResource
         ));
         assert!(matches!(
-            render_product_resource_shape().editor,
-            ValueEditorHint::RenderProductResource
+            visual_product_resource_shape().editor,
+            ValueEditorHint::VisualProductResource
+        ));
+        assert!(matches!(
+            control_product_shape().editor,
+            ValueEditorHint::ControlProduct
         ));
         assert!(matches!(
             color_order_shape().editor,
@@ -363,7 +369,7 @@ mod tests {
             order
         );
 
-        let resource = ResourceRef::render_product(RenderProductId::new(7));
+        let resource = ResourceRef::visual_product(VisualProductId::new(7));
         assert_eq!(
             ResourceRef::from_lp_value(resource.to_lp_value()).unwrap(),
             resource

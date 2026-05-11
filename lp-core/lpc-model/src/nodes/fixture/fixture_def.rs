@@ -3,17 +3,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::MappingConfig;
 use crate::{
-    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, RelativeNodeRef,
-    RelativeNodeRefSlot, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError,
-    ValueSlot,
+    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, SlotShapeId,
+    SlotValue, SlotValueShape, ToLpValue, ValueRootError, ValueSlot,
 };
 
 /// Authored fixture node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
 #[slot(root, view)]
 pub struct FixtureDef {
-    /// Output node locator.
-    pub output_loc: RelativeNodeRefSlot,
     /// Full-frame render size used when materializing the fixture input.
     #[serde(default = "default_render_size")]
     pub render_size: Dim2uSlot,
@@ -37,10 +34,6 @@ pub struct FixtureDef {
 
 impl FixtureDef {
     pub const KIND: &'static str = "fixture";
-
-    pub fn output_loc(&self) -> &RelativeNodeRef {
-        self.output_loc.value()
-    }
 
     pub fn render_width(&self) -> u32 {
         self.render_size.value().width
@@ -278,7 +271,6 @@ mod tests {
             ),
         );
         let def = FixtureDef {
-            output_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..out_output").unwrap()),
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),

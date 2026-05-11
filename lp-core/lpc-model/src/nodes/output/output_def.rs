@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+use crate::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 /// Authored GPIO output node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
 #[slot(root, view)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
+    /// Authored slot bindings for output inputs.
+    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
+    pub bindings: BindingDefs,
     /// Optional display pipeline options.
     #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub options: OptionSlot<OutputDriverOptionsConfig>,
@@ -18,6 +21,7 @@ impl OutputDef {
     pub fn new(pin: u32) -> Self {
         Self {
             pin: ValueSlot::new(pin),
+            bindings: BindingDefs::default(),
             options: OptionSlot::none(),
         }
     }

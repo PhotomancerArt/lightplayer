@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::project::Revision;
-use lpc_model::resource::{RenderProductId, ResourceRef, RuntimeBufferId};
+use lpc_model::resource::{ResourceRef, RuntimeBufferId, VisualProductId};
 use serde::{Deserialize, Serialize};
 
 /// Domains requested for project resource summaries.
@@ -14,11 +14,11 @@ pub enum ResourceSummarySpecifier {
     #[default]
     None,
     RuntimeBuffers,
-    RenderProducts,
+    VisualProducts,
     All,
 }
 
-/// Runtime-buffer payloads to include on `GetChanges` (distinct from render-product payloads).
+/// Runtime-buffer payloads to include on `GetChanges` (distinct from visual-product payloads).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeBufferPayloadSpecifier {
@@ -36,13 +36,13 @@ impl Default for RuntimeBufferPayloadSpecifier {
 /// Render-product payloads to materialize on `GetChanges`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RenderProductPayloadSpecifier {
+pub enum VisualProductPayloadSpecifier {
     None,
     All,
-    ByIds(Vec<RenderProductId>),
+    ByIds(Vec<VisualProductId>),
 }
 
-impl Default for RenderProductPayloadSpecifier {
+impl Default for VisualProductPayloadSpecifier {
     fn default() -> Self {
         Self::None
     }
@@ -50,15 +50,15 @@ impl Default for RenderProductPayloadSpecifier {
 
 /// Reserved LOD / sampling / preview options; empty for M4.1 full/native payloads only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct RenderProductPayloadOptions {}
+pub struct VisualProductPayloadOptions {}
 
 /// Render-product payload request: specifier plus future options (LOD, previews, …).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct RenderProductPayloadRequest {
+pub struct VisualProductPayloadRequest {
     #[serde(default)]
-    pub specifier: RenderProductPayloadSpecifier,
+    pub specifier: VisualProductPayloadSpecifier,
     #[serde(default)]
-    pub options: RenderProductPayloadOptions,
+    pub options: VisualProductPayloadOptions,
 }
 
 /// Classification line in a [`WireResourceSummary`].
@@ -74,7 +74,7 @@ pub enum WireRuntimeBufferKind {
 /// Render-product kind on the wire (M4.1: sampled CPU texture products).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WireRenderProductKind {
+pub enum WireVisualProductKind {
     Texture,
 }
 
@@ -83,7 +83,7 @@ pub enum WireRenderProductKind {
 #[serde(rename_all = "snake_case")]
 pub enum WireResourceKindSummary {
     RuntimeBuffer(WireRuntimeBufferKind),
-    RenderProduct(WireRenderProductKind),
+    VisualProduct(WireVisualProductKind),
 }
 
 /// Texture-ish pixel layout for summaries and payloads.
@@ -179,9 +179,9 @@ pub enum WireRuntimeBufferMetadataPayload {
     Raw,
 }
 
-/// Materialized full/native texture bytes for a render product.
+/// Materialized full/native texture bytes for a visual product.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WireRenderProductPayload {
+pub struct WireVisualProductPayload {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
     pub revision: Revision,

@@ -1,6 +1,9 @@
 kind = "output"
 pin = 4
 
+[bindings.input]
+source = "bus#control.out"
+
 [options]
 lum_power = 2.0
 white_point = [0.9, 1.0, 1.0]

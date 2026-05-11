@@ -5,8 +5,8 @@
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    RenderProductPayloadRequest, RenderProductPayloadSpecifier, ResourceSummarySpecifier,
-    RuntimeBufferPayloadSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
+    ResourceSummarySpecifier, RuntimeBufferPayloadSpecifier, VisualProductPayloadRequest,
+    VisualProductPayloadSpecifier, WireProjectHandle as ProjectHandle, WireProjectRequest,
     WireServerMessage,
     message::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
@@ -25,7 +25,7 @@ use crate::transport::ClientTransport;
 pub struct ProjectGetChangesOptions {
     pub resource_summary_specifier: ResourceSummarySpecifier,
     pub runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier,
-    pub render_product_payload_request: RenderProductPayloadRequest,
+    pub visual_product_payload_request: VisualProductPayloadRequest,
 }
 
 impl Default for ProjectGetChangesOptions {
@@ -33,19 +33,19 @@ impl Default for ProjectGetChangesOptions {
         Self {
             resource_summary_specifier: ResourceSummarySpecifier::default(),
             runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::default(),
-            render_product_payload_request: RenderProductPayloadRequest::default(),
+            visual_product_payload_request: VisualProductPayloadRequest::default(),
         }
     }
 }
 
 impl ProjectGetChangesOptions {
-    /// Local dev UI (`just demo`): summaries plus full buffer and render-product payloads.
+    /// Local dev UI (`just demo`): summaries plus full buffer and visual-product payloads.
     pub fn dev_demo_full_resources() -> Self {
         Self {
             resource_summary_specifier: ResourceSummarySpecifier::All,
             runtime_buffer_payload_specifier: RuntimeBufferPayloadSpecifier::All,
-            render_product_payload_request: RenderProductPayloadRequest {
-                specifier: RenderProductPayloadSpecifier::All,
+            visual_product_payload_request: VisualProductPayloadRequest {
+                specifier: VisualProductPayloadSpecifier::All,
                 ..Default::default()
             },
         }

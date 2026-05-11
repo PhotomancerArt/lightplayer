@@ -154,14 +154,16 @@ mod output_sink_flush_tests {
         DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext,
         RenderNode, TickContext,
     };
-    use crate::nodes::{FixtureNode, TextureNode, fixture_input_path, shader_output_path};
-    use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
-    use crate::runtime_buffer::RuntimeBuffer;
+    use crate::nodes::{
+        FixtureNode, OutputNode, fixture_input_path, output_input_path, shader_output_path,
+    };
+    use crate::runtime_buffer::RuntimeBufferId;
+    use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
     use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
     use lpc_model::nodes::output::OutputDef;
     use lpc_model::{
         Dim2u, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath, SlotShapeRegistry,
-        SlotShapeRegistryError, StaticSlotShape, ToLpValue, TreePath, WithRevision,
+        SlotShapeRegistryError, StaticSlotShape, ToLpValue, TreePath,
     };
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -209,7 +211,7 @@ mod output_sink_flush_tests {
             self.ticks.fetch_add(1, Ordering::Relaxed);
             self.state
                 .output
-                .set_with_version(ctx.revision(), RenderProduct::new(ctx.node_id(), 0));
+                .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
             Ok(())
         }
 
@@ -244,7 +246,7 @@ mod output_sink_flush_tests {
     impl RenderNode for SolidFixtureProducer {
         fn render_texture(
             &mut self,
-            _product: RenderProduct,
+            _product: VisualProduct,
             request: &RenderTextureRequest,
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
@@ -344,6 +346,122 @@ mod output_sink_flush_tests {
             .unwrap();
     }
 
+    fn attach_output_demand_root(
+        rt: &mut CoreProjectRuntime,
+        root: lpc_model::NodeId,
+        spine: lpc_model::NodeInvocation,
+        artifact: crate::artifact::ArtifactId,
+        frame: Revision,
+        name: &str,
+        pin: u32,
+    ) -> (lpc_model::NodeId, RuntimeBufferId) {
+        let out_id = rt
+            .engine_mut()
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse(name).unwrap(),
+                lpc_model::NodeName::parse("output").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        rt.engine_mut()
+            .attach_runtime_node(out_id, Box::new(OutputNode::new()), frame)
+            .unwrap();
+        let sink = rt
+            .engine()
+            .runtime_output_sink_buffer_id(out_id)
+            .expect("output sink buffer");
+        rt.services_mut()
+            .register_output_sink(sink, &OutputDef::new(pin));
+        rt.engine_mut()
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: out_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: out_id,
+                },
+                frame,
+            )
+            .unwrap();
+        rt.engine_mut().add_demand_root(out_id);
+        (out_id, sink)
+    }
+
+    fn attach_idle_output_sink(
+        rt: &mut CoreProjectRuntime,
+        root: lpc_model::NodeId,
+        spine: lpc_model::NodeInvocation,
+        artifact: crate::artifact::ArtifactId,
+        frame: Revision,
+        name: &str,
+        pin: u32,
+    ) -> (lpc_model::NodeId, RuntimeBufferId) {
+        let out_id = rt
+            .engine_mut()
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse(name).unwrap(),
+                lpc_model::NodeName::parse("output").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        rt.engine_mut()
+            .attach_runtime_node(out_id, Box::new(OutputNode::new()), frame)
+            .unwrap();
+        let sink = rt
+            .engine()
+            .runtime_output_sink_buffer_id(out_id)
+            .expect("output sink buffer");
+        rt.services_mut()
+            .register_output_sink(sink, &OutputDef::new(pin));
+        (out_id, sink)
+    }
+
+    fn bind_output_to_fixture(
+        rt: &mut CoreProjectRuntime,
+        out_id: lpc_model::NodeId,
+        fix_id: lpc_model::NodeId,
+        frame: Revision,
+    ) {
+        rt.engine_mut()
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: fix_id,
+                        slot: SlotPath::parse("output").unwrap(),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: out_id,
+                        slot: output_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: out_id,
+                },
+                frame,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn project_runtime_output_sink_flush_writes_expected_rgb_via_memory_provider() {
         let mem = Rc::new(MemoryOutputProvider::new());
@@ -358,26 +476,6 @@ mod output_sink_flush_tests {
         let frame = Revision::new(1);
         let root = rt.engine().tree().root();
         let (spine, artifact) = test_placeholder_spine();
-
-        let tex_id = rt
-            .engine_mut()
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("tex").unwrap(),
-                lpc_model::NodeName::parse("texture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine.clone(),
-                artifact,
-                frame,
-            )
-            .unwrap();
-
-        rt.engine_mut()
-            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
-            .unwrap();
 
         let sh_id = rt
             .engine_mut()
@@ -400,24 +498,13 @@ mod output_sink_flush_tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(SolidFixtureProducer {
-                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
             )
             .unwrap();
-
-        let sink = rt
-            .engine_mut()
-            .runtime_buffers_mut()
-            .insert(WithRevision::new(
-                Revision::default(),
-                RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-            ));
-
-        rt.services_mut()
-            .register_output_sink(sink, &OutputDef::new(pin));
 
         let mapping = MappingConfig::path_points_vec(
             vec![PathSpec::ring_array_counts(
@@ -442,7 +529,7 @@ mod output_sink_flush_tests {
                 WireChildKind::Input {
                     source: WireSlotIndex(0),
                 },
-                spine,
+                spine.clone(),
                 artifact,
                 frame,
             )
@@ -451,7 +538,7 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(mapping, frame, sink)),
+                Box::new(FixtureNode::new(fix_id, mapping, frame)),
                 frame,
             )
             .unwrap();
@@ -475,23 +562,9 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        rt.engine_mut()
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(0.0)),
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: default_demand_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-
-        rt.engine_mut().add_demand_root(fix_id);
+        let (out_id, _sink) =
+            attach_output_demand_root(&mut rt, root, spine.clone(), artifact, frame, "out", pin);
+        bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
         rt.tick(10).expect("tick");
 
@@ -519,26 +592,6 @@ mod output_sink_flush_tests {
         let root = rt.engine().tree().root();
         let (spine, artifact) = test_placeholder_spine();
 
-        let tex_id = rt
-            .engine_mut()
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("tex").unwrap(),
-                lpc_model::NodeName::parse("texture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine.clone(),
-                artifact,
-                frame,
-            )
-            .unwrap();
-
-        rt.engine_mut()
-            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
-            .unwrap();
-
         let sh_id = rt
             .engine_mut()
             .tree_mut()
@@ -560,35 +613,13 @@ mod output_sink_flush_tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(SolidFixtureProducer {
-                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
                     color: [1.0, 0.0, 0.0, 1.0],
                 }),
                 frame,
             )
             .unwrap();
-
-        let sink_written = rt
-            .engine_mut()
-            .runtime_buffers_mut()
-            .insert(WithRevision::new(
-                Revision::default(),
-                RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-            ));
-
-        let _sink_idle = rt
-            .engine_mut()
-            .runtime_buffers_mut()
-            .insert(WithRevision::new(
-                Revision::default(),
-                RuntimeBuffer::raw(alloc::vec![0xffu8; 6]),
-            ));
-
-        rt.services_mut()
-            .register_output_sink(sink_written, &OutputDef::new(pin_written));
-
-        rt.services_mut()
-            .register_output_sink(_sink_idle, &OutputDef::new(pin_idle));
 
         let mapping = MappingConfig::path_points_vec(
             vec![PathSpec::ring_array_counts(
@@ -613,7 +644,7 @@ mod output_sink_flush_tests {
                 WireChildKind::Input {
                     source: WireSlotIndex(0),
                 },
-                spine,
+                spine.clone(),
                 artifact,
                 frame,
             )
@@ -622,7 +653,7 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(mapping, frame, sink_written)),
+                Box::new(FixtureNode::new(fix_id, mapping, frame)),
                 frame,
             )
             .unwrap();
@@ -646,23 +677,25 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        rt.engine_mut()
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(0.0)),
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: default_demand_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-
-        rt.engine_mut().add_demand_root(fix_id);
+        let (out_id, _sink_written) = attach_output_demand_root(
+            &mut rt,
+            root,
+            spine.clone(),
+            artifact,
+            frame,
+            "out_written",
+            pin_written,
+        );
+        bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
+        let (_idle_out_id, _sink_idle) = attach_idle_output_sink(
+            &mut rt,
+            root,
+            spine.clone(),
+            artifact,
+            frame,
+            "out_idle",
+            pin_idle,
+        );
 
         rt.tick(10).expect("tick");
 
@@ -677,7 +710,7 @@ mod output_sink_flush_tests {
     }
 
     #[test]
-    fn fixture_push_marks_output_buffer_dirty_same_frame_before_flush() {
+    fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
         let mem = Rc::new(MemoryOutputProvider::new());
         let path = TreePath::parse("/show.t").expect("path");
         let mut services = RuntimeServices::new(path.clone());
@@ -688,26 +721,6 @@ mod output_sink_flush_tests {
         let frame = Revision::new(1);
         let root = rt.engine().tree().root();
         let (spine, artifact) = test_placeholder_spine();
-
-        let tex_id = rt
-            .engine_mut()
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("tex").unwrap(),
-                lpc_model::NodeName::parse("texture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine.clone(),
-                artifact,
-                frame,
-            )
-            .unwrap();
-
-        rt.engine_mut()
-            .attach_runtime_node(tex_id, Box::new(TextureNode::new(tex_id)), frame)
-            .unwrap();
 
         let sh_id = rt
             .engine_mut()
@@ -730,24 +743,13 @@ mod output_sink_flush_tests {
             .attach_runtime_node(
                 sh_id,
                 Box::new(SolidFixtureProducer {
-                    state: ShaderState::new(RenderProduct::new(sh_id, 0)),
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
                     ticks: Arc::clone(&ticks),
                     color: [0.0, 1.0, 0.0, 1.0],
                 }),
                 frame,
             )
             .unwrap();
-
-        let sink = rt
-            .engine_mut()
-            .runtime_buffers_mut()
-            .insert(WithRevision::new(
-                Revision::default(),
-                RuntimeBuffer::raw(alloc::vec![0u8; 6]),
-            ));
-
-        rt.services_mut()
-            .register_output_sink(sink, &OutputDef::new(99));
 
         let mapping = MappingConfig::path_points_vec(
             vec![PathSpec::ring_array_counts(
@@ -772,7 +774,7 @@ mod output_sink_flush_tests {
                 WireChildKind::Input {
                     source: WireSlotIndex(0),
                 },
-                spine,
+                spine.clone(),
                 artifact,
                 frame,
             )
@@ -781,7 +783,7 @@ mod output_sink_flush_tests {
         rt.engine_mut()
             .attach_runtime_node(
                 fix_id,
-                Box::new(FixtureNode::new(mapping, frame, sink)),
+                Box::new(FixtureNode::new(fix_id, mapping, frame)),
                 frame,
             )
             .unwrap();
@@ -805,23 +807,9 @@ mod output_sink_flush_tests {
             )
             .unwrap();
 
-        rt.engine_mut()
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(0.0)),
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: default_demand_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-
-        rt.engine_mut().add_demand_root(fix_id);
+        let (out_id, sink) =
+            attach_output_demand_root(&mut rt, root, spine.clone(), artifact, frame, "out", 99);
+        bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
         rt.tick(10).expect("tick");
 
@@ -834,7 +822,7 @@ mod output_sink_flush_tests {
         assert_eq!(
             ver_frame.as_i64(),
             rt.engine().revision().as_i64(),
-            "fixture write should bump buffer version to current frame before flush runs",
+            "output demand should bump buffer version to current frame before flush runs",
         );
 
         let handle = mem.get_handle_for_pin(99).expect("opened");

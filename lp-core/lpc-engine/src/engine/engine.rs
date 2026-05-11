@@ -7,18 +7,20 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    LpValue, NodeId, Revision, SlotAccessor, SlotDataAccess, SlotPath, SlotShapeRegistry, TreePath,
-    WithRevision, advance_revision, current_revision, lookup_slot_data,
+    ControlProduct, LpValue, NodeId, Revision, SlotAccessor, SlotDataAccess, SlotPath,
+    SlotShapeRegistry, TreePath, WithRevision, advance_revision, current_revision,
+    lookup_slot_data,
 };
 
 use crate::artifact::{ArtifactState, ArtifactStore};
 use crate::binding::{BindingDraft, BindingError, BindingRef};
+use crate::control_product::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::gfx::LpGraphics;
 use crate::node::{
-    NodeCall, NodeCallKey, NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
+    ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
+    NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
 };
 use crate::node::{NodeEntryState, NodeTree};
-use crate::render_product::{RenderProduct, RenderTextureRequest, TextureRenderProduct};
 use crate::resolver::resolver::model_value_to_lps_value_f32;
 use crate::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
@@ -28,6 +30,7 @@ use crate::runtime::frame_num::FrameNum;
 use crate::runtime::frame_time::FrameTime;
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 use crate::runtime_product::RuntimeProduct;
+use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 
 use super::EngineError;
 
@@ -38,7 +41,8 @@ pub(crate) fn default_demand_input_path() -> SlotPath {
 
 fn runtime_product_from_lp_value(value: LpValue) -> Result<RuntimeProduct, SessionResolveError> {
     match value {
-        LpValue::RenderProduct(product) => Ok(RuntimeProduct::render(product)),
+        LpValue::VisualProduct(product) => Ok(RuntimeProduct::visual(product)),
+        LpValue::ControlProduct(product) => Ok(RuntimeProduct::control(product)),
         other => match model_value_to_lps_value_f32(&other) {
             Ok(value) => Ok(RuntimeProduct::Value(value)),
             Err(_) => Ok(RuntimeProduct::model_value(other)),
@@ -245,7 +249,7 @@ impl Engine {
     #[cfg(test)]
     pub(crate) fn render_texture_for_test(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
         let mut producers_ticked = BTreeSet::new();
@@ -260,6 +264,27 @@ impl Engine {
             frame_time_seconds: time_s,
         };
         host.render_node_texture(product, request)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_control_for_test(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, SessionResolveError> {
+        let mut producers_ticked = BTreeSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            artifacts: &self.artifacts,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            frame_time_seconds: time_s,
+        };
+        host.render_node_control(product, request, target)
     }
 
     fn consumed_slot_is_bound(&self, node: NodeId, slot: &SlotPath) -> bool {
@@ -461,10 +486,19 @@ impl ResolveHost for EngineResolveHost<'_> {
 
     fn render_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
         self.render_node_texture(product, request)
+    }
+
+    fn render_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, SessionResolveError> {
+        self.render_node_control(product, request, target)
     }
 
     fn runtime_buffer_mut(
@@ -583,7 +617,7 @@ impl EngineResolveHost<'_> {
 
     fn render_node_texture(
         &mut self,
-        product: RenderProduct,
+        product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
         let node_id = product.node();
@@ -594,7 +628,7 @@ impl EngineResolveHost<'_> {
             })?;
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
-                call: NodeCallKey::new(node_id, NodeCall::Render { product }),
+                call: NodeCallKey::new(node_id, NodeCall::Visual { product }),
             };
             let stolen = core::mem::replace(
                 &mut entry.state,
@@ -629,7 +663,7 @@ impl EngineResolveHost<'_> {
                     node_runtime,
                     revision,
                     SessionResolveError::other(format!(
-                        "node {node_id:?} cannot render product output {}: NodeRuntime::render_node() returned None",
+                        "node {node_id:?} cannot visual product output {}: NodeRuntime::render_node() returned None",
                         product.output()
                     )),
                 );
@@ -650,6 +684,89 @@ impl EngineResolveHost<'_> {
 
         result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
     }
+
+    fn render_node_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, SessionResolveError> {
+        let node_id = product.node();
+        let revision = current_revision();
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Control { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                NodeEntryState::Executing { call } => {
+                    entry.state = WithRevision::new(
+                        old_changed_at,
+                        NodeEntryState::Executing { call: call.clone() },
+                    );
+                    return Err(SessionResolveError::other(format!(
+                        "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                        call.call.label()
+                    )));
+                }
+                other => {
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(format!(
+                        "control render: node {node_id:?} not alive"
+                    )));
+                }
+            }
+        };
+
+        let result = {
+            let Some(control_node) = node_runtime.control_node() else {
+                return restore_node_after_failed_control(
+                    self.tree,
+                    node_id,
+                    node_runtime,
+                    revision,
+                    SessionResolveError::other(format!(
+                        "node {node_id:?} cannot render control product output {}: NodeRuntime::control_node() returned None",
+                        product.output()
+                    )),
+                );
+            };
+            let mut ctx = ControlRenderContext::new(
+                node_id,
+                revision,
+                self.graphics.clone(),
+                self.frame_time_seconds,
+                self,
+            );
+            control_node.render_control(product, request, target, &mut ctx)
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+
+        result.map_err(|e| SessionResolveError::other(format!("control render: {e:?}")))
+    }
+}
+
+impl ControlRenderServices for EngineResolveHost<'_> {
+    fn render_texture(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError> {
+        self.render_node_texture(product, request)
+            .map_err(|e| NodeError::msg(format!("render texture: {e}")))
+    }
 }
 
 fn restore_node_after_failed_render(
@@ -659,6 +776,19 @@ fn restore_node_after_failed_render(
     revision: Revision,
     err: SessionResolveError,
 ) -> Result<TextureRenderProduct, SessionResolveError> {
+    if let Some(entry) = tree.get_mut(node_id) {
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+    }
+    Err(err)
+}
+
+fn restore_node_after_failed_control(
+    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    node_id: NodeId,
+    node_runtime: Box<dyn NodeRuntime>,
+    revision: Revision,
+    err: SessionResolveError,
+) -> Result<ControlLayout, SessionResolveError> {
     if let Some(entry) = tree.get_mut(node_id) {
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
     }
@@ -816,9 +946,9 @@ mod tests {
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
-    use crate::render_product::RenderProduct;
     use crate::runtime_buffer::RuntimeBuffer;
     use crate::runtime_product::RuntimeProduct;
+    use crate::visual_product::VisualProduct;
 
     #[test]
     fn engine_new_has_frame_state_empty_bindings_resolver_and_tree_root() {
@@ -1001,10 +1131,10 @@ mod tests {
     }
 
     #[test]
-    fn runtime_product_render_handle_is_node_owned_value() {
-        let product = RenderProduct::new(NodeId::new(7), 0);
-        let runtime = RuntimeProduct::render(product);
-        assert_eq!(runtime.as_render(), Some(product));
+    fn runtime_product_visual_handle_is_node_owned_value() {
+        let product = VisualProduct::new(NodeId::new(7), 0);
+        let runtime = RuntimeProduct::visual(product);
+        assert_eq!(runtime.as_visual(), Some(product));
         assert!(runtime.as_value().is_none());
         assert!(runtime.as_buffer().is_none());
     }
