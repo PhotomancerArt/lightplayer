@@ -99,6 +99,7 @@ struct StaticSlotViewField {
     method_name: String,
     slot_name: String,
     accessor_name: String,
+    some_accessor_name: Option<String>,
 }
 
 fn discover_static_slot_roots(
@@ -241,11 +242,23 @@ fn slot_view_fields(item: &syn::ItemStruct) -> Vec<StaticSlotViewField> {
             let slot_name = slot_field_name(field).unwrap_or_else(|| method_name.clone());
             Some(StaticSlotViewField {
                 accessor_name: format!("{ident}_accessor"),
+                some_accessor_name: type_is_option_slot(&field.ty)
+                    .then(|| format!("{ident}_some_accessor")),
                 method_name,
                 slot_name,
             })
         })
         .collect()
+}
+
+fn type_is_option_slot(ty: &syn::Type) -> bool {
+    let syn::Type::Path(path) = ty else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "OptionSlot")
 }
 
 fn has_slot_skip_attr(attrs: &[syn::Attribute]) -> bool {
@@ -409,6 +422,11 @@ fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
         out.push_str("    ");
         out.push_str(&field.accessor_name);
         out.push_str(": ::lpc_model::SlotAccessor,\n");
+        if let Some(some_accessor_name) = &field.some_accessor_name {
+            out.push_str("    ");
+            out.push_str(some_accessor_name);
+            out.push_str(": ::lpc_model::SlotAccessor,\n");
+        }
     }
     out.push_str("}\n\n");
 
@@ -432,6 +450,19 @@ fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
         out.push_str("\").expect(\"generated slot field path is valid\"),\n");
         out.push_str("                registry,\n");
         out.push_str("            )?,\n");
+        if let Some(some_accessor_name) = &field.some_accessor_name {
+            out.push_str("            ");
+            out.push_str(some_accessor_name);
+            out.push_str(": ::lpc_model::SlotAccessor::compile(\n");
+            out.push_str("                <");
+            out.push_str(&view.type_path);
+            out.push_str(" as ::lpc_model::StaticSlotShape>::SHAPE_ID,\n");
+            out.push_str("                ::lpc_model::SlotPath::parse(\"");
+            out.push_str(&escape_rust_string(&field.slot_name));
+            out.push_str(".some\").expect(\"generated option slot payload path is valid\"),\n");
+            out.push_str("                registry,\n");
+            out.push_str("            )?,\n");
+        }
     }
     out.push_str("        })\n");
     out.push_str("    }\n\n");
@@ -462,10 +493,19 @@ fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
     for field in &view.fields {
         out.push_str("    pub fn ");
         out.push_str(&field.method_name);
-        out.push_str("(&self) -> &::lpc_model::SlotAccessor {\n");
-        out.push_str("        &self.");
-        out.push_str(&field.accessor_name);
-        out.push('\n');
+        if let Some(some_accessor_name) = &field.some_accessor_name {
+            out.push_str("(&self) -> ::lpc_model::SlotOptionReader<'_> {\n");
+            out.push_str("        ::lpc_model::SlotOptionReader::new(&self.");
+            out.push_str(&field.accessor_name);
+            out.push_str(", &self.");
+            out.push_str(some_accessor_name);
+            out.push_str(")\n");
+        } else {
+            out.push_str("(&self) -> ::lpc_model::SlotFieldReader<'_> {\n");
+            out.push_str("        ::lpc_model::SlotFieldReader::new(&self.");
+            out.push_str(&field.accessor_name);
+            out.push_str(")\n");
+        }
         out.push_str("    }\n\n");
     }
 
@@ -562,11 +602,19 @@ pub struct ProjectDef {}
                     method_name: String::from("size"),
                     slot_name: String::from("size"),
                     accessor_name: String::from("size_accessor"),
+                    some_accessor_name: None,
                 },
                 StaticSlotViewField {
                     method_name: String::from("bindings"),
                     slot_name: String::from("bindings"),
                     accessor_name: String::from("bindings_accessor"),
+                    some_accessor_name: None,
+                },
+                StaticSlotViewField {
+                    method_name: String::from("brightness"),
+                    slot_name: String::from("brightness"),
+                    accessor_name: String::from("brightness_accessor"),
+                    some_accessor_name: Some(String::from("brightness_some_accessor")),
                 },
             ],
         }];
@@ -575,7 +623,9 @@ pub struct ProjectDef {}
 
         assert!(code.contains("pub struct TextureDefView"));
         assert!(code.contains("pub fn get_or_compile"));
-        assert!(code.contains("pub fn size(&self) -> &::lpc_model::SlotAccessor"));
+        assert!(code.contains("pub fn size(&self) -> ::lpc_model::SlotFieldReader<'_>"));
+        assert!(code.contains("pub fn brightness(&self) -> ::lpc_model::SlotOptionReader<'_>"));
+        assert!(code.contains("SlotPath::parse(\"brightness.some\")"));
         assert!(
             code.contains("<crate::nodes::texture::TextureDef as ::lpc_model::StaticSlotShape>")
         );

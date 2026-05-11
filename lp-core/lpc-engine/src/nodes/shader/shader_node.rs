@@ -121,16 +121,10 @@ impl ShaderNode {
         let next_opts = GlslOpts {
             add_sub: lpc_model::ValueSlot::with_version(
                 ctx.revision(),
-                ctx.resolve_consumed_slot_accessor_value(&accessors.add_sub)?,
+                accessors.add_sub.get(ctx)?,
             ),
-            mul: lpc_model::ValueSlot::with_version(
-                ctx.revision(),
-                ctx.resolve_consumed_slot_accessor_value(&accessors.mul)?,
-            ),
-            div: lpc_model::ValueSlot::with_version(
-                ctx.revision(),
-                ctx.resolve_consumed_slot_accessor_value(&accessors.div)?,
-            ),
+            mul: lpc_model::ValueSlot::with_version(ctx.revision(), accessors.mul.get(ctx)?),
+            div: lpc_model::ValueSlot::with_version(ctx.revision(), accessors.div.get(ctx)?),
         };
         if next_opts != self.glsl_opts {
             self.glsl_opts = next_opts;

@@ -96,11 +96,12 @@ pub use slot::{
 pub use slot::{
     FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotAccessor,
     SlotAccessorError, SlotAccessorStep, SlotData, SlotDataAccess, SlotEnum, SlotEnumAccess,
-    SlotEnumShape, SlotFieldShape, SlotLookupError, SlotMapDyn, SlotMapKey, SlotMapKeyShape,
-    SlotMeta, SlotName, SlotNameError, SlotOptionAccess, SlotOptionDyn, SlotOwner, SlotPath,
-    SlotPathError, SlotPathSegment, SlotRecord, SlotRecordAccess, SlotRecordShape, SlotRef,
-    SlotShape, SlotShapeEntry, SlotShapeId, SlotShapeIdError, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess, SlotVariantShape,
-    StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data,
+    SlotEnumShape, SlotFieldReader, SlotFieldShape, SlotLookupError, SlotMapDyn, SlotMapKey,
+    SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOptionAccess, SlotOptionDyn,
+    SlotOptionReader, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotReadContext,
+    SlotRecord, SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeEntry, SlotShapeId,
+    SlotShapeIdError, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
+    SlotValueAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot,
+    lookup_slot_data,
 };
 pub use value::value_path::ValuePath;

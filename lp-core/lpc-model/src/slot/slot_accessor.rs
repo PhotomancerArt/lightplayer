@@ -6,9 +6,10 @@
 //! already been resolved to field indexes, and the accessor is guarded by the
 //! registry revision it was compiled from.
 
+use crate::slot::SlotReadContext;
 use crate::{
-    Revision, SlotAccess, SlotDataAccess, SlotName, SlotPath, SlotPathSegment, SlotShape,
-    SlotShapeId, SlotShapeRegistry,
+    FromLpValue, Revision, SlotAccess, SlotDataAccess, SlotName, SlotPath, SlotPathSegment,
+    SlotShape, SlotShapeId, SlotShapeRegistry,
 };
 use alloc::format;
 use alloc::string::String;
@@ -124,6 +125,19 @@ impl SlotAccessor {
     /// Original semantic path, kept for diagnostics and resolver compatibility.
     pub fn path(&self) -> &SlotPath {
         &self.path
+    }
+
+    /// Resolve this accessor as a typed value through a runtime context.
+    ///
+    /// Generated views usually return [`crate::SlotFieldReader`] wrappers, but
+    /// this keeps hand-authored nested accessors ergonomic while they still
+    /// exist.
+    pub fn get<C, T>(&self, ctx: &mut C) -> Result<T, C::Error>
+    where
+        C: SlotReadContext,
+        T: FromLpValue,
+    {
+        ctx.read_slot_value(self)
     }
 
     /// Access borrowed slot data using compiled indexes.

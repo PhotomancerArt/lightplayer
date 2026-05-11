@@ -62,8 +62,7 @@ impl TextureNode {
 
 impl NodeRuntime for TextureNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let size: lpc_model::Dim2u =
-            ctx.resolve_consumed_slot_accessor_value(self.def_view(ctx)?.size())?;
+        let size: lpc_model::Dim2u = self.def_view(ctx)?.size().get(ctx)?;
         self.state.sync_with_revision(
             ctx.revision(),
             i32::try_from(size.width).unwrap_or(i32::MAX),

@@ -7,9 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
-use lpc_model::{
-    Dim2u, FixtureDef, FixtureDefView, Revision, SlotAccessor, SlotPath, StaticSlotShape,
-};
+use lpc_model::{Dim2u, FixtureDefView, Revision, SlotPath};
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
@@ -40,7 +38,6 @@ pub struct FixtureNode {
     output_sink: RuntimeBufferId,
     lamp_colors_buffer_id: Option<RuntimeBufferId>,
     def_view: Option<FixtureDefView>,
-    option_accessors: Option<FixtureOptionAccessors>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
 }
@@ -57,7 +54,6 @@ impl FixtureNode {
             output_sink,
             lamp_colors_buffer_id: None,
             def_view: None,
-            option_accessors: None,
             precomputed: None,
         }
     }
@@ -65,56 +61,6 @@ impl FixtureNode {
     fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FixtureDefView, NodeError> {
         FixtureDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
             .map_err(|e| NodeError::msg(format!("compile fixture def view: {e}")))
-    }
-
-    fn option_accessors(
-        &mut self,
-        ctx: &TickContext<'_>,
-    ) -> Result<&FixtureOptionAccessors, NodeError> {
-        FixtureOptionAccessors::get_or_compile(&mut self.option_accessors, ctx.slot_shapes())
-            .map_err(|e| NodeError::msg(format!("compile fixture option accessors: {e}")))
-    }
-}
-
-struct FixtureOptionAccessors {
-    registry_revision: Revision,
-    brightness: SlotAccessor,
-    gamma_correction: SlotAccessor,
-}
-
-impl FixtureOptionAccessors {
-    fn get_or_compile<'a>(
-        cache: &'a mut Option<Self>,
-        registry: &lpc_model::SlotShapeRegistry,
-    ) -> Result<&'a Self, lpc_model::SlotAccessorError> {
-        let needs_compile = cache
-            .as_ref()
-            .is_none_or(|accessors| accessors.registry_revision != registry.revision());
-        if needs_compile {
-            *cache = Some(Self::compile(registry)?);
-        }
-        Ok(cache
-            .as_ref()
-            .expect("fixture accessors were just compiled"))
-    }
-
-    fn compile(
-        registry: &lpc_model::SlotShapeRegistry,
-    ) -> Result<Self, lpc_model::SlotAccessorError> {
-        Ok(Self {
-            registry_revision: registry.revision(),
-            brightness: SlotAccessor::compile_value(
-                FixtureDef::SHAPE_ID,
-                SlotPath::parse("brightness.some").expect("fixture brightness slot path"),
-                registry,
-            )?,
-            gamma_correction: SlotAccessor::compile_value(
-                FixtureDef::SHAPE_ID,
-                SlotPath::parse("gamma_correction.some")
-                    .expect("fixture gamma correction slot path"),
-                registry,
-            )?,
-        })
     }
 }
 
@@ -127,6 +73,7 @@ impl NodeRuntime for FixtureNode {
         if self.lamp_colors_buffer_id.is_some() {
             return Ok(());
         }
+
         let channels = fixture_lamp_channel_count(&self.mapping);
         let byte_len = (channels as usize).saturating_mul(3);
         let id = ctx.insert_runtime_buffer(WithRevision::new(
@@ -149,13 +96,11 @@ impl NodeRuntime for FixtureNode {
             prod.product.get().as_render().ok_or_else(|| {
                 NodeError::msg("fixture expected RuntimeProduct::Render from input")
             })?;
-        let render_size: Dim2u =
-            ctx.resolve_consumed_slot_accessor_value(self.def_view(ctx)?.render_size())?;
-        let color_order: ColorOrder =
-            ctx.resolve_consumed_slot_accessor_value(self.def_view(ctx)?.color_order())?;
-        let brightness = resolve_optional_brightness(ctx, &self.option_accessors(ctx)?.brightness)?;
-        let gamma_correction =
-            resolve_optional_gamma_correction(ctx, &self.option_accessors(ctx)?.gamma_correction)?;
+        let def = self.def_view(ctx)?;
+        let render_size: Dim2u = def.render_size().get(ctx)?;
+        let color_order: ColorOrder = def.color_order().get(ctx)?;
+        let brightness = u8::try_from(def.brightness().get_or(ctx, 64u32)?).unwrap_or(u8::MAX);
+        let gamma_correction = def.gamma_correction().get_or(ctx, true)?;
         let width = render_size.width;
         let height = render_size.height;
 
@@ -231,34 +176,6 @@ impl NodeRuntime for FixtureNode {
     ) -> Result<(), NodeError> {
         self.precomputed = None;
         Ok(())
-    }
-}
-
-fn resolve_optional_brightness(
-    ctx: &mut TickContext<'_>,
-    accessor: &SlotAccessor,
-) -> Result<u8, NodeError> {
-    match ctx.resolve_consumed_slot_accessor_value::<u32>(accessor) {
-        Ok(value) => Ok(u8::try_from(value).unwrap_or(u8::MAX)),
-        Err(err) if is_optional_none_error(&err) => Ok(64),
-        Err(err) => Err(err),
-    }
-}
-
-fn resolve_optional_gamma_correction(
-    ctx: &mut TickContext<'_>,
-    accessor: &SlotAccessor,
-) -> Result<bool, NodeError> {
-    match ctx.resolve_consumed_slot_accessor_value::<bool>(accessor) {
-        Ok(value) => Ok(value),
-        Err(err) if is_optional_none_error(&err) => Ok(true),
-        Err(err) => Err(err),
-    }
-}
-
-fn is_optional_none_error(err: &NodeError) -> bool {
-    match err {
-        NodeError::Message(message) => message.contains("option slot is none"),
     }
 }
 

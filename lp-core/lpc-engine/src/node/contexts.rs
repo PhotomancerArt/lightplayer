@@ -213,6 +213,23 @@ impl<'r> TickContext<'r> {
     }
 }
 
+impl lpc_model::SlotReadContext for TickContext<'_> {
+    type Error = NodeError;
+
+    fn read_slot_value<T>(&mut self, accessor: &SlotAccessor) -> Result<T, Self::Error>
+    where
+        T: FromLpValue,
+    {
+        self.resolve_consumed_slot_accessor_value(accessor)
+    }
+
+    fn is_optional_none_error(error: &Self::Error) -> bool {
+        match error {
+            NodeError::Message(message) => message.contains("option slot is none"),
+        }
+    }
+}
+
 fn runtime_product_to_model_value(
     product: &crate::runtime_product::RuntimeProduct,
     slot: &SlotPath,

@@ -12,6 +12,7 @@ mod slot_meta;
 mod slot_name;
 mod slot_owner;
 mod slot_path;
+mod slot_reader;
 mod slot_record_shape;
 mod slot_ref;
 mod slot_shape;
@@ -33,6 +34,7 @@ pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};
+pub use slot_reader::{SlotFieldReader, SlotOptionReader, SlotReadContext};
 pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
 pub use slot_shape::{
