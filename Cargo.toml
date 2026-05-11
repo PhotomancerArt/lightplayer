@@ -88,7 +88,7 @@ default-members = [
 version = "40.0.0"
 authors = ["The Wasmtime Project Developers"]
 edition = "2024"
-license = "Apache-2.0 WITH LLVM-exception"
+license = "AGPL-3.0-or-later"
 rust-version = "1.90.0"
 
 [workspace.lints.rust]

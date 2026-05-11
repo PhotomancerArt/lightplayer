@@ -163,3 +163,12 @@ LightPlayer would not be possible without the amazing work of these projects:
 
 Special thanks to @SeanConnell for his support and guidance throughout the development of
 the project.
+
+# License
+
+LightPlayer-owned code is licensed under the GNU Affero General Public License version 3 or later
+(`AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full license text.
+
+Third-party code, vendored forks, and dependencies remain under their own licenses.
+
+Contributions are accepted under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).
