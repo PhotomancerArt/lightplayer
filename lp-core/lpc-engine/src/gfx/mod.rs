@@ -13,6 +13,9 @@ pub mod lp_gfx;
 pub mod lp_shader;
 pub(crate) mod uniforms;
 
+pub mod convert_type;
+pub mod convert_value;
+
 #[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
 pub mod host;
 #[cfg(target_arch = "riscv32")]
@@ -20,6 +23,8 @@ pub mod native_jit;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_guest;
 
+pub use convert_type::model_type_to_lps_type;
+pub use convert_value::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
 pub use lp_gfx::LpGraphics;
 pub use lp_shader::{LpShader, ShaderCompileOptions};
 
