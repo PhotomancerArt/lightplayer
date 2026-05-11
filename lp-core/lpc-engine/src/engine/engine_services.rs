@@ -1,4 +1,4 @@
-//! Narrow runtime service surface for core [`super::CoreProjectRuntime`].
+//! Narrow IO/service surface owned by [`super::Engine`].
 //!
 //! Carries project identity, optional [`OutputProvider`] plumbing, and registered
 //! output sinks (fixture-pushed [`crate::runtime_buffer::RuntimeBuffer`] → flush).
@@ -16,7 +16,7 @@ use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat,
 
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 
-/// Per-sink channel state for [`RuntimeServices`] output flushing.
+/// Per-sink channel state for [`EngineServices`] output flushing.
 #[derive(Debug)]
 struct OutputSinkBinding {
     pin: u32,
@@ -46,8 +46,8 @@ impl fmt::Display for OutputFlushError {
 
 impl core::error::Error for OutputFlushError {}
 
-/// Project-level services and identity, separate from the core engine spine.
-pub struct RuntimeServices {
+/// Project-level IO services and identity owned by the engine.
+pub struct EngineServices {
     /// Tree path identifying the project/show root (authored layout anchor).
     project_root: TreePath,
     output_provider: Option<Box<dyn OutputProvider>>,
@@ -55,7 +55,7 @@ pub struct RuntimeServices {
     output_sinks: HashMap<RuntimeBufferId, OutputSinkBinding>,
 }
 
-impl RuntimeServices {
+impl EngineServices {
     pub fn new(project_root: TreePath) -> Self {
         Self {
             project_root,
@@ -123,9 +123,7 @@ impl RuntimeServices {
         for sink in self.output_sinks.values_mut() {
             if let Some(handle) = sink.channel_handle.take() {
                 if let Err(error) = provider.close(handle) {
-                    log::warn!(
-                        "RuntimeServices: failed to close output handle {handle:?}: {error}"
-                    );
+                    log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
                 }
             }
         }
@@ -137,13 +135,13 @@ impl RuntimeServices {
         };
         if let Some(handle) = sink.channel_handle.take() {
             if let Err(error) = provider.close(handle) {
-                log::warn!("RuntimeServices: failed to close output handle {handle:?}: {error}");
+                log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
             }
         }
     }
 }
 
-impl Drop for RuntimeServices {
+impl Drop for EngineServices {
     fn drop(&mut self) {
         self.close_output_sinks();
     }
@@ -258,13 +256,13 @@ mod tests {
         OutputProvider,
     };
 
-    use super::RuntimeServices;
+    use super::EngineServices;
     use crate::runtime_buffer::{RuntimeBuffer, RuntimeBufferStore};
 
     #[test]
-    fn runtime_services_drop_closes_open_output_channels() {
+    fn engine_services_drop_closes_open_output_channels() {
         let provider = Rc::new(MemoryOutputProvider::new());
-        let mut services = RuntimeServices::new(TreePath::parse("/p.show").expect("tree path"));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
         services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
             &provider,
         )))));

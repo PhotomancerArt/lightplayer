@@ -15,9 +15,9 @@ use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
 /// Active engine session for one frame (or nested test scope).
 ///
 /// The session owns the demand-resolution cache and trace stack. Engine-owned
-/// callbacks such as produced-slot reads and render materialization still pass
-/// through a host adapter so the resolver can be tested without constructing a
-/// full [`crate::engine::Engine`].
+/// callbacks such as runtime state slot reads and product materialization still
+/// pass through a host adapter so the resolver can be tested without
+/// constructing a full [`crate::engine::Engine`].
 pub struct EngineSession<'a> {
     revision: Revision,
     resolver: &'a mut Resolver,

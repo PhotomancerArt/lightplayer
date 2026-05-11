@@ -1,5 +1,5 @@
 //! Output demand root: resolves a control product, renders into output-owned samples, and exposes
-//! the dirty runtime buffer flushed by [`crate::project_runtime::RuntimeServices`].
+//! the dirty runtime buffer flushed by [`crate::EngineServices`].
 
 use alloc::vec::Vec;
 

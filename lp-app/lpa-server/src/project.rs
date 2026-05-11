@@ -6,20 +6,20 @@ use crate::error::ServerError;
 use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lpc_engine::{CoreProjectLoader, CoreProjectRuntime, LpGraphics, RuntimeServices};
+use lpc_engine::{Engine, EngineServices, LpGraphics, ProjectLoader};
 use lpc_model::{LpPath, LpPathBuf, TreePath};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpfs::{FsVersion, LpFs};
 
-/// A project instance wrapping a ProjectRuntime
+/// A project instance wrapping one loaded engine.
 pub struct Project {
     /// Project name/identifier
     name: String,
     /// Project filesystem path
     path: LpPathBuf,
-    /// The underlying ProjectRuntime instance
-    runtime: CoreProjectRuntime,
+    /// The loaded project engine.
+    runtime: Engine,
     /// Last filesystem version processed by this project
     last_fs_version: FsVersion,
 }
@@ -42,15 +42,15 @@ impl Project {
         let _ = time_provider;
 
         let root_path = project_root_path(&name)?;
-        let mut services = RuntimeServices::new(root_path);
+        let mut services = EngineServices::new(root_path);
         services.set_output_provider(Some(Box::new(SharedOutputProvider(output_provider))));
 
         let mut runtime = {
             let fs_ref = fs.borrow();
-            CoreProjectLoader::load_from_root(&*fs_ref, services)
+            ProjectLoader::load_from_root(&*fs_ref, services)
                 .map_err(|e| ServerError::Core(format!("Failed to load core project: {e}")))?
         };
-        runtime.engine_mut().set_graphics(Some(graphics));
+        runtime.set_graphics(Some(graphics));
 
         Ok(Self {
             name,
@@ -70,13 +70,13 @@ impl Project {
         &self.path
     }
 
-    /// Get mutable access to the underlying ProjectRuntime
-    pub fn runtime_mut(&mut self) -> &mut CoreProjectRuntime {
+    /// Get mutable access to the loaded engine.
+    pub fn engine_mut(&mut self) -> &mut Engine {
         &mut self.runtime
     }
 
-    /// Get immutable access to the underlying ProjectRuntime
-    pub fn runtime(&self) -> &CoreProjectRuntime {
+    /// Get immutable access to the loaded engine.
+    pub fn engine(&self) -> &Engine {
         &self.runtime
     }
 

@@ -1,21 +1,21 @@
-//! Frame timing information
+//! Engine frame timing counters.
 
-/// Frame timing information
+/// Millisecond timing for the current engine frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameTime {
-    /// Time since last frame in milliseconds
+    /// Time since last frame in milliseconds.
     pub delta_ms: u32,
-    /// Total time since project start in milliseconds (accumulated, no clamping)
+    /// Total time since project start in milliseconds.
     pub total_ms: u32,
 }
 
 impl FrameTime {
-    /// Create a new FrameTime with the given delta and total
+    /// Create frame timing from a delta and accumulated total.
     pub fn new(delta_ms: u32, total_ms: u32) -> Self {
         Self { delta_ms, total_ms }
     }
 
-    /// Create a new FrameTime starting at zero
+    /// Create zeroed frame timing.
     pub fn zero() -> Self {
         Self {
             delta_ms: 0,

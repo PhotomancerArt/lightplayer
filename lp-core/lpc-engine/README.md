@@ -2,8 +2,8 @@
 
 The LightPlayer engine runtime for loaded projects.
 
-This crate owns engine-only behavior: project runtime state, node trees,
-resolution, bindings, produced-slot access, and the boundary between
+This crate owns engine-only behavior: loaded project runtime state, node trees,
+resolution, bindings, runtime state slot roots, and the boundary between
 shader/runtime values and portable model or wire values.
 
 **Runtime spine:** `engine::Engine` is the core runtime owner for the new
@@ -24,21 +24,21 @@ tests and future diagnostics can explain value provenance.
 
 The first runnable core slice uses test-only dummy shader/fixture/output nodes
 from `engine::test_support` to validate demand roots, bus binding selection,
-same-frame caching, recursive resolution, cycle detection, and versioned values
-without porting concrete legacy runtimes yet.
+same-frame caching, recursive resolution, cycle detection, and revised values
+without depending on concrete node implementations.
 
 Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
 `lps-shared` because it is responsible for converting between `LpsValue` /
-`LpsType` and `ModelValue` / `ModelType`.
+`LpsType` and `LpValue` / `LpType`.
 
 **Produced values:** demand-driven resolution caches
-[`resolver::production::Production`]: a versioned `LpValue` plus provenance.
+[`resolver::production::Production`]: an `LpValue` plus revision provenance.
 Nodes expose produced values through their runtime state slot roots. Shader ABI
 values are converted at node/shader boundaries; lazy graph products travel as
 `LpValue::Product`.
 
 **Naming:** Prefer plain engine/runtime nouns when the crate already owns the
-concept (`Engine`, `ProjectRuntime`, `NodeTree`, `Resolver`).
+concept (`Engine`, `NodeTree`, `Resolver`).
 Use an `Engine*` prefix only when ambiguity with another layer remains high.
 Conversion helpers should name both sides of the boundary (for example functions
-that mention `model_value` / `ModelType` vs `LpsValueF32` / `LpsType`).
+that mention `lp_value` / `LpType` vs `LpsValueF32` / `LpsType`).

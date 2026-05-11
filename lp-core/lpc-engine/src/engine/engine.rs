@@ -3,14 +3,18 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::format;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use hashbrown::HashMap;
 
 use lpc_model::{
     ControlProduct, LpValue, NodeId, Revision, SlotAccessor, SlotDataAccess, SlotPath,
     SlotShapeRegistry, TreePath, WithRevision, advance_revision, current_revision,
     lookup_slot_data,
 };
+use lpfs::FsChange;
+use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::{ArtifactState, ArtifactStore};
 use crate::binding::{BindingDraft, BindingError, BindingRef};
@@ -25,12 +29,11 @@ use crate::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
-use crate::runtime::frame_num::FrameNum;
-use crate::runtime::frame_time::FrameTime;
 use crate::runtime_buffer::{RuntimeBufferId, RuntimeBufferStore};
 use crate::visual_product::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 
-use super::EngineError;
+use super::{EngineError, EngineServices};
+use super::{FrameNum, FrameTime};
 
 /// Conventional demand input used by the M2 engine slice.
 pub(crate) fn default_demand_input_path() -> SlotPath {
@@ -47,12 +50,18 @@ pub struct Engine {
     slot_shapes: SlotShapeRegistry,
     runtime_buffers: RuntimeBufferStore,
     artifacts: ArtifactStore,
+    services: EngineServices,
+    artifact_nodes: HashMap<String, NodeId>,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
 }
 
 impl Engine {
     pub fn new(root_path: TreePath) -> Self {
+        Self::with_services(root_path.clone(), EngineServices::new(root_path))
+    }
+
+    pub fn with_services(root_path: TreePath, services: EngineServices) -> Self {
         let revision = Revision::default();
         let mut slot_shapes = SlotShapeRegistry::default();
         lpc_model::slot_shapes::register_all_static_slot_shapes(&mut slot_shapes)
@@ -61,11 +70,13 @@ impl Engine {
             frame_num: FrameNum::default(),
             revision,
             frame_time: FrameTime::zero(),
-            tree: NodeTree::new(root_path, revision),
+            tree: NodeTree::new(root_path.clone(), revision),
             resolver: Resolver::new(),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
             artifacts: ArtifactStore::new(),
+            services,
+            artifact_nodes: HashMap::new(),
             demand_roots: Vec::new(),
             graphics: None,
         }
@@ -121,6 +132,23 @@ impl Engine {
 
     pub fn artifacts_mut(&mut self) -> &mut ArtifactStore {
         &mut self.artifacts
+    }
+
+    pub fn services(&self) -> &EngineServices {
+        &self.services
+    }
+
+    pub fn services_mut(&mut self) -> &mut EngineServices {
+        &mut self.services
+    }
+
+    /// Engine [`NodeId`] for a node artifact path, if loaded.
+    pub fn artifact_node_id(&self, path: &LpPath) -> Option<NodeId> {
+        self.artifact_nodes.get(path.as_str()).copied()
+    }
+
+    pub(crate) fn insert_artifact_node(&mut self, path: LpPathBuf, id: NodeId) {
+        self.artifact_nodes.insert(String::from(path.as_str()), id);
     }
 
     pub fn demand_roots(&self) -> &[NodeId] {
@@ -182,6 +210,23 @@ impl Engine {
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
+        lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
+        let result = (|| {
+            self.tick_nodes(delta_ms)?;
+            let revision = self.revision;
+            let buffers = &self.runtime_buffers;
+            self.services
+                .flush_dirty_output_sinks(revision, buffers)
+                .map_err(|e| EngineError::OutputFlush {
+                    message: alloc::format!("{e}"),
+                })?;
+            Ok(())
+        })();
+        lp_perf::emit_end!(lp_perf::EVENT_FRAME);
+        result
+    }
+
+    fn tick_nodes(&mut self, delta_ms: u32) -> Result<(), EngineError> {
         self.resolver.clear_frame_cache();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
@@ -231,6 +276,23 @@ impl Engine {
 
         self.resolver = resolver;
         Ok(())
+    }
+
+    /// Accept filesystem changes on the core server path.
+    ///
+    /// Source reload is follow-up work; this hook exists so server version
+    /// tracking can advance without a separate project-runtime wrapper.
+    pub fn handle_fs_changes(&mut self, _changes: &[FsChange]) -> Result<(), EngineError> {
+        Ok(())
+    }
+
+    /// Project sync is disabled until canonical project sync is rebuilt.
+    pub fn project_sync_disabled(&self) -> EngineError {
+        EngineError::ProjectSyncDisabled {
+            message: alloc::string::String::from(
+                "project sync is disabled until canonical project sync",
+            ),
+        }
     }
 
     #[cfg(test)]

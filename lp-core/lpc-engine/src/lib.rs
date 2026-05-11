@@ -22,9 +22,7 @@ pub mod memory;
 pub mod node;
 pub mod nodes;
 pub mod output;
-pub mod project_runtime;
 pub mod resolver;
-pub mod runtime;
 pub mod runtime_buffer;
 pub mod visual_product;
 pub mod wire_bridge;
@@ -41,7 +39,10 @@ pub use control_product::{
     ControlExtent, ControlHint, ControlLayout, ControlProduct, ControlRenderRequest,
     ControlRenderTarget, ControlSampleFormat, ControlSpan,
 };
-pub use engine::{Engine, EngineError};
+pub use engine::{
+    Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError, ProjectLoadError,
+    ProjectLoader,
+};
 pub use error::Error;
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
 pub use node::{
@@ -49,9 +50,6 @@ pub use node::{
     NodeError, NodeRuntime, NodeTree, PressureLevel, TickContext, TreeError, tree_deltas_since,
 };
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
-pub use project_runtime::{
-    CoreProjectLoadError, CoreProjectLoader, CoreProjectRuntime, OutputFlushError, RuntimeServices,
-};
 pub use resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveSession, ResolveTrace, ResolveTraceError, ResolveTraceEvent, Resolver, ResolverCache,
