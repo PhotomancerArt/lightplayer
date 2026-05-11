@@ -8,7 +8,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod json;
-pub mod message;
+pub mod messages;
 pub mod project;
 pub mod serde_base64;
 pub mod server;
@@ -17,17 +17,19 @@ pub mod state;
 pub mod transport_error;
 pub mod tree;
 
-pub use message::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
-pub use project::{
+pub use messages::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
+pub use messages::{
     ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery, NodeReadResult,
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
     ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation, WireChannelSampleFormat,
-    WireColorLayout, WireNodeStatus, WireProjectHandle, WireProjectRequest,
-    WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
-    WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
-    WireRuntimeBufferPayload, WireTextureFormat,
+    ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation,
+};
+pub use project::{
+    WireChannelSampleFormat, WireColorLayout, WireNodeStatus, WireProjectHandle,
+    WireProjectRequest, WireResourceAvailability, WireResourceKindSummary,
+    WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
+    WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload, WireTextureFormat,
 };
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,

@@ -5,7 +5,7 @@
 
 use log;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{TransportError, messages::ClientMessage};
 use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};

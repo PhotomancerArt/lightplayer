@@ -5,13 +5,15 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_engine::node::NodeError;
-use lpc_engine::{
-    ArtifactLocation, ArtifactState, ArtifactStore, BindingEntry, BindingPriority, BindingRef,
-    BindingSource, BindingTarget, NodeRuntime, Production, QueryKey, ResolveHost, ResolveLogLevel,
-    ResolveSession, ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickContext,
-    TickResolver,
+use lpc_engine::artifact::{ArtifactLocation, ArtifactState, ArtifactStore};
+use lpc_engine::dataflow::binding::{
+    BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
+use lpc_engine::dataflow::resolver::{
+    Production, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession, ResolveTrace, Resolver,
+    SessionHostResolver, SessionResolveError, TickResolver,
+};
+use lpc_engine::node::{MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 use lpc_model::node::node_invocation::NodeInvocation;
 use lpc_model::{Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName};
 use lpc_source::ArtifactLocator;
@@ -164,14 +166,14 @@ impl NodeRuntime for TickProbeNode {
         Ok(())
     }
 
-    fn destroy(&mut self, _ctx: &mut lpc_engine::DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut lpc_engine::node::DestroyCtx<'_>) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
-        _level: lpc_engine::PressureLevel,
-        _ctx: &mut lpc_engine::MemPressureCtx<'_>,
+        _level: PressureLevel,
+        _ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError> {
         Ok(())
     }

@@ -5,7 +5,7 @@
 use crate::transport::ClientTransport;
 use futures_util::{SinkExt, StreamExt};
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{TransportError, messages::ClientMessage};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
@@ -152,7 +152,7 @@ impl ClientTransport for WebSocketClientTransport {
 mod tests {
     use super::*;
     use lpc_model::AsLpPathBuf;
-    use lpc_wire::{message::ClientRequest, server::FsRequest};
+    use lpc_wire::{messages::ClientRequest, server::FsRequest};
 
     #[test]
     fn test_serialization_format() {

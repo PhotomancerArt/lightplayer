@@ -4,8 +4,8 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lpa_server::{Graphics, LpGraphics, LpServer};
-use lpc_engine::MemoryOutputProvider;
 use lpc_model::{AsLpPath, AsLpPathBuf};
+use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
 #[test]

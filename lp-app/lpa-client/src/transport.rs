@@ -4,7 +4,7 @@
 //! Messages are consumed (moved) on send, and receive operations are async.
 
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{TransportError, messages::ClientMessage};
 
 /// Trait for client-side transport implementations
 ///

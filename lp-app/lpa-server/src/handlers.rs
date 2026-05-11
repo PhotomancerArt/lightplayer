@@ -13,7 +13,7 @@ use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
     WireServerMessage, WireServerMsgBody as ServerMessagePayload,
-    message::ClientMessage,
+    messages::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
 use lpfs::LpFs;

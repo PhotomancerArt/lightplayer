@@ -5,7 +5,7 @@
 
 use crate::transport::ClientTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{TransportError, messages::ClientMessage};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};

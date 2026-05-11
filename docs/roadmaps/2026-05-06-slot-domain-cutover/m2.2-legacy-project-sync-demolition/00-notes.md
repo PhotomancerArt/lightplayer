@@ -65,7 +65,7 @@ Out of scope:
 - `lp-core/lpc-wire/src/server/api.rs` is generic over the project response body:
   `ServerMsgBody<R>::ProjectRequest { response: R }`. This generic envelope is
   useful and should probably survive.
-- `lp-core/lpc-wire/src/message/client.rs` uses `WireProjectRequest`, but the
+- `lp-core/lpc-wire/src/messages/client.rs` uses `WireProjectRequest`, but the
   message envelope itself is not legacy-specific.
 - `lp-core/lpc-wire/src/legacy/mod.rs` currently exports aliases:
   `LegacyMessage`, `LegacyServerMessage`, and `LegacyServerMsgBody`, all tied

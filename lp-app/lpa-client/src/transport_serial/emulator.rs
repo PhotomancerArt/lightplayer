@@ -8,7 +8,7 @@ use log;
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{TransportError, messages::ClientMessage};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::sync::{mpsc, oneshot};

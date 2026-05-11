@@ -8,7 +8,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lpc_wire::{TransportError, WireServerMessage, message::ClientMessage};
+use lpc_wire::{TransportError, WireServerMessage, messages::ClientMessage};
 
 /// Trait for server-side transport implementations
 ///

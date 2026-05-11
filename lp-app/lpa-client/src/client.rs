@@ -7,7 +7,7 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
     ProjectReadRequest, ProjectReadResponse, WireProjectHandle as ProjectHandle,
     WireProjectRequest, WireServerMessage,
-    message::{ClientMessage, ClientRequest},
+    messages::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
 use std::sync::Arc;

@@ -48,7 +48,7 @@ Relevant files:
 - `lp-core/lpc-wire/src/project/wire_project_request.rs`
 - `lp-core/lpc-wire/src/project/resource_sync.rs`
 - `lp-core/lpc-wire/src/project/mod.rs`
-- `lp-core/lpc-wire/src/message/client.rs`
+- `lp-core/lpc-wire/src/messages/client.rs`
 - `lp-core/lpc-wire/src/server/api.rs`
 - `lp-core/lpc-wire/src/lib.rs`
 - `lp-core/lpc-wire/tests/m4_get_changes_all_specifiers_roundtrip.rs`

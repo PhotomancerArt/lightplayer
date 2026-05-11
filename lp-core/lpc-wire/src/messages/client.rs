@@ -90,7 +90,7 @@ mod tests {
     fn test_project_request() {
         let req = ClientRequest::ProjectRequest {
             handle: WireProjectHandle::new(1),
-            request: WireProjectRequest::Read(crate::project::ProjectReadRequest::default_debug(
+            request: WireProjectRequest::Read(crate::messages::ProjectReadRequest::default_debug(
                 None,
             )),
         };
@@ -101,7 +101,7 @@ mod tests {
                 assert_eq!(handle.id(), 1);
                 assert_eq!(
                     request,
-                    WireProjectRequest::Read(crate::project::ProjectReadRequest::default_debug(
+                    WireProjectRequest::Read(crate::messages::ProjectReadRequest::default_debug(
                         None
                     ))
                 );

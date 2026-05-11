@@ -1,6 +1,6 @@
 //! Wire-visible project request / node status types.
 
-use super::ProjectReadRequest;
+use crate::messages::ProjectReadRequest;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 

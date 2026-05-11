@@ -21,7 +21,7 @@ Out of scope:
 
 ## Code Organization Reminders
 
-- Put probe files under `lp-core/lpc-wire/src/project/read/probe/`.
+- Put probe files under `lp-core/lpc-wire/src/messages/project_read/probe/`.
 - Commented future enum variants are intentional here; keep them short and
   clearly marked as future.
 - Keep docs concise and developer-facing.

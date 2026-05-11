@@ -6,7 +6,7 @@
 use crate::transport::ClientTransport;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
-use lpc_wire::{TransportError, message::ClientMessage};
+use lpc_wire::{TransportError, messages::ClientMessage};
 use tokio::sync::mpsc;
 
 /// Async local client transport

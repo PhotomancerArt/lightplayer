@@ -24,7 +24,7 @@ Out of scope:
 
 ## Code Organization Reminders
 
-- Use granular files under `lp-core/lpc-wire/src/project/read/`.
+- Use granular files under `lp-core/lpc-wire/src/messages/project_read/`.
 - Use concise names inside `lpc-wire`; do not prefix every new type with
   `Wire`.
 - Keep `mod.rs` files mostly declarations and re-exports.

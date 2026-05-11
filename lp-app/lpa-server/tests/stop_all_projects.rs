@@ -4,10 +4,10 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 use lpa_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
-use lpc_engine::MemoryOutputProvider;
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_shared::ProjectBuilder;
-use lpc_wire::message::{ClientMessage, ClientRequest};
+use lpc_shared::output::MemoryOutputProvider;
+use lpc_wire::messages::{ClientMessage, ClientRequest};
 use lpfs::{LpFs, LpFsMemory};
 
 #[test]

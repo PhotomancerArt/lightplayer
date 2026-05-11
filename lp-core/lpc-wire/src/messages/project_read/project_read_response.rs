@@ -1,7 +1,6 @@
 //! Project read response envelope.
 
-use super::ProjectProbeResult;
-use crate::project::{NodeReadResult, ResourceReadResult, ShapeReadResult};
+use super::{NodeReadResult, ProjectProbeResult, ResourceReadResult, ShapeReadResult};
 use alloc::vec::Vec;
 use lpc_model::Revision;
 
@@ -29,7 +28,7 @@ pub enum ProjectReadResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::ReadLevel;
+    use crate::messages::ReadLevel;
     use alloc::vec;
 
     #[test]
