@@ -80,13 +80,17 @@ impl DebugUiState {
 
         self.last_poll = Instant::now();
         self.poll_in_flight = true;
+        let selected_resource = match self.selected {
+            Some(InspectorSelection::Resource(resource_ref)) => Some(resource_ref),
+            _ => None,
+        };
         let client = self.async_client.clone();
         let handle = self.project_handle;
         let tx = self.response_tx.clone();
         let repaint = ctx.clone();
         self.runtime_handle.spawn(async move {
             let result = client
-                .project_read(handle, debug_ui_project_read())
+                .project_read(handle, debug_ui_project_read(selected_resource))
                 .await
                 .map_err(|error| error.to_string());
             let _ = tx.send(result);
@@ -95,13 +99,15 @@ impl DebugUiState {
     }
 }
 
-fn debug_ui_project_read() -> ProjectReadRequest {
+fn debug_ui_project_read(selected_resource: Option<lpc_model::ResourceRef>) -> ProjectReadRequest {
     let mut request = ProjectReadRequest::default_debug(None);
     for query in &mut request.queries {
         if matches!(query, ProjectReadQuery::Resources(_)) {
             *query = ProjectReadQuery::Resources(ResourceReadQuery {
                 level: ReadLevel::Detail,
-                payloads: ResourcePayloadRead::All,
+                payloads: selected_resource.map_or(ResourcePayloadRead::None, |resource_ref| {
+                    ResourcePayloadRead::ByRefs(Vec::from([resource_ref]))
+                }),
             });
         }
     }
