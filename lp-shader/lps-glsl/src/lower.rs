@@ -10,7 +10,7 @@ use lpir::{
 };
 use lps_shared::{LpsModuleSig, LpsType};
 
-use crate::body::{BinaryOp, UnaryOp};
+use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 use crate::hir::{
     BuiltinKind, HirExpr, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey,
     scalar_base_type, scalar_ir_types, scalar_lane_count,
@@ -145,6 +145,23 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             ctx.fb.end_if();
             Ok(())
         }
+        HirStmt::For {
+            init,
+            condition,
+            continuing,
+            body,
+        } => {
+            lower_statements(ctx, init)?;
+            ctx.fb.push_loop();
+            let cond = lower_expr(ctx, condition)?;
+            let cond = single_lane(condition.span, &cond)?;
+            ctx.fb.push(LpirOp::BrIfNot { cond });
+            lower_statements(ctx, body)?;
+            ctx.fb.push_continuing();
+            lower_statements(ctx, continuing)?;
+            ctx.fb.end_loop();
+            Ok(())
+        }
         HirStmt::While { condition, body } => {
             ctx.fb.push_loop();
             let cond = lower_expr(ctx, condition)?;
@@ -155,12 +172,26 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             ctx.fb.end_loop();
             Ok(())
         }
+        HirStmt::DoWhile { body, condition } => {
+            ctx.fb.push_loop();
+            lower_statements(ctx, body)?;
+            ctx.fb.push_continuing();
+            let cond = lower_expr(ctx, condition)?;
+            let cond = single_lane(condition.span, &cond)?;
+            ctx.fb.push(LpirOp::BrIfNot { cond });
+            ctx.fb.end_loop();
+            Ok(())
+        }
         HirStmt::Break => {
             ctx.fb.push(LpirOp::Break);
             Ok(())
         }
         HirStmt::Continue => {
             ctx.fb.push(LpirOp::Continue);
+            Ok(())
+        }
+        HirStmt::Expr(expr) => {
+            let _ = lower_expr(ctx, expr)?;
             Ok(())
         }
         HirStmt::Return(expr) => {
@@ -373,6 +404,9 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             })?;
             copy_value(ctx, dst, value.clone(), expr.span)?;
             Ok(value)
+        }
+        HirExprKind::IncDec { local, op, prefix } => {
+            lower_inc_dec(ctx, expr.span, *local, *op, *prefix)
         }
     }
 }
@@ -830,6 +864,73 @@ fn lower_select(
     Ok(LowerValue {
         ty: result_ty.clone(),
         lanes,
+    })
+}
+
+fn lower_inc_dec(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    local: usize,
+    op: IncDecOp,
+    prefix: bool,
+) -> Result<LowerValue, Diagnostic> {
+    let current =
+        ctx.locals.get(local).cloned().ok_or_else(|| {
+            Diagnostic::error(span, format!("local index {local} is out of range"))
+        })?;
+    let old = temp_copy(ctx, &current, span)?;
+    let one = one_value(ctx, span, &current.ty)?;
+    let binary_op = match op {
+        IncDecOp::Increment => BinaryOp::Add,
+        IncDecOp::Decrement => BinaryOp::Sub,
+    };
+    let updated = lower_binary(ctx, span, binary_op, old.clone(), one, &current.ty)?;
+    copy_value(ctx, current, updated.clone(), span)?;
+    if prefix { Ok(updated) } else { Ok(old) }
+}
+
+fn temp_copy(
+    ctx: &mut LowerCtx<'_>,
+    value: &LowerValue,
+    span: Span,
+) -> Result<LowerValue, Diagnostic> {
+    let mut lanes = Vec::new();
+    for (lane, ty) in value.lanes.iter().zip(scalar_ir_types(&value.ty)?) {
+        let dst = ctx.fb.alloc_vreg(ty);
+        ctx.fb.push(LpirOp::Copy { dst, src: *lane });
+        lanes.push(dst);
+    }
+    if lanes.len() != value.lanes.len() {
+        return Err(Diagnostic::error(span, "temporary copy lane mismatch"));
+    }
+    Ok(LowerValue {
+        ty: value.ty.clone(),
+        lanes,
+    })
+}
+
+fn one_value(ctx: &mut LowerCtx<'_>, span: Span, ty: &LpsType) -> Result<LowerValue, Diagnostic> {
+    let lane = match ty {
+        LpsType::Float => {
+            let dst = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(LpirOp::FconstF32 { dst, value: 1.0 });
+            dst
+        }
+        LpsType::Int => {
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 { dst, value: 1 });
+            dst
+        }
+        LpsType::UInt => {
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 { dst, value: 1 });
+            dst
+        }
+        _ => return Err(Diagnostic::error(span, "unsupported increment type")),
+    };
+    Ok(LowerValue {
+        ty: ty.clone(),
+        lanes: vec![lane],
     })
 }
 

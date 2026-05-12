@@ -9,8 +9,8 @@ use lps_shared::{
 };
 
 use crate::body::{
-    AssignOp, BinaryOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt, UnaryOp,
-    parse_expr_tokens,
+    AssignOp, BinaryOp, IncDecOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt,
+    UnaryOp, parse_expr_tokens,
 };
 use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
@@ -85,12 +85,23 @@ pub enum HirStmt {
         accept: Vec<HirStmt>,
         reject: Vec<HirStmt>,
     },
+    For {
+        init: Vec<HirStmt>,
+        condition: HirExpr,
+        continuing: Vec<HirStmt>,
+        body: Vec<HirStmt>,
+    },
     While {
         condition: HirExpr,
         body: Vec<HirStmt>,
     },
+    DoWhile {
+        body: Vec<HirStmt>,
+        condition: HirExpr,
+    },
     Break,
     Continue,
+    Expr(HirExpr),
     Return(HirExpr),
 }
 
@@ -157,6 +168,11 @@ pub enum HirExprKind {
     Assign {
         local: usize,
         value: Box<HirExpr>,
+    },
+    IncDec {
+        local: usize,
+        op: IncDecOp,
+        prefix: bool,
     },
 }
 
@@ -537,6 +553,39 @@ impl<'a> TypeCtx<'a> {
                     reject,
                 }])
             }
+            ParsedStmt::For {
+                init,
+                condition,
+                continuing,
+                body,
+                span,
+            } => {
+                self.scopes.push(BTreeMap::new());
+                let init = self.type_statements(init, return_ty)?;
+                let condition = if let Some(condition) = condition {
+                    let condition = self.type_expr(condition)?;
+                    self.coerce_expr(condition, &LpsType::Bool)?
+                } else {
+                    HirExpr {
+                        span: *span,
+                        ty: LpsType::Bool,
+                        kind: HirExprKind::BoolLiteral(true),
+                    }
+                };
+                self.loop_depth += 1;
+                self.scopes.push(BTreeMap::new());
+                let body = self.type_statements(body, return_ty)?;
+                self.scopes.pop();
+                let continuing = self.type_statements(continuing, return_ty)?;
+                self.loop_depth -= 1;
+                self.scopes.pop();
+                Ok(alloc::vec![HirStmt::For {
+                    init,
+                    condition,
+                    continuing,
+                    body,
+                }])
+            }
             ParsedStmt::While {
                 condition,
                 body,
@@ -550,6 +599,18 @@ impl<'a> TypeCtx<'a> {
                 self.scopes.pop();
                 self.loop_depth -= 1;
                 Ok(alloc::vec![HirStmt::While { condition, body }])
+            }
+            ParsedStmt::DoWhile {
+                body, condition, ..
+            } => {
+                self.loop_depth += 1;
+                self.scopes.push(BTreeMap::new());
+                let body = self.type_statements(body, return_ty)?;
+                self.scopes.pop();
+                self.loop_depth -= 1;
+                let condition = self.type_expr(condition)?;
+                let condition = self.coerce_expr(condition, &LpsType::Bool)?;
+                Ok(alloc::vec![HirStmt::DoWhile { body, condition }])
             }
             ParsedStmt::Break { span } => {
                 if self.loop_depth == 0 {
@@ -570,6 +631,10 @@ impl<'a> TypeCtx<'a> {
                 Ok(statements)
             }
             ParsedStmt::Empty { .. } => Ok(Vec::new()),
+            ParsedStmt::Expr { expr, .. } => {
+                let expr = self.type_expr(expr)?;
+                Ok(alloc::vec![HirStmt::Expr(expr)])
+            }
             ParsedStmt::Return(expr) => {
                 let expr = self.type_expr(expr)?;
                 let expr = self.coerce_expr(expr, return_ty)?;
@@ -662,6 +727,27 @@ impl<'a> TypeCtx<'a> {
                     kind: HirExprKind::Assign {
                         local,
                         value: Box::new(value),
+                    },
+                })
+            }
+            ParsedExprKind::IncDec { name, op, prefix } => {
+                let local = self.resolve_local(name).ok_or_else(|| {
+                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                })?;
+                let ty = self.locals[local].ty.clone();
+                if !matches!(ty, LpsType::Float | LpsType::Int | LpsType::UInt) {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        "increment/decrement requires scalar numeric local",
+                    ));
+                }
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty,
+                    kind: HirExprKind::IncDec {
+                        local,
+                        op: *op,
+                        prefix: *prefix,
                     },
                 })
             }

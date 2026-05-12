@@ -1,129 +1,12 @@
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use crate::{Diagnostic, Keyword, Span, Token, TokenKind};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedFunctionBody {
-    pub statements: Vec<ParsedStmt>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParsedStmt {
-    Let {
-        is_const: bool,
-        ty: String,
-        name: String,
-        init: Option<ParsedExpr>,
-        span: Span,
-    },
-    Assign {
-        name: String,
-        op: AssignOp,
-        value: ParsedExpr,
-        span: Span,
-    },
-    If {
-        condition: ParsedExpr,
-        accept: Vec<ParsedStmt>,
-        reject: Vec<ParsedStmt>,
-        span: Span,
-    },
-    While {
-        condition: ParsedExpr,
-        body: Vec<ParsedStmt>,
-        span: Span,
-    },
-    Break {
-        span: Span,
-    },
-    Continue {
-        span: Span,
-    },
-    Block {
-        statements: Vec<ParsedStmt>,
-        span: Span,
-    },
-    Empty {
-        span: Span,
-    },
-    Return(ParsedExpr),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedExpr {
-    pub span: Span,
-    pub kind: ParsedExprKind,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParsedExprKind {
-    BoolLiteral(bool),
-    FloatLiteral(f32),
-    IntLiteral(i32),
-    UIntLiteral(u32),
-    Name(String),
-    Call {
-        name: String,
-        args: Vec<ParsedExpr>,
-    },
-    Swizzle {
-        base: alloc::boxed::Box<ParsedExpr>,
-        fields: String,
-    },
-    Unary {
-        op: UnaryOp,
-        expr: alloc::boxed::Box<ParsedExpr>,
-    },
-    Binary {
-        op: BinaryOp,
-        lhs: alloc::boxed::Box<ParsedExpr>,
-        rhs: alloc::boxed::Box<ParsedExpr>,
-    },
-    Conditional {
-        condition: alloc::boxed::Box<ParsedExpr>,
-        accept: alloc::boxed::Box<ParsedExpr>,
-        reject: alloc::boxed::Box<ParsedExpr>,
-    },
-    Assign {
-        name: String,
-        value: alloc::boxed::Box<ParsedExpr>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnaryOp {
-    Neg,
-    Not,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    LogicalAnd,
-    LogicalOr,
-    LogicalXor,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    Eq,
-    Ne,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssignOp {
-    Set,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-}
+pub use crate::syntax::{
+    AssignOp, BinaryOp, IncDecOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt,
+    UnaryOp,
+};
 
 pub fn parse_function_body(
     source: &str,
@@ -232,8 +115,14 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         if self.at_keyword(Keyword::If) {
             return self.parse_if();
         }
+        if self.at_keyword(Keyword::For) {
+            return self.parse_for();
+        }
         if self.at_keyword(Keyword::While) {
             return self.parse_while();
+        }
+        if self.at_keyword(Keyword::Do) {
+            return self.parse_do_while();
         }
         if self.at_keyword(Keyword::Break) {
             let start = self.bump().span.start;
@@ -268,10 +157,12 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             }
             self.pos = checkpoint;
         }
-        Err(Diagnostic::error(
-            self.current_span(),
-            "M3 lps-glsl supports only declarations, assignment, if, and return statements",
-        ))
+        let expr = self.parse_expr(0)?;
+        let end = self.expect_punct(";")?.span.end;
+        Ok(ParsedStmt::Expr {
+            span: Span::new(expr.span.start, end),
+            expr,
+        })
     }
 
     fn parse_if(&mut self) -> Result<ParsedStmt, Diagnostic> {
@@ -298,6 +189,53 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         })
     }
 
+    fn parse_for(&mut self) -> Result<ParsedStmt, Diagnostic> {
+        let start = self.expect_keyword(Keyword::For)?.span.start;
+        self.expect_punct("(")?;
+        let init = if self.at_punct(";") {
+            self.bump();
+            Vec::new()
+        } else if self.at_keyword(Keyword::Const) || self.starts_type_name() {
+            alloc::vec![self.parse_let()?]
+        } else {
+            let expr = self.parse_expr(0)?;
+            let end = self.expect_punct(";")?.span.end;
+            alloc::vec![ParsedStmt::Expr {
+                span: Span::new(expr.span.start, end),
+                expr,
+            }]
+        };
+        let condition = if self.at_punct(";") {
+            self.bump();
+            None
+        } else {
+            let condition = self.parse_expr(0)?;
+            self.expect_punct(";")?;
+            Some(condition)
+        };
+        let continuing = if self.at_punct(")") {
+            Vec::new()
+        } else {
+            let expr = self.parse_expr(0)?;
+            alloc::vec![ParsedStmt::Expr {
+                span: expr.span,
+                expr,
+            }]
+        };
+        self.expect_punct(")")?;
+        let body = self.parse_statement_or_block()?;
+        let end = body
+            .last()
+            .map_or_else(|| continuing.last().map_or(start, stmt_end), stmt_end);
+        Ok(ParsedStmt::For {
+            init,
+            condition,
+            continuing,
+            body,
+            span: Span::new(start, end),
+        })
+    }
+
     fn parse_while(&mut self) -> Result<ParsedStmt, Diagnostic> {
         let start = self.expect_keyword(Keyword::While)?.span.start;
         self.expect_punct("(")?;
@@ -308,6 +246,21 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         Ok(ParsedStmt::While {
             condition,
             body,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_do_while(&mut self) -> Result<ParsedStmt, Diagnostic> {
+        let start = self.expect_keyword(Keyword::Do)?.span.start;
+        let body = self.parse_statement_or_block()?;
+        self.expect_keyword(Keyword::While)?;
+        self.expect_punct("(")?;
+        let condition = self.parse_expr(0)?;
+        self.expect_punct(")")?;
+        let end = self.expect_punct(";")?.span.end;
+        Ok(ParsedStmt::DoWhile {
+            body,
+            condition,
             span: Span::new(start, end),
         })
     }
@@ -413,6 +366,23 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 
     fn parse_prefix(&mut self) -> Result<ParsedExpr, Diagnostic> {
+        if self.at_punct("++") || self.at_punct("--") {
+            let op_tok = self.bump();
+            let op = if op_tok.lexeme(self.source) == "++" {
+                IncDecOp::Increment
+            } else {
+                IncDecOp::Decrement
+            };
+            let name_tok = self.expect_identifier_like()?;
+            return Ok(ParsedExpr {
+                span: Span::new(op_tok.span.start, self.previous().span.end),
+                kind: ParsedExprKind::IncDec {
+                    name: name_tok.to_string(),
+                    op,
+                    prefix: true,
+                },
+            });
+        }
         if self.at_punct("-") {
             let start = self.bump().span.start;
             if self
@@ -456,17 +426,42 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
 
     fn parse_postfix(&mut self) -> Result<ParsedExpr, Diagnostic> {
         let mut expr = self.parse_primary()?;
-        while self.at_punct(".") {
-            self.bump();
-            let fields = self.expect_identifier_like()?.to_string();
-            let end = self.previous().span.end;
-            expr = ParsedExpr {
-                span: Span::new(expr.span.start, end),
-                kind: ParsedExprKind::Swizzle {
-                    base: alloc::boxed::Box::new(expr),
-                    fields,
-                },
-            };
+        loop {
+            if self.at_punct(".") {
+                self.bump();
+                let fields = self.expect_identifier_like()?.to_string();
+                let end = self.previous().span.end;
+                expr = ParsedExpr {
+                    span: Span::new(expr.span.start, end),
+                    kind: ParsedExprKind::Swizzle {
+                        base: alloc::boxed::Box::new(expr),
+                        fields,
+                    },
+                };
+                continue;
+            }
+            if self.at_punct("++") || self.at_punct("--") {
+                let ParsedExprKind::Name(name) = &expr.kind else {
+                    return Err(Diagnostic::error(expr.span, "invalid increment target"));
+                };
+                let name = name.clone();
+                let op_tok = self.bump();
+                let op = if op_tok.lexeme(self.source) == "++" {
+                    IncDecOp::Increment
+                } else {
+                    IncDecOp::Decrement
+                };
+                expr = ParsedExpr {
+                    span: Span::new(expr.span.start, op_tok.span.end),
+                    kind: ParsedExprKind::IncDec {
+                        name,
+                        op,
+                        prefix: false,
+                    },
+                };
+                continue;
+            }
+            break;
         }
         Ok(expr)
     }
@@ -705,11 +700,14 @@ fn stmt_end(stmt: &ParsedStmt) -> usize {
         ParsedStmt::Let { span, .. }
         | ParsedStmt::Assign { span, .. }
         | ParsedStmt::If { span, .. }
+        | ParsedStmt::For { span, .. }
         | ParsedStmt::While { span, .. }
+        | ParsedStmt::DoWhile { span, .. }
         | ParsedStmt::Break { span }
         | ParsedStmt::Continue { span }
         | ParsedStmt::Block { span, .. }
-        | ParsedStmt::Empty { span } => span.end,
+        | ParsedStmt::Empty { span }
+        | ParsedStmt::Expr { span, .. } => span.end,
         ParsedStmt::Return(expr) => expr.span.end,
     }
 }

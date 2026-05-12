@@ -14,6 +14,7 @@ mod lexer;
 mod lower;
 mod lvalue;
 mod source;
+mod syntax;
 mod token;
 
 pub use compile::{CompileOptions, CompileOutput, compile, index_source};
