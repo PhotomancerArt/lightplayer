@@ -11,6 +11,7 @@ pub mod artifact;
 mod artifact_read_root;
 pub mod legacy;
 pub mod presentation;
+pub mod prop;
 pub mod schema;
 
 pub mod slot_shapes {
@@ -22,3 +23,4 @@ pub use artifact::{
     SrcArtifactLibRef, load_artifact,
 };
 pub use presentation::Presentation;
+pub use prop::{SrcBinding, SrcShape, SrcSlot, SrcTextureSpec, SrcValueSpec};

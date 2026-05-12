@@ -17,17 +17,17 @@ pub use visual::{
     PlaylistEntry, ShaderRef, Stack, Transition, TransitionRef, VisualInput,
 };
 
-pub use lpc_model::{constraint, error, kind, node, types};
+pub use lpc_model::{constraint, kind, node};
 pub use lpc_source::{artifact, presentation, schema};
 
 pub use lpc_model::node::tree_path::TreePath;
 pub use lpc_model::{
-    ChannelName, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, DomainError, Kind,
-    NodeId, NodeName, NodePropSpec, ValuePath,
+    ChannelName, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, Kind, NodeId,
+    NodeInvocation, NodeName, NodePropSpec, ValuePath,
 };
 pub use lpc_source::prop::{binding, shape};
 pub use lpc_source::{
-    ArtifactLocator, LoadError, NodeInvocation, Presentation, SrcBinding, SrcShape, SrcSlot,
-    SrcTextureSpec, SrcValueSpec, load_artifact,
+    ArtifactLocator, LoadError, Presentation, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec,
+    SrcValueSpec, load_artifact,
 };
 pub use lps_shared::{LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat};

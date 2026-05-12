@@ -5,7 +5,6 @@
 use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef, visual_input::VisualInput};
 use alloc::string::String;
 use lpc_source::artifact::src_artifact::SrcArtifact;
-use lpc_source::prop::shape::SrcSlot;
 
 /// An input-transforming Visual: input slot + shader + parameter
 /// surface. The shader reads the input via a sampler uniform
@@ -55,10 +54,6 @@ impl SrcArtifact for Effect {
 
     fn schema_version(&self) -> u32 {
         self.schema_version
-    }
-
-    fn walk_slots<F: FnMut(&SrcSlot)>(&self, mut f: F) {
-        f(&self.params.0);
     }
 }
 

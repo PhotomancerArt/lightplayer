@@ -5,7 +5,6 @@
 use crate::visual::{params_table::ParamsTable, shader_ref::ShaderRef};
 use alloc::string::String;
 use lpc_source::artifact::src_artifact::SrcArtifact;
-use lpc_source::prop::shape::SrcSlot;
 
 /// A texture-producing Visual: shader source + parameter surface. No
 /// input slot; Patterns generate their pixels from `time`, params, and
@@ -46,10 +45,6 @@ impl SrcArtifact for Pattern {
 
     fn schema_version(&self) -> u32 {
         self.schema_version
-    }
-
-    fn walk_slots<F: FnMut(&SrcSlot)>(&self, mut f: F) {
-        f(&self.params.0);
     }
 }
 

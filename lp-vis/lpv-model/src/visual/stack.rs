@@ -8,7 +8,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_source::ArtifactLocator;
 use lpc_source::artifact::src_artifact::SrcArtifact;
-use lpc_source::prop::shape::SrcSlot;
 
 /// One Effect in a Stack's chain. Order is the order of declaration.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -69,10 +68,6 @@ impl SrcArtifact for Stack {
 
     fn schema_version(&self) -> u32 {
         self.schema_version
-    }
-
-    fn walk_slots<F: FnMut(&SrcSlot)>(&self, mut f: F) {
-        f(&self.params.0);
     }
 }
 

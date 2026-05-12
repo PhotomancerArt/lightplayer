@@ -47,7 +47,7 @@ mod tests {
     }
     #[test]
     fn schema_artifact_spec() {
-        assert_schema_compiles!(SrcArtifactSpec);
+        assert_schema_compiles!(ArtifactLocator);
     }
     #[test]
     fn schema_channel_name() {
