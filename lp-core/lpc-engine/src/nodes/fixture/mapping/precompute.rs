@@ -38,11 +38,6 @@ pub fn compute_mapping(
             // First pass: collect all mapping points (circles)
             let mapping_points = generate_mapping_points(config, texture_width, texture_height);
 
-            // Second pass: for each pixel, compute contributions from all circles
-            let mut pixel_contributions: Vec<Vec<(u32, f32)>> =
-                Vec::with_capacity((texture_width * texture_height) as usize);
-            pixel_contributions.resize((texture_width * texture_height) as usize, Vec::new());
-
             // Track total weight per channel for normalization
             let mut channel_totals: Vec<f32> = Vec::new();
             let max_channel = mapping_points.iter().map(|p| p.channel).max().unwrap_or(0);
@@ -67,8 +62,6 @@ pub fn compute_mapping(
                     for x in min_x..=max_x {
                         let weight = circle_pixel_overlap(center_x, center_y, radius, x, y);
                         if weight > 0.0 {
-                            let pixel_idx = (y * texture_width + x) as usize;
-                            pixel_contributions[pixel_idx].push((mapping_point.channel, weight));
                             // Accumulate total weight per channel
                             channel_totals[mapping_point.channel as usize] += weight;
                         }
@@ -76,41 +69,61 @@ pub fn compute_mapping(
                 }
             }
 
-            // Third pass: normalize weights per-channel and build entries
+            // Third pass: normalize weights per-channel and build entries.
+            //
+            // This intentionally recomputes per-pixel overlaps instead of keeping
+            // `Vec<Vec<_>>` scratch state. The old representation created one
+            // heap allocation per pixel contribution bucket, which badly
+            // fragmented the ESP32 heap immediately before shader compilation and
+            // output setup.
+            mapping
+                .entries
+                .reserve((texture_width * texture_height) as usize);
             // Each channel's total contribution from all pixels should sum to 1.0
             for y in 0..texture_height {
                 for x in 0..texture_width {
-                    let pixel_idx = (y * texture_width + x) as usize;
-                    let contributions = &pixel_contributions[pixel_idx];
+                    let contribution_count = mapping_points
+                        .iter()
+                        .filter(|mapping_point| {
+                            let center_x = mapping_point.center[0] * texture_width as f32;
+                            let center_y = mapping_point.center[1] * texture_height as f32;
+                            let radius =
+                                mapping_point.radius * texture_width.max(texture_height) as f32;
+                            circle_pixel_overlap(center_x, center_y, radius, x, y) > 0.0
+                        })
+                        .count();
 
-                    if contributions.is_empty() {
+                    if contribution_count == 0 {
                         // No contributions - add SKIP entry
                         mapping.entries.push(PixelMappingEntry::skip());
                     } else {
-                        // Normalize weights per-channel: divide by channel total
-                        // This ensures each channel's total contribution from all pixels = 1.0
-                        let normalized: Vec<(u32, f32)> = contributions
-                            .iter()
-                            .map(|(ch, w)| {
-                                let channel_total = channel_totals[*ch as usize];
-                                if channel_total > 0.0 {
-                                    (*ch, *w / channel_total)
-                                } else {
-                                    (*ch, 0.0)
-                                }
-                            })
-                            .collect();
+                        let mut contribution_index = 0usize;
+                        for mapping_point in &mapping_points {
+                            let center_x = mapping_point.center[0] * texture_width as f32;
+                            let center_y = mapping_point.center[1] * texture_height as f32;
+                            let radius =
+                                mapping_point.radius * texture_width.max(texture_height) as f32;
+                            let weight = circle_pixel_overlap(center_x, center_y, radius, x, y);
+                            if weight <= 0.0 {
+                                continue;
+                            }
 
-                        // Add entries (last one has has_more = false)
-                        for (idx, (channel, weight)) in normalized.iter().enumerate() {
-                            let has_more = idx < normalized.len() - 1;
-                            let contribution_q32 = Q32::from_f32_wrapping(*weight);
-
+                            // Normalize weights per-channel: divide by channel total.
+                            // This ensures each channel's total contribution from all pixels = 1.0.
+                            let channel_total = channel_totals[mapping_point.channel as usize];
+                            let normalized = if channel_total > 0.0 {
+                                weight / channel_total
+                            } else {
+                                0.0
+                            };
+                            let has_more = contribution_index + 1 < contribution_count;
+                            let contribution_q32 = Q32::from_f32_wrapping(normalized);
                             mapping.entries.push(PixelMappingEntry::new(
-                                *channel,
+                                mapping_point.channel,
                                 contribution_q32,
                                 has_more,
                             ));
+                            contribution_index += 1;
                         }
                     }
                 }
