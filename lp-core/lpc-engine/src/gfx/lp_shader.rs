@@ -1,5 +1,6 @@
 use crate::engine::error::Error;
-use alloc::string::String;
+use alloc::string::{String, ToString};
+use lps_shared::LpsValueF32;
 
 /// Backend-agnostic compile options understood by `lp-engine`.
 pub struct ShaderCompileOptions {
@@ -54,4 +55,30 @@ pub trait LpShader: Send + Sync {
     }
 
     fn has_render(&self) -> bool;
+}
+
+/// Compiled serial compute shader.
+///
+/// The engine-facing trait intentionally exposes only the shader ABI: write
+/// named consumed inputs, execute `tick`, and read named produced globals.
+/// Slot maps, merge behavior, and value-shape materialization are handled by
+/// runtime nodes above this boundary.
+pub trait LpComputeShader {
+    fn tick(&mut self, inputs: &[(&str, LpsValueF32)]) -> Result<(), Error>;
+
+    fn get_output(&mut self, path: &str) -> Result<LpsValueF32, Error>;
+}
+
+impl LpComputeShader for lp_shader::LpsComputeShader {
+    fn tick(&mut self, inputs: &[(&str, LpsValueF32)]) -> Result<(), Error> {
+        lp_shader::LpsComputeShader::tick(self, inputs).map_err(|e| Error::Other {
+            message: String::from(e.to_string()),
+        })
+    }
+
+    fn get_output(&mut self, path: &str) -> Result<LpsValueF32, Error> {
+        lp_shader::LpsComputeShader::get_output(self, path).map_err(|e| Error::Other {
+            message: String::from(e.to_string()),
+        })
+    }
 }

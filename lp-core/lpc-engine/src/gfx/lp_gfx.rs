@@ -1,5 +1,5 @@
 use crate::engine::error::Error;
-use crate::gfx::lp_shader::{LpShader, ShaderCompileOptions};
+use crate::gfx::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
 use alloc::boxed::Box;
 
 /// Compiles GLSL and produces runnable shaders for this process.
@@ -9,6 +9,21 @@ pub trait LpGraphics: Send + Sync {
         source: &str,
         options: &ShaderCompileOptions,
     ) -> Result<Box<dyn LpShader>, Error>;
+
+    /// Compile a serial compute shader descriptor.
+    ///
+    /// `lp-shader` owns the ABI contract while the engine remains responsible
+    /// for mapping authored slot shapes to and from that ABI.
+    fn compile_compute_shader(
+        &self,
+        _desc: lp_shader::CompileComputeDesc<'_>,
+    ) -> Result<Box<dyn LpComputeShader>, Error> {
+        Err(Error::Other {
+            message: alloc::string::String::from(
+                "graphics backend does not support compute shaders",
+            ),
+        })
+    }
 
     /// Human-readable label for logs (e.g. `cranelift`, `wasm`).
     fn backend_name(&self) -> &'static str {

@@ -13,7 +13,7 @@ use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_browser::BrowserLpvmEngine;
 
 use super::lp_gfx::LpGraphics;
-use super::lp_shader::{LpShader, ShaderCompileOptions};
+use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
 use crate::engine::error::Error;
 use crate::gfx::uniforms::build_uniforms;
 
@@ -56,6 +56,19 @@ impl LpGraphics for Graphics {
                 message: format!("{e}"),
             })?;
         Ok(Box::new(WasmGuestShader { px }))
+    }
+
+    fn compile_compute_shader(
+        &self,
+        desc: lp_shader::CompileComputeDesc<'_>,
+    ) -> Result<Box<dyn LpComputeShader>, Error> {
+        let shader = self
+            .engine
+            .compile_compute_desc(desc)
+            .map_err(|e| Error::Other {
+                message: format!("{e}"),
+            })?;
+        Ok(Box::new(shader))
     }
 
     fn backend_name(&self) -> &'static str {
