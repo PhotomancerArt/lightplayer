@@ -17,14 +17,13 @@ use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators,
 };
-use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 use lps_shared::TextureBuffer;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
-    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError,
-    NodeResourceInitContext, NodeRuntime, PressureLevel, TickContext,
+    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
+    PressureLevel, TickContext,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
@@ -34,14 +33,12 @@ use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSample, VisualSampleBatch,
     VisualSamplePoint,
 };
-use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
 pub struct FixtureNode {
     state: FixtureState,
     mapping: MappingConfig,
     mapping_version: Revision,
-    lamp_colors_buffer_id: Option<RuntimeBufferId>,
     def_view: Option<FixtureDefView>,
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
@@ -61,7 +58,6 @@ impl FixtureNode {
             state: FixtureState::new(node_id, 0, preferred_extent),
             mapping,
             mapping_version,
-            lamp_colors_buffer_id: None,
             def_view: None,
             last_visual_product: None,
             last_settings: None,
@@ -81,21 +77,6 @@ pub fn fixture_input_path() -> SlotPath {
 }
 
 impl NodeRuntime for FixtureNode {
-    fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
-        if self.lamp_colors_buffer_id.is_some() {
-            return Ok(());
-        }
-
-        let channels = fixture_lamp_channel_count(&self.mapping);
-        let byte_len = (channels as usize).saturating_mul(3);
-        let id = ctx.insert_runtime_buffer(WithRevision::new(
-            Revision::default(),
-            RuntimeBuffer::fixture_colors_rgb8(channels, vec![0u8; byte_len]),
-        ));
-        self.lamp_colors_buffer_id = Some(id);
-        Ok(())
-    }
-
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let prod = ctx
             .resolve(QueryKey::ConsumedSlot {
