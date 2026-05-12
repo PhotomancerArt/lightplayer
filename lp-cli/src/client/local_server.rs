@@ -4,8 +4,8 @@
 //! a client transport interface for communicating with it.
 
 use anyhow::Result;
-use lp_client::{AsyncLocalClientTransport, ClientTransport, create_local_transport_pair};
-use lp_model::TransportError;
+use lpa_client::{AsyncLocalClientTransport, ClientTransport, create_local_transport_pair};
+use lpc_wire::{ClientMessage, TransportError};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
@@ -45,7 +45,7 @@ impl LocalServerTransport {
         // Spawn server thread
         let closed_clone = Arc::clone(&closed);
         let server_handle = thread::Builder::new()
-            .name("lp-server".to_string())
+            .name("lpa-server".to_string())
             .spawn(move || {
                 // Create tokio runtime for server
                 let runtime = match tokio::runtime::Runtime::new() {
@@ -140,14 +140,14 @@ impl LocalServerTransport {
 
 #[async_trait::async_trait]
 impl ClientTransport for LocalServerTransport {
-    async fn send(&mut self, msg: lp_model::ClientMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         match &mut self.client_transport {
             Some(transport) => transport.send(msg).await,
             None => Err(TransportError::ConnectionLost),
         }
     }
 
-    async fn receive(&mut self) -> Result<lp_model::ServerMessage, TransportError> {
+    async fn receive(&mut self) -> Result<lpc_wire::WireServerMessage, TransportError> {
         match &mut self.client_transport {
             Some(transport) => transport.receive().await,
             None => Err(TransportError::ConnectionLost),
@@ -223,7 +223,7 @@ impl Drop for LocalServerTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_model::{ClientMessage, ClientRequest};
+    use lpc_wire::{ClientMessage, ClientRequest};
 
     #[tokio::test]
     async fn test_local_server_transport_creation() {

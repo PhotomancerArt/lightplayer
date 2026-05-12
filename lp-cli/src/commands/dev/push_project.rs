@@ -3,7 +3,7 @@
 //! Provides async function to push local project files to the server.
 
 use anyhow::{Context, Result};
-use lp_model::AsLpPath;
+use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
 use crate::client::LpClient;

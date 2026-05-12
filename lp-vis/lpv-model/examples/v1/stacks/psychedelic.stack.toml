@@ -1,0 +1,18 @@
+# FBM noise → tint → kaleidoscope.
+
+schema_version = 1
+title          = "Psychedelic"
+description    = "FBM noise tinted and reflected through a kaleidoscope."
+author         = "yona"
+
+[input]
+visual = "../patterns/fbm.pattern.toml"
+[input.params]
+scale = 6.0
+
+[[effects]]
+visual = "../effects/tint.effect.toml"
+
+[[effects]]
+visual = "../effects/kaleidoscope.effect.toml"
+params = { slices = 8 }

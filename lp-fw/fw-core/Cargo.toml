@@ -9,21 +9,22 @@ rust-version.workspace = true
 [features]
 default = []
 std = ["log/std"]
-emu = ["ser-write-json", "lp-model/ser-write-json"]
+emu = ["ser-write-json", "lpc-wire/ser-write-json"]
 esp32 = []
 
 [dependencies]
-lp-model = { path = "../../lp-core/lp-model", default-features = false }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
-lp-server = { path = "../../lp-core/lp-server", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false }
 log = { workspace = true, default-features = false }
 embassy-sync = "0.7.2"
 serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false, features = ["std"] }
-lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["std"] }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["std"] }
 critical-section = { version = "1.2", features = ["std"] }
 pollster = "0.3"
 

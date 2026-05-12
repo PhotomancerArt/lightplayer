@@ -1,0 +1,38 @@
+[package]
+name = "lpa-server"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std"]
+# Panic recovery via catch_unwind (shader compilation, node render)
+panic-recovery = ["lpc-engine/panic-recovery"]
+std = [
+	"lpc-shared/std",
+	"lpc-engine/std",
+	"lpc-wire/std",
+	"lpfs/std",
+	"log/std"
+]
+
+[dependencies]
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
+lpc-source = { path = "../../lp-core/lpc-source", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+lpfs = { path = "../../lp-base/lpfs", default-features = false }
+hashbrown = { workspace = true }
+log = { workspace = true, default-features = false }
+
+[dev-dependencies]
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["std"] }
+lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

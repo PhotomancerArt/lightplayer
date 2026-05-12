@@ -140,7 +140,10 @@ pub fn lpfn_worley2_value(p: Vec2Q32, seed: u32) -> Q32 {
         let test_dx = x - test_point.0;
         let test_dy = y - test_point.1;
         let test_distance = test_dx * test_dx + test_dy * test_dy;
-        #[allow(unused_assignments)]
+        #[allow(
+            unused_assignments,
+            reason = "tracks nearest seed cell for optional diagnostic output"
+        )]
         if test_distance < distance {
             distance = test_distance;
             seed_cell_x = test_x_int;

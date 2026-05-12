@@ -34,17 +34,17 @@
 
 # Formatting: Run `cargo +nightly fmt` on all changes before committing
 
-# Code Organization: Place helper utility functions at the bottom of files
+# Code Organization: Implementation first, tests last. The reading order in a Rust source file is: public items / entry points near the top, then their direct support, then helpers at the bottom, and finally `#[cfg(test)] mod tests` at the very end of the file. This is the opposite of an older convention in this repo's plan docs ("tests first") — that older convention is deprecated; do not follow it in new code.
 
-# Code Organization: Place more abstract things, entry points, and tests first
+# Code Organization: Place helper utility functions at the bottom of files (above the test module).
 
-# Code Organization: Keep related functionality grouped together
+# Code Organization: Keep related functionality grouped together.
 
-# Tests: Tests should be in `mod tests` at the top of the module
+# Tests: Tests live in a `#[cfg(test)] mod tests { ... }` block at the **bottom** of the module file, after all impl and helpers. Never place the test module before the impl it covers.
 
-# Tests: Tests should be short and concise, use utility functions to avoid duplication
+# Tests: Tests should be short and concise, use utility functions to avoid duplication.
 
-# Tests: Utility functions should be at the bottom of the test module
+# Tests: Utility functions inside the test module live below the tests that use them.
 
 # Tests: Use builder pattern to create test data
 
@@ -52,7 +52,7 @@
 
 # Tests: Use helper functions liberally - if test logic is repeated, extract it
 
-# Tests: Test helpers should be at the bottom of test files
+# Tests: Test helpers live at the bottom of the test module (which itself sits at the bottom of the file).
 
 # Tests: Prefer clear test names over inline comments explaining what the test does
 

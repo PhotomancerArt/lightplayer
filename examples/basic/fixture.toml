@@ -1,0 +1,46 @@
+kind = "fixture"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[transform]
+m00 = 1.0
+m01 = 0.0
+m10 = 0.0
+m11 = 1.0
+tx = 0.0
+ty = 0.0
+
+[render_size]
+width = 16
+height = 16
+
+[mapping]
+kind = "path_points"
+sample_diameter = 2.0
+
+[mapping.paths.0]
+kind = "ring_array"
+center = [0.5, 0.5]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 9
+offset_angle = 0.0
+order = "inner_first"
+
+[mapping.paths.0.ring_lamp_counts]
+0 = 1
+1 = 8
+2 = 12
+3 = 16
+4 = 24
+5 = 32
+6 = 40
+7 = 48
+8 = 60

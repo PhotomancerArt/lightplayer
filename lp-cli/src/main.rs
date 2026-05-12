@@ -52,9 +52,6 @@ enum Cli {
         /// Project name (defaults to directory name)
         #[arg(long)]
         name: Option<String>,
-        /// Project UID (auto-generated if not provided)
-        #[arg(long)]
-        uid: Option<String>,
     },
     /// Run a profiling session or compare profiles (`profile diff` is a stub in m0).
     Profile(profile::ProfileCli),
@@ -95,9 +92,7 @@ fn main() -> Result<()> {
             headless,
         }),
         Cli::Upload { dir, host } => upload::handle_upload(upload::UploadArgs { dir, host }),
-        Cli::Create { dir, name, uid } => {
-            create::handle_create(create::CreateArgs { dir, name, uid })
-        }
+        Cli::Create { dir, name } => create::handle_create(create::CreateArgs { dir, name }),
         Cli::Profile(cli) => match cli.subcommand {
             Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),
             None => profile::handle_profile(cli.run),

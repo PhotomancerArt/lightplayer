@@ -1,0 +1,11 @@
+kind = "project"
+name = "basic"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"

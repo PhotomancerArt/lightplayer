@@ -7,14 +7,14 @@ use crate::test_run::TestCaseStats;
 
 use crate::test_run::compile;
 use crate::test_run::execution;
-use crate::test_run::filetest_lpvm::FiletestInstance;
+use crate::test_run::filetest_lpvm::{CompiledShader, FiletestInstance};
 use crate::test_run::parse_assert;
 use crate::test_run::record_result;
 use crate::test_run::set_uniform;
 use crate::test_run::texture_fixture;
 use anyhow::Result;
 use lp_riscv_emu::LogLevel;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::colors;
 use crate::perf_model::PerfModel;
@@ -121,6 +121,7 @@ pub fn run(
                         eprintln!("────────────────────────────────────────");
                     }
                 }
+                dump_wasm_debug_artifacts(target, &relative_path, &c);
             }
             c
         }
@@ -872,6 +873,71 @@ fn append_debug_state_if_requested(
         Some(debug) if !debug.is_empty() => format!("{message}\n\n{debug}"),
         _ => message,
     }
+}
+
+fn dump_wasm_debug_artifacts(target: &Target, relative_path: &str, compiled: &CompiledShader) {
+    let Some(bytes) = compiled.wasm_bytes() else {
+        return;
+    };
+
+    let out_dir = filetest_debug_dir().join("wasm");
+    if let Err(e) = std::fs::create_dir_all(&out_dir) {
+        eprintln!(
+            "warning: failed to create WASM debug dir {}: {e}",
+            out_dir.display()
+        );
+        return;
+    }
+
+    let name = format!(
+        "{}-{}",
+        sanitize_debug_filename(relative_path),
+        target.name()
+    );
+    let wasm_path = out_dir.join(format!("{name}.wasm"));
+    let wat_path = out_dir.join(format!("{name}.wat"));
+
+    if let Err(e) = std::fs::write(&wasm_path, bytes) {
+        eprintln!("warning: failed to write {}: {e}", wasm_path.display());
+        return;
+    }
+
+    let mut wat = String::new();
+    match wasmprinter::Config::new()
+        .print_offsets(true)
+        .print(bytes, &mut wasmprinter::PrintFmtWrite(&mut wat))
+    {
+        Ok(()) => {
+            if let Err(e) = std::fs::write(&wat_path, wat) {
+                eprintln!("warning: failed to write {}: {e}", wat_path.display());
+            }
+        }
+        Err(e) => eprintln!(
+            "warning: failed to print WAT for {}: {e}",
+            wasm_path.display()
+        ),
+    }
+
+    eprintln!("=== WASM debug artifacts ===");
+    eprintln!("wasm: {}", wasm_path.display());
+    eprintln!("wat:  {}", wat_path.display());
+    eprintln!("────────────────────────────────────────");
+}
+
+fn filetest_debug_dir() -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"))
+        .join("lps-filetests-debug")
+}
+
+fn sanitize_debug_filename(path: &str) -> String {
+    path.chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' => c,
+            _ => '_',
+        })
+        .collect()
 }
 
 /// Per-`// run:` diagnostic on parse/execute/compare failure (Detail/Debug only; concise runs use

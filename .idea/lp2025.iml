@@ -7,14 +7,9 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-esp32/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-model/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/tests" isTestSource="true" />
@@ -28,8 +23,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/tests" isTestSource="true" />
@@ -72,6 +65,34 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-native/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lpfx/lpfx-cpu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-shader/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-client/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-server/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-base/lp-perf/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-base/lp-perf/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-base/lpfs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-engine/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-model/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-source/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-view/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-view/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-wire/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpl-model/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpl-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-emu/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-vis/lpv-model/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-vis/lpv-model/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-vis/lpv-model/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-model/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-slot-codegen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-slot-macros/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-slot-mockup/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-source/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-wire/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lpfx/lpfx/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

@@ -1,0 +1,1 @@
+Use the hash of a shape as its id for deduping and caching

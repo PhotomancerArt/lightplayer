@@ -1,6 +1,6 @@
 //! Server loop for emulator firmware
 //!
-//! Main loop that runs in the emulator and calls lp-server::tick().
+//! Main loop that runs in the emulator and calls lpa-server::tick().
 
 use crate::serial::SyscallSerialIo;
 use crate::time::SyscallTimeProvider;
@@ -10,11 +10,11 @@ use core::pin::pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use fw_core::transport::SerialTransport;
 use log;
-use lp_model::Message;
 use lp_riscv_emu_guest::sys_yield;
-use lp_server::LpServer;
-use lp_shared::time::TimeProvider;
-use lp_shared::transport::ServerTransport;
+use lpa_server::LpServer;
+use lpc_shared::time::TimeProvider;
+use lpc_shared::transport::ServerTransport;
+use lpc_wire::WireMessage;
 
 /// Block on a future until completion. Uses sys_yield when pending.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -65,7 +65,7 @@ pub fn run_server_loop(
                         msg.id,
                         receive_calls
                     );
-                    incoming_messages.push(Message::Client(msg));
+                    incoming_messages.push(WireMessage::Client(msg));
                 }
                 Ok(None) => {
                     if receive_calls > 1 {
@@ -102,7 +102,7 @@ pub fn run_server_loop(
                 );
                 // Send responses
                 for response in responses {
-                    if let Message::Server(server_msg) = response {
+                    if let WireMessage::Server(server_msg) = response {
                         log::debug!(
                             "run_server_loop: Sending response message id={}",
                             server_msg.id

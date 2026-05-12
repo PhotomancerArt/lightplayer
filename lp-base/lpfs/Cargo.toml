@@ -13,7 +13,6 @@ std = []
 [dependencies]
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
-lp-model = { path = "../../lp-core/lp-model", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]

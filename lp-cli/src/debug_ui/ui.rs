@@ -1,329 +1,211 @@
-//! Main UI state and egui App implementation
+//! Temporary debug UI shell.
 
-use crate::client::{LpClient, serializable_response_to_project_response};
-use crate::debug_ui::panels;
-use eframe::egui;
-use lp_engine_client::project::ClientProjectView;
-use lp_model::{NodeHandle, project::FrameId, project::handle::ProjectHandle};
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use tokio::sync::oneshot;
+use std::time::{Duration, Instant};
 
-/// Debug UI application state
+use crate::client::LpClient;
+use eframe::egui;
+use lpc_model::Revision;
+use lpc_view::apply_project_read_response;
+use lpc_wire::{
+    NodeReadQuery, NodeReadSelection, ProjectReadQuery, ProjectReadRequest, ReadLevel,
+    ResourcePayloadRead, ResourceReadQuery, ShapeReadQuery, WireProjectHandle as ProjectHandle,
+};
+
+use super::inspector::{InspectorSelection, render_debug_inspector};
+use super::node_cards::render_node_workspace;
+
+type ProjectReadResult = Result<lpc_wire::ProjectReadResponse, String>;
+
+/// Debug UI application state.
 pub struct DebugUiState {
-    /// Project view (shared between sync and UI)
-    project_view: Arc<Mutex<ClientProjectView>>,
-    /// Project handle
+    project_view: Arc<Mutex<lpc_view::project::ProjectView>>,
     project_handle: ProjectHandle,
-    /// Async client for syncing (shared via Arc<Mutex<>>)
-    async_client: Arc<tokio::sync::Mutex<LpClient>>,
-    /// Nodes we're tracking detail for
-    tracked_nodes: BTreeSet<NodeHandle>,
-    /// "All detail" checkbox state
-    all_detail: bool,
-    /// Whether a sync is currently in progress
-    sync_in_progress: bool,
-    /// Pending sync result receiver (if sync is in progress)
-    /// Contains SerializableProjectResponse which can be sent across threads
-    pending_sync: Option<
-        oneshot::Receiver<
-            Result<lp_model::project::api::SerializableProjectResponse, anyhow::Error>,
-        >,
-    >,
-    /// Track if tracked_nodes changed since last sync (to trigger immediate sync)
-    tracked_nodes_changed: bool,
-    /// Tokio runtime handle for spawning async tasks
+    async_client: LpClient,
     runtime_handle: tokio::runtime::Handle,
-    /// Last frame time for UI FPS calculation
-    last_frame_time: Option<Instant>,
-    /// Last server frame ID (for server FPS calculation)
-    last_server_frame_id: Option<FrameId>,
-    /// Last time we saw a server frame update (for server FPS calculation)
-    last_server_frame_time: Option<Instant>,
-    /// Server FPS history (last 60 measurements)
-    server_fps_history: Vec<f32>,
-    /// Current theoretical FPS from server (based on frame processing time)
-    theoretical_fps: Option<f32>,
-    /// Texture display options
-    show_texture_background: bool,
-    show_texture_labels: bool,
-    show_texture_strokes: bool,
-    /// Whether connection has been lost (stop syncing and exit)
-    connection_lost: bool,
+    response_tx: std::sync::mpsc::Sender<ProjectReadResult>,
+    response_rx: std::sync::mpsc::Receiver<ProjectReadResult>,
+    last_poll: Instant,
+    poll_in_flight: bool,
+    last_error: Option<String>,
+    selected: Option<InspectorSelection>,
 }
 
 impl DebugUiState {
-    /// Create new debug UI state
+    /// Create new debug UI state.
     pub fn new(
-        project_view: Arc<Mutex<ClientProjectView>>,
+        project_view: Arc<Mutex<lpc_view::project::ProjectView>>,
         project_handle: ProjectHandle,
         async_client: LpClient,
         runtime_handle: tokio::runtime::Handle,
     ) -> Self {
+        let (response_tx, response_rx) = std::sync::mpsc::channel();
         Self {
             project_view,
             project_handle,
-            async_client: Arc::new(tokio::sync::Mutex::new(async_client)),
-            tracked_nodes: BTreeSet::new(),
-            all_detail: true,
-            sync_in_progress: false,
-            pending_sync: None,
-            tracked_nodes_changed: false,
+            async_client,
             runtime_handle,
-            last_frame_time: None,
-            last_server_frame_id: None,
-            last_server_frame_time: None,
-            server_fps_history: Vec::new(),
-            theoretical_fps: None,
-            show_texture_background: false,
-            show_texture_labels: false,
-            show_texture_strokes: false,
-            connection_lost: false,
+            response_tx,
+            response_rx,
+            last_poll: Instant::now() - Duration::from_secs(1),
+            poll_in_flight: false,
+            last_error: None,
+            selected: None,
         }
     }
 
-    /// Handle sync logic
-    ///
-    /// Checks if sync is in progress, starts new sync if not, and handles completion.
-    /// Uses a channel-based approach to avoid holding locks across await points.
-    /// Returns true if connection was lost and app should exit.
-    fn handle_sync(&mut self) -> bool {
-        // Check if previous sync completed
-        if let Some(mut receiver) = self.pending_sync.take() {
-            match receiver.try_recv() {
-                Ok(Ok(serializable_response)) => {
-                    // Extract theoretical FPS from response before converting
-                    let lp_model::project::api::SerializableProjectResponse::GetChanges {
-                        theoretical_fps,
-                        ..
-                    } = &serializable_response;
-                    self.theoretical_fps = *theoretical_fps;
-
-                    // Sync completed successfully - convert and apply changes in UI thread
-                    match serializable_response_to_project_response(serializable_response) {
-                        Ok(project_response) => {
-                            let mut view = self.project_view.lock().unwrap();
-                            match view.apply_changes(&project_response) {
-                                Ok(status_changes) => {
-                                    // Log status changes
-                                    for change in &status_changes {
-                                        match (&change.old_status, &change.new_status) {
-                                            (
-                                                lp_model::project::api::NodeStatus::Ok,
-                                                lp_model::project::api::NodeStatus::Error(msg),
-                                            ) => {
-                                                println!(
-                                                    "[{}] Status changed: Ok -> Error(\"{}\")",
-                                                    change.path.as_str(),
-                                                    msg
-                                                );
-                                            }
-                                            (
-                                                lp_model::project::api::NodeStatus::Error(old_msg),
-                                                lp_model::project::api::NodeStatus::Ok,
-                                            ) => {
-                                                println!(
-                                                    "[{}] Status changed: Error(\"{}\") -> Ok",
-                                                    change.path.as_str(),
-                                                    old_msg
-                                                );
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    // If "All detail" is enabled, track all nodes
-                                    if self.all_detail && !view.nodes.is_empty() {
-                                        let all_node_handles: BTreeSet<_> =
-                                            view.nodes.keys().copied().collect();
-                                        if self.tracked_nodes != all_node_handles {
-                                            self.tracked_nodes = all_node_handles;
-                                        }
-                                    }
-
-                                    self.sync_in_progress = false;
-                                    // Check if tracked_nodes changed while sync was in progress
-                                    // If so, we need to sync again immediately
-                                    let current_tracked: BTreeSet<_> =
-                                        self.tracked_nodes.iter().copied().collect();
-                                    let view_tracked: BTreeSet<_> =
-                                        view.detail_tracking.iter().copied().collect();
-                                    if current_tracked != view_tracked {
-                                        self.tracked_nodes_changed = true;
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to apply changes: {e}");
-                                    self.sync_in_progress = false;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to convert response: {e}");
-                            self.sync_in_progress = false;
+    fn drain_project_reads(&mut self) {
+        while let Ok(result) = self.response_rx.try_recv() {
+            self.poll_in_flight = false;
+            match result {
+                Ok(response) => {
+                    if let Ok(mut view) = self.project_view.lock() {
+                        if let Err(error) = apply_project_read_response(&mut view, response) {
+                            self.last_error = Some(error.to_string());
+                        } else {
+                            self.last_error = None;
                         }
                     }
                 }
-                Ok(Err(e)) => {
-                    // Sync failed
-                    let error_msg = e.to_string();
-                    // Check if this is a connection lost error
-                    // Error format is "Transport error: Connection lost" from client.rs
-                    if error_msg.contains("Connection lost") {
-                        eprintln!("Connection lost - exiting");
-                        self.connection_lost = true;
-                        self.sync_in_progress = false;
-                        return true;
-                    }
-                    eprintln!("Sync error: {e}");
-                    self.sync_in_progress = false;
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    // Still in progress, put receiver back
-                    self.pending_sync = Some(receiver);
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    // Channel closed (shouldn't happen)
-                    self.sync_in_progress = false;
+                Err(error) => {
+                    self.last_error = Some(error);
                 }
             }
         }
+    }
 
-        // Start new sync if not in progress and connection is still alive
-        // If tracked_nodes changed, we'll sync again after current sync finishes
-        if !self.sync_in_progress && !self.connection_lost {
-            // Update view's detail_tracking to match tracked_nodes and get sync parameters
-            let (since_frame, detail_specifier) = {
-                let mut view = self.project_view.lock().unwrap();
-                let is_initial_sync = view.nodes.is_empty();
-
-                view.detail_tracking.clear();
-                view.detail_tracking
-                    .extend(self.tracked_nodes.iter().copied());
-
-                let since_frame = view.frame_id;
-                // For initial sync (empty view), request all nodes to populate the list
-                // Otherwise use normal detail_specifier
-                let detail_specifier = if is_initial_sync {
-                    lp_model::project::api::ApiNodeSpecifier::All
-                } else {
-                    view.detail_specifier()
-                };
-                (since_frame, detail_specifier)
-            };
-
-            // Spawn async task to do sync (without holding view lock)
-            let client = Arc::clone(&self.async_client);
-            let handle = self.project_handle;
-            let runtime_handle = self.runtime_handle.clone();
-
-            let (tx, rx) = oneshot::channel();
-            self.pending_sync = Some(rx);
-            self.sync_in_progress = true;
-
-            runtime_handle.spawn(async move {
-                // Do async sync call (no view lock held)
-                let result = {
-                    let client_guard = client.lock().await;
-                    client_guard
-                        .project_sync_internal(handle, Some(since_frame), detail_specifier)
-                        .await
-                };
-
-                // Send result back to UI thread (SerializableProjectResponse is Send)
-                match result {
-                    Ok(serializable_response) => {
-                        // Send the serializable response back - UI thread will convert and apply it
-                        let _ = tx.send(Ok(serializable_response));
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                    }
-                }
-            });
+    fn poll_project_if_due(&mut self, ctx: &egui::Context) {
+        if self.poll_in_flight || self.last_poll.elapsed() < Duration::from_millis(500) {
+            return;
         }
 
-        false
+        self.last_poll = Instant::now();
+        self.poll_in_flight = true;
+        let (since, needs_slot_snapshot, selected_resource) = self.next_project_read_context();
+        let client = self.async_client.clone();
+        let handle = self.project_handle;
+        let tx = self.response_tx.clone();
+        let repaint = ctx.clone();
+        self.runtime_handle.spawn(async move {
+            let result = client
+                .project_read(
+                    handle,
+                    debug_ui_project_read(since, needs_slot_snapshot, selected_resource),
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(result);
+            repaint.request_repaint();
+        });
+    }
+
+    fn next_project_read_context(
+        &self,
+    ) -> (Option<Revision>, bool, Option<lpc_model::ResourceRef>) {
+        let selected_resource = match self.selected {
+            Some(InspectorSelection::Resource(resource_ref)) => Some(resource_ref),
+            _ => None,
+        };
+        let Ok(view) = self.project_view.lock() else {
+            return (None, true, selected_resource);
+        };
+        let since = (view.revision != Revision::default()).then_some(view.revision);
+        let needs_slot_snapshot = view.slots.roots.is_empty();
+        (since, needs_slot_snapshot, selected_resource)
+    }
+}
+
+fn debug_ui_project_read(
+    since: Option<Revision>,
+    include_slots: bool,
+    selected_resource: Option<lpc_model::ResourceRef>,
+) -> ProjectReadRequest {
+    let mut queries = Vec::new();
+    if include_slots {
+        queries.push(ProjectReadQuery::Shapes(ShapeReadQuery {
+            level: ReadLevel::Detail,
+        }));
+    }
+    queries.push(ProjectReadQuery::Nodes(NodeReadQuery {
+        level: if include_slots {
+            ReadLevel::Detail
+        } else {
+            ReadLevel::Summary
+        },
+        nodes: NodeReadSelection::All,
+        include_slots,
+    }));
+    queries.push(ProjectReadQuery::Resources(ResourceReadQuery {
+        level: ReadLevel::Summary,
+        payloads: selected_resource.map_or(ResourcePayloadRead::None, |resource_ref| {
+            ResourcePayloadRead::ByRefs(Vec::from([resource_ref]))
+        }),
+    }));
+
+    ProjectReadRequest {
+        since,
+        queries,
+        probes: Vec::new(),
     }
 }
 
 impl eframe::App for DebugUiState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Calculate FPS
-        let now = Instant::now();
-        self.last_frame_time = Some(now);
+        self.drain_project_reads();
+        self.poll_project_if_due(ctx);
 
-        // Handle sync - exit if connection lost
-        if self.handle_sync() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-
-        // Request repaint to keep loop running
-        ctx.request_repaint_after(std::time::Duration::from_millis(16)); // ~60 FPS
-
-        // Get view snapshot for rendering
-        let view = self.project_view.lock().unwrap();
-
-        // Calculate server FPS based on frame_id progression
-        let current_frame_id = view.frame_id;
-        if let Some(prev_frame_id) = self.last_server_frame_id {
-            if current_frame_id != prev_frame_id {
-                // Server frame advanced - calculate FPS
-                if let Some(prev_time) = self.last_server_frame_time {
-                    let frame_delta = current_frame_id.as_i64() - prev_frame_id.as_i64();
-                    let time_delta = now.duration_since(prev_time);
-                    if frame_delta > 0 && !time_delta.is_zero() {
-                        let server_fps = frame_delta as f32 / time_delta.as_secs_f32();
-                        self.server_fps_history.push(server_fps);
-                        if self.server_fps_history.len() > 60 {
-                            self.server_fps_history.remove(0);
-                        }
-                    }
-                }
-                self.last_server_frame_time = Some(now);
-            }
-        } else {
-            // First time seeing a server frame
-            self.last_server_frame_time = Some(now);
-        }
-        self.last_server_frame_id = Some(current_frame_id);
-
-        // Status panel (top)
-        egui::TopBottomPanel::top("status_panel").show(ctx, |ui| {
-            panels::render_status_panel(
-                ui,
-                view.frame_id,
-                self.server_fps_history.last().copied().unwrap_or(0.0),
-                if !self.server_fps_history.is_empty() {
-                    self.server_fps_history.iter().sum::<f32>()
-                        / self.server_fps_history.len() as f32
-                } else {
-                    0.0
-                },
-                self.theoretical_fps,
-                self.sync_in_progress,
-            );
+        egui::TopBottomPanel::top("lp_status").show(ctx, |ui| {
+            self.render_status(ui);
         });
 
-        // Right panel for all node details (scrollable)
+        egui::SidePanel::right("lp_debug_inspector")
+            .resizable(true)
+            .default_width(340.0)
+            .show(ctx, |ui| {
+                let Ok(view) = self.project_view.lock() else {
+                    ui.label("Project view locked");
+                    return;
+                };
+                render_debug_inspector(ui, &view, &mut self.selected);
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    let nodes_changed = panels::render_all_nodes_panel(
-                        ui,
-                        &view,
-                        &mut self.tracked_nodes,
-                        &mut self.all_detail,
-                        &mut self.show_texture_background,
-                        &mut self.show_texture_labels,
-                        &mut self.show_texture_strokes,
-                    );
-                    if nodes_changed {
-                        self.tracked_nodes_changed = true;
-                    }
-                });
+            let Ok(view) = self.project_view.lock() else {
+                ui.label("Project view locked");
+                return;
+            };
+            let mut selected_node = match self.selected {
+                Some(InspectorSelection::Node(id)) => Some(id),
+                _ => None,
+            };
+            render_node_workspace(ui, &view, &mut selected_node);
+            if let Some(id) = selected_node {
+                self.selected = Some(InspectorSelection::Node(id));
+            }
         });
+
+        ctx.request_repaint_after(Duration::from_millis(250));
+    }
+}
+
+impl DebugUiState {
+    fn render_status(&self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("LightPlayer Dev UI");
+            ui.separator();
+            ui.label(format!("Project {}", self.project_handle.id()));
+            ui.separator();
+            if let Ok(view) = self.project_view.lock() {
+                ui.separator();
+                ui.label(format!("rev {}", view.revision.0));
+                ui.label(format!("nodes {}", view.tree.nodes.len()));
+                ui.label(format!("slots {}", view.slots.roots.len()));
+                ui.label(format!("resources {}", view.resource_cache.summary_count()));
+            }
+        });
+
+        if let Some(error) = &self.last_error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
     }
 }

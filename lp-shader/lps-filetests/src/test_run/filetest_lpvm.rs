@@ -271,6 +271,13 @@ impl CompiledShader {
         }
     }
 
+    pub(crate) fn wasm_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Wasm(_, m) => Some(m.wasm_bytes()),
+            Self::Jit(_, _) | Self::Emu(_, _) | Self::NativeFa(_, _) => None,
+        }
+    }
+
     pub(crate) fn lpir_module(&self) -> Option<&LpirModule> {
         match self {
             Self::Emu(_, m) => m.lpir_module(),

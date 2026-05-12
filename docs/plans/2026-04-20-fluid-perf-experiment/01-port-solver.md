@@ -19,7 +19,7 @@ compiles in the `fw-esp32` target. No `cargo run`, no flashing.
 
 - The RGB path (`r`/`g`/`b` together) — mono only.
 - The `_avgDensity` / `_avgSpeed` / `uniformity` diagnostics inside
-  `fadeR()` — port the *fade* but drop the accumulation.
+  `fadeR()` — port the _fade_ but drop the accumulation.
 - Any `addColorAtPos` / `getInfoAtCell` accessor variants beyond what
   phase 02 needs (`add_force_at_cell` and `add_color_at_cell` are
   enough; `*_at_pos` not needed).
@@ -115,7 +115,7 @@ pub struct MsaFluidSolver {
 ```
 
 Add `lps-q32` to `fw-esp32/Cargo.toml` if it isn't there already
-(it's almost certainly *not* — `fw-esp32` doesn't currently use Q32
+(it's almost certainly _not_ — `fw-esp32` doesn't currently use Q32
 directly). Use a path dep:
 
 ```toml
@@ -125,7 +125,7 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 If `lps-q32` doesn't have a no_std-compatible feature shape, stop
 and report — do not modify `lps-q32` to make it work. We may need
 to use a different Q32 source or hand-roll a small one inline. (It
-*should* be no_std-compatible since the JIT runtime uses it on
+_should_ be no_std-compatible since the JIT runtime uses it on
 device, but verify.)
 
 ### Constants and defaults
@@ -135,7 +135,7 @@ From the lp2014 source:
 - `FLUID_DEFAULT_DT = 1.0` → `Q32::ONE`
 - `FLUID_DEFAULT_VISC = 0.0001` → `Q32::from_f32_wrapping(0.0001)`
 - `FLUID_DEFAULT_FADESPEED = 0.0` → `Q32::ZERO`
-  (note: lp2014 default fade is *zero* — the dye doesn't fade. For
+  (note: lp2014 default fade is _zero_ — the dye doesn't fade. For
   perf measurement this is fine; we're not visualizing.)
 - `FLUID_DEFAULT_SOLVER_ITERATIONS = 10` → `const SOLVER_ITERATIONS`
 
@@ -230,6 +230,7 @@ fn linear_solver(
 ```
 
 Notes:
+
 - `BoundaryKind` is a small enum: `None`, `MirrorX`, `MirrorY`
   matching Java's `b == 0`, `b == 1`, `b == 2`.
 - `set_boundary` is a free function (not `&mut self`) because
@@ -404,7 +405,7 @@ already prescribes (often `just build-fw` or similar). Look in
 `lp-fw/Justfile` or root `Justfile` for the right command before
 guessing.
 
-If you cannot get *any* `fw-esp32` build to pass on your machine
+If you cannot get _any_ `fw-esp32` build to pass on your machine
 because of toolchain / target / linker issues unrelated to your
 changes, **stop and report** — don't disable warnings or skip
 modules to force it through.

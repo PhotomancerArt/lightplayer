@@ -1,0 +1,11 @@
+kind = "shader"
+glsl_path = "shader.glsl"
+render_order = 0
+
+[bindings.output]
+target = "bus#visual.out"
+
+[glsl_opts]
+add_sub = "wrapping"
+mul = "wrapping"
+div = "reciprocal"

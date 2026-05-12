@@ -1,8 +1,6 @@
 //! `lp-cli profile` — run a workload under the emulator with unified profiling.
 
 use anyhow::{Context, Result, bail};
-use lp_client::LpClient;
-use lp_client::transport_emu_serial::SerialEmuClientTransport;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
     LogLevel, Riscv32Emulator, TimeMode,
@@ -13,6 +11,8 @@ use lp_riscv_emu::{
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
+use lpa_client::LpClient;
+use lpa_client::transport_emu_serial::SerialEmuClientTransport;
 use std::collections::HashSet;
 use std::path::Component;
 use std::path::Path;
@@ -253,15 +253,17 @@ fn validate_collectors(names: &[String]) -> Result<()> {
 }
 
 fn read_project_uid(dir: &std::path::Path) -> Result<String> {
-    let project_json = dir.join("project.json");
-    let content = std::fs::read_to_string(&project_json)
-        .with_context(|| format!("Failed to read {}", project_json.display()))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&content).context("Failed to parse project.json")?;
-    let uid = value["uid"]
-        .as_str()
-        .context("project.json missing 'uid' field")?;
-    Ok(uid.to_string())
+    let project_toml = dir.join("project.toml");
+    let content = std::fs::read_to_string(&project_toml)
+        .with_context(|| format!("Failed to read {}", project_toml.display()))?;
+    let value: toml::Value = toml::from_str(&content).context("Failed to parse project.toml")?;
+    let project_key = value
+        .get("uid")
+        .and_then(toml::Value::as_str)
+        .or_else(|| value.get("name").and_then(toml::Value::as_str))
+        .or_else(|| dir.file_name().and_then(std::ffi::OsStr::to_str))
+        .context("project.toml missing 'name' field")?;
+    Ok(project_key.to_string())
 }
 
 fn derive_dir_label(input_dir: &Path, cwd: &Path) -> String {

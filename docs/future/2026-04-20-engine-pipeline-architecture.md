@@ -267,7 +267,7 @@ tells us whether "fluid on esp32" is real or aspirational.
 - Profile that prompted this:
   [`profiles/2026-04-20T10-43-20--examples-perf-fastmath--steady-render--p0-baseline/report.txt`](../../profiles/2026-04-20T10-43-20--examples-perf-fastmath--steady-render--p0-baseline/report.txt)
 - Plan that exhausted the easy wins:
-  [`docs/plans-old/2026-04-19-fixture-render-perf/summary.md`](../plans-old/2026-04-19-fixture-render-perf/summary.md)
+  [`docs/plans-old/2026-04-19-fixture-render-perf/summary.md`](../archive/plans/2026-04-19-fixture-render-perf/summary.md)
 - lp2014 source for the polygon + stateful precedent:
   `~/dev/personal/lightPlayer` (out of repo).
 - WLED for the "what we're trying to be better than" reference:

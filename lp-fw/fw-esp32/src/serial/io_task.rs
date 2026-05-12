@@ -2,14 +2,14 @@
 //!
 //! Responsibilities:
 //! - Drain outgoing queue and send via serial (with M! prefix)
-//! - Drain OUTGOING_SERVER_MSG and stream JSON to serial (server feature)
+//! - Drain OUTGOING_SERVER_MSG and write JSON to serial (server feature)
 //! - Read from serial and push to incoming queue (filter M! prefix)
 //! - Monitor USB host connection; skip writes when disconnected to prevent blocking
 //! - All serial writes use timeouts to prevent blocking if host disconnects mid-write
 
 extern crate alloc;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
@@ -17,6 +17,8 @@ use embedded_io_async::{Read, Write};
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use fw_core::message_router::MessageRouter;
 use log;
+#[cfg(feature = "server")]
+use ser_write_json::SerWrite;
 
 use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
 
@@ -24,20 +26,58 @@ use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 
-/// Server messages for streaming transport (capacity 1 = backpressure)
+/// Server messages for transport serialization (capacity 1 = backpressure)
 ///
 /// When StreamingMessageRouterTransport is used, server loop sends ServerMessage here.
-/// io_task receives, serializes with ser-write-json directly to serial, never buffers full JSON.
+/// Large project-read responses are streamed field-by-field; small messages use the
+/// simpler full-message serializer.
 #[cfg(feature = "server")]
-static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lp_model::ServerMessage, 1> =
+static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
     Channel::new();
+
+/// Raw server JSON frame chunks for large responses.
+///
+/// Project-read responses use this path so the firmware does not need to
+/// materialize a full `WireServerMessage` or a full JSON frame on the heap.
+#[cfg(feature = "server")]
+static OUTGOING_SERVER_JSON_CHUNK: Channel<CriticalSectionRawMutex, ServerJsonChunk, 16> =
+    Channel::new();
+
+#[cfg(feature = "server")]
+pub const SERVER_JSON_CHUNK_SIZE: usize = 1024;
+
+#[cfg(feature = "server")]
+#[derive(Debug, Clone, Copy)]
+pub struct ServerJsonChunk {
+    len: u16,
+    bytes: [u8; SERVER_JSON_CHUNK_SIZE],
+}
+
+#[cfg(feature = "server")]
+impl ServerJsonChunk {
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > SERVER_JSON_CHUNK_SIZE || bytes.len() > u16::MAX as usize {
+            return None;
+        }
+        let mut chunk = Self {
+            len: bytes.len() as u16,
+            bytes: [0; SERVER_JSON_CHUNK_SIZE],
+        };
+        chunk.bytes[..bytes.len()].copy_from_slice(bytes);
+        Some(chunk)
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
 /// is likely gone. Short enough to detect disconnects, long enough for USB.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
+const WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Chunk size for large writes. Small enough to avoid timeout on slow USB,
-/// large enough to avoid excessive syscalls. GetChanges can be 10KB+.
+/// large enough to avoid excessive syscalls. Resource snapshots can be 10KB+.
 const WRITE_CHUNK_SIZE: usize = 256;
 
 /// Async write with timeout. Returns false if the write timed out or errored.
@@ -50,7 +90,7 @@ async fn timed_write<W: Write>(tx: &mut W, data: &[u8]) -> bool {
 }
 
 /// Write all data in chunks with per-chunk timeout. Prevents large messages
-/// (e.g. GetChanges) from timing out mid-write and corrupting the stream
+/// (e.g. resource snapshots) from timing out mid-write and corrupting the stream
 /// by concatenating with the next message. Uses write_all per chunk to
 /// handle partial writes.
 async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
@@ -69,16 +109,45 @@ async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
     true
 }
 
-/// SerWrite impl that collects bytes into a Vec (for later timed async write).
 #[cfg(feature = "server")]
-struct VecWriter<'a>(&'a mut Vec<u8>);
+struct StackJsonWriter<'a> {
+    buf: &'a mut [u8],
+    len: usize,
+}
 
 #[cfg(feature = "server")]
-impl ser_write_json::SerWrite for VecWriter<'_> {
-    type Error = core::convert::Infallible;
+#[derive(Debug)]
+struct StackJsonError;
 
-    fn write(&mut self, buf: &[u8]) -> Result<(), core::convert::Infallible> {
-        self.0.extend_from_slice(buf);
+#[cfg(feature = "server")]
+impl core::fmt::Display for StackJsonError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("stack JSON buffer full")
+    }
+}
+
+#[cfg(feature = "server")]
+impl<'a> StackJsonWriter<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, len: 0 }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.buf[..self.len]
+    }
+}
+
+#[cfg(feature = "server")]
+impl ser_write_json::SerWrite for StackJsonWriter<'_> {
+    type Error = StackJsonError;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), StackJsonError> {
+        let end = self.len.checked_add(buf.len()).ok_or(StackJsonError)?;
+        if end > self.buf.len() {
+            return Err(StackJsonError);
+        }
+        self.buf[self.len..end].copy_from_slice(buf);
+        self.len = end;
         Ok(())
     }
 }
@@ -113,6 +182,9 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         let connected = conn.is_connected();
 
         #[cfg(feature = "server")]
+        drain_outgoing_server_json_chunks(&mut tx, connected).await;
+
+        #[cfg(feature = "server")]
         drain_outgoing_server_msg(&mut tx, connected).await;
 
         drain_outgoing_messages(&router, &mut tx, connected).await;
@@ -122,6 +194,24 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         }
 
         Timer::after(Duration::from_millis(1)).await;
+    }
+}
+
+/// Drain raw server JSON chunks. Always consumes; only writes if connected.
+#[cfg(feature = "server")]
+async fn drain_outgoing_server_json_chunks<W: Write>(tx: &mut W, connected: bool) {
+    let receiver = OUTGOING_SERVER_JSON_CHUNK.receiver();
+    loop {
+        match receiver.try_receive() {
+            Ok(chunk) if connected => {
+                if !timed_write_all(tx, chunk.bytes()).await {
+                    let _ = timed_write(tx, b"\n").await;
+                    break;
+                }
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
     }
 }
 
@@ -171,12 +261,217 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
         return;
     }
 
-    let mut buf: Vec<u8> = Vec::new();
-    buf.extend_from_slice(b"M!");
-    if ser_write_json::ser::to_writer(&mut VecWriter(&mut buf), &msg).is_ok() {
-        buf.push(b'\n');
-        timed_write_all(tx, &buf).await;
+    if timed_write_server_msg(tx, msg).await {
+        return;
     }
+
+    // If a timeout interrupts a JSON frame before the trailing newline, separate the
+    // next frame so host parsers can recover instead of concatenating two `M!` messages.
+    let _ = timed_write(tx, b"\n").await;
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_server_msg<W: Write>(tx: &mut W, msg: lpc_wire::WireServerMessage) -> bool {
+    let id = msg.id;
+    match msg.msg {
+        lpc_wire::server::ServerMsgBody::ProjectRequest { response } => {
+            timed_write_project_read_server_msg(tx, id, response).await
+        }
+        msg => timed_write_full_server_msg(tx, lpc_wire::WireServerMessage { id, msg }).await,
+    }
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_full_server_msg<W: Write>(
+    tx: &mut W,
+    msg: lpc_wire::WireServerMessage,
+) -> bool {
+    let mut buf = [0u8; 4 * 1024];
+    let mut writer = StackJsonWriter::new(&mut buf);
+    if writer.write(b"M!").is_err() {
+        return false;
+    }
+    if ser_write_json::ser::to_writer(&mut writer, &msg).is_err() {
+        return false;
+    }
+    if writer.write(b"\n").is_err() {
+        return false;
+    }
+    timed_write_all(tx, writer.bytes()).await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_project_read_server_msg<W: Write>(
+    tx: &mut W,
+    id: u64,
+    response: lpc_wire::ProjectReadResponse,
+) -> bool {
+    let header = format!(
+        "M!{{\"id\":{},\"msg\":{{\"projectRequest\":{{\"response\":{{\"revision\":{},\"results\":[",
+        id,
+        response.revision.as_i64(),
+    );
+    if !timed_write(tx, header.as_bytes()).await {
+        return false;
+    }
+
+    for (index, result) in response.results.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_project_read_result(tx, result).await {
+            return false;
+        }
+    }
+
+    if !timed_write(tx, b"],\"probes\":[").await {
+        return false;
+    }
+    for (index, probe) in response.probes.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_serde_json(tx, probe).await {
+            return false;
+        }
+    }
+
+    timed_write(tx, b"]}}}}\n").await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_project_read_result<W: Write>(
+    tx: &mut W,
+    result: &lpc_wire::ProjectReadResult,
+) -> bool {
+    match result {
+        lpc_wire::ProjectReadResult::Resources(resources) => {
+            timed_write_resource_read_result(tx, resources).await
+        }
+        _ => timed_write_serde_json(tx, result).await,
+    }
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_resource_read_result<W: Write>(
+    tx: &mut W,
+    resources: &lpc_wire::ResourceReadResult,
+) -> bool {
+    if !timed_write(tx, b"{\"resources\":{\"level\":").await {
+        return false;
+    }
+    if !timed_write_serde_json(tx, &resources.level).await {
+        return false;
+    }
+    if !timed_write(tx, b",\"summaries\":[").await {
+        return false;
+    }
+    for (index, summary) in resources.summaries.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_serde_json(tx, summary).await {
+            return false;
+        }
+    }
+    if !timed_write(tx, b"],\"runtime_buffer_payloads\":[").await {
+        return false;
+    }
+    for (index, payload) in resources.runtime_buffer_payloads.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_runtime_buffer_payload(tx, payload).await {
+            return false;
+        }
+    }
+    timed_write(tx, b"]}}").await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_runtime_buffer_payload<W: Write>(
+    tx: &mut W,
+    payload: &lpc_wire::WireRuntimeBufferPayload,
+) -> bool {
+    if !timed_write(tx, b"{\"ref\":").await {
+        return false;
+    }
+    if !timed_write_serde_json(tx, &payload.resource_ref).await {
+        return false;
+    }
+    let revision = format!(",\"revision\":{},\"metadata\":", payload.revision.as_i64());
+    if !timed_write(tx, revision.as_bytes()).await {
+        return false;
+    }
+    if !timed_write_serde_json(tx, &payload.metadata).await {
+        return false;
+    }
+    if !timed_write(tx, b",\"bytes\":").await {
+        return false;
+    }
+    if !timed_write_base64_json_string(tx, &payload.bytes).await {
+        return false;
+    }
+    timed_write(tx, b"}").await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_serde_json<W, T>(tx: &mut W, value: &T) -> bool
+where
+    W: Write,
+    T: serde::Serialize,
+{
+    let mut buf = [0u8; 32 * 1024];
+    let mut writer = StackJsonWriter::new(&mut buf);
+    if ser_write_json::ser::to_writer(&mut writer, value).is_err() {
+        return false;
+    }
+    timed_write_all(tx, writer.bytes()).await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_base64_json_string<W: Write>(tx: &mut W, bytes: &[u8]) -> bool {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const OUT_CAP: usize = 252;
+
+    if !timed_write(tx, b"\"").await {
+        return false;
+    }
+
+    let mut out = [0u8; OUT_CAP];
+    let mut out_len = 0usize;
+    for chunk in bytes.chunks(3) {
+        if out_len + 4 > out.len() {
+            if !timed_write(tx, &out[..out_len]).await {
+                return false;
+            }
+            out_len = 0;
+        }
+
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+
+        out[out_len] = TABLE[(b0 >> 2) as usize];
+        out[out_len + 1] = TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize];
+        out[out_len + 2] = if chunk.len() > 1 {
+            TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize]
+        } else {
+            b'='
+        };
+        out[out_len + 3] = if chunk.len() > 2 {
+            TABLE[(b2 & 0b0011_1111) as usize]
+        } else {
+            b'='
+        };
+        out_len += 4;
+    }
+
+    if out_len > 0 && !timed_write(tx, &out[..out_len]).await {
+        return false;
+    }
+
+    timed_write(tx, b"\"").await
 }
 
 /// Process read buffer and extract complete lines
@@ -226,8 +521,15 @@ pub fn get_message_channels() -> (
 /// Get reference to OUTGOING_SERVER_MSG channel for StreamingMessageRouterTransport
 #[cfg(feature = "server")]
 pub fn get_server_msg_channel()
--> &'static Channel<CriticalSectionRawMutex, lp_model::ServerMessage, 1> {
+-> &'static Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> {
     &OUTGOING_SERVER_MSG
+}
+
+/// Get reference to raw server JSON chunk channel.
+#[cfg(feature = "server")]
+pub fn get_server_json_chunk_channel()
+-> &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16> {
+    &OUTGOING_SERVER_JSON_CHUNK
 }
 
 /// Write log output to the outgoing channel (serial to host).

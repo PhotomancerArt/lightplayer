@@ -1,7 +1,6 @@
 //! Test message types for USB serial testing
 //!
-//! Defines command and response types for test protocol using external
-//! discriminators compatible with serde-json-core.
+//! Defines command and response types for the serial test protocol.
 
 extern crate alloc;
 
@@ -84,12 +83,12 @@ pub fn parse_message_line(line: &str) -> Option<&str> {
 /// # Returns
 ///
 /// Serialized message string with `M!` prefix and newline
-pub fn serialize_command(cmd: &TestCommand) -> Result<String, lp_model::TransportError> {
+pub fn serialize_command(cmd: &TestCommand) -> Result<String, lpc_wire::TransportError> {
     use alloc::format;
-    use lp_model::json;
+    use lpc_wire::json;
 
     let json = json::to_string(cmd).map_err(|e| {
-        lp_model::TransportError::Serialization(format!("Failed to serialize TestCommand: {e:?}"))
+        lpc_wire::TransportError::Serialization(format!("Failed to serialize TestCommand: {e:?}"))
     })?;
     Ok(format!("M!{json}\n"))
 }
@@ -107,7 +106,7 @@ pub fn serialize_command(cmd: &TestCommand) -> Result<String, lp_model::Transpor
 /// * `Ok(Some(cmd))` if valid command
 /// * `Ok(None)` if line doesn't start with `M!` (not a message)
 /// * `Err` if JSON parsing fails
-pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lp_model::TransportError> {
+pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lpc_wire::TransportError> {
     use alloc::format;
 
     let json_str = match parse_message_line(line) {
@@ -115,9 +114,9 @@ pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lp_model::
         None => return Ok(None), // Not a message line
     };
 
-    use lp_model::json;
+    use lpc_wire::json;
     let cmd: TestCommand = json::from_str(json_str).map_err(|e| {
-        lp_model::TransportError::Deserialization(format!("Failed to parse TestCommand: {e:?}"))
+        lpc_wire::TransportError::Deserialization(format!("Failed to parse TestCommand: {e:?}"))
     })?;
     Ok(Some(cmd))
 }
@@ -133,12 +132,12 @@ pub fn deserialize_command(line: &str) -> Result<Option<TestCommand>, lp_model::
 /// # Returns
 ///
 /// Serialized message string with `M!` prefix and newline
-pub fn serialize_response(resp: &TestResponse) -> Result<String, lp_model::TransportError> {
+pub fn serialize_response(resp: &TestResponse) -> Result<String, lpc_wire::TransportError> {
     use alloc::format;
-    use lp_model::json;
+    use lpc_wire::json;
 
     let json = json::to_string(resp).map_err(|e| {
-        lp_model::TransportError::Serialization(format!("Failed to serialize TestResponse: {e:?}"))
+        lpc_wire::TransportError::Serialization(format!("Failed to serialize TestResponse: {e:?}"))
     })?;
     Ok(format!("M!{json}\n"))
 }

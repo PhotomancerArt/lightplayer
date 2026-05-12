@@ -12,7 +12,7 @@ pub fn handle_create(args: CreateArgs) -> Result<()> {
     };
 
     // Create project structure
-    project::create_project_structure(&args.dir, args.name.as_deref(), args.uid.as_deref())?;
+    project::create_project_structure(&args.dir, args.name.as_deref())?;
 
     // Print success message
     project::print_success_message(&args.dir, &name);

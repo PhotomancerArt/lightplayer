@@ -15,8 +15,9 @@ use core::str;
 use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
-use lp_model::{ClientMessage, ServerMessage, TransportError, json};
-use lp_shared::transport::ServerTransport;
+use lpc_shared::transport::ServerTransport;
+use lpc_wire::WireServerMessage;
+use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Serial transport implementation
 ///
@@ -53,7 +54,7 @@ impl<Io: SerialIo> ser_write_json::SerWrite for SerialIoSerWrite<'_, Io> {
 }
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
-    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
 
         #[cfg(feature = "emu")]
@@ -65,7 +66,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             let mut writer = SerialIoSerWrite(&mut self.io);
             ser_write_json::ser::to_writer(&mut writer, &msg).map_err(|e| {
                 TransportError::Serialization(alloc::format!(
-                    "Failed to serialize ServerMessage: {e}"
+                    "Failed to serialize WireServerMessage: {e}"
                 ))
             })?;
             self.io
@@ -79,9 +80,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         #[cfg(not(feature = "emu"))]
         {
-            // Buffered serialization (legacy path)
+            // Buffered serialization path for hardware builds.
             let json = json::to_string(&msg).map_err(|e| {
-                TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
+                TransportError::Serialization(format!("Failed to serialize WireServerMessage: {e}"))
             })?;
             let message = format!("M!{json}\n");
             let message_bytes = message.as_bytes();
@@ -258,7 +259,7 @@ mod tests {
     use crate::serial::SerialError;
     use alloc::vec::Vec;
     use core::{cell::RefCell, str};
-    use lp_model::ClientRequest;
+    use lpc_wire::ClientRequest;
 
     // Mock SerialIo for testing
     struct MockSerialIo {
@@ -309,9 +310,9 @@ mod tests {
         let mock_io = MockSerialIo::new();
         let mut transport = SerialTransport::new(mock_io);
 
-        let msg = ServerMessage {
+        let msg = WireServerMessage {
             id: 1,
-            msg: lp_model::server::ServerMsgBody::UnloadProject,
+            msg: lpc_wire::server::ServerMsgBody::UnloadProject,
         };
         pollster::block_on(transport.send(msg)).unwrap();
 

@@ -1,6 +1,6 @@
 //! Server loop for ESP32 firmware
 //!
-//! Main async loop that handles hardware I/O and calls lp-server::tick().
+//! Main async loop that handles hardware I/O and calls lpa-server::tick().
 //!
 //! # Heartbeat Messages
 //!
@@ -26,12 +26,12 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lp_model::Message;
-use lp_server::LpServer;
-use lp_shared::fps::FpsTracker;
-use lp_shared::stats::WindowedStatsCollector;
-use lp_shared::time::TimeProvider;
-use lp_shared::transport::ServerTransport;
+use lpa_server::LpServer;
+use lpc_shared::fps::FpsTracker;
+use lpc_shared::stats::WindowedStatsCollector;
+use lpc_shared::time::TimeProvider;
+use lpc_shared::transport::ServerTransport;
+use lpc_wire::{WireMessage, WireServerMessage};
 
 use crate::time::Esp32TimeProvider;
 
@@ -71,11 +71,12 @@ pub async fn run_server_loop<T: ServerTransport>(
         let frame_start = time_provider.now_ms();
 
         // Collect incoming messages (non-blocking)
+        let receive_start = time_provider.now_ms();
         let mut incoming_messages = Vec::new();
         loop {
             match transport.receive().await {
                 Ok(Some(msg)) => {
-                    incoming_messages.push(Message::Client(msg));
+                    incoming_messages.push(WireMessage::Client(msg));
                 }
                 Ok(None) => {
                     // No more messages available
@@ -88,25 +89,46 @@ pub async fn run_server_loop<T: ServerTransport>(
                 }
             }
         }
+        let receive_done = time_provider.now_ms();
 
         // Calculate delta time since last tick
         let delta_time = time_provider.elapsed_ms(last_tick);
         let delta_ms = delta_time.min(u32::MAX as u64) as u32;
 
         // Tick server (synchronous)
-        match server.tick(delta_ms.max(1), incoming_messages) {
-            Ok(responses) => {
-                // Send responses
-                for response in responses {
-                    if let Message::Server(server_msg) = response {
-                        if let Err(e) = transport.send(server_msg).await {
-                            log::warn!("run_server_loop: Failed to send response: {e:?}");
-                            // Transport error - continue with next message
-                        }
-                    }
+        let tick_start = time_provider.now_ms();
+        match server
+            .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
+            .await
+        {
+            Ok(response_count) => {
+                let tick_done = time_provider.now_ms();
+                let send_done = time_provider.now_ms();
+                server.set_last_frame_time(send_done.saturating_sub(frame_start) * 1000);
+                if frame_count % FPS_LOG_INTERVAL == 0 {
+                    log::info!(
+                        "[perf] frame={} recv={}ms tick={}ms send={}ms total={}ms responses={}",
+                        frame_count,
+                        receive_done.saturating_sub(receive_start),
+                        tick_done.saturating_sub(tick_start),
+                        send_done.saturating_sub(tick_done),
+                        send_done.saturating_sub(frame_start),
+                        response_count,
+                    );
                 }
             }
             Err(e) => {
+                let tick_done = time_provider.now_ms();
+                server.set_last_frame_time(tick_done.saturating_sub(frame_start) * 1000);
+                if frame_count % FPS_LOG_INTERVAL == 0 {
+                    log::info!(
+                        "[perf] frame={} recv={}ms tick={}ms send=0ms total={}ms responses=0",
+                        frame_count,
+                        receive_done.saturating_sub(receive_start),
+                        tick_done.saturating_sub(tick_start),
+                        tick_done.saturating_sub(frame_start),
+                    );
+                }
                 log::warn!("run_server_loop: Server tick error: {e:?}");
                 // Server error - continue
             }
@@ -145,16 +167,16 @@ pub async fn run_server_loop<T: ServerTransport>(
             // Query heap memory from esp_alloc
             let used_bytes = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
             let free_bytes = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-            let memory = Some(lp_model::server::MemoryStats {
+            let memory = Some(lpc_wire::server::MemoryStats {
                 free_bytes,
                 used_bytes,
                 total_bytes: used_bytes.saturating_add(free_bytes),
             });
 
             // Create heartbeat message
-            let heartbeat_msg = lp_model::ServerMessage {
+            let heartbeat_msg = WireServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
-                msg: lp_model::server::ServerMsgBody::Heartbeat {
+                msg: lpc_wire::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,
                     frame_count: frame_count as u64,
                     loaded_projects,

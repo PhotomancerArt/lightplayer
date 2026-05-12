@@ -2,9 +2,9 @@
 
 ## Status
 
-In progress. Throwaway perf experiment — *not* a product feature, *not*
+In progress. Throwaway perf experiment — _not_ a product feature, _not_
 shipping code. Goal is one data point: how fast can a Stam-style fluid
-solver run on esp32c6 *at all*, when implemented as native Rust + Q32
+solver run on esp32c6 _at all_, when implemented as native Rust + Q32
 (skipping the JIT and the entire fixture/texture pipeline)?
 
 ## Why
@@ -14,8 +14,8 @@ The engine pipeline architecture doc
 calls out fluid as the one esp32 stretch target that the proposed
 point-fixture / functional-effect architectural split doesn't help —
 fluid is intrinsically stateful and grid-based. Before committing to
-that architecture, we want to know whether fluid on esp32 is *real* or
-*aspirational*. If the raw native Rust + Q32 solver doesn't fit the
+that architecture, we want to know whether fluid on esp32 is _real_ or
+_aspirational_. If the raw native Rust + Q32 solver doesn't fit the
 budget, no compiler / pipeline work will save it.
 
 This experiment establishes the **theoretical upper bound**:
@@ -24,7 +24,7 @@ This experiment establishes the **theoretical upper bound**:
   overhead, no interpreter, no shader plumbing. Whatever LLVM can do
   with the algorithm, this gets.
 - Q32 fixed-point math → matches what lpvm uses (so it's
-  apples-to-apples vs the eventual JIT path) *and* is the right shape
+  apples-to-apples vs the eventual JIT path) _and_ is the right shape
   for an FPU-less RV32 target. f32 on esp32c6 (no FPU) would go
   through soft-float helpers and not represent the platform's actual
   ceiling.
@@ -61,11 +61,11 @@ decision and worth knowing now.
 
 ## Phase outline
 
-| # | Title | Sub-agent | Out |
-| --- | --- | --- | --- |
-| 01 | Port the monochrome MSAFluid solver to no_std Rust + Q32 | yes | `lp-fw/fw-esp32/src/tests/msafluid_solver.rs` (no wiring) |
-| 02 | Add `test_msafluid` feature, run at 16/32/48/64, print cycles | yes | `lp-fw/fw-esp32/src/tests/test_msafluid.rs` + Cargo + main wiring |
-| 03 | Cleanup, validation, summary | supervised | `summary.md`, plan move |
+| #   | Title                                                         | Sub-agent  | Out                                                               |
+| --- | ------------------------------------------------------------- | ---------- | ----------------------------------------------------------------- |
+| 01  | Port the monochrome MSAFluid solver to no_std Rust + Q32      | yes        | `lp-fw/fw-esp32/src/tests/msafluid_solver.rs` (no wiring)         |
+| 02  | Add `test_msafluid` feature, run at 16/32/48/64, print cycles | yes        | `lp-fw/fw-esp32/src/tests/test_msafluid.rs` + Cargo + main wiring |
+| 03  | Cleanup, validation, summary                                  | supervised | `summary.md`, plan move                                           |
 
 Each phase commits **at the end** as a single squash-style commit
 (this is a throwaway experiment, no need for per-phase commits like
@@ -115,7 +115,7 @@ precompute (call it `inv_2nx`).
 ### Use raw `i32` indexing, not `Q32`, for grid coordinates
 
 `FLUID_IX(i, j) = i + (NX+2) * j` is integer math on grid
-coordinates. Don't wrap that in `Q32`. Q32 is only for the *field*
+coordinates. Don't wrap that in `Q32`. Q32 is only for the _field_
 values (u, v, r, etc.).
 
 ### Storage layout
@@ -132,6 +132,7 @@ has 512 KB SRAM, so this is fine, but worth being mindful of.
 ### Skip RGB
 
 Port only the monochrome path:
+
 - `r`, `rOld` (no `g`/`b`/`gOld`/`bOld`)
 - `addSource`, `swapR`, `diffuse(r)`, `advect(r)`, `fadeR`
 - `linearSolver` (not `linearSolverRGB` / `linearSolverUV`)
@@ -225,7 +226,7 @@ real product.
 
 The lp2014 `fadeR()` updates `_avgDensity`, `_avgSpeed`, and
 `uniformity` — these are diagnostic outputs, not part of the solver.
-Port the *fade* (`r[i] *= holdAmount`) but skip the avg / uniformity
+Port the _fade_ (`r[i] *= holdAmount`) but skip the avg / uniformity
 accumulation. They'd add per-cell work that the real product
 wouldn't pay either.
 

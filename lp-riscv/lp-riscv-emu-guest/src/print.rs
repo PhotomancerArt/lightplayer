@@ -41,7 +41,10 @@ static mut WRITER: BuiltinsWriter = BuiltinsWriter;
 /// This function is called by the print! and println! macros
 /// when used in a no_std environment.
 #[unsafe(no_mangle)]
-#[allow(static_mut_refs)] // Safe: WRITER is only accessed from this single-threaded function
+#[allow(
+    static_mut_refs,
+    reason = "WRITER is only accessed from this single-threaded guest print function"
+)]
 pub fn _print(args: fmt::Arguments) {
     unsafe {
         // Use addr_of_mut! to safely get a pointer to the mutable static

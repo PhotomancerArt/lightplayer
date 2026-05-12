@@ -1,0 +1,41 @@
+# Cycling rainbow gradient: hue rolls forward at `speed` cycles/sec.
+# Single-file ShaderPattern with inline GLSL.
+
+schema_version = 1
+title          = "Rainbow"
+description    = "Rolling rainbow with HSL hue rotation."
+author         = "yona"
+
+[shader]
+glsl = """
+struct Params {
+    float time;
+    float speed;
+    float saturation;
+};
+
+uniform vec2  outputSize;
+uniform Params params;
+
+vec4 render(vec2 pos) {
+  vec2 uv = pos / outputSize;
+  float h = fract(uv.x + params.time * params.speed);
+  return vec4(lpfn_hsv2rgb(vec3(h, params.saturation, 1.0)), 1.0);
+}
+"""
+
+[params.time]
+kind    = "instant"
+default = 0.0
+# `instant` default-binds to "time"; no explicit bind needed.
+
+[params.speed]
+kind    = "frequency"
+range   = [0.0, 5.0]
+step    = 0.1
+default = 0.25
+label   = "Speed"
+
+[params.saturation]
+kind    = "amplitude"
+default = 1.0

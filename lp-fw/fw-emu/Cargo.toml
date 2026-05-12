@@ -9,10 +9,11 @@ rust-version.workspace = true
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 fw-core = { path = "../fw-core", default-features = false, features = ["emu"] }
-lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"] }
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"] }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
-lp-model = { path = "../../lp-core/lp-model", default-features = false }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false }
 lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"] }
@@ -31,11 +32,11 @@ test_unwind = []
 [build-dependencies]
 
 [dev-dependencies]
-lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
-lp-engine-client = { path = "../../lp-core/lp-engine-client" }
+lpa-client = { path = "../../lp-app/lpa-client", features = ["serial"] }
+lpc-view = { path = "../../lp-core/lpc-view" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
-lp-shared = { path = "../../lp-core/lp-shared" }
+lpc-shared = { path = "../../lp-core/lpc-shared" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 tokio = { version = "1", features = ["rt", "macros"] }
 

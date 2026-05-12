@@ -21,6 +21,10 @@ extern crate unwinding;
 
 use core::alloc::Layout;
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+static OOM_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static OOM_ALLOC_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 /// Custom panic handler that starts stack unwinding via the `unwinding` crate.
 ///
@@ -34,6 +38,16 @@ fn panic_handler(info: &PanicInfo) -> ! {
     esp_println::println!("\n\n====================== PANIC ======================");
     esp_println::println!("{info}");
     esp_println::println!();
+
+    if OOM_IN_PROGRESS.load(Ordering::Relaxed) {
+        esp_println::println!(
+            "OOM while handling allocation failure: requested={} free={} used={}",
+            OOM_ALLOC_SIZE.load(Ordering::Relaxed),
+            esp_alloc::HEAP.free(),
+            esp_alloc::HEAP.used(),
+        );
+        loop {}
+    }
 
     let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
         #[cfg(feature = "server")]
@@ -56,7 +70,9 @@ fn panic_handler(info: &PanicInfo) -> ! {
             } else {
                 (None, None)
             };
-            alloc::boxed::Box::new(lp_shared::backtrace::PanicPayload::new(message, file, line))
+            alloc::boxed::Box::new(lpc_shared::backtrace::PanicPayload::new(
+                message, file, line,
+            ))
         }
         #[cfg(not(feature = "server"))]
         {
@@ -75,6 +91,16 @@ fn panic_handler(info: &PanicInfo) -> ! {
 /// The default alloc_error_handler uses nounwind panic and cannot be caught.
 #[alloc_error_handler]
 fn on_alloc_error(layout: Layout) -> ! {
+    OOM_ALLOC_SIZE.store(layout.size(), Ordering::Relaxed);
+    OOM_IN_PROGRESS.store(true, Ordering::Relaxed);
+    esp_println::println!("\n\n====================== OOM ======================");
+    esp_println::println!(
+        "allocation failed: requested={} align={} free={} used={}",
+        layout.size(),
+        layout.align(),
+        esp_alloc::HEAP.free(),
+        esp_alloc::HEAP.used(),
+    );
     panic!("memory allocation of {} bytes failed", layout.size());
 }
 
@@ -180,13 +206,22 @@ mod lp_fs_flash;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
 )))]
+use lpfs::lp_path::AsLpPath;
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+)))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
-    lp_model::path::AsLpPath,
-    lp_server::{Graphics, LpGraphics, LpServer},
-    lp_shared::output::OutputProvider,
+    lpa_server::{Graphics, LpGraphics, LpServer},
+    lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::Esp32OutputProvider,
     serial::io_task,
@@ -357,7 +392,8 @@ async fn main(spawner: embassy_executor::Spawner) {
             esp_println::println!("[test_oom] Tests complete, continuing boot...");
         }
 
-        // Create streaming transport (serializes in io_task, never buffers full JSON)
+        // Create serial transport. Project-read responses stream through io_task;
+        // small messages use the simpler full-message serializer.
         esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
         let transport = transport::StreamingMessageRouterTransport::from_io_channels();
         esp_println::println!("[INIT] StreamingMessageRouterTransport created");

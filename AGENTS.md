@@ -154,6 +154,49 @@ cargo build --workspace \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
 
+## Code organization in Rust source files
+
+This repo prefers **filesystem-oriented, concept-per-file organization**. The
+directory tree should act as a useful map of the domain, especially in core
+model crates where the concepts are the product vocabulary.
+
+When adding or moving Rust files:
+
+- Prefer one clear concept per file when the concept has its own identity.
+- Use search-friendly filenames even when the parent module already provides
+  context. For example, `slot/slot_path.rs`, `slot/slot_shape.rs`, and
+  `slot/slot_shape_registry.rs` are preferred over a cluster of generic names
+  like `slot/path.rs`, `slot/shape.rs`, and `slot/registry.rs`.
+- Match the file name to the primary exported type when that type has a clear
+  domain name: `SlotPath` belongs in `slot_path.rs`, `ValueSlot` belongs in
+  `value_slot.rs`.
+- Avoid redundant suffixes inside directories that already name the collection.
+  For semantic slot leaves, prefer `slot/slots/ratio.rs` and
+  `slot/slots/resource_ref.rs`, not `ratio_slot.rs` or
+  `resource_ref_slot.rs`.
+- Do not collapse a set of domain concepts into a large `mod.rs` just because
+  the code is short. `mod.rs` should primarily declare and re-export modules,
+  not hide the filesystem map.
+
+Inside a single `.rs` file, the reading order is **top → bottom = most
+important → least important → tests**. Concretely:
+
+1. Module-level docs, `use`s, type aliases, constants.
+2. Public types / entry points / the headline impl.
+3. Supporting types and their impls.
+4. Private helper functions.
+5. `#[cfg(test)] mod tests { ... }` — **always at the bottom of the file**,
+   never above the impl it exercises.
+
+Inside the test module, the same principle applies: the actual `#[test]`
+functions come first, shared test helpers live below them.
+
+This is the opposite of an older "tests first" convention you will see in
+many archived plan files under `docs/plans-old/`. That convention is
+deprecated. Do not adopt it in new code. If a plan file you are executing
+asks for "tests at the top", treat that as a stale instruction and put the
+test module at the bottom anyway.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:
@@ -169,8 +212,8 @@ cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 
 # Host still works
-cargo check -p lp-server
-cargo test -p lp-server --no-run
+cargo check -p lpa-server
+cargo test -p lpa-server --no-run
 ```
 
 ## CI gate (run this before pushing)

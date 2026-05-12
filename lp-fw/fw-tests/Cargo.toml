@@ -11,13 +11,15 @@ test_usb = []
 
 [dependencies]
 hashbrown = { workspace = true }
-lp-client = { path = "../../lp-core/lp-client", features = ["serial", "emu"] }
-lp-engine-client = { path = "../../lp-core/lp-engine-client" }
-lp-model = { path = "../../lp-core/lp-model" }
+lpa-client = { path = "../../lp-app/lpa-client", features = ["serial", "emu"] }
+lpc-view = { path = "../../lp-core/lpc-view" }
+lpc-model = { path = "../../lp-core/lpc-model" }
+lpc-wire = { path = "../../lp-core/lpc-wire" }
+lpc-source = { path = "../../lp-core/lpc-source", default-features = false }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
-lp-shared = { path = "../../lp-core/lp-shared" }
+lpc-shared = { path = "../../lp-core/lpc-shared" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 async-trait = "0.1"

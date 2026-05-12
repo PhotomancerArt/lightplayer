@@ -1,0 +1,15 @@
+kind = "project"
+uid = "basic2"
+name = "basic2"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.texture]
+artifact = "./texture.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"

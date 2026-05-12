@@ -10,7 +10,7 @@ use tokio::signal;
 use crate::client::{LpClient, client_connect};
 use crate::commands::dev::{fs_loop, push_project_async, validation};
 use crate::debug_ui::DebugUiState;
-use lp_client::HostSpecifier;
+use lpa_client::HostSpecifier;
 
 use super::args::DevArgs;
 
@@ -115,9 +115,7 @@ async fn handle_dev_async(
         println!("Shutting down...");
     } else {
         // Run UI
-        let project_view = Arc::new(std::sync::Mutex::new(
-            lp_engine_client::project::ClientProjectView::new(),
-        ));
+        let project_view = Arc::new(std::sync::Mutex::new(lpc_view::project::ProjectView::new()));
 
         // Create a new LpClient for the UI (shares the same transport)
         let ui_client = LpClient::new_shared(Arc::clone(&shared_transport));

@@ -1,0 +1,96 @@
+use lpc_model::{LpValue, Revision, SlotMapKey};
+
+use super::fixture::{
+    Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks, select,
+};
+
+#[test]
+fn incremental_changes_patch_client_state() {
+    let mut harness = Harness::new();
+    harness.sync_full();
+    harness.print_client_tree("engine.shader_node");
+
+    println!("server updating source.fixture#mapping.path_points.path.ring_array.ring_lamp_counts");
+    harness
+        .runtime
+        .set_fixture_ring_lamp_counts(Revision::new(2), vec![1, 8, 12, 16]);
+    harness.print_server_tree("source.fixture");
+    harness.sync_diff("source.fixture", Revision::new(1));
+    harness.print_client_tree("source.fixture");
+    assert_eq!(
+        select(
+            harness.client.roots.get("source.fixture").unwrap(),
+            "mapping.path_points.path.ring_array.ring_lamp_counts",
+        ),
+        &lpc_model::SlotData::Value(lpc_model::WithRevision::new(
+            Revision::new(2),
+            LpValue::Array(vec![
+                LpValue::U32(1),
+                LpValue::U32(8),
+                LpValue::U32(12),
+                LpValue::U32(16)
+            ])
+        )),
+    );
+
+    println!("server updating source.shader#param_defs[gain].default to 0.5");
+    harness
+        .runtime
+        .add_shader_param_def(Revision::new(3), "gain", 0.5);
+    harness.print_server_tree("source.shader");
+    harness.sync_diff("source.shader", Revision::new(2));
+    harness.print_client_tree("source.shader");
+    assert_map_has_key(
+        harness.client.roots.get("source.shader").unwrap(),
+        "param_defs",
+        SlotMapKey::String("gain".to_string()),
+    );
+
+    println!("server updating engine.shader_node#params.exposure to 2.5");
+    harness
+        .runtime
+        .set_shader_param(Revision::new(4), "exposure", 2.5);
+    harness.print_server_tree("engine.shader_node");
+    harness.sync_diff("engine.shader_node", Revision::new(3));
+    harness.print_client_tree("engine.shader_node");
+    assert_shader_param(
+        harness.client.roots.get("engine.shader_node").unwrap(),
+        "exposure",
+        LpValue::F32(2.5),
+    );
+
+    println!("server removing engine.shader_node#params.speed");
+    harness
+        .runtime
+        .remove_shader_param(Revision::new(5), "speed");
+    harness.print_server_tree("engine.shader_node");
+    harness.sync_registry();
+    harness.sync_diff("engine.shader_node", Revision::new(4));
+    harness.print_client_tree("engine.shader_node");
+    assert_shader_param_lacks(
+        harness.client.roots.get("engine.shader_node").unwrap(),
+        "speed",
+    );
+
+    println!("server updating source.fixture#mapping to square and brightness to none");
+    harness.runtime.switch_fixture_mapping(Revision::new(6));
+    harness.runtime.clear_fixture_brightness(Revision::new(7));
+    harness.print_server_tree("source.fixture");
+    harness.sync_diff("source.fixture", Revision::new(5));
+    harness.print_client_tree("source.fixture");
+
+    println!("server updating source.fixture#mapping to disabled unit variant");
+    harness.runtime.disable_fixture_mapping(Revision::new(8));
+    harness.print_server_tree("source.fixture");
+    harness.sync_diff("source.fixture", Revision::new(7));
+    harness.print_client_tree("source.fixture");
+    assert_eq!(
+        select(
+            harness.client.roots.get("source.fixture").unwrap(),
+            "mapping.disabled",
+        ),
+        &lpc_model::SlotData::Unit {
+            revision: Revision::new(8),
+        },
+    );
+}

@@ -164,10 +164,10 @@ build-release: build-host-release build-rv32-release
 # ============================================================================
 
 build-app:
-    cargo build --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
+    cargo build --package lp-engine --package lpc-view --package lpc-shared --package lpa-server --package lp-cli --package lp-model
 
 build-app-release:
-    cargo build --release --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
+    cargo build --release --package lp-engine --package lpc-view --package lpc-shared --package lpa-server --package lp-cli --package lp-model
 
 # ============================================================================
 # Build commands - lps only
@@ -221,9 +221,9 @@ fix: fmt clippy-fix
 
 clippy-app:
     cargo clippy --package lp-engine \
-                 --package lp-engine-client \
-                 --package lp-shared \
-                 --package lp-server \
+                 --package lpc-view \
+                 --package lpc-shared \
+                 --package lpa-server \
                  --package lp-cli \
                  --package lp-model \
                  -- \
@@ -235,9 +235,9 @@ clippy-app-fix:
                  --allow-dirty\
                  --allow-staged \
                  --package lp-engine \
-                 --package lp-engine-client \
-                 --package lp-shared \
-                 --package lp-server \
+                 --package lpc-view \
+                 --package lpc-shared \
+                 --package lpa-server \
                  --package lp-cli \
                  --package lp-model
 
@@ -269,7 +269,7 @@ test-filetests:
 # ============================================================================
 
 test-app:
-    cargo test --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
+    cargo test --package lp-engine --package lpc-view --package lpc-shared --package lpa-server --package lp-cli --package lp-model
 
 # ============================================================================
 # Testing - lps only

@@ -1,10 +1,10 @@
-//! Debug UI module for visualizing project state
-//!
-//! This module provides a temporary debug UI for the dev command.
-//! It displays node state from the client perspective.
+//! Temporary debug UI shell.
 
-pub mod nodes;
-pub mod panels;
+mod format;
+mod inspector;
+mod node_cards;
+mod resource_preview;
+mod slot_render;
 pub mod ui;
 
 pub use ui::DebugUiState;

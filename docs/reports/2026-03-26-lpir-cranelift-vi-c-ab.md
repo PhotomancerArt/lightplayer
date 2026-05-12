@@ -29,7 +29,7 @@ Commands run; all **passed** on 2026-03-26:
 ```bash
 just build-fw-emu
 cargo test -p fw-tests
-cargo test -p lp-client --features serial --test scene_render_emu_async
+cargo test -p lpa-client --features serial --test scene_render_emu_async
 ```
 
 Notes:
@@ -72,11 +72,11 @@ Compare with an old worktree after `just build-fw-esp32` with the same profile/f
 
 ```bash
 cargo test -p lp-engine
-cargo test -p lp-server
+cargo test -p lpa-server
 cargo test -p lpvm-cranelift
 cargo test -p lpvm-cranelift --no-default-features   # options + q32 encode only; host JIT tests require `std`
 cargo test -p lpvm-cranelift --features riscv32-emu
-cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift -p lp-client --all-features -- -D warnings
+cargo clippy -p lp-engine -p lpa-server -p lpvm-cranelift -p lpa-client --all-features -- -D warnings
 just build-fw-esp32
 ```
 

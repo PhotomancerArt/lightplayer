@@ -1,0 +1,15 @@
+[package]
+name = "lpc-slot-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

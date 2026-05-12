@@ -3,7 +3,7 @@
 //! Provides functions for syncing individual file changes to the server.
 
 use anyhow::{Context, Result};
-use lp_model::AsLpPath;
+use lpc_model::AsLpPath;
 use lpfs::{ChangeType, FsChange, LpFs};
 use std::sync::Arc;
 

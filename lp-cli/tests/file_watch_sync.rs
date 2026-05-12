@@ -5,7 +5,7 @@
 //! - File change detection (via LpFsMemory)
 //! - Path formatting in sync_file_change
 
-use lp_model::AsLpPath;
+use lpc_model::AsLpPath;
 use lpfs::{ChangeType, FsChange, LpFs, LpFsMemory};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -19,7 +19,7 @@ fn test_add_pending_change() {
     let mut last_change_time: Option<Instant> = None;
 
     let change1 = FsChange {
-        path: lp_model::LpPathBuf::from("/src/test1.glsl"),
+        path: lpc_model::LpPathBuf::from("/src/test1.glsl"),
         change_type: ChangeType::Create,
     };
 
@@ -31,7 +31,7 @@ fn test_add_pending_change() {
 
     // Add another change
     let change2 = FsChange {
-        path: lp_model::LpPathBuf::from("/src/test2.glsl"),
+        path: lpc_model::LpPathBuf::from("/src/test2.glsl"),
         change_type: ChangeType::Modify,
     };
 
@@ -43,7 +43,7 @@ fn test_add_pending_change() {
 
     // Update existing change (should deduplicate by path)
     let change1_updated = FsChange {
-        path: lp_model::LpPathBuf::from("/src/test1.glsl"),
+        path: lpc_model::LpPathBuf::from("/src/test1.glsl"),
         change_type: ChangeType::Modify, // Changed from Create to Modify
     };
 
@@ -169,7 +169,7 @@ fn test_debouncing_logic() {
 
     // Add a change
     let change = FsChange {
-        path: lp_model::LpPathBuf::from("/src/test.glsl"),
+        path: lpc_model::LpPathBuf::from("/src/test.glsl"),
         change_type: ChangeType::Create,
     };
     add_pending_change(&mut pending_changes, &mut last_change_time, change);

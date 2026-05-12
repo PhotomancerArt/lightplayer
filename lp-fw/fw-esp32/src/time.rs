@@ -3,7 +3,7 @@
 //! Uses embassy-time for millisecond-precision timing.
 
 use embassy_time::Instant;
-use lp_shared::time::TimeProvider;
+use lpc_shared::time::TimeProvider;
 
 /// ESP32 TimeProvider implementation using embassy-time
 pub struct Esp32TimeProvider {

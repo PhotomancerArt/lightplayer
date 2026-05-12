@@ -1,0 +1,38 @@
+[package]
+name = "lpv-model"
+description = "LightPlayer domain model: identity, addressing, and the Quantity model"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+std = ["dep:lpfs", "lpc-model/std", "lpc-source/std", "lpfs/std", "toml/std"]
+schema-gen = ["std", "lps-shared/schemars", "dep:schemars", "lpc-model/schema-gen", "lpc-source/schema-gen"]
+
+[dependencies]
+lps-shared = { path = "../../lp-shader/lps-shared" }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-source = { path = "../../lp-core/lpc-source", default-features = false }
+lpfs = { path = "../../lp-base/lpfs", optional = true }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true, features = ["display", "preserve_order"] }
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+jsonschema = "0.46.2"
+lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true, features = ["display", "preserve_order"] }
+
+[[test]]
+name = "round_trip"
+path = "tests/round_trip.rs"
+required-features = ["std"]
+
+[lints]
+workspace = true

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::client::{LpClient, client_connect};
 use crate::commands::dev::{push_project_async, validation};
-use lp_client::HostSpecifier;
+use lpa_client::HostSpecifier;
 
 use super::args::UploadArgs;
 

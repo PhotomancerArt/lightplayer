@@ -1,0 +1,28 @@
+# Barebones Live: candidates + default transition + bindings cascade.
+# No [selection] block in M3; selection runtime semantics deferred.
+
+schema_version = 1
+title          = "Main"
+description    = "Audio-reactive fluid with rainbow fallback."
+
+[[candidates]]
+visual   = "../patterns/fluid.pattern.toml"
+priority = 1.0
+
+[[candidates]]
+visual   = "../stacks/psychedelic.stack.toml"
+priority = 0.5
+
+[[candidates]]
+visual   = "../patterns/rainbow.pattern.toml"
+priority = 0.1
+
+[transition]
+visual   = "../transitions/crossfade.transition.toml"
+duration = 2.0
+
+# Cascade: descendant slot keys → bus bindings. Keys are raw
+# relative-NodePropSpec strings in M3 (no parsing yet).
+[bindings]
+"candidates/0#emitter_x" = { bus = "touch/in/0/x" }
+"candidates/0#emitter_y" = { bus = "touch/in/0/y" }

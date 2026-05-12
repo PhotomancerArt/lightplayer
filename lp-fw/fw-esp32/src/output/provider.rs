@@ -9,8 +9,8 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use lp_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
-use lp_shared::{DisplayPipeline, OutputError};
+use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::{DisplayPipeline, OutputError};
 
 use crate::output::{LedChannel, LedTransaction};
 use esp_hal::Blocking;

@@ -554,7 +554,10 @@ fn discover_builtins(
     Ok(builtins)
 }
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "legacy extraction path kept during builtin codegen migration"
+)]
 fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<BuiltinInfo> {
     // Check for #[unsafe(no_mangle)] attribute
     let has_no_mangle = func.attrs.iter().any(|attr| attr.path().is_ident("unsafe"));
@@ -687,7 +690,7 @@ fn format_rust_function_signature(func: &ItemFn) -> String {
     sig
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "reserved for generated identifier formatting")]
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -803,7 +806,9 @@ pub enum BuiltinId {
 
     let mut output = String::from(header);
     if builtins.is_empty() {
-        output.push_str("    #[allow(dead_code)]\n");
+        output.push_str(
+            "    #[allow(dead_code, reason = \"generated dispatch table may include unused pointer slots\")]\n",
+        );
         output.push_str("    _Placeholder,\n");
     } else {
         for builtin in builtins {

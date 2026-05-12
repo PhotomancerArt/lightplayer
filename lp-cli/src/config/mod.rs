@@ -1,3 +1,3 @@
 pub mod server;
 
-pub use lp_model::server::ServerConfig;
+pub use lpc_wire::server::ServerConfig;

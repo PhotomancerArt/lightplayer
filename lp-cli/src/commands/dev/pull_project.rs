@@ -3,7 +3,7 @@
 //! Provides async function to pull project files from the server to local filesystem.
 
 use anyhow::{Context, Result};
-use lp_model::AsLpPath;
+use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
 use crate::client::LpClient;

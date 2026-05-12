@@ -77,7 +77,10 @@ pub fn lpfn_srandom3_vec(p: Vec3Q32, _seed: u32) -> Vec3Q32 {
 /// * `seed` - Seed value for randomization
 /// * `out` - Pointer to output vec3 [x, y, z] as i32
 #[lpfn_impl_macro::lpfn_impl(q32, "vec3 lpfn_srandom3_vec(vec3 p, uint seed)")]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes vec3 through caller-provided out-pointer"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_srandom3_vec_q32(out: *mut i32, x: i32, y: i32, z: i32, seed: u32) {
     let result = lpfn_srandom3_vec(

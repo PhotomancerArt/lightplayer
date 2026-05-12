@@ -3,18 +3,24 @@ members = [
     # lp-base workspace members
     "lp-base/lp-perf",
     "lp-base/lpfs",
+    "lp-vis/lpv-model",
     # lp-app workspace members
-    "lp-core/lp-engine",
-    "lp-core/lp-engine-client",
-    "lp-core/lp-shared",
-    "lp-core/lp-server",
-    "lp-core/lp-client",
+    "lp-core/lpc-engine",
+    "lp-core/lpc-view",
+    "lp-core/lpc-shared",
+    "lp-app/lpa-server",
+    "lp-app/lpa-client",
     "lp-fw/fw-core",
     "lp-cli",
     "lp-fw/fw-esp32",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
-    "lp-core/lp-model",
+    "lp-core/lpc-model",
+    "lp-core/lpc-slot-codegen",
+    "lp-core/lpc-slot-macros",
+    "lp-core/lpc-slot-mockup",
+    "lp-core/lpc-source",
+    "lp-core/lpc-wire",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -53,16 +59,19 @@ resolver = "2"
 default-members = [
     # lp-base workspace members
     "lp-base/lpfs",
+    "lp-vis/lpv-model",
     # lp-app workspace members
-    "lp-core/lp-engine",
-    "lp-core/lp-engine-client",
-    "lp-core/lp-shared",
-    "lp-core/lp-server",
-    "lp-core/lp-client",
+    "lp-core/lpc-engine",
+    "lp-core/lpc-view",
+    "lp-core/lpc-shared",
+    "lp-app/lpa-server",
+    "lp-app/lpa-client",
     "lp-fw/fw-core",
     "lp-fw/fw-tests",
     "lp-cli",
-    "lp-core/lp-model",
+    "lp-core/lpc-model",
+    "lp-core/lpc-source",
+    "lp-core/lpc-wire",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -148,7 +157,8 @@ object = { version = "0.37.3", default-features = false, features = ['read_core'
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "preserve_order"] }
+schemars = { version = "1.2.1", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 
@@ -184,7 +194,7 @@ debug = 1
 
 # Hot-path crates: optimize for speed instead of size
 # These crates are in the critical rendering path and benefit from speed optimizations
-[profile.release.package.lp-engine]
+[profile.release.package.lpc-engine]
 # Optimize for speed (hot path in rendering loop)
 opt-level = 3
 # Keep multiple codegen units for faster compilation and better parallelization

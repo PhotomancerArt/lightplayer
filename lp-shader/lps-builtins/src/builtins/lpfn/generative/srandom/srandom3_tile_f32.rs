@@ -4,7 +4,10 @@ use crate::builtins::lpfn::generative::srandom::srandom3_tile_q32::__lp_lpfn_sra
 use lps_q32::q32::Q32;
 
 #[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_srandom3_tile(vec3 p, float tileLength, uint seed)")]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes vec3 through caller-provided out-pointer"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_srandom3_tile_f32(
     out: *mut f32,

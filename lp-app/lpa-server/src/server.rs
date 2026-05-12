@@ -1,0 +1,464 @@
+//! Main server struct for processing messages and managing projects
+
+extern crate alloc;
+
+use crate::error::ServerError;
+use crate::handlers;
+use crate::project_manager::ProjectManager;
+use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
+use core::cell::RefCell;
+use hashbrown::HashMap;
+use log;
+use lpc_engine::LpGraphics;
+use lpc_model::{LpPath, LpPathBuf};
+use lpc_shared::output::OutputProvider;
+use lpc_shared::time::TimeProvider;
+use lpc_shared::transport::ServerTransport;
+use lpc_wire::{ClientRequest, WireMessage, WireProjectRequest, WireServerMessage};
+use lpfs::{FsChange, LpFs};
+
+/// Optional callback returning (free_bytes, used_bytes) for memory logging.
+/// Platforms without heap stats (e.g. fw-emu) pass `None`.
+pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
+
+/// Main server struct for processing client-server messages
+///
+/// Uses a tick-based API similar to game engines, processing incoming messages
+/// and returning responses. The server manages projects and handles filesystem
+/// operations on its base filesystem.
+pub struct LpServer {
+    /// Output provider (shared, mutable) for projects
+    output_provider: Rc<RefCell<dyn OutputProvider>>,
+    /// Project manager for handling multiple projects
+    project_manager: ProjectManager,
+    /// Base filesystem (server root, projects in `projects/` subdirectory)
+    base_fs: Box<dyn LpFs>,
+    /// Last frame processing time in microseconds (for theoretical FPS calculation)
+    last_frame_time_us: RefCell<Option<u64>>,
+    /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
+    memory_stats: Option<MemoryStatsFn>,
+    /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
+    time_provider: Option<Rc<dyn TimeProvider>>,
+    /// Shader backend (Cranelift, WASM, …).
+    graphics: Arc<dyn LpGraphics>,
+}
+
+impl LpServer {
+    /// Create a new LpServer instance
+    ///
+    /// # Arguments
+    ///
+    /// * `output_provider` - Shared output provider for projects (Rc<RefCell> for no_std compatibility)
+    /// * `base_fs` - Base filesystem (server root, projects stored in `projects_base_dir` subdirectory)
+    /// * `projects_base_dir` - Base directory for projects (e.g., "projects/")
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// extern crate alloc;
+    /// use lpc_model::AsLpPath;
+    /// use lpa_server::LpServer;
+    /// use lpfs::LpFsStd;
+    /// use lpc_shared::output::MemoryOutputProvider;
+    /// use alloc::{boxed::Box, rc::Rc, sync::Arc};
+    /// use core::cell::RefCell;
+    ///
+    /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
+    /// let graphics = Arc::new(lpc_engine::Graphics::new());
+    /// let server = LpServer::new(
+    ///     output_provider,
+    ///     base_fs,
+    ///     "projects/".as_path(),
+    ///     None,
+    ///     None,
+    ///     graphics,
+    /// );
+    /// ```
+    pub fn new(
+        output_provider: Rc<RefCell<dyn OutputProvider>>,
+        base_fs: Box<dyn LpFs>,
+        projects_base_dir: &LpPath,
+        memory_stats: Option<MemoryStatsFn>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
+        graphics: Arc<dyn LpGraphics>,
+    ) -> Self {
+        let project_manager = ProjectManager::new(projects_base_dir);
+        Self {
+            output_provider,
+            project_manager,
+            base_fs,
+            last_frame_time_us: RefCell::new(None),
+            memory_stats,
+            time_provider,
+            graphics,
+        }
+    }
+
+    /// Process incoming messages and return responses
+    ///
+    /// This is the main entry point for processing client messages. It handles
+    /// filesystem operations and project management requests.
+    ///
+    /// # Arguments
+    ///
+    /// * `delta_ms` - Time delta in milliseconds (for future use with project updates)
+    /// * `incoming` - Vector of incoming messages from clients
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<WireMessage>)` - Vector of response messages (all `WireMessage::Server` variants)
+    /// * `Err(ServerError)` - If processing failed
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// extern crate alloc;
+    /// use lpc_model::AsLpPath;
+    /// use lpc_wire::WireMessage;
+    /// use lpa_server::LpServer;
+    /// use lpfs::LpFsMemory;
+    /// use lpc_shared::output::MemoryOutputProvider;
+    /// use alloc::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
+    /// use core::cell::RefCell;
+    ///
+    /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    /// let base_fs = Box::new(LpFsMemory::new());
+    /// let graphics = Arc::new(lpc_engine::Graphics::new());
+    /// let mut server = LpServer::new(
+    ///     output_provider,
+    ///     base_fs,
+    ///     "projects/".as_path(),
+    ///     None,
+    ///     None,
+    ///     graphics,
+    /// );
+    /// let incoming = vec![/* messages */];
+    /// let responses = server.tick(16, incoming).unwrap();
+    /// ```
+    pub fn tick(
+        &mut self,
+        delta_ms: u32,
+        incoming: Vec<WireMessage>,
+    ) -> Result<Vec<WireMessage>, ServerError> {
+        // Process filesystem changes for all loaded projects
+        // Collect project info first to avoid borrowing issues
+        let project_info: Vec<_> = self
+            .project_manager
+            .list_loaded_projects()
+            .iter()
+            .map(|p| (p.handle, p.path.clone()))
+            .collect();
+
+        log::debug!(
+            "LpServer::tick: Found {} loaded projects",
+            project_info.len()
+        );
+
+        // Collect changes per project
+        let mut project_changes_map: HashMap<_, Vec<FsChange>> = HashMap::new();
+
+        for (handle, project_path) in &project_info {
+            if let Some(project) = self.project_manager.get_project(*handle) {
+                let last_version = project.last_fs_version();
+
+                // Query changes from base_fs
+                let base_changes = self.base_fs().get_changes_since(last_version);
+
+                // If no changes, skip this project
+                if base_changes.is_empty() {
+                    continue;
+                }
+
+                // Filter changes for this project
+                // Build project prefix path using join - ensure it ends with /
+                let project_prefix_buf = LpPathBuf::from("/").join(project_path.as_str()).join("");
+                let project_prefix = project_prefix_buf.as_str();
+                let project_changes: Vec<FsChange> = base_changes
+                    .into_iter()
+                    .filter_map(|change| {
+                        // Use LpPath to strip prefix and normalize
+                        if let Some(stripped) = change.path.strip_prefix(project_prefix) {
+                            Some(FsChange {
+                                path: stripped.to_path_buf(),
+                                change_type: change.change_type,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if !project_changes.is_empty() {
+                    project_changes_map.insert(*handle, project_changes);
+                }
+            }
+        }
+
+        // Get current_version AFTER collecting all changes but BEFORE processing
+        // This represents the version that will be assigned to the NEXT change
+        // So all changes we're about to process have versions < current_version
+        let current_version = self.base_fs().current_version();
+
+        // Now apply changes to projects (mutable borrows)
+        for (handle, project_changes) in project_changes_map {
+            if let Some(project) = self.project_manager.get_project_mut(handle) {
+                if let Err(_e) = project.engine_mut().handle_fs_changes(&project_changes) {
+                    // Log error but continue with other projects
+                    // Note: In no_std context, errors are silently ignored
+                    // Errors will be visible when clients read project state.
+                } else {
+                    // Update last processed version to current_version.next() (one more than the next version)
+                    // This ensures that get_changes_since(current_version.next()) will return nothing next time
+                    // because get_changes_since uses >=, and current_version.next() is beyond all changes we processed
+                    // All changes we processed have versions < current_version, so >= current_version.next() returns nothing
+                    project.update_fs_version(current_version.next());
+                }
+            }
+        }
+
+        // Tick all loaded projects
+        // Tick each project's runtime BEFORE processing incoming messages.
+        // This ensures project read requests see the current frame's data.
+        log::debug!("LpServer::tick: Ticking {} projects", project_info.len());
+        for (handle, path) in &project_info {
+            if let Some(project) = self.project_manager.get_project_mut(*handle) {
+                log::debug!(
+                    "LpServer::tick: Ticking project {} (path: {}, delta_ms: {})",
+                    project.name(),
+                    path,
+                    delta_ms
+                );
+                // Ignore errors and continue with other projects
+                // Errors will be visible when clients sync or query project state
+                match project.engine_mut().tick(delta_ms) {
+                    Ok(()) => {
+                        log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "LpServer::tick: Project {} tick error: {:?}",
+                            project.name(),
+                            e
+                        );
+                    }
+                }
+            } else {
+                log::warn!(
+                    "LpServer::tick: Project handle {} not found",
+                    handle.as_i32()
+                );
+            }
+        }
+
+        // Log frame IDs after ticking (for debugging frame synchronization)
+        for (handle, _) in &project_info {
+            if let Some(project) = self.project_manager.get_project(*handle) {
+                log::debug!(
+                    "LpServer::tick: Project {} revision: {}",
+                    project.name(),
+                    project.engine().revision().as_i64()
+                );
+            }
+        }
+
+        // Process incoming messages AFTER ticking projects.
+        // This ensures project read requests see the current frame's data.
+        let mut responses = Vec::new();
+        for message in incoming {
+            match message {
+                WireMessage::Client(client_msg) => {
+                    // Process client message and generate response
+                    let theoretical_fps = self.theoretical_fps();
+                    let msg_id = client_msg.id;
+                    match handlers::handle_client_message(
+                        &mut self.project_manager,
+                        &mut *self.base_fs,
+                        &self.output_provider,
+                        self.memory_stats.as_ref(),
+                        self.time_provider.clone(),
+                        self.graphics.clone(),
+                        client_msg,
+                        theoretical_fps,
+                    ) {
+                        Ok(response) => {
+                            responses.push(WireMessage::Server(response));
+                        }
+                        Err(e) => {
+                            // Send error response for this message
+                            responses.push(WireMessage::Server(WireServerMessage {
+                                id: msg_id,
+                                msg: lpc_wire::server::ServerMsgBody::Error {
+                                    error: format!("{e}"),
+                                },
+                            }));
+                        }
+                    }
+                }
+                WireMessage::Server(_) => {
+                    // Server messages shouldn't be sent to the server
+                    // Log or ignore
+                    return Err(ServerError::Core(
+                        "Received server message on server side".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(responses)
+    }
+
+    /// Tick projects and send incoming-message responses through a transport.
+    ///
+    /// This avoids materializing large project-read responses before transport
+    /// serialization. Simple transports may still fall back to an in-memory
+    /// implementation internally, but firmware transports can stream directly.
+    pub async fn tick_and_send<T: ServerTransport>(
+        &mut self,
+        delta_ms: u32,
+        incoming: Vec<WireMessage>,
+        transport: &mut T,
+    ) -> Result<usize, ServerError> {
+        self.tick(delta_ms, Vec::new())?;
+
+        let mut response_count = 0usize;
+        for message in incoming {
+            match message {
+                WireMessage::Client(client_msg) => {
+                    let msg_id = client_msg.id;
+                    match client_msg.msg {
+                        ClientRequest::ProjectRequest {
+                            handle,
+                            request: WireProjectRequest::Read(request),
+                        } => {
+                            let Some(project) = self.project_manager.get_project(handle) else {
+                                transport
+                                    .send(WireServerMessage {
+                                        id: msg_id,
+                                        msg: lpc_wire::server::ServerMsgBody::Error {
+                                            error: format!(
+                                                "{}",
+                                                ServerError::ProjectNotFound(format!(
+                                                    "handle {}",
+                                                    handle.id()
+                                                ))
+                                            ),
+                                        },
+                                    })
+                                    .await
+                                    .map_err(|error| ServerError::Core(format!("{error}")))?;
+                                response_count += 1;
+                                continue;
+                            };
+                            transport
+                                .send_project_read(msg_id, handle, project.engine(), request)
+                                .await
+                                .map_err(|error| ServerError::Core(format!("{error}")))?;
+                            response_count += 1;
+                        }
+                        msg => {
+                            let theoretical_fps = self.theoretical_fps();
+                            let response = handlers::handle_client_message(
+                                &mut self.project_manager,
+                                &mut *self.base_fs,
+                                &self.output_provider,
+                                self.memory_stats.as_ref(),
+                                self.time_provider.clone(),
+                                self.graphics.clone(),
+                                lpc_wire::ClientMessage { id: msg_id, msg },
+                                theoretical_fps,
+                            )?;
+                            transport
+                                .send(response)
+                                .await
+                                .map_err(|error| ServerError::Core(format!("{error}")))?;
+                            response_count += 1;
+                        }
+                    }
+                }
+                WireMessage::Server(_) => {
+                    return Err(ServerError::Core(
+                        "Received server message on server side".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(response_count)
+    }
+
+    /// Get a reference to the base filesystem
+    pub fn base_fs(&self) -> &dyn LpFs {
+        &*self.base_fs
+    }
+
+    /// Get a reference to the project manager
+    pub fn project_manager(&self) -> &ProjectManager {
+        &self.project_manager
+    }
+
+    /// Get a mutable reference to the project manager
+    pub fn project_manager_mut(&mut self) -> &mut ProjectManager {
+        &mut self.project_manager
+    }
+
+    /// Get a mutable reference to the base filesystem
+    ///
+    /// This is primarily for testing purposes where we need mutable access
+    /// to load projects.
+    pub fn base_fs_mut(&mut self) -> &mut dyn LpFs {
+        &mut *self.base_fs
+    }
+
+    /// Get the output provider (for loading projects)
+    pub fn output_provider(&self) -> &Rc<RefCell<dyn OutputProvider>> {
+        &self.output_provider
+    }
+
+    /// Get the memory stats callback
+    pub fn memory_stats(&self) -> Option<MemoryStatsFn> {
+        self.memory_stats
+    }
+
+    /// Load a project (internal use, e.g. boot auto-load).
+    ///
+    /// Avoids multiple borrows when caller needs to pass base_fs, output_provider, etc.
+    pub fn load_project(
+        &mut self,
+        path: &lpfs::lp_path::LpPath,
+    ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
+        self.project_manager.load_project(
+            path,
+            &mut *self.base_fs,
+            self.output_provider.clone(),
+            self.memory_stats,
+            self.time_provider.clone(),
+            self.graphics.clone(),
+        )
+    }
+
+    /// Set the last frame processing time (called by server loop)
+    ///
+    /// # Arguments
+    ///
+    /// * `time_us` - Frame processing time in microseconds
+    pub fn set_last_frame_time(&self, time_us: u64) {
+        *self.last_frame_time_us.borrow_mut() = Some(time_us);
+    }
+
+    /// Get the last frame processing time in microseconds
+    ///
+    /// Returns `None` if no frame has been processed yet.
+    pub fn last_frame_time_us(&self) -> Option<u64> {
+        *self.last_frame_time_us.borrow()
+    }
+
+    /// Get theoretical FPS based on last frame processing time
+    ///
+    /// Returns `None` if no frame has been processed yet.
+    /// Returns theoretical FPS as `1000000.0 / frame_time_us`.
+    pub fn theoretical_fps(&self) -> Option<f32> {
+        self.last_frame_time_us()
+            .map(|time_us| 1_000_000.0 / time_us as f32)
+    }
+}

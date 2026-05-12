@@ -4,7 +4,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 /// One step in a value path (`obj.things[2].prop`)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum LpsPathSeg {
     Field(String),
     Index(usize),
@@ -169,5 +170,21 @@ mod tests {
     #[test]
     fn parse_leading_index() {
         assert_eq!(parse_path("[2]").unwrap(), vec![LpsPathSeg::Index(2)]);
+    }
+
+    #[test]
+    fn lps_path_seg_field_roundtrip() {
+        let original = LpsPathSeg::Field(String::from("foo"));
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: LpsPathSeg = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn lps_path_seg_index_roundtrip() {
+        let original = LpsPathSeg::Index(3);
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: LpsPathSeg = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, decoded);
     }
 }
