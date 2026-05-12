@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 
 use crate::client::LpClient;
 use eframe::egui;
+use lpc_model::Revision;
 use lpc_view::apply_project_read_response;
 use lpc_wire::{
-    ProjectReadQuery, ProjectReadRequest, ReadLevel, ResourcePayloadRead, ResourceReadQuery,
-    WireProjectHandle as ProjectHandle,
+    NodeReadQuery, NodeReadSelection, ProjectReadQuery, ProjectReadRequest, ReadLevel,
+    ResourcePayloadRead, ResourceReadQuery, WireProjectHandle as ProjectHandle,
 };
 
 use super::inspector::{InspectorSelection, render_debug_inspector};
@@ -80,38 +81,66 @@ impl DebugUiState {
 
         self.last_poll = Instant::now();
         self.poll_in_flight = true;
-        let selected_resource = match self.selected {
-            Some(InspectorSelection::Resource(resource_ref)) => Some(resource_ref),
-            _ => None,
-        };
+        let (since, needs_slot_snapshot, selected_resource) = self.next_project_read_context();
         let client = self.async_client.clone();
         let handle = self.project_handle;
         let tx = self.response_tx.clone();
         let repaint = ctx.clone();
         self.runtime_handle.spawn(async move {
             let result = client
-                .project_read(handle, debug_ui_project_read(selected_resource))
+                .project_read(
+                    handle,
+                    debug_ui_project_read(since, needs_slot_snapshot, selected_resource),
+                )
                 .await
                 .map_err(|error| error.to_string());
             let _ = tx.send(result);
             repaint.request_repaint();
         });
     }
+
+    fn next_project_read_context(
+        &self,
+    ) -> (Option<Revision>, bool, Option<lpc_model::ResourceRef>) {
+        let selected_resource = match self.selected {
+            Some(InspectorSelection::Resource(resource_ref)) => Some(resource_ref),
+            _ => None,
+        };
+        let Ok(view) = self.project_view.lock() else {
+            return (None, true, selected_resource);
+        };
+        let since = (view.revision != Revision::default()).then_some(view.revision);
+        let needs_slot_snapshot = view.slots.roots.is_empty();
+        (since, needs_slot_snapshot, selected_resource)
+    }
 }
 
-fn debug_ui_project_read(selected_resource: Option<lpc_model::ResourceRef>) -> ProjectReadRequest {
-    let mut request = ProjectReadRequest::default_debug(None);
-    for query in &mut request.queries {
-        if matches!(query, ProjectReadQuery::Resources(_)) {
-            *query = ProjectReadQuery::Resources(ResourceReadQuery {
-                level: ReadLevel::Detail,
+fn debug_ui_project_read(
+    since: Option<Revision>,
+    include_slots: bool,
+    selected_resource: Option<lpc_model::ResourceRef>,
+) -> ProjectReadRequest {
+    ProjectReadRequest {
+        since,
+        queries: Vec::from([
+            ProjectReadQuery::Nodes(NodeReadQuery {
+                level: if include_slots {
+                    ReadLevel::Detail
+                } else {
+                    ReadLevel::Summary
+                },
+                nodes: NodeReadSelection::All,
+                include_slots,
+            }),
+            ProjectReadQuery::Resources(ResourceReadQuery {
+                level: ReadLevel::Summary,
                 payloads: selected_resource.map_or(ResourcePayloadRead::None, |resource_ref| {
                     ResourcePayloadRead::ByRefs(Vec::from([resource_ref]))
                 }),
-            });
-        }
+            }),
+        ]),
+        probes: Vec::new(),
     }
-    request
 }
 
 impl eframe::App for DebugUiState {
