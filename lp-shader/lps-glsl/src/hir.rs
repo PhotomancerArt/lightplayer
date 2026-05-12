@@ -178,7 +178,7 @@ pub enum HirExprKind {
         value: Box<HirExpr>,
     },
     IncDec {
-        local: usize,
+        target: HirAssignTarget,
         op: IncDecOp,
         prefix: bool,
     },
@@ -810,22 +810,23 @@ impl<'a> TypeCtx<'a> {
                     },
                 })
             }
-            ParsedExprKind::IncDec { name, op, prefix } => {
-                let local = self.resolve_local(name).ok_or_else(|| {
-                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                })?;
-                let ty = self.locals[local].ty.clone();
-                if !matches!(ty, LpsType::Float | LpsType::Int | LpsType::UInt) {
+            ParsedExprKind::IncDec { target, op, prefix } => {
+                let target = self.type_assign_target(target)?;
+                let ty = target.ty().clone();
+                if !matches!(
+                    scalar_base_type(&ty),
+                    Some(LpsType::Float | LpsType::Int | LpsType::UInt)
+                ) {
                     return Err(Diagnostic::error(
                         expr.span,
-                        "increment/decrement requires scalar numeric local",
+                        "increment/decrement requires numeric local",
                     ));
                 }
                 Ok(HirExpr {
                     span: expr.span,
                     ty,
                     kind: HirExprKind::IncDec {
-                        local,
+                        target,
                         op: *op,
                         prefix: *prefix,
                     },

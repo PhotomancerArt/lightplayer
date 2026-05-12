@@ -110,7 +110,7 @@ pub enum ParsedExprKind {
         value: alloc::boxed::Box<ParsedExpr>,
     },
     IncDec {
-        name: String,
+        target: alloc::boxed::Box<ParsedExpr>,
         op: IncDecOp,
         prefix: bool,
     },

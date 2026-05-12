@@ -372,11 +372,14 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             } else {
                 IncDecOp::Decrement
             };
-            let name_tok = self.expect_identifier_like()?;
+            let target = self.parse_postfix()?;
+            if !is_assignment_target(&target) {
+                return Err(Diagnostic::error(target.span, "invalid increment target"));
+            }
             return Ok(ParsedExpr {
-                span: Span::new(op_tok.span.start, self.previous().span.end),
+                span: Span::new(op_tok.span.start, target.span.end),
                 kind: ParsedExprKind::IncDec {
-                    name: name_tok.to_string(),
+                    target: alloc::boxed::Box::new(target),
                     op,
                     prefix: true,
                 },
@@ -453,10 +456,9 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 continue;
             }
             if self.at_punct("++") || self.at_punct("--") {
-                let ParsedExprKind::Name(name) = &expr.kind else {
+                if !is_assignment_target(&expr) {
                     return Err(Diagnostic::error(expr.span, "invalid increment target"));
-                };
-                let name = name.clone();
+                }
                 let op_tok = self.bump();
                 let op = if op_tok.lexeme(self.source) == "++" {
                     IncDecOp::Increment
@@ -466,7 +468,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 expr = ParsedExpr {
                     span: Span::new(expr.span.start, op_tok.span.end),
                     kind: ParsedExprKind::IncDec {
-                        name,
+                        target: alloc::boxed::Box::new(expr),
                         op,
                         prefix: false,
                     },
