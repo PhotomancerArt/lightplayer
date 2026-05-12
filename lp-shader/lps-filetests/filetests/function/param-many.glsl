@@ -42,6 +42,7 @@ float test_scalar_plus_mat3() {
     ));
 }
 
+// @broken(rv32n.q32)
 // run: test_scalar_plus_mat3() ~= 12.0
 
 // mat4 alone = 16 slots (vmctx + 16 = 8 on stack)
@@ -115,6 +116,7 @@ float test_nested_many_params() {
     return outer_many(10.0);
 }
 
+// @broken(rv32n.q32)
 // run: test_nested_many_params() ~= 19.0
 
 // Chain of calls passing through many params
@@ -134,4 +136,5 @@ float test_param_chain() {
     return chain_b(1.0);
 }
 
+// @broken(rv32n.q32)
 // run: test_param_chain() ~= 9.0

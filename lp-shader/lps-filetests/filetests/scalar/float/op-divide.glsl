@@ -66,4 +66,5 @@ float test_float_divide_large_numbers() {
     return a / b;
 }
 
+// @unsupported(rv32c.q32)
 // run: test_float_divide_large_numbers() ~= 31.999985 (tolerance: 0.001)

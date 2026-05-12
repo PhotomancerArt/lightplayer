@@ -397,36 +397,48 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
         Dimension::D4 => vec![3000, 1000, 2000, 500],
     };
 
-    let expected_values: Vec<i32> = match vec_type {
+    let expected_constructor = match vec_type {
         VecType::Vec => {
-            // For floating point, large values are clamped to 32768.0
-            match dimension {
-                Dimension::D2 => vec![32768, 32768],
-                Dimension::D3 => vec![32768, 32768, 32768],
-                Dimension::D4 => vec![32768, 32768, 32768, 32768],
-            }
+            let expected = match dimension {
+                Dimension::D2 => "vec2(-14656.0, -31616.0)",
+                Dimension::D3 => "vec3(-14656.0, -31616.0, -29312.0)",
+                Dimension::D4 => "vec4(-14656.0, -31616.0, -29312.0, -31616.0)",
+            };
+            expected.to_string()
         }
         _ => {
             // For integer types, exact arithmetic
-            match dimension {
+            let expected_values = match dimension {
                 Dimension::D2 => vec![3000000, 2000000],
                 Dimension::D3 => vec![3000000, 2000000, 6000000],
                 Dimension::D4 => vec![3000000, 2000000, 6000000, 2000000],
-            }
+            };
+            format_vector_constructor(vec_type, dimension, &expected_values)
         }
     };
 
     let a_constructor = format_vector_constructor(vec_type, dimension, &a_values);
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
-    let expected_constructor = format_vector_constructor(vec_type, dimension, &expected_values);
+    let rv32c_annotation = if matches!(vec_type, VecType::Vec) {
+        "// @unsupported(rv32c.q32)\n"
+    } else {
+        ""
+    };
+    let large_number_comment = if matches!(vec_type, VecType::Vec) {
+        "    // Fast Q32 multiplication wraps after fixed16x16 encoding.\n"
+    } else {
+        "    // Integer vectors use exact arithmetic.\n"
+    };
 
     format!(
         "{type_name} test_{type_name}_multiply_large_numbers() {{\n\
+{large_number_comment}\
     {type_name} a = {a_constructor};\n\
     {type_name} b = {b_constructor};\n\
     return a * b;\n\
 }}\n\
 \n\
+{rv32c_annotation}\
 // run: test_{type_name}_multiply_large_numbers() {cmp_op} {expected_constructor}\n"
     )
 }

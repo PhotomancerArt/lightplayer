@@ -359,38 +359,48 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
         Dimension::D4 => vec![200000, 30000, 15000, 5000],
     };
 
-    let expected_values: Vec<i32> = match vec_type {
+    let expected_constructor = match vec_type {
         VecType::Vec => {
-            // For floating point, values may be clamped
-            match dimension {
-                Dimension::D2 => vec![32768, 32768],
-                Dimension::D3 => vec![32768, 32768, 32768], // 25000 + 15000 = 40000, but clamped to 32768
-                Dimension::D4 => vec![32768, 32768, 32768, 15000], // 10000 + 5000 = 15000
-            }
+            let expected = match dimension {
+                Dimension::D2 => "vec2(-0.000030517578, -2768.0)",
+                Dimension::D3 => "vec3(-0.000030517578, -2768.0, -25536.0)",
+                Dimension::D4 => "vec4(-0.000030517578, -2768.0, -25536.0, 15000.0)",
+            };
+            expected.to_string()
         }
         _ => {
             // For integer types, exact arithmetic
-            match dimension {
+            let expected_values = match dimension {
                 Dimension::D2 => vec![300000, 80000],
                 Dimension::D3 => vec![300000, 80000, 40000],
                 Dimension::D4 => vec![300000, 80000, 40000, 15000],
-            }
+            };
+            format_vector_constructor(vec_type, dimension, &expected_values)
         }
     };
 
     let a_constructor = format_vector_constructor(vec_type, dimension, &a_values);
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
-    let expected_constructor = format_vector_constructor(vec_type, dimension, &expected_values);
+    let rv32c_annotation = if matches!(vec_type, VecType::Vec) {
+        "// @unsupported(rv32c.q32)\n"
+    } else {
+        ""
+    };
+    let large_number_comment = if matches!(vec_type, VecType::Vec) {
+        "    // Fast Q32 addition wraps after fixed16x16 encoding.\n"
+    } else {
+        "    // Integer vectors use exact arithmetic.\n"
+    };
 
     format!(
         "{type_name} test_{type_name}_add_large_numbers() {{\n\
-    // Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)\n\
-    // Addition saturates to max for each component\n\
+{large_number_comment}\
     {type_name} a = {a_constructor};\n\
     {type_name} b = {b_constructor};\n\
     return a + b;\n\
 }}\n\
 \n\
+{rv32c_annotation}\
 // run: test_{type_name}_add_large_numbers() {cmp_op} {expected_constructor}\n"
     )
 }

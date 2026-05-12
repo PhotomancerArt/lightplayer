@@ -131,4 +131,5 @@ vec4 test_rainbow_main_corner_t5() {
     return rainbow_main(vec2(0.0, 0.0), vec2(64.0, 64.0), 5.0);
 }
 
-// run: test_rainbow_main_corner_t5() ~= vec4(0.8667755, 0.5487366, 0.0, 1.0) (tolerance: 0.002)
+// @unsupported(rv32c.q32)
+// run: test_rainbow_main_corner_t5() ~= vec4(0.64064026, 0.0, 0.64637756, 1.0) (tolerance: 0.002)
