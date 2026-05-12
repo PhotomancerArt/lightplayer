@@ -13,7 +13,7 @@ use lps_shared::{LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f3
 use lpvm::{
     CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
     encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
-    q32_to_lps_value_f32, validate_render_texture_sig_ir,
+    q32_to_lps_value_f32, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 use lpvm_cranelift::{CompileOptions, signature_for_ir_func, signature_uses_struct_return};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_header};
@@ -41,6 +41,7 @@ pub struct NativeEmuInstance {
     /// Size of globals region in bytes
     pub(crate) globals_size: usize,
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
+    pub(crate) render_samples_cache: Option<RenderTextureEntry>,
 }
 
 impl NativeEmuInstance {
@@ -144,6 +145,36 @@ impl NativeEmuInstance {
         })?;
 
         self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            entry_pc: entry,
+        });
+        Ok(entry)
+    }
+
+    fn resolve_render_samples(&mut self, fn_name: &str) -> Result<u32, NativeError> {
+        if let Some(entry) = &self.render_samples_cache {
+            if entry.name == fn_name {
+                return Ok(entry.entry_pc);
+            }
+        }
+
+        let ir_fn = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
+        validate_render_samples_sig_ir(ir_fn).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "render-samples sig invalid: {e}"
+            )))
+        })?;
+
+        let entry = *self.module.load.symbol_map.get(fn_name).ok_or_else(|| {
+            CallError::Unsupported(format!("symbol `{fn_name}` not in linked RV32 image"))
+        })?;
+        self.render_samples_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
             entry_pc: entry,
         });
@@ -496,6 +527,53 @@ impl LpvmInstance for NativeEmuInstance {
             CycleModel::default(),
             return_ty_owned.as_ref(),
         )?;
+        Ok(())
+    }
+
+    fn call_render_samples(
+        &mut self,
+        fn_name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
+        self.refresh_vmctx_header();
+
+        if self.module.options.float_mode != FloatMode::Q32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeEmuInstance::call_render_samples requires FloatMode::Q32",
+            ))));
+        }
+
+        let entry = self.resolve_render_samples(fn_name)?;
+        let ir_func = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(fn_name.into())))?
+            .clone();
+
+        let points_offset = i32::try_from(points.guest_base()).map_err(|_| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "points guest base {:#x} exceeds i32 range",
+                points.guest_base()
+            )))
+        })?;
+        let out_offset = i32::try_from(out.guest_base()).map_err(|_| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "sample output guest base {:#x} exceeds i32 range",
+                out.guest_base()
+            )))
+        })?;
+        let vmctx = self.vmctx_guest as i32;
+        let full = [vmctx, points_offset, out_offset, count as i32];
+        self.run_emulator_call(&ir_func, entry, &full, CycleModel::default(), None)?;
         Ok(())
     }
 

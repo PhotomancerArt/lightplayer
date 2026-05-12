@@ -175,6 +175,7 @@ vec4 render(vec2 pos) {
             height: 16,
         }),
         bindings: fixture_binding_defs(),
+        sampling: lpc_model::FixtureSamplingConfig::TextureArea,
         mapping: MappingConfig::path_points(MapSlot::default(), 2.0),
         color_order: ValueSlot::new(ColorOrder::Rgb),
         transform: Affine2dSlot::new(Affine2d::identity()),

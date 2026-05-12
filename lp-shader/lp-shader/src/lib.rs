@@ -18,6 +18,7 @@ mod engine;
 mod error;
 mod px_shader;
 mod runtime_texture_validation;
+mod sample_buf;
 pub mod synth;
 mod texture_buf;
 mod texture_interface;
@@ -28,6 +29,7 @@ pub use error::LpsError;
 pub use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue};
 pub use lpvm::AllocError;
 pub use px_shader::LpsPxShader;
+pub use sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 pub use texture_buf::LpsTextureBuf;
 
 pub use lps_shared::{

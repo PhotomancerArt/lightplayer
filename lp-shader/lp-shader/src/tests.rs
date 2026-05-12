@@ -268,6 +268,35 @@ fn render_frame_no_uniforms() {
 }
 
 #[test]
+fn render_samples_no_uniforms_writes_rgba16_points() {
+    let engine = test_engine();
+    let glsl = "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.25, 1.0); }";
+    let shader = engine
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+        )
+        .expect("compile_px");
+    let mut points = engine.alloc_sample_points(2).expect("points");
+    points.data_mut().copy_from_slice(&[0, 0, 32768, 65536]);
+    let mut out = engine.alloc_sample_rgba16(2).expect("out");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![],
+    };
+    shader
+        .sample_points_rgba16(&uniforms, &mut points, &mut out)
+        .expect("sample");
+
+    assert_eq!(&out.data()[0..4], &[0, 0, 16384, 65535]);
+    assert_eq!(out.data()[4], 32768);
+    assert_eq!(out.data()[5], 65535);
+    assert_eq!(out.data()[6], 16384);
+    assert_eq!(out.data()[7], 65535);
+}
+
+#[test]
 fn render_frame_sets_uniforms() {
     let engine = test_engine();
     let glsl = "layout(binding = 0) uniform float u_time;

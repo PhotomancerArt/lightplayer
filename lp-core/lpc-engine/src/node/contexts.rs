@@ -12,7 +12,10 @@ use crate::gfx::LpGraphics;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
-use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{
+    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
+    VisualSampleTarget,
+};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
     FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
@@ -304,6 +307,15 @@ impl<'a> ControlRenderContext<'a> {
     ) -> Result<(), NodeError> {
         self.services.render_texture_into(product, request, target)
     }
+
+    pub fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError> {
+        self.services.sample_visual_into(product, request, target)
+    }
 }
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
@@ -319,6 +331,13 @@ pub trait ControlRenderServices {
         product: VisualProduct,
         request: &RenderTextureRequest,
         target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError>;
+
+    fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
     ) -> Result<(), NodeError>;
 }
 

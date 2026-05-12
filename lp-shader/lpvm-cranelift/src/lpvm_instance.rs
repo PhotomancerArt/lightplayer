@@ -12,7 +12,8 @@ use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
     CallError, LpsValueF32, LpvmBuffer, LpvmInstance, LpvmModule, VmContext, decode_q32_return,
     encode_uniform_write, encode_uniform_write_q32, flat_q32_words_from_f32_args,
-    glsl_component_count, q32_to_lps_value_f32, validate_render_texture_sig_ir,
+    glsl_component_count, q32_to_lps_value_f32, validate_render_samples_sig_ir,
+    validate_render_texture_sig_ir,
 };
 
 use crate::lpvm_module::CraneliftModule;
@@ -55,6 +56,7 @@ pub struct CraneliftInstance {
     /// Size of globals region in bytes
     globals_size: usize,
     render_texture_cache: Option<RenderTextureEntry>,
+    render_samples_cache: Option<RenderTextureEntry>,
 }
 
 impl CraneliftInstance {
@@ -79,6 +81,7 @@ impl CraneliftInstance {
             snapshot_offset,
             globals_size,
             render_texture_cache: None,
+            render_samples_cache: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot
@@ -182,6 +185,40 @@ impl CraneliftInstance {
         })?;
 
         self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            code,
+        });
+        Ok(code)
+    }
+
+    fn resolve_render_samples(&mut self, fn_name: &str) -> Result<*const u8, InstanceError> {
+        if let Some(entry) = &self.render_samples_cache {
+            if entry.name == fn_name {
+                return Ok(entry.code);
+            }
+        }
+
+        let ir_fn = self
+            .module
+            .lpir_module()
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| {
+                InstanceError::Call(CallError::MissingMetadata(String::from(fn_name)))
+            })?;
+        validate_render_samples_sig_ir(ir_fn).map_err(|e| {
+            InstanceError::Call(CallError::Unsupported(format!(
+                "render-samples sig invalid: {e}"
+            )))
+        })?;
+
+        let code = self.module.code_ptr(fn_name).ok_or_else(|| {
+            InstanceError::Call(CallError::Unsupported(format!(
+                "symbol `{fn_name}` not in cranelift module"
+            )))
+        })?;
+        self.render_samples_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
             code,
         });
@@ -384,6 +421,34 @@ impl LpvmInstance for CraneliftInstance {
             type RenderFn = extern "C" fn(usize, *mut u8, i32, i32);
             let f: RenderFn = core::mem::transmute(code);
             f(vmctx, tex_ptr, width as i32, height as i32);
+        }
+        Ok(())
+    }
+
+    fn call_render_samples(
+        &mut self,
+        fn_name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        if self.module.float_mode() != FloatMode::Q32 {
+            return Err(InstanceError::Unsupported(
+                "CraneliftInstance::call_render_samples requires FloatMode::Q32",
+            ));
+        }
+
+        let code = self.resolve_render_samples(fn_name)?;
+        let vmctx = self.vmctx_ptr() as usize;
+        let points_ptr = points.native_ptr();
+        let out_ptr = out.native_ptr();
+
+        unsafe {
+            type RenderFn = extern "C" fn(usize, *mut u8, *mut u8, i32);
+            let f: RenderFn = core::mem::transmute(code);
+            f(vmctx, points_ptr, out_ptr, count as i32);
         }
         Ok(())
     }

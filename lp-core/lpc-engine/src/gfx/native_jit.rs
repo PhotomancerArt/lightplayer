@@ -73,6 +73,30 @@ impl LpGraphics for Graphics {
     fn free_output_buffer(&self, buffer: LpsTextureBuf) {
         self.engine.free_texture(buffer);
     }
+
+    fn alloc_sample_points(&self, count: u32) -> Result<lp_shader::LpsSamplePointBuf, Error> {
+        self.engine
+            .alloc_sample_points(count)
+            .map_err(|e| Error::Other {
+                message: format!("alloc sample points: {e:?}"),
+            })
+    }
+
+    fn alloc_sample_rgba16(&self, count: u32) -> Result<lp_shader::LpsSampleRgba16Buf, Error> {
+        self.engine
+            .alloc_sample_rgba16(count)
+            .map_err(|e| Error::Other {
+                message: format!("alloc sample rgba16: {e:?}"),
+            })
+    }
+
+    fn free_sample_points(&self, buffer: lp_shader::LpsSamplePointBuf) {
+        self.engine.free_sample_points(buffer);
+    }
+
+    fn free_sample_rgba16(&self, buffer: lp_shader::LpsSampleRgba16Buf) {
+        self.engine.free_sample_rgba16(buffer);
+    }
 }
 
 struct NativeJitShader {
@@ -86,6 +110,20 @@ impl LpShader for NativeJitShader {
             .render_frame(&uniforms, buf)
             .map_err(|e| Error::Other {
                 message: format!("render_frame: {e}"),
+            })
+    }
+
+    fn sample_rgba16(
+        &mut self,
+        points: &mut lp_shader::LpsSamplePointBuf,
+        out: &mut lp_shader::LpsSampleRgba16Buf,
+        time: f32,
+    ) -> Result<(), Error> {
+        let uniforms = build_uniforms(1, points.count(), time);
+        self.px
+            .sample_points_rgba16(&uniforms, points, out)
+            .map_err(|e| Error::Other {
+                message: format!("sample_points_rgba16: {e}"),
             })
     }
 

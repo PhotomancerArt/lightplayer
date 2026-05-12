@@ -17,6 +17,7 @@ use crate::node::{
     TickContext,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -299,6 +300,32 @@ impl RenderNode for ShaderNode {
             .render(target, request.time_seconds)
             .map_err(|e| NodeError::msg(format!("shader render: {e}")))
     }
+
+    fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        validate_shader_visual_product(self.node_id, product)?;
+        if target.samples.count() != request.points.count() {
+            return Err(NodeError::msg(format!(
+                "shader sample target count {} does not match request count {}",
+                target.samples.count(),
+                request.points.count()
+            )));
+        }
+
+        self.ensure_compiled(ctx)?;
+        let shader = self
+            .shader
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+        shader
+            .sample_rgba16(request.points, target.samples, request.time_seconds)
+            .map_err(|e| NodeError::msg(format!("shader sample: {e}")))
+    }
 }
 
 fn validate_shader_visual_product(
@@ -493,7 +520,11 @@ mod tests {
             )
             .expect("render texture");
         let batch = VisualSampleBatch {
-            points: vec![VisualSamplePoint { x: 4, y: 4 }],
+            points: vec![VisualSamplePoint {
+                x_q16: 32768,
+                y_q16: 32768,
+            }],
+            time_seconds: 0.5,
         };
         let sample = texture.sample_batch(&batch);
         assert!(sample.samples[0].rgba_unorm16[0] > 26_000);
@@ -575,6 +606,22 @@ mod tests {
 
         fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf) {
             self.inner.free_output_buffer(buffer);
+        }
+
+        fn alloc_sample_points(&self, count: u32) -> Result<lp_shader::LpsSamplePointBuf, Error> {
+            self.inner.alloc_sample_points(count)
+        }
+
+        fn alloc_sample_rgba16(&self, count: u32) -> Result<lp_shader::LpsSampleRgba16Buf, Error> {
+            self.inner.alloc_sample_rgba16(count)
+        }
+
+        fn free_sample_points(&self, buffer: lp_shader::LpsSamplePointBuf) {
+            self.inner.free_sample_points(buffer);
+        }
+
+        fn free_sample_rgba16(&self, buffer: lp_shader::LpsSampleRgba16Buf) {
+            self.inner.free_sample_rgba16(buffer);
         }
     }
 

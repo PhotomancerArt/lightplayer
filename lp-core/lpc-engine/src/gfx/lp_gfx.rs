@@ -30,4 +30,12 @@ pub trait LpGraphics: Send + Sync {
     /// but native embedded backends return this memory to the heap. Product
     /// materialization paths must call this for short-lived render targets.
     fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf);
+
+    fn alloc_sample_points(&self, count: u32) -> Result<lp_shader::LpsSamplePointBuf, Error>;
+
+    fn alloc_sample_rgba16(&self, count: u32) -> Result<lp_shader::LpsSampleRgba16Buf, Error>;
+
+    fn free_sample_points(&self, buffer: lp_shader::LpsSamplePointBuf);
+
+    fn free_sample_rgba16(&self, buffer: lp_shader::LpsSampleRgba16Buf);
 }

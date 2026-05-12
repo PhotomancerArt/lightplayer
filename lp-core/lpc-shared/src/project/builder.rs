@@ -387,6 +387,7 @@ impl FixtureBuilder {
                 height: 16,
             }),
             bindings: fixture_binding_defs(texture_loc),
+            sampling: lpc_model::FixtureSamplingConfig::TextureArea,
             mapping: self.mapping,
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),

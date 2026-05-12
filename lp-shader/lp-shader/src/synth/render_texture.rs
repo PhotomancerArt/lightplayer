@@ -219,7 +219,7 @@ fn module_globals_mutated(_module: &LpirModule) -> bool {
     true
 }
 
-fn emit_globals_reset(fb: &mut FunctionBuilder, meta: &LpsModuleSig) {
+pub(crate) fn emit_globals_reset(fb: &mut FunctionBuilder, meta: &LpsModuleSig) {
     let globals_addr = fb.alloc_vreg(IrType::I32);
     fb.push(LpirOp::IaddImm {
         dst: globals_addr,
@@ -240,7 +240,7 @@ fn emit_globals_reset(fb: &mut FunctionBuilder, meta: &LpsModuleSig) {
     });
 }
 
-fn append_local_function(module: &mut LpirModule, func: IrFunction) {
+pub(crate) fn append_local_function(module: &mut LpirModule, func: IrFunction) {
     let next_id = module
         .functions
         .keys()

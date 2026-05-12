@@ -100,9 +100,33 @@ pub fn validate_render_texture_sig_ir(ir: &IrFunction) -> Result<(), &'static st
     Ok(())
 }
 
+/// Verify an [`IrFunction`] has the shape required by [`LpvmInstance::call_render_samples`]:
+/// `(Pointer, Pointer, I32) -> ()` in LPIR, with implicit vmctx in vreg 0.
+pub fn validate_render_samples_sig_ir(ir: &IrFunction) -> Result<(), &'static str> {
+    if !ir.return_types.is_empty() {
+        return Err("render-samples function must return void");
+    }
+    if ir.param_count != 3 {
+        return Err("render-samples function must take 3 parameters");
+    }
+    let p0 = ir.vreg_types.get(1).copied();
+    let p1 = ir.vreg_types.get(2).copied();
+    let p2 = ir.vreg_types.get(3).copied();
+    if p0 != Some(IrType::Pointer) {
+        return Err("render-samples param 0 must be Pointer");
+    }
+    if p1 != Some(IrType::Pointer) {
+        return Err("render-samples param 1 must be Pointer");
+    }
+    if p2 != Some(IrType::I32) {
+        return Err("render-samples param 2 must be I32 count");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod validate_render_texture_tests {
-    use super::validate_render_texture_sig_ir;
+    use super::{validate_render_samples_sig_ir, validate_render_texture_sig_ir};
     use lpir::IrType;
     use lpir::builder::FunctionBuilder;
 
@@ -149,5 +173,38 @@ mod validate_render_texture_tests {
     fn validate_render_texture_sig_ir_rejects_non_pointer_first_param() {
         let f = make_ir_fn_with_param_types("bad", &[IrType::I32, IrType::I32, IrType::I32], &[]);
         assert!(validate_render_texture_sig_ir(&f).is_err());
+    }
+
+    #[test]
+    fn validate_render_samples_sig_ir_accepts_expected() {
+        let f = make_ir_fn_with_param_types(
+            "__render_samples_rgba16",
+            &[IrType::Pointer, IrType::Pointer, IrType::I32],
+            &[],
+        );
+        assert!(validate_render_samples_sig_ir(&f).is_ok());
+    }
+
+    #[test]
+    fn validate_render_samples_sig_ir_rejects_wrong_return() {
+        let f = make_ir_fn_with_param_types(
+            "bad",
+            &[IrType::Pointer, IrType::Pointer, IrType::I32],
+            &[IrType::I32],
+        );
+        assert!(validate_render_samples_sig_ir(&f).is_err());
+    }
+
+    #[test]
+    fn validate_render_samples_sig_ir_rejects_wrong_arity() {
+        let f = make_ir_fn_with_param_types("bad", &[IrType::Pointer, IrType::Pointer], &[]);
+        assert!(validate_render_samples_sig_ir(&f).is_err());
+    }
+
+    #[test]
+    fn validate_render_samples_sig_ir_rejects_non_pointer_output_param() {
+        let f =
+            make_ir_fn_with_param_types("bad", &[IrType::Pointer, IrType::I32, IrType::I32], &[]);
+        assert!(validate_render_samples_sig_ir(&f).is_err());
     }
 }

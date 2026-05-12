@@ -2,7 +2,10 @@
 
 use lps_shared::TextureBuffer;
 
-use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{
+    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
+    VisualSampleTarget,
+};
 
 use super::{NodeError, RenderContext};
 
@@ -43,5 +46,18 @@ pub trait RenderNode {
         }
         target.data_mut().copy_from_slice(bytes);
         Ok(())
+    }
+
+    /// Sample a visual product at caller-provided points into caller-owned RGBA16 storage.
+    fn sample_visual_into(
+        &mut self,
+        _product: VisualProduct,
+        _request: VisualSampleBufferRequest<'_>,
+        _target: VisualSampleTarget<'_>,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        Err(NodeError::msg(
+            "render node does not support direct sampling",
+        ))
     }
 }

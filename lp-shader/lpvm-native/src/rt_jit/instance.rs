@@ -9,7 +9,7 @@ use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF3
 use lpvm::{
     CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
     encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
-    q32_to_lps_value_f32, validate_render_texture_sig_ir,
+    q32_to_lps_value_f32, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 
 use crate::error::NativeError;
@@ -34,6 +34,7 @@ pub struct NativeJitInstance {
     /// Size of globals region in bytes
     pub(crate) globals_size: u32,
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
+    pub(crate) render_samples_cache: Option<RenderTextureEntry>,
 }
 
 impl NativeJitInstance {
@@ -110,6 +111,41 @@ impl NativeJitInstance {
         let entry_pc = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
 
         self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            entry_pc,
+        });
+        Ok(entry_pc)
+    }
+
+    fn resolve_render_samples(&mut self, fn_name: &str) -> Result<usize, NativeError> {
+        if let Some(entry) = &self.render_samples_cache {
+            if entry.name == fn_name {
+                return Ok(entry.entry_pc);
+            }
+        }
+
+        let ir_fn = self
+            .module
+            .inner
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
+        validate_render_samples_sig_ir(ir_fn).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "render-samples sig invalid: {e}"
+            )))
+        })?;
+
+        let entry_off = self.module.entry_offset(fn_name).ok_or_else(|| {
+            NativeError::Call(CallError::Unsupported(alloc::format!(
+                "symbol `{fn_name}` not in JIT image"
+            )))
+        })?;
+        let entry_pc = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
+
+        self.render_samples_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
             entry_pc,
         });
@@ -503,6 +539,51 @@ impl LpvmInstance for NativeJitInstance {
             let _ = (entry, vmctx, tex_offset, width, height);
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeJitInstance::call_render_texture requires riscv32 host",
+            ))));
+        }
+
+        Ok(())
+    }
+
+    fn call_render_samples(
+        &mut self,
+        fn_name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        if self.module.inner.options.float_mode != FloatMode::Q32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeJitInstance::call_render_samples requires FloatMode::Q32",
+            ))));
+        }
+
+        let entry = self.resolve_render_samples(fn_name)?;
+        let points_offset = (points.guest_base() as u32) as i32;
+        let out_offset = (out.guest_base() as u32) as i32;
+        let vmctx = self.vmctx_guest as i32;
+
+        #[cfg(target_arch = "riscv32")]
+        unsafe {
+            crate::rt_jit::call::rv32_jalr_a0_a7(
+                entry,
+                vmctx,
+                points_offset,
+                out_offset,
+                count as i32,
+                0,
+                0,
+                0,
+                0,
+            );
+        }
+        #[cfg(not(target_arch = "riscv32"))]
+        {
+            let _ = (entry, vmctx, points_offset, out_offset, count);
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeJitInstance::call_render_samples requires riscv32 host",
             ))));
         }
 
