@@ -9,3 +9,5 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }

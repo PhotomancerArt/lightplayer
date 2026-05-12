@@ -4388,6 +4388,10 @@ dependencies = [
 [[package]]
 name = "lps-glsl"
 version = "40.0.0"
+dependencies = [
+ "lpir",
+ "lps-shared",
+]
 
 [[package]]
 name = "lps-q32"

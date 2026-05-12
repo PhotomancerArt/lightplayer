@@ -1,10 +1,16 @@
+use lpir::LpirModule;
+use lps_shared::LpsModuleSig;
+
 use crate::{CompileJob, CompileStepResult, Diagnostic, TopLevelIndex};
 
 #[derive(Debug, Clone, Default)]
 pub struct CompileOptions {}
 
 #[derive(Debug, Clone)]
-pub struct CompileOutput {}
+pub struct CompileOutput {
+    pub ir: LpirModule,
+    pub meta: LpsModuleSig,
+}
 
 pub fn compile(source: &str, options: &CompileOptions) -> Result<CompileOutput, Diagnostic> {
     let mut job = CompileJob::new(source, options.clone());

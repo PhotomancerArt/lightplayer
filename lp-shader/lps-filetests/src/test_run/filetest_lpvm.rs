@@ -199,12 +199,9 @@ impl CompiledShader {
                 compiler_config.texture.texel_fetch_bounds,
             )?,
             Frontend::Lp => {
-                return match lps_glsl::compile(source, &lps_glsl::CompileOptions::default()) {
-                    Ok(_) => Err(anyhow::anyhow!(
-                        "lps-glsl LPIR output is not available in M1"
-                    )),
-                    Err(e) => Err(anyhow::anyhow!("{e}")),
-                };
+                let output = lps_glsl::compile(source, &lps_glsl::CompileOptions::default())
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                (output.ir, output.meta)
             }
         };
         lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)

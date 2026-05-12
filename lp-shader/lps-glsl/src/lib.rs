@@ -4,16 +4,20 @@
 
 extern crate alloc;
 
+mod body;
 mod compile;
 mod diagnostic;
+mod hir;
 mod index;
 mod job;
 mod lexer;
+mod lower;
 mod source;
 mod token;
 
 pub use compile::{CompileOptions, CompileOutput, compile, index_source};
 pub use diagnostic::{Diagnostic, DiagnosticSeverity};
+pub use hir::HirModule;
 pub use index::{ConstDecl, FunctionDecl, FunctionParam, TopLevelIndex, TypeRef, UniformDecl};
 pub use job::{CompileBudget, CompileJob, CompileStepResult};
 pub use lexer::lex;
@@ -104,17 +108,34 @@ mod tests {
     }
 
     #[test]
-    fn compile_job_reaches_planned_m1_error_after_indexing() {
+    fn compile_job_reaches_lpir_output_for_fast_example() {
         let mut job = CompileJob::new(EXAMPLES[0].1, CompileOptions::default());
         assert!(matches!(
             job.step(CompileBudget::single_step()),
             CompileStepResult::Pending
         ));
-        let err = match job.step(CompileBudget::single_step()) {
-            CompileStepResult::Failed(err) => err,
-            other => panic!("expected planned compile error, got {other:?}"),
+        assert!(matches!(
+            job.step(CompileBudget::single_step()),
+            CompileStepResult::Pending
+        ));
+        assert!(matches!(
+            job.step(CompileBudget::single_step()),
+            CompileStepResult::Pending
+        ));
+        let output = match job.step(CompileBudget::single_step()) {
+            CompileStepResult::Finished(output) => output,
+            other => panic!("expected compile output, got {other:?}"),
         };
-        assert!(err.message.contains("body lowering"));
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+        assert!(output.meta.uniforms_type.is_some());
         assert!(job.index().is_some());
+    }
+
+    #[test]
+    fn synchronous_compile_validates_fast_example() {
+        let output = compile(EXAMPLES[0].1, &CompileOptions::default()).expect("compile");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        assert_eq!(output.meta.functions.len(), 1);
     }
 }
