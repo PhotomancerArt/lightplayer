@@ -19,6 +19,7 @@ pub enum ParsedStmt {
     },
     Assign {
         name: String,
+        op: AssignOp,
         value: ParsedExpr,
         span: Span,
     },
@@ -26,6 +27,24 @@ pub enum ParsedStmt {
         condition: ParsedExpr,
         accept: Vec<ParsedStmt>,
         reject: Vec<ParsedStmt>,
+        span: Span,
+    },
+    While {
+        condition: ParsedExpr,
+        body: Vec<ParsedStmt>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
+    Block {
+        statements: Vec<ParsedStmt>,
+        span: Span,
+    },
+    Empty {
         span: Span,
     },
     Return(ParsedExpr),
@@ -61,11 +80,21 @@ pub enum ParsedExprKind {
         lhs: alloc::boxed::Box<ParsedExpr>,
         rhs: alloc::boxed::Box<ParsedExpr>,
     },
+    Conditional {
+        condition: alloc::boxed::Box<ParsedExpr>,
+        accept: alloc::boxed::Box<ParsedExpr>,
+        reject: alloc::boxed::Box<ParsedExpr>,
+    },
+    Assign {
+        name: String,
+        value: alloc::boxed::Box<ParsedExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
+    Not,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,12 +103,26 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
+    LogicalAnd,
+    LogicalOr,
+    LogicalXor,
     Lt,
     Le,
     Gt,
     Ge,
     Eq,
     Ne,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignOp {
+    Set,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
 }
 
 pub fn parse_function_body(
@@ -167,6 +210,19 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 
     fn parse_statement(&mut self) -> Result<ParsedStmt, Diagnostic> {
+        if self.at_punct(";") {
+            let span = self.bump().span;
+            return Ok(ParsedStmt::Empty { span });
+        }
+        if self.at_punct("{") {
+            let start = self.bump().span.start;
+            let statements = self.parse_block_contents()?;
+            let end = self.expect_punct("}")?.span.end;
+            return Ok(ParsedStmt::Block {
+                statements,
+                span: Span::new(start, end),
+            });
+        }
         if self.at_keyword(Keyword::Return) {
             self.bump();
             let expr = self.parse_expr(0)?;
@@ -176,18 +232,36 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         if self.at_keyword(Keyword::If) {
             return self.parse_if();
         }
+        if self.at_keyword(Keyword::While) {
+            return self.parse_while();
+        }
+        if self.at_keyword(Keyword::Break) {
+            let start = self.bump().span.start;
+            let end = self.expect_punct(";")?.span.end;
+            return Ok(ParsedStmt::Break {
+                span: Span::new(start, end),
+            });
+        }
+        if self.at_keyword(Keyword::Continue) {
+            let start = self.bump().span.start;
+            let end = self.expect_punct(";")?.span.end;
+            return Ok(ParsedStmt::Continue {
+                span: Span::new(start, end),
+            });
+        }
         if self.at_keyword(Keyword::Const) || self.starts_type_name() {
             return self.parse_let();
         }
         if self.at_identifier_like() {
             let checkpoint = self.pos;
             let name_tok = self.bump();
-            if self.at_punct("=") {
+            if let Some(op) = self.current_assign_op() {
                 self.bump();
                 let value = self.parse_expr(0)?;
                 let end = self.expect_punct(";")?.span.end;
                 return Ok(ParsedStmt::Assign {
                     name: name_tok.lexeme(self.source).to_string(),
+                    op,
                     value,
                     span: Span::new(name_tok.span.start, end),
                 });
@@ -220,6 +294,20 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             condition,
             accept,
             reject,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_while(&mut self) -> Result<ParsedStmt, Diagnostic> {
+        let start = self.expect_keyword(Keyword::While)?.span.start;
+        self.expect_punct("(")?;
+        let condition = self.parse_expr(0)?;
+        self.expect_punct(")")?;
+        let body = self.parse_statement_or_block()?;
+        let end = body.last().map_or(condition.span.end, stmt_end);
+        Ok(ParsedStmt::While {
+            condition,
+            body,
             span: Span::new(start, end),
         })
     }
@@ -264,6 +352,45 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     fn parse_expr(&mut self, min_binding_power: u8) -> Result<ParsedExpr, Diagnostic> {
         let mut lhs = self.parse_prefix()?;
         loop {
+            if self.at_punct("=") {
+                if min_binding_power > 0 {
+                    break;
+                }
+                let ParsedExprKind::Name(name) = &lhs.kind else {
+                    return Err(Diagnostic::error(lhs.span, "invalid assignment target"));
+                };
+                let name = name.clone();
+                self.bump();
+                let value = self.parse_expr(0)?;
+                let span = Span::new(lhs.span.start, value.span.end);
+                lhs = ParsedExpr {
+                    span,
+                    kind: ParsedExprKind::Assign {
+                        name,
+                        value: alloc::boxed::Box::new(value),
+                    },
+                };
+                continue;
+            }
+            if self.at_punct("?") {
+                if min_binding_power > 0 {
+                    break;
+                }
+                self.bump();
+                let accept = self.parse_expr(0)?;
+                self.expect_punct(":")?;
+                let reject = self.parse_expr(0)?;
+                let span = Span::new(lhs.span.start, reject.span.end);
+                lhs = ParsedExpr {
+                    span,
+                    kind: ParsedExprKind::Conditional {
+                        condition: alloc::boxed::Box::new(lhs),
+                        accept: alloc::boxed::Box::new(accept),
+                        reject: alloc::boxed::Box::new(reject),
+                    },
+                };
+                continue;
+            }
             let Some((op, left_bp, right_bp)) = self.current_binary_op() else {
                 break;
             };
@@ -288,11 +415,38 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     fn parse_prefix(&mut self) -> Result<ParsedExpr, Diagnostic> {
         if self.at_punct("-") {
             let start = self.bump().span.start;
-            let expr = self.parse_expr(7)?;
+            if self
+                .current()
+                .is_some_and(|t| matches!(t.kind, TokenKind::IntLiteral))
+            {
+                let tok = self.bump();
+                let value = tok
+                    .lexeme(self.source)
+                    .parse::<i64>()
+                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse int literal"))?;
+                let value = i32::try_from(-value)
+                    .map_err(|_| Diagnostic::error(tok.span, "int literal is out of range"))?;
+                return Ok(ParsedExpr {
+                    span: Span::new(start, tok.span.end),
+                    kind: ParsedExprKind::IntLiteral(value),
+                });
+            }
+            let expr = self.parse_expr(15)?;
             return Ok(ParsedExpr {
                 span: Span::new(start, expr.span.end),
                 kind: ParsedExprKind::Unary {
                     op: UnaryOp::Neg,
+                    expr: alloc::boxed::Box::new(expr),
+                },
+            });
+        }
+        if self.at_punct("!") {
+            let start = self.bump().span.start;
+            let expr = self.parse_expr(15)?;
+            return Ok(ParsedExpr {
+                span: Span::new(start, expr.span.end),
+                kind: ParsedExprKind::Unary {
+                    op: UnaryOp::Not,
                     expr: alloc::boxed::Box::new(expr),
                 },
             });
@@ -409,15 +563,35 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             "-" => BinaryOp::Sub,
             "*" => BinaryOp::Mul,
             "/" => BinaryOp::Div,
+            "%" => BinaryOp::Mod,
+            "&&" => BinaryOp::LogicalAnd,
+            "||" => BinaryOp::LogicalOr,
+            "^^" => BinaryOp::LogicalXor,
             _ => return None,
         };
         let bp = match op {
-            BinaryOp::Eq | BinaryOp::Ne => (1, 2),
-            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => (3, 4),
-            BinaryOp::Add | BinaryOp::Sub => (5, 6),
-            BinaryOp::Mul | BinaryOp::Div => (7, 8),
+            BinaryOp::LogicalOr => (1, 2),
+            BinaryOp::LogicalXor => (3, 4),
+            BinaryOp::LogicalAnd => (5, 6),
+            BinaryOp::Eq | BinaryOp::Ne => (7, 8),
+            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => (9, 10),
+            BinaryOp::Add | BinaryOp::Sub => (11, 12),
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (13, 14),
         };
         Some((op, bp.0, bp.1))
+    }
+
+    fn current_assign_op(&self) -> Option<AssignOp> {
+        let op = match self.current()?.lexeme(self.source) {
+            "=" => AssignOp::Set,
+            "+=" => AssignOp::Add,
+            "-=" => AssignOp::Sub,
+            "*=" => AssignOp::Mul,
+            "/=" => AssignOp::Div,
+            "%=" => AssignOp::Mod,
+            _ => return None,
+        };
+        Some(op)
     }
 
     fn starts_type_name(&self) -> bool {
@@ -530,7 +704,12 @@ fn stmt_end(stmt: &ParsedStmt) -> usize {
     match stmt {
         ParsedStmt::Let { span, .. }
         | ParsedStmt::Assign { span, .. }
-        | ParsedStmt::If { span, .. } => span.end,
+        | ParsedStmt::If { span, .. }
+        | ParsedStmt::While { span, .. }
+        | ParsedStmt::Break { span }
+        | ParsedStmt::Continue { span }
+        | ParsedStmt::Block { span, .. }
+        | ParsedStmt::Empty { span } => span.end,
         ParsedStmt::Return(expr) => expr.span.end,
     }
 }

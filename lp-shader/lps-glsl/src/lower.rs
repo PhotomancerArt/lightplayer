@@ -145,6 +145,24 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             ctx.fb.end_if();
             Ok(())
         }
+        HirStmt::While { condition, body } => {
+            ctx.fb.push_loop();
+            let cond = lower_expr(ctx, condition)?;
+            let cond = single_lane(condition.span, &cond)?;
+            ctx.fb.push(LpirOp::BrIfNot { cond });
+            lower_statements(ctx, body)?;
+            ctx.fb.push_continuing();
+            ctx.fb.end_loop();
+            Ok(())
+        }
+        HirStmt::Break => {
+            ctx.fb.push(LpirOp::Break);
+            Ok(())
+        }
+        HirStmt::Continue => {
+            ctx.fb.push(LpirOp::Continue);
+            Ok(())
+        }
         HirStmt::Return(expr) => {
             let value = lower_expr(ctx, expr)?;
             ctx.fb.push_return(&value.lanes);
@@ -315,6 +333,21 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                         lanes: vec![dst],
                     })
                 }
+                (UnaryOp::Not, LpsType::Bool) => {
+                    let src = single_lane(expr.span, &inner)?;
+                    let one = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::IconstI32 { dst: one, value: 1 });
+                    let dst = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::Ixor {
+                        dst,
+                        lhs: src,
+                        rhs: one,
+                    });
+                    Ok(LowerValue {
+                        ty: LpsType::Bool,
+                        lanes: vec![dst],
+                    })
+                }
                 _ => Err(Diagnostic::error(expr.span, "unsupported unary lowering")),
             }
         }
@@ -322,6 +355,24 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             let lhs = lower_expr(ctx, lhs)?;
             let rhs = lower_expr(ctx, rhs)?;
             lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
+        }
+        HirExprKind::Conditional {
+            condition,
+            accept,
+            reject,
+        } => {
+            let condition = lower_expr(ctx, condition)?;
+            let accept = lower_expr(ctx, accept)?;
+            let reject = lower_expr(ctx, reject)?;
+            lower_select(ctx, expr.span, condition, accept, reject, &expr.ty)
+        }
+        HirExprKind::Assign { local, value } => {
+            let value = lower_expr(ctx, value)?;
+            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
+                Diagnostic::error(expr.span, format!("local index {local} is out of range"))
+            })?;
+            copy_value(ctx, dst, value.clone(), expr.span)?;
+            Ok(value)
         }
     }
 }
@@ -486,6 +537,34 @@ fn lower_binary(
     rhs: LowerValue,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
+    if is_logical(op) {
+        let lhs_lane = single_lane(span, &lhs)?;
+        let rhs_lane = single_lane(span, &rhs)?;
+        let dst = ctx.fb.alloc_vreg(IrType::I32);
+        let op = match op {
+            BinaryOp::LogicalAnd => LpirOp::Iand {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::LogicalOr => LpirOp::Ior {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::LogicalXor => LpirOp::Ixor {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            _ => unreachable!(),
+        };
+        ctx.fb.push(op);
+        return Ok(LowerValue {
+            ty: LpsType::Bool,
+            lanes: vec![dst],
+        });
+    }
     if is_comparison(op) {
         let lhs_lane = single_lane(span, &lhs)?;
         let rhs_lane = single_lane(span, &rhs)?;
@@ -569,7 +648,8 @@ fn lower_binary(
     for i in 0..width {
         let l = lane_at(&lhs, i);
         let r = lane_at(&rhs, i);
-        let dst = match scalar_base_type(result_ty).unwrap_or_else(|| result_ty.clone()) {
+        let base_ty = scalar_base_type(result_ty).unwrap_or_else(|| result_ty.clone());
+        let dst = match base_ty {
             LpsType::Float => {
                 let dst = ctx.fb.alloc_vreg(IrType::F32);
                 let op = match op {
@@ -616,7 +696,22 @@ fn lower_binary(
                         lhs: l,
                         rhs: r,
                     },
+                    BinaryOp::Div if base_ty == LpsType::UInt => LpirOp::IdivU {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
                     BinaryOp::Div => LpirOp::IdivS {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::Mod if base_ty == LpsType::UInt => LpirOp::IremU {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::Mod => LpirOp::IremS {
                         dst,
                         lhs: l,
                         rhs: r,
@@ -653,6 +748,34 @@ fn lower_cast(
         (LpsType::UInt, LpsType::Float) => ctx.fb.push(LpirOp::ItofU { dst, src }),
         (LpsType::Float, LpsType::Int) => ctx.fb.push(LpirOp::FtoiSatS { dst, src }),
         (LpsType::Float, LpsType::UInt) => ctx.fb.push(LpirOp::FtoiSatU { dst, src }),
+        (LpsType::Bool, LpsType::Float) => ctx.fb.push(LpirOp::ItofS { dst, src }),
+        (LpsType::Bool, LpsType::Int) | (LpsType::Bool, LpsType::UInt) => {
+            ctx.fb.push(LpirOp::Copy { dst, src });
+        }
+        (LpsType::Int | LpsType::UInt, LpsType::Bool) => {
+            let zero = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 {
+                dst: zero,
+                value: 0,
+            });
+            ctx.fb.push(LpirOp::Ine {
+                dst,
+                lhs: src,
+                rhs: zero,
+            });
+        }
+        (LpsType::Float, LpsType::Bool) => {
+            let zero = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(LpirOp::FconstF32 {
+                dst: zero,
+                value: 0.0,
+            });
+            ctx.fb.push(LpirOp::Fne {
+                dst,
+                lhs: src,
+                rhs: zero,
+            });
+        }
         (LpsType::Int, LpsType::UInt) | (LpsType::UInt, LpsType::Int) => {
             ctx.fb.push(LpirOp::Copy { dst, src });
         }
@@ -666,6 +789,47 @@ fn lower_cast(
     Ok(LowerValue {
         ty: target_ty.clone(),
         lanes: vec![dst],
+    })
+}
+
+fn lower_select(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    condition: LowerValue,
+    accept: LowerValue,
+    reject: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let cond = single_lane(span, &condition)?;
+    if accept.lanes.len() != reject.lanes.len() {
+        return Err(Diagnostic::error(span, "ternary arm lane count mismatch"));
+    }
+    let result_types = scalar_ir_types(result_ty)?;
+    if result_types.len() != accept.lanes.len() {
+        return Err(Diagnostic::error(
+            span,
+            "ternary result lane count mismatch",
+        ));
+    }
+    let mut lanes = Vec::new();
+    for ((if_true, if_false), ty) in accept
+        .lanes
+        .iter()
+        .zip(reject.lanes.iter())
+        .zip(result_types.iter())
+    {
+        let dst = ctx.fb.alloc_vreg(*ty);
+        ctx.fb.push(LpirOp::Select {
+            dst,
+            cond,
+            if_true: *if_true,
+            if_false: *if_false,
+        });
+        lanes.push(dst);
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
     })
 }
 
@@ -899,5 +1063,12 @@ fn is_comparison(op: BinaryOp) -> bool {
     matches!(
         op,
         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge | BinaryOp::Eq | BinaryOp::Ne
+    )
+}
+
+fn is_logical(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::LogicalXor
     )
 }

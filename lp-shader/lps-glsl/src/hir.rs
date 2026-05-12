@@ -9,7 +9,7 @@ use lps_shared::{
 };
 
 use crate::body::{
-    BinaryOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt, UnaryOp,
+    AssignOp, BinaryOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt, UnaryOp,
     parse_expr_tokens,
 };
 use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
@@ -85,6 +85,12 @@ pub enum HirStmt {
         accept: Vec<HirStmt>,
         reject: Vec<HirStmt>,
     },
+    While {
+        condition: HirExpr,
+        body: Vec<HirStmt>,
+    },
+    Break,
+    Continue,
     Return(HirExpr),
 }
 
@@ -142,6 +148,15 @@ pub enum HirExprKind {
         op: BinaryOp,
         lhs: Box<HirExpr>,
         rhs: Box<HirExpr>,
+    },
+    Conditional {
+        condition: Box<HirExpr>,
+        accept: Box<HirExpr>,
+        reject: Box<HirExpr>,
+    },
+    Assign {
+        local: usize,
+        value: Box<HirExpr>,
     },
 }
 
@@ -394,6 +409,7 @@ struct TypeCtx<'a> {
     imports: &'a mut ImportRegistry,
     locals: Vec<HirLocal>,
     scopes: Vec<BTreeMap<String, usize>>,
+    loop_depth: usize,
 }
 
 impl<'a> TypeCtx<'a> {
@@ -412,6 +428,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
+            loop_depth: 0,
         }
     }
 
@@ -429,6 +446,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
+            loop_depth: 0,
         }
     }
 
@@ -451,12 +469,16 @@ impl<'a> TypeCtx<'a> {
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         let mut statements = Vec::new();
         for stmt in parsed {
-            statements.push(self.type_stmt(stmt, return_ty)?);
+            statements.append(&mut self.type_stmt(stmt, return_ty)?);
         }
         Ok(statements)
     }
 
-    fn type_stmt(&mut self, stmt: &ParsedStmt, return_ty: &LpsType) -> Result<HirStmt, Diagnostic> {
+    fn type_stmt(
+        &mut self,
+        stmt: &ParsedStmt,
+        return_ty: &LpsType,
+    ) -> Result<Vec<HirStmt>, Diagnostic> {
         match stmt {
             ParsedStmt::Let {
                 ty,
@@ -481,16 +503,19 @@ impl<'a> TypeCtx<'a> {
                     .last_mut()
                     .expect("type scope")
                     .insert(name.clone(), local);
-                Ok(HirStmt::Let { local, init })
+                Ok(alloc::vec![HirStmt::Let { local, init }])
             }
-            ParsedStmt::Assign { name, value, span } => {
+            ParsedStmt::Assign {
+                name,
+                op,
+                value,
+                span,
+            } => {
                 let local = self
                     .resolve_local(name)
                     .ok_or_else(|| Diagnostic::error(*span, format!("unknown local `{name}`")))?;
-                let ty = self.locals[local].ty.clone();
-                let value = self.type_expr(value)?;
-                let value = self.coerce_expr(value, &ty)?;
-                Ok(HirStmt::Assign { local, value })
+                let value = self.type_assign_value(*span, local, *op, value)?;
+                Ok(alloc::vec![HirStmt::Assign { local, value }])
             }
             ParsedStmt::If {
                 condition,
@@ -506,16 +531,49 @@ impl<'a> TypeCtx<'a> {
                 self.scopes.push(BTreeMap::new());
                 let reject = self.type_statements(reject, return_ty)?;
                 self.scopes.pop();
-                Ok(HirStmt::If {
+                Ok(alloc::vec![HirStmt::If {
                     condition,
                     accept,
                     reject,
-                })
+                }])
             }
+            ParsedStmt::While {
+                condition,
+                body,
+                span: _,
+            } => {
+                let condition = self.type_expr(condition)?;
+                let condition = self.coerce_expr(condition, &LpsType::Bool)?;
+                self.loop_depth += 1;
+                self.scopes.push(BTreeMap::new());
+                let body = self.type_statements(body, return_ty)?;
+                self.scopes.pop();
+                self.loop_depth -= 1;
+                Ok(alloc::vec![HirStmt::While { condition, body }])
+            }
+            ParsedStmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(Diagnostic::error(*span, "break outside loop"));
+                }
+                Ok(alloc::vec![HirStmt::Break])
+            }
+            ParsedStmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(Diagnostic::error(*span, "continue outside loop"));
+                }
+                Ok(alloc::vec![HirStmt::Continue])
+            }
+            ParsedStmt::Block { statements, .. } => {
+                self.scopes.push(BTreeMap::new());
+                let statements = self.type_statements(statements, return_ty)?;
+                self.scopes.pop();
+                Ok(statements)
+            }
+            ParsedStmt::Empty { .. } => Ok(Vec::new()),
             ParsedStmt::Return(expr) => {
                 let expr = self.type_expr(expr)?;
                 let expr = self.coerce_expr(expr, return_ty)?;
-                Ok(HirStmt::Return(expr))
+                Ok(alloc::vec![HirStmt::Return(expr)])
             }
         }
     }
@@ -561,15 +619,26 @@ impl<'a> TypeCtx<'a> {
             }
             ParsedExprKind::Unary { op, expr: inner } => {
                 let inner = self.type_expr(inner)?;
-                if inner.ty != LpsType::Float && inner.ty != LpsType::Int {
-                    return Err(Diagnostic::error(
-                        expr.span,
-                        "unsupported unary operand type",
-                    ));
-                }
+                let ty = match op {
+                    UnaryOp::Neg if inner.ty == LpsType::Float || inner.ty == LpsType::Int => {
+                        inner.ty.clone()
+                    }
+                    UnaryOp::Not => LpsType::Bool,
+                    _ => {
+                        return Err(Diagnostic::error(
+                            expr.span,
+                            "unsupported unary operand type",
+                        ));
+                    }
+                };
+                let inner = if *op == UnaryOp::Not {
+                    self.coerce_expr(inner, &LpsType::Bool)?
+                } else {
+                    inner
+                };
                 Ok(HirExpr {
                     span: expr.span,
-                    ty: inner.ty.clone(),
+                    ty,
                     kind: HirExprKind::Unary {
                         op: *op,
                         expr: Box::new(inner),
@@ -577,6 +646,25 @@ impl<'a> TypeCtx<'a> {
                 })
             }
             ParsedExprKind::Binary { op, lhs, rhs } => self.type_binary(expr.span, *op, lhs, rhs),
+            ParsedExprKind::Conditional {
+                condition,
+                accept,
+                reject,
+            } => self.type_conditional(expr.span, condition, accept, reject),
+            ParsedExprKind::Assign { name, value } => {
+                let local = self.resolve_local(name).ok_or_else(|| {
+                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                })?;
+                let value = self.type_assign_value(expr.span, local, AssignOp::Set, value)?;
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty: value.ty.clone(),
+                    kind: HirExprKind::Assign {
+                        local,
+                        value: Box::new(value),
+                    },
+                })
+            }
         }
     }
 
@@ -789,6 +877,29 @@ impl<'a> TypeCtx<'a> {
     ) -> Result<HirExpr, Diagnostic> {
         let lhs = self.type_expr(lhs)?;
         let rhs = self.type_expr(rhs)?;
+        self.type_binary_values(span, op, lhs, rhs)
+    }
+
+    fn type_binary_values(
+        &mut self,
+        span: Span,
+        op: BinaryOp,
+        lhs: HirExpr,
+        rhs: HirExpr,
+    ) -> Result<HirExpr, Diagnostic> {
+        if is_logical(op) {
+            let lhs = self.coerce_expr(lhs, &LpsType::Bool)?;
+            let rhs = self.coerce_expr(rhs, &LpsType::Bool)?;
+            return Ok(HirExpr {
+                span,
+                ty: LpsType::Bool,
+                kind: HirExprKind::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+            });
+        }
         if is_comparison(op) {
             let (lhs, rhs) = coerce_numeric_pair(span, lhs, rhs)?;
             return Ok(HirExpr {
@@ -802,6 +913,9 @@ impl<'a> TypeCtx<'a> {
             });
         }
         let (lhs, rhs, ty) = coerce_arithmetic_pair(span, lhs, rhs)?;
+        if op == BinaryOp::Mod && scalar_base_type(&ty) == Some(LpsType::Float) {
+            return Err(Diagnostic::error(span, "modulo requires integer operands"));
+        }
         Ok(HirExpr {
             span,
             ty,
@@ -811,6 +925,65 @@ impl<'a> TypeCtx<'a> {
                 rhs: Box::new(rhs),
             },
         })
+    }
+
+    fn type_conditional(
+        &mut self,
+        span: Span,
+        condition: &ParsedExpr,
+        accept: &ParsedExpr,
+        reject: &ParsedExpr,
+    ) -> Result<HirExpr, Diagnostic> {
+        let condition = self.type_expr(condition)?;
+        let condition = self.coerce_expr(condition, &LpsType::Bool)?;
+        let accept = self.type_expr(accept)?;
+        let reject = self.type_expr(reject)?;
+        let ty = if accept.ty == reject.ty {
+            accept.ty.clone()
+        } else {
+            vector_dominant_type(&[&accept.ty, &reject.ty])
+                .ok_or_else(|| Diagnostic::error(span, "incompatible ternary arm types"))?
+        };
+        let accept = self.coerce_expr(accept, &ty)?;
+        let reject = self.coerce_expr(reject, &ty)?;
+        Ok(HirExpr {
+            span,
+            ty,
+            kind: HirExprKind::Conditional {
+                condition: Box::new(condition),
+                accept: Box::new(accept),
+                reject: Box::new(reject),
+            },
+        })
+    }
+
+    fn type_assign_value(
+        &mut self,
+        span: Span,
+        local: usize,
+        op: AssignOp,
+        value: &ParsedExpr,
+    ) -> Result<HirExpr, Diagnostic> {
+        let ty = self.locals[local].ty.clone();
+        let value = self.type_expr(value)?;
+        if op == AssignOp::Set {
+            return self.coerce_expr(value, &ty);
+        }
+        let binary_op = match op {
+            AssignOp::Set => unreachable!(),
+            AssignOp::Add => BinaryOp::Add,
+            AssignOp::Sub => BinaryOp::Sub,
+            AssignOp::Mul => BinaryOp::Mul,
+            AssignOp::Div => BinaryOp::Div,
+            AssignOp::Mod => BinaryOp::Mod,
+        };
+        let lhs = HirExpr {
+            span,
+            ty: ty.clone(),
+            kind: HirExprKind::Local { index: local },
+        };
+        let value = self.type_binary_values(span, binary_op, lhs, value)?;
+        self.coerce_expr(value, &ty)
     }
 
     fn coerce_expr(&mut self, expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
@@ -1020,6 +1193,18 @@ fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
                 expr: Box::new(expr),
             },
         }),
+        (LpsType::Bool, LpsType::Float)
+        | (LpsType::Bool, LpsType::Int)
+        | (LpsType::Bool, LpsType::UInt)
+        | (LpsType::Float, LpsType::Bool)
+        | (LpsType::Int, LpsType::Bool)
+        | (LpsType::UInt, LpsType::Bool) => Ok(HirExpr {
+            span: expr.span,
+            ty: target.clone(),
+            kind: HirExprKind::Cast {
+                expr: Box::new(expr),
+            },
+        }),
         (LpsType::Bool, LpsType::Bool) => Ok(expr),
         _ => Err(Diagnostic::error(
             expr.span,
@@ -1113,6 +1298,13 @@ fn is_comparison(op: BinaryOp) -> bool {
     matches!(
         op,
         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge | BinaryOp::Eq | BinaryOp::Ne
+    )
+}
+
+fn is_logical(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::LogicalXor
     )
 }
 

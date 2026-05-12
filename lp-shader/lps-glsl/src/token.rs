@@ -19,6 +19,7 @@ pub enum Keyword {
     Vec3,
     Vec4,
     Void,
+    While,
 }
 
 impl Keyword {
@@ -41,6 +42,7 @@ impl Keyword {
             "vec3" => Self::Vec3,
             "vec4" => Self::Vec4,
             "void" => Self::Void,
+            "while" => Self::While,
             _ => return None,
         })
     }

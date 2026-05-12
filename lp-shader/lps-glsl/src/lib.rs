@@ -12,6 +12,7 @@ mod index;
 mod job;
 mod lexer;
 mod lower;
+mod lvalue;
 mod source;
 mod token;
 
@@ -21,6 +22,7 @@ pub use hir::HirModule;
 pub use index::{ConstDecl, FunctionDecl, FunctionParam, TopLevelIndex, TypeRef, UniformDecl};
 pub use job::{CompileBudget, CompileJob, CompileStage, CompileStepResult};
 pub use lexer::lex;
+pub use lvalue::{LvalueBase, LvaluePath, LvalueProjection, SwizzleComponent};
 pub use source::{SourceMap, Span};
 pub use token::{Keyword, Token, TokenKind};
 
@@ -169,6 +171,48 @@ mod tests {
     }
 
     #[test]
+    fn compile_job_zero_budget_runs_one_coarse_stage() {
+        let mut job = CompileJob::new(EXAMPLES[0].1, CompileOptions::default());
+        assert!(matches!(
+            job.step(CompileBudget::steps(0)),
+            CompileStepResult::Pending
+        ));
+        assert_eq!(job.stage(), CompileStage::Index);
+    }
+
+    #[test]
+    fn compile_job_single_steps_match_default_budget_output() {
+        let stepped = compile_with_single_steps(EXAMPLES[0].1);
+        let default = match CompileJob::new(EXAMPLES[0].1, CompileOptions::default())
+            .step(CompileBudget::default())
+        {
+            CompileStepResult::Finished(output) => output,
+            other => panic!("expected default-budget compile output, got {other:?}"),
+        };
+
+        assert_eq!(stepped.meta, default.meta);
+        assert_eq!(
+            alloc::format!("{:?}", stepped.ir),
+            alloc::format!("{:?}", default.ir)
+        );
+    }
+
+    #[test]
+    fn compile_job_failed_lex_moves_to_done() {
+        let mut job = CompileJob::new("@", CompileOptions::default());
+        let first = job.step(CompileBudget::single_step());
+        assert!(matches!(first, CompileStepResult::Failed(_)));
+        assert_eq!(job.stage(), CompileStage::Done);
+
+        let second = job.step(CompileBudget::single_step());
+        let CompileStepResult::Failed(err) = second else {
+            panic!("expected already-finished failure");
+        };
+        assert!(err.message.contains("already finished"));
+        assert_eq!(job.stage(), CompileStage::Done);
+    }
+
+    #[test]
     fn synchronous_compile_validates_fast_example() {
         let output = compile(EXAMPLES[0].1, &CompileOptions::default()).expect("compile");
         lpir::validate_module(&output.ir).expect("valid LPIR");
@@ -187,5 +231,16 @@ mod tests {
         let output = compile(EXAMPLES[2].1, &CompileOptions::default()).expect("compile basic");
         lpir::validate_module(&output.ir).expect("valid LPIR");
         assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+    }
+
+    fn compile_with_single_steps(source: &str) -> CompileOutput {
+        let mut job = CompileJob::new(source, CompileOptions::default());
+        loop {
+            match job.step(CompileBudget::single_step()) {
+                CompileStepResult::Pending => {}
+                CompileStepResult::Finished(output) => return output,
+                CompileStepResult::Failed(err) => panic!("single-step compile failed: {err}"),
+            }
+        }
     }
 }

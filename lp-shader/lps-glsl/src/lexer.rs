@@ -137,6 +137,7 @@ impl<'src> Lexer<'src> {
                 | (b'*' | b'/' | b'%' | b'=' | b'!' | b'<' | b'>', Some(b'='))
                 | (b'&', Some(b'&'))
                 | (b'|', Some(b'|'))
+                | (b'^', Some(b'^'))
         );
         if two_char {
             self.bump();
@@ -160,6 +161,8 @@ impl<'src> Lexer<'src> {
                 | b'/'
                 | b'%'
                 | b'='
+                | b'!'
+                | b'^'
                 | b'<'
                 | b'>'
         ) {
