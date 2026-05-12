@@ -55,7 +55,7 @@ pin = 4
 const FIXTURE_NODE_TOML: &[u8] = br#"kind = "fixture"
 output_loc = "..output"
 texture_loc = "..texture"
-color_order = "Rgb"
+color_order = "rgb"
 transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 
 [mapping.PathPoints]

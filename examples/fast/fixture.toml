@@ -1,7 +1,7 @@
 kind = "fixture"
 output_loc = "..output"
 texture_loc = "..texture"
-color_order = "Rgb"
+color_order = "rgb"
 transform = [
     [
     1.0,
@@ -47,4 +47,3 @@ end_ring_exclusive = 1
 ring_lamp_counts = [1]
 offset_angle = 0.0
 order = "InnerFirst"
-
