@@ -309,17 +309,16 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 if min_binding_power > 1 {
                     break;
                 }
-                let ParsedExprKind::Name(name) = &lhs.kind else {
+                if !is_assignment_target(&lhs) {
                     return Err(Diagnostic::error(lhs.span, "invalid assignment target"));
-                };
-                let name = name.clone();
+                }
                 self.bump();
                 let value = self.parse_expr(1)?;
                 let span = Span::new(lhs.span.start, value.span.end);
                 lhs = ParsedExpr {
                     span,
                     kind: ParsedExprKind::Assign {
-                        name,
+                        target: alloc::boxed::Box::new(lhs),
                         value: alloc::boxed::Box::new(value),
                     },
                 };
@@ -436,6 +435,19 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     kind: ParsedExprKind::Swizzle {
                         base: alloc::boxed::Box::new(expr),
                         fields,
+                    },
+                };
+                continue;
+            }
+            if self.at_punct("[") {
+                self.bump();
+                let index = self.parse_expr(0)?;
+                let end = self.expect_punct("]")?.span.end;
+                expr = ParsedExpr {
+                    span: Span::new(expr.span.start, end),
+                    kind: ParsedExprKind::Index {
+                        base: alloc::boxed::Box::new(expr),
+                        index: alloc::boxed::Box::new(index),
                     },
                 };
                 continue;
@@ -712,6 +724,13 @@ fn stmt_end(stmt: &ParsedStmt) -> usize {
         | ParsedStmt::Expr { span, .. } => span.end,
         ParsedStmt::Return(expr) => expr.span.end,
     }
+}
+
+fn is_assignment_target(expr: &ParsedExpr) -> bool {
+    matches!(
+        expr.kind,
+        ParsedExprKind::Name(_) | ParsedExprKind::Swizzle { .. } | ParsedExprKind::Index { .. }
+    )
 }
 
 fn token_is_type_name(tok: Token, source: &str) -> bool {

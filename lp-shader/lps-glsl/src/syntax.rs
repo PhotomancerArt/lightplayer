@@ -87,6 +87,10 @@ pub enum ParsedExprKind {
         base: alloc::boxed::Box<ParsedExpr>,
         fields: String,
     },
+    Index {
+        base: alloc::boxed::Box<ParsedExpr>,
+        index: alloc::boxed::Box<ParsedExpr>,
+    },
     Unary {
         op: UnaryOp,
         expr: alloc::boxed::Box<ParsedExpr>,
@@ -102,7 +106,7 @@ pub enum ParsedExprKind {
         reject: alloc::boxed::Box<ParsedExpr>,
     },
     Assign {
-        name: String,
+        target: alloc::boxed::Box<ParsedExpr>,
         value: alloc::boxed::Box<ParsedExpr>,
     },
     IncDec {

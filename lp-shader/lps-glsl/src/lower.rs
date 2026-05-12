@@ -12,7 +12,7 @@ use lps_shared::{LpsModuleSig, LpsType};
 
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 use crate::hir::{
-    BuiltinKind, HirExpr, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey,
+    BuiltinKind, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey,
     scalar_base_type, scalar_ir_types, scalar_lane_count,
 };
 use crate::{Diagnostic, Span};
@@ -268,6 +268,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 for arg in args {
                     lanes.extend(lower_expr(ctx, arg)?.lanes);
                 }
+                lanes.truncate(scalar_lane_count(&expr.ty));
             }
             Ok(LowerValue {
                 ty: expr.ty.clone(),
@@ -285,6 +286,11 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 ty: expr.ty.clone(),
                 lanes: out,
             })
+        }
+        HirExprKind::Index { base, index } => {
+            let base = lower_expr(ctx, base)?;
+            let index = lower_expr(ctx, index)?;
+            lower_index(ctx, expr.span, base, index, &expr.ty)
         }
         HirExprKind::Builtin { kind, args } => lower_builtin(ctx, expr.span, *kind, args, &expr.ty),
         HirExprKind::UserCall { function, args } => {
@@ -401,12 +407,9 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             let reject = lower_expr(ctx, reject)?;
             lower_select(ctx, expr.span, condition, accept, reject, &expr.ty)
         }
-        HirExprKind::Assign { local, value } => {
+        HirExprKind::Assign { target, value } => {
             let value = lower_expr(ctx, value)?;
-            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
-                Diagnostic::error(expr.span, format!("local index {local} is out of range"))
-            })?;
-            copy_value(ctx, dst, value.clone(), expr.span)?;
+            assign_target(ctx, expr.span, target, value.clone())?;
             Ok(value)
         }
         HirExprKind::IncDec { local, op, prefix } => {
@@ -616,6 +619,9 @@ fn lower_builtin(
                     rhs: hi,
                 });
                 dst
+            }
+            BuiltinKind::Mix if scalar_base_type(result_ty) == Some(LpsType::Bool) => {
+                lower_bool_mix_lane(ctx, &values[0], &values[1], &values[2], i)
             }
             BuiltinKind::Mix => lower_mix_lane(ctx, &values[0], &values[1], &values[2], i),
             BuiltinKind::Smoothstep => {
@@ -1037,6 +1043,127 @@ fn lower_scalar_cast(
     Ok(dst)
 }
 
+fn lower_index(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    base: LowerValue,
+    index: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let index = single_lane(span, &index)?;
+    let Some(mut selected) = base.lanes.first().copied() else {
+        return Err(Diagnostic::error(span, "index base has no lanes"));
+    };
+    let result_ir_ty = scalar_ir_types(result_ty)?
+        .first()
+        .copied()
+        .ok_or_else(|| Diagnostic::error(span, "index result has no type"))?;
+    for (lane_index, lane) in base.lanes.iter().enumerate().skip(1) {
+        let constant = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::IconstI32 {
+            dst: constant,
+            value: lane_index as i32,
+        });
+        let cond = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Ieq {
+            dst: cond,
+            lhs: index,
+            rhs: constant,
+        });
+        let dst = ctx.fb.alloc_vreg(result_ir_ty);
+        ctx.fb.push(LpirOp::Select {
+            dst,
+            cond,
+            if_true: *lane,
+            if_false: selected,
+        });
+        selected = dst;
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes: vec![selected],
+    })
+}
+
+fn assign_target(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    target: &HirAssignTarget,
+    value: LowerValue,
+) -> Result<(), Diagnostic> {
+    match target {
+        HirAssignTarget::Local { local, .. } => {
+            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            copy_value(ctx, dst, value, span)
+        }
+        HirAssignTarget::Swizzle { local, lanes, .. } => {
+            if lanes.len() != value.lanes.len() {
+                return Err(Diagnostic::error(span, "swizzle assignment lane mismatch"));
+            }
+            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            for (dst_lane, src_lane) in lanes.iter().zip(value.lanes.iter()) {
+                let Some(dst) = dst.lanes.get(*dst_lane) else {
+                    return Err(Diagnostic::error(
+                        span,
+                        "swizzle assignment lane out of range",
+                    ));
+                };
+                ctx.fb.push(LpirOp::Copy {
+                    dst: *dst,
+                    src: *src_lane,
+                });
+            }
+            Ok(())
+        }
+        HirAssignTarget::Index { local, index, .. } => {
+            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            let index = lower_expr(ctx, index)?;
+            let index = single_lane(span, &index)?;
+            let Some(src) = value.lanes.first().copied() else {
+                return Err(Diagnostic::error(
+                    span,
+                    "index assignment value has no lanes",
+                ));
+            };
+            let lane_ty = scalar_ir_types(&value.ty)?
+                .first()
+                .copied()
+                .ok_or_else(|| Diagnostic::error(span, "index assignment value has no type"))?;
+            for (lane_index, current) in dst.lanes.iter().enumerate() {
+                let constant = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: constant,
+                    value: lane_index as i32,
+                });
+                let cond = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Ieq {
+                    dst: cond,
+                    lhs: index,
+                    rhs: constant,
+                });
+                let selected = ctx.fb.alloc_vreg(lane_ty);
+                ctx.fb.push(LpirOp::Select {
+                    dst: selected,
+                    cond,
+                    if_true: src,
+                    if_false: *current,
+                });
+                ctx.fb.push(LpirOp::Copy {
+                    dst: *current,
+                    src: selected,
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
 fn lower_select(
     ctx: &mut LowerCtx<'_>,
     span: Span,
@@ -1336,6 +1463,23 @@ fn lower_mix_lane(
         dst,
         lhs: left,
         rhs: right,
+    });
+    dst
+}
+
+fn lower_bool_mix_lane(
+    ctx: &mut LowerCtx<'_>,
+    x: &LowerValue,
+    y: &LowerValue,
+    selector: &LowerValue,
+    index: usize,
+) -> VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: lane_at(selector, index),
+        if_true: lane_at(y, index),
+        if_false: lane_at(x, index),
     });
     dst
 }

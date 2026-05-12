@@ -138,6 +138,10 @@ pub enum HirExprKind {
         base: Box<HirExpr>,
         lanes: Vec<usize>,
     },
+    Index {
+        base: Box<HirExpr>,
+        index: Box<HirExpr>,
+    },
     Builtin {
         kind: BuiltinKind,
         args: Vec<HirExpr>,
@@ -170,7 +174,7 @@ pub enum HirExprKind {
         reject: Box<HirExpr>,
     },
     Assign {
-        local: usize,
+        target: HirAssignTarget,
         value: Box<HirExpr>,
     },
     IncDec {
@@ -185,6 +189,34 @@ pub struct HirOutArg {
     pub local: usize,
     pub ty: LpsType,
     pub arg_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum HirAssignTarget {
+    Local {
+        local: usize,
+        ty: LpsType,
+    },
+    Swizzle {
+        local: usize,
+        lanes: Vec<usize>,
+        ty: LpsType,
+    },
+    Index {
+        local: usize,
+        index: Box<HirExpr>,
+        ty: LpsType,
+    },
+}
+
+impl HirAssignTarget {
+    fn ty(&self) -> &LpsType {
+        match self {
+            HirAssignTarget::Local { ty, .. }
+            | HirAssignTarget::Swizzle { ty, .. }
+            | HirAssignTarget::Index { ty, .. } => ty,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -704,6 +736,21 @@ impl<'a> TypeCtx<'a> {
                     },
                 })
             }
+            ParsedExprKind::Index { base, index } => {
+                let base = self.type_expr(base)?;
+                let ty = scalar_base_type(&base.ty)
+                    .ok_or_else(|| Diagnostic::error(expr.span, "index base must be vector"))?;
+                let index = self.type_expr(index)?;
+                let index = self.coerce_expr(index, &LpsType::Int)?;
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty,
+                    kind: HirExprKind::Index {
+                        base: Box::new(base),
+                        index: Box::new(index),
+                    },
+                })
+            }
             ParsedExprKind::Unary { op, expr: inner } => {
                 let inner = self.type_expr(inner)?;
                 let ty = match op {
@@ -750,16 +797,15 @@ impl<'a> TypeCtx<'a> {
                 accept,
                 reject,
             } => self.type_conditional(expr.span, condition, accept, reject),
-            ParsedExprKind::Assign { name, value } => {
-                let local = self.resolve_local(name).ok_or_else(|| {
-                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                })?;
-                let value = self.type_assign_value(expr.span, local, AssignOp::Set, value)?;
+            ParsedExprKind::Assign { target, value } => {
+                let target = self.type_assign_target(target)?;
+                let value = self.type_expr(value)?;
+                let value = self.coerce_expr(value, target.ty())?;
                 Ok(HirExpr {
                     span: expr.span,
                     ty: value.ty.clone(),
                     kind: HirExprKind::Assign {
-                        local,
+                        target,
                         value: Box::new(value),
                     },
                 })
@@ -1111,6 +1157,54 @@ impl<'a> TypeCtx<'a> {
         self.coerce_expr(value, &ty)
     }
 
+    fn type_assign_target(&mut self, expr: &ParsedExpr) -> Result<HirAssignTarget, Diagnostic> {
+        match &expr.kind {
+            ParsedExprKind::Name(name) => {
+                let local = self.resolve_local(name).ok_or_else(|| {
+                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                })?;
+                Ok(HirAssignTarget::Local {
+                    local,
+                    ty: self.locals[local].ty.clone(),
+                })
+            }
+            ParsedExprKind::Swizzle { base, fields } => {
+                let ParsedExprKind::Name(name) = &base.kind else {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        "unsupported swizzle assignment base",
+                    ));
+                };
+                let local = self.resolve_local(name).ok_or_else(|| {
+                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                })?;
+                let (lanes, ty) = swizzle_lanes(expr.span, &self.locals[local].ty, fields)?;
+                Ok(HirAssignTarget::Swizzle { local, lanes, ty })
+            }
+            ParsedExprKind::Index { base, index } => {
+                let ParsedExprKind::Name(name) = &base.kind else {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        "unsupported index assignment base",
+                    ));
+                };
+                let local = self.resolve_local(name).ok_or_else(|| {
+                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                })?;
+                let ty = scalar_base_type(&self.locals[local].ty)
+                    .ok_or_else(|| Diagnostic::error(expr.span, "index base must be vector"))?;
+                let index = self.type_expr(index)?;
+                let index = self.coerce_expr(index, &LpsType::Int)?;
+                Ok(HirAssignTarget::Index {
+                    local,
+                    index: Box::new(index),
+                    ty,
+                })
+            }
+            _ => Err(Diagnostic::error(expr.span, "invalid assignment target")),
+        }
+    }
+
     fn coerce_expr(&mut self, expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
         coerce_expr(expr, target)
     }
@@ -1305,7 +1399,7 @@ fn coerce_constructor_args(
         .iter()
         .map(|arg| scalar_lane_count(&arg.ty))
         .sum::<usize>();
-    if expected_lanes == actual_lanes {
+    if actual_lanes >= expected_lanes {
         let expected_scalar = scalar_base_type(target_ty).unwrap_or_else(|| target_ty.clone());
         return args
             .into_iter()
@@ -1488,10 +1582,10 @@ fn swizzle_lanes(
     let mut lanes = Vec::new();
     for ch in fields.chars() {
         let lane = match ch {
-            'x' | 'r' => 0,
-            'y' | 'g' => 1,
-            'z' | 'b' => 2,
-            'w' | 'a' => 3,
+            'x' | 'r' | 's' => 0,
+            'y' | 'g' | 't' => 1,
+            'z' | 'b' | 'p' => 2,
+            'w' | 'a' | 'q' => 3,
             _ => return Err(Diagnostic::error(span, "unsupported swizzle field")),
         };
         if lane >= count {
