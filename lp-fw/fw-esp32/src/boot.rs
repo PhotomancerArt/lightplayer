@@ -1,7 +1,7 @@
 //! Boot-time configuration and auto-load logic.
 //!
 //! Reads lightplayer.json for startup_project, or falls back to lexical-first
-//! project in projects/ directory.
+//! project artifact directory in projects/.
 
 use lpa_server::LpServer;
 use lpc_model::LpPathBuf;
@@ -71,13 +71,7 @@ pub fn auto_load_project(server: &mut LpServer) {
             );
             let mut projects: alloc::vec::Vec<_> = entries
                 .into_iter()
-                .filter(|e| {
-                    let json_path = e.join("project.json");
-                    server
-                        .base_fs()
-                        .file_exists(json_path.as_path())
-                        .unwrap_or(false)
-                })
+                .filter(|e| is_project_dir(server.base_fs(), e))
                 .collect();
             projects.sort_by(|a, b| a.as_str().cmp(b.as_str()));
             log::info!("Boot: {} valid projects found", projects.len());
@@ -99,6 +93,11 @@ pub fn auto_load_project(server: &mut LpServer) {
         log_memory(server, "boot auto_load after");
         log::info!("Boot: auto-loaded project {}", project_path.as_str());
     }
+}
+
+fn is_project_dir(fs: &dyn LpFs, path: &LpPathBuf) -> bool {
+    let project_toml_path = path.join("project.toml");
+    fs.file_exists(project_toml_path.as_path()).unwrap_or(false)
 }
 
 fn log_memory(server: &LpServer, label: &str) {
