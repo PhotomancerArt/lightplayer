@@ -19,7 +19,7 @@ pub use compile::{CompileOptions, CompileOutput, compile, index_source};
 pub use diagnostic::{Diagnostic, DiagnosticSeverity};
 pub use hir::HirModule;
 pub use index::{ConstDecl, FunctionDecl, FunctionParam, TopLevelIndex, TypeRef, UniformDecl};
-pub use job::{CompileBudget, CompileJob, CompileStepResult};
+pub use job::{CompileBudget, CompileJob, CompileStage, CompileStepResult};
 pub use lexer::lex;
 pub use source::{SourceMap, Span};
 pub use token::{Keyword, Token, TokenKind};
@@ -110,26 +110,52 @@ mod tests {
     #[test]
     fn compile_job_reaches_lpir_output_for_fast_example() {
         let mut job = CompileJob::new(EXAMPLES[0].1, CompileOptions::default());
+        assert_eq!(job.stage(), CompileStage::Lex);
         assert!(matches!(
             job.step(CompileBudget::single_step()),
             CompileStepResult::Pending
         ));
+        assert_eq!(job.stage(), CompileStage::Index);
         assert!(matches!(
             job.step(CompileBudget::single_step()),
             CompileStepResult::Pending
         ));
+        assert_eq!(job.stage(), CompileStage::Body);
         assert!(matches!(
             job.step(CompileBudget::single_step()),
             CompileStepResult::Pending
         ));
+        assert_eq!(job.stage(), CompileStage::Lower);
         let output = match job.step(CompileBudget::single_step()) {
             CompileStepResult::Finished(output) => output,
             other => panic!("expected compile output, got {other:?}"),
         };
+        assert_eq!(job.stage(), CompileStage::Done);
         lpir::validate_module(&output.ir).expect("valid LPIR");
         assert!(output.meta.functions.iter().any(|f| f.name == "render"));
         assert!(output.meta.uniforms_type.is_some());
         assert!(job.index().is_some());
+    }
+
+    #[test]
+    fn compile_job_default_budget_runs_to_completion() {
+        let mut job = CompileJob::new(EXAMPLES[0].1, CompileOptions::default());
+        let output = match job.step(CompileBudget::default()) {
+            CompileStepResult::Finished(output) => output,
+            other => panic!("expected compile output, got {other:?}"),
+        };
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        assert_eq!(job.stage(), CompileStage::Done);
+    }
+
+    #[test]
+    fn compile_job_steps_budget_runs_multiple_coarse_stages() {
+        let mut job = CompileJob::new(EXAMPLES[0].1, CompileOptions::default());
+        assert!(matches!(
+            job.step(CompileBudget::steps(2)),
+            CompileStepResult::Pending
+        ));
+        assert_eq!(job.stage(), CompileStage::Body);
     }
 
     #[test]
