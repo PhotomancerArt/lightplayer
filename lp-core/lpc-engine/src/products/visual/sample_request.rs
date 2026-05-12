@@ -19,6 +19,8 @@ pub struct VisualSampleBatch {
 /// Direct shader sampling request backed by a reusable guest-addressable point buffer.
 pub struct VisualSampleBufferRequest<'a> {
     pub points: &'a mut lp_shader::LpsSamplePointBuf,
+    pub output_width: u32,
+    pub output_height: u32,
     pub time_seconds: f32,
 }
 

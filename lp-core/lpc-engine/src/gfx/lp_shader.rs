@@ -32,11 +32,13 @@ pub trait LpShader: Send + Sync {
     /// Run the shader into an RGBA16 texture buffer allocated from the same graphics engine.
     fn render(&mut self, texture: &mut lp_shader::LpsTextureBuf, time: f32) -> Result<(), Error>;
 
-    /// Run the shader at caller-provided Q16.16 normalized points.
+    /// Run the shader at caller-provided Q16.16 pixel-space points.
     fn sample_rgba16(
         &mut self,
         _points: &mut lp_shader::LpsSamplePointBuf,
         _out: &mut lp_shader::LpsSampleRgba16Buf,
+        _output_width: u32,
+        _output_height: u32,
         _time: f32,
     ) -> Result<(), Error> {
         Err(Error::Other {

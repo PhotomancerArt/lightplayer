@@ -341,7 +341,13 @@ impl RenderNode for ShaderNode {
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
         shader
-            .sample_rgba16(request.points, target.samples, request.time_seconds)
+            .sample_rgba16(
+                request.points,
+                target.samples,
+                request.output_width,
+                request.output_height,
+                request.time_seconds,
+            )
             .map_err(|e| NodeError::msg(format!("shader sample: {e}")))
     }
 }
