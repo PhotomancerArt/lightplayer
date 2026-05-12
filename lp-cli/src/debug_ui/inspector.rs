@@ -21,17 +21,19 @@ pub(crate) fn render_debug_inspector(
 ) {
     ensure_selection(view, selection);
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.heading("Debug");
-        ui.separator();
-        render_node_tree(ui, view, selection);
-        ui.separator();
-        render_resource_tree(ui, view, selection);
-        ui.separator();
-        render_shape_tree(ui, view, selection);
-        ui.separator();
-        render_selected_detail(ui, view, *selection);
-    });
+    egui::ScrollArea::vertical()
+        .id_salt("debug-inspector")
+        .show(ui, |ui| {
+            ui.heading("Debug");
+            ui.separator();
+            render_node_tree(ui, view, selection);
+            ui.separator();
+            render_resource_tree(ui, view, selection);
+            ui.separator();
+            render_shape_tree(ui, view, selection);
+            ui.separator();
+            render_selected_detail(ui, view, *selection);
+        });
 }
 
 fn ensure_selection(view: &ProjectView, selection: &mut Option<InspectorSelection>) {
@@ -60,23 +62,25 @@ fn render_node_tree(
     view: &ProjectView,
     selection: &mut Option<InspectorSelection>,
 ) {
-    ui.collapsing("Nodes", |ui| {
-        if view.tree.nodes.is_empty() {
-            ui.label("Waiting for project sync...");
-            return;
-        }
+    egui::CollapsingHeader::new("Nodes")
+        .id_salt("inspector-nodes")
+        .show(ui, |ui| {
+            if view.tree.nodes.is_empty() {
+                ui.label("Waiting for project sync...");
+                return;
+            }
 
-        let roots: Vec<NodeId> = view
-            .tree
-            .nodes
-            .iter()
-            .filter_map(|(id, entry)| entry.parent.is_none().then_some(*id))
-            .collect();
+            let roots: Vec<NodeId> = view
+                .tree
+                .nodes
+                .iter()
+                .filter_map(|(id, entry)| entry.parent.is_none().then_some(*id))
+                .collect();
 
-        for root in roots {
-            render_node_tree_entry(ui, view, root, 0, selection);
-        }
-    });
+            for root in roots {
+                render_node_tree_entry(ui, view, root, 0, selection);
+            }
+        });
 }
 
 fn render_node_tree_entry(
@@ -115,22 +119,25 @@ fn render_resource_tree(
     view: &ProjectView,
     selection: &mut Option<InspectorSelection>,
 ) {
-    ui.collapsing("Resources", |ui| {
-        let mut count = 0usize;
-        for summary in view.resource_cache.summaries() {
-            count += 1;
-            let selected = *selection == Some(InspectorSelection::Resource(summary.resource_ref));
-            if ui
-                .selectable_label(selected, format_resource_summary(summary))
-                .clicked()
-            {
-                *selection = Some(InspectorSelection::Resource(summary.resource_ref));
+    egui::CollapsingHeader::new("Resources")
+        .id_salt("inspector-resources")
+        .show(ui, |ui| {
+            let mut count = 0usize;
+            for summary in view.resource_cache.summaries() {
+                count += 1;
+                let selected =
+                    *selection == Some(InspectorSelection::Resource(summary.resource_ref));
+                if ui
+                    .selectable_label(selected, format_resource_summary(summary))
+                    .clicked()
+                {
+                    *selection = Some(InspectorSelection::Resource(summary.resource_ref));
+                }
             }
-        }
-        if count == 0 {
-            ui.label("No resources synced.");
-        }
-    });
+            if count == 0 {
+                ui.label("No resources synced.");
+            }
+        });
 }
 
 fn render_shape_tree(
@@ -138,23 +145,25 @@ fn render_shape_tree(
     view: &ProjectView,
     selection: &mut Option<InspectorSelection>,
 ) {
-    ui.collapsing("Shapes", |ui| {
-        let snapshot = view.slots.registry.snapshot();
-        if snapshot.shapes.is_empty() {
-            ui.label("No shapes synced.");
-            return;
-        }
-
-        for (id, entry) in snapshot.shapes {
-            let selected = *selection == Some(InspectorSelection::Shape(id));
-            if ui
-                .selectable_label(selected, format!("{id}  rev {}", entry.changed_at().0))
-                .clicked()
-            {
-                *selection = Some(InspectorSelection::Shape(id));
+    egui::CollapsingHeader::new("Shapes")
+        .id_salt("inspector-shapes")
+        .show(ui, |ui| {
+            let snapshot = view.slots.registry.snapshot();
+            if snapshot.shapes.is_empty() {
+                ui.label("No shapes synced.");
+                return;
             }
-        }
-    });
+
+            for (id, entry) in snapshot.shapes {
+                let selected = *selection == Some(InspectorSelection::Shape(id));
+                if ui
+                    .selectable_label(selected, format!("{id}  rev {}", entry.changed_at().0))
+                    .clicked()
+                {
+                    *selection = Some(InspectorSelection::Shape(id));
+                }
+            }
+        });
 }
 
 fn render_selected_detail(
@@ -201,6 +210,7 @@ fn render_node_detail(ui: &mut egui::Ui, view: &ProjectView, id: NodeId) {
         };
 
         egui::CollapsingHeader::new(suffix)
+            .id_salt(("inspector-node-root", id.0, suffix))
             .default_open(suffix == "def")
             .show(ui, |ui| {
                 render_slot_root_debug(ui, &view.slots.registry, shape, data);

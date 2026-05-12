@@ -14,7 +14,7 @@ pub(crate) fn render_slot_root_debug(
     data: &SlotData,
 ) {
     match registry.get(&shape_id) {
-        Some(shape) => render_slot_shape_debug(ui, registry, shape, data),
+        Some(shape) => render_slot_shape_debug(ui, registry, shape, data, "root"),
         None => {
             ui.colored_label(
                 egui::Color32::LIGHT_RED,
@@ -32,7 +32,7 @@ pub(crate) fn render_slot_root_rows(
     data: &SlotData,
 ) {
     match registry.get(&shape_id) {
-        Some(shape) => render_slot_shape_rows(ui, registry, shape, data, 0),
+        Some(shape) => render_slot_shape_rows(ui, registry, shape, data, 0, "root"),
         None => {
             ui.colored_label(
                 egui::Color32::LIGHT_RED,
@@ -54,7 +54,7 @@ pub(crate) fn render_top_field_row(
     let Some((shape, data)) = top_record_field(registry, shape_id, data, field_name) else {
         return false;
     };
-    render_named_slot_shape_row(ui, registry, label, shape, data, 0);
+    render_named_slot_shape_row(ui, registry, label, shape, data, 0, label);
     true
 }
 
@@ -123,6 +123,7 @@ fn render_slot_shape_rows(
     shape: &SlotShape,
     data: &SlotData,
     depth: usize,
+    id_path: &str,
 ) {
     let Some(shape) = resolve_shape(registry, shape) else {
         ui.colored_label(egui::Color32::LIGHT_RED, "Missing referenced shape");
@@ -148,10 +149,11 @@ fn render_slot_shape_rows(
                     &field.shape,
                     child,
                     depth,
+                    &format!("{id_path}.{}", field.name.as_str()),
                 );
             }
         }
-        _ => render_named_slot_shape_row(ui, registry, "value", shape, data, depth),
+        _ => render_named_slot_shape_row(ui, registry, "value", shape, data, depth, id_path),
     }
 }
 
@@ -162,6 +164,7 @@ fn render_named_slot_shape_row(
     shape: &SlotShape,
     data: &SlotData,
     depth: usize,
+    id_path: &str,
 ) {
     let Some(shape) = resolve_shape(registry, shape) else {
         ui.horizontal_wrapped(|ui| {
@@ -181,6 +184,7 @@ fn render_named_slot_shape_row(
         }
         (SlotShape::Record { fields, .. }, SlotData::Record(record)) => {
             egui::CollapsingHeader::new(format!("{name}  record[{}]", fields.len()))
+                .id_salt(("slot-row-record", id_path))
                 .default_open(depth == 0 && name == "bindings")
                 .show(ui, |ui| {
                     ui.label(format!("fields rev {}", record.fields_revision.0));
@@ -193,6 +197,7 @@ fn render_named_slot_shape_row(
                                 &field.shape,
                                 child,
                                 depth + 1,
+                                &format!("{id_path}.{}", field.name.as_str()),
                             );
                         }
                     }
@@ -204,16 +209,19 @@ fn render_named_slot_shape_row(
                 map.entries.len(),
                 map.keys_revision.0
             ))
+            .id_salt(("slot-row-map", id_path))
             .default_open(name == "bindings")
             .show(ui, |ui| {
                 for (key, child) in &map.entries {
+                    let key_label = format_slot_map_key(key);
                     render_named_slot_shape_row(
                         ui,
                         registry,
-                        &format_slot_map_key(key),
+                        &key_label,
                         value,
                         child,
                         depth + 1,
+                        &format!("{id_path}[{key_label}]"),
                     );
                 }
             });
@@ -225,6 +233,7 @@ fn render_named_slot_shape_row(
                 value.variant_revision.0
             );
             egui::CollapsingHeader::new(label)
+                .id_salt(("slot-row-enum", id_path))
                 .default_open(false)
                 .show(ui, |ui| {
                     if let Some(variant) = variants.iter().find(|v| v.name == value.variant) {
@@ -235,6 +244,7 @@ fn render_named_slot_shape_row(
                             &variant.shape,
                             &value.data,
                             depth + 1,
+                            &format!("{id_path}.{}", value.variant.as_str()),
                         );
                     } else {
                         ui.colored_label(
@@ -251,9 +261,18 @@ fn render_named_slot_shape_row(
                     "{name}  some  rev {}",
                     value.presence_revision.0
                 ))
+                .id_salt(("slot-row-option", id_path))
                 .default_open(false)
                 .show(ui, |ui| {
-                    render_named_slot_shape_row(ui, registry, "some", some, child, depth + 1);
+                    render_named_slot_shape_row(
+                        ui,
+                        registry,
+                        "some",
+                        some,
+                        child,
+                        depth + 1,
+                        &format!("{id_path}.some"),
+                    );
                 });
             }
             None => row(
@@ -313,6 +332,7 @@ fn render_slot_shape_debug(
     registry: &SlotShapeRegistry,
     shape: &SlotShape,
     data: &SlotData,
+    id_path: &str,
 ) {
     match resolve_shape(registry, shape) {
         Some(SlotShape::Unit { .. }) => {
@@ -347,10 +367,12 @@ fn render_slot_shape_debug(
                         );
                         continue;
                     };
+                    let child_path = format!("{id_path}.{}", field.name.as_str());
                     egui::CollapsingHeader::new(field.name.as_str())
+                        .id_salt(("slot-debug-record-field", child_path.as_str()))
                         .default_open(false)
                         .show(ui, |ui| {
-                            render_slot_shape_debug(ui, registry, &field.shape, child);
+                            render_slot_shape_debug(ui, registry, &field.shape, child, &child_path);
                         });
                 }
             } else {
@@ -365,10 +387,13 @@ fn render_slot_shape_debug(
                     map.keys_revision.0
                 ));
                 for (key, child) in &map.entries {
-                    egui::CollapsingHeader::new(format_slot_map_key(key))
+                    let key_label = format_slot_map_key(key);
+                    let child_path = format!("{id_path}[{key_label}]");
+                    egui::CollapsingHeader::new(key_label)
+                        .id_salt(("slot-debug-map-key", child_path.as_str()))
                         .default_open(false)
                         .show(ui, |ui| {
-                            render_slot_shape_debug(ui, registry, value, child);
+                            render_slot_shape_debug(ui, registry, value, child, &child_path);
                         });
                 }
             } else {
@@ -383,7 +408,8 @@ fn render_slot_shape_debug(
                     value.variant_revision.0
                 ));
                 if let Some(variant) = variants.iter().find(|v| v.name == value.variant) {
-                    render_slot_shape_debug(ui, registry, &variant.shape, &value.data);
+                    let child_path = format!("{id_path}.{}", value.variant.as_str());
+                    render_slot_shape_debug(ui, registry, &variant.shape, &value.data, &child_path);
                 } else {
                     ui.colored_label(
                         egui::Color32::LIGHT_RED,
@@ -399,7 +425,10 @@ fn render_slot_shape_debug(
             if let SlotData::Option(value) = data {
                 ui.label(format!("presence rev {}", value.presence_revision.0));
                 match &value.data {
-                    Some(child) => render_slot_shape_debug(ui, registry, some, child),
+                    Some(child) => {
+                        let child_path = format!("{id_path}.some");
+                        render_slot_shape_debug(ui, registry, some, child, &child_path);
+                    }
                     None => {
                         ui.monospace("none");
                     }

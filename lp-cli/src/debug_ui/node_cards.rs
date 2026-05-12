@@ -20,14 +20,16 @@ pub(crate) fn render_node_workspace(
         return;
     }
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.heading("Nodes");
-        ui.add_space(6.0);
-        for id in node_order(view) {
-            render_node_card(ui, view, id, selected_node);
-            ui.add_space(8.0);
-        }
-    });
+    egui::ScrollArea::vertical()
+        .id_salt("node-workspace")
+        .show(ui, |ui| {
+            ui.heading("Nodes");
+            ui.add_space(6.0);
+            for id in node_order(view) {
+                render_node_card(ui, view, id, selected_node);
+                ui.add_space(8.0);
+            }
+        });
 }
 
 fn render_node_card(
@@ -41,52 +43,57 @@ fn render_node_card(
     };
 
     let selected = *selected_node == Some(id);
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal_wrapped(|ui| {
-            let label = entry.path.0.last().map_or_else(
-                || entry.path.to_string(),
-                |segment| segment.name.to_string(),
-            );
-            if ui.selectable_label(selected, label).clicked() {
-                *selected_node = Some(id);
+    ui.push_id(("node-card", id.0), |ui| {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                let label = entry.path.0.last().map_or_else(
+                    || entry.path.to_string(),
+                    |segment| segment.name.to_string(),
+                );
+                if ui.selectable_label(selected, label).clicked() {
+                    *selected_node = Some(id);
+                }
+                ui.monospace(format!("#{}", id.0));
+                ui.separator();
+                ui.label(format!("{:?}", entry.status));
+                ui.label(format!("{:?}", entry.state));
+                ui.separator();
+                ui.label(format!("changed {}", entry.change_frame.0));
+            });
+            ui.small(entry.path.to_string());
+            ui.separator();
+
+            render_connections(ui, view, id);
+
+            egui::CollapsingHeader::new("def / config")
+                .id_salt(("node-card-def", id.0))
+                .default_open(false)
+                .show(ui, |ui| render_root_rows(ui, view, id, "def"));
+
+            if has_root(view, id, "state") {
+                egui::CollapsingHeader::new("state")
+                    .id_salt(("node-card-state", id.0))
+                    .default_open(false)
+                    .show(ui, |ui| render_root_rows(ui, view, id, "state"));
             }
-            ui.monospace(format!("#{}", id.0));
-            ui.separator();
-            ui.label(format!("{:?}", entry.status));
-            ui.label(format!("{:?}", entry.state));
-            ui.separator();
-            ui.label(format!("changed {}", entry.change_frame.0));
-        });
-        ui.small(entry.path.to_string());
-        ui.separator();
 
-        render_connections(ui, view, id);
-
-        egui::CollapsingHeader::new("def / config")
-            .default_open(false)
-            .show(ui, |ui| render_root_rows(ui, view, id, "def"));
-
-        if has_root(view, id, "state") {
-            egui::CollapsingHeader::new("state")
-                .default_open(false)
-                .show(ui, |ui| render_root_rows(ui, view, id, "state"));
-        }
-
-        if !entry.children.is_empty() {
-            egui::CollapsingHeader::new(format!("children ({})", entry.children.len()))
-                .default_open(false)
-                .show(ui, |ui| {
-                    for child in &entry.children {
-                        if let Some(child_entry) = view.tree.nodes.get(child) {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.monospace(format!("#{}", child.0));
-                                ui.label(child_entry.path.to_string());
-                            });
+            if !entry.children.is_empty() {
+                egui::CollapsingHeader::new(format!("children ({})", entry.children.len()))
+                    .id_salt(("node-card-children", id.0))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        for child in &entry.children {
+                            if let Some(child_entry) = view.tree.nodes.get(child) {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.monospace(format!("#{}", child.0));
+                                    ui.label(child_entry.path.to_string());
+                                });
+                            }
                         }
-                    }
-                });
-        }
+                    });
+            }
+        });
     });
 }
 
