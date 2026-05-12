@@ -558,7 +558,10 @@ impl EngineResolveHost<'_> {
         node: &dyn NodeRuntime,
         slot: &SlotPath,
     ) -> Result<WithRevision<LpValue>, SessionResolveError> {
-        let data = lookup_slot_data(node.runtime_state_slots(), self.slot_shapes, slot)
+        let state = node.runtime_state_slots().ok_or_else(|| {
+            SessionResolveError::other("node does not expose runtime state slots")
+        })?;
+        let data = lookup_slot_data(state, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("runtime state lookup: {e}")))?;
         let SlotDataAccess::Value(value) = data else {
             return Err(SessionResolveError::other(format!(

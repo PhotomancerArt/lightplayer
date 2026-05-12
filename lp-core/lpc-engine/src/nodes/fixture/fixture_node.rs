@@ -172,8 +172,8 @@ impl NodeRuntime for FixtureNode {
         Ok(())
     }
 
-    fn runtime_state_slots(&self) -> &dyn SlotAccess {
-        &self.state
+    fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+        Some(&self.state)
     }
 
     fn register_runtime_state_shapes(
@@ -528,8 +528,8 @@ mod tests {
             Ok(())
         }
 
-        fn runtime_state_slots(&self) -> &dyn SlotAccess {
-            &self.state
+        fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+            Some(&self.state)
         }
 
         fn register_runtime_state_shapes(

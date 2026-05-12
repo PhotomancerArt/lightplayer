@@ -53,6 +53,7 @@ mod tests {
     use lpc_model::{Revision, TreePath, WithRevision};
     use lpc_wire::{ProjectReadRequest, ProjectReadResult, ResourcePayloadRead};
 
+    use crate::engine::test_support::EngineTestBuilder;
     use crate::resource::RuntimeBuffer;
 
     #[test]
@@ -73,6 +74,27 @@ mod tests {
         };
         assert_eq!(resources.summaries.len(), 1);
         assert!(resources.runtime_buffer_payloads.is_empty());
+    }
+
+    #[test]
+    fn default_debug_read_skips_nodes_without_runtime_state_roots() {
+        let h = EngineTestBuilder::new().output_node("output").build();
+
+        let response = h
+            .engine
+            .read_project(ProjectReadRequest::default_debug(None));
+
+        let ProjectReadResult::Nodes(nodes) = &response.results[1] else {
+            panic!("second result should be nodes");
+        };
+        let slots = nodes.slots.as_ref().expect("node slot snapshot");
+        assert!(
+            slots
+                .roots
+                .iter()
+                .all(|root| !root.name.ends_with(".state")),
+            "output node has no public runtime state root"
+        );
     }
 
     #[test]

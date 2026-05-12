@@ -50,8 +50,9 @@ impl Engine {
                 });
             }
 
-            if let NodeEntryState::Alive(node) = entry.state.value() {
-                let state = node.runtime_state_slots();
+            if let NodeEntryState::Alive(node) = entry.state.value()
+                && let Some(state) = node.runtime_state_slots()
+            {
                 roots.push(WireSlotRootSnapshot {
                     name: node_state_root_name(entry.id),
                     shape: state.shape_id(),

@@ -118,16 +118,18 @@ impl ShaderNode {
         let accessors =
             ShaderConfigAccessors::get_or_compile(&mut self.config_accessors, ctx.slot_shapes())
                 .map_err(|e| NodeError::msg(format!("compile shader config view: {e}")))?;
-        let next_opts = GlslOpts {
-            add_sub: lpc_model::ValueSlot::with_version(
-                ctx.revision(),
-                accessors.add_sub.get(ctx)?,
-            ),
-            mul: lpc_model::ValueSlot::with_version(ctx.revision(), accessors.mul.get(ctx)?),
-            div: lpc_model::ValueSlot::with_version(ctx.revision(), accessors.div.get(ctx)?),
-        };
-        if next_opts != self.glsl_opts {
-            self.glsl_opts = next_opts;
+        let next_add_sub = accessors.add_sub.get(ctx)?;
+        let next_mul = accessors.mul.get(ctx)?;
+        let next_div = accessors.div.get(ctx)?;
+        if *self.glsl_opts.add_sub.value() != next_add_sub
+            || *self.glsl_opts.mul.value() != next_mul
+            || *self.glsl_opts.div.value() != next_div
+        {
+            self.glsl_opts = GlslOpts {
+                add_sub: lpc_model::ValueSlot::with_version(ctx.revision(), next_add_sub),
+                mul: lpc_model::ValueSlot::with_version(ctx.revision(), next_mul),
+                div: lpc_model::ValueSlot::with_version(ctx.revision(), next_div),
+            };
             self.shader = None;
         }
         Ok(())
@@ -155,8 +157,8 @@ impl NodeRuntime for ShaderNode {
         Ok(())
     }
 
-    fn runtime_state_slots(&self) -> &dyn SlotAccess {
-        &self.state
+    fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+        Some(&self.state)
     }
 
     fn register_runtime_state_shapes(
@@ -298,13 +300,16 @@ fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
 mod tests {
     use alloc::sync::Arc;
     use alloc::vec;
+    use core::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
     use crate::artifact::ArtifactLocation;
     use crate::dataflow::resolver::QueryKey;
     use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
+    use crate::engine::error::Error;
     use crate::engine::resolve_with_engine_host;
+    use crate::gfx::LpGraphics;
     use crate::nodes::TextureNode;
     use crate::products::visual::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
     use lpc_model::{
@@ -390,8 +395,9 @@ mod tests {
     fn shader_render_output_is_on_runtime_state_slot_root() {
         let node = ShaderNode::new(NodeId::new(1), String::new());
 
-        assert_eq!(node.runtime_state_slots().shape_id(), ShaderState::SHAPE_ID);
-        let SlotDataAccess::Record(record) = node.runtime_state_slots().data() else {
+        let state = node.runtime_state_slots().expect("shader state slots");
+        assert_eq!(state.shape_id(), ShaderState::SHAPE_ID);
+        let SlotDataAccess::Record(record) = state.data() else {
             panic!("shader runtime state should be a record");
         };
         let Some(SlotDataAccess::Value(output)) = record.field(0) else {
@@ -451,5 +457,96 @@ mod tests {
         let sample = texture.sample_batch(&batch);
         assert!(sample.samples[0].rgba_unorm16[0] > 26_000);
         assert!(sample.samples[0].rgba_unorm16[0] < 40_000);
+    }
+
+    #[test]
+    fn shader_compile_cache_survives_unchanged_config_across_frames() {
+        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        let graphics = Arc::new(CountingGraphics::new());
+        engine.set_graphics(Some(graphics.clone()));
+
+        for time_ms in [500, 600, 700] {
+            engine.tick(time_ms).expect("tick");
+            resolve_with_engine_host(
+                &mut engine,
+                QueryKey::ProducedSlot {
+                    node: sh_id,
+                    slot: shader_output_path(),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve");
+            engine
+                .render_texture_for_test(
+                    rid,
+                    &crate::products::visual::RenderTextureRequest {
+                        width: 8,
+                        height: 8,
+                        format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                        time_seconds: time_ms as f32 / 1000.0,
+                    },
+                )
+                .expect("render texture");
+        }
+
+        assert_eq!(graphics.compile_count(), 1);
+    }
+
+    struct CountingGraphics {
+        inner: crate::Graphics,
+        compile_count: AtomicU32,
+    }
+
+    impl CountingGraphics {
+        fn new() -> Self {
+            Self {
+                inner: crate::Graphics::new(),
+                compile_count: AtomicU32::new(0),
+            }
+        }
+
+        fn compile_count(&self) -> u32 {
+            self.compile_count.load(Ordering::Relaxed)
+        }
+    }
+
+    impl LpGraphics for CountingGraphics {
+        fn compile_shader(
+            &self,
+            _source: &str,
+            _options: &ShaderCompileOptions,
+        ) -> Result<Box<dyn LpShader>, Error> {
+            self.compile_count.fetch_add(1, Ordering::Relaxed);
+            Ok(Box::new(CountingShader))
+        }
+
+        fn backend_name(&self) -> &'static str {
+            "counting-test"
+        }
+
+        fn alloc_output_buffer(
+            &self,
+            width: u32,
+            height: u32,
+        ) -> Result<lp_shader::LpsTextureBuf, Error> {
+            self.inner.alloc_output_buffer(width, height)
+        }
+    }
+
+    struct CountingShader;
+
+    impl LpShader for CountingShader {
+        fn render(
+            &mut self,
+            texture: &mut lp_shader::LpsTextureBuf,
+            _time: f32,
+        ) -> Result<(), Error> {
+            texture.data_mut().fill(0);
+            Ok(())
+        }
+
+        fn has_render(&self) -> bool {
+            true
+        }
     }
 }

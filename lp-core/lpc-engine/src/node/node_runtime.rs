@@ -5,7 +5,6 @@ use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
-use super::runtime_state_slots::EMPTY_RUNTIME_STATE_SLOTS;
 use super::{ControlNode, RenderNode};
 use crate::engine::memory_pressure::PressureLevel;
 
@@ -29,9 +28,12 @@ pub trait NodeRuntime {
         ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError>;
 
-    /// Node-owned runtime state exposed as a slot root. Default: empty state.
-    fn runtime_state_slots(&self) -> &dyn SlotAccess {
-        &EMPTY_RUNTIME_STATE_SLOTS
+    /// Node-owned runtime state exposed as a slot root.
+    ///
+    /// Nodes without public runtime state return `None`; they do not publish a
+    /// synthetic state root in project-read snapshots.
+    fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+        None
     }
 
     /// Register any shape roots required by [`Self::runtime_state_slots`].
@@ -68,7 +70,7 @@ mod tests {
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
     };
-    use lpc_model::{NodeId, Revision, SlotDataAccess, SlotShapeRegistry};
+    use lpc_model::{NodeId, Revision, SlotShapeRegistry};
 
     struct EmptyResolveHost;
 
@@ -120,12 +122,9 @@ mod tests {
     }
 
     #[test]
-    fn default_runtime_state_is_empty_unit() {
+    fn default_runtime_state_is_absent() {
         let node = DummyNode::new();
-        assert!(matches!(
-            node.runtime_state_slots().data(),
-            SlotDataAccess::Unit(_)
-        ));
+        assert!(node.runtime_state_slots().is_none());
 
         let mut res = Resolver::new();
         let frame = Revision::new(0);
