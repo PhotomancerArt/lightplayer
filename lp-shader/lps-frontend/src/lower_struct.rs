@@ -90,6 +90,23 @@ pub(crate) fn peel_arrayofstruct_chain(
             }
             (ainfo, subscripts, 0u32)
         }
+        ArraySubscriptRoot::Global(gv) => {
+            let ginfo = ctx.global_map.get(&gv)?;
+            if ginfo.is_uniform {
+                return None;
+            }
+            let ainfo = ctx
+                .aggregate_info_for_subscript_root(ArraySubscriptRoot::Global(gv))
+                .ok()
+                .flatten()?;
+            if !matches!(
+                &ainfo.layout.kind,
+                crate::naga_util::AggregateKind::Array { .. }
+            ) {
+                return None;
+            }
+            (ainfo, subscripts, 0u32)
+        }
         _ => return None,
     };
     let leaf = info.leaf_element_ty();

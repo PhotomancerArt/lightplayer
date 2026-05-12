@@ -8,7 +8,10 @@ use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
 use lpvm::AllocError;
 use lpvm::LpvmEngine;
 
+use crate::compile_compute_desc::CompileComputeDesc;
 use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
+use crate::compute_abi::{validate_compute_abi, validate_compute_tick_sig};
+use crate::compute_shader::LpsComputeShader;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
@@ -101,6 +104,38 @@ impl<E: LpvmEngine> LpsEngine<E> {
             render_texture_fn_name,
             render_samples_fn_name,
         )
+    }
+
+    /// Compile GLSL into a serial compute shader.
+    pub fn compile_compute_desc(
+        &self,
+        desc: CompileComputeDesc<'_>,
+    ) -> Result<LpsComputeShader, LpsError>
+    where
+        E::Module: 'static,
+    {
+        let CompileComputeDesc {
+            glsl,
+            compiler_config,
+            abi,
+        } = desc;
+
+        let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
+        let lower_options = lps_frontend::LowerOptions {
+            texture_specs: Default::default(),
+            texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
+        };
+        let (ir, meta) = lps_frontend::lower_with_options(&naga, &lower_options)
+            .map_err(|e| LpsError::Lower(format!("{e}")))?;
+        drop(naga);
+
+        let tick_fn_index = validate_compute_tick_sig(&meta)?;
+        validate_compute_abi(&meta, &abi)?;
+        let module = self
+            .engine
+            .compile_with_config(&ir, &meta, &compiler_config)
+            .map_err(|e| LpsError::Compile(format!("{e}")))?;
+        LpsComputeShader::new(module, meta, tick_fn_index)
     }
 
     /// Allocate a texture in the engine's shared memory.

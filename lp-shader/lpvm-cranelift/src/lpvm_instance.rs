@@ -10,10 +10,10 @@ use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    CallError, LpsValueF32, LpvmBuffer, LpvmInstance, LpvmModule, VmContext, decode_q32_return,
-    encode_uniform_write, encode_uniform_write_q32, flat_q32_words_from_f32_args,
-    glsl_component_count, q32_to_lps_value_f32, validate_render_samples_sig_ir,
-    validate_render_texture_sig_ir,
+    CallError, LpsValueF32, LpvmBuffer, LpvmInstance, LpvmModule, VmContext, decode_global_read,
+    decode_q32_return, encode_global_write, encode_uniform_write, encode_uniform_write_q32,
+    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
+    validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 
 use crate::lpvm_module::CraneliftModule;
@@ -159,6 +159,21 @@ impl CraneliftInstance {
         }
         self.vmctx_buf[offset..end].copy_from_slice(data);
         Ok(())
+    }
+
+    fn vmctx_read_bytes(&self, offset: usize, len: usize) -> Result<Vec<u8>, InstanceError> {
+        let end = offset.checked_add(len).ok_or_else(|| {
+            InstanceError::Call(CallError::Unsupported(String::from(
+                "vmctx read: offset overflow",
+            )))
+        })?;
+        if end > self.vmctx_buf.len() {
+            return Err(InstanceError::Call(CallError::Unsupported(format!(
+                "vmctx read out of bounds: end {end} len {}",
+                self.vmctx_buf.len()
+            ))));
+        }
+        Ok(self.vmctx_buf[offset..end].to_vec())
     }
 
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<*const u8, InstanceError> {
@@ -470,5 +485,43 @@ impl LpvmInstance for CraneliftInstance {
                 InstanceError::Call(CallError::Unsupported(format!("set_uniform_q32: {e}")))
             })?;
         self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_global(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_global_write(
+            self.module.metadata(),
+            path,
+            value,
+            self.module.float_mode(),
+        )
+        .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("set_global: {e}"))))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn get_global(&mut self, path: &str) -> Result<LpsValueF32, Self::Error> {
+        let span = global_data_span(self.module.metadata(), path)
+            .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("get_global: {e}"))))?;
+        let bytes = self.vmctx_read_bytes(span.offset, span.len)?;
+        decode_global_read(&span.ty, &bytes, self.module.float_mode())
+            .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("get_global: {e}"))))
+    }
+
+    fn call_compute_tick(&mut self, name: &str) -> Result<(), Self::Error> {
+        let sig = self
+            .module
+            .metadata()
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        validate_compute_tick_sig(sig)
+            .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("{name}: {e}"))))?;
+        let code = self.module.code_ptr(name).ok_or_else(|| {
+            CallError::Unsupported(String::from("internal: missing code pointer"))
+        })?;
+        unsafe {
+            crate::invoke::invoke_i32_args_returns(code, self.vmctx_ptr(), &[], 0, false)?;
+        }
+        Ok(())
     }
 }
