@@ -31,7 +31,7 @@
 //!
 //! ```ignore
 //! #[slot(name = "params", map(key = "string", value_ref = "shader.param_def"))]
-//! pub param_defs: SlotMap<String, ShaderParamDef>,
+//! pub param_defs: SlotMap<String, ShaderSlotDef>,
 //! ```
 //!
 //! Supported container attributes:

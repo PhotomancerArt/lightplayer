@@ -1,9 +1,9 @@
 use lpc_model::{
     Affine2d, Affine2dSlot, ColorOrderSlot, ColorOrderValue, OptionSlot, RelativeNodeRef,
-    RelativeNodeRefSlot,
+    RelativeNodeRefSlot, ValueSlot,
 };
 
-use super::{FixtureMapping, shader_def::ScalarHint};
+use super::FixtureMapping;
 
 #[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
@@ -13,7 +13,7 @@ pub struct FixtureDef {
     mapping: FixtureMapping,
     color_order: ColorOrderSlot,
     transform: Affine2dSlot,
-    brightness: OptionSlot<ScalarHint>,
+    brightness: OptionSlot<ValueSlot<f32>>,
     gamma_correction: lpc_model::ValueSlot<bool>,
 }
 
@@ -25,7 +25,7 @@ impl FixtureDef {
             mapping: FixtureMapping::path_points(),
             color_order: ColorOrderSlot::new(ColorOrderValue::Grb),
             transform: Affine2dSlot::new(Affine2d::identity()),
-            brightness: OptionSlot::some(ScalarHint::mock(0.8)),
+            brightness: OptionSlot::some(ValueSlot::new(0.8)),
             gamma_correction: lpc_model::ValueSlot::new(true),
         }
     }

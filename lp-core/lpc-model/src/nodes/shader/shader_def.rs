@@ -1,7 +1,7 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::shader::{GlslOpts, ShaderParamDef};
+use crate::nodes::shader::{GlslOpts, ShaderSlotDef};
 use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot};
 
 /// Authored shader node definition.
@@ -19,7 +19,7 @@ pub struct ShaderDef {
     #[serde(default)]
     pub glsl_opts: GlslOpts,
     #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
-    pub param_defs: MapSlot<String, ShaderParamDef>,
+    pub param_defs: MapSlot<String, ShaderSlotDef>,
 }
 
 impl Default for ShaderDef {
