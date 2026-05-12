@@ -131,7 +131,7 @@ impl<'r> TickContext<'r> {
                 slot: slot.clone(),
             })
             .map_err(|e| NodeError::msg(alloc::format!("resolve consumed slot {slot}: {e:?}")))?;
-        T::from_lp_value(production.product.value().clone()).map_err(|e| {
+        T::from_lp_value(production.product.value()).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {slot} has incompatible value: {e}"
             ))
@@ -157,7 +157,7 @@ impl<'r> TickContext<'r> {
                     accessor.path()
                 ))
             })?;
-        T::from_lp_value(production.product.value().clone()).map_err(|e| {
+        T::from_lp_value(production.product.value()).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {} has incompatible value: {e}",
                 accessor.path()

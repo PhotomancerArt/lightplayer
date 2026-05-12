@@ -13,9 +13,9 @@ impl ToLpValue for VisualProduct {
 }
 
 impl FromLpValue for VisualProduct {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::Product(ProductRef::Visual(product)) => Ok(product),
+            LpValue::Product(ProductRef::Visual(product)) => Ok(*product),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected VisualProduct, got {other:?}"
             ))),
@@ -50,7 +50,7 @@ mod tests {
         let product = VisualProduct::new(NodeId::new(3), 1);
 
         assert_eq!(
-            VisualProduct::from_lp_value(product.to_lp_value()).unwrap(),
+            VisualProduct::from_lp_value(&product.to_lp_value()).unwrap(),
             product
         );
         assert_eq!(

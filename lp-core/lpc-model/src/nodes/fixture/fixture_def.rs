@@ -230,7 +230,7 @@ impl ToLpValue for ColorOrder {
 }
 
 impl FromLpValue for ColorOrder {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => Self::parse(&value)
                 .ok_or_else(|| ValueRootError::new("expected RGB color order value")),

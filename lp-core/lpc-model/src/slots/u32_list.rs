@@ -12,7 +12,7 @@ impl ToLpValue for Vec<u32> {
 }
 
 impl FromLpValue for Vec<u32> {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         let LpValue::Array(values) = value else {
             return Err(ValueRootError::new("expected u32 list array"));
         };
@@ -22,7 +22,7 @@ impl FromLpValue for Vec<u32> {
             let LpValue::U32(value) = value else {
                 return Err(ValueRootError::new("expected u32 list array of u32 values"));
             };
-            output.push(value);
+            output.push(*value);
         }
         Ok(output)
     }
@@ -59,7 +59,7 @@ mod tests {
             LpValue::Array(vec![LpValue::U32(1), LpValue::U32(8), LpValue::U32(12)])
         );
         assert_eq!(
-            Vec::<u32>::from_lp_value(values.to_lp_value()).unwrap(),
+            Vec::<u32>::from_lp_value(&values.to_lp_value()).unwrap(),
             values
         );
         assert_eq!(

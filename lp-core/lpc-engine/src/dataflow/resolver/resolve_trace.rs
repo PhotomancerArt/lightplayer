@@ -112,30 +112,32 @@ impl ResolveTrace {
     }
 
     /// Push `query` onto the active stack, or error if it is already active (cycle).
-    pub fn try_push_active(&self, query: QueryKey) -> Result<(), ResolveTraceError> {
+    pub fn try_push_active(&self, query: &QueryKey) -> Result<(), ResolveTraceError> {
         {
             let stack = self.active_stack.borrow();
-            if stack.contains(&query) {
+            if stack.contains(query) {
                 drop(stack);
-                self.record_event_if_enabled(ResolveTraceEvent::CycleDetected {
+                if self.is_logging_enabled() {
+                    self.record_event_if_enabled(ResolveTraceEvent::CycleDetected {
+                        query: query.clone(),
+                    });
+                }
+                return Err(ResolveTraceError::Cycle {
                     query: query.clone(),
                 });
-                return Err(ResolveTraceError::Cycle { query });
             }
         }
         self.active_stack.borrow_mut().push(query.clone());
-        self.record_event_if_enabled(ResolveTraceEvent::BeginQuery(query));
+        if self.is_logging_enabled() {
+            self.record_event_if_enabled(ResolveTraceEvent::BeginQuery(query.clone()));
+        }
         Ok(())
     }
 
     /// Push `query` if not already active; on success returns a guard that pops on drop.
     pub fn enter<'a>(&'a self, query: QueryKey) -> Result<TraceGuard<'a>, ResolveTraceError> {
-        let q = query.clone();
-        self.try_push_active(query)?;
-        Ok(TraceGuard {
-            trace: self,
-            query: q,
-        })
+        self.try_push_active(&query)?;
+        Ok(TraceGuard { trace: self, query })
     }
 
     /// Pop `query` if it is the top of the active stack.
@@ -157,6 +159,10 @@ impl ResolveTrace {
 
     pub fn log_level(&self) -> ResolveLogLevel {
         self.log_level
+    }
+
+    pub fn is_logging_enabled(&self) -> bool {
+        self.log_level != ResolveLogLevel::Off
     }
 
     /// Append an event only when logging is enabled.

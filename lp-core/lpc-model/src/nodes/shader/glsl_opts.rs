@@ -4,7 +4,7 @@ use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
     ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
 /// Mode for Q32 add/sub: saturating (builtin) or wrapping (inline iadd/isub)
@@ -125,7 +125,7 @@ impl ToLpValue for AddSubMode {
 }
 
 impl FromLpValue for AddSubMode {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
@@ -148,7 +148,7 @@ impl ToLpValue for MulMode {
 }
 
 impl FromLpValue for MulMode {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
@@ -171,7 +171,7 @@ impl ToLpValue for DivMode {
 }
 
 impl FromLpValue for DivMode {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         string_lp_value(value).and_then(|value| Self::parse(&value))
     }
 }
@@ -187,9 +187,9 @@ impl SlotValue for DivMode {
     }
 }
 
-fn string_lp_value(value: LpValue) -> Result<String, ValueRootError> {
+fn string_lp_value(value: &LpValue) -> Result<&str, ValueRootError> {
     match value {
-        LpValue::String(value) => Ok(value),
+        LpValue::String(value) => Ok(value.as_str()),
         other => Err(ValueRootError::new(alloc::format!(
             "expected String, got {other:?}"
         ))),

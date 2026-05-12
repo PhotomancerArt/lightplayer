@@ -13,9 +13,9 @@ impl ToLpValue for ControlProduct {
 }
 
 impl FromLpValue for ControlProduct {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::Product(ProductRef::Control(product)) => Ok(product),
+            LpValue::Product(ProductRef::Control(product)) => Ok(*product),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected ControlProduct, got {other:?}"
             ))),
@@ -50,7 +50,7 @@ mod tests {
         let product = ControlProduct::new(NodeId::new(3), 1, ControlExtent::new(1, 600));
 
         assert_eq!(
-            ControlProduct::from_lp_value(product.to_lp_value()).unwrap(),
+            ControlProduct::from_lp_value(&product.to_lp_value()).unwrap(),
             product
         );
         assert_eq!(

@@ -3,19 +3,23 @@
 use crate::dataflow::binding::BindingRef;
 use crate::dataflow::resolver::resolver::model_value_to_lps_value_f32;
 use crate::gfx::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
+use alloc::rc::Rc;
 use lpc_model::{LpValue, NodeId, SlotPath, WithRevision};
 use lps_shared::LpsValueF32;
 
 /// One cached production: versioned slot value and where it came from.
 #[derive(Clone, Debug)]
 pub struct Production {
-    pub product: WithRevision<LpValue>,
+    pub product: Rc<WithRevision<LpValue>>,
     pub source: ProductionSource,
 }
 
 impl Production {
     pub fn new(product: WithRevision<LpValue>, source: ProductionSource) -> Self {
-        Self { product, source }
+        Self {
+            product: Rc::new(product),
+            source,
+        }
     }
 
     pub fn value(

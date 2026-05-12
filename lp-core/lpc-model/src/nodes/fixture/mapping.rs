@@ -265,7 +265,7 @@ impl ToLpValue for RingOrder {
 }
 
 impl FromLpValue for RingOrder {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => Self::parse(&value),
             other => Err(ValueRootError::new(alloc::format!(
