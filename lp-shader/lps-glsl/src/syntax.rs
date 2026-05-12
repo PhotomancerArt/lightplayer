@@ -77,6 +77,7 @@ pub enum ParsedStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedLetDecl {
+    pub ty: String,
     pub name: String,
     pub init: Option<ParsedExpr>,
     pub span: Span,

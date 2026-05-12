@@ -263,10 +263,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
         } => lower_uniform_load(ctx, expr.span, *byte_offset, &expr.ty),
         HirExprKind::Constructor { args } => {
             let mut lanes = Vec::new();
-            if expr.ty.is_matrix()
-                && args.len() == 1
-                && scalar_lane_count(&args[0].ty) == 1
-            {
+            if expr.ty.is_matrix() && args.len() == 1 && scalar_lane_count(&args[0].ty) == 1 {
                 let value = lower_expr(ctx, &args[0])?;
                 let diagonal = single_lane(args[0].span, &value)?;
                 let Some((cols, rows)) = expr.ty.matrix_dims() else {
@@ -1127,7 +1124,7 @@ fn lower_index(
         return Err(Diagnostic::error(span, "index result has no lanes"));
     }
     let result_ir_types = scalar_ir_types(result_ty)?;
-    let source_width = if base.ty.is_matrix() {
+    let source_width = if base.ty.is_matrix() || base.ty.is_array() {
         result_width
     } else {
         1
@@ -1287,7 +1284,10 @@ fn assign_target(
                 Diagnostic::error(span, format!("local index {local} is out of range"))
             })?;
             let Some((cols, rows)) = dst.ty.matrix_dims() else {
-                return Err(Diagnostic::error(span, "matrix element base must be matrix"));
+                return Err(Diagnostic::error(
+                    span,
+                    "matrix element base must be matrix",
+                ));
             };
             let column = lower_expr(ctx, column)?;
             let column = single_lane(span, &column)?;
@@ -1415,11 +1415,9 @@ fn read_assign_target(
     target: &HirAssignTarget,
 ) -> Result<LowerValue, Diagnostic> {
     match target {
-        HirAssignTarget::Param { param, .. } => {
-            ctx.params.get(*param).cloned().ok_or_else(|| {
-                Diagnostic::error(span, format!("parameter index {param} is out of range"))
-            })
-        }
+        HirAssignTarget::Param { param, .. } => ctx.params.get(*param).cloned().ok_or_else(|| {
+            Diagnostic::error(span, format!("parameter index {param} is out of range"))
+        }),
         HirAssignTarget::Local { local, .. } => {
             ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
@@ -1474,7 +1472,10 @@ fn read_assign_target(
                 Diagnostic::error(span, format!("local index {local} is out of range"))
             })?;
             let Some((cols, rows)) = value.ty.matrix_dims() else {
-                return Err(Diagnostic::error(span, "matrix element base must be matrix"));
+                return Err(Diagnostic::error(
+                    span,
+                    "matrix element base must be matrix",
+                ));
             };
             let column = lower_expr(ctx, column)?;
             let column = single_lane(span, &column)?;

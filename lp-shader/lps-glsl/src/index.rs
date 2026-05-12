@@ -298,9 +298,13 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let tok = self.current();
         if self.is_type_name(tok) {
             self.bump();
+            let mut name = tok.lexeme(self.source).to_string();
+            while self.at_punct("[") {
+                name.push_str(self.parse_array_suffix()?);
+            }
             Ok(TypeRef {
-                name: tok.lexeme(self.source).to_string(),
-                span: tok.span,
+                name,
+                span: Span::new(tok.span.start, self.previous().span.end),
             })
         } else {
             Err(Diagnostic::expected(
@@ -309,6 +313,23 @@ impl<'src, 'tok> Parser<'src, 'tok> {
                 self.describe_current(),
             ))
         }
+    }
+
+    fn parse_array_suffix(&mut self) -> Result<&'src str, Diagnostic> {
+        let start = self.expect_punct("[")?.span.start;
+        if !matches!(
+            self.current().kind,
+            TokenKind::IntLiteral | TokenKind::UintLiteral
+        ) {
+            return Err(Diagnostic::expected(
+                self.current().span,
+                "array length",
+                self.describe_current(),
+            ));
+        }
+        self.bump();
+        let end = self.expect_punct("]")?.span.end;
+        Ok(&self.source[start..end])
     }
 
     fn starts_type_name(&self) -> bool {

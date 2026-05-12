@@ -291,19 +291,29 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         } else {
             false
         };
-        let ty = self.expect_type_name()?.to_string();
+        let mut base_ty = self.expect_type_name()?.to_string();
+        if self.at_punct("[") {
+            base_ty.push_str(self.parse_array_suffix()?);
+        }
         let mut declarations = Vec::new();
         loop {
             let decl_start = self.current_span().start;
+            let mut ty = base_ty.clone();
             let name = self.expect_identifier_like()?.to_string();
+            if self.at_punct("[") {
+                ty.push_str(self.parse_array_suffix()?);
+            }
             let init = if self.at_punct("=") {
                 self.bump();
                 Some(self.parse_expr(1)?)
             } else {
                 None
             };
-            let decl_end = init.as_ref().map_or(self.previous().span.end, |expr| expr.span.end);
+            let decl_end = init
+                .as_ref()
+                .map_or(self.previous().span.end, |expr| expr.span.end);
             declarations.push(crate::syntax::ParsedLetDecl {
+                ty,
                 name,
                 init,
                 span: Span::new(decl_start, decl_end),
@@ -320,7 +330,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             let decl = declarations.remove(0);
             Ok(ParsedStmt::Let {
                 is_const,
-                ty,
+                ty: decl.ty,
                 name: decl.name,
                 init: decl.init,
                 span,
@@ -328,7 +338,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         } else {
             Ok(ParsedStmt::LetGroup {
                 is_const,
-                ty,
+                ty: base_ty,
                 declarations,
                 span,
             })
@@ -486,6 +496,27 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                         index: alloc::boxed::Box::new(index),
                     },
                 };
+                if self.at_punct("(")
+                    && let Some(name) = array_constructor_name(&expr, self.source)
+                {
+                    self.bump();
+                    let mut args = Vec::new();
+                    if !self.at_punct(")") {
+                        loop {
+                            args.push(self.parse_expr(1)?);
+                            if self.at_punct(",") {
+                                self.bump();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    let end = self.expect_punct(")")?.span.end;
+                    expr = ParsedExpr {
+                        span: Span::new(expr.span.start, end),
+                        kind: ParsedExprKind::Call { name, args },
+                    };
+                }
                 continue;
             }
             if self.at_punct("++") || self.at_punct("--") {
@@ -655,6 +686,23 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         }
     }
 
+    fn parse_array_suffix(&mut self) -> Result<&'src str, Diagnostic> {
+        let start = self.expect_punct("[")?.span.start;
+        let len = self.current().ok_or_else(|| {
+            Diagnostic::expected(self.current_span(), "array length", self.current_text())
+        })?;
+        if !matches!(len.kind, TokenKind::IntLiteral | TokenKind::UintLiteral) {
+            return Err(Diagnostic::expected(
+                len.span,
+                "array length",
+                len.lexeme(self.source),
+            ));
+        }
+        self.bump();
+        let end = self.expect_punct("]")?.span.end;
+        Ok(&self.source[start..end])
+    }
+
     fn expect_keyword(&mut self, keyword: Keyword) -> Result<Token, Diagnostic> {
         if self.at_keyword(keyword) {
             Ok(self.bump())
@@ -769,6 +817,23 @@ fn is_assignment_target(expr: &ParsedExpr) -> bool {
     )
 }
 
+fn array_constructor_name(expr: &ParsedExpr, source: &str) -> Option<alloc::string::String> {
+    let ParsedExprKind::Index { base, index } = &expr.kind else {
+        return None;
+    };
+    let ParsedExprKind::Name(base_name) = &base.kind else {
+        return None;
+    };
+    if !token_text_is_type_name(base_name) {
+        return None;
+    }
+    Some(alloc::format!(
+        "{}[{}]",
+        base_name,
+        index.span_text(source).trim_end_matches(['u', 'U'])
+    ))
+}
+
 fn token_is_type_name(tok: Token, source: &str) -> bool {
     match tok.kind {
         TokenKind::Keyword(
@@ -805,5 +870,41 @@ fn token_is_type_name(tok: Token, source: &str) -> bool {
                 | "void"
         ),
         _ => false,
+    }
+}
+
+fn token_text_is_type_name(text: &str) -> bool {
+    matches!(
+        text,
+        "bool"
+            | "float"
+            | "int"
+            | "uint"
+            | "vec2"
+            | "vec3"
+            | "vec4"
+            | "ivec2"
+            | "ivec3"
+            | "ivec4"
+            | "uvec2"
+            | "uvec3"
+            | "uvec4"
+            | "bvec2"
+            | "bvec3"
+            | "bvec4"
+            | "mat2"
+            | "mat3"
+            | "mat4"
+            | "void"
+    )
+}
+
+trait SpanText {
+    fn span_text<'a>(&self, source: &'a str) -> &'a str;
+}
+
+impl SpanText for ParsedExpr {
+    fn span_text<'a>(&self, source: &'a str) -> &'a str {
+        source.get(self.span.start..self.span.end).unwrap_or("")
     }
 }

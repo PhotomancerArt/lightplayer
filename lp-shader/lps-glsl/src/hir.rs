@@ -391,6 +391,13 @@ pub fn type_ref_to_lps(ty: &TypeRef) -> Result<LpsType, Diagnostic> {
 }
 
 fn type_name_to_lps(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
+    if let Some((element_name, len)) = parse_array_type_name(name) {
+        let element = type_name_to_lps(element_name, span)?;
+        return Ok(LpsType::Array {
+            element: Box::new(element),
+            len,
+        });
+    }
     match name {
         "void" => Ok(LpsType::Void),
         "float" => Ok(LpsType::Float),
@@ -417,6 +424,14 @@ fn type_name_to_lps(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
             format!("M3 lps-glsl does not support type `{other}`"),
         )),
     }
+}
+
+fn parse_array_type_name(name: &str) -> Option<(&str, u32)> {
+    let open = name.rfind('[')?;
+    let close = name.strip_suffix(']')?;
+    let len_text = close.get(open + 1..)?;
+    let len = len_text.trim_end_matches(['u', 'U']).parse::<u32>().ok()?;
+    Some((&name[..open], len))
 }
 
 fn build_function_sigs(index: &TopLevelIndex) -> Result<Vec<FunctionSig>, Diagnostic> {
@@ -602,15 +617,10 @@ impl<'a> TypeCtx<'a> {
                     .insert(name.clone(), local);
                 Ok(alloc::vec![HirStmt::Let { local, init }])
             }
-            ParsedStmt::LetGroup {
-                ty,
-                declarations,
-                span,
-                ..
-            } => {
-                let ty = type_name_to_lps(ty, *span)?;
+            ParsedStmt::LetGroup { declarations, .. } => {
                 let mut statements = Vec::new();
                 for declaration in declarations {
+                    let ty = type_name_to_lps(&declaration.ty, declaration.span)?;
                     let init = if let Some(init) = &declaration.init {
                         let expr = self.type_expr(init)?;
                         self.coerce_expr(expr, &ty)?
@@ -816,9 +826,11 @@ impl<'a> TypeCtx<'a> {
             ParsedExprKind::Index { base, index } => {
                 let base = self.type_expr(base)?;
                 let ty = if base.ty.is_matrix() {
-                    base.ty.matrix_column_type().ok_or_else(|| {
-                        Diagnostic::error(expr.span, "index base must be matrix")
-                    })?
+                    base.ty
+                        .matrix_column_type()
+                        .ok_or_else(|| Diagnostic::error(expr.span, "index base must be matrix"))?
+                } else if let Some(element) = base.ty.array_element_type() {
+                    element
                 } else {
                     scalar_base_type(&base.ty)
                         .ok_or_else(|| Diagnostic::error(expr.span, "index base must be vector"))?
@@ -1269,65 +1281,65 @@ impl<'a> TypeCtx<'a> {
                     format!("unknown local `{name}`"),
                 ))
             }
-            ParsedExprKind::Index { base, index } => {
-                match &base.kind {
-                    ParsedExprKind::Name(name) => {
-                        let local = self.resolve_local(name).ok_or_else(|| {
-                            Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                        })?;
-                        let ty = if self.locals[local].ty.is_matrix() {
-                            self.locals[local].ty.matrix_column_type().ok_or_else(|| {
-                                Diagnostic::error(expr.span, "index base must be matrix")
-                            })?
-                        } else {
-                            scalar_base_type(&self.locals[local].ty).ok_or_else(|| {
-                                Diagnostic::error(expr.span, "index base must be vector")
-                            })?
-                        };
-                        let index = self.type_expr(index)?;
-                        let index = self.coerce_expr(index, &LpsType::Int)?;
-                        Ok(HirAssignTarget::Index {
-                            local,
-                            index: Box::new(index),
-                            ty,
-                        })
-                    }
-                    ParsedExprKind::Index {
-                        base: matrix_base,
-                        index: column,
-                    } => {
-                        let ParsedExprKind::Name(name) = &matrix_base.kind else {
-                            return Err(Diagnostic::error(
-                                expr.span,
-                                "unsupported matrix element assignment base",
-                            ));
-                        };
-                        let local = self.resolve_local(name).ok_or_else(|| {
-                            Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                        })?;
-                        if !self.locals[local].ty.is_matrix() {
-                            return Err(Diagnostic::error(
-                                expr.span,
-                                "nested index assignment base must be matrix",
-                            ));
-                        }
-                        let column = self.type_expr(column)?;
-                        let column = self.coerce_expr(column, &LpsType::Int)?;
-                        let row = self.type_expr(index)?;
-                        let row = self.coerce_expr(row, &LpsType::Int)?;
-                        Ok(HirAssignTarget::MatrixElement {
-                            local,
-                            column: Box::new(column),
-                            row: Box::new(row),
-                            ty: LpsType::Float,
-                        })
-                    }
-                    _ => Err(Diagnostic::error(
-                        expr.span,
-                        "unsupported index assignment base",
-                    )),
+            ParsedExprKind::Index { base, index } => match &base.kind {
+                ParsedExprKind::Name(name) => {
+                    let local = self.resolve_local(name).ok_or_else(|| {
+                        Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                    })?;
+                    let ty = if self.locals[local].ty.is_matrix() {
+                        self.locals[local].ty.matrix_column_type().ok_or_else(|| {
+                            Diagnostic::error(expr.span, "index base must be matrix")
+                        })?
+                    } else if let Some(element) = self.locals[local].ty.array_element_type() {
+                        element
+                    } else {
+                        scalar_base_type(&self.locals[local].ty).ok_or_else(|| {
+                            Diagnostic::error(expr.span, "index base must be vector")
+                        })?
+                    };
+                    let index = self.type_expr(index)?;
+                    let index = self.coerce_expr(index, &LpsType::Int)?;
+                    Ok(HirAssignTarget::Index {
+                        local,
+                        index: Box::new(index),
+                        ty,
+                    })
                 }
-            }
+                ParsedExprKind::Index {
+                    base: matrix_base,
+                    index: column,
+                } => {
+                    let ParsedExprKind::Name(name) = &matrix_base.kind else {
+                        return Err(Diagnostic::error(
+                            expr.span,
+                            "unsupported matrix element assignment base",
+                        ));
+                    };
+                    let local = self.resolve_local(name).ok_or_else(|| {
+                        Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                    })?;
+                    if !self.locals[local].ty.is_matrix() {
+                        return Err(Diagnostic::error(
+                            expr.span,
+                            "nested index assignment base must be matrix",
+                        ));
+                    }
+                    let column = self.type_expr(column)?;
+                    let column = self.coerce_expr(column, &LpsType::Int)?;
+                    let row = self.type_expr(index)?;
+                    let row = self.coerce_expr(row, &LpsType::Int)?;
+                    Ok(HirAssignTarget::MatrixElement {
+                        local,
+                        column: Box::new(column),
+                        row: Box::new(row),
+                        ty: LpsType::Float,
+                    })
+                }
+                _ => Err(Diagnostic::error(
+                    expr.span,
+                    "unsupported index assignment base",
+                )),
+            },
             _ => Err(Diagnostic::error(expr.span, "invalid assignment target")),
         }
     }
@@ -1383,28 +1395,7 @@ impl<'a> TypeCtx<'a> {
 }
 
 fn is_constructor_name(name: &str) -> bool {
-    matches!(
-        name,
-        "float"
-            | "int"
-            | "uint"
-            | "bool"
-            | "vec2"
-            | "vec3"
-            | "vec4"
-            | "ivec2"
-            | "ivec3"
-            | "ivec4"
-            | "uvec2"
-            | "uvec3"
-            | "uvec4"
-            | "bvec2"
-            | "bvec3"
-            | "bvec4"
-            | "mat2"
-            | "mat3"
-            | "mat4"
-    )
+    type_name_to_lps(name, Span::new(0, 0)).is_ok()
 }
 
 fn builtin_kind(name: &str) -> Option<BuiltinKind> {
@@ -1823,6 +1814,7 @@ pub fn scalar_lane_count(ty: &LpsType) -> usize {
     match ty {
         LpsType::Void => 0,
         LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
+        LpsType::Array { element, len } => scalar_lane_count(element).saturating_mul(*len as usize),
         _ => ty
             .component_count()
             .or_else(|| ty.matrix_element_count())
@@ -1831,7 +1823,9 @@ pub fn scalar_lane_count(ty: &LpsType) -> usize {
 }
 
 pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
-    if ty.is_matrix() {
+    if let LpsType::Array { element, .. } = ty {
+        scalar_base_type(element)
+    } else if ty.is_matrix() {
         Some(LpsType::Float)
     } else if ty.is_vector() {
         ty.vector_base_type()
