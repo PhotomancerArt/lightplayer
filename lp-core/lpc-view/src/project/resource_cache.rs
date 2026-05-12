@@ -34,6 +34,11 @@ impl ClientResourceCache {
         self.summaries.get(&resource_ref)
     }
 
+    /// Iterate cached resource summaries in stable resource-ref order.
+    pub fn summaries(&self) -> impl Iterator<Item = &WireResourceSummary> {
+        self.summaries.values()
+    }
+
     /// Apply store summaries; when non-empty, membership is authoritative per domain present.
     pub fn apply_summaries(&mut self, summaries: &[WireResourceSummary]) {
         if summaries.is_empty() {
