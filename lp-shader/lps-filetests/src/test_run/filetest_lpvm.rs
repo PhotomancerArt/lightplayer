@@ -200,7 +200,7 @@ impl CompiledShader {
             )?,
             Frontend::Lp => {
                 let output = lps_glsl::compile(source, &lps_glsl::CompileOptions::default())
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                    .map_err(|e| anyhow::anyhow!("{}", e.render(source)))?;
                 (output.ir, output.meta)
             }
         };

@@ -215,6 +215,23 @@ fn compile_px_desc_lps_glsl_simple_shader() {
 }
 
 #[test]
+fn compile_px_desc_lps_glsl_basic_shader() {
+    let engine = test_engine();
+    let shader = engine
+        .compile_px_desc(
+            CompilePxDesc::new(
+                include_str!("../../../examples/basic/shader.glsl"),
+                TextureStorageFormat::Rgba16Unorm,
+                lpir::CompilerConfig::default(),
+            )
+            .with_frontend(ShaderFrontend::LpsGlsl),
+        )
+        .expect("compile_px_desc lps-glsl basic shader");
+    assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
+    assert_eq!(shader.render_sig().name, "render");
+}
+
+#[test]
 fn compile_px_with_uniforms() {
     let engine = test_engine();
     let glsl = "layout(binding = 0) uniform float u_time;

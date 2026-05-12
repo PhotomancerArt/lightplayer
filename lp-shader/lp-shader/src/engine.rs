@@ -184,7 +184,7 @@ fn lower_glsl(
                 )));
             }
             let output = lps_glsl::compile(glsl, &lps_glsl::CompileOptions::default())
-                .map_err(|e| LpsError::Parse(format!("{e}")))?;
+                .map_err(|e| LpsError::Parse(e.render(glsl)))?;
             Ok((output.ir, output.meta))
         }
     }

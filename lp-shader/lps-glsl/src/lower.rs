@@ -257,10 +257,29 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 lanes: results,
             })
         }
-        HirExprKind::ImportCall { import, args } => {
+        HirExprKind::ImportCall { import, args, out } => {
             let callee = *ctx.import_map.get(import).ok_or_else(|| {
                 Diagnostic::error(expr.span, format!("missing import for {import:?}"))
             })?;
+            if let Some(out) = out {
+                return lower_import_call_with_out(ctx, expr.span, callee, args, out, &expr.ty);
+            }
+            if matches!(import, ImportKey::Glsl { .. })
+                && args.len() == 1
+                && scalar_lane_count(&expr.ty) > 1
+            {
+                let arg = lower_expr(ctx, &args[0])?;
+                let mut results = Vec::new();
+                for lane in arg.lanes {
+                    let dst = ctx.fb.alloc_vreg(IrType::F32);
+                    ctx.fb.push_call(callee, &[lane], &[dst]);
+                    results.push(dst);
+                }
+                return Ok(LowerValue {
+                    ty: expr.ty.clone(),
+                    lanes: results,
+                });
+            }
             let mut arg_lanes = Vec::new();
             for arg in args {
                 arg_lanes.extend(lower_expr(ctx, arg)?.lanes);
@@ -305,6 +324,67 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
         }
     }
+}
+
+fn lower_import_call_with_out(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    callee: CalleeRef,
+    args: &[HirExpr],
+    out: &crate::hir::HirOutArg,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let out_lanes = scalar_lane_count(&out.ty);
+    let slot = ctx.fb.alloc_slot(out_lanes as u32 * 4);
+    let addr = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
+
+    let mut arg_lanes = Vec::new();
+    let mut value_arg = 0usize;
+    for arg_index in 0..(args.len() + 1) {
+        if arg_index == out.arg_index {
+            arg_lanes.push(addr);
+        } else {
+            let arg = args.get(value_arg).ok_or_else(|| {
+                Diagnostic::error(span, "internal lpfn out argument lowering mismatch")
+            })?;
+            arg_lanes.extend(lower_expr(ctx, arg)?.lanes);
+            value_arg += 1;
+        }
+    }
+
+    let results = scalar_ir_types(result_ty)?
+        .into_iter()
+        .map(|ty| ctx.fb.alloc_vreg(ty))
+        .collect::<Vec<_>>();
+    ctx.fb.push_call(callee, &arg_lanes, &results);
+
+    let Some(local) = ctx.locals.get(out.local).cloned() else {
+        return Err(Diagnostic::error(span, "internal lpfn out local missing"));
+    };
+    if local.lanes.len() != out_lanes {
+        return Err(Diagnostic::error(
+            span,
+            "internal lpfn out local width mismatch",
+        ));
+    }
+    for (i, dst) in local.lanes.iter().enumerate() {
+        let tmp = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Load {
+            dst: tmp,
+            base: addr,
+            offset: i as u32 * 4,
+        });
+        ctx.fb.push(LpirOp::Copy {
+            dst: *dst,
+            src: tmp,
+        });
+    }
+
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes: results,
+    })
 }
 
 fn lower_uniform_load(

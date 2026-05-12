@@ -65,6 +65,16 @@ mod tests {
         assert_eq!(map.line_col(0), Some((1, 1)));
         assert_eq!(map.line_col(4), Some((2, 1)));
         assert_eq!(map.line_col(8), Some((3, 1)));
+        assert_eq!(map.line_bounds(2), Some((4, 7)));
+    }
+
+    #[test]
+    fn diagnostic_render_shows_line_and_span() {
+        let source = "one\ntwo + three\n";
+        let rendered = Diagnostic::error(Span::new(8, 13), "sample error").render(source);
+        assert!(rendered.contains("--> <shader>:2:5"));
+        assert!(rendered.contains("2 | two + three"));
+        assert!(rendered.contains("|     ^^^^^"));
     }
 
     #[test]
@@ -168,6 +178,13 @@ mod tests {
     #[test]
     fn synchronous_compile_validates_basic2_example() {
         let output = compile(EXAMPLES[1].1, &CompileOptions::default()).expect("compile basic2");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+    }
+
+    #[test]
+    fn synchronous_compile_validates_basic_example() {
+        let output = compile(EXAMPLES[2].1, &CompileOptions::default()).expect("compile basic");
         lpir::validate_module(&output.ir).expect("valid LPIR");
         assert!(output.meta.functions.iter().any(|f| f.name == "render"));
     }

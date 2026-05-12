@@ -17,6 +17,7 @@ impl Span {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceMap {
     line_starts: Vec<usize>,
+    source_len: usize,
 }
 
 impl SourceMap {
@@ -28,7 +29,10 @@ impl SourceMap {
                 line_starts.push(i + 1);
             }
         }
-        Self { line_starts }
+        Self {
+            line_starts,
+            source_len: source.len(),
+        }
     }
 
     /// Return 1-based `(line, column)` for a byte offset.
@@ -40,5 +44,20 @@ impl SourceMap {
         };
         let col = offset.checked_sub(self.line_starts[line_idx])? + 1;
         Some((line_idx + 1, col))
+    }
+
+    /// Return byte bounds for a 1-based line, excluding the trailing newline.
+    pub fn line_bounds(&self, line: usize) -> Option<(usize, usize)> {
+        let line_idx = line.checked_sub(1)?;
+        let start = *self.line_starts.get(line_idx)?;
+        let mut end = self
+            .line_starts
+            .get(line_idx + 1)
+            .copied()
+            .unwrap_or(self.source_len);
+        if end > start {
+            end -= 1;
+        }
+        Some((start, end))
     }
 }

@@ -132,6 +132,7 @@ pub enum HirExprKind {
     ImportCall {
         import: ImportKey,
         args: Vec<HirExpr>,
+        out: Option<HirOutArg>,
     },
     Unary {
         op: UnaryOp,
@@ -142,6 +143,13 @@ pub enum HirExprKind {
         lhs: Box<HirExpr>,
         rhs: Box<HirExpr>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct HirOutArg {
+    pub local: usize,
+    pub ty: LpsType,
+    pub arg_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -648,15 +656,16 @@ impl<'a> TypeCtx<'a> {
         }
 
         if is_glsl_import(name) {
-            let args = args
-                .into_iter()
-                .map(|arg| self.coerce_expr(arg, &LpsType::Float))
-                .collect::<Result<Vec<_>, _>>()?;
+            let (args, ty) = type_glsl_import_args(span, name, args)?;
             let key = self.imports.glsl(name, args.len());
             return Ok(HirExpr {
                 span,
-                ty: LpsType::Float,
-                kind: HirExprKind::ImportCall { import: key, args },
+                ty,
+                kind: HirExprKind::ImportCall {
+                    import: key,
+                    args,
+                    out: None,
+                },
             });
         }
 
@@ -705,7 +714,9 @@ impl<'a> TypeCtx<'a> {
             .map(|arg| glsl_param_token(&arg.ty, span))
             .collect::<Result<Vec<_>, _>>()?;
         let glsl_params_csv = glsl_params.join(",");
-        let param_types = args
+        let mut out = None;
+        let mut import_args = args.clone();
+        let mut param_types = args
             .iter()
             .flat_map(|arg| scalar_ir_types(&arg.ty).unwrap_or_default())
             .collect::<Vec<_>>();
@@ -713,10 +724,39 @@ impl<'a> TypeCtx<'a> {
             && matches!(glsl_params.as_slice(), [a, b] if (a == "Vec2" || a == "Vec3") && b == "UInt")
         {
             LpsType::Float
+        } else if name == "lpfn_fbm"
+            && matches!(glsl_params.as_slice(), [a, b, c] if (a == "Vec2" || a == "Vec3") && b == "Int" && c == "UInt")
+        {
+            LpsType::Float
         } else if name == "lpfn_hsv2rgb" && matches!(glsl_params.as_slice(), [a] if a == "Vec3") {
             LpsType::Vec3
         } else if name == "lpfn_hsv2rgb" && matches!(glsl_params.as_slice(), [a] if a == "Vec4") {
             LpsType::Vec4
+        } else if name == "lpfn_psrdnoise"
+            && matches!(glsl_params.as_slice(), [a, b, c, d, e] if a == "Vec2" && b == "Vec2" && c == "Float" && d == "Vec2" && e == "UInt")
+        {
+            let HirExprKind::Local { index } = args[3].kind else {
+                return Err(Diagnostic::error(
+                    args[3].span,
+                    "lpfn_psrdnoise gradient argument must be a local vec2",
+                ));
+            };
+            out = Some(HirOutArg {
+                local: index,
+                ty: LpsType::Vec2,
+                arg_index: 3,
+            });
+            import_args.remove(3);
+            param_types = alloc::vec![
+                lpir::IrType::F32,
+                lpir::IrType::F32,
+                lpir::IrType::F32,
+                lpir::IrType::F32,
+                lpir::IrType::F32,
+                lpir::IrType::I32,
+                lpir::IrType::I32,
+            ];
+            LpsType::Float
         } else {
             return Err(Diagnostic::error(
                 span,
@@ -732,7 +772,11 @@ impl<'a> TypeCtx<'a> {
         Ok(HirExpr {
             span,
             ty: return_ty,
-            kind: HirExprKind::ImportCall { import: key, args },
+            kind: HirExprKind::ImportCall {
+                import: key,
+                args: import_args,
+                out,
+            },
         })
     }
 
@@ -805,6 +849,37 @@ fn builtin_kind(name: &str) -> Option<BuiltinKind> {
 
 fn is_glsl_import(name: &str) -> bool {
     matches!(name, "sin" | "cos" | "exp" | "atan")
+}
+
+fn type_glsl_import_args(
+    span: Span,
+    name: &str,
+    args: Vec<HirExpr>,
+) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
+    if matches!(name, "sin" | "cos" | "exp") && args.len() == 1 {
+        let arg = args[0].clone();
+        let arg_base = scalar_base_type(&arg.ty).unwrap_or_else(|| arg.ty.clone());
+        if arg_base == LpsType::Float {
+            return Ok((args, arg.ty));
+        }
+        let arg = coerce_expr(arg, &LpsType::Float)?;
+        return Ok((alloc::vec![arg], LpsType::Float));
+    }
+
+    let args = args
+        .into_iter()
+        .map(|arg| coerce_expr(arg, &LpsType::Float))
+        .collect::<Result<Vec<_>, _>>()?;
+    let ty = match name {
+        "atan" if args.len() == 1 || args.len() == 2 => LpsType::Float,
+        _ => {
+            return Err(Diagnostic::error(
+                span,
+                format!("unsupported GLSL import signature `{name}`"),
+            ));
+        }
+    };
+    Ok((args, ty))
 }
 
 fn type_builtin_args(
