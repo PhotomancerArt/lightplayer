@@ -107,10 +107,17 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             });
         }
         if self.at_keyword(Keyword::Return) {
-            self.bump();
-            let expr = self.parse_expr(0)?;
-            self.expect_punct(";")?;
-            return Ok(ParsedStmt::Return(expr));
+            let start = self.bump().span.start;
+            let expr = if self.at_punct(";") {
+                None
+            } else {
+                Some(self.parse_expr(0)?)
+            };
+            let end = self.expect_punct(";")?.span.end;
+            return Ok(ParsedStmt::Return {
+                expr,
+                span: Span::new(start, end),
+            });
         }
         if self.at_keyword(Keyword::If) {
             return self.parse_if();
@@ -285,21 +292,47 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             false
         };
         let ty = self.expect_type_name()?.to_string();
-        let name = self.expect_identifier_like()?.to_string();
-        let init = if self.at_punct("=") {
-            self.bump();
-            Some(self.parse_expr(0)?)
-        } else {
-            None
-        };
+        let mut declarations = Vec::new();
+        loop {
+            let decl_start = self.current_span().start;
+            let name = self.expect_identifier_like()?.to_string();
+            let init = if self.at_punct("=") {
+                self.bump();
+                Some(self.parse_expr(1)?)
+            } else {
+                None
+            };
+            let decl_end = init.as_ref().map_or(self.previous().span.end, |expr| expr.span.end);
+            declarations.push(crate::syntax::ParsedLetDecl {
+                name,
+                init,
+                span: Span::new(decl_start, decl_end),
+            });
+            if self.at_punct(",") {
+                self.bump();
+            } else {
+                break;
+            }
+        }
         let end = self.expect_punct(";")?.span.end;
-        Ok(ParsedStmt::Let {
-            is_const,
-            ty,
-            name,
-            init,
-            span: Span::new(start, end),
-        })
+        let span = Span::new(start, end);
+        if declarations.len() == 1 {
+            let decl = declarations.remove(0);
+            Ok(ParsedStmt::Let {
+                is_const,
+                ty,
+                name: decl.name,
+                init: decl.init,
+                span,
+            })
+        } else {
+            Ok(ParsedStmt::LetGroup {
+                is_const,
+                ty,
+                declarations,
+                span,
+            })
+        }
     }
 
     fn parse_expr(&mut self, min_binding_power: u8) -> Result<ParsedExpr, Diagnostic> {
@@ -714,6 +747,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
 fn stmt_end(stmt: &ParsedStmt) -> usize {
     match stmt {
         ParsedStmt::Let { span, .. }
+        | ParsedStmt::LetGroup { span, .. }
         | ParsedStmt::Assign { span, .. }
         | ParsedStmt::If { span, .. }
         | ParsedStmt::For { span, .. }
@@ -724,7 +758,7 @@ fn stmt_end(stmt: &ParsedStmt) -> usize {
         | ParsedStmt::Block { span, .. }
         | ParsedStmt::Empty { span }
         | ParsedStmt::Expr { span, .. } => span.end,
-        ParsedStmt::Return(expr) => expr.span.end,
+        ParsedStmt::Return { span, .. } => span.end,
     }
 }
 

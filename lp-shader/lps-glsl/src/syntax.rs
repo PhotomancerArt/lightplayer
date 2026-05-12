@@ -17,6 +17,12 @@ pub enum ParsedStmt {
         init: Option<ParsedExpr>,
         span: Span,
     },
+    LetGroup {
+        is_const: bool,
+        ty: String,
+        declarations: Vec<ParsedLetDecl>,
+        span: Span,
+    },
     Assign {
         name: String,
         op: AssignOp,
@@ -63,7 +69,17 @@ pub enum ParsedStmt {
         expr: ParsedExpr,
         span: Span,
     },
-    Return(ParsedExpr),
+    Return {
+        expr: Option<ParsedExpr>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedLetDecl {
+    pub name: String,
+    pub init: Option<ParsedExpr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -194,9 +194,15 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             let _ = lower_expr(ctx, expr)?;
             Ok(())
         }
-        HirStmt::Return(expr) => {
-            let value = lower_expr(ctx, expr)?;
-            ctx.fb.push_return(&value.lanes);
+        HirStmt::Return { expr, span } => {
+            let lanes = match expr {
+                Some(expr) => lower_expr(ctx, expr)?.lanes,
+                None => Vec::new(),
+            };
+            if lanes.is_empty() && expr.is_some() {
+                return Err(Diagnostic::error(*span, "return expression has no value"));
+            }
+            ctx.fb.push_return(&lanes);
             Ok(())
         }
     }
@@ -1092,6 +1098,12 @@ fn assign_target(
     value: LowerValue,
 ) -> Result<(), Diagnostic> {
     match target {
+        HirAssignTarget::Param { param, .. } => {
+            let dst = ctx.params.get(*param).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("parameter index {param} is out of range"))
+            })?;
+            copy_value(ctx, dst, value, span)
+        }
         HirAssignTarget::Local { local, .. } => {
             let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
@@ -1104,6 +1116,27 @@ fn assign_target(
             }
             let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            for (dst_lane, src_lane) in lanes.iter().zip(value.lanes.iter()) {
+                let Some(dst) = dst.lanes.get(*dst_lane) else {
+                    return Err(Diagnostic::error(
+                        span,
+                        "swizzle assignment lane out of range",
+                    ));
+                };
+                ctx.fb.push(LpirOp::Copy {
+                    dst: *dst,
+                    src: *src_lane,
+                });
+            }
+            Ok(())
+        }
+        HirAssignTarget::ParamSwizzle { param, lanes, .. } => {
+            if lanes.len() != value.lanes.len() {
+                return Err(Diagnostic::error(span, "swizzle assignment lane mismatch"));
+            }
+            let dst = ctx.params.get(*param).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("parameter index {param} is out of range"))
             })?;
             for (dst_lane, src_lane) in lanes.iter().zip(value.lanes.iter()) {
                 let Some(dst) = dst.lanes.get(*dst_lane) else {
@@ -1230,6 +1263,11 @@ fn read_assign_target(
     target: &HirAssignTarget,
 ) -> Result<LowerValue, Diagnostic> {
     match target {
+        HirAssignTarget::Param { param, .. } => {
+            ctx.params.get(*param).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("parameter index {param} is out of range"))
+            })
+        }
         HirAssignTarget::Local { local, .. } => {
             ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
@@ -1238,6 +1276,22 @@ fn read_assign_target(
         HirAssignTarget::Swizzle { local, lanes, ty } => {
             let value = ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            let mut out = Vec::new();
+            for lane in lanes {
+                let Some(value_lane) = value.lanes.get(*lane) else {
+                    return Err(Diagnostic::error(span, "swizzle lane out of range"));
+                };
+                out.push(*value_lane);
+            }
+            Ok(LowerValue {
+                ty: ty.clone(),
+                lanes: out,
+            })
+        }
+        HirAssignTarget::ParamSwizzle { param, lanes, ty } => {
+            let value = ctx.params.get(*param).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("parameter index {param} is out of range"))
             })?;
             let mut out = Vec::new();
             for lane in lanes {

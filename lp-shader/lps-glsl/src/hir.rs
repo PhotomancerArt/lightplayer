@@ -56,6 +56,7 @@ pub struct HirFunction {
 pub struct HirParam {
     pub name: Option<String>,
     pub ty: LpsType,
+    pub qualifier: ParamQualifier,
 }
 
 #[derive(Debug, Clone)]
@@ -102,7 +103,10 @@ pub enum HirStmt {
     Break,
     Continue,
     Expr(HirExpr),
-    Return(HirExpr),
+    Return {
+        expr: Option<HirExpr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -193,12 +197,21 @@ pub struct HirOutArg {
 
 #[derive(Debug, Clone)]
 pub enum HirAssignTarget {
+    Param {
+        param: usize,
+        ty: LpsType,
+    },
     Local {
         local: usize,
         ty: LpsType,
     },
     Swizzle {
         local: usize,
+        lanes: Vec<usize>,
+        ty: LpsType,
+    },
+    ParamSwizzle {
+        param: usize,
         lanes: Vec<usize>,
         ty: LpsType,
     },
@@ -212,8 +225,10 @@ pub enum HirAssignTarget {
 impl HirAssignTarget {
     fn ty(&self) -> &LpsType {
         match self {
-            HirAssignTarget::Local { ty, .. }
+            HirAssignTarget::Param { ty, .. }
+            | HirAssignTarget::Local { ty, .. }
             | HirAssignTarget::Swizzle { ty, .. }
+            | HirAssignTarget::ParamSwizzle { ty, .. }
             | HirAssignTarget::Index { ty, .. } => ty,
         }
     }
@@ -330,7 +345,7 @@ pub fn build_hir(
                 .map(|p| FnParam {
                     name: p.name.clone().unwrap_or_default(),
                     ty: p.ty.clone(),
-                    qualifier: ParamQualifier::In,
+                    qualifier: p.qualifier,
                 })
                 .collect(),
             kind: LpsFnKind::UserDefined,
@@ -408,6 +423,7 @@ fn build_function_sigs(index: &TopLevelIndex) -> Result<Vec<FunctionSig>, Diagno
                         Ok(HirParam {
                             name: p.name.clone(),
                             ty: type_ref_to_lps(&p.ty)?,
+                            qualifier: p.qualifier,
                         })
                     })
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
@@ -575,17 +591,50 @@ impl<'a> TypeCtx<'a> {
                     .insert(name.clone(), local);
                 Ok(alloc::vec![HirStmt::Let { local, init }])
             }
+            ParsedStmt::LetGroup {
+                ty,
+                declarations,
+                span,
+                ..
+            } => {
+                let ty = type_name_to_lps(ty, *span)?;
+                let mut statements = Vec::new();
+                for declaration in declarations {
+                    let init = if let Some(init) = &declaration.init {
+                        let expr = self.type_expr(init)?;
+                        self.coerce_expr(expr, &ty)?
+                    } else {
+                        zero_expr(declaration.span, &ty)?
+                    };
+                    let local = self.locals.len();
+                    self.locals.push(HirLocal {
+                        name: declaration.name.clone(),
+                        ty: ty.clone(),
+                    });
+                    self.scopes
+                        .last_mut()
+                        .expect("type scope")
+                        .insert(declaration.name.clone(), local);
+                    statements.push(HirStmt::Let { local, init });
+                }
+                Ok(statements)
+            }
             ParsedStmt::Assign {
                 name,
                 op,
                 value,
                 span,
             } => {
-                let local = self
-                    .resolve_local(name)
-                    .ok_or_else(|| Diagnostic::error(*span, format!("unknown local `{name}`")))?;
-                let value = self.type_assign_value(*span, local, *op, value)?;
-                Ok(alloc::vec![HirStmt::Assign { local, value }])
+                let target = self.type_name_assign_target(*span, name)?;
+                let value = self.type_assign_value(*span, &target, *op, value)?;
+                Ok(alloc::vec![HirStmt::Expr(HirExpr {
+                    span: *span,
+                    ty: value.ty.clone(),
+                    kind: HirExprKind::Assign {
+                        target,
+                        value: Box::new(value),
+                    },
+                })])
             }
             ParsedStmt::If {
                 condition,
@@ -689,10 +738,27 @@ impl<'a> TypeCtx<'a> {
                 let expr = self.type_expr(expr)?;
                 Ok(alloc::vec![HirStmt::Expr(expr)])
             }
-            ParsedStmt::Return(expr) => {
-                let expr = self.type_expr(expr)?;
-                let expr = self.coerce_expr(expr, return_ty)?;
-                Ok(alloc::vec![HirStmt::Return(expr)])
+            ParsedStmt::Return { expr, span } => {
+                let expr = match expr {
+                    Some(expr) if *return_ty == LpsType::Void => {
+                        return Err(Diagnostic::error(
+                            *span,
+                            "void function cannot return a value",
+                        ));
+                    }
+                    Some(expr) => {
+                        let expr = self.type_expr(expr)?;
+                        Some(self.coerce_expr(expr, return_ty)?)
+                    }
+                    None if *return_ty == LpsType::Void => None,
+                    None => {
+                        return Err(Diagnostic::error(
+                            *span,
+                            "non-void function must return a value",
+                        ));
+                    }
+                };
+                Ok(alloc::vec![HirStmt::Return { expr, span: *span }])
             }
         }
     }
@@ -1132,11 +1198,11 @@ impl<'a> TypeCtx<'a> {
     fn type_assign_value(
         &mut self,
         span: Span,
-        local: usize,
+        target: &HirAssignTarget,
         op: AssignOp,
         value: &ParsedExpr,
     ) -> Result<HirExpr, Diagnostic> {
-        let ty = self.locals[local].ty.clone();
+        let ty = target.ty().clone();
         let value = self.type_expr(value)?;
         if op == AssignOp::Set {
             return self.coerce_expr(value, &ty);
@@ -1152,7 +1218,7 @@ impl<'a> TypeCtx<'a> {
         let lhs = HirExpr {
             span,
             ty: ty.clone(),
-            kind: HirExprKind::Local { index: local },
+            kind: self.read_assign_target_kind(target),
         };
         let value = self.type_binary_values(span, binary_op, lhs, value)?;
         self.coerce_expr(value, &ty)
@@ -1160,15 +1226,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_assign_target(&mut self, expr: &ParsedExpr) -> Result<HirAssignTarget, Diagnostic> {
         match &expr.kind {
-            ParsedExprKind::Name(name) => {
-                let local = self.resolve_local(name).ok_or_else(|| {
-                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                })?;
-                Ok(HirAssignTarget::Local {
-                    local,
-                    ty: self.locals[local].ty.clone(),
-                })
-            }
+            ParsedExprKind::Name(name) => self.type_name_assign_target(expr.span, name),
             ParsedExprKind::Swizzle { base, fields } => {
                 let ParsedExprKind::Name(name) = &base.kind else {
                     return Err(Diagnostic::error(
@@ -1176,11 +1234,23 @@ impl<'a> TypeCtx<'a> {
                         "unsupported swizzle assignment base",
                     ));
                 };
-                let local = self.resolve_local(name).ok_or_else(|| {
-                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                })?;
-                let (lanes, ty) = swizzle_lanes(expr.span, &self.locals[local].ty, fields)?;
-                Ok(HirAssignTarget::Swizzle { local, lanes, ty })
+                if let Some(local) = self.resolve_local(name) {
+                    let (lanes, ty) = swizzle_lanes(expr.span, &self.locals[local].ty, fields)?;
+                    return Ok(HirAssignTarget::Swizzle { local, lanes, ty });
+                }
+                if let Some((param, p)) = self
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.name.as_deref() == Some(name))
+                {
+                    let (lanes, ty) = swizzle_lanes(expr.span, &p.ty, fields)?;
+                    return Ok(HirAssignTarget::ParamSwizzle { param, lanes, ty });
+                }
+                Err(Diagnostic::error(
+                    expr.span,
+                    format!("unknown local `{name}`"),
+                ))
             }
             ParsedExprKind::Index { base, index } => {
                 let ParsedExprKind::Name(name) = &base.kind else {
@@ -1203,6 +1273,43 @@ impl<'a> TypeCtx<'a> {
                 })
             }
             _ => Err(Diagnostic::error(expr.span, "invalid assignment target")),
+        }
+    }
+
+    fn type_name_assign_target(
+        &self,
+        span: Span,
+        name: &str,
+    ) -> Result<HirAssignTarget, Diagnostic> {
+        if let Some(local) = self.resolve_local(name) {
+            return Ok(HirAssignTarget::Local {
+                local,
+                ty: self.locals[local].ty.clone(),
+            });
+        }
+        if let Some((param, p)) = self
+            .params
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.name.as_deref() == Some(name))
+        {
+            return Ok(HirAssignTarget::Param {
+                param,
+                ty: p.ty.clone(),
+            });
+        }
+        Err(Diagnostic::error(span, format!("unknown local `{name}`")))
+    }
+
+    fn read_assign_target_kind(&self, target: &HirAssignTarget) -> HirExprKind {
+        match target {
+            HirAssignTarget::Param { param, .. } => HirExprKind::Param { index: *param },
+            HirAssignTarget::Local { local, .. } => HirExprKind::Local { index: *local },
+            HirAssignTarget::Swizzle { .. }
+            | HirAssignTarget::ParamSwizzle { .. }
+            | HirAssignTarget::Index { .. } => {
+                unreachable!("compound assignment statement only has simple name targets")
+            }
         }
     }
 
@@ -1654,6 +1761,9 @@ pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
 }
 
 pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
+    if *ty == LpsType::Void {
+        return Ok(Vec::new());
+    }
     let Some(base) = scalar_base_type(ty) else {
         return Err(Diagnostic::error(
             Span::new(0, 0),

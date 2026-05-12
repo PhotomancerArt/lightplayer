@@ -1,6 +1,8 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use lps_shared::ParamQualifier;
+
 use crate::{Diagnostic, Keyword, Span, Token, TokenKind, lex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +31,7 @@ pub struct ConstDecl {
 pub struct FunctionParam {
     pub name: Option<String>,
     pub ty: TypeRef,
+    pub qualifier: ParamQualifier,
     pub span: Span,
 }
 
@@ -191,6 +194,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             return Ok(params);
         }
         loop {
+            let qualifier = self.parse_param_qualifier();
             let ty = self.expect_type_ref()?;
             let name = if self.at_identifier_like() {
                 Some(self.expect_identifier_like()?.to_string())
@@ -202,6 +206,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             params.push(FunctionParam {
                 name,
                 ty,
+                qualifier,
                 span: Span::new(span_start, span_end),
             });
             if self.at_punct(",") {
@@ -211,6 +216,28 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             }
         }
         Ok(params)
+    }
+
+    fn parse_param_qualifier(&mut self) -> ParamQualifier {
+        let tok = self.current();
+        if tok.kind != TokenKind::Identifier {
+            return ParamQualifier::In;
+        }
+        match tok.lexeme(self.source) {
+            "in" => {
+                self.bump();
+                ParamQualifier::In
+            }
+            "out" => {
+                self.bump();
+                ParamQualifier::Out
+            }
+            "inout" => {
+                self.bump();
+                ParamQualifier::InOut
+            }
+            _ => ParamQualifier::In,
+        }
     }
 
     fn skip_balanced_brace_body(&mut self) -> Result<usize, Diagnostic> {
