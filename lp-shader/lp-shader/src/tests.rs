@@ -15,7 +15,7 @@ use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 use crate::{
-    CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor,
+    CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor, ShaderFrontend,
     px_shader::{RecordingUniformBackend, px_shader_from_parts_for_test},
     texture_binding,
 };
@@ -86,6 +86,19 @@ fn compile_px_desc_new_has_empty_texture_specs() {
         lpir::CompilerConfig::default(),
     );
     assert!(desc.textures.is_empty());
+    assert_eq!(desc.frontend, ShaderFrontend::default());
+}
+
+#[test]
+fn compile_px_desc_with_frontend_selects_lps_glsl() {
+    let desc = CompilePxDesc::new(
+        "vec4 render(vec2 p) { return vec4(0.0); }",
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    )
+    .with_frontend(ShaderFrontend::LpsGlsl);
+    assert_eq!(desc.frontend, ShaderFrontend::LpsGlsl);
+    assert_eq!(desc.frontend.name(), "lps-glsl");
 }
 
 #[test]
@@ -180,6 +193,24 @@ fn compile_px_simple_shader() {
         .expect("compile_px");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert!(!shader.meta().functions.is_empty());
+    assert_eq!(shader.render_sig().name, "render");
+}
+
+#[test]
+fn compile_px_desc_lps_glsl_simple_shader() {
+    let engine = test_engine();
+    let glsl = "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }";
+    let shader = engine
+        .compile_px_desc(
+            CompilePxDesc::new(
+                glsl,
+                TextureStorageFormat::Rgba16Unorm,
+                lpir::CompilerConfig::default(),
+            )
+            .with_frontend(ShaderFrontend::LpsGlsl),
+        )
+        .expect("compile_px_desc lps-glsl");
+    assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert_eq!(shader.render_sig().name, "render");
 }
 

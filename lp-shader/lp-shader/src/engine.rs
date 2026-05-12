@@ -3,12 +3,12 @@
 use alloc::format;
 use alloc::string::String;
 
-use lpir::CompilerConfig;
+use lpir::{CompilerConfig, LpirModule};
 use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
 use lpvm::AllocError;
 use lpvm::LpvmEngine;
 
-use crate::compile_px_desc::CompilePxDesc;
+use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
@@ -64,16 +64,10 @@ impl<E: LpvmEngine> LpsEngine<E> {
             output_format,
             compiler_config,
             textures,
+            frontend,
         } = desc;
 
-        let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
-        let lower_options = lps_frontend::LowerOptions {
-            texture_specs: textures.clone(),
-            texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
-        };
-        let (mut ir, mut meta) = lps_frontend::lower_with_options(&naga, &lower_options)
-            .map_err(|e| LpsError::Lower(format!("{e}")))?;
-        drop(naga);
+        let (mut ir, mut meta) = lower_glsl(glsl, &textures, &compiler_config, frontend)?;
 
         validate_texture_interface(&meta, &textures)?;
 
@@ -173,6 +167,53 @@ impl<E: LpvmEngine> LpsEngine<E> {
     pub fn inner(&self) -> &E {
         &self.engine
     }
+}
+
+fn lower_glsl(
+    glsl: &str,
+    textures: &TextureBindingSpecs,
+    compiler_config: &CompilerConfig,
+    frontend: ShaderFrontend,
+) -> Result<(LpirModule, LpsModuleSig), LpsError> {
+    match frontend {
+        ShaderFrontend::Naga => lower_glsl_with_naga(glsl, textures, compiler_config),
+        ShaderFrontend::LpsGlsl => {
+            if !textures.is_empty() {
+                return Err(LpsError::Validation(String::from(
+                    "lps-glsl frontend does not support texture bindings yet",
+                )));
+            }
+            let output = lps_glsl::compile(glsl, &lps_glsl::CompileOptions::default())
+                .map_err(|e| LpsError::Parse(format!("{e}")))?;
+            Ok((output.ir, output.meta))
+        }
+    }
+}
+
+#[cfg(feature = "naga-frontend")]
+fn lower_glsl_with_naga(
+    glsl: &str,
+    textures: &TextureBindingSpecs,
+    compiler_config: &CompilerConfig,
+) -> Result<(LpirModule, LpsModuleSig), LpsError> {
+    let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
+    let lower_options = lps_frontend::LowerOptions {
+        texture_specs: textures.clone(),
+        texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
+    };
+    lps_frontend::lower_with_options(&naga, &lower_options)
+        .map_err(|e| LpsError::Lower(format!("{e}")))
+}
+
+#[cfg(not(feature = "naga-frontend"))]
+fn lower_glsl_with_naga(
+    _glsl: &str,
+    _textures: &TextureBindingSpecs,
+    _compiler_config: &CompilerConfig,
+) -> Result<(LpirModule, LpsModuleSig), LpsError> {
+    Err(LpsError::Validation(String::from(
+        "naga frontend was not built into this binary",
+    )))
 }
 
 /// Validate the `render` function signature against the output format.

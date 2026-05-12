@@ -7,9 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "naga-frontend"]
 # Panic recovery via catch_unwind (shader compilation, node render)
 panic-recovery = ["lpc-engine/panic-recovery"]
+naga-frontend = ["lpc-engine/naga-frontend"]
+lps-glsl-default = ["lpc-engine/lps-glsl-default"]
 std = [
 	"lpc-shared/std",
 	"lpc-engine/std",

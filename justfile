@@ -368,6 +368,12 @@ demo-esp32c6-host: install-rv32-target
     espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
+# Requires: ESP32-C6 device connected via USB. Builds firmware with only the lps-glsl frontend.
+demo-esp32c6-host-lps-glsl: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo build --no-default-features --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6,server-lps-glsl
+    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
+    cargo run --package lp-cli -- dev examples/basic2 --push serial:auto
+
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
 demo-esp32c6-standalone: build-fw-esp32
     espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}

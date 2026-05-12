@@ -23,9 +23,11 @@ serde_json = { workspace = true, default-features = false, features = ["alloc"] 
 log = { workspace = true, default-features = false }
 
 [features]
-default = []
+default = ["naga-frontend"]
 # Unified profile session (alloc + perf hooks); guest syscall path was renamed from `alloc-trace`.
 profile = ["lp-riscv-emu-guest/profile"]
+naga-frontend = ["lpa-server/naga-frontend"]
+lps-glsl-default = ["lpa-server/lps-glsl-default"]
 # Test command __test_unwind: runs catch_unwind test before server loop (for CI)
 test_unwind = []
 

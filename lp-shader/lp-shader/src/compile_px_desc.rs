@@ -8,6 +8,35 @@ use lps_shared::{TextureBindingSpec, TextureStorageFormat};
 
 pub type TextureBindingSpecs = BTreeMap<String, TextureBindingSpec>;
 
+/// Frontend used for GLSL source before LPIR lowering.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShaderFrontend {
+    /// Existing Naga GLSL frontend.
+    Naga,
+    /// LightPlayer-native GLSL frontend (`lps-glsl`).
+    LpsGlsl,
+}
+
+impl Default for ShaderFrontend {
+    fn default() -> Self {
+        if cfg!(feature = "naga-frontend") {
+            Self::Naga
+        } else {
+            Self::LpsGlsl
+        }
+    }
+}
+
+impl ShaderFrontend {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Naga => "naga",
+            Self::LpsGlsl => "lps-glsl",
+        }
+    }
+}
+
 /// GLSL source, output [`TextureStorageFormat`], compiler settings, and optional per-sampler
 /// [`TextureBindingSpec`] entries consumed by [`crate::LpsEngine::compile_px_desc`].
 pub struct CompilePxDesc<'a> {
@@ -15,6 +44,7 @@ pub struct CompilePxDesc<'a> {
     pub output_format: TextureStorageFormat,
     pub compiler_config: CompilerConfig,
     pub textures: TextureBindingSpecs,
+    pub frontend: ShaderFrontend,
 }
 
 impl<'a> CompilePxDesc<'a> {
@@ -30,7 +60,15 @@ impl<'a> CompilePxDesc<'a> {
             output_format,
             compiler_config,
             textures: TextureBindingSpecs::new(),
+            frontend: ShaderFrontend::default(),
         }
+    }
+
+    /// Selects the GLSL frontend for this compile.
+    #[must_use]
+    pub fn with_frontend(mut self, frontend: ShaderFrontend) -> Self {
+        self.frontend = frontend;
+        self
     }
 
     /// Adds or replaces the compile-time [`TextureBindingSpec`] for uniform `name`.

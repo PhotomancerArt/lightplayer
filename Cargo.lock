@@ -4068,6 +4068,7 @@ version = "40.0.0"
 dependencies = [
  "lpir",
  "lps-frontend",
+ "lps-glsl",
  "lps-shared",
  "lpvm",
  "lpvm-wasm",
@@ -4130,7 +4131,6 @@ dependencies = [
  "lpfs",
  "lpir",
  "lps-builtins",
- "lps-frontend",
  "lps-q32",
  "lps-shared",
  "lpvm",

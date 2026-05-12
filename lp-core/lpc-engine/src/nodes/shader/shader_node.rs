@@ -75,6 +75,7 @@ impl ShaderNode {
         let compile_opts = ShaderCompileOptions {
             q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
+            ..ShaderCompileOptions::default()
         };
 
         let compile_start_ms = ctx.now_ms();
