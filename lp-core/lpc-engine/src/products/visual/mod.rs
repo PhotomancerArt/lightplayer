@@ -7,7 +7,9 @@ mod texture_product;
 
 pub use lpc_model::VisualProduct;
 pub use render_texture_request::RenderTextureRequest;
-pub use sample_request::{VisualSampleBatch, VisualSamplePoint};
+pub use sample_request::{
+    VisualSampleBatch, VisualSampleBufferRequest, VisualSamplePoint, VisualSampleTarget,
+};
 pub use sample_result::{VisualSample, VisualSampleBatchResult};
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 #[cfg(test)]
@@ -20,9 +22,13 @@ mod tests {
     fn sample_batch_holds_points_and_results_hold_samples() {
         let batch = VisualSampleBatch {
             points: vec![
-                VisualSamplePoint { x: 0, y: 0 },
-                VisualSamplePoint { x: 1, y: 1 },
+                VisualSamplePoint { x_q16: 0, y_q16: 0 },
+                VisualSamplePoint {
+                    x_q16: 65536,
+                    y_q16: 65536,
+                },
             ],
+            time_seconds: 0.0,
         };
         assert_eq!(batch.points.len(), 2);
 

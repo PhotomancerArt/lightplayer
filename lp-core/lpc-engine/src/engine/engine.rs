@@ -3,6 +3,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -13,6 +14,7 @@ use lpc_model::{
     SlotShapeRegistry, TreePath, WithRevision, advance_revision, current_revision,
     lookup_slot_data,
 };
+use lpc_shared::time::TimeProvider;
 use lpfs::FsChange;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
@@ -29,7 +31,10 @@ use crate::node::{
 };
 use crate::node::{NodeEntryState, NodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
-use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{
+    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
+    VisualSampleTarget,
+};
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
 use super::{EngineError, EngineServices};
@@ -246,6 +251,7 @@ impl Engine {
 
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
@@ -253,6 +259,7 @@ impl Engine {
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
+            time_provider,
             frame_time_seconds: time_s,
         };
 
@@ -294,6 +301,7 @@ impl Engine {
     ) -> Result<TextureRenderProduct, SessionResolveError> {
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
@@ -301,6 +309,7 @@ impl Engine {
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
+            time_provider,
             frame_time_seconds: time_s,
         };
         host.render_node_texture(product, request)
@@ -315,6 +324,7 @@ impl Engine {
     ) -> Result<ControlLayout, SessionResolveError> {
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
@@ -322,6 +332,7 @@ impl Engine {
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
+            time_provider,
             frame_time_seconds: time_s,
         };
         host.render_node_control(product, request, target)
@@ -340,6 +351,7 @@ struct EngineResolveHost<'a> {
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
+    time_provider: Option<Rc<dyn TimeProvider>>,
     frame_time_seconds: f32,
 }
 
@@ -706,6 +718,7 @@ impl EngineResolveHost<'_> {
                 node_id,
                 revision,
                 self.graphics.clone(),
+                self.time_provider.clone(),
                 self.frame_time_seconds,
             );
             render_node.render_texture(product, request, &mut ctx)
@@ -777,6 +790,7 @@ impl EngineResolveHost<'_> {
                 node_id,
                 revision,
                 self.graphics.clone(),
+                self.time_provider.clone(),
                 self.frame_time_seconds,
             );
             render_node.render_texture_into(product, request, target, &mut ctx)
@@ -788,6 +802,78 @@ impl EngineResolveHost<'_> {
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
+    }
+
+    fn sample_node_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), SessionResolveError> {
+        let node_id = product.node();
+        let revision = current_revision();
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!("sample visual: unknown node {node_id:?}"))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Visual { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                NodeEntryState::Executing { call } => {
+                    entry.state = WithRevision::new(
+                        old_changed_at,
+                        NodeEntryState::Executing { call: call.clone() },
+                    );
+                    return Err(SessionResolveError::other(format!(
+                        "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                        call.call.label()
+                    )));
+                }
+                other => {
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(format!(
+                        "sample visual: node {node_id:?} not alive"
+                    )));
+                }
+            }
+        };
+
+        let result = {
+            let Some(render_node) = node_runtime.render_node() else {
+                return restore_node_after_failed_render_unit(
+                    self.tree,
+                    node_id,
+                    node_runtime,
+                    revision,
+                    SessionResolveError::other(format!(
+                        "node {node_id:?} cannot sample visual product output {}: NodeRuntime::render_node() returned None",
+                        product.output()
+                    )),
+                );
+            };
+            let mut ctx = RenderContext::new(
+                node_id,
+                revision,
+                self.graphics.clone(),
+                self.time_provider.clone(),
+                self.frame_time_seconds,
+            );
+            render_node.sample_visual_into(product, request, target, &mut ctx)
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("sample visual: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+
+        result.map_err(|e| SessionResolveError::other(format!("sample visual: {e:?}")))
     }
 
     fn render_node_control(
@@ -881,6 +967,16 @@ impl ControlRenderServices for EngineResolveHost<'_> {
     ) -> Result<(), NodeError> {
         self.render_node_texture_into(product, request, target)
             .map_err(|e| NodeError::msg(format!("render texture: {e}")))
+    }
+
+    fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError> {
+        self.sample_node_visual_into(product, request, target)
+            .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
     }
 }
 
@@ -1015,6 +1111,7 @@ pub(crate) fn resolve_with_engine_host(
     let mut session = EngineSession::new(fid, &mut resolver_tmp, ResolveTrace::new(log_level));
     let mut producers_ticked = BTreeSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
+    let time_provider = eng.services.time_provider();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
@@ -1022,6 +1119,7 @@ pub(crate) fn resolve_with_engine_host(
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
         graphics: eng.graphics.clone(),
+        time_provider,
         frame_time_seconds: time_s,
     };
     let result = session
@@ -1046,6 +1144,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     );
     let mut producers_ticked = BTreeSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
+    let time_provider = eng.services.time_provider();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
@@ -1053,6 +1152,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
         graphics: eng.graphics.clone(),
+        time_provider,
         frame_time_seconds: time_s,
     };
     let result = session.resolve(&mut host, key.clone()).and_then(|first| {

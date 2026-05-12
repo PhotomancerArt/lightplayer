@@ -80,9 +80,9 @@ impl ToLpValue for ResourceRef {
 }
 
 impl FromLpValue for ResourceRef {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::Resource(value) => Ok(value),
+            LpValue::Resource(value) => Ok(*value),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected Resource, got {other:?}"
             ))),

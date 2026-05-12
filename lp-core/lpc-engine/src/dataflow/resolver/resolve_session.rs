@@ -52,15 +52,17 @@ impl<'a> EngineSession<'a> {
         query: QueryKey,
     ) -> Result<Production, SessionResolveError> {
         if let Some(pv) = self.resolver.cache().get(&query) {
-            self.trace
-                .record_event(ResolveTraceEvent::CacheHit(query.clone()));
+            if self.trace.is_logging_enabled() {
+                self.trace
+                    .record_event(ResolveTraceEvent::CacheHit(query.clone()));
+            }
             return Ok(pv.clone());
         }
 
         self.trace
-            .try_push_active(query.clone())
+            .try_push_active(&query)
             .map_err(SessionResolveError::from)?;
-        let inner_result = self.resolve_uncached(host, query.clone());
+        let inner_result = self.resolve_uncached(host, &query);
         self.trace.exit(&query);
         let result = inner_result?;
         self.resolver.cache_mut().insert(query, result.clone());
@@ -70,27 +72,32 @@ impl<'a> EngineSession<'a> {
     fn resolve_uncached<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
-        query: QueryKey,
+        query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        match &query {
-            QueryKey::Bus(channel) => self.resolve_bus(host, channel, &query),
+        match query {
+            QueryKey::Bus(channel) => self.resolve_bus(host, channel, query),
             QueryKey::ConsumedSlot { node, slot } => {
-                self.resolve_consumed_slot(host, *node, slot.clone(), &query)
+                self.resolve_consumed_slot(host, *node, slot, query)
             }
             QueryKey::ConsumedSlotAccessor { node, accessor } => {
-                self.resolve_consumed_slot(host, *node, accessor.path().clone(), &query)
+                self.resolve_consumed_slot(host, *node, accessor.path(), query)
             }
             QueryKey::ProducedSlot { .. } => {
-                self.trace
-                    .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
-                let r = host.produce(&query, self);
+                if self.trace.is_logging_enabled() {
+                    self.trace
+                        .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
+                }
+                let r = host.produce(query, self);
                 match &r {
-                    Ok(_) => self
+                    Ok(_) if self.trace.is_logging_enabled() => self
                         .trace
                         .record_event(ResolveTraceEvent::ProduceEnd(query.clone())),
-                    Err(_) => self.trace.record_event(ResolveTraceEvent::ResolveError {
-                        query: query.clone(),
-                    }),
+                    Err(_) if self.trace.is_logging_enabled() => {
+                        self.trace.record_event(ResolveTraceEvent::ResolveError {
+                            query: query.clone(),
+                        })
+                    }
+                    _ => {}
                 }
                 r
             }
@@ -105,10 +112,12 @@ impl<'a> EngineSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         let candidates = host.providers_for_bus(channel);
         let entry = select_highest_priority_bus_provider(channel, &candidates)?;
-        self.trace.record_event(ResolveTraceEvent::SelectBinding {
-            query: query.clone(),
-            binding: entry.0,
-        });
+        if self.trace.is_logging_enabled() {
+            self.trace.record_event(ResolveTraceEvent::SelectBinding {
+                query: query.clone(),
+                binding: entry.0,
+            });
+        }
         self.resolve_binding_source(host, entry.0, &entry.1.source)
     }
 
@@ -116,26 +125,33 @@ impl<'a> EngineSession<'a> {
         &mut self,
         host: &mut (impl ResolveHost + ?Sized),
         node: NodeId,
-        slot: SlotPath,
+        slot: &SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        if let Some(entry) = host.binding_for_consumed_slot(node, &slot) {
-            self.trace.record_event(ResolveTraceEvent::SelectBinding {
-                query: query.clone(),
-                binding: entry.0,
-            });
+        if let Some(entry) = host.binding_for_consumed_slot(node, slot) {
+            if self.trace.is_logging_enabled() {
+                self.trace.record_event(ResolveTraceEvent::SelectBinding {
+                    query: query.clone(),
+                    binding: entry.0,
+                });
+            }
             return self.resolve_binding_source(host, entry.0, &entry.1.source);
         }
-        self.trace
-            .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
+        if self.trace.is_logging_enabled() {
+            self.trace
+                .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
+        }
         let r = host.produce(query, self);
         match &r {
-            Ok(_) => self
+            Ok(_) if self.trace.is_logging_enabled() => self
                 .trace
                 .record_event(ResolveTraceEvent::ProduceEnd(query.clone())),
-            Err(_) => self.trace.record_event(ResolveTraceEvent::ResolveError {
-                query: query.clone(),
-            }),
+            Err(_) if self.trace.is_logging_enabled() => {
+                self.trace.record_event(ResolveTraceEvent::ResolveError {
+                    query: query.clone(),
+                });
+            }
+            _ => {}
         }
         r
     }

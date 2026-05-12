@@ -81,7 +81,7 @@ impl ToLpValue for RelativeNodeRef {
 }
 
 impl crate::FromLpValue for RelativeNodeRef {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => RelativeNodeRef::parse(&value)
                 .map_err(|err| ValueRootError::new(alloc::format!("{err}"))),

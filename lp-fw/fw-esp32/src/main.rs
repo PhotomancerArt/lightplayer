@@ -113,6 +113,7 @@ mod board;
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
 )))]
 mod boot;
 mod jit_fns;
@@ -126,6 +127,7 @@ mod logger;
         feature = "test_json",
         feature = "test_msafluid",
         feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
     )),
     feature = "test_rmt",
     feature = "test_dither",
@@ -144,6 +146,7 @@ mod serial;
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
 )))]
 mod server_loop;
 #[cfg(not(any(
@@ -154,6 +157,7 @@ mod server_loop;
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
 )))]
 mod time;
 #[cfg(all(
@@ -166,6 +170,7 @@ mod time;
         feature = "test_json",
         feature = "test_msafluid",
         feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
     )),
 ))]
 mod transport;
@@ -180,6 +185,7 @@ mod transport;
         feature = "test_json",
         feature = "test_msafluid",
         feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
     )),
 ))]
 mod flash_storage;
@@ -193,6 +199,7 @@ mod flash_storage;
         feature = "test_json",
         feature = "test_msafluid",
         feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
     )),
 ))]
 mod lp_fs_flash;
@@ -205,6 +212,7 @@ mod lp_fs_flash;
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
 )))]
 use lpfs::lp_path::AsLpPath;
 #[cfg(not(any(
@@ -215,6 +223,7 @@ use lpfs::lp_path::AsLpPath;
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
 )))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -266,6 +275,11 @@ mod tests {
     pub mod msafluid_solver;
 }
 
+#[cfg(feature = "test_jit_math_perf")]
+mod tests {
+    pub mod jit_math_perf;
+}
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[cfg(not(any(
@@ -276,6 +290,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
 )))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
@@ -328,6 +343,12 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_fluid_demo(spawner).await;
     }
 
+    #[cfg(feature = "test_jit_math_perf")]
+    {
+        use tests::jit_math_perf::run_jit_math_perf;
+        run_jit_math_perf(spawner).await;
+    }
+
     #[cfg(not(any(
         feature = "test_rmt",
         feature = "test_dither",
@@ -336,6 +357,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_json",
         feature = "test_msafluid",
         feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
     )))]
     {
         // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing

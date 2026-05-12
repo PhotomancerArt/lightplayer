@@ -25,7 +25,7 @@ impl ToLpValue for RingLampCounts {
 }
 
 impl FromLpValue for RingLampCounts {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         Vec::<u32>::from_lp_value(value).map(Self)
     }
 }
@@ -60,7 +60,7 @@ mod tests {
             LpValue::Array(vec![LpValue::U32(1), LpValue::U32(8), LpValue::U32(12)])
         );
         assert_eq!(
-            RingLampCounts::from_lp_value(counts.to_lp_value()).unwrap(),
+            RingLampCounts::from_lp_value(&counts.to_lp_value()).unwrap(),
             counts
         );
         assert_eq!(

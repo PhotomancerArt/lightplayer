@@ -8,7 +8,7 @@ use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
     DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmBuffer, LpvmInstance, encode_uniform_write,
-    encode_uniform_write_q32, validate_render_texture_sig_ir,
+    encode_uniform_write_q32, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 use wasmtime::{Instance, Val};
 
@@ -49,6 +49,7 @@ pub struct WasmLpvmInstance {
     globals_size: usize,
     lpir: LpirModule,
     render_texture_cache: Option<RenderTextureEntry>,
+    render_samples_cache: Option<RenderTextureEntry>,
 }
 
 impl WasmLpvmInstance {
@@ -76,6 +77,7 @@ impl WasmLpvmInstance {
             globals_size,
             lpir: module.lpir.clone(),
             render_texture_cache: None,
+            render_samples_cache: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot
@@ -223,6 +225,36 @@ impl WasmLpvmInstance {
             .ok_or_else(|| WasmError::runtime(format!("function `{fn_name}` not found")))?;
         let func_ret = func;
         self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            func,
+        });
+        Ok(func_ret)
+    }
+
+    fn resolve_render_samples(&mut self, fn_name: &str) -> Result<wasmtime::Func, WasmError> {
+        if let Some(entry) = &self.render_samples_cache {
+            if entry.name == fn_name {
+                return Ok(entry.func);
+            }
+        }
+
+        let ir_fn = self
+            .lpir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| WasmError::runtime(format!("function `{fn_name}` not in LPIR")))?;
+        validate_render_samples_sig_ir(ir_fn)
+            .map_err(|e| WasmError::runtime(format!("render-samples sig invalid: {e}")))?;
+
+        let mut guard = self.runtime.lock();
+        let store = &mut guard.store;
+        let func = self
+            .instance
+            .get_func(store, fn_name)
+            .ok_or_else(|| WasmError::runtime(format!("function `{fn_name}` not found")))?;
+        let func_ret = func;
+        self.render_samples_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
             func,
         });
@@ -482,6 +514,52 @@ impl LpvmInstance for WasmLpvmInstance {
         self.prepare_call(store, mem)?;
         func.call(&mut *store, &wasm_args, &mut []).map_err(|e| {
             format_wasm_call_error(&format!("rendering texture via `{fn_name}`"), e)
+        })?;
+        Ok(())
+    }
+
+    fn call_render_samples(
+        &mut self,
+        fn_name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), Self::Error> {
+        if self.float_mode != FloatMode::Q32 {
+            return Err(WasmError::runtime(
+                "WasmLpvmInstance::call_render_samples requires FloatMode::Q32",
+            ));
+        }
+
+        let func = self.resolve_render_samples(fn_name)?;
+        let points_offset = i32::try_from(points.guest_base()).map_err(|_| {
+            WasmError::runtime(format!(
+                "points guest base {:#x} exceeds i32 range",
+                points.guest_base()
+            ))
+        })?;
+        let out_offset = i32::try_from(out.guest_base()).map_err(|_| {
+            WasmError::runtime(format!(
+                "sample output guest base {:#x} exceeds i32 range",
+                out.guest_base()
+            ))
+        })?;
+
+        let wasm_args = vec![
+            Val::I32(0),
+            Val::I32(points_offset),
+            Val::I32(out_offset),
+            Val::I32(count as i32),
+        ];
+
+        let mut guard = self.runtime.lock();
+        self.reset_globals_with_guard(&mut guard);
+
+        let mem = guard.memory;
+        let store = &mut guard.store;
+        self.prepare_call(store, mem)?;
+        func.call(&mut *store, &wasm_args, &mut []).map_err(|e| {
+            format_wasm_call_error(&format!("rendering samples via `{fn_name}`"), e)
         })?;
         Ok(())
     }

@@ -69,6 +69,37 @@ fn print_contains_func_and_fadd() {
 }
 
 #[test]
+fn print_contains_fdiv_const_for_literal_divisor() {
+    let glsl = "float div_const(float x) { return x / 2.0; }";
+    let naga = compile(glsl).expect("compile");
+    let (ir, _) = lower(&naga).expect("lower");
+    validate_module(&ir).expect("validate");
+    let s = print_module(&ir);
+    assert!(s.contains("fdiv_const.f32"), "{s}");
+}
+
+#[test]
+fn print_contains_fdiv_const_for_const_name_divisor() {
+    let glsl = "const float K = 3.0; float div_const(float x) { return x / K; }";
+    let naga = compile(glsl).expect("compile");
+    let (ir, _) = lower(&naga).expect("lower");
+    validate_module(&ir).expect("validate");
+    let s = print_module(&ir);
+    assert!(s.contains("fdiv_const.f32"), "{s}");
+}
+
+#[test]
+fn print_keeps_fdiv_for_dynamic_divisor() {
+    let glsl = "float div_dynamic(float x, float y) { return x / y; }";
+    let naga = compile(glsl).expect("compile");
+    let (ir, _) = lower(&naga).expect("lower");
+    validate_module(&ir).expect("validate");
+    let s = print_module(&ir);
+    assert!(s.contains("fdiv "), "{s}");
+    assert!(!s.contains("fdiv_const.f32"), "{s}");
+}
+
+#[test]
 fn print_contains_if_structure() {
     let glsl = "float f(float x) { if (x > 0.0) return 1.0; else return 0.0; }";
     let naga = compile(glsl).expect("compile");

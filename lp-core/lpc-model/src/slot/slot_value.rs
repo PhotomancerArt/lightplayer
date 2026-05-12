@@ -123,9 +123,13 @@ pub trait ToLpValue {
     fn to_lp_value(&self) -> LpValue;
 }
 
-/// Conversion from the generic model value into a typed slot leaf value.
+/// Borrowed conversion from the generic model value into a typed slot leaf value.
+///
+/// Runtime slot reads usually inspect values that are already owned by a slot
+/// root or resolver cache. Borrowing keeps scalar/product reads allocation-free;
+/// owned target types such as [`String`] still clone their payload explicitly.
 pub trait FromLpValue: Sized {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError>;
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError>;
 }
 /// Error converting a generic model value into a typed slot leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,12 +207,23 @@ impl ToLpValue for [f32; 3] {
     }
 }
 
-macro_rules! impl_from_lp_value {
+impl FromLpValue for String {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
+        match value {
+            LpValue::String(value) => Ok(value.clone()),
+            other => Err(ValueRootError::new(alloc::format!(
+                "expected String, got {other:?}"
+            ))),
+        }
+    }
+}
+
+macro_rules! impl_copy_from_lp_value {
     ($ty:ty, $variant:ident) => {
         impl FromLpValue for $ty {
-            fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+            fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
                 match value {
-                    LpValue::$variant(value) => Ok(value),
+                    LpValue::$variant(value) => Ok(*value),
                     other => Err(ValueRootError::new(alloc::format!(
                         "expected {}, got {other:?}",
                         stringify!($variant)
@@ -219,16 +234,15 @@ macro_rules! impl_from_lp_value {
     };
 }
 
-impl_from_lp_value!(String, String);
-impl_from_lp_value!(i32, I32);
-impl_from_lp_value!(u32, U32);
-impl_from_lp_value!(f32, F32);
-impl_from_lp_value!(bool, Bool);
+impl_copy_from_lp_value!(i32, I32);
+impl_copy_from_lp_value!(u32, U32);
+impl_copy_from_lp_value!(f32, F32);
+impl_copy_from_lp_value!(bool, Bool);
 
 impl FromLpValue for [f32; 2] {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::Vec2(value) => Ok(value),
+            LpValue::Vec2(value) => Ok(*value),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected Vec2, got {other:?}"
             ))),
@@ -237,9 +251,9 @@ impl FromLpValue for [f32; 2] {
 }
 
 impl FromLpValue for [f32; 3] {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
-            LpValue::Vec3(value) => Ok(value),
+            LpValue::Vec3(value) => Ok(*value),
             other => Err(ValueRootError::new(alloc::format!(
                 "expected Vec3, got {other:?}"
             ))),
@@ -349,23 +363,23 @@ mod tests {
             width: 64,
             height: 32,
         };
-        assert_eq!(Dim2u::from_lp_value(dim.to_lp_value()).unwrap(), dim);
+        assert_eq!(Dim2u::from_lp_value(&dim.to_lp_value()).unwrap(), dim);
 
         let affine = Affine2d::identity();
         assert_eq!(
-            Affine2d::from_lp_value(affine.to_lp_value()).unwrap(),
+            Affine2d::from_lp_value(&affine.to_lp_value()).unwrap(),
             affine
         );
 
         let order = ColorOrderValue::Grb;
         assert_eq!(
-            ColorOrderValue::from_lp_value(order.to_lp_value()).unwrap(),
+            ColorOrderValue::from_lp_value(&order.to_lp_value()).unwrap(),
             order
         );
 
         let resource = ResourceRef::runtime_buffer(RuntimeBufferId::new(7));
         assert_eq!(
-            ResourceRef::from_lp_value(resource.to_lp_value()).unwrap(),
+            ResourceRef::from_lp_value(&resource.to_lp_value()).unwrap(),
             resource
         );
     }

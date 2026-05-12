@@ -14,7 +14,8 @@ use lps_shared::{LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
     AllocError, CallError, LpsValueF32, LpvmBuffer, LpvmInstance, LpvmMemory, decode_q32_return,
     encode_uniform_write, encode_uniform_write_q32, flat_q32_words_from_f32_args,
-    glsl_component_count, q32_to_lps_value_f32, validate_render_texture_sig_ir,
+    glsl_component_count, q32_to_lps_value_f32, validate_render_samples_sig_ir,
+    validate_render_texture_sig_ir,
 };
 use lpvm_cranelift::signature_for_ir_func;
 
@@ -67,6 +68,7 @@ pub struct EmuInstance {
     /// Size of globals region in bytes
     globals_size: usize,
     render_texture_cache: Option<RenderTextureEntry>,
+    render_samples_cache: Option<RenderTextureEntry>,
 }
 
 impl EmuInstance {
@@ -100,6 +102,7 @@ impl EmuInstance {
             snapshot_offset,
             globals_size,
             render_texture_cache: None,
+            render_samples_cache: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot
@@ -319,6 +322,53 @@ impl LpvmInstance for EmuInstance {
         Ok(())
     }
 
+    fn call_render_samples(
+        &mut self,
+        fn_name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), Self::Error> {
+        self.reset_globals();
+
+        self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
+        self.refresh_vmctx_header();
+
+        if self.module.options.float_mode != FloatMode::Q32 {
+            return Err(InstanceError::Unsupported(
+                "EmuInstance::call_render_samples requires FloatMode::Q32",
+            ));
+        }
+
+        let entry = self.resolve_render_samples(fn_name)?;
+        let ir_func = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| CallError::MissingMetadata(fn_name.into()))?
+            .clone();
+
+        let points_offset = i32::try_from(points.guest_base()).map_err(|_| {
+            InstanceError::Call(CallError::Unsupported(alloc::format!(
+                "points guest base {:#x} exceeds i32 range",
+                points.guest_base()
+            )))
+        })?;
+        let out_offset = i32::try_from(out.guest_base()).map_err(|_| {
+            InstanceError::Call(CallError::Unsupported(alloc::format!(
+                "sample output guest base {:#x} exceeds i32 range",
+                out.guest_base()
+            )))
+        })?;
+        let vmctx = self.vmctx_guest as i32;
+        let full = [vmctx, points_offset, out_offset, count as i32];
+        self.run_emulator_call(&ir_func, entry, &full, CycleModel::default(), None)?;
+        Ok(())
+    }
+
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
         let (off, bytes) = encode_uniform_write(
             &self.module.meta,
@@ -445,6 +495,37 @@ impl EmuInstance {
         })?;
 
         self.render_texture_cache = Some(RenderTextureEntry {
+            name: fn_name.into(),
+            entry_pc: entry,
+        });
+        Ok(entry)
+    }
+
+    fn resolve_render_samples(&mut self, fn_name: &str) -> Result<u32, InstanceError> {
+        if let Some(entry) = &self.render_samples_cache {
+            if entry.name == fn_name {
+                return Ok(entry.entry_pc);
+            }
+        }
+
+        let ir_fn = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == fn_name)
+            .ok_or_else(|| InstanceError::Call(CallError::MissingMetadata(fn_name.into())))?;
+        validate_render_samples_sig_ir(ir_fn).map_err(|e| {
+            InstanceError::Call(CallError::Unsupported(alloc::format!(
+                "render-samples sig invalid: {e}"
+            )))
+        })?;
+
+        let entry = *self.module.load.symbol_map.get(fn_name).ok_or_else(|| {
+            CallError::Unsupported(format!("symbol `{fn_name}` not in linked RV32 image"))
+        })?;
+
+        self.render_samples_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
             entry_pc: entry,
         });

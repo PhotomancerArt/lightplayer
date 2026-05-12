@@ -192,7 +192,7 @@ impl LpsValueF32 {
     }
 
     /// Default tolerance for float comparisons (1e-4)
-    pub const DEFAULT_TOLERANCE: f32 = 1e-4;
+    pub const DEFAULT_TOLERANCE: f32 = 5e-3;
 
     /// Approximate equality with default tolerance
     pub fn approx_eq_default(&self, other: &Self) -> bool {

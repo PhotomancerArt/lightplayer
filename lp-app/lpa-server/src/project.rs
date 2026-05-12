@@ -39,11 +39,10 @@ impl Project {
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, ServerError> {
         let _ = memory_stats;
-        let _ = time_provider;
-
         let root_path = project_root_path(&name)?;
         let mut services = EngineServices::new(root_path);
         services.set_output_provider(Some(Box::new(SharedOutputProvider(output_provider))));
+        services.set_time_provider(time_provider);
 
         let mut runtime = {
             let fs_ref = fs.borrow();

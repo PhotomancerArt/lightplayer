@@ -4,6 +4,7 @@
 //! output sinks (fixture-pushed [`crate::resource::RuntimeBuffer`] → flush).
 
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
@@ -13,6 +14,7 @@ use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{Revision, TreePath};
 use lpc_shared::error::OutputError;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lpc_shared::time::TimeProvider;
 
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
@@ -51,6 +53,7 @@ pub struct EngineServices {
     /// Tree path identifying the project/show root (authored layout anchor).
     project_root: TreePath,
     output_provider: Option<Box<dyn OutputProvider>>,
+    time_provider: Option<Rc<dyn TimeProvider>>,
     /// Fixture-written buffers paired with GPIO output configuration.
     output_sinks: HashMap<RuntimeBufferId, OutputSinkBinding>,
 }
@@ -60,6 +63,7 @@ impl EngineServices {
         Self {
             project_root,
             output_provider: None,
+            time_provider: None,
             output_sinks: HashMap::new(),
         }
     }
@@ -72,6 +76,14 @@ impl EngineServices {
     pub fn set_output_provider(&mut self, provider: Option<Box<dyn OutputProvider>>) {
         self.close_output_sinks();
         self.output_provider = provider;
+    }
+
+    pub fn set_time_provider(&mut self, provider: Option<Rc<dyn TimeProvider>>) {
+        self.time_provider = provider;
+    }
+
+    pub fn time_provider(&self) -> Option<Rc<dyn TimeProvider>> {
+        self.time_provider.clone()
     }
 
     /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush writes

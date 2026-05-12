@@ -212,7 +212,7 @@ codegen-units = 4
 [patch.crates-io]
 esp-println = { path = "lp-fw/esp-println-fork" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
-pp-rs = { git = "https://github.com/light-player/pp-rs", branch = "main" }
+pp-rs = { path = "third_party/pp-rs" }
 
 #####################################
 # Local dev patches

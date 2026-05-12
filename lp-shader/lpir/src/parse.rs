@@ -855,6 +855,11 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<LpirOp, ParseError> {
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
+        "fdiv_const.f32" => Ok(LpirOp::FdivConstF32 {
+            dst,
+            lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            rhs: parse_f32_literal(parts[2])?,
+        }),
         "fneg" => Ok(LpirOp::Fneg {
             dst,
             src: parse_vreg_token(parts[1])?,

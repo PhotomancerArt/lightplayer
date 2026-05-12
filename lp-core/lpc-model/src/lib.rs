@@ -77,10 +77,11 @@ pub use node::{
     RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, FixtureState, GlslOpts,
-    MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
-    PathSpec, ProjectDef, RingOrder, ScalarHint, ShaderDef, ShaderDefView, ShaderParamDef,
-    ShaderState, TextureDef, TextureDefView, TextureFormat, TextureState,
+    AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, FixtureSamplingConfig,
+    FixtureState, GlslOpts, MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView,
+    OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder, ScalarHint, ShaderDef,
+    ShaderDefView, ShaderParamDef, ShaderState, TextureDef, TextureDefView, TextureFormat,
+    TextureState,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};

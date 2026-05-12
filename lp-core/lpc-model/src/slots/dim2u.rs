@@ -95,7 +95,7 @@ impl ToLpValue for Dim2u {
 }
 
 impl FromLpValue for Dim2u {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         let LpValue::Struct { name, fields } = value else {
             return Err(ValueRootError::new("expected Dim2u struct"));
         };

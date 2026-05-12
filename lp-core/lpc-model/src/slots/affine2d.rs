@@ -116,7 +116,7 @@ impl ToLpValue for Affine2d {
 }
 
 impl FromLpValue for Affine2d {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         let LpValue::Struct { name, fields } = value else {
             return Err(ValueRootError::new("expected Affine2d struct"));
         };

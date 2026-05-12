@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn apply_q32_add_sub() {
         let mut c = CompilerConfig::default();
-        assert_eq!(c.q32.add_sub, lps_q32::q32_options::AddSubMode::Saturating);
+        assert_eq!(c.q32.add_sub, lps_q32::q32_options::AddSubMode::Wrapping);
         c.apply("q32.add_sub", "wrapping").unwrap();
         assert_eq!(c.q32.add_sub, lps_q32::q32_options::AddSubMode::Wrapping);
         c.apply("q32.add_sub", "saturating").unwrap();

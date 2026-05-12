@@ -17,6 +17,9 @@ m11 = 1.0
 tx = 0.0
 ty = 0.0
 
+[sampling]
+kind = "direct"
+
 [render_size]
 width = 16
 height = 16

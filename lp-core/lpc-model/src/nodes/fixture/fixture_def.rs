@@ -1,7 +1,7 @@
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::fixture::MappingConfig;
+use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, SlotShapeId,
     SlotValue, SlotValueShape, ToLpValue, ValueRootError, ValueSlot,
@@ -17,6 +17,10 @@ pub struct FixtureDef {
     /// Authored slot bindings for fixture inputs.
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
+    /// Visual sampling strategy.
+    #[slot(skip)]
+    #[serde(default)]
+    pub sampling: FixtureSamplingConfig,
     /// Fixture mapping definition.
     #[slot(enum)]
     pub mapping: MappingConfig,
@@ -226,7 +230,7 @@ impl ToLpValue for ColorOrder {
 }
 
 impl FromLpValue for ColorOrder {
-    fn from_lp_value(value: LpValue) -> Result<Self, ValueRootError> {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => Self::parse(&value)
                 .ok_or_else(|| ValueRootError::new("expected RGB color order value")),
@@ -273,6 +277,7 @@ mod tests {
         let def = FixtureDef {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
+            sampling: FixtureSamplingConfig::TextureArea,
             mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),

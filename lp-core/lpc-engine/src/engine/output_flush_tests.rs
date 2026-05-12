@@ -108,6 +108,22 @@ impl LpGraphics for CountingGraphics {
         self.output_free_count.fetch_add(1, Ordering::Relaxed);
         self.inner.free_output_buffer(buffer);
     }
+
+    fn alloc_sample_points(&self, count: u32) -> Result<lp_shader::LpsSamplePointBuf, Error> {
+        self.inner.alloc_sample_points(count)
+    }
+
+    fn alloc_sample_rgba16(&self, count: u32) -> Result<lp_shader::LpsSampleRgba16Buf, Error> {
+        self.inner.alloc_sample_rgba16(count)
+    }
+
+    fn free_sample_points(&self, buffer: lp_shader::LpsSamplePointBuf) {
+        self.inner.free_sample_points(buffer);
+    }
+
+    fn free_sample_rgba16(&self, buffer: lp_shader::LpsSampleRgba16Buf) {
+        self.inner.free_sample_rgba16(buffer);
+    }
 }
 
 struct SolidFixtureProducer {
@@ -430,7 +446,12 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
 
     rt.attach_runtime_node(
         fix_id,
-        Box::new(FixtureNode::new(fix_id, mapping, frame)),
+        Box::new(FixtureNode::new(
+            fix_id,
+            mapping,
+            lpc_model::FixtureSamplingConfig::TextureArea,
+            frame,
+        )),
         frame,
     )
     .unwrap();
@@ -553,7 +574,12 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
 
     rt.attach_runtime_node(
         fix_id,
-        Box::new(FixtureNode::new(fix_id, mapping, frame)),
+        Box::new(FixtureNode::new(
+            fix_id,
+            mapping,
+            lpc_model::FixtureSamplingConfig::TextureArea,
+            frame,
+        )),
         frame,
     )
     .unwrap();
@@ -679,7 +705,12 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
 
     rt.attach_runtime_node(
         fix_id,
-        Box::new(FixtureNode::new(fix_id, mapping, frame)),
+        Box::new(FixtureNode::new(
+            fix_id,
+            mapping,
+            lpc_model::FixtureSamplingConfig::TextureArea,
+            frame,
+        )),
         frame,
     )
     .unwrap();

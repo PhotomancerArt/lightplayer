@@ -13,6 +13,7 @@ use lps_shared::{
 use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
 
 use crate::error::LpsError;
+use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
 
 /// Backend-erased operations on a compiled pixel shader's runtime instance.
@@ -23,6 +24,14 @@ pub(crate) trait PxShaderBackend {
         texture: &mut LpvmBuffer,
         width: u32,
         height: u32,
+    ) -> Result<(), LpsError>;
+
+    fn call_render_samples(
+        &mut self,
+        name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
     ) -> Result<(), LpsError>;
 
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), LpsError>;
@@ -55,6 +64,18 @@ impl<M: LpvmModule + 'static> PxShaderBackend for BackendAdapter<M> {
             .set_uniform(path, value)
             .map_err(|e| LpsError::Render(format!("set_uniform `{path}`: {e}")))
     }
+
+    fn call_render_samples(
+        &mut self,
+        name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), LpsError> {
+        self.instance
+            .call_render_samples(name, points, out, count)
+            .map_err(|e| LpsError::Render(format!("call_render_samples `{name}`: {e}")))
+    }
 }
 
 /// A compiled pixel shader with internal execution state.
@@ -74,6 +95,8 @@ pub struct LpsPxShader {
     meta: LpsModuleSig,
     /// Format-specific synthesised entry, e.g. `"__render_texture_rgba16"`.
     render_texture_fn_name: String,
+    /// Synthesised point-sampling entry for RGBA16 output shaders.
+    render_samples_fn_name: Option<String>,
     /// Index of `render` in `meta.functions` (preserved from compile_px).
     render_fn_index: usize,
 }
@@ -89,6 +112,7 @@ impl LpsPxShader {
         output_format: TextureStorageFormat,
         render_fn_index: usize,
         render_texture_fn_name: String,
+        render_samples_fn_name: Option<String>,
     ) -> Result<Self, LpsError> {
         let synth_sig = meta
             .functions
@@ -129,6 +153,7 @@ impl LpsPxShader {
             output_format,
             meta,
             render_texture_fn_name,
+            render_samples_fn_name,
             render_fn_index,
         })
     }
@@ -181,6 +206,37 @@ impl LpsPxShader {
         self.inner
             .borrow_mut()
             .call_render_texture(&self.render_texture_fn_name, &mut buf, w, h)
+    }
+
+    /// Sample this shader at packed Q16.16 points and write packed RGBA16 colors.
+    pub fn sample_points_rgba16(
+        &self,
+        uniforms: &LpsValueF32,
+        points: &mut LpsSamplePointBuf,
+        out: &mut LpsSampleRgba16Buf,
+    ) -> Result<(), LpsError> {
+        self.apply_uniforms(uniforms)?;
+        if points.count() != out.count() {
+            return Err(LpsError::Render(format!(
+                "sample_points_rgba16: point count {} does not match output count {}",
+                points.count(),
+                out.count()
+            )));
+        }
+        let render_samples_fn_name = self.render_samples_fn_name.as_deref().ok_or_else(|| {
+            LpsError::Render(format!(
+                "sample_points_rgba16 is only available for {:?} shaders",
+                TextureStorageFormat::Rgba16Unorm
+            ))
+        })?;
+        let mut points_buf = points.buffer();
+        let mut out_buf = out.buffer();
+        self.inner.borrow_mut().call_render_samples(
+            render_samples_fn_name,
+            &mut points_buf,
+            &mut out_buf,
+            points.count(),
+        )
     }
 
     fn apply_uniforms(&self, uniforms: &LpsValueF32) -> Result<(), LpsError> {
@@ -314,6 +370,16 @@ impl PxShaderBackend for RecordingUniformBackend {
         Ok(())
     }
 
+    fn call_render_samples(
+        &mut self,
+        _name: &str,
+        _points: &mut LpvmBuffer,
+        _out: &mut LpvmBuffer,
+        _count: u32,
+    ) -> Result<(), LpsError> {
+        Ok(())
+    }
+
     fn set_uniform(&mut self, path: &str, _value: &LpsValueF32) -> Result<(), LpsError> {
         self.paths.borrow_mut().push(String::from(path));
         Ok(())
@@ -334,6 +400,7 @@ pub(crate) fn px_shader_from_parts_for_test(
         output_format,
         meta,
         render_texture_fn_name,
+        render_samples_fn_name: Some(String::from(crate::synth::RENDER_SAMPLES_RGBA16_FN)),
         render_fn_index,
     }
 }

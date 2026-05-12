@@ -3,6 +3,7 @@
 //! [`TickContext`] resolves through the active [`ResolveSession`] and [`ResolveHost`] using
 //! [`QueryKey`] (not the legacy slot resolver cache).
 
+use alloc::rc::Rc;
 use alloc::sync::Arc;
 
 use crate::artifact::ArtifactId;
@@ -12,12 +13,16 @@ use crate::gfx::LpGraphics;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
-use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+use crate::products::visual::{
+    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
+    VisualSampleTarget,
+};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
     FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
     bus::ChannelName,
 };
+use lpc_shared::time::TimeProvider;
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -128,7 +133,7 @@ impl<'r> TickContext<'r> {
                 slot: slot.clone(),
             })
             .map_err(|e| NodeError::msg(alloc::format!("resolve consumed slot {slot}: {e:?}")))?;
-        T::from_lp_value(production.product.value().clone()).map_err(|e| {
+        T::from_lp_value(production.product.value()).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {slot} has incompatible value: {e}"
             ))
@@ -154,7 +159,7 @@ impl<'r> TickContext<'r> {
                     accessor.path()
                 ))
             })?;
-        T::from_lp_value(production.product.value().clone()).map_err(|e| {
+        T::from_lp_value(production.product.value()).map_err(|e| {
             NodeError::msg(alloc::format!(
                 "consumed slot {} has incompatible value: {e}",
                 accessor.path()
@@ -304,6 +309,15 @@ impl<'a> ControlRenderContext<'a> {
     ) -> Result<(), NodeError> {
         self.services.render_texture_into(product, request, target)
     }
+
+    pub fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError> {
+        self.services.sample_visual_into(product, request, target)
+    }
 }
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
@@ -320,6 +334,13 @@ pub trait ControlRenderServices {
         request: &RenderTextureRequest,
         target: &mut lp_shader::LpsTextureBuf,
     ) -> Result<(), NodeError>;
+
+    fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError>;
 }
 
 /// Context passed to [`super::RenderNode`] materialization hooks.
@@ -327,6 +348,7 @@ pub struct RenderContext<'a> {
     node_id: NodeId,
     revision: Revision,
     graphics: Option<Arc<dyn LpGraphics>>,
+    time_provider: Option<Rc<dyn TimeProvider>>,
     frame_time_seconds: f32,
     _marker: core::marker::PhantomData<&'a mut ()>,
 }
@@ -336,12 +358,14 @@ impl<'a> RenderContext<'a> {
         node_id: NodeId,
         revision: Revision,
         graphics: Option<Arc<dyn LpGraphics>>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
         frame_time_seconds: f32,
     ) -> Self {
         Self {
             node_id,
             revision,
             graphics,
+            time_provider,
             frame_time_seconds,
             _marker: core::marker::PhantomData,
         }
@@ -357,6 +381,18 @@ impl<'a> RenderContext<'a> {
 
     pub fn graphics(&self) -> Option<&dyn LpGraphics> {
         self.graphics.as_ref().map(|g| g.as_ref())
+    }
+
+    pub fn now_ms(&self) -> Option<u64> {
+        self.time_provider
+            .as_ref()
+            .map(|provider| provider.now_ms())
+    }
+
+    pub fn elapsed_ms(&self, start_ms: u64) -> Option<u64> {
+        self.time_provider
+            .as_ref()
+            .map(|provider| provider.elapsed_ms(start_ms))
     }
 
     pub fn time_seconds(&self) -> f32 {

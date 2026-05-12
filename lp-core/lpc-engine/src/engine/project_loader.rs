@@ -276,7 +276,12 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(FixtureNode::new(node.id, config.mapping.clone(), frame)),
+                        Box::new(FixtureNode::new(
+                            node.id,
+                            config.mapping.clone(),
+                            config.sampling,
+                            frame,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {

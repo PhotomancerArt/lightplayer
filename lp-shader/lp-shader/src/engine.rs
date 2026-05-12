@@ -11,6 +11,7 @@ use lpvm::LpvmEngine;
 use crate::compile_px_desc::CompilePxDesc;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
+use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
 use crate::texture_interface::validate_texture_interface;
 
@@ -85,6 +86,14 @@ impl<E: LpvmEngine> LpsEngine<E> {
             output_format,
         )
         .map_err(|e| LpsError::Compile(format!("synth render_texture: {e:?}")))?;
+        let render_samples_fn_name = if output_format == TextureStorageFormat::Rgba16Unorm {
+            Some(
+                crate::synth::synthesise_render_samples_rgba16(&mut ir, &mut meta, render_fn_index)
+                    .map_err(|e| LpsError::Compile(format!("synth render_samples: {e:?}")))?,
+            )
+        } else {
+            None
+        };
 
         let module = self
             .engine
@@ -96,6 +105,7 @@ impl<E: LpvmEngine> LpsEngine<E> {
             output_format,
             render_fn_index,
             render_texture_fn_name,
+            render_samples_fn_name,
         )
     }
 
@@ -128,6 +138,34 @@ impl<E: LpvmEngine> LpsEngine<E> {
     /// on [`LpsTextureBuf`] drop semantics.
     pub fn free_texture(&self, texture: LpsTextureBuf) {
         self.engine.memory().free(texture.buffer());
+    }
+
+    pub fn alloc_sample_points(&self, count: u32) -> Result<LpsSamplePointBuf, AllocError> {
+        let size = (count as usize)
+            .checked_mul(8)
+            .ok_or(AllocError::InvalidSize)?;
+        let buffer = self.engine.memory().alloc(size, 4)?;
+        let mut out = LpsSamplePointBuf::new(buffer, count);
+        out.data_mut().fill(0);
+        Ok(out)
+    }
+
+    pub fn alloc_sample_rgba16(&self, count: u32) -> Result<LpsSampleRgba16Buf, AllocError> {
+        let size = (count as usize)
+            .checked_mul(8)
+            .ok_or(AllocError::InvalidSize)?;
+        let buffer = self.engine.memory().alloc(size, 4)?;
+        let mut out = LpsSampleRgba16Buf::new(buffer, count);
+        out.data_mut().fill(0);
+        Ok(out)
+    }
+
+    pub fn free_sample_points(&self, buffer: LpsSamplePointBuf) {
+        self.engine.memory().free(buffer.buffer());
+    }
+
+    pub fn free_sample_rgba16(&self, buffer: LpsSampleRgba16Buf) {
+        self.engine.memory().free(buffer.buffer());
     }
 
     /// Access the underlying LPVM engine.

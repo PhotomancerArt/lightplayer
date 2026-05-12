@@ -2,38 +2,56 @@
 
 use crate::dataflow::resolver::production::Production;
 use crate::dataflow::resolver::query_key::QueryKey;
-use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 /// Per-frame cache of [`Production`] entries addressed by [`QueryKey`].
+///
+/// Resolver caches are small in normal scenes, and they are rebuilt every frame.
+/// A linear vec avoids per-entry tree allocation and pointer chasing on embedded
+/// targets.
 #[derive(Clone, Debug, Default)]
 pub struct ResolverCache {
-    entries: BTreeMap<QueryKey, Production>,
+    entries: Vec<(QueryKey, Production)>,
 }
 
 impl ResolverCache {
     pub fn new() -> Self {
         Self {
-            entries: BTreeMap::new(),
+            entries: Vec::new(),
         }
     }
 
     pub fn get(&self, key: &QueryKey) -> Option<&Production> {
-        self.entries.get(key)
+        self.entries
+            .iter()
+            .find_map(|(entry_key, value)| (entry_key == key).then_some(value))
     }
 
     pub fn insert(&mut self, key: QueryKey, value: Production) -> Option<Production> {
-        self.entries.insert(key, value)
+        if let Some((_, current)) = self
+            .entries
+            .iter_mut()
+            .find(|(entry_key, _)| entry_key == &key)
+        {
+            return Some(core::mem::replace(current, value));
+        }
+        self.entries.push((key, value));
+        None
     }
 
     pub fn remove(&mut self, key: &QueryKey) -> Option<Production> {
-        self.entries.remove(key)
+        let index = self
+            .entries
+            .iter()
+            .position(|(entry_key, _)| entry_key == key)?;
+        Some(self.entries.swap_remove(index).1)
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    pub fn iter(&self) -> alloc::collections::btree_map::Iter<'_, QueryKey, Production> {
+    pub fn iter(&self) -> core::slice::Iter<'_, (QueryKey, Production)> {
         self.entries.iter()
     }
 

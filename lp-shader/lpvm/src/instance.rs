@@ -86,6 +86,18 @@ pub trait LpvmInstance {
         height: u32,
     ) -> Result<(), Self::Error>;
 
+    /// Hot path: invoke `__render_samples_rgba16(points_ptr, out_ptr, count)`.
+    ///
+    /// `points` contains packed Q16.16 `[x, y]` pairs. `out` receives packed
+    /// RGBA16 samples. Both buffers must be guest-addressable.
+    fn call_render_samples(
+        &mut self,
+        fn_name: &str,
+        points: &mut LpvmBuffer,
+        out: &mut LpvmBuffer,
+        count: u32,
+    ) -> Result<(), Self::Error>;
+
     /// Set a uniform by dot/bracket path with F32-level values (encoded per backend float mode).
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error>;
 
