@@ -8,20 +8,40 @@ use lps_shared::{
     FnParam, LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier,
 };
 
-use crate::body::{BinaryOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt, UnaryOp};
-use crate::{Diagnostic, FunctionDecl, Span, TopLevelIndex, TypeRef};
+use crate::body::{
+    BinaryOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, ParsedStmt, UnaryOp,
+    parse_expr_tokens,
+};
+use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
 #[derive(Debug, Clone)]
 pub struct HirModule {
     pub functions: Vec<HirFunction>,
     pub meta: LpsModuleSig,
     pub uniforms: BTreeMap<String, UniformInfo>,
+    pub imports: Vec<ImportInfo>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UniformInfo {
     pub ty: LpsType,
     pub byte_offset: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportInfo {
+    pub key: ImportKey,
+    pub module_name: String,
+    pub func_name: String,
+    pub param_types: Vec<lpir::IrType>,
+    pub return_types: Vec<lpir::IrType>,
+    pub lpfn_glsl_params: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImportKey {
+    Glsl { name: String, argc: usize },
+    Lpfn { name: String, glsl_params: String },
 }
 
 #[derive(Debug, Clone)]
@@ -40,11 +60,31 @@ pub struct HirParam {
 
 #[derive(Debug, Clone)]
 pub struct HirFunctionBody {
+    pub locals: Vec<HirLocal>,
     pub statements: Vec<HirStmt>,
 }
 
 #[derive(Debug, Clone)]
+pub struct HirLocal {
+    pub name: String,
+    pub ty: LpsType,
+}
+
+#[derive(Debug, Clone)]
 pub enum HirStmt {
+    Let {
+        local: usize,
+        init: HirExpr,
+    },
+    Assign {
+        local: usize,
+        value: HirExpr,
+    },
+    If {
+        condition: HirExpr,
+        accept: Vec<HirStmt>,
+        reject: Vec<HirStmt>,
+    },
     Return(HirExpr),
 }
 
@@ -57,10 +97,14 @@ pub struct HirExpr {
 
 #[derive(Debug, Clone)]
 pub enum HirExprKind {
+    BoolLiteral(bool),
     FloatLiteral(f32),
     IntLiteral(i32),
     UIntLiteral(u32),
     Param {
+        index: usize,
+    },
+    Local {
         index: usize,
     },
     Uniform {
@@ -70,9 +114,24 @@ pub enum HirExprKind {
     Constructor {
         args: Vec<HirExpr>,
     },
-    Mod {
-        lhs: Box<HirExpr>,
-        rhs: Box<HirExpr>,
+    Cast {
+        expr: Box<HirExpr>,
+    },
+    Swizzle {
+        base: Box<HirExpr>,
+        lanes: Vec<usize>,
+    },
+    Builtin {
+        kind: BuiltinKind,
+        args: Vec<HirExpr>,
+    },
+    UserCall {
+        function: usize,
+        args: Vec<HirExpr>,
+    },
+    ImportCall {
+        import: ImportKey,
+        args: Vec<HirExpr>,
     },
     Unary {
         op: UnaryOp,
@@ -85,31 +144,104 @@ pub enum HirExprKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinKind {
+    Abs,
+    Clamp,
+    Floor,
+    Fract,
+    Max,
+    Min,
+    Mix,
+    Mod,
+    Smoothstep,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSig {
+    name: String,
+    return_ty: LpsType,
+    params: Vec<HirParam>,
+}
+
+#[derive(Debug, Clone)]
+struct GlobalConst {
+    expr: HirExpr,
+}
+
+#[derive(Debug, Default)]
+struct ImportRegistry {
+    imports: BTreeMap<ImportKey, ImportInfo>,
+}
+
+impl ImportRegistry {
+    fn glsl(&mut self, name: &str, argc: usize) -> ImportKey {
+        let key = ImportKey::Glsl {
+            name: String::from(name),
+            argc,
+        };
+        self.imports
+            .entry(key.clone())
+            .or_insert_with(|| ImportInfo {
+                key: key.clone(),
+                module_name: String::from("glsl"),
+                func_name: String::from(name),
+                param_types: alloc::vec![lpir::IrType::F32; argc],
+                return_types: alloc::vec![lpir::IrType::F32],
+                lpfn_glsl_params: None,
+            });
+        key
+    }
+
+    fn lpfn(
+        &mut self,
+        name: &str,
+        glsl_params: String,
+        param_types: Vec<lpir::IrType>,
+        return_types: Vec<lpir::IrType>,
+    ) -> ImportKey {
+        let key = ImportKey::Lpfn {
+            name: String::from(name),
+            glsl_params: glsl_params.clone(),
+        };
+        self.imports
+            .entry(key.clone())
+            .or_insert_with(|| ImportInfo {
+                key: key.clone(),
+                module_name: String::from("lpfn"),
+                func_name: format!("{name}_0"),
+                param_types,
+                return_types,
+                lpfn_glsl_params: Some(glsl_params),
+            });
+        key
+    }
+
+    fn into_vec(self) -> Vec<ImportInfo> {
+        self.imports.into_values().collect()
+    }
+}
+
 pub fn build_hir(
+    source: &str,
+    tokens: &[Token],
     index: &TopLevelIndex,
     bodies: Vec<(String, ParsedFunctionBody)>,
 ) -> Result<HirModule, Diagnostic> {
     let (uniforms, uniforms_type) = build_uniforms(index)?;
+    let functions_sigs = build_function_sigs(index)?;
+    let globals = build_global_consts(source, tokens, index, &uniforms, &functions_sigs)?;
     let body_map = bodies.into_iter().collect::<BTreeMap<_, _>>();
+    let mut imports = ImportRegistry::default();
     let mut functions = Vec::new();
-    let mut function_sigs = Vec::new();
+    let mut function_meta = Vec::new();
 
-    for function in &index.functions {
-        let return_ty = type_ref_to_lps(&function.return_ty)?;
-        let params = function
-            .params
-            .iter()
-            .map(|p| {
-                Ok(HirParam {
-                    name: p.name.clone(),
-                    ty: type_ref_to_lps(&p.ty)?,
-                })
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
-        function_sigs.push(LpsFnSig {
-            name: function.name.clone(),
-            return_type: return_ty.clone(),
-            parameters: params
+    for (function_index, sig) in functions_sigs.iter().enumerate() {
+        function_meta.push(LpsFnSig {
+            name: sig.name.clone(),
+            return_type: sig.return_ty.clone(),
+            parameters: sig
+                .params
                 .iter()
                 .map(|p| FnParam {
                     name: p.name.clone().unwrap_or_default(),
@@ -119,14 +251,17 @@ pub fn build_hir(
                 .collect(),
             kind: LpsFnKind::UserDefined,
         });
+
+        let decl = &index.functions[function_index];
         let parsed_body = body_map
-            .get(function.name.as_str())
-            .ok_or_else(|| Diagnostic::error(function.body_span, "missing parsed function body"))?;
-        let body = type_function_body(function, &params, &return_ty, parsed_body, &uniforms)?;
+            .get(sig.name.as_str())
+            .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
+        let mut ctx = TypeCtx::new(sig, &functions_sigs, &uniforms, &globals, &mut imports);
+        let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
         functions.push(HirFunction {
-            name: function.name.clone(),
-            return_ty,
-            params,
+            name: sig.name.clone(),
+            return_ty: sig.return_ty.clone(),
+            params: sig.params.clone(),
             body,
         });
     }
@@ -134,17 +269,22 @@ pub fn build_hir(
     Ok(HirModule {
         functions,
         meta: LpsModuleSig {
-            functions: function_sigs,
+            functions: function_meta,
             uniforms_type,
             globals_type: None,
             ..Default::default()
         },
         uniforms,
+        imports: imports.into_vec(),
     })
 }
 
 pub fn type_ref_to_lps(ty: &TypeRef) -> Result<LpsType, Diagnostic> {
-    match ty.name.as_str() {
+    type_name_to_lps(&ty.name, ty.span)
+}
+
+fn type_name_to_lps(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
+    match name {
         "void" => Ok(LpsType::Void),
         "float" => Ok(LpsType::Float),
         "int" => Ok(LpsType::Int),
@@ -154,10 +294,33 @@ pub fn type_ref_to_lps(ty: &TypeRef) -> Result<LpsType, Diagnostic> {
         "vec3" => Ok(LpsType::Vec3),
         "vec4" => Ok(LpsType::Vec4),
         other => Err(Diagnostic::error(
-            ty.span,
-            format!("M2 lps-glsl does not support type `{other}`"),
+            span,
+            format!("M3 lps-glsl does not support type `{other}`"),
         )),
     }
+}
+
+fn build_function_sigs(index: &TopLevelIndex) -> Result<Vec<FunctionSig>, Diagnostic> {
+    index
+        .functions
+        .iter()
+        .map(|function| {
+            Ok(FunctionSig {
+                name: function.name.clone(),
+                return_ty: type_ref_to_lps(&function.return_ty)?,
+                params: function
+                    .params
+                    .iter()
+                    .map(|p| {
+                        Ok(HirParam {
+                            name: p.name.clone(),
+                            ty: type_ref_to_lps(&p.ty)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            })
+        })
+        .collect()
 }
 
 fn build_uniforms(
@@ -189,162 +352,432 @@ fn build_uniforms(
     Ok((uniforms, uniforms_type))
 }
 
-fn type_function_body(
-    function: &FunctionDecl,
-    params: &[HirParam],
-    return_ty: &LpsType,
-    parsed: &ParsedFunctionBody,
+fn build_global_consts(
+    source: &str,
+    tokens: &[Token],
+    index: &TopLevelIndex,
     uniforms: &BTreeMap<String, UniformInfo>,
-) -> Result<HirFunctionBody, Diagnostic> {
-    let mut statements = Vec::new();
-    for stmt in &parsed.statements {
+    functions: &[FunctionSig],
+) -> Result<BTreeMap<String, GlobalConst>, Diagnostic> {
+    let mut globals = BTreeMap::new();
+    let mut imports = ImportRegistry::default();
+    for konst in &index.consts {
+        let ty = type_ref_to_lps(&konst.ty)?;
+        let Some(init_span) = konst.init_span else {
+            return Err(Diagnostic::error(
+                konst.span,
+                "const declaration requires initializer",
+            ));
+        };
+        let parsed = parse_expr_tokens(source, tokens, init_span)?;
+        let mut ctx = TypeCtx::global_const(functions, uniforms, &globals, &mut imports);
+        let expr = ctx.type_expr(&parsed)?;
+        let expr = ctx.coerce_expr(expr, &ty)?;
+        globals.insert(konst.name.clone(), GlobalConst { expr });
+    }
+    Ok(globals)
+}
+
+struct TypeCtx<'a> {
+    params: &'a [HirParam],
+    functions: &'a [FunctionSig],
+    uniforms: &'a BTreeMap<String, UniformInfo>,
+    globals: &'a BTreeMap<String, GlobalConst>,
+    imports: &'a mut ImportRegistry,
+    locals: Vec<HirLocal>,
+    scopes: Vec<BTreeMap<String, usize>>,
+}
+
+impl<'a> TypeCtx<'a> {
+    fn new(
+        function: &'a FunctionSig,
+        functions: &'a [FunctionSig],
+        uniforms: &'a BTreeMap<String, UniformInfo>,
+        globals: &'a BTreeMap<String, GlobalConst>,
+        imports: &'a mut ImportRegistry,
+    ) -> Self {
+        Self {
+            params: &function.params,
+            functions,
+            uniforms,
+            globals,
+            imports,
+            locals: Vec::new(),
+            scopes: alloc::vec![BTreeMap::new()],
+        }
+    }
+
+    fn global_const(
+        functions: &'a [FunctionSig],
+        uniforms: &'a BTreeMap<String, UniformInfo>,
+        globals: &'a BTreeMap<String, GlobalConst>,
+        imports: &'a mut ImportRegistry,
+    ) -> Self {
+        Self {
+            params: &[],
+            functions,
+            uniforms,
+            globals,
+            imports,
+            locals: Vec::new(),
+            scopes: alloc::vec![BTreeMap::new()],
+        }
+    }
+
+    fn type_block(
+        &mut self,
+        parsed: &[ParsedStmt],
+        return_ty: &LpsType,
+    ) -> Result<HirFunctionBody, Diagnostic> {
+        let statements = self.type_statements(parsed, return_ty)?;
+        Ok(HirFunctionBody {
+            locals: core::mem::take(&mut self.locals),
+            statements,
+        })
+    }
+
+    fn type_statements(
+        &mut self,
+        parsed: &[ParsedStmt],
+        return_ty: &LpsType,
+    ) -> Result<Vec<HirStmt>, Diagnostic> {
+        let mut statements = Vec::new();
+        for stmt in parsed {
+            statements.push(self.type_stmt(stmt, return_ty)?);
+        }
+        Ok(statements)
+    }
+
+    fn type_stmt(&mut self, stmt: &ParsedStmt, return_ty: &LpsType) -> Result<HirStmt, Diagnostic> {
         match stmt {
+            ParsedStmt::Let {
+                ty,
+                name,
+                init,
+                span,
+                ..
+            } => {
+                let ty = type_name_to_lps(ty, *span)?;
+                let init = if let Some(init) = init {
+                    let expr = self.type_expr(init)?;
+                    self.coerce_expr(expr, &ty)?
+                } else {
+                    zero_expr(*span, &ty)?
+                };
+                let local = self.locals.len();
+                self.locals.push(HirLocal {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                });
+                self.scopes
+                    .last_mut()
+                    .expect("type scope")
+                    .insert(name.clone(), local);
+                Ok(HirStmt::Let { local, init })
+            }
+            ParsedStmt::Assign { name, value, span } => {
+                let local = self
+                    .resolve_local(name)
+                    .ok_or_else(|| Diagnostic::error(*span, format!("unknown local `{name}`")))?;
+                let ty = self.locals[local].ty.clone();
+                let value = self.type_expr(value)?;
+                let value = self.coerce_expr(value, &ty)?;
+                Ok(HirStmt::Assign { local, value })
+            }
+            ParsedStmt::If {
+                condition,
+                accept,
+                reject,
+                ..
+            } => {
+                let condition = self.type_expr(condition)?;
+                let condition = self.coerce_expr(condition, &LpsType::Bool)?;
+                self.scopes.push(BTreeMap::new());
+                let accept = self.type_statements(accept, return_ty)?;
+                self.scopes.pop();
+                self.scopes.push(BTreeMap::new());
+                let reject = self.type_statements(reject, return_ty)?;
+                self.scopes.pop();
+                Ok(HirStmt::If {
+                    condition,
+                    accept,
+                    reject,
+                })
+            }
             ParsedStmt::Return(expr) => {
-                let expr = type_expr(expr, params, uniforms)?;
-                if expr.ty != *return_ty {
-                    return Err(Diagnostic::error(
-                        expr.span,
-                        format!(
-                            "return type mismatch in `{}`: expected {:?}, found {:?}",
-                            function.name, return_ty, expr.ty
-                        ),
-                    ));
-                }
-                statements.push(HirStmt::Return(expr));
+                let expr = self.type_expr(expr)?;
+                let expr = self.coerce_expr(expr, return_ty)?;
+                Ok(HirStmt::Return(expr))
             }
         }
     }
-    Ok(HirFunctionBody { statements })
-}
 
-fn type_expr(
-    expr: &ParsedExpr,
-    params: &[HirParam],
-    uniforms: &BTreeMap<String, UniformInfo>,
-) -> Result<HirExpr, Diagnostic> {
-    match &expr.kind {
-        ParsedExprKind::FloatLiteral(v) => Ok(HirExpr {
-            span: expr.span,
-            ty: LpsType::Float,
-            kind: HirExprKind::FloatLiteral(*v),
-        }),
-        ParsedExprKind::IntLiteral(v) => Ok(HirExpr {
-            span: expr.span,
-            ty: LpsType::Int,
-            kind: HirExprKind::IntLiteral(*v),
-        }),
-        ParsedExprKind::UIntLiteral(v) => Ok(HirExpr {
-            span: expr.span,
-            ty: LpsType::UInt,
-            kind: HirExprKind::UIntLiteral(*v),
-        }),
-        ParsedExprKind::Name(name) => {
-            if let Some((index, param)) = params
-                .iter()
-                .enumerate()
-                .find(|(_, p)| p.name.as_deref() == Some(name.as_str()))
-            {
-                return Ok(HirExpr {
-                    span: expr.span,
-                    ty: param.ty.clone(),
-                    kind: HirExprKind::Param { index },
-                });
-            }
-            if let Some(uniform) = uniforms.get(name) {
-                return Ok(HirExpr {
-                    span: expr.span,
-                    ty: uniform.ty.clone(),
-                    kind: HirExprKind::Uniform {
-                        name: name.clone(),
-                        byte_offset: uniform.byte_offset,
-                    },
-                });
-            }
-            Err(Diagnostic::error(
-                expr.span,
-                format!("unknown name `{name}`"),
-            ))
-        }
-        ParsedExprKind::Call { name, args } if is_constructor_name(name) => {
-            let target_ty = constructor_type(name, expr.span)?;
-            let args = args
-                .iter()
-                .map(|arg| type_expr(arg, params, uniforms))
-                .collect::<Result<Vec<_>, _>>()?;
-            ensure_constructor_args(expr.span, &target_ty, &args)?;
-            Ok(HirExpr {
+    fn type_expr(&mut self, expr: &ParsedExpr) -> Result<HirExpr, Diagnostic> {
+        match &expr.kind {
+            ParsedExprKind::BoolLiteral(v) => Ok(HirExpr {
                 span: expr.span,
-                ty: target_ty,
-                kind: HirExprKind::Constructor { args },
-            })
-        }
-        ParsedExprKind::Call { name, args } if name == "mod" => {
-            if args.len() != 2 {
-                return Err(Diagnostic::error(expr.span, "mod expects two arguments"));
-            }
-            let lhs = type_expr(&args[0], params, uniforms)?;
-            let rhs = type_expr(&args[1], params, uniforms)?;
-            if lhs.ty != LpsType::Float || rhs.ty != LpsType::Float {
-                return Err(Diagnostic::error(
-                    expr.span,
-                    "M2 lps-glsl supports only scalar float mod",
-                ));
-            }
-            Ok(HirExpr {
+                ty: LpsType::Bool,
+                kind: HirExprKind::BoolLiteral(*v),
+            }),
+            ParsedExprKind::FloatLiteral(v) => Ok(HirExpr {
                 span: expr.span,
                 ty: LpsType::Float,
-                kind: HirExprKind::Mod {
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                },
-            })
-        }
-        ParsedExprKind::Call { name, .. } => Err(Diagnostic::error(
-            expr.span,
-            format!("M2 lps-glsl does not support call `{name}`"),
-        )),
-        ParsedExprKind::Unary { op, expr: inner } => {
-            let inner = type_expr(inner, params, uniforms)?;
-            if inner.ty != LpsType::Float && inner.ty != LpsType::Int {
-                return Err(Diagnostic::error(
-                    expr.span,
-                    "unsupported unary operand type",
-                ));
-            }
-            Ok(HirExpr {
+                kind: HirExprKind::FloatLiteral(*v),
+            }),
+            ParsedExprKind::IntLiteral(v) => Ok(HirExpr {
                 span: expr.span,
-                ty: inner.ty.clone(),
-                kind: HirExprKind::Unary {
-                    op: *op,
-                    expr: Box::new(inner),
-                },
-            })
-        }
-        ParsedExprKind::Binary { op, lhs, rhs } => {
-            let lhs = type_expr(lhs, params, uniforms)?;
-            let rhs = type_expr(rhs, params, uniforms)?;
-            if lhs.ty != rhs.ty {
-                return Err(Diagnostic::error(
-                    expr.span,
-                    "binary operands must have the same type",
-                ));
-            }
-            if lhs.ty != LpsType::Float && lhs.ty != LpsType::Int {
-                return Err(Diagnostic::error(
-                    expr.span,
-                    "M2 lps-glsl supports binary arithmetic on float and int",
-                ));
-            }
-            Ok(HirExpr {
+                ty: LpsType::Int,
+                kind: HirExprKind::IntLiteral(*v),
+            }),
+            ParsedExprKind::UIntLiteral(v) => Ok(HirExpr {
                 span: expr.span,
-                ty: lhs.ty.clone(),
+                ty: LpsType::UInt,
+                kind: HirExprKind::UIntLiteral(*v),
+            }),
+            ParsedExprKind::Name(name) => self.type_name(expr.span, name),
+            ParsedExprKind::Call { name, args } if is_constructor_name(name) => {
+                self.type_constructor(expr.span, name, args)
+            }
+            ParsedExprKind::Call { name, args } => self.type_call(expr.span, name, args),
+            ParsedExprKind::Swizzle { base, fields } => {
+                let base = self.type_expr(base)?;
+                let (lanes, ty) = swizzle_lanes(expr.span, &base.ty, fields)?;
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty,
+                    kind: HirExprKind::Swizzle {
+                        base: Box::new(base),
+                        lanes,
+                    },
+                })
+            }
+            ParsedExprKind::Unary { op, expr: inner } => {
+                let inner = self.type_expr(inner)?;
+                if inner.ty != LpsType::Float && inner.ty != LpsType::Int {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        "unsupported unary operand type",
+                    ));
+                }
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty: inner.ty.clone(),
+                    kind: HirExprKind::Unary {
+                        op: *op,
+                        expr: Box::new(inner),
+                    },
+                })
+            }
+            ParsedExprKind::Binary { op, lhs, rhs } => self.type_binary(expr.span, *op, lhs, rhs),
+        }
+    }
+
+    fn type_name(&self, span: Span, name: &str) -> Result<HirExpr, Diagnostic> {
+        if let Some(local) = self.resolve_local(name) {
+            return Ok(HirExpr {
+                span,
+                ty: self.locals[local].ty.clone(),
+                kind: HirExprKind::Local { index: local },
+            });
+        }
+        if let Some((index, param)) = self
+            .params
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.name.as_deref() == Some(name))
+        {
+            return Ok(HirExpr {
+                span,
+                ty: param.ty.clone(),
+                kind: HirExprKind::Param { index },
+            });
+        }
+        if let Some(global) = self.globals.get(name) {
+            return Ok(global.expr.clone());
+        }
+        if let Some(uniform) = self.uniforms.get(name) {
+            return Ok(HirExpr {
+                span,
+                ty: uniform.ty.clone(),
+                kind: HirExprKind::Uniform {
+                    name: name.to_string(),
+                    byte_offset: uniform.byte_offset,
+                },
+            });
+        }
+        Err(Diagnostic::error(span, format!("unknown name `{name}`")))
+    }
+
+    fn type_constructor(
+        &mut self,
+        span: Span,
+        name: &str,
+        args: &[ParsedExpr],
+    ) -> Result<HirExpr, Diagnostic> {
+        let target_ty = type_name_to_lps(name, span)?;
+        let args = args
+            .iter()
+            .map(|arg| self.type_expr(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let args = coerce_constructor_args(span, &target_ty, args)?;
+        Ok(HirExpr {
+            span,
+            ty: target_ty,
+            kind: HirExprKind::Constructor { args },
+        })
+    }
+
+    fn type_call(
+        &mut self,
+        span: Span,
+        name: &str,
+        args: &[ParsedExpr],
+    ) -> Result<HirExpr, Diagnostic> {
+        let args = args
+            .iter()
+            .map(|arg| self.type_expr(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if let Some(kind) = builtin_kind(name) {
+            let (args, ty) = type_builtin_args(span, kind, args)?;
+            return Ok(HirExpr {
+                span,
+                ty,
+                kind: HirExprKind::Builtin { kind, args },
+            });
+        }
+
+        if is_glsl_import(name) {
+            let args = args
+                .into_iter()
+                .map(|arg| self.coerce_expr(arg, &LpsType::Float))
+                .collect::<Result<Vec<_>, _>>()?;
+            let key = self.imports.glsl(name, args.len());
+            return Ok(HirExpr {
+                span,
+                ty: LpsType::Float,
+                kind: HirExprKind::ImportCall { import: key, args },
+            });
+        }
+
+        if name.starts_with("lpfn_") {
+            return self.type_lpfn_call(span, name, args);
+        }
+
+        if let Some((function, sig)) = self
+            .functions
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == name)
+        {
+            if sig.params.len() != args.len() {
+                return Err(Diagnostic::error(
+                    span,
+                    format!("function `{name}` expects {} arguments", sig.params.len()),
+                ));
+            }
+            let args = args
+                .into_iter()
+                .zip(sig.params.iter())
+                .map(|(arg, param)| self.coerce_expr(arg, &param.ty))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(HirExpr {
+                span,
+                ty: sig.return_ty.clone(),
+                kind: HirExprKind::UserCall { function, args },
+            });
+        }
+
+        Err(Diagnostic::error(
+            span,
+            format!("M3 lps-glsl does not support call `{name}`"),
+        ))
+    }
+
+    fn type_lpfn_call(
+        &mut self,
+        span: Span,
+        name: &str,
+        args: Vec<HirExpr>,
+    ) -> Result<HirExpr, Diagnostic> {
+        let glsl_params = args
+            .iter()
+            .map(|arg| glsl_param_token(&arg.ty, span))
+            .collect::<Result<Vec<_>, _>>()?;
+        let glsl_params_csv = glsl_params.join(",");
+        let param_types = args
+            .iter()
+            .flat_map(|arg| scalar_ir_types(&arg.ty).unwrap_or_default())
+            .collect::<Vec<_>>();
+        let return_ty = if name == "lpfn_worley"
+            && matches!(glsl_params.as_slice(), [a, b] if (a == "Vec2" || a == "Vec3") && b == "UInt")
+        {
+            LpsType::Float
+        } else if name == "lpfn_hsv2rgb" && matches!(glsl_params.as_slice(), [a] if a == "Vec3") {
+            LpsType::Vec3
+        } else if name == "lpfn_hsv2rgb" && matches!(glsl_params.as_slice(), [a] if a == "Vec4") {
+            LpsType::Vec4
+        } else {
+            return Err(Diagnostic::error(
+                span,
+                format!("M3 lps-glsl does not support LPFN signature `{name}({glsl_params_csv})`"),
+            ));
+        };
+        let key = self.imports.lpfn(
+            name,
+            glsl_params_csv,
+            param_types,
+            scalar_ir_types(&return_ty)?,
+        );
+        Ok(HirExpr {
+            span,
+            ty: return_ty,
+            kind: HirExprKind::ImportCall { import: key, args },
+        })
+    }
+
+    fn type_binary(
+        &mut self,
+        span: Span,
+        op: BinaryOp,
+        lhs: &ParsedExpr,
+        rhs: &ParsedExpr,
+    ) -> Result<HirExpr, Diagnostic> {
+        let lhs = self.type_expr(lhs)?;
+        let rhs = self.type_expr(rhs)?;
+        if is_comparison(op) {
+            let (lhs, rhs) = coerce_numeric_pair(span, lhs, rhs)?;
+            return Ok(HirExpr {
+                span,
+                ty: LpsType::Bool,
                 kind: HirExprKind::Binary {
-                    op: *op,
+                    op,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
                 },
-            })
+            });
         }
+        let (lhs, rhs, ty) = coerce_arithmetic_pair(span, lhs, rhs)?;
+        Ok(HirExpr {
+            span,
+            ty,
+            kind: HirExprKind::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+        })
+    }
+
+    fn coerce_expr(&mut self, expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
+        coerce_expr(expr, target)
+    }
+
+    fn resolve_local(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
     }
 }
 
@@ -355,44 +788,274 @@ fn is_constructor_name(name: &str) -> bool {
     )
 }
 
-fn constructor_type(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
-    let ty_ref = TypeRef {
-        name: name.to_string(),
-        span,
-    };
-    type_ref_to_lps(&ty_ref)
+fn builtin_kind(name: &str) -> Option<BuiltinKind> {
+    Some(match name {
+        "abs" => BuiltinKind::Abs,
+        "clamp" => BuiltinKind::Clamp,
+        "floor" => BuiltinKind::Floor,
+        "fract" => BuiltinKind::Fract,
+        "max" => BuiltinKind::Max,
+        "min" => BuiltinKind::Min,
+        "mix" => BuiltinKind::Mix,
+        "mod" => BuiltinKind::Mod,
+        "smoothstep" => BuiltinKind::Smoothstep,
+        _ => return None,
+    })
 }
 
-fn ensure_constructor_args(
+fn is_glsl_import(name: &str) -> bool {
+    matches!(name, "sin" | "cos" | "exp" | "atan")
+}
+
+fn type_builtin_args(
+    span: Span,
+    kind: BuiltinKind,
+    args: Vec<HirExpr>,
+) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
+    let arity = match kind {
+        BuiltinKind::Abs | BuiltinKind::Floor | BuiltinKind::Fract => 1,
+        BuiltinKind::Max | BuiltinKind::Min | BuiltinKind::Mod => 2,
+        BuiltinKind::Clamp | BuiltinKind::Mix | BuiltinKind::Smoothstep => 3,
+    };
+    if args.len() != arity {
+        return Err(Diagnostic::error(
+            span,
+            format!("builtin expects {arity} arguments"),
+        ));
+    }
+    match kind {
+        BuiltinKind::Abs | BuiltinKind::Floor | BuiltinKind::Fract => {
+            let ty = args[0].ty.clone();
+            Ok((args, ty))
+        }
+        BuiltinKind::Max | BuiltinKind::Min | BuiltinKind::Mod => {
+            let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            Ok((alloc::vec![a, b], ty))
+        }
+        BuiltinKind::Clamp | BuiltinKind::Smoothstep => {
+            let (a, b, ty_ab) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            let c = coerce_expr(args[2].clone(), &ty_ab).or_else(|_| {
+                let (_, c, _) = coerce_arithmetic_pair(span, a.clone(), args[2].clone())?;
+                Ok::<_, Diagnostic>(c)
+            })?;
+            let ty = vector_dominant_type(&[&a.ty, &b.ty, &c.ty])
+                .ok_or_else(|| Diagnostic::error(span, "unsupported builtin argument types"))?;
+            Ok((
+                alloc::vec![
+                    coerce_expr(a, &ty)?,
+                    coerce_expr(b, &ty)?,
+                    coerce_expr(c, &ty)?
+                ],
+                ty,
+            ))
+        }
+        BuiltinKind::Mix => {
+            let (x, y, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            let a = if scalar_lane_count(&args[2].ty) == 1 {
+                coerce_expr(args[2].clone(), &LpsType::Float)?
+            } else {
+                coerce_expr(args[2].clone(), &ty)?
+            };
+            Ok((alloc::vec![x, y, a], ty))
+        }
+    }
+}
+
+fn coerce_constructor_args(
     span: Span,
     target_ty: &LpsType,
-    args: &[HirExpr],
-) -> Result<(), Diagnostic> {
+    args: Vec<HirExpr>,
+) -> Result<Vec<HirExpr>, Diagnostic> {
     let expected_lanes = scalar_lane_count(target_ty);
     let actual_lanes = args
         .iter()
         .map(|arg| scalar_lane_count(&arg.ty))
         .sum::<usize>();
-    if expected_lanes != actual_lanes {
-        return Err(Diagnostic::error(
-            span,
-            format!(
-                "constructor for {:?} expects {expected_lanes} scalar lanes, got {actual_lanes}",
-                target_ty
-            ),
-        ));
+    if expected_lanes == actual_lanes {
+        let expected_scalar = scalar_base_type(target_ty).unwrap_or_else(|| target_ty.clone());
+        return args
+            .into_iter()
+            .map(|arg| {
+                let arg_scalar = scalar_base_type(&arg.ty).unwrap_or_else(|| arg.ty.clone());
+                if arg_scalar == expected_scalar {
+                    Ok(arg)
+                } else {
+                    coerce_expr(arg, &expected_scalar)
+                }
+            })
+            .collect();
     }
-    let expected_scalar = scalar_base_type(target_ty).unwrap_or_else(|| target_ty.clone());
-    if args
-        .iter()
-        .any(|arg| scalar_base_type(&arg.ty).unwrap_or_else(|| arg.ty.clone()) != expected_scalar)
-    {
-        return Err(Diagnostic::error(
-            span,
-            "constructor arguments must use the target scalar type",
-        ));
+    if args.len() == 1 && expected_lanes > 1 && scalar_lane_count(&args[0].ty) == 1 {
+        return Ok(args);
     }
-    Ok(())
+    Err(Diagnostic::error(
+        span,
+        format!(
+            "constructor for {:?} expects {expected_lanes} scalar lanes, got {actual_lanes}",
+            target_ty
+        ),
+    ))
+}
+
+fn coerce_arithmetic_pair(
+    span: Span,
+    lhs: HirExpr,
+    rhs: HirExpr,
+) -> Result<(HirExpr, HirExpr, LpsType), Diagnostic> {
+    let ty = vector_dominant_type(&[&lhs.ty, &rhs.ty])
+        .ok_or_else(|| Diagnostic::error(span, "unsupported arithmetic operand types"))?;
+    Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?, ty))
+}
+
+fn coerce_numeric_pair(
+    span: Span,
+    lhs: HirExpr,
+    rhs: HirExpr,
+) -> Result<(HirExpr, HirExpr), Diagnostic> {
+    let ty = vector_dominant_type(&[&lhs.ty, &rhs.ty])
+        .ok_or_else(|| Diagnostic::error(span, "unsupported comparison operand types"))?;
+    Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?))
+}
+
+fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
+    if expr.ty == *target {
+        return Ok(expr);
+    }
+    if scalar_lane_count(&expr.ty) == 1 && scalar_lane_count(target) > 1 {
+        let scalar = scalar_base_type(target).unwrap_or_else(|| target.clone());
+        let expr = coerce_expr(expr, &scalar)?;
+        return Ok(HirExpr {
+            span: expr.span,
+            ty: target.clone(),
+            kind: HirExprKind::Constructor {
+                args: alloc::vec![expr],
+            },
+        });
+    }
+    match (&expr.ty, target) {
+        (LpsType::Int, LpsType::Float)
+        | (LpsType::UInt, LpsType::Float)
+        | (LpsType::Float, LpsType::Int)
+        | (LpsType::Float, LpsType::UInt)
+        | (LpsType::Int, LpsType::UInt)
+        | (LpsType::UInt, LpsType::Int) => Ok(HirExpr {
+            span: expr.span,
+            ty: target.clone(),
+            kind: HirExprKind::Cast {
+                expr: Box::new(expr),
+            },
+        }),
+        (LpsType::Bool, LpsType::Bool) => Ok(expr),
+        _ => Err(Diagnostic::error(
+            expr.span,
+            format!("cannot coerce {:?} to {:?}", expr.ty, target),
+        )),
+    }
+}
+
+fn vector_dominant_type(types: &[&LpsType]) -> Option<LpsType> {
+    let mut lanes = 1usize;
+    let mut base = LpsType::Int;
+    for ty in types {
+        let ty_base = scalar_base_type(ty)?;
+        if ty_base == LpsType::Float {
+            base = LpsType::Float;
+        } else if ty_base == LpsType::UInt && base != LpsType::Float {
+            base = LpsType::UInt;
+        } else if ty_base != LpsType::Int && ty_base != LpsType::Bool {
+            return None;
+        }
+        lanes = lanes.max(scalar_lane_count(ty));
+    }
+    if lanes == 1 {
+        Some(base)
+    } else {
+        LpsType::vector_type(&base, lanes)
+    }
+}
+
+fn zero_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
+    let scalar = match scalar_base_type(ty).unwrap_or_else(|| ty.clone()) {
+        LpsType::Float => HirExpr {
+            span,
+            ty: LpsType::Float,
+            kind: HirExprKind::FloatLiteral(0.0),
+        },
+        LpsType::Int => HirExpr {
+            span,
+            ty: LpsType::Int,
+            kind: HirExprKind::IntLiteral(0),
+        },
+        LpsType::UInt => HirExpr {
+            span,
+            ty: LpsType::UInt,
+            kind: HirExprKind::UIntLiteral(0),
+        },
+        LpsType::Bool => HirExpr {
+            span,
+            ty: LpsType::Bool,
+            kind: HirExprKind::BoolLiteral(false),
+        },
+        _ => return Err(Diagnostic::error(span, "unsupported zero initializer type")),
+    };
+    coerce_expr(scalar, ty)
+}
+
+fn swizzle_lanes(
+    span: Span,
+    ty: &LpsType,
+    fields: &str,
+) -> Result<(Vec<usize>, LpsType), Diagnostic> {
+    let count = scalar_lane_count(ty);
+    if count < 2 {
+        return Err(Diagnostic::error(span, "swizzle requires vector base"));
+    }
+    let mut lanes = Vec::new();
+    for ch in fields.chars() {
+        let lane = match ch {
+            'x' | 'r' => 0,
+            'y' | 'g' => 1,
+            'z' | 'b' => 2,
+            'w' | 'a' => 3,
+            _ => return Err(Diagnostic::error(span, "unsupported swizzle field")),
+        };
+        if lane >= count {
+            return Err(Diagnostic::error(span, "swizzle lane out of range"));
+        }
+        lanes.push(lane);
+    }
+    let base = scalar_base_type(ty).ok_or_else(|| Diagnostic::error(span, "swizzle base type"))?;
+    let out_ty = if lanes.len() == 1 {
+        base
+    } else {
+        LpsType::vector_type(&base, lanes.len())
+            .ok_or_else(|| Diagnostic::error(span, "unsupported swizzle width"))?
+    };
+    Ok((lanes, out_ty))
+}
+
+fn is_comparison(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge | BinaryOp::Eq | BinaryOp::Ne
+    )
+}
+
+fn glsl_param_token(ty: &LpsType, span: Span) -> Result<String, Diagnostic> {
+    Ok(match ty {
+        LpsType::Float => String::from("Float"),
+        LpsType::Int => String::from("Int"),
+        LpsType::UInt => String::from("UInt"),
+        LpsType::Vec2 => String::from("Vec2"),
+        LpsType::Vec3 => String::from("Vec3"),
+        LpsType::Vec4 => String::from("Vec4"),
+        other => {
+            return Err(Diagnostic::error(
+                span,
+                format!("unsupported LPFN parameter type {other:?}"),
+            ));
+        }
+    })
 }
 
 pub fn scalar_lane_count(ty: &LpsType) -> usize {
@@ -411,4 +1074,24 @@ pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
     } else {
         None
     }
+}
+
+pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
+    let Some(base) = scalar_base_type(ty) else {
+        return Err(Diagnostic::error(
+            Span::new(0, 0),
+            format!("M3 lps-glsl cannot scalarize type {ty:?}"),
+        ));
+    };
+    let lane = match base {
+        LpsType::Float => lpir::IrType::F32,
+        LpsType::Int | LpsType::UInt | LpsType::Bool => lpir::IrType::I32,
+        _ => {
+            return Err(Diagnostic::error(
+                Span::new(0, 0),
+                format!("M3 lps-glsl cannot scalarize type {ty:?}"),
+            ));
+        }
+    };
+    Ok(alloc::vec![lane; scalar_lane_count(ty)])
 }

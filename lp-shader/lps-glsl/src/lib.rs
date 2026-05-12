@@ -138,4 +138,11 @@ mod tests {
         lpir::validate_module(&output.ir).expect("valid LPIR");
         assert_eq!(output.meta.functions.len(), 1);
     }
+
+    #[test]
+    fn synchronous_compile_validates_basic2_example() {
+        let output = compile(EXAMPLES[1].1, &CompileOptions::default()).expect("compile basic2");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+    }
 }

@@ -121,7 +121,14 @@ impl<'src> CompileJob<'src> {
                         "compile job missing typed body input",
                     ));
                 };
-                let result = crate::hir::build_hir(index, bodies)
+                let Some(tokens) = self.tokens.as_ref() else {
+                    self.state = JobState::Done;
+                    return CompileStepResult::Failed(Diagnostic::error(
+                        Span::new(0, 0),
+                        "compile job missing token tape for lowering",
+                    ));
+                };
+                let result = crate::hir::build_hir(self.source, tokens, index, bodies)
                     .and_then(crate::lower::lower_hir)
                     .map(|lowered| CompileOutput {
                         ir: lowered.ir,

@@ -21,6 +21,7 @@ pub struct UniformDecl {
 pub struct ConstDecl {
     pub name: String,
     pub ty: TypeRef,
+    pub init_span: Option<Span>,
     pub span: Span,
 }
 
@@ -141,10 +142,17 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let start = self.expect_keyword(Keyword::Const)?.span.start;
         let ty = self.expect_type_ref()?;
         let name = self.expect_identifier_like()?.to_string();
-        let end = self.skip_to_semicolon()?;
+        let init_span = if self.at_punct("=") {
+            self.bump();
+            Some(self.span_until_semicolon()?)
+        } else {
+            None
+        };
+        let end = self.expect_punct(";")?.span.end;
         Ok(ConstDecl {
             name,
             ty,
+            init_span,
             span: Span::new(start, end),
         })
     }
@@ -230,6 +238,28 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             if tok.lexeme(self.source) == ";" {
                 return Ok(tok.span.end);
             }
+        }
+        Err(Diagnostic::error(
+            self.previous().span,
+            "expected ';' before end of file",
+        ))
+    }
+
+    fn span_until_semicolon(&mut self) -> Result<Span, Diagnostic> {
+        let start = self.current().span.start;
+        let mut end = start;
+        let mut paren_depth = 0usize;
+        while !self.at_eof() {
+            if paren_depth == 0 && self.at_punct(";") {
+                return Ok(Span::new(start, end));
+            }
+            let tok = self.bump();
+            match tok.lexeme(self.source) {
+                "(" => paren_depth += 1,
+                ")" => paren_depth = paren_depth.saturating_sub(1),
+                _ => {}
+            }
+            end = tok.span.end;
         }
         Err(Diagnostic::error(
             self.previous().span,
