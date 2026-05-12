@@ -27,12 +27,13 @@ pub fn write(
     Ok(())
 }
 
-/// Bucket raw `(jal_pc, callee)` edges into `(caller_symbol_lo, callee)` for a tree walk.
+/// Bucket raw `(jal_pc, callee)` edges into `(caller_symbol_lo, callee_symbol_lo)` for a tree walk.
 fn bucket_call_edges(cpu: &CpuCollector, sym: &dyn PcSymbolizer) -> HashMap<(u32, u32), CallEdge> {
     let mut out: HashMap<(u32, u32), CallEdge> = HashMap::new();
     for ((jal, callee), e) in &cpu.call_edges {
         let parent = sym.entry_lo_for_pc(*jal);
-        let agg = out.entry((parent, *callee)).or_default();
+        let child = sym.entry_lo_for_pc(*callee);
+        let agg = out.entry((parent, child)).or_default();
         agg.count += e.count;
         agg.inclusive_cycles += e.inclusive_cycles;
     }
@@ -54,6 +55,20 @@ fn collect_pcs(cpu: &CpuCollector, edges: &HashMap<(u32, u32), CallEdge>) -> Vec
     v
 }
 
+fn build_adjacency(edges: &HashMap<(u32, u32), CallEdge>) -> HashMap<u32, Vec<(u32, CallEdge)>> {
+    let mut adjacency: HashMap<u32, Vec<(u32, CallEdge)>> = HashMap::new();
+    for (&(caller, callee), edge) in edges {
+        adjacency
+            .entry(caller)
+            .or_default()
+            .push((callee, edge.clone()));
+    }
+    for callees in adjacency.values_mut() {
+        callees.sort_by_key(|(callee, _)| *callee);
+    }
+    adjacency
+}
+
 fn build_frames(pcs: &[u32], sym: &dyn PcSymbolizer) -> (Vec<Value>, HashMap<u32, usize>) {
     let mut frames = Vec::new();
     let mut pc_to_frame = HashMap::new();
@@ -73,27 +88,26 @@ struct RawEv {
     at: u64,
 }
 
-/// `stack_edges` holds the active `(caller_fn, callee)` pairs on the DFS stack. If the same pair
-/// is entered again before the outer visit completes, treat it as a graph cycle (e.g. mutual
-/// recursion) and emit a single flat open/close span without recursing (m2 limitation).
+/// `active_fns` holds the active function PCs on the DFS stack. If a callee is already active,
+/// treat it as a graph cycle (e.g. recursion or mutual recursion) and emit a single flat span
+/// without recursing (m2 limitation).
 fn emit_events(
     caller_fn: u32,
-    edges: &HashMap<(u32, u32), CallEdge>,
+    adjacency: &HashMap<u32, Vec<(u32, CallEdge)>>,
     pc_to_frame: &HashMap<u32, usize>,
     cursor: &mut u64,
     events: &mut Vec<RawEv>,
-    stack_edges: &mut HashSet<(u32, u32)>,
+    active_fns: &mut HashSet<u32>,
+    expanded_fns: &mut HashSet<u32>,
 ) {
-    let mut callees: Vec<(u32, &CallEdge)> = edges
-        .iter()
-        .filter_map(|((c, d), e)| (*c == caller_fn).then_some((*d, e)))
-        .collect();
-    callees.sort_by_key(|(d, _)| *d);
+    let Some(callees) = adjacency.get(&caller_fn) else {
+        return;
+    };
 
     for (callee, edge) in callees {
         let frame = pc_to_frame[&callee];
 
-        if stack_edges.contains(&(caller_fn, callee)) {
+        if active_fns.contains(callee) || expanded_fns.contains(callee) {
             events.push(RawEv {
                 open: true,
                 frame,
@@ -108,14 +122,22 @@ fn emit_events(
             continue;
         }
 
-        stack_edges.insert((caller_fn, callee));
+        active_fns.insert(*callee);
         events.push(RawEv {
             open: true,
             frame,
             at: *cursor,
         });
         let before = *cursor;
-        emit_events(callee, edges, pc_to_frame, cursor, events, stack_edges);
+        emit_events(
+            *callee,
+            adjacency,
+            pc_to_frame,
+            cursor,
+            events,
+            active_fns,
+            expanded_fns,
+        );
         let recursed = cursor.saturating_sub(before);
         let self_time = edge.inclusive_cycles.saturating_sub(recursed);
         *cursor = cursor.saturating_add(self_time);
@@ -124,12 +146,14 @@ fn emit_events(
             frame,
             at: *cursor,
         });
-        stack_edges.remove(&(caller_fn, callee));
+        active_fns.remove(callee);
+        expanded_fns.insert(*callee);
     }
 }
 
 pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &str) -> Value {
     let edges = bucket_call_edges(cpu, sym);
+    let adjacency = build_adjacency(&edges);
     let callee_set: HashSet<u32> = edges.keys().map(|(_, d)| *d).collect();
 
     let pcs = collect_pcs(cpu, &edges);
@@ -137,22 +161,22 @@ pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &
 
     let mut cursor = 0u64;
     let mut raw_events = Vec::new();
-    let mut stack_edges = HashSet::new();
+    let mut active_fns = HashSet::from([ROOT_PC]);
+    let mut expanded_fns = HashSet::new();
 
-    let mut roots: Vec<(u32, &CallEdge)> = edges
+    let mut roots: Vec<(u32, CallEdge)> = edges
         .iter()
         .filter_map(|((c, d), e)| {
             let attach = *c == ROOT_PC || !callee_set.contains(c);
-            attach.then_some((*d, e))
+            attach.then_some((*d, e.clone()))
         })
         .collect();
     roots.sort_by_key(|(d, _)| *d);
 
     for (callee, edge) in roots {
-        let caller_fn = ROOT_PC;
         let frame = pc_to_frame[&callee];
 
-        if stack_edges.contains(&(caller_fn, callee)) {
+        if active_fns.contains(&callee) || expanded_fns.contains(&callee) {
             raw_events.push(RawEv {
                 open: true,
                 frame,
@@ -167,7 +191,7 @@ pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &
             continue;
         }
 
-        stack_edges.insert((caller_fn, callee));
+        active_fns.insert(callee);
         raw_events.push(RawEv {
             open: true,
             frame,
@@ -176,11 +200,12 @@ pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &
         let before = cursor;
         emit_events(
             callee,
-            &edges,
+            &adjacency,
             &pc_to_frame,
             &mut cursor,
             &mut raw_events,
-            &mut stack_edges,
+            &mut active_fns,
+            &mut expanded_fns,
         );
         let recursed = cursor.saturating_sub(before);
         let self_time = edge.inclusive_cycles.saturating_sub(recursed);
@@ -190,7 +215,8 @@ pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &
             frame,
             at: cursor,
         });
-        stack_edges.remove(&(caller_fn, callee));
+        active_fns.remove(&callee);
+        expanded_fns.insert(callee);
     }
 
     let json_events: Vec<Value> = raw_events
@@ -348,5 +374,51 @@ mod tests {
         );
         // Smoke: JSON structure intact (no stack overflow / hang).
         assert_eq!(v["profiles"][0]["type"], "evented");
+    }
+
+    /// Mutual recursion creates a cycle without repeating the same edge; DFS must still finish.
+    #[test]
+    fn mutual_recursive_cycle_guard_finishes() {
+        let symbols = vec![
+            TraceSymbol {
+                addr: 0x1000,
+                size: 0x100,
+                name: "a".into(),
+            },
+            TraceSymbol {
+                addr: 0x2000,
+                size: 0x100,
+                name: "b".into(),
+            },
+        ];
+        let sym = Symbolizer::new(&symbols, &[]);
+
+        let mut cpu = CpuCollector::new("esp32c6");
+        cpu.total_cycles_attributed = 30;
+        cpu.call_edges.insert(
+            (ROOT_PC, 0x1000),
+            CallEdge {
+                count: 1,
+                inclusive_cycles: 30,
+            },
+        );
+        cpu.call_edges.insert(
+            (0x1004, 0x2000),
+            CallEdge {
+                count: 1,
+                inclusive_cycles: 20,
+            },
+        );
+        cpu.call_edges.insert(
+            (0x2004, 0x1000),
+            CallEdge {
+                count: 1,
+                inclusive_cycles: 10,
+            },
+        );
+
+        let v = build(&cpu, &sym, "w", "m");
+        let events = v["profiles"][0]["events"].as_array().unwrap();
+        assert_eq!(events.len(), 6, "expected A, B, and flattened A spans");
     }
 }

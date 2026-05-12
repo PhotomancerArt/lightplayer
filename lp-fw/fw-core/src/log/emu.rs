@@ -62,7 +62,7 @@ impl Log for EmuLogger {
 pub fn init() {
     let logger = alloc::boxed::Box::new(EmuLogger);
     log::set_logger(alloc::boxed::Box::leak(logger))
-        .map(|()| log::set_max_level(LevelFilter::Trace))
+        .map(|()| log::set_max_level(LevelFilter::Info))
         .expect("Failed to set emulator logger");
 }
 
