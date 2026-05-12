@@ -53,13 +53,34 @@ pin = 4
 
 /// TOML for the default fixture.
 const FIXTURE_NODE_TOML: &[u8] = br#"kind = "fixture"
-output_loc = "..output"
-texture_loc = "..texture"
 color_order = "rgb"
-transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+brightness = 64
+gamma_correction = true
 
-[mapping.PathPoints]
-paths = []
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[transform]
+m00 = 1.0
+m01 = 0.0
+m10 = 0.0
+m11 = 1.0
+tx = 0.0
+ty = 0.0
+
+[sampling]
+kind = "direct"
+
+[render_size]
+width = 16
+height = 16
+
+[mapping]
+kind = "path_points"
+paths = {}
 sample_diameter = 2.0
 "#;
 
