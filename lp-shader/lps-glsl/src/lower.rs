@@ -520,6 +520,29 @@ fn lower_builtin(
             BuiltinKind::Abs => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Abs)?
             }
+            BuiltinKind::All | BuiltinKind::Any | BuiltinKind::Not => {
+                return lower_bool_builtin(ctx, span, kind, &values[0], result_ty);
+            }
+            BuiltinKind::Equal => {
+                return lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Eq,
+                    values[0].clone(),
+                    values[1].clone(),
+                    result_ty,
+                );
+            }
+            BuiltinKind::NotEqual => {
+                return lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Ne,
+                    values[0].clone(),
+                    values[1].clone(),
+                    result_ty,
+                );
+            }
             BuiltinKind::Floor => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Floor)?
             }
@@ -567,6 +590,68 @@ fn lower_builtin(
     })
 }
 
+fn lower_bool_builtin(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    kind: BuiltinKind,
+    value: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if scalar_base_type(&value.ty) != Some(LpsType::Bool) {
+        return Err(Diagnostic::error(span, "bool builtin expects bool lanes"));
+    }
+    match kind {
+        BuiltinKind::All | BuiltinKind::Any => {
+            let Some(mut acc) = value.lanes.first().copied() else {
+                return Err(Diagnostic::error(span, "bool reduction has no lanes"));
+            };
+            for lane in value.lanes.iter().skip(1) {
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                match kind {
+                    BuiltinKind::All => ctx.fb.push(LpirOp::Iand {
+                        dst,
+                        lhs: acc,
+                        rhs: *lane,
+                    }),
+                    BuiltinKind::Any => ctx.fb.push(LpirOp::Ior {
+                        dst,
+                        lhs: acc,
+                        rhs: *lane,
+                    }),
+                    _ => unreachable!(),
+                }
+                acc = dst;
+            }
+            Ok(LowerValue {
+                ty: result_ty.clone(),
+                lanes: vec![acc],
+            })
+        }
+        BuiltinKind::Not => {
+            let mut lanes = Vec::new();
+            for lane in &value.lanes {
+                let zero = ctx.fb.alloc_vreg(IrType::I32);
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: zero,
+                    value: 0,
+                });
+                ctx.fb.push(LpirOp::Ieq {
+                    dst,
+                    lhs: *lane,
+                    rhs: zero,
+                });
+                lanes.push(dst);
+            }
+            Ok(LowerValue {
+                ty: result_ty.clone(),
+                lanes,
+            })
+        }
+        _ => Err(Diagnostic::error(span, "unsupported bool builtin")),
+    }
+}
+
 fn lower_binary(
     ctx: &mut LowerCtx<'_>,
     span: Span,
@@ -604,81 +689,134 @@ fn lower_binary(
         });
     }
     if is_comparison(op) {
-        let lhs_lane = single_lane(span, &lhs)?;
-        let rhs_lane = single_lane(span, &rhs)?;
-        let dst = ctx.fb.alloc_vreg(IrType::I32);
-        let op = match lhs.ty {
-            LpsType::Float => match op {
-                BinaryOp::Lt => LpirOp::Flt {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
+            && *result_ty == LpsType::Bool
+            && lhs.lanes.len() > 1
+        {
+            let component_ty = LpsType::vector_type(&LpsType::Bool, lhs.lanes.len())
+                .ok_or_else(|| Diagnostic::error(span, "unsupported aggregate comparison width"))?;
+            let components = lower_binary(ctx, span, op, lhs, rhs, &component_ty)?;
+            let reduction = if op == BinaryOp::Eq {
+                BuiltinKind::All
+            } else {
+                BuiltinKind::Any
+            };
+            return lower_bool_builtin(ctx, span, reduction, &components, &LpsType::Bool);
+        }
+        let width = scalar_lane_count(result_ty);
+        let mut lanes = Vec::new();
+        for i in 0..width {
+            let lhs_lane = lane_at(&lhs, i);
+            let rhs_lane = lane_at(&rhs, i);
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            let base_ty = scalar_base_type(&lhs.ty).unwrap_or_else(|| lhs.ty.clone());
+            let op = match base_ty {
+                LpsType::Float => match op {
+                    BinaryOp::Lt => LpirOp::Flt {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Le => LpirOp::Fle {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Gt => LpirOp::Fgt {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Ge => LpirOp::Fge {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Eq => LpirOp::Feq {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Ne => LpirOp::Fne {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    _ => unreachable!(),
                 },
-                BinaryOp::Le => LpirOp::Fle {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
+                LpsType::UInt => match op {
+                    BinaryOp::Lt => LpirOp::IltU {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Le => LpirOp::IleU {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Gt => LpirOp::IgtU {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Ge => LpirOp::IgeU {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Eq => LpirOp::Ieq {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Ne => LpirOp::Ine {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    _ => unreachable!(),
                 },
-                BinaryOp::Gt => LpirOp::Fgt {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
+                _ => match op {
+                    BinaryOp::Lt => LpirOp::IltS {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Le => LpirOp::IleS {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Gt => LpirOp::IgtS {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Ge => LpirOp::IgeS {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Eq => LpirOp::Ieq {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    BinaryOp::Ne => LpirOp::Ine {
+                        dst,
+                        lhs: lhs_lane,
+                        rhs: rhs_lane,
+                    },
+                    _ => unreachable!(),
                 },
-                BinaryOp::Ge => LpirOp::Fge {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Eq => LpirOp::Feq {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Ne => LpirOp::Fne {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                _ => unreachable!(),
-            },
-            _ => match op {
-                BinaryOp::Lt => LpirOp::IltS {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Le => LpirOp::IleS {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Gt => LpirOp::IgtS {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Ge => LpirOp::IgeS {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Eq => LpirOp::Ieq {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                BinaryOp::Ne => LpirOp::Ine {
-                    dst,
-                    lhs: lhs_lane,
-                    rhs: rhs_lane,
-                },
-                _ => unreachable!(),
-            },
-        };
-        ctx.fb.push(op);
+            };
+            ctx.fb.push(op);
+            lanes.push(dst);
+        }
         return Ok(LowerValue {
-            ty: LpsType::Bool,
-            lanes: vec![dst],
+            ty: result_ty.clone(),
+            lanes,
         });
     }
     let width = scalar_lane_count(result_ty);
@@ -775,20 +913,55 @@ fn lower_cast(
     value: LowerValue,
     target_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
-    let src = single_lane(span, &value)?;
-    let dst_ty = scalar_ir_types(target_ty)?
-        .first()
-        .copied()
-        .ok_or_else(|| Diagnostic::error(span, "empty cast target"))?;
-    let dst = ctx.fb.alloc_vreg(dst_ty);
-    match (&value.ty, target_ty) {
-        (LpsType::Int, LpsType::Float) => ctx.fb.push(LpirOp::ItofS { dst, src }),
-        (LpsType::UInt, LpsType::Float) => ctx.fb.push(LpirOp::ItofU { dst, src }),
-        (LpsType::Float, LpsType::Int) => ctx.fb.push(LpirOp::FtoiSatS { dst, src }),
-        (LpsType::Float, LpsType::UInt) => ctx.fb.push(LpirOp::FtoiSatU { dst, src }),
-        (LpsType::Bool, LpsType::Float) => ctx.fb.push(LpirOp::ItofS { dst, src }),
-        (LpsType::Bool, LpsType::Int) | (LpsType::Bool, LpsType::UInt) => {
-            ctx.fb.push(LpirOp::Copy { dst, src });
+    let src_base = scalar_base_type(&value.ty).ok_or_else(|| {
+        Diagnostic::error(span, format!("unsupported cast source {:?}", value.ty))
+    })?;
+    let dst_base = scalar_base_type(target_ty)
+        .ok_or_else(|| Diagnostic::error(span, format!("unsupported cast target {target_ty:?}")))?;
+    if value.lanes.len() != scalar_lane_count(target_ty) {
+        return Err(Diagnostic::error(span, "cast lane count mismatch"));
+    }
+    let dst_types = scalar_ir_types(target_ty)?;
+    let mut lanes = Vec::new();
+    for (src, dst_ty) in value.lanes.iter().zip(dst_types.iter()) {
+        let dst = lower_scalar_cast(ctx, span, *src, &src_base, &dst_base, *dst_ty)?;
+        lanes.push(dst);
+    }
+    Ok(LowerValue {
+        ty: target_ty.clone(),
+        lanes,
+    })
+}
+
+fn lower_scalar_cast(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    src: VReg,
+    src_ty: &LpsType,
+    dst_ty: &LpsType,
+    dst_ir_ty: IrType,
+) -> Result<VReg, Diagnostic> {
+    let dst = ctx.fb.alloc_vreg(dst_ir_ty);
+    match (src_ty, dst_ty) {
+        (LpsType::Float, LpsType::Float)
+        | (LpsType::Int, LpsType::Int)
+        | (LpsType::UInt, LpsType::UInt)
+        | (LpsType::Bool, LpsType::Bool)
+        | (LpsType::Bool, LpsType::Int)
+        | (LpsType::Bool, LpsType::UInt)
+        | (LpsType::Int, LpsType::UInt)
+        | (LpsType::UInt, LpsType::Int) => ctx.fb.push(LpirOp::Copy { dst, src }),
+        (LpsType::Int, LpsType::Float) | (LpsType::Bool, LpsType::Float) => {
+            ctx.fb.push(LpirOp::ItofS { dst, src });
+        }
+        (LpsType::UInt, LpsType::Float) => {
+            ctx.fb.push(LpirOp::ItofU { dst, src });
+        }
+        (LpsType::Float, LpsType::Int) => {
+            ctx.fb.push(LpirOp::FtoiSatS { dst, src });
+        }
+        (LpsType::Float, LpsType::UInt) => {
+            ctx.fb.push(LpirOp::FtoiSatU { dst, src });
         }
         (LpsType::Int | LpsType::UInt, LpsType::Bool) => {
             let zero = ctx.fb.alloc_vreg(IrType::I32);
@@ -814,20 +987,14 @@ fn lower_cast(
                 rhs: zero,
             });
         }
-        (LpsType::Int, LpsType::UInt) | (LpsType::UInt, LpsType::Int) => {
-            ctx.fb.push(LpirOp::Copy { dst, src });
-        }
         _ => {
             return Err(Diagnostic::error(
                 span,
-                format!("unsupported cast {:?} to {target_ty:?}", value.ty),
+                format!("unsupported scalar cast {src_ty:?} to {dst_ty:?}"),
             ));
         }
     }
-    Ok(LowerValue {
-        ty: target_ty.clone(),
-        lanes: vec![dst],
-    })
+    Ok(dst)
 }
 
 fn lower_select(

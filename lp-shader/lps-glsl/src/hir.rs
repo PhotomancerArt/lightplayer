@@ -190,13 +190,18 @@ pub struct HirOutArg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinKind {
     Abs,
+    All,
+    Any,
     Clamp,
+    Equal,
     Floor,
     Fract,
     Max,
     Min,
     Mix,
     Mod,
+    Not,
+    NotEqual,
     Smoothstep,
 }
 
@@ -336,6 +341,15 @@ fn type_name_to_lps(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
         "vec2" => Ok(LpsType::Vec2),
         "vec3" => Ok(LpsType::Vec3),
         "vec4" => Ok(LpsType::Vec4),
+        "ivec2" => Ok(LpsType::IVec2),
+        "ivec3" => Ok(LpsType::IVec3),
+        "ivec4" => Ok(LpsType::IVec4),
+        "uvec2" => Ok(LpsType::UVec2),
+        "uvec3" => Ok(LpsType::UVec3),
+        "uvec4" => Ok(LpsType::UVec4),
+        "bvec2" => Ok(LpsType::BVec2),
+        "bvec3" => Ok(LpsType::BVec3),
+        "bvec4" => Ok(LpsType::BVec4),
         other => Err(Diagnostic::error(
             span,
             format!("M3 lps-glsl does not support type `{other}`"),
@@ -1003,10 +1017,15 @@ impl<'a> TypeCtx<'a> {
             });
         }
         if is_comparison(op) {
-            let (lhs, rhs) = coerce_numeric_pair(span, lhs, rhs)?;
+            let (lhs, rhs, ty) = coerce_comparison_pair(span, lhs, rhs)?;
+            let ty = if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+                LpsType::Bool
+            } else {
+                ty
+            };
             return Ok(HirExpr {
                 span,
-                ty: LpsType::Bool,
+                ty,
                 kind: HirExprKind::Binary {
                     op,
                     lhs: Box::new(lhs),
@@ -1103,20 +1122,40 @@ impl<'a> TypeCtx<'a> {
 fn is_constructor_name(name: &str) -> bool {
     matches!(
         name,
-        "float" | "int" | "uint" | "bool" | "vec2" | "vec3" | "vec4"
+        "float"
+            | "int"
+            | "uint"
+            | "bool"
+            | "vec2"
+            | "vec3"
+            | "vec4"
+            | "ivec2"
+            | "ivec3"
+            | "ivec4"
+            | "uvec2"
+            | "uvec3"
+            | "uvec4"
+            | "bvec2"
+            | "bvec3"
+            | "bvec4"
     )
 }
 
 fn builtin_kind(name: &str) -> Option<BuiltinKind> {
     Some(match name {
         "abs" => BuiltinKind::Abs,
+        "all" => BuiltinKind::All,
+        "any" => BuiltinKind::Any,
         "clamp" => BuiltinKind::Clamp,
+        "equal" => BuiltinKind::Equal,
         "floor" => BuiltinKind::Floor,
         "fract" => BuiltinKind::Fract,
         "max" => BuiltinKind::Max,
         "min" => BuiltinKind::Min,
         "mix" => BuiltinKind::Mix,
         "mod" => BuiltinKind::Mod,
+        "not" => BuiltinKind::Not,
+        "notEqual" => BuiltinKind::NotEqual,
         "smoothstep" => BuiltinKind::Smoothstep,
         _ => return None,
     })
@@ -1163,8 +1202,17 @@ fn type_builtin_args(
     args: Vec<HirExpr>,
 ) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
     let arity = match kind {
-        BuiltinKind::Abs | BuiltinKind::Floor | BuiltinKind::Fract => 1,
-        BuiltinKind::Max | BuiltinKind::Min | BuiltinKind::Mod => 2,
+        BuiltinKind::Abs
+        | BuiltinKind::All
+        | BuiltinKind::Any
+        | BuiltinKind::Floor
+        | BuiltinKind::Fract
+        | BuiltinKind::Not => 1,
+        BuiltinKind::Equal
+        | BuiltinKind::Max
+        | BuiltinKind::Min
+        | BuiltinKind::Mod
+        | BuiltinKind::NotEqual => 2,
         BuiltinKind::Clamp | BuiltinKind::Mix | BuiltinKind::Smoothstep => 3,
     };
     if args.len() != arity {
@@ -1178,8 +1226,27 @@ fn type_builtin_args(
             let ty = args[0].ty.clone();
             Ok((args, ty))
         }
+        BuiltinKind::All | BuiltinKind::Any => {
+            let arg = coerce_expr(args[0].clone(), &args[0].ty)?;
+            if scalar_base_type(&arg.ty) != Some(LpsType::Bool) {
+                return Err(Diagnostic::error(span, "all/any expects bool lanes"));
+            }
+            Ok((alloc::vec![arg], LpsType::Bool))
+        }
+        BuiltinKind::Not => {
+            let arg = args[0].clone();
+            let ty = arg.ty.clone();
+            if scalar_base_type(&ty) != Some(LpsType::Bool) {
+                return Err(Diagnostic::error(span, "not expects bool lanes"));
+            }
+            Ok((alloc::vec![arg], ty))
+        }
         BuiltinKind::Max | BuiltinKind::Min | BuiltinKind::Mod => {
             let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            Ok((alloc::vec![a, b], ty))
+        }
+        BuiltinKind::Equal | BuiltinKind::NotEqual => {
+            let (a, b, ty) = coerce_comparison_pair(span, args[0].clone(), args[1].clone())?;
             Ok((alloc::vec![a, b], ty))
         }
         BuiltinKind::Clamp | BuiltinKind::Smoothstep => {
@@ -1230,7 +1297,13 @@ fn coerce_constructor_args(
                 if arg_scalar == expected_scalar {
                     Ok(arg)
                 } else {
-                    coerce_expr(arg, &expected_scalar)
+                    let target = if scalar_lane_count(&arg.ty) > 1 {
+                        LpsType::vector_type(&expected_scalar, scalar_lane_count(&arg.ty))
+                            .unwrap_or_else(|| expected_scalar.clone())
+                    } else {
+                        expected_scalar.clone()
+                    };
+                    coerce_expr(arg, &target)
                 }
             })
             .collect();
@@ -1257,14 +1330,16 @@ fn coerce_arithmetic_pair(
     Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?, ty))
 }
 
-fn coerce_numeric_pair(
+fn coerce_comparison_pair(
     span: Span,
     lhs: HirExpr,
     rhs: HirExpr,
-) -> Result<(HirExpr, HirExpr), Diagnostic> {
+) -> Result<(HirExpr, HirExpr, LpsType), Diagnostic> {
     let ty = vector_dominant_type(&[&lhs.ty, &rhs.ty])
         .ok_or_else(|| Diagnostic::error(span, "unsupported comparison operand types"))?;
-    Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?))
+    let result_ty = comparison_result_type(&ty)
+        .ok_or_else(|| Diagnostic::error(span, "unsupported comparison result type"))?;
+    Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?, result_ty))
 }
 
 fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
@@ -1279,6 +1354,18 @@ fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
             ty: target.clone(),
             kind: HirExprKind::Constructor {
                 args: alloc::vec![expr],
+            },
+        });
+    }
+    if scalar_lane_count(&expr.ty) == scalar_lane_count(target)
+        && scalar_base_type(&expr.ty).is_some()
+        && scalar_base_type(target).is_some()
+    {
+        return Ok(HirExpr {
+            span: expr.span,
+            ty: target.clone(),
+            kind: HirExprKind::Cast {
+                expr: Box::new(expr),
             },
         });
     }
@@ -1317,13 +1404,15 @@ fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
 
 fn vector_dominant_type(types: &[&LpsType]) -> Option<LpsType> {
     let mut lanes = 1usize;
-    let mut base = LpsType::Int;
+    let mut base = LpsType::Bool;
     for ty in types {
         let ty_base = scalar_base_type(ty)?;
         if ty_base == LpsType::Float {
             base = LpsType::Float;
         } else if ty_base == LpsType::UInt && base != LpsType::Float {
             base = LpsType::UInt;
+        } else if ty_base == LpsType::Int && base == LpsType::Bool {
+            base = LpsType::Int;
         } else if ty_base != LpsType::Int && ty_base != LpsType::Bool {
             return None;
         }
@@ -1333,6 +1422,13 @@ fn vector_dominant_type(types: &[&LpsType]) -> Option<LpsType> {
         Some(base)
     } else {
         LpsType::vector_type(&base, lanes)
+    }
+}
+
+fn comparison_result_type(operand_ty: &LpsType) -> Option<LpsType> {
+    match scalar_lane_count(operand_ty) {
+        1 => Some(LpsType::Bool),
+        lanes => LpsType::vector_type(&LpsType::Bool, lanes),
     }
 }
 

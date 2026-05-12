@@ -728,7 +728,23 @@ fn token_is_type_name(tok: Token, source: &str) -> bool {
         ) => true,
         TokenKind::Identifier => matches!(
             tok.lexeme(source),
-            "bool" | "float" | "int" | "uint" | "vec2" | "vec3" | "vec4" | "void"
+            "bool"
+                | "float"
+                | "int"
+                | "uint"
+                | "vec2"
+                | "vec3"
+                | "vec4"
+                | "ivec2"
+                | "ivec3"
+                | "ivec4"
+                | "uvec2"
+                | "uvec3"
+                | "uvec4"
+                | "bvec2"
+                | "bvec3"
+                | "bvec4"
+                | "void"
         ),
         _ => false,
     }
