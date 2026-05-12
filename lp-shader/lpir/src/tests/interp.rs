@@ -41,6 +41,16 @@ fn interp_fdiv() {
 }
 
 #[test]
+fn interp_fdiv_const_f32() {
+    let r = run_f32(
+        "func @f(v1:f32) -> f32 {\n  v2:f32 = fdiv_const.f32 v1, 4.0\n  return v2\n}\n",
+        "f",
+        &[Value::F32(10.0)],
+    );
+    assert!((r - 2.5).abs() < 1e-6);
+}
+
+#[test]
 fn interp_fneg() {
     let r = run_f32(
         "func @f(v1:f32) -> f32 {\n  v2:f32 = fneg v1\n  return v2\n}\n",

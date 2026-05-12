@@ -557,6 +557,15 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
+        LpirOp::FdivConstF32 { dst, lhs, rhs } => match fm {
+            FloatMode::Q32 => q32::emit_q32_fdiv_const_fast(sink, lhs.0, *rhs, dst.0),
+            FloatMode::F32 => {
+                sink.local_get(lhs.0)
+                    .f32_const(Ieee32::from(*rhs))
+                    .f32_div()
+                    .local_set(dst.0);
+            }
+        },
         LpirOp::Fneg { dst, src } => match fm {
             FloatMode::Q32 => {
                 sink.i32_const(0)

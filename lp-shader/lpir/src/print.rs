@@ -453,6 +453,13 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Lp
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
+        LpirOp::FdivConstF32 { dst, lhs, rhs } => {
+            let _ = write!(out, "{ind}");
+            fmt_vreg(st, out, *dst);
+            let _ = write!(out, " = fdiv_const.f32 ");
+            fmt_vreg(st, out, *lhs);
+            let _ = writeln!(out, ", {}", fmt_f32(*rhs));
+        }
         LpirOp::Fneg { dst, src } => unary(out, st, ind, "fneg", *dst, *src),
         LpirOp::Fabs { dst, src } => unary(out, st, ind, "fabs", *dst, *src),
         LpirOp::Fsqrt { dst, src } => unary(out, st, ind, "fsqrt", *dst, *src),

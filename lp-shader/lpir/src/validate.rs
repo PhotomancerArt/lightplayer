@@ -588,6 +588,7 @@ fn check_op_operands_defined(
             check(*lhs, "lhs");
             check(*rhs, "rhs");
         }
+        LpirOp::FdivConstF32 { lhs, .. } => check(*lhs, "lhs"),
         LpirOp::Fneg { src, .. }
         | LpirOp::Fabs { src, .. }
         | LpirOp::Fsqrt { src, .. }
@@ -766,6 +767,21 @@ fn check_opcode_dst_types(
         | LpirOp::Unorm16toF { dst, .. }
         | LpirOp::Unorm8toF { dst, .. } => expect(*dst, IrType::F32, "float op result"),
 
+        LpirOp::FdivConstF32 { dst, lhs, .. } => {
+            expect(*dst, IrType::F32, "float op result");
+            let j = lhs.0 as usize;
+            if j < func.vreg_types.len() && func.vreg_types[j] != IrType::F32 {
+                errs.push(err_in_func(
+                    fname,
+                    op_i,
+                    format!(
+                        "fdiv_const.f32 lhs: v{} has type {:?}, expected F32",
+                        lhs.0, func.vreg_types[j]
+                    ),
+                ));
+            }
+        }
+
         LpirOp::Iadd { dst, .. }
         | LpirOp::Isub { dst, .. }
         | LpirOp::Imul { dst, .. }
@@ -905,6 +921,7 @@ fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
         | LpirOp::Fsub { dst, .. }
         | LpirOp::Fmul { dst, .. }
         | LpirOp::Fdiv { dst, .. }
+        | LpirOp::FdivConstF32 { dst, .. }
         | LpirOp::Fneg { dst, .. }
         | LpirOp::Fabs { dst, .. }
         | LpirOp::Fsqrt { dst, .. }

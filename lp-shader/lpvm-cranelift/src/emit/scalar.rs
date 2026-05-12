@@ -74,6 +74,23 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
+        LpirOp::FdivConstF32 { dst, lhs, rhs } => {
+            let a = use_v(builder, vars, *lhs);
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let b = builder.ins().f32const(*rhs);
+                    def_v_expr(builder, vars, *dst, |bd| bd.ins().fdiv(a, b));
+                }
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let encoded = lps_q32::q32_encode::q32_encode(*rhs);
+                    let b = builder.ins().iconst(types::I32, i64::from(encoded));
+                    let call = builder.ins().call(refs.fdiv, &[a, b]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
+        }
         LpirOp::Fneg { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {

@@ -2,14 +2,15 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use lpir::{IrType, LpirOp, VReg};
-use naga::{BinaryOperator, Expression, Handle, ScalarKind, TypeInner};
+use naga::{BinaryOperator, Expression, Handle, Literal, ScalarKind, TypeInner};
 
 use crate::lower_ctx::VRegVec;
 use crate::lower_error::LowerError;
 use crate::lower_expr::lower_expr_vec;
-use crate::naga_util::{expr_scalar_kind, expr_type_inner};
+use crate::naga_util::{expr_scalar_kind, expr_type_inner, vector_size_usize};
 
 pub(crate) fn lower_binary_vec(
     ctx: &mut crate::lower_ctx::LowerCtx<'_>,
@@ -25,6 +26,12 @@ pub(crate) fn lower_binary_vec(
         return Err(LowerError::UnsupportedExpression(String::from(
             "binary operand kind mismatch",
         )));
+    }
+    if op == BinaryOperator::Divide && lk == ScalarKind::Float {
+        if let Some(right_consts) = float_const_expr_lanes(ctx, right) {
+            let left_vs = lower_expr_vec(ctx, left)?;
+            return lower_float_div_const_vec(ctx, &left_vs, &right_consts);
+        }
     }
     let left_vs = lower_expr_vec(ctx, left)?;
     let right_vs = lower_expr_vec(ctx, right)?;
@@ -44,6 +51,94 @@ pub(crate) fn lower_binary_vec(
         result.push(v);
     }
     Ok(result)
+}
+
+fn lower_float_div_const_vec(
+    ctx: &mut crate::lower_ctx::LowerCtx<'_>,
+    left_vs: &[VReg],
+    right_consts: &[f32],
+) -> Result<VRegVec, LowerError> {
+    let n = left_vs.len().max(right_consts.len());
+    if left_vs.len() != right_consts.len() && left_vs.len() != 1 && right_consts.len() != 1 {
+        return Err(LowerError::UnsupportedExpression(format!(
+            "binary vector width mismatch {} vs {}",
+            left_vs.len(),
+            right_consts.len()
+        )));
+    }
+    let mut result = VRegVec::new();
+    for i in 0..n {
+        let lhs = left_vs[i.min(left_vs.len().saturating_sub(1).max(0))];
+        let rhs = right_consts[i.min(right_consts.len().saturating_sub(1).max(0))];
+        let dst = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::FdivConstF32 { dst, lhs, rhs });
+        result.push(dst);
+    }
+    Ok(result)
+}
+
+fn float_const_expr_lanes(
+    ctx: &crate::lower_ctx::LowerCtx<'_>,
+    expr: Handle<Expression>,
+) -> Option<Vec<f32>> {
+    match &ctx.func.expressions[expr] {
+        Expression::Literal(lit) => float_literal(*lit).map(|v| alloc::vec![v]),
+        Expression::Constant(h) => {
+            let init = ctx.module.constants[*h].init;
+            float_const_global_expr_lanes(ctx, init)
+        }
+        Expression::Compose { components, .. } => {
+            let mut lanes = Vec::new();
+            for &component in components {
+                lanes.extend(float_const_expr_lanes(ctx, component)?);
+            }
+            Some(lanes)
+        }
+        Expression::Splat { size, value } => {
+            let lanes = float_const_expr_lanes(ctx, *value)?;
+            if lanes.len() != 1 {
+                return None;
+            }
+            Some(alloc::vec![lanes[0]; vector_size_usize(*size)])
+        }
+        _ => None,
+    }
+}
+
+fn float_const_global_expr_lanes(
+    ctx: &crate::lower_ctx::LowerCtx<'_>,
+    expr: Handle<Expression>,
+) -> Option<Vec<f32>> {
+    match &ctx.module.global_expressions[expr] {
+        Expression::Literal(lit) => float_literal(*lit).map(|v| alloc::vec![v]),
+        Expression::Constant(h) => {
+            let init = ctx.module.constants[*h].init;
+            float_const_global_expr_lanes(ctx, init)
+        }
+        Expression::Compose { components, .. } => {
+            let mut lanes = Vec::new();
+            for &component in components {
+                lanes.extend(float_const_global_expr_lanes(ctx, component)?);
+            }
+            Some(lanes)
+        }
+        Expression::Splat { size, value } => {
+            let lanes = float_const_global_expr_lanes(ctx, *value)?;
+            if lanes.len() != 1 {
+                return None;
+            }
+            Some(alloc::vec![lanes[0]; vector_size_usize(*size)])
+        }
+        _ => None,
+    }
+}
+
+fn float_literal(lit: Literal) -> Option<f32> {
+    match lit {
+        Literal::F32(value) => Some(value),
+        Literal::F64(value) => Some(value as f32),
+        _ => None,
+    }
 }
 
 fn lower_binary_scalar(

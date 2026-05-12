@@ -79,7 +79,12 @@ fn fa_vreg(v: lpir::VReg) -> VReg {
 }
 
 fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice, LowerError> {
-    if ir.len() > u8::MAX as usize {
+    let regs: Vec<VReg> = ir.iter().map(|v| fa_vreg(*v)).collect();
+    push_native_vregs_slice(pool, &regs)
+}
+
+fn push_native_vregs_slice(pool: &mut Vec<VReg>, regs: &[VReg]) -> Result<VRegSlice, LowerError> {
+    if regs.len() > u8::MAX as usize {
         return Err(LowerError::UnsupportedOp {
             description: String::from("vreg slice too long for FA backend"),
         });
@@ -87,12 +92,12 @@ fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice
     let start = u16::try_from(pool.len()).map_err(|_| LowerError::UnsupportedOp {
         description: String::from("vreg pool exhausted (u16)"),
     })?;
-    for v in ir {
-        pool.push(fa_vreg(*v));
+    for v in regs {
+        pool.push(*v);
     }
     Ok(VRegSlice {
         start,
-        count: ir.len() as u8,
+        count: regs.len() as u8,
     })
 }
 
@@ -138,6 +143,116 @@ fn lower_alu_imm12(
     }
 }
 
+fn q32_const_from_f32(value: f32) -> i32 {
+    ((value as f64) * 65536.0) as i32
+}
+
+fn emit_q32_fmul_wrap(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    dst: VReg,
+    lhs: VReg,
+    rhs: VReg,
+    src_op: u16,
+) {
+    let lo = temps.mint();
+    let hi = temps.mint();
+    out.push(VInst::AluRRR {
+        op: AluOp::Mul,
+        dst: lo,
+        src1: lhs,
+        src2: rhs,
+        src_op,
+    });
+    out.push(VInst::AluRRR {
+        op: AluOp::MulH,
+        dst: hi,
+        src1: lhs,
+        src2: rhs,
+        src_op,
+    });
+    out.push(VInst::AluRRI {
+        op: AluImmOp::SrliU,
+        dst: lo,
+        src: lo,
+        imm: 16,
+        src_op,
+    });
+    out.push(VInst::AluRRI {
+        op: AluImmOp::Slli,
+        dst: hi,
+        src: hi,
+        imm: 16,
+        src_op,
+    });
+    out.push(VInst::AluRRR {
+        op: AluOp::Or,
+        dst,
+        src1: lo,
+        src2: hi,
+        src_op,
+    });
+}
+
+fn emit_q32_fdiv_const_zero(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    dst: VReg,
+    lhs: VReg,
+    src_op: u16,
+) {
+    let zero = temps.mint();
+    let max = temps.mint();
+    let min = temps.mint();
+    let is_pos = temps.mint();
+    let is_zero = temps.mint();
+    let nonzero_sat = temps.mint();
+
+    out.push(VInst::IConst32 {
+        dst: zero,
+        val: 0,
+        src_op,
+    });
+    out.push(VInst::IConst32 {
+        dst: max,
+        val: i32::MAX,
+        src_op,
+    });
+    out.push(VInst::IConst32 {
+        dst: min,
+        val: i32::MIN,
+        src_op,
+    });
+    out.push(VInst::Icmp {
+        dst: is_pos,
+        lhs,
+        rhs: zero,
+        cond: IcmpCond::GtS,
+        src_op,
+    });
+    out.push(VInst::Select {
+        dst: nonzero_sat,
+        cond: is_pos,
+        if_true: max,
+        if_false: min,
+        src_op,
+    });
+    out.push(VInst::Icmp {
+        dst: is_zero,
+        lhs,
+        rhs: zero,
+        cond: IcmpCond::Eq,
+        src_op,
+    });
+    out.push(VInst::Select {
+        dst,
+        cond: is_zero,
+        if_true: zero,
+        if_false: nonzero_sat,
+        src_op,
+    });
+}
+
 fn sym_call(
     out: &mut Vec<VInst>,
     symbols: &mut ModuleSymbols,
@@ -147,10 +262,24 @@ fn sym_call(
     rets: &[lpir::VReg],
     src_op: Option<u32>,
 ) -> Result<(), LowerError> {
+    let args: Vec<VReg> = args.iter().map(|v| fa_vreg(*v)).collect();
+    let rets: Vec<VReg> = rets.iter().map(|v| fa_vreg(*v)).collect();
+    sym_call_vregs(out, symbols, pool, name, &args, &rets, src_op)
+}
+
+fn sym_call_vregs(
+    out: &mut Vec<VInst>,
+    symbols: &mut ModuleSymbols,
+    pool: &mut Vec<VReg>,
+    name: &'static str,
+    args: &[VReg],
+    rets: &[VReg],
+    src_op: Option<u32>,
+) -> Result<(), LowerError> {
     out.push(VInst::Call {
         target: symbols.intern(name),
-        args: push_vregs_slice(pool, args)?,
-        rets: push_vregs_slice(pool, rets)?,
+        args: push_native_vregs_slice(pool, args)?,
+        rets: push_native_vregs_slice(pool, rets)?,
         callee_uses_sret: false,
         caller_passes_sret_ptr: false,
         caller_sret_vm_abi_swap: false,
@@ -763,43 +892,7 @@ pub fn lower_lpir_op(
                 let a = fa_vreg(*lhs);
                 let b = fa_vreg(*rhs);
                 let dstv = fa_vreg(*dst);
-                let lo = temps.mint();
-                let hi = temps.mint();
-                out.push(VInst::AluRRR {
-                    op: AluOp::Mul,
-                    dst: lo,
-                    src1: a,
-                    src2: b,
-                    src_op: po,
-                });
-                out.push(VInst::AluRRR {
-                    op: AluOp::MulH,
-                    dst: hi,
-                    src1: a,
-                    src2: b,
-                    src_op: po,
-                });
-                out.push(VInst::AluRRI {
-                    op: AluImmOp::SrliU,
-                    dst: lo,
-                    src: lo,
-                    imm: 16,
-                    src_op: po,
-                });
-                out.push(VInst::AluRRI {
-                    op: AluImmOp::Slli,
-                    dst: hi,
-                    src: hi,
-                    imm: 16,
-                    src_op: po,
-                });
-                out.push(VInst::AluRRR {
-                    op: AluOp::Or,
-                    dst: dstv,
-                    src1: lo,
-                    src2: hi,
-                    src_op: po,
-                });
+                emit_q32_fmul_wrap(out, temps, dstv, a, b, po);
                 Ok(())
             }
         },
@@ -817,6 +910,22 @@ pub fn lower_lpir_op(
                 &[*dst],
                 src_op,
             )
+        }
+        LpirOp::FdivConstF32 { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => {
+            if *rhs == 0.0 {
+                emit_q32_fdiv_const_zero(out, temps, fa_vreg(*dst), fa_vreg(*lhs), po);
+                return Ok(());
+            }
+
+            let recip = q32_const_from_f32(1.0 / *rhs);
+            let recip_v = temps.mint();
+            out.push(VInst::IConst32 {
+                dst: recip_v,
+                val: recip,
+                src_op: po,
+            });
+            emit_q32_fmul_wrap(out, temps, fa_vreg(*dst), fa_vreg(*lhs), recip_v, po);
+            Ok(())
         }
         LpirOp::Fneg { dst, src } if opts.float_mode == FloatMode::Q32 => {
             out.push(VInst::Neg {
@@ -908,7 +1017,7 @@ pub fn lower_lpir_op(
 
         // Q32 float constants: convert f32 to Q32 fixed-point (multiply by 65536.0)
         LpirOp::FconstF32 { dst, value } if opts.float_mode == FloatMode::Q32 => {
-            let q32_val = ((*value as f64) * 65536.0) as i32;
+            let q32_val = q32_const_from_f32(*value);
             out.push(VInst::IConst32 {
                 dst: fa_vreg(*dst),
                 val: q32_val,
@@ -1195,6 +1304,7 @@ pub fn lower_lpir_op(
         | LpirOp::Fsub { .. }
         | LpirOp::Fmul { .. }
         | LpirOp::Fdiv { .. }
+        | LpirOp::FdivConstF32 { .. }
         | LpirOp::Fneg { .. }
         | LpirOp::FconstF32 { .. }
         | LpirOp::Fsqrt { .. }
@@ -2579,6 +2689,83 @@ mod tests {
             panic!("expected sym_call");
         };
         assert_eq!(symbols.name(*target), BuiltinId::LpLpirFdivRecipQ32.name());
+    }
+
+    #[test]
+    fn fdiv_const_q32_nonzero_emits_recip_const_mul_sequence() {
+        let op = LpirOp::FdivConstF32 {
+            dst: v(2),
+            lhs: v(0),
+            rhs: 2.0,
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        let (v, _symbols, _pool) = call_lower_op_full_q32(
+            &op,
+            FloatMode::Q32,
+            &Q32Options::default(),
+            None,
+            &f,
+            &ir,
+            &abi,
+        )
+        .expect("ok");
+        assert_eq!(v.len(), 6);
+        assert!(matches!(v[0], VInst::IConst32 { val: 32_768, .. }));
+        assert!(matches!(v[1], VInst::AluRRR { op: AluOp::Mul, .. }));
+        assert!(matches!(
+            v[2],
+            VInst::AluRRR {
+                op: AluOp::MulH,
+                ..
+            }
+        ));
+        assert!(matches!(v[5], VInst::AluRRR { op: AluOp::Or, .. }));
+    }
+
+    #[test]
+    fn fdiv_const_q32_zero_inlines_sign_based_saturation() {
+        let op = LpirOp::FdivConstF32 {
+            dst: v(2),
+            lhs: v(0),
+            rhs: 0.0,
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        let (v, symbols, _pool) = call_lower_op_full_q32(
+            &op,
+            FloatMode::Q32,
+            &Q32Options::default(),
+            None,
+            &f,
+            &ir,
+            &abi,
+        )
+        .expect("ok");
+        assert!(
+            symbols.names.is_empty(),
+            "zero const-div should not call a helper"
+        );
+        assert_eq!(v.len(), 7);
+        assert!(matches!(v[0], VInst::IConst32 { val: 0, .. }));
+        assert!(matches!(v[1], VInst::IConst32 { val: i32::MAX, .. }));
+        assert!(matches!(v[2], VInst::IConst32 { val: i32::MIN, .. }));
+        assert!(matches!(
+            v[3],
+            VInst::Icmp {
+                cond: IcmpCond::GtS,
+                ..
+            }
+        ));
+        assert!(matches!(v[4], VInst::Select { .. }));
+        assert!(matches!(
+            v[5],
+            VInst::Icmp {
+                cond: IcmpCond::Eq,
+                ..
+            }
+        ));
+        assert!(matches!(v[6], VInst::Select { .. }));
     }
 
     #[test]

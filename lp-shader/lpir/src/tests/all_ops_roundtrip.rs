@@ -62,6 +62,12 @@ pub(crate) fn module_all_ops() -> LpirModule {
     fop!(Fsub);
     fop!(Fmul);
     fop!(Fdiv);
+    let fdiv_const_d = b.alloc_vreg(IrType::F32);
+    b.push(LpirOp::FdivConstF32 {
+        dst: fdiv_const_d,
+        lhs: f1,
+        rhs: 2.0,
+    });
     let fneg_d = b.alloc_vreg(IrType::F32);
     b.push(LpirOp::Fneg {
         dst: fneg_d,

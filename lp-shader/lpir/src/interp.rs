@@ -444,6 +444,10 @@ fn eval_op(
         LpirOp::Fsub { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, -),
         LpirOp::Fmul { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, *),
         LpirOp::Fdiv { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, /),
+        LpirOp::FdivConstF32 { dst, lhs, rhs } => {
+            let a = val_f32(get_reg(regs, *lhs)?)?;
+            set_reg(regs, *dst, Value::F32(a / *rhs))?;
+        }
         LpirOp::Fneg { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(-a))?;
