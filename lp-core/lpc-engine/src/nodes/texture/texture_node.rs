@@ -1,6 +1,7 @@
 //! Core texture node: width/height/format metadata for shader output sizing.
 
 use lpc_model::NodeId;
+use lpc_model::Revision;
 use lpc_model::SlotAccess;
 #[cfg(test)]
 use lpc_model::SlotPath;
@@ -8,10 +9,15 @@ use lpc_model::SlotShapeRegistry;
 use lpc_model::SlotShapeRegistryError;
 use lpc_model::StaticSlotShape;
 use lpc_model::TextureDefView;
+use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
 use lpc_model::nodes::texture::TextureState;
 
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
+    TickContext,
+};
+use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 
 #[cfg(test)]
 fn size_path() -> SlotPath {
@@ -33,6 +39,7 @@ pub struct TextureNode {
     pixel_format: TextureFormat,
     state: TextureState,
     def_view: Option<TextureDefView>,
+    texture_buffer_id: Option<RuntimeBufferId>,
 }
 
 impl TextureNode {
@@ -43,6 +50,7 @@ impl TextureNode {
             pixel_format,
             state: TextureState::new(0, 0, texture_format_tag(pixel_format)),
             def_view: None,
+            texture_buffer_id: None,
         }
     }
 
@@ -61,6 +69,18 @@ impl TextureNode {
 }
 
 impl NodeRuntime for TextureNode {
+    fn init_resources(&mut self, ctx: &mut NodeResourceInitContext<'_>) -> Result<(), NodeError> {
+        if self.texture_buffer_id.is_some() {
+            return Ok(());
+        }
+        let id = ctx.insert_runtime_buffer(WithRevision::new(
+            Revision::default(),
+            RuntimeBuffer::texture_rgba16(0, 0, alloc::vec::Vec::new()),
+        ));
+        self.texture_buffer_id = Some(id);
+        Ok(())
+    }
+
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let size: lpc_model::Dim2u = self.def_view(ctx)?.size().get(ctx)?;
         self.state.sync_with_revision(
@@ -69,6 +89,13 @@ impl NodeRuntime for TextureNode {
             i32::try_from(size.height).unwrap_or(i32::MAX),
             texture_format_tag(self.pixel_format),
         );
+        if let Some(buffer_id) = self.texture_buffer_id {
+            ctx.with_runtime_buffer_mut(buffer_id, ctx.revision(), |buffer| {
+                *buffer =
+                    RuntimeBuffer::texture_rgba16(size.width, size.height, alloc::vec::Vec::new());
+                Ok(())
+            })?;
+        }
         Ok(())
     }
 
@@ -174,6 +201,41 @@ mod tests {
         .expect("resolve")
         .0;
         assert!(matches!(pv.as_value().expect("value"), LpsValueF32::I32(9)));
+    }
+
+    #[test]
+    fn texture_node_exposes_owned_texture_resource_summary() {
+        let (mut engine, tid) = texture_engine(64, 48);
+
+        resolve_with_engine_host(
+            &mut engine,
+            QueryKey::ProducedSlot {
+                node: tid,
+                slot: SlotPath::parse("width").unwrap(),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve texture width");
+        let response = engine.read_project(lpc_wire::ProjectReadRequest::default_debug(None));
+
+        let lpc_wire::ProjectReadResult::Resources(resources) = &response.results[2] else {
+            panic!("third result should be resources");
+        };
+        let texture = resources
+            .summaries
+            .iter()
+            .find(|summary| {
+                matches!(
+                    summary.metadata,
+                    lpc_wire::WireResourceMetadataSummary::Texture {
+                        width: 64,
+                        height: 48,
+                        ..
+                    }
+                )
+            })
+            .expect("texture summary");
+        assert_eq!(texture.owner, Some(tid));
     }
 
     fn texture_engine(width: u32, height: u32) -> (Engine, NodeId) {

@@ -34,7 +34,14 @@ impl Engine {
     fn resource_summaries(&self) -> Vec<WireResourceSummary> {
         self.runtime_buffers()
             .iter()
-            .map(|(id, buffer)| runtime_buffer_summary(id, buffer.changed_at(), buffer.value()))
+            .map(|(id, buffer)| {
+                runtime_buffer_summary(
+                    id,
+                    self.runtime_buffers().owner(id),
+                    buffer.changed_at(),
+                    buffer.value(),
+                )
+            })
             .collect()
     }
 
@@ -71,11 +78,13 @@ fn runtime_buffer_id_from_ref(resource_ref: ResourceRef) -> Option<RuntimeBuffer
 
 fn runtime_buffer_summary(
     id: RuntimeBufferId,
+    owner: Option<lpc_model::NodeId>,
     revision: lpc_model::Revision,
     buffer: &RuntimeBuffer,
 ) -> WireResourceSummary {
     WireResourceSummary {
         resource_ref: ResourceRef::runtime_buffer(id),
+        owner,
         revision,
         kind: WireResourceKindSummary::RuntimeBuffer(runtime_buffer_kind(&buffer.kind)),
         metadata: runtime_buffer_metadata_summary(&buffer.metadata),

@@ -167,6 +167,7 @@ mod tests {
         let buf_id = RuntimeBufferId::new(id);
         WireResourceSummary {
             resource_ref: ResourceRef::runtime_buffer(buf_id),
+            owner: None,
             revision: Revision::new(frame),
             kind: WireResourceKindSummary::RuntimeBuffer(WireRuntimeBufferKind::OutputChannels),
             metadata: WireResourceMetadataSummary::OutputChannels {

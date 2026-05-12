@@ -26,19 +26,23 @@ use super::node_error::NodeError;
 ///
 /// Passed to [`super::super::NodeRuntime::init_resources`] before the node payload is [`crate::node::NodeEntryState::Alive`].
 pub struct NodeResourceInitContext<'a> {
+    node_id: NodeId,
     runtime_buffers: &'a mut RuntimeBufferStore,
 }
 
 impl<'a> NodeResourceInitContext<'a> {
-    pub fn new(runtime_buffers: &'a mut RuntimeBufferStore) -> Self {
-        Self { runtime_buffers }
+    pub fn new(node_id: NodeId, runtime_buffers: &'a mut RuntimeBufferStore) -> Self {
+        Self {
+            node_id,
+            runtime_buffers,
+        }
     }
 
     pub fn insert_runtime_buffer(
         &mut self,
         buffer: WithRevision<RuntimeBuffer>,
     ) -> RuntimeBufferId {
-        self.runtime_buffers.insert(buffer)
+        self.runtime_buffers.insert_owned(self.node_id, buffer)
     }
 }
 

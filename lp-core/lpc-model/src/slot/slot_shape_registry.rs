@@ -4,8 +4,9 @@
 //! register here. The registry is versioned so clients can sync shape additions,
 //! removals, and replacements before applying slot data patches.
 
-use crate::{Revision, SlotShape, SlotShapeId, WithRevision, current_revision};
+use crate::{Revision, SlotShape, SlotShapeId, current_revision};
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 
 /// Registry of id-addressed slot shape roots.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -15,7 +16,49 @@ pub struct SlotShapeRegistry {
     shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
 }
 
-pub type SlotShapeEntry = WithRevision<SlotShape>;
+/// Versioned registry entry for one slot shape root.
+///
+/// Shape ids are compact integers on the wire and in embedded lookup tables.
+/// `name` preserves the human/debug name that produced the id when one is
+/// known, so tools do not have to display only hash-like ids.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct SlotShapeEntry {
+    pub changed_at: Revision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub shape: SlotShape,
+}
+
+impl SlotShapeEntry {
+    pub fn new(changed_at: Revision, shape: SlotShape) -> Self {
+        Self {
+            changed_at,
+            name: None,
+            shape,
+        }
+    }
+
+    pub fn named(changed_at: Revision, name: impl Into<String>, shape: SlotShape) -> Self {
+        Self {
+            changed_at,
+            name: Some(name.into()),
+            shape,
+        }
+    }
+
+    pub fn changed_at(&self) -> Revision {
+        self.changed_at
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn value(&self) -> &SlotShape {
+        &self.shape
+    }
+}
 
 impl SlotShapeRegistry {
     /// Register a new shape root.
@@ -29,6 +72,15 @@ impl SlotShapeRegistry {
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
         self.register_root_with_version(current_revision(), root, shape)
+    }
+
+    pub fn register_root_named(
+        &mut self,
+        root: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_root_named_with_version(current_revision(), root, name, shape)
     }
 
     pub fn register_root_with_version(
@@ -46,6 +98,22 @@ impl SlotShapeRegistry {
         Ok(())
     }
 
+    pub fn register_root_named_with_version(
+        &mut self,
+        revision: Revision,
+        root: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<(), SlotShapeRegistryError> {
+        if self.shapes.contains_key(&root) {
+            return Err(SlotShapeRegistryError::DuplicateShapeId(root));
+        }
+        self.shapes
+            .insert(root, SlotShapeEntry::named(revision, name, shape));
+        self.ids_revision = revision;
+        Ok(())
+    }
+
     /// Ensure that a static shape root is present.
     ///
     /// Returns `Ok(true)` when the shape was inserted and `Ok(false)` when the
@@ -58,6 +126,15 @@ impl SlotShapeRegistry {
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
         self.ensure_root_with_version(current_revision(), root, shape)
+    }
+
+    pub fn ensure_root_named(
+        &mut self,
+        root: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_root_named_with_version(current_revision(), root, name, shape)
     }
 
     pub fn ensure_root_with_version(
@@ -80,6 +157,28 @@ impl SlotShapeRegistry {
         Ok(true)
     }
 
+    pub fn ensure_root_named_with_version(
+        &mut self,
+        revision: Revision,
+        root: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        let name = name.into();
+        if let Some(existing) = self.shapes.get(&root) {
+            return if existing.value() == &shape {
+                Ok(false)
+            } else {
+                Err(SlotShapeRegistryError::ShapeIdConflict(root))
+            };
+        }
+
+        self.shapes
+            .insert(root, SlotShapeEntry::named(revision, name, shape));
+        self.ids_revision = revision;
+        Ok(true)
+    }
+
     /// Replace a dynamic shape root.
     ///
     /// Runtime-owned shapes whose structure varies by artifact or instance use
@@ -96,6 +195,27 @@ impl SlotShapeRegistry {
     ) {
         self.shapes
             .insert(root, SlotShapeEntry::new(revision, shape));
+        self.ids_revision = revision;
+    }
+
+    pub fn replace_root_named(
+        &mut self,
+        root: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) {
+        self.replace_root_named_with_version(current_revision(), root, name, shape);
+    }
+
+    pub fn replace_root_named_with_version(
+        &mut self,
+        revision: Revision,
+        root: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) {
+        self.shapes
+            .insert(root, SlotShapeEntry::named(revision, name, shape));
         self.ids_revision = revision;
     }
 
@@ -123,7 +243,7 @@ impl SlotShapeRegistry {
     }
 
     pub fn get(&self, id: &SlotShapeId) -> Option<&SlotShape> {
-        self.shapes.get(id).map(WithRevision::value)
+        self.shapes.get(id).map(SlotShapeEntry::value)
     }
 
     pub fn entry(&self, id: &SlotShapeId) -> Option<&SlotShapeEntry> {
@@ -218,6 +338,26 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, SlotShapeRegistryError::ShapeIdConflict(id));
+    }
+
+    #[test]
+    fn named_root_preserves_debug_name_in_snapshot() {
+        let mut registry = SlotShapeRegistry::default();
+        let id = SlotShapeId::from_static_name("test.named_shape");
+
+        registry
+            .ensure_root_named(
+                id,
+                "crate::test::NamedShape",
+                SlotShape::value(LpType::Bool),
+            )
+            .unwrap();
+
+        let snapshot = registry.snapshot();
+        assert_eq!(
+            snapshot.shapes.get(&id).and_then(SlotShapeEntry::name),
+            Some("crate::test::NamedShape")
+        );
     }
 
     #[test]

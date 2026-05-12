@@ -79,6 +79,10 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                 const SHAPE_ID: ::lpc_model::SlotShapeId =
                     #shape_id;
 
+                fn shape_name() -> Option<&'static str> {
+                    Some(concat!(module_path!(), "::", stringify!(#ident)))
+                }
+
                 fn slot_shape() -> ::lpc_model::SlotShape {
                     <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
                 }

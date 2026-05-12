@@ -3,6 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use lpc_model::NodeId;
 use lpc_model::project::Revision;
 use lpc_model::resource::ResourceRef;
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,8 @@ pub enum WireResourceAvailability {
 pub struct WireResourceSummary {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<NodeId>,
     pub revision: Revision,
     pub kind: WireResourceKindSummary,
     pub metadata: WireResourceMetadataSummary,

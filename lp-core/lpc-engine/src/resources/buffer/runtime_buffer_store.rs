@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::{Revision, WithRevision};
+use lpc_model::{NodeId, Revision, WithRevision};
 
 use super::{RuntimeBuffer, RuntimeBufferId};
 
@@ -26,6 +26,7 @@ impl RuntimeBufferError {
 pub struct RuntimeBufferStore {
     next_id: u32,
     buffers: BTreeMap<RuntimeBufferId, WithRevision<RuntimeBuffer>>,
+    owners: BTreeMap<RuntimeBufferId, NodeId>,
 }
 
 impl RuntimeBufferStore {
@@ -34,15 +35,39 @@ impl RuntimeBufferStore {
         Self {
             next_id: 0,
             buffers: BTreeMap::new(),
+            owners: BTreeMap::new(),
         }
     }
 
     /// Allocates a new id. Ids increase monotonically and are never reused after allocation.
     pub fn insert(&mut self, buffer: WithRevision<RuntimeBuffer>) -> RuntimeBufferId {
+        self.insert_with_owner(buffer, None)
+    }
+
+    pub fn insert_owned(
+        &mut self,
+        owner: NodeId,
+        buffer: WithRevision<RuntimeBuffer>,
+    ) -> RuntimeBufferId {
+        self.insert_with_owner(buffer, Some(owner))
+    }
+
+    fn insert_with_owner(
+        &mut self,
+        buffer: WithRevision<RuntimeBuffer>,
+        owner: Option<NodeId>,
+    ) -> RuntimeBufferId {
         let id = RuntimeBufferId::new(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.buffers.insert(id, buffer);
+        if let Some(owner) = owner {
+            self.owners.insert(id, owner);
+        }
         id
+    }
+
+    pub fn owner(&self, id: RuntimeBufferId) -> Option<NodeId> {
+        self.owners.get(&id).copied()
     }
 
     pub fn get(&self, id: RuntimeBufferId) -> Option<&WithRevision<RuntimeBuffer>> {

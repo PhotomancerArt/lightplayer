@@ -98,6 +98,30 @@ mod tests {
     }
 
     #[test]
+    fn resource_summary_reports_owning_node() {
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let owner = lpc_model::NodeId::new(7);
+        let buffer_id = engine.runtime_buffers_mut().insert_owned(
+            owner,
+            WithRevision::new(Revision::new(1), RuntimeBuffer::raw(alloc::vec![1])),
+        );
+
+        let response = engine.read_project(ProjectReadRequest::default_debug(None));
+
+        let ProjectReadResult::Resources(resources) = &response.results[2] else {
+            panic!("third result should be resources");
+        };
+        let summary = resources
+            .summaries
+            .iter()
+            .find(|summary| {
+                summary.resource_ref == lpc_model::ResourceRef::runtime_buffer(buffer_id)
+            })
+            .expect("output buffer summary");
+        assert_eq!(summary.owner, Some(owner));
+    }
+
+    #[test]
     fn resource_payload_read_all_includes_buffer_bytes() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
         engine.runtime_buffers_mut().insert(WithRevision::new(

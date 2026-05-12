@@ -28,8 +28,15 @@ pub trait StaticSlotShape {
 
     fn slot_shape() -> SlotShape;
 
+    fn shape_name() -> Option<&'static str> {
+        None
+    }
+
     fn ensure_registered(registry: &mut SlotShapeRegistry) -> Result<bool, SlotShapeRegistryError> {
-        registry.ensure_root(Self::SHAPE_ID, Self::slot_shape())
+        match Self::shape_name() {
+            Some(name) => registry.ensure_root_named(Self::SHAPE_ID, name, Self::slot_shape()),
+            None => registry.ensure_root(Self::SHAPE_ID, Self::slot_shape()),
+        }
     }
 }
 

@@ -106,11 +106,15 @@ pub(crate) fn format_product_ref(product: ProductRef) -> String {
 
 pub(crate) fn format_resource_summary(summary: &WireResourceSummary) -> String {
     format!(
-        "{}  rev {}  {}  {}",
+        "{}  rev {}  {}  {}{}",
         format_resource_ref(summary.resource_ref),
         summary.revision.0,
         format_resource_kind(summary.kind),
-        format_resource_availability(&summary.availability)
+        format_resource_availability(&summary.availability),
+        summary
+            .owner
+            .map(|owner| format!("  owner #{}", owner.0))
+            .unwrap_or_default()
     )
 }
 

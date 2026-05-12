@@ -157,8 +157,11 @@ fn render_shape_tree(
 
             for (id, entry) in snapshot.shapes {
                 let selected = *selection == Some(InspectorSelection::Shape(id));
+                let label = entry
+                    .name()
+                    .map_or_else(|| id.to_string(), |name| format!("{name}  {id}"));
                 if ui
-                    .selectable_label(selected, format!("{id}  rev {}", entry.changed_at().0))
+                    .selectable_label(selected, format!("{label}  rev {}", entry.changed_at().0))
                     .clicked()
                 {
                     *selection = Some(InspectorSelection::Shape(id));
@@ -226,6 +229,13 @@ fn render_resource_detail(ui: &mut egui::Ui, view: &ProjectView, resource_ref: R
     };
 
     ui.monospace(format!("{:?}/{}", resource_ref.domain, resource_ref.id));
+    if let Some(owner) = summary.owner {
+        if let Some(node) = view.tree.nodes.get(&owner) {
+            ui.label(format!("owner #{} {}", owner.0, node.path));
+        } else {
+            ui.label(format!("owner #{}", owner.0));
+        }
+    }
     ui.label(format!("revision {}", summary.revision.0));
     ui.label(format!("availability {:?}", summary.availability));
     ui.label(format_resource_metadata(&summary.metadata));
@@ -243,6 +253,9 @@ fn render_shape_detail(ui: &mut egui::Ui, view: &ProjectView, id: SlotShapeId) {
     };
 
     ui.monospace(format!("{id}"));
+    if let Some(name) = entry.name() {
+        ui.label(name);
+    }
     ui.label(format!("revision {}", entry.changed_at().0));
     render_shape_tree_detail(ui, &view.slots.registry, entry.value(), 0);
 }

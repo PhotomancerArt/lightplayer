@@ -186,7 +186,7 @@ impl Engine {
         mut runtime: Box<dyn NodeRuntime>,
         frame: Revision,
     ) -> Result<(), EngineError> {
-        let mut ctx = NodeResourceInitContext::new(&mut self.runtime_buffers);
+        let mut ctx = NodeResourceInitContext::new(id, &mut self.runtime_buffers);
         runtime
             .init_resources(&mut ctx)
             .map_err(|e| EngineError::node(id, e))?;
