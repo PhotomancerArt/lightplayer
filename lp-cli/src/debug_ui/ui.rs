@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use crate::client::LpClient;
 use eframe::egui;
 use lpc_view::apply_project_read_response;
-use lpc_wire::WireProjectHandle as ProjectHandle;
+use lpc_wire::{
+    ProjectReadQuery, ProjectReadRequest, ReadLevel, ResourcePayloadRead, ResourceReadQuery,
+    WireProjectHandle as ProjectHandle,
+};
 
 use super::inspector::{InspectorSelection, render_debug_inspector};
 use super::node_cards::render_node_workspace;
@@ -83,13 +86,26 @@ impl DebugUiState {
         let repaint = ctx.clone();
         self.runtime_handle.spawn(async move {
             let result = client
-                .project_read_default_debug(handle)
+                .project_read(handle, debug_ui_project_read())
                 .await
                 .map_err(|error| error.to_string());
             let _ = tx.send(result);
             repaint.request_repaint();
         });
     }
+}
+
+fn debug_ui_project_read() -> ProjectReadRequest {
+    let mut request = ProjectReadRequest::default_debug(None);
+    for query in &mut request.queries {
+        if matches!(query, ProjectReadQuery::Resources(_)) {
+            *query = ProjectReadQuery::Resources(ResourceReadQuery {
+                level: ReadLevel::Detail,
+                payloads: ResourcePayloadRead::All,
+            });
+        }
+    }
+    request
 }
 
 impl eframe::App for DebugUiState {

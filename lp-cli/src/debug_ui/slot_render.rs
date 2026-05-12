@@ -2,7 +2,8 @@
 
 use eframe::egui;
 use lpc_model::{
-    LpValue, SlotData, SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry, SlotValueShape,
+    LpValue, ProductRef, SlotData, SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotValueShape,
 };
 
 use super::format::{format_lp_type, format_lp_value, format_product_ref, format_resource_ref};
@@ -308,8 +309,7 @@ fn render_value_row(
         ui.label("=");
         match value {
             LpValue::Product(product) => {
-                ui.strong(format_product_ref(*product));
-                ui.add_enabled(false, egui::Button::new("probe"));
+                render_product_skeleton(ui, *product);
             }
             LpValue::Resource(resource) => {
                 ui.strong(format_resource_ref(*resource));
@@ -325,6 +325,32 @@ fn render_value_row(
             ui.label(format!("{:?}", shape.editor));
         }
     });
+}
+
+fn render_product_skeleton(ui: &mut egui::Ui, product: ProductRef) {
+    egui::Frame::default()
+        .fill(ui.visuals().faint_bg_color)
+        .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+        .rounding(4.0)
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.strong(format_product_ref(product));
+                match product {
+                    ProductRef::Visual(_) => {
+                        ui.label("lazy visual");
+                        ui.label("probe pending");
+                    }
+                    ProductRef::Control(product) => {
+                        ui.label("lazy control");
+                        let extent = product.preferred_extent();
+                        ui.monospace(format!(
+                            "{} samples",
+                            extent.rows.saturating_mul(extent.samples_per_row)
+                        ));
+                    }
+                }
+            });
+        });
 }
 
 fn render_slot_shape_debug(
@@ -345,7 +371,12 @@ fn render_slot_shape_debug(
         Some(SlotShape::Value { shape }) => {
             if let SlotData::Value(value) = data {
                 ui.horizontal_wrapped(|ui| {
-                    ui.monospace(format_lp_value(value.value()));
+                    match value.value() {
+                        LpValue::Product(product) => render_product_skeleton(ui, *product),
+                        other => {
+                            ui.monospace(format_lp_value(other));
+                        }
+                    }
                     ui.label(format!("rev {}", value.changed_at().0));
                     ui.label(format!("type {}", format_lp_type(&shape.ty)));
                     if shape.editor != Default::default() {

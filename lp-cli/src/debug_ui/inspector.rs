@@ -5,6 +5,7 @@ use lpc_model::{NodeId, ResourceRef, SlotShape, SlotShapeId};
 use lpc_view::project::ProjectView;
 
 use super::format::{format_resource_metadata, format_resource_summary};
+use super::resource_preview::render_resource_payload_preview;
 use super::slot_render::{render_slot_root_debug, render_slot_shape_summary, root_name};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,7 +232,8 @@ fn render_resource_detail(ui: &mut egui::Ui, view: &ProjectView, resource_ref: R
     if let Some(bytes) = summary.byte_length_hint {
         ui.label(format!("{bytes} bytes"));
     }
-    ui.add_enabled(false, egui::Button::new("payload detail"));
+    ui.separator();
+    render_resource_payload_preview(ui, view, resource_ref);
 }
 
 fn render_shape_detail(ui: &mut egui::Ui, view: &ProjectView, id: SlotShapeId) {

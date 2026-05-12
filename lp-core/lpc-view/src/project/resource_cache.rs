@@ -98,6 +98,18 @@ impl ClientResourceCache {
             .map(Vec::as_slice)
     }
 
+    /// Cached runtime-buffer payload bytes and metadata, if requested.
+    #[must_use]
+    pub fn runtime_buffer_payload(
+        &self,
+        resource_ref: ResourceRef,
+    ) -> Option<(&[u8], &WireRuntimeBufferMetadataPayload)> {
+        Some((
+            self.runtime_buffer_bytes.get(&resource_ref)?.as_slice(),
+            self.runtime_buffer_metadata.get(&resource_ref)?,
+        ))
+    }
+
     /// Cached output-channel bytes projected for simple byte-oriented previews.
     pub fn output_channel_preview_bytes(
         &self,
