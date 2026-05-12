@@ -19,7 +19,7 @@ use lpvm_wasm::{
 };
 use std::collections::BTreeMap;
 
-use crate::targets::{Backend, FloatMode as TargetFloatMode, Target};
+use crate::targets::{Backend, FloatMode as TargetFloatMode, Frontend, Target};
 
 /// Compiled artifact for one test file and target.
 ///
@@ -192,11 +192,21 @@ impl CompiledShader {
         compiler_config: &CompilerConfig,
         texture_specs: &BTreeMap<String, TextureBindingSpec>,
     ) -> anyhow::Result<Self> {
-        let (ir, meta) = lower_glsl(
-            source,
-            texture_specs,
-            compiler_config.texture.texel_fetch_bounds,
-        )?;
+        let (ir, meta) = match target.frontend {
+            Frontend::Naga => lower_glsl(
+                source,
+                texture_specs,
+                compiler_config.texture.texel_fetch_bounds,
+            )?,
+            Frontend::Lp => {
+                return match lps_glsl::compile(source, &lps_glsl::CompileOptions::default()) {
+                    Ok(_) => Err(anyhow::anyhow!(
+                        "lps-glsl LPIR output is not available in M1"
+                    )),
+                    Err(e) => Err(anyhow::anyhow!("{e}")),
+                };
+            }
+        };
         lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let fm = match target.float_mode {

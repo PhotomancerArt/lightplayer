@@ -1,0 +1,11 @@
+[package]
+name = "lps-glsl"
+description = "LightPlayer-shaped GLSL frontend scaffold"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

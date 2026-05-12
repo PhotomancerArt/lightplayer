@@ -4339,6 +4339,7 @@ dependencies = [
  "lpir",
  "lps-diagnostics",
  "lps-frontend",
+ "lps-glsl",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",
@@ -4383,6 +4384,10 @@ dependencies = [
  "naga 29.0.0",
  "smallvec",
 ]
+
+[[package]]
+name = "lps-glsl"
+version = "40.0.0"
 
 [[package]]
 name = "lps-q32"
