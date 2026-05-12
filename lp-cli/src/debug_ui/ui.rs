@@ -138,12 +138,6 @@ impl DebugUiState {
             ui.separator();
             ui.label(format!("Project {}", self.project_handle.id()));
             ui.separator();
-            ui.label(if self.poll_in_flight {
-                "sync polling"
-            } else {
-                "sync idle"
-            });
-
             if let Ok(view) = self.project_view.lock() {
                 ui.separator();
                 ui.label(format!("rev {}", view.revision.0));
