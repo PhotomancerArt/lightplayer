@@ -6,6 +6,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::default_demand_input_path;
+use crate::engine::error::Error;
+use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::node::test_placeholder_spine;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
@@ -53,6 +55,58 @@ impl OutputProvider for RcMemoryOutput {
 
     fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
         self.0.close(handle)
+    }
+}
+
+struct CountingGraphics {
+    inner: crate::Graphics,
+    output_alloc_count: AtomicU32,
+    output_free_count: AtomicU32,
+}
+
+impl CountingGraphics {
+    fn new() -> Self {
+        Self {
+            inner: crate::Graphics::new(),
+            output_alloc_count: AtomicU32::new(0),
+            output_free_count: AtomicU32::new(0),
+        }
+    }
+
+    fn output_alloc_count(&self) -> u32 {
+        self.output_alloc_count.load(Ordering::Relaxed)
+    }
+
+    fn output_free_count(&self) -> u32 {
+        self.output_free_count.load(Ordering::Relaxed)
+    }
+}
+
+impl LpGraphics for CountingGraphics {
+    fn compile_shader(
+        &self,
+        source: &str,
+        options: &ShaderCompileOptions,
+    ) -> Result<Box<dyn LpShader>, Error> {
+        self.inner.compile_shader(source, options)
+    }
+
+    fn backend_name(&self) -> &'static str {
+        self.inner.backend_name()
+    }
+
+    fn alloc_output_buffer(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<lp_shader::LpsTextureBuf, Error> {
+        self.output_alloc_count.fetch_add(1, Ordering::Relaxed);
+        self.inner.alloc_output_buffer(width, height)
+    }
+
+    fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf) {
+        self.output_free_count.fetch_add(1, Ordering::Relaxed);
+        self.inner.free_output_buffer(buffer);
     }
 }
 
@@ -311,6 +365,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let graphics = Arc::new(CountingGraphics::new());
+    rt.set_graphics(Some(graphics.clone()));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
@@ -402,6 +458,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
     rt.tick(10).expect("tick");
+    rt.tick(10)
+        .expect("second tick reuses fixture render target");
 
     let handle = mem.get_handle_for_pin(pin).expect("channel opened");
     let got = mem.get_data(handle).expect("written");
@@ -409,6 +467,16 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     assert_eq!(got[0], 65535);
     assert_eq!(got[1], 0);
     assert_eq!(got[2], 0);
+    assert_eq!(
+        graphics.output_alloc_count(),
+        1,
+        "fixture should allocate one render target and reuse it across frames",
+    );
+    assert_eq!(
+        graphics.output_free_count(),
+        0,
+        "unchanged render size should not resize/free the fixture target",
+    );
 }
 
 #[test]
@@ -421,6 +489,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
@@ -546,6 +615,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);

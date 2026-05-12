@@ -228,18 +228,62 @@ impl RenderNode for ShaderNode {
         request: &RenderTextureRequest,
         ctx: &mut RenderContext<'_>,
     ) -> Result<TextureRenderProduct, NodeError> {
-        if product.node() != self.node_id {
-            return Err(NodeError::msg(format!(
-                "shader node {:?} cannot visual product owned by {:?}",
-                self.node_id,
-                product.node()
-            )));
+        let mut texture = {
+            let graphics = ctx
+                .graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+            let texture = graphics
+                .alloc_output_buffer(request.width, request.height)
+                .map_err(|e| NodeError::msg(format!("alloc_output_buffer: {e}")))?;
+            if texture.format() != request.format {
+                let allocated = texture.format();
+                graphics.free_output_buffer(texture);
+                return Err(NodeError::msg(format!(
+                    "graphics allocated {allocated:?}, requested {:?}",
+                    request.format
+                )));
+            }
+            texture
+        };
+        if let Err(e) = self.render_texture_into(product, request, &mut texture, ctx) {
+            if let Some(graphics) = ctx.graphics() {
+                graphics.free_output_buffer(texture);
+            }
+            return Err(e);
         }
-        if product.output() != 0 {
+
+        let width = texture.width();
+        let height = texture.height();
+        let format = texture.format();
+        let pixels = texture.data().to_vec();
+        if let Some(graphics) = ctx.graphics() {
+            graphics.free_output_buffer(texture);
+        }
+
+        TextureRenderProduct::new(width, height, format, pixels)
+            .map_err(|e| NodeError::msg(format!("texture product: {e}")))
+    }
+
+    fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        validate_shader_visual_product(self.node_id, product)?;
+        if target.width() != request.width
+            || target.height() != request.height
+            || target.format() != request.format
+        {
             return Err(NodeError::msg(format!(
-                "shader node {:?} has no render output {}",
-                self.node_id,
-                product.output()
+                "shader render target {:?} {}x{} does not match request {:?} {}x{}",
+                target.format(),
+                target.width(),
+                target.height(),
+                request.format,
+                request.width,
+                request.height
             )));
         }
 
@@ -251,35 +295,29 @@ impl RenderNode for ShaderNode {
         if !shader.has_render() {
             return Err(NodeError::msg("compiled shader has no render() entry"));
         }
-
-        let graphics = ctx
-            .graphics()
-            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let mut texture = graphics
-            .alloc_output_buffer(request.width, request.height)
-            .map_err(|e| NodeError::msg(format!("alloc_output_buffer: {e}")))?;
-        if texture.format() != request.format {
-            return Err(NodeError::msg(format!(
-                "graphics allocated {:?}, requested {:?}",
-                texture.format(),
-                request.format
-            )));
-        }
-        let render_result = shader.render(&mut texture, request.time_seconds);
-        if let Err(e) = render_result {
-            graphics.free_output_buffer(texture);
-            return Err(NodeError::msg(format!("shader render: {e}")));
-        }
-
-        let width = texture.width();
-        let height = texture.height();
-        let format = texture.format();
-        let pixels = texture.data().to_vec();
-        graphics.free_output_buffer(texture);
-
-        TextureRenderProduct::new(width, height, format, pixels)
-            .map_err(|e| NodeError::msg(format!("texture product: {e}")))
+        shader
+            .render(target, request.time_seconds)
+            .map_err(|e| NodeError::msg(format!("shader render: {e}")))
     }
+}
+
+fn validate_shader_visual_product(
+    node_id: lpc_model::NodeId,
+    product: VisualProduct,
+) -> Result<(), NodeError> {
+    if product.node() != node_id {
+        return Err(NodeError::msg(format!(
+            "shader node {node_id:?} cannot render visual product owned by {:?}",
+            product.node()
+        )));
+    }
+    if product.output() != 0 {
+        return Err(NodeError::msg(format!(
+            "shader node {node_id:?} has no render output {}",
+            product.output()
+        )));
+    }
+    Ok(())
 }
 
 fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {

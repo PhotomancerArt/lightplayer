@@ -19,6 +19,7 @@ use crate::nodes::fixture::mapping::{
 };
 use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
+use lps_shared::TextureBuffer;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
@@ -44,6 +45,7 @@ pub struct FixtureNode {
     def_view: Option<FixtureDefView>,
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
+    render_target: Option<lp_shader::LpsTextureBuf>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
 }
@@ -63,6 +65,7 @@ impl FixtureNode {
             def_view: None,
             last_visual_product: None,
             last_settings: None,
+            render_target: None,
             precomputed: None,
         }
     }
@@ -217,17 +220,16 @@ impl ControlNode for FixtureNode {
             .ok_or_else(|| NodeError::msg("fixture control render missing cached mapping"))?
             .3;
 
-        let texture = ctx.render_texture(
-            visual_product,
-            &RenderTextureRequest {
-                width: settings.width,
-                height: settings.height,
-                format: lps_shared::TextureStorageFormat::Rgba16Unorm,
-                time_seconds: ctx.time_seconds(),
-            },
-        )?;
-        let accumulators = accumulate_fixture_channels_from_texture_product(
-            &texture,
+        let texture_request = RenderTextureRequest {
+            width: settings.width,
+            height: settings.height,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: ctx.time_seconds(),
+        };
+        let texture = ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
+        ctx.render_texture_into(visual_product, &texture_request, texture)?;
+        let accumulators = accumulate_fixture_channels_from_texture_buffer(
+            texture,
             mapping_entries,
             settings.width,
             settings.height,
@@ -242,6 +244,75 @@ impl ControlNode for FixtureNode {
             settings.gamma_correction,
         )
     }
+}
+
+fn ensure_fixture_render_target<'a>(
+    current: &'a mut Option<lp_shader::LpsTextureBuf>,
+    request: &RenderTextureRequest,
+    ctx: &ControlRenderContext<'_>,
+) -> Result<&'a mut lp_shader::LpsTextureBuf, NodeError> {
+    let stale = current.as_ref().is_none_or(|texture| {
+        texture.width() != request.width
+            || texture.height() != request.height
+            || texture.format() != request.format
+    });
+    if stale {
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("fixture render target allocation requires graphics"))?;
+        if let Some(old) = current.take() {
+            graphics.free_output_buffer(old);
+        }
+        let texture = graphics
+            .alloc_output_buffer(request.width, request.height)
+            .map_err(|e| NodeError::msg(format!("fixture render target allocation: {e}")))?;
+        if texture.format() != request.format {
+            let allocated = texture.format();
+            graphics.free_output_buffer(texture);
+            return Err(NodeError::msg(format!(
+                "fixture render target allocated {allocated:?}, requested {:?}",
+                request.format
+            )));
+        }
+        *current = Some(texture);
+    }
+    current
+        .as_mut()
+        .ok_or_else(|| NodeError::msg("fixture render target missing after allocation"))
+}
+
+fn accumulate_fixture_channels_from_texture_buffer(
+    texture: &lp_shader::LpsTextureBuf,
+    mapping_entries: &[PixelMappingEntry],
+    width: u32,
+    height: u32,
+) -> Result<ChannelAccumulators, NodeError> {
+    if texture.format() == lps_shared::TextureStorageFormat::Rgba16Unorm
+        && texture.width() == width
+        && texture.height() == height
+    {
+        return Ok(accumulate_from_mapping(
+            mapping_entries,
+            texture.data(),
+            TextureFormat::Rgba16,
+            width,
+            height,
+        ));
+    }
+
+    let texture_product = TextureRenderProduct::new(
+        texture.width(),
+        texture.height(),
+        texture.format(),
+        texture.data().to_vec(),
+    )
+    .map_err(|e| NodeError::msg(format!("fixture render target product: {e}")))?;
+    accumulate_fixture_channels_from_texture_product(
+        &texture_product,
+        mapping_entries,
+        width,
+        height,
+    )
 }
 
 fn accumulate_fixture_channels_from_texture_product(
@@ -775,6 +846,7 @@ mod tests {
     fn fixture_writes_expected_u16_rgb_for_solid_red_product() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let (spine, artifact) = test_placeholder_spine();

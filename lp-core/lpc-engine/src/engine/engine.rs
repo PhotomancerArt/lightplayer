@@ -719,6 +719,77 @@ impl EngineResolveHost<'_> {
         result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
     }
 
+    fn render_node_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), SessionResolveError> {
+        let node_id = product.node();
+        let revision = current_revision();
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!("render: unknown node {node_id:?}"))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Visual { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                NodeEntryState::Executing { call } => {
+                    entry.state = WithRevision::new(
+                        old_changed_at,
+                        NodeEntryState::Executing { call: call.clone() },
+                    );
+                    return Err(SessionResolveError::other(format!(
+                        "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                        call.call.label()
+                    )));
+                }
+                other => {
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(format!(
+                        "render: node {node_id:?} not alive"
+                    )));
+                }
+            }
+        };
+
+        let result = {
+            let Some(render_node) = node_runtime.render_node() else {
+                return restore_node_after_failed_render_unit(
+                    self.tree,
+                    node_id,
+                    node_runtime,
+                    revision,
+                    SessionResolveError::other(format!(
+                        "node {node_id:?} cannot visual product output {}: NodeRuntime::render_node() returned None",
+                        product.output()
+                    )),
+                );
+            };
+            let mut ctx = RenderContext::new(
+                node_id,
+                revision,
+                self.graphics.clone(),
+                self.frame_time_seconds,
+            );
+            render_node.render_texture_into(product, request, target, &mut ctx)
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("render: unknown node {node_id:?}"))
+        })?;
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+
+        result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
+    }
+
     fn render_node_control(
         &mut self,
         product: ControlProduct,
@@ -801,6 +872,16 @@ impl ControlRenderServices for EngineResolveHost<'_> {
         self.render_node_texture(product, request)
             .map_err(|e| NodeError::msg(format!("render texture: {e}")))
     }
+
+    fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError> {
+        self.render_node_texture_into(product, request, target)
+            .map_err(|e| NodeError::msg(format!("render texture: {e}")))
+    }
 }
 
 fn restore_node_after_failed_render(
@@ -810,6 +891,19 @@ fn restore_node_after_failed_render(
     revision: Revision,
     err: SessionResolveError,
 ) -> Result<TextureRenderProduct, SessionResolveError> {
+    if let Some(entry) = tree.get_mut(node_id) {
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+    }
+    Err(err)
+}
+
+fn restore_node_after_failed_render_unit(
+    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    node_id: NodeId,
+    node_runtime: Box<dyn NodeRuntime>,
+    revision: Revision,
+    err: SessionResolveError,
+) -> Result<(), SessionResolveError> {
     if let Some(entry) = tree.get_mut(node_id) {
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
     }

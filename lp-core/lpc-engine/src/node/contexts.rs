@@ -291,6 +291,15 @@ impl<'a> ControlRenderContext<'a> {
     ) -> Result<TextureRenderProduct, NodeError> {
         self.services.render_texture(product, request)
     }
+
+    pub fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError> {
+        self.services.render_texture_into(product, request, target)
+    }
 }
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
@@ -300,6 +309,13 @@ pub trait ControlRenderServices {
         product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, NodeError>;
+
+    fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError>;
 }
 
 /// Context passed to [`super::RenderNode`] materialization hooks.
