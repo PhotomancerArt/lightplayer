@@ -6,7 +6,7 @@ pub mod shader_slot_def;
 pub mod shader_slot_mapping;
 pub mod shader_state;
 
-pub use crate::slot_views::ShaderDefView;
+pub use crate::slot_views::{ComputeShaderDefView, ShaderDefView};
 pub use compute_shader_def::ComputeShaderDef;
 pub use glsl_opts::{AddSubMode, DivMode, GlslOpts, MulMode};
 pub use shader_def::ShaderDef;

@@ -347,7 +347,7 @@ fn validate_shader_visual_product(
     Ok(())
 }
 
-fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
+pub(super) fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
     lps_q32::q32_options::Q32Options {
         add_sub: match opts.add_sub.value() {
             AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,

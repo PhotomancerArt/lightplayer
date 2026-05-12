@@ -5,6 +5,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::{
@@ -18,7 +19,9 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 use crate::artifact::ArtifactLocation;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
-use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
+use crate::nodes::{
+    ComputeShaderNode, CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode,
+};
 
 use super::{Engine, EngineServices};
 
@@ -272,6 +275,56 @@ impl ProjectLoader {
         }
 
         for node in loaded_nodes {
+            if let NodeDef::ComputeShader(config) = &node.config {
+                let shader_path =
+                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
+                let source = read_utf8_file(root, shader_path.as_path())?;
+                let header = generate_compute_shader_header(config, runtime.slot_shapes())
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("generate compute shader header: {e}"),
+                    })?;
+                let glsl_source = format!("{header}\n{source}");
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(ComputeShaderNode::new(
+                            node.id,
+                            config.clone(),
+                            glsl_source,
+                            frame,
+                        )),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach compute shader runtime: {e}"),
+                    })?;
+
+                for name in config.consumed_slots.entries.keys() {
+                    register_optional_source_binding(
+                        runtime,
+                        loaded_nodes,
+                        node,
+                        name.as_str(),
+                        &config.bindings,
+                        frame,
+                    )?;
+                }
+                for name in config.produced_slots.entries.keys() {
+                    register_target_binding(
+                        runtime,
+                        loaded_nodes,
+                        node,
+                        name.as_str(),
+                        &config.bindings,
+                        frame,
+                    )?;
+                }
+            }
+        }
+
+        for node in loaded_nodes {
             if let NodeDef::Fixture(config) = &node.config {
                 runtime
                     .attach_runtime_node(
@@ -422,7 +475,11 @@ fn resolve_path_relative_to_file(
 }
 
 fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLoadError> {
-    NodeName::parse(config.kind_name()).map_err(|e| ProjectLoadError::InvalidNodeName {
+    let name = match config {
+        NodeDef::ComputeShader(_) => "compute_shader",
+        _ => config.kind_name(),
+    };
+    NodeName::parse(name).map_err(|e| ProjectLoadError::InvalidNodeName {
         path: path.as_str().to_string(),
         reason: format!("{e}"),
     })
@@ -507,6 +564,20 @@ fn register_source_binding(
             reason: format!("register {slot_name} source binding: {e}"),
         })?;
     Ok(())
+}
+
+fn register_optional_source_binding(
+    engine: &mut Engine,
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    slot_name: &str,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_source(bindings, slot_name).is_none() {
+        return Ok(());
+    }
+    register_source_binding(engine, loaded_nodes, current, slot_name, bindings, frame)
 }
 
 fn register_target_binding(
@@ -607,12 +678,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::sync::Arc;
     use lpc_model::NodeName;
     use lpc_model::TreePath;
     use lpfs::lp_path::AsLpPath;
     use lpfs::{LpFs, LpFsMemory};
 
     use super::*;
+    use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
+    use crate::engine::resolve_with_engine_host;
 
     fn flat_project() -> LpFsMemory {
         let fs = LpFsMemory::new();
@@ -875,6 +949,64 @@ order = "inner_first"
             ),
             "expected invalid slash node ref parse error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn project_loader_attaches_compute_shader_node() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "project"
+
+[nodes.compute]
+artifact = "./compute.toml"
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/compute.toml".as_path(),
+            br#"
+kind = "shader/compute"
+glsl_path = "compute.glsl"
+
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.25
+
+[produced.phase]
+kind = "value"
+value = "f32"
+"#,
+        )
+        .expect("compute.toml");
+        fs.write_file(
+            "/compute.glsl".as_path(),
+            b"void tick() { phase = time + 2.0; }",
+        )
+        .expect("compute.glsl");
+
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = EngineServices::new(root_path);
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let node = rt
+            .artifact_node_id(LpPath::new("/compute.toml"))
+            .expect("compute node");
+
+        let production = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node,
+                slot: SlotPath::parse("phase").expect("phase"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve phase")
+        .0;
+
+        assert_eq!(*production.product.value(), LpValue::F32(2.25));
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {

@@ -15,8 +15,9 @@ pub use node_def::{NodeDef, NodeDefParseError};
 pub use output::{OutputDef, OutputDefView, OutputDriverOptionsConfig};
 pub use project::ProjectDef;
 pub use shader::{
-    AddSubMode, ComputeShaderDef, DivMode, GlslOpts, MulMode, ShaderDef, ShaderDefView,
-    ShaderHeaderGenError, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, generate_compute_shader_header,
+    AddSubMode, ComputeShaderDef, ComputeShaderDefView, DivMode, GlslOpts, MulMode, ShaderDef,
+    ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
+    ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
+    generate_compute_shader_header,
 };
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState};
