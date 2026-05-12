@@ -196,6 +196,10 @@ pub enum BuiltinKind {
     Equal,
     Floor,
     Fract,
+    GreaterThan,
+    GreaterThanEqual,
+    LessThan,
+    LessThanEqual,
     Max,
     Min,
     Mix,
@@ -1150,6 +1154,10 @@ fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "equal" => BuiltinKind::Equal,
         "floor" => BuiltinKind::Floor,
         "fract" => BuiltinKind::Fract,
+        "greaterThan" => BuiltinKind::GreaterThan,
+        "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
+        "lessThan" => BuiltinKind::LessThan,
+        "lessThanEqual" => BuiltinKind::LessThanEqual,
         "max" => BuiltinKind::Max,
         "min" => BuiltinKind::Min,
         "mix" => BuiltinKind::Mix,
@@ -1209,6 +1217,10 @@ fn type_builtin_args(
         | BuiltinKind::Fract
         | BuiltinKind::Not => 1,
         BuiltinKind::Equal
+        | BuiltinKind::GreaterThan
+        | BuiltinKind::GreaterThanEqual
+        | BuiltinKind::LessThan
+        | BuiltinKind::LessThanEqual
         | BuiltinKind::Max
         | BuiltinKind::Min
         | BuiltinKind::Mod
@@ -1245,7 +1257,12 @@ fn type_builtin_args(
             let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
             Ok((alloc::vec![a, b], ty))
         }
-        BuiltinKind::Equal | BuiltinKind::NotEqual => {
+        BuiltinKind::Equal
+        | BuiltinKind::GreaterThan
+        | BuiltinKind::GreaterThanEqual
+        | BuiltinKind::LessThan
+        | BuiltinKind::LessThanEqual
+        | BuiltinKind::NotEqual => {
             let (a, b, ty) = coerce_comparison_pair(span, args[0].clone(), args[1].clone())?;
             Ok((alloc::vec![a, b], ty))
         }

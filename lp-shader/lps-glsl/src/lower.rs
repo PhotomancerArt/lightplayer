@@ -533,6 +533,46 @@ fn lower_builtin(
                     result_ty,
                 );
             }
+            BuiltinKind::GreaterThan => {
+                return lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Gt,
+                    values[0].clone(),
+                    values[1].clone(),
+                    result_ty,
+                );
+            }
+            BuiltinKind::GreaterThanEqual => {
+                return lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Ge,
+                    values[0].clone(),
+                    values[1].clone(),
+                    result_ty,
+                );
+            }
+            BuiltinKind::LessThan => {
+                return lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Lt,
+                    values[0].clone(),
+                    values[1].clone(),
+                    result_ty,
+                );
+            }
+            BuiltinKind::LessThanEqual => {
+                return lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Le,
+                    values[0].clone(),
+                    values[1].clone(),
+                    result_ty,
+                );
+            }
             BuiltinKind::NotEqual => {
                 return lower_binary(
                     ctx,
@@ -559,10 +599,10 @@ fn lower_builtin(
                 dst
             }
             BuiltinKind::Min => {
-                lower_binary_float_lane(ctx, &values[0], &values[1], i, BinaryFloatOp::Min)
+                lower_min_max_lane(ctx, span, result_ty, &values[0], &values[1], i, true)?
             }
             BuiltinKind::Max => {
-                lower_binary_float_lane(ctx, &values[0], &values[1], i, BinaryFloatOp::Max)
+                lower_min_max_lane(ctx, span, result_ty, &values[0], &values[1], i, false)?
             }
             BuiltinKind::Mod => lower_mod_lane(ctx, &values[0], &values[1], i),
             BuiltinKind::Clamp => {
@@ -1154,7 +1194,6 @@ fn lower_unary_float_lane(
 
 #[derive(Debug, Clone, Copy)]
 enum BinaryFloatOp {
-    Min,
     Max,
 }
 
@@ -1169,10 +1208,68 @@ fn lower_binary_float_lane(
     let lhs = lane_at(lhs, index);
     let rhs = lane_at(rhs, index);
     ctx.fb.push(match op {
-        BinaryFloatOp::Min => LpirOp::Fmin { dst, lhs, rhs },
         BinaryFloatOp::Max => LpirOp::Fmax { dst, lhs, rhs },
     });
     dst
+}
+
+fn lower_min_max_lane(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    result_ty: &LpsType,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
+    index: usize,
+    is_min: bool,
+) -> Result<VReg, Diagnostic> {
+    let lhs = lane_at(lhs, index);
+    let rhs = lane_at(rhs, index);
+    match scalar_base_type(result_ty).unwrap_or_else(|| result_ty.clone()) {
+        LpsType::Float => {
+            let dst = ctx.fb.alloc_vreg(IrType::F32);
+            if is_min {
+                ctx.fb.push(LpirOp::Fmin { dst, lhs, rhs });
+            } else {
+                ctx.fb.push(LpirOp::Fmax { dst, lhs, rhs });
+            }
+            Ok(dst)
+        }
+        LpsType::Int | LpsType::UInt => {
+            let cond = ctx.fb.alloc_vreg(IrType::I32);
+            let is_uint = scalar_base_type(result_ty) == Some(LpsType::UInt);
+            match (is_min, is_uint) {
+                (true, true) => ctx.fb.push(LpirOp::IltU {
+                    dst: cond,
+                    lhs,
+                    rhs,
+                }),
+                (true, false) => ctx.fb.push(LpirOp::IltS {
+                    dst: cond,
+                    lhs,
+                    rhs,
+                }),
+                (false, true) => ctx.fb.push(LpirOp::IgtU {
+                    dst: cond,
+                    lhs,
+                    rhs,
+                }),
+                (false, false) => ctx.fb.push(LpirOp::IgtS {
+                    dst: cond,
+                    lhs,
+                    rhs,
+                }),
+            }
+            let dst = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::Select {
+                dst,
+                cond,
+                if_true: lhs,
+                if_false: rhs,
+            });
+            Ok(dst)
+        }
+        _ => Err(Diagnostic::error(span, "min/max expects numeric lanes")),
+    }
 }
 
 fn lower_mod_lane(
