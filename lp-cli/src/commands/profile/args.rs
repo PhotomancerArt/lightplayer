@@ -21,6 +21,8 @@ pub struct ProfileCli {
 pub enum ProfileSubcommand {
     /// Compare two profile directories (not yet implemented).
     Diff(ProfileDiffArgs),
+    /// Explain one function in an existing cpu-profile.json.
+    Function(ProfileFunctionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -78,6 +80,27 @@ impl CycleModelArg {
 pub struct ProfileDiffArgs {
     pub a: PathBuf,
     pub b: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct ProfileFunctionArgs {
+    /// Profile output directory containing cpu-profile.json.
+    pub dir: PathBuf,
+
+    /// Function name substring to inspect.
+    pub function: String,
+
+    /// Match the full function name exactly.
+    #[arg(long)]
+    pub exact: bool,
+
+    /// Maximum rows per section.
+    #[arg(long, default_value_t = 20)]
+    pub top: usize,
+
+    /// Optional RV32 ELF for addr2line callsite locations.
+    #[arg(long)]
+    pub elf: Option<PathBuf>,
 }
 
 #[cfg(test)]

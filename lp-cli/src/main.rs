@@ -95,6 +95,9 @@ fn main() -> Result<()> {
         Cli::Create { dir, name } => create::handle_create(create::CreateArgs { dir, name }),
         Cli::Profile(cli) => match cli.subcommand {
             Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),
+            Some(profile::ProfileSubcommand::Function(args)) => {
+                profile::handle_profile_function(args)
+            }
             None => profile::handle_profile(cli.run),
         },
         Cli::ShaderLpir {
