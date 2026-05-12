@@ -799,6 +799,9 @@ fn token_is_type_name(tok: Token, source: &str) -> bool {
                 | "bvec2"
                 | "bvec3"
                 | "bvec4"
+                | "mat2"
+                | "mat3"
+                | "mat4"
                 | "void"
         ),
         _ => false,

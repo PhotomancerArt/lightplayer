@@ -220,6 +220,12 @@ pub enum HirAssignTarget {
         index: Box<HirExpr>,
         ty: LpsType,
     },
+    MatrixElement {
+        local: usize,
+        column: Box<HirExpr>,
+        row: Box<HirExpr>,
+        ty: LpsType,
+    },
 }
 
 impl HirAssignTarget {
@@ -229,7 +235,8 @@ impl HirAssignTarget {
             | HirAssignTarget::Local { ty, .. }
             | HirAssignTarget::Swizzle { ty, .. }
             | HirAssignTarget::ParamSwizzle { ty, .. }
-            | HirAssignTarget::Index { ty, .. } => ty,
+            | HirAssignTarget::Index { ty, .. }
+            | HirAssignTarget::MatrixElement { ty, .. } => ty,
         }
     }
 }
@@ -245,6 +252,7 @@ pub enum BuiltinKind {
     Fract,
     GreaterThan,
     GreaterThanEqual,
+    Length,
     LessThan,
     LessThanEqual,
     Max,
@@ -401,6 +409,9 @@ fn type_name_to_lps(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
         "bvec2" => Ok(LpsType::BVec2),
         "bvec3" => Ok(LpsType::BVec3),
         "bvec4" => Ok(LpsType::BVec4),
+        "mat2" => Ok(LpsType::Mat2),
+        "mat3" => Ok(LpsType::Mat3),
+        "mat4" => Ok(LpsType::Mat4),
         other => Err(Diagnostic::error(
             span,
             format!("M3 lps-glsl does not support type `{other}`"),
@@ -804,8 +815,14 @@ impl<'a> TypeCtx<'a> {
             }
             ParsedExprKind::Index { base, index } => {
                 let base = self.type_expr(base)?;
-                let ty = scalar_base_type(&base.ty)
-                    .ok_or_else(|| Diagnostic::error(expr.span, "index base must be vector"))?;
+                let ty = if base.ty.is_matrix() {
+                    base.ty.matrix_column_type().ok_or_else(|| {
+                        Diagnostic::error(expr.span, "index base must be matrix")
+                    })?
+                } else {
+                    scalar_base_type(&base.ty)
+                        .ok_or_else(|| Diagnostic::error(expr.span, "index base must be vector"))?
+                };
                 let index = self.type_expr(index)?;
                 let index = self.coerce_expr(index, &LpsType::Int)?;
                 Ok(HirExpr {
@@ -1253,24 +1270,63 @@ impl<'a> TypeCtx<'a> {
                 ))
             }
             ParsedExprKind::Index { base, index } => {
-                let ParsedExprKind::Name(name) = &base.kind else {
-                    return Err(Diagnostic::error(
+                match &base.kind {
+                    ParsedExprKind::Name(name) => {
+                        let local = self.resolve_local(name).ok_or_else(|| {
+                            Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                        })?;
+                        let ty = if self.locals[local].ty.is_matrix() {
+                            self.locals[local].ty.matrix_column_type().ok_or_else(|| {
+                                Diagnostic::error(expr.span, "index base must be matrix")
+                            })?
+                        } else {
+                            scalar_base_type(&self.locals[local].ty).ok_or_else(|| {
+                                Diagnostic::error(expr.span, "index base must be vector")
+                            })?
+                        };
+                        let index = self.type_expr(index)?;
+                        let index = self.coerce_expr(index, &LpsType::Int)?;
+                        Ok(HirAssignTarget::Index {
+                            local,
+                            index: Box::new(index),
+                            ty,
+                        })
+                    }
+                    ParsedExprKind::Index {
+                        base: matrix_base,
+                        index: column,
+                    } => {
+                        let ParsedExprKind::Name(name) = &matrix_base.kind else {
+                            return Err(Diagnostic::error(
+                                expr.span,
+                                "unsupported matrix element assignment base",
+                            ));
+                        };
+                        let local = self.resolve_local(name).ok_or_else(|| {
+                            Diagnostic::error(expr.span, format!("unknown local `{name}`"))
+                        })?;
+                        if !self.locals[local].ty.is_matrix() {
+                            return Err(Diagnostic::error(
+                                expr.span,
+                                "nested index assignment base must be matrix",
+                            ));
+                        }
+                        let column = self.type_expr(column)?;
+                        let column = self.coerce_expr(column, &LpsType::Int)?;
+                        let row = self.type_expr(index)?;
+                        let row = self.coerce_expr(row, &LpsType::Int)?;
+                        Ok(HirAssignTarget::MatrixElement {
+                            local,
+                            column: Box::new(column),
+                            row: Box::new(row),
+                            ty: LpsType::Float,
+                        })
+                    }
+                    _ => Err(Diagnostic::error(
                         expr.span,
                         "unsupported index assignment base",
-                    ));
-                };
-                let local = self.resolve_local(name).ok_or_else(|| {
-                    Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                })?;
-                let ty = scalar_base_type(&self.locals[local].ty)
-                    .ok_or_else(|| Diagnostic::error(expr.span, "index base must be vector"))?;
-                let index = self.type_expr(index)?;
-                let index = self.coerce_expr(index, &LpsType::Int)?;
-                Ok(HirAssignTarget::Index {
-                    local,
-                    index: Box::new(index),
-                    ty,
-                })
+                    )),
+                }
             }
             _ => Err(Diagnostic::error(expr.span, "invalid assignment target")),
         }
@@ -1307,7 +1363,8 @@ impl<'a> TypeCtx<'a> {
             HirAssignTarget::Local { local, .. } => HirExprKind::Local { index: *local },
             HirAssignTarget::Swizzle { .. }
             | HirAssignTarget::ParamSwizzle { .. }
-            | HirAssignTarget::Index { .. } => {
+            | HirAssignTarget::Index { .. }
+            | HirAssignTarget::MatrixElement { .. } => {
                 unreachable!("compound assignment statement only has simple name targets")
             }
         }
@@ -1344,6 +1401,9 @@ fn is_constructor_name(name: &str) -> bool {
             | "bvec2"
             | "bvec3"
             | "bvec4"
+            | "mat2"
+            | "mat3"
+            | "mat4"
     )
 }
 
@@ -1358,6 +1418,7 @@ fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "fract" => BuiltinKind::Fract,
         "greaterThan" => BuiltinKind::GreaterThan,
         "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
+        "length" => BuiltinKind::Length,
         "lessThan" => BuiltinKind::LessThan,
         "lessThanEqual" => BuiltinKind::LessThanEqual,
         "max" => BuiltinKind::Max,
@@ -1417,6 +1478,7 @@ fn type_builtin_args(
         | BuiltinKind::Any
         | BuiltinKind::Floor
         | BuiltinKind::Fract
+        | BuiltinKind::Length
         | BuiltinKind::Not => 1,
         BuiltinKind::Equal
         | BuiltinKind::GreaterThan
@@ -1439,6 +1501,12 @@ fn type_builtin_args(
         BuiltinKind::Abs | BuiltinKind::Floor | BuiltinKind::Fract => {
             let ty = args[0].ty.clone();
             Ok((args, ty))
+        }
+        BuiltinKind::Length => {
+            if scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
+                return Err(Diagnostic::error(span, "length expects float lanes"));
+            }
+            Ok((args, LpsType::Float))
         }
         BuiltinKind::All | BuiltinKind::Any => {
             let arg = coerce_expr(args[0].clone(), &args[0].ty)?;
@@ -1622,6 +1690,15 @@ fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
 }
 
 fn vector_dominant_type(types: &[&LpsType]) -> Option<LpsType> {
+    if let Some(matrix) = types.iter().find(|ty| ty.is_matrix()) {
+        if types
+            .iter()
+            .all(|ty| **ty == **matrix || **ty == LpsType::Float)
+        {
+            return Some((*matrix).clone());
+        }
+        return None;
+    }
     let mut lanes = 1usize;
     let mut base = LpsType::Bool;
     for ty in types {
@@ -1746,12 +1823,17 @@ pub fn scalar_lane_count(ty: &LpsType) -> usize {
     match ty {
         LpsType::Void => 0,
         LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
-        _ => ty.component_count().unwrap_or(0),
+        _ => ty
+            .component_count()
+            .or_else(|| ty.matrix_element_count())
+            .unwrap_or(0),
     }
 }
 
 pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
-    if ty.is_vector() {
+    if ty.is_matrix() {
+        Some(LpsType::Float)
+    } else if ty.is_vector() {
         ty.vector_base_type()
     } else if ty.is_scalar() {
         Some(ty.clone())

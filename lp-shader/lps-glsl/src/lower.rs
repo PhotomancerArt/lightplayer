@@ -263,7 +263,30 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
         } => lower_uniform_load(ctx, expr.span, *byte_offset, &expr.ty),
         HirExprKind::Constructor { args } => {
             let mut lanes = Vec::new();
-            if args.len() == 1
+            if expr.ty.is_matrix()
+                && args.len() == 1
+                && scalar_lane_count(&args[0].ty) == 1
+            {
+                let value = lower_expr(ctx, &args[0])?;
+                let diagonal = single_lane(args[0].span, &value)?;
+                let Some((cols, rows)) = expr.ty.matrix_dims() else {
+                    return Err(Diagnostic::error(expr.span, "invalid matrix constructor"));
+                };
+                for col in 0..cols {
+                    for row in 0..rows {
+                        if col == row {
+                            lanes.push(diagonal);
+                        } else {
+                            let zero = ctx.fb.alloc_vreg(IrType::F32);
+                            ctx.fb.push(LpirOp::FconstF32 {
+                                dst: zero,
+                                value: 0.0,
+                            });
+                            lanes.push(zero);
+                        }
+                    }
+                }
+            } else if args.len() == 1
                 && scalar_lane_count(&expr.ty) > 1
                 && scalar_lane_count(&args[0].ty) == 1
             {
@@ -582,6 +605,7 @@ fn lower_builtin(
                     result_ty,
                 );
             }
+            BuiltinKind::Length => return lower_length(ctx, span, &values[0], result_ty),
             BuiltinKind::NotEqual => {
                 return lower_binary(
                     ctx,
@@ -639,6 +663,47 @@ fn lower_builtin(
     Ok(LowerValue {
         ty: result_ty.clone(),
         lanes,
+    })
+}
+
+fn lower_length(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    value: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if *result_ty != LpsType::Float || scalar_base_type(&value.ty) != Some(LpsType::Float) {
+        return Err(Diagnostic::error(span, "length expects float lanes"));
+    }
+    let Some(first) = value.lanes.first().copied() else {
+        return Err(Diagnostic::error(span, "length has no lanes"));
+    };
+    let mut sum = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fmul {
+        dst: sum,
+        lhs: first,
+        rhs: first,
+    });
+    for lane in value.lanes.iter().skip(1) {
+        let square = ctx.fb.alloc_vreg(IrType::F32);
+        let next = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Fmul {
+            dst: square,
+            lhs: *lane,
+            rhs: *lane,
+        });
+        ctx.fb.push(LpirOp::Fadd {
+            dst: next,
+            lhs: sum,
+            rhs: square,
+        });
+        sum = next;
+    }
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fsqrt { dst, src: sum });
+    Ok(LowerValue {
+        ty: LpsType::Float,
+        lanes: vec![dst],
     })
 }
 
@@ -1057,37 +1122,55 @@ fn lower_index(
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let index = single_lane(span, &index)?;
-    let Some(mut selected) = base.lanes.first().copied() else {
-        return Err(Diagnostic::error(span, "index base has no lanes"));
+    let result_width = scalar_lane_count(result_ty);
+    if result_width == 0 {
+        return Err(Diagnostic::error(span, "index result has no lanes"));
+    }
+    let result_ir_types = scalar_ir_types(result_ty)?;
+    let source_width = if base.ty.is_matrix() {
+        result_width
+    } else {
+        1
     };
-    let result_ir_ty = scalar_ir_types(result_ty)?
-        .first()
-        .copied()
-        .ok_or_else(|| Diagnostic::error(span, "index result has no type"))?;
-    for (lane_index, lane) in base.lanes.iter().enumerate().skip(1) {
-        let constant = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(LpirOp::IconstI32 {
-            dst: constant,
-            value: lane_index as i32,
-        });
-        let cond = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(LpirOp::Ieq {
-            dst: cond,
-            lhs: index,
-            rhs: constant,
-        });
-        let dst = ctx.fb.alloc_vreg(result_ir_ty);
-        ctx.fb.push(LpirOp::Select {
-            dst,
-            cond,
-            if_true: *lane,
-            if_false: selected,
-        });
-        selected = dst;
+    let source_count = base.lanes.len() / source_width;
+    let mut lanes = Vec::new();
+    for component in 0..result_width {
+        let Some(mut selected) = base.lanes.get(component).copied() else {
+            return Err(Diagnostic::error(span, "index base has no lanes"));
+        };
+        let result_ir_ty = result_ir_types
+            .get(component)
+            .copied()
+            .ok_or_else(|| Diagnostic::error(span, "index result has no type"))?;
+        for lane_index in 1..source_count {
+            let Some(lane) = base.lanes.get(lane_index * source_width + component) else {
+                return Err(Diagnostic::error(span, "index base lane out of range"));
+            };
+            let constant = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 {
+                dst: constant,
+                value: lane_index as i32,
+            });
+            let cond = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::Ieq {
+                dst: cond,
+                lhs: index,
+                rhs: constant,
+            });
+            let dst = ctx.fb.alloc_vreg(result_ir_ty);
+            ctx.fb.push(LpirOp::Select {
+                dst,
+                cond,
+                if_true: *lane,
+                if_false: selected,
+            });
+            selected = dst;
+        }
+        lanes.push(selected);
     }
     Ok(LowerValue {
         ty: result_ty.clone(),
-        lanes: vec![selected],
+        lanes,
     })
 }
 
@@ -1152,23 +1235,22 @@ fn assign_target(
             }
             Ok(())
         }
-        HirAssignTarget::Index { local, index, .. } => {
+        HirAssignTarget::Index { local, index, ty } => {
             let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
             })?;
             let index = lower_expr(ctx, index)?;
             let index = single_lane(span, &index)?;
-            let Some(src) = value.lanes.first().copied() else {
+            let width = scalar_lane_count(ty);
+            if width == 0 || width != value.lanes.len() {
                 return Err(Diagnostic::error(
                     span,
-                    "index assignment value has no lanes",
+                    "index assignment value lane mismatch",
                 ));
-            };
-            let lane_ty = scalar_ir_types(&value.ty)?
-                .first()
-                .copied()
-                .ok_or_else(|| Diagnostic::error(span, "index assignment value has no type"))?;
-            for (lane_index, current) in dst.lanes.iter().enumerate() {
+            }
+            let lane_types = scalar_ir_types(&value.ty)?;
+            let count = dst.lanes.len() / width;
+            for lane_index in 0..count {
                 let constant = ctx.fb.alloc_vreg(IrType::I32);
                 ctx.fb.push(LpirOp::IconstI32 {
                     dst: constant,
@@ -1180,17 +1262,87 @@ fn assign_target(
                     lhs: index,
                     rhs: constant,
                 });
-                let selected = ctx.fb.alloc_vreg(lane_ty);
-                ctx.fb.push(LpirOp::Select {
-                    dst: selected,
-                    cond,
-                    if_true: src,
-                    if_false: *current,
+                for component in 0..width {
+                    let dst_index = lane_index * width + component;
+                    let current = dst.lanes[dst_index];
+                    let selected = ctx.fb.alloc_vreg(lane_types[component]);
+                    ctx.fb.push(LpirOp::Select {
+                        dst: selected,
+                        cond,
+                        if_true: value.lanes[component],
+                        if_false: current,
+                    });
+                    ctx.fb.push(LpirOp::Copy {
+                        dst: current,
+                        src: selected,
+                    });
+                }
+            }
+            Ok(())
+        }
+        HirAssignTarget::MatrixElement {
+            local, column, row, ..
+        } => {
+            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            let Some((cols, rows)) = dst.ty.matrix_dims() else {
+                return Err(Diagnostic::error(span, "matrix element base must be matrix"));
+            };
+            let column = lower_expr(ctx, column)?;
+            let column = single_lane(span, &column)?;
+            let row = lower_expr(ctx, row)?;
+            let row = single_lane(span, &row)?;
+            let Some(src) = value.lanes.first().copied() else {
+                return Err(Diagnostic::error(
+                    span,
+                    "matrix element assignment value has no lane",
+                ));
+            };
+            for col in 0..cols {
+                let col_constant = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: col_constant,
+                    value: col as i32,
                 });
-                ctx.fb.push(LpirOp::Copy {
-                    dst: *current,
-                    src: selected,
+                let col_cond = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Ieq {
+                    dst: col_cond,
+                    lhs: column,
+                    rhs: col_constant,
                 });
+                for row_index in 0..rows {
+                    let row_constant = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::IconstI32 {
+                        dst: row_constant,
+                        value: row_index as i32,
+                    });
+                    let row_cond = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::Ieq {
+                        dst: row_cond,
+                        lhs: row,
+                        rhs: row_constant,
+                    });
+                    let cond = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::Iand {
+                        dst: cond,
+                        lhs: col_cond,
+                        rhs: row_cond,
+                    });
+                    let dst_index = col * rows + row_index;
+                    let current = dst.lanes[dst_index];
+                    let selected = ctx.fb.alloc_vreg(IrType::F32);
+                    ctx.fb.push(LpirOp::Select {
+                        dst: selected,
+                        cond,
+                        if_true: src,
+                        if_false: current,
+                    });
+                    ctx.fb.push(LpirOp::Copy {
+                        dst: current,
+                        src: selected,
+                    });
+                }
             }
             Ok(())
         }
@@ -1311,6 +1463,74 @@ fn read_assign_target(
             })?;
             let index = lower_expr(ctx, index)?;
             lower_index(ctx, span, value, index, ty)
+        }
+        HirAssignTarget::MatrixElement {
+            local,
+            column,
+            row,
+            ty,
+        } => {
+            let value = ctx.locals.get(*local).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("local index {local} is out of range"))
+            })?;
+            let Some((cols, rows)) = value.ty.matrix_dims() else {
+                return Err(Diagnostic::error(span, "matrix element base must be matrix"));
+            };
+            let column = lower_expr(ctx, column)?;
+            let column = single_lane(span, &column)?;
+            let row = lower_expr(ctx, row)?;
+            let row = single_lane(span, &row)?;
+            let Some(mut selected) = value.lanes.first().copied() else {
+                return Err(Diagnostic::error(span, "matrix element base has no lanes"));
+            };
+            for col in 0..cols {
+                let col_constant = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::IconstI32 {
+                    dst: col_constant,
+                    value: col as i32,
+                });
+                let col_cond = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(LpirOp::Ieq {
+                    dst: col_cond,
+                    lhs: column,
+                    rhs: col_constant,
+                });
+                for row_index in 0..rows {
+                    if col == 0 && row_index == 0 {
+                        continue;
+                    }
+                    let row_constant = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::IconstI32 {
+                        dst: row_constant,
+                        value: row_index as i32,
+                    });
+                    let row_cond = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::Ieq {
+                        dst: row_cond,
+                        lhs: row,
+                        rhs: row_constant,
+                    });
+                    let cond = ctx.fb.alloc_vreg(IrType::I32);
+                    ctx.fb.push(LpirOp::Iand {
+                        dst: cond,
+                        lhs: col_cond,
+                        rhs: row_cond,
+                    });
+                    let dst_index = col * rows + row_index;
+                    let next = ctx.fb.alloc_vreg(IrType::F32);
+                    ctx.fb.push(LpirOp::Select {
+                        dst: next,
+                        cond,
+                        if_true: value.lanes[dst_index],
+                        if_false: selected,
+                    });
+                    selected = next;
+                }
+            }
+            Ok(LowerValue {
+                ty: ty.clone(),
+                lanes: vec![selected],
+            })
         }
     }
 }
