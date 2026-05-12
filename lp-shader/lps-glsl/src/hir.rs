@@ -153,6 +153,7 @@ pub enum HirExprKind {
     UserCall {
         function: usize,
         args: Vec<HirExpr>,
+        writebacks: Vec<HirUserCallWriteback>,
     },
     ImportCall {
         import: ImportKey,
@@ -196,6 +197,14 @@ pub struct HirOutArg {
 }
 
 #[derive(Debug, Clone)]
+pub struct HirUserCallWriteback {
+    pub arg_index: usize,
+    pub target: HirAssignTarget,
+    pub ty: LpsType,
+    pub copy_in: bool,
+}
+
+#[derive(Debug, Clone)]
 pub enum HirAssignTarget {
     Param {
         param: usize,
@@ -213,6 +222,11 @@ pub enum HirAssignTarget {
     ParamSwizzle {
         param: usize,
         lanes: Vec<usize>,
+        ty: LpsType,
+    },
+    ParamIndex {
+        param: usize,
+        index: Box<HirExpr>,
         ty: LpsType,
     },
     Index {
@@ -235,6 +249,7 @@ impl HirAssignTarget {
             | HirAssignTarget::Local { ty, .. }
             | HirAssignTarget::Swizzle { ty, .. }
             | HirAssignTarget::ParamSwizzle { ty, .. }
+            | HirAssignTarget::ParamIndex { ty, .. }
             | HirAssignTarget::Index { ty, .. }
             | HirAssignTarget::MatrixElement { ty, .. } => ty,
         }
@@ -991,6 +1006,72 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: &[ParsedExpr],
     ) -> Result<HirExpr, Diagnostic> {
+        if let Some((function, sig)) = self
+            .functions
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == name)
+        {
+            if sig.params.len() != args.len() {
+                return Err(Diagnostic::error(
+                    span,
+                    format!("function `{name}` expects {} arguments", sig.params.len()),
+                ));
+            }
+            let mut call_args = Vec::new();
+            let mut writebacks = Vec::new();
+            for (arg_index, (arg, param)) in args.iter().zip(sig.params.iter()).enumerate() {
+                match param.qualifier {
+                    ParamQualifier::In => {
+                        let value = self.type_expr(arg)?;
+                        call_args.push(self.coerce_expr(value, &param.ty)?);
+                    }
+                    ParamQualifier::Out => {
+                        let target = self.type_assign_target(arg)?;
+                        if target.ty() != &param.ty {
+                            return Err(Diagnostic::error(
+                                arg.span,
+                                "out argument type must match parameter type",
+                            ));
+                        }
+                        call_args.push(zero_expr(arg.span, &param.ty)?);
+                        writebacks.push(HirUserCallWriteback {
+                            arg_index,
+                            target,
+                            ty: param.ty.clone(),
+                            copy_in: false,
+                        });
+                    }
+                    ParamQualifier::InOut => {
+                        let target = self.type_assign_target(arg)?;
+                        if target.ty() != &param.ty {
+                            return Err(Diagnostic::error(
+                                arg.span,
+                                "inout argument type must match parameter type",
+                            ));
+                        }
+                        let value = self.type_expr(arg)?;
+                        call_args.push(self.coerce_expr(value, &param.ty)?);
+                        writebacks.push(HirUserCallWriteback {
+                            arg_index,
+                            target,
+                            ty: param.ty.clone(),
+                            copy_in: true,
+                        });
+                    }
+                }
+            }
+            return Ok(HirExpr {
+                span,
+                ty: sig.return_ty.clone(),
+                kind: HirExprKind::UserCall {
+                    function,
+                    args: call_args,
+                    writebacks,
+                },
+            });
+        }
+
         let args = args
             .iter()
             .map(|arg| self.type_expr(arg))
@@ -1021,30 +1102,6 @@ impl<'a> TypeCtx<'a> {
 
         if name.starts_with("lpfn_") {
             return self.type_lpfn_call(span, name, args);
-        }
-
-        if let Some((function, sig)) = self
-            .functions
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.name == name)
-        {
-            if sig.params.len() != args.len() {
-                return Err(Diagnostic::error(
-                    span,
-                    format!("function `{name}` expects {} arguments", sig.params.len()),
-                ));
-            }
-            let args = args
-                .into_iter()
-                .zip(sig.params.iter())
-                .map(|(arg, param)| self.coerce_expr(arg, &param.ty))
-                .collect::<Result<Vec<_>, _>>()?;
-            return Ok(HirExpr {
-                span,
-                ty: sig.return_ty.clone(),
-                kind: HirExprKind::UserCall { function, args },
-            });
         }
 
         Err(Diagnostic::error(
@@ -1283,27 +1340,55 @@ impl<'a> TypeCtx<'a> {
             }
             ParsedExprKind::Index { base, index } => match &base.kind {
                 ParsedExprKind::Name(name) => {
-                    let local = self.resolve_local(name).ok_or_else(|| {
-                        Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                    })?;
-                    let ty = if self.locals[local].ty.is_matrix() {
-                        self.locals[local].ty.matrix_column_type().ok_or_else(|| {
-                            Diagnostic::error(expr.span, "index base must be matrix")
-                        })?
-                    } else if let Some(element) = self.locals[local].ty.array_element_type() {
-                        element
-                    } else {
-                        scalar_base_type(&self.locals[local].ty).ok_or_else(|| {
-                            Diagnostic::error(expr.span, "index base must be vector")
-                        })?
-                    };
-                    let index = self.type_expr(index)?;
-                    let index = self.coerce_expr(index, &LpsType::Int)?;
-                    Ok(HirAssignTarget::Index {
-                        local,
-                        index: Box::new(index),
-                        ty,
-                    })
+                    if let Some(local) = self.resolve_local(name) {
+                        let ty = if self.locals[local].ty.is_matrix() {
+                            self.locals[local].ty.matrix_column_type().ok_or_else(|| {
+                                Diagnostic::error(expr.span, "index base must be matrix")
+                            })?
+                        } else if let Some(element) = self.locals[local].ty.array_element_type() {
+                            element
+                        } else {
+                            scalar_base_type(&self.locals[local].ty).ok_or_else(|| {
+                                Diagnostic::error(expr.span, "index base must be vector")
+                            })?
+                        };
+                        let index = self.type_expr(index)?;
+                        let index = self.coerce_expr(index, &LpsType::Int)?;
+                        return Ok(HirAssignTarget::Index {
+                            local,
+                            index: Box::new(index),
+                            ty,
+                        });
+                    }
+                    if let Some((param, p)) = self
+                        .params
+                        .iter()
+                        .enumerate()
+                        .find(|(_, p)| p.name.as_deref() == Some(name))
+                    {
+                        let ty = if p.ty.is_matrix() {
+                            p.ty.matrix_column_type().ok_or_else(|| {
+                                Diagnostic::error(expr.span, "index base must be matrix")
+                            })?
+                        } else if let Some(element) = p.ty.array_element_type() {
+                            element
+                        } else {
+                            scalar_base_type(&p.ty).ok_or_else(|| {
+                                Diagnostic::error(expr.span, "index base must be vector")
+                            })?
+                        };
+                        let index = self.type_expr(index)?;
+                        let index = self.coerce_expr(index, &LpsType::Int)?;
+                        return Ok(HirAssignTarget::ParamIndex {
+                            param,
+                            index: Box::new(index),
+                            ty,
+                        });
+                    }
+                    Err(Diagnostic::error(
+                        expr.span,
+                        format!("unknown local `{name}`"),
+                    ))
                 }
                 ParsedExprKind::Index {
                     base: matrix_base,
@@ -1375,6 +1460,7 @@ impl<'a> TypeCtx<'a> {
             HirAssignTarget::Local { local, .. } => HirExprKind::Local { index: *local },
             HirAssignTarget::Swizzle { .. }
             | HirAssignTarget::ParamSwizzle { .. }
+            | HirAssignTarget::ParamIndex { .. }
             | HirAssignTarget::Index { .. }
             | HirAssignTarget::MatrixElement { .. } => {
                 unreachable!("compound assignment statement only has simple name targets")

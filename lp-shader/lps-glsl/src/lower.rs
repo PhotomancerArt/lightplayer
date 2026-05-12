@@ -8,7 +8,7 @@ use lpir::{
     CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrType, LpirModule, LpirOp, ModuleBuilder,
     VMCTX_VREG, VReg,
 };
-use lps_shared::{LpsModuleSig, LpsType};
+use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 use crate::hir::{
@@ -68,10 +68,14 @@ fn lower_function(
     let mut fb = FunctionBuilder::new(&function.name, &return_types);
     let mut params = Vec::new();
     for param in &function.params {
-        let mut lanes = Vec::new();
-        for ty in scalar_ir_types(&param.ty)? {
-            lanes.push(fb.add_param(ty));
-        }
+        let lanes = if matches!(param.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+            vec![fb.add_param(IrType::Pointer)]
+        } else {
+            scalar_ir_types(&param.ty)?
+                .into_iter()
+                .map(|ty| fb.add_param(ty))
+                .collect()
+        };
         params.push(LowerValue {
             ty: param.ty.clone(),
             lanes,
@@ -93,8 +97,12 @@ fn lower_function(
         params,
         locals,
         import_map,
+        param_qualifiers: function.params.iter().map(|p| p.qualifier).collect(),
     };
     lower_statements(&mut ctx, &function.body.statements)?;
+    if function.return_ty == LpsType::Void {
+        ctx.fb.push_return(&[]);
+    }
     Ok(ctx.fb.finish())
 }
 
@@ -103,6 +111,7 @@ struct LowerCtx<'a> {
     params: Vec<LowerValue>,
     locals: Vec<LowerValue>,
     import_map: &'a BTreeMap<ImportKey, CalleeRef>,
+    param_qualifiers: Vec<ParamQualifier>,
 }
 
 #[derive(Debug, Clone)]
@@ -195,17 +204,26 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             Ok(())
         }
         HirStmt::Return { expr, span } => {
-            let lanes = match expr {
-                Some(expr) => lower_expr(ctx, expr)?.lanes,
-                None => Vec::new(),
-            };
-            if lanes.is_empty() && expr.is_some() {
-                return Err(Diagnostic::error(*span, "return expression has no value"));
-            }
+            let lanes = return_lanes(ctx, *span, expr.as_ref())?;
             ctx.fb.push_return(&lanes);
             Ok(())
         }
     }
+}
+
+fn return_lanes(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    expr: Option<&HirExpr>,
+) -> Result<Vec<VReg>, Diagnostic> {
+    let lanes = match expr {
+        Some(expr) => lower_expr(ctx, expr)?.lanes,
+        None => Vec::new(),
+    };
+    if lanes.is_empty() && expr.is_some() {
+        return Err(Diagnostic::error(span, "return expression has no value"));
+    }
+    Ok(lanes)
 }
 
 fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diagnostic> {
@@ -248,12 +266,19 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 lanes: vec![dst],
             })
         }
-        HirExprKind::Param { index } => ctx.params.get(*index).cloned().ok_or_else(|| {
-            Diagnostic::error(
-                expr.span,
-                format!("parameter index {index} is out of range"),
-            )
-        }),
+        HirExprKind::Param { index } => {
+            if is_pointer_param(ctx, *index) {
+                let addr = param_pointer(ctx, expr.span, *index)?;
+                load_value_from_addr(ctx, expr.span, addr, &expr.ty)
+            } else {
+                ctx.params.get(*index).cloned().ok_or_else(|| {
+                    Diagnostic::error(
+                        expr.span,
+                        format!("parameter index {index} is out of range"),
+                    )
+                })
+            }
+        }
         HirExprKind::Local { index } => ctx.locals.get(*index).cloned().ok_or_else(|| {
             Diagnostic::error(expr.span, format!("local index {index} is out of range"))
         }),
@@ -319,10 +344,29 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             lower_index(ctx, expr.span, base, index, &expr.ty)
         }
         HirExprKind::Builtin { kind, args } => lower_builtin(ctx, expr.span, *kind, args, &expr.ty),
-        HirExprKind::UserCall { function, args } => {
+        HirExprKind::UserCall {
+            function,
+            args,
+            writebacks,
+        } => {
+            let mut writeback_slots = Vec::new();
             let mut arg_lanes = vec![VMCTX_VREG];
-            for arg in args {
-                arg_lanes.extend(lower_expr(ctx, arg)?.lanes);
+            for (arg_index, arg) in args.iter().enumerate() {
+                if let Some(writeback) = writebacks.iter().find(|w| w.arg_index == arg_index) {
+                    let slot = ctx
+                        .fb
+                        .alloc_slot(scalar_lane_count(&writeback.ty) as u32 * 4);
+                    let addr = ctx.fb.alloc_vreg(IrType::Pointer);
+                    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
+                    if writeback.copy_in {
+                        let value = lower_expr(ctx, arg)?;
+                        store_value_to_addr(ctx, expr.span, addr, &value)?;
+                    }
+                    arg_lanes.push(addr);
+                    writeback_slots.push((writeback, addr));
+                } else {
+                    arg_lanes.extend(lower_expr(ctx, arg)?.lanes);
+                }
             }
             let results = scalar_ir_types(&expr.ty)?
                 .into_iter()
@@ -333,6 +377,10 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 &arg_lanes,
                 &results,
             );
+            for (writeback, addr) in writeback_slots {
+                let value = load_value_from_addr(ctx, expr.span, addr, &writeback.ty)?;
+                assign_target(ctx, expr.span, &writeback.target, value)?;
+            }
             Ok(LowerValue {
                 ty: expr.ty.clone(),
                 lanes: results,
@@ -529,6 +577,68 @@ fn lower_uniform_load(
         ty: ty.clone(),
         lanes,
     })
+}
+
+fn is_pointer_param(ctx: &LowerCtx<'_>, param: usize) -> bool {
+    ctx.param_qualifiers
+        .get(param)
+        .is_some_and(|q| matches!(q, ParamQualifier::Out | ParamQualifier::InOut))
+}
+
+fn param_pointer(ctx: &LowerCtx<'_>, span: Span, param: usize) -> Result<VReg, Diagnostic> {
+    let value = ctx.params.get(param).ok_or_else(|| {
+        Diagnostic::error(span, format!("parameter index {param} is out of range"))
+    })?;
+    value
+        .lanes
+        .first()
+        .copied()
+        .ok_or_else(|| Diagnostic::error(span, "pointer parameter has no address lane"))
+}
+
+fn load_value_from_addr(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    addr: VReg,
+    ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let ir_types = scalar_ir_types(ty)?;
+    let mut lanes = Vec::new();
+    for (i, ir_ty) in ir_types.iter().enumerate() {
+        let dst = ctx.fb.alloc_vreg(*ir_ty);
+        ctx.fb.push(LpirOp::Load {
+            dst,
+            base: addr,
+            offset: i as u32 * 4,
+        });
+        lanes.push(dst);
+    }
+    if lanes.len() != scalar_lane_count(ty) {
+        return Err(Diagnostic::error(span, "load lane count mismatch"));
+    }
+    Ok(LowerValue {
+        ty: ty.clone(),
+        lanes,
+    })
+}
+
+fn store_value_to_addr(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    addr: VReg,
+    value: &LowerValue,
+) -> Result<(), Diagnostic> {
+    if value.lanes.len() != scalar_lane_count(&value.ty) {
+        return Err(Diagnostic::error(span, "store lane count mismatch"));
+    }
+    for (i, lane) in value.lanes.iter().enumerate() {
+        ctx.fb.push(LpirOp::Store {
+            base: addr,
+            offset: i as u32 * 4,
+            value: *lane,
+        });
+    }
+    Ok(())
 }
 
 fn lower_builtin(
@@ -1179,10 +1289,15 @@ fn assign_target(
 ) -> Result<(), Diagnostic> {
     match target {
         HirAssignTarget::Param { param, .. } => {
-            let dst = ctx.params.get(*param).cloned().ok_or_else(|| {
-                Diagnostic::error(span, format!("parameter index {param} is out of range"))
-            })?;
-            copy_value(ctx, dst, value, span)
+            if is_pointer_param(ctx, *param) {
+                let addr = param_pointer(ctx, span, *param)?;
+                store_value_to_addr(ctx, span, addr, &value)
+            } else {
+                let dst = ctx.params.get(*param).cloned().ok_or_else(|| {
+                    Diagnostic::error(span, format!("parameter index {param} is out of range"))
+                })?;
+                copy_value(ctx, dst, value, span)
+            }
         }
         HirAssignTarget::Local { local, .. } => {
             let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
@@ -1215,6 +1330,17 @@ fn assign_target(
             if lanes.len() != value.lanes.len() {
                 return Err(Diagnostic::error(span, "swizzle assignment lane mismatch"));
             }
+            if is_pointer_param(ctx, *param) {
+                let addr = param_pointer(ctx, span, *param)?;
+                for (dst_lane, src_lane) in lanes.iter().zip(value.lanes.iter()) {
+                    ctx.fb.push(LpirOp::Store {
+                        base: addr,
+                        offset: (*dst_lane as u32) * 4,
+                        value: *src_lane,
+                    });
+                }
+                return Ok(());
+            }
             let dst = ctx.params.get(*param).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("parameter index {param} is out of range"))
             })?;
@@ -1232,50 +1358,24 @@ fn assign_target(
             }
             Ok(())
         }
+        HirAssignTarget::ParamIndex { param, index, ty } => {
+            if is_pointer_param(ctx, *param) {
+                let addr = param_pointer(ctx, span, *param)?;
+                let param_ty = ctx.params[*param].ty.clone();
+                let dst = load_value_from_addr(ctx, span, addr, &param_ty)?;
+                assign_index_target(ctx, span, dst.clone(), index, ty, value)?;
+                return store_value_to_addr(ctx, span, addr, &dst);
+            }
+            let dst = ctx.params.get(*param).cloned().ok_or_else(|| {
+                Diagnostic::error(span, format!("parameter index {param} is out of range"))
+            })?;
+            assign_index_target(ctx, span, dst, index, ty, value)
+        }
         HirAssignTarget::Index { local, index, ty } => {
             let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
             })?;
-            let index = lower_expr(ctx, index)?;
-            let index = single_lane(span, &index)?;
-            let width = scalar_lane_count(ty);
-            if width == 0 || width != value.lanes.len() {
-                return Err(Diagnostic::error(
-                    span,
-                    "index assignment value lane mismatch",
-                ));
-            }
-            let lane_types = scalar_ir_types(&value.ty)?;
-            let count = dst.lanes.len() / width;
-            for lane_index in 0..count {
-                let constant = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(LpirOp::IconstI32 {
-                    dst: constant,
-                    value: lane_index as i32,
-                });
-                let cond = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(LpirOp::Ieq {
-                    dst: cond,
-                    lhs: index,
-                    rhs: constant,
-                });
-                for component in 0..width {
-                    let dst_index = lane_index * width + component;
-                    let current = dst.lanes[dst_index];
-                    let selected = ctx.fb.alloc_vreg(lane_types[component]);
-                    ctx.fb.push(LpirOp::Select {
-                        dst: selected,
-                        cond,
-                        if_true: value.lanes[component],
-                        if_false: current,
-                    });
-                    ctx.fb.push(LpirOp::Copy {
-                        dst: current,
-                        src: selected,
-                    });
-                }
-            }
-            Ok(())
+            assign_index_target(ctx, span, dst, index, ty, value)
         }
         HirAssignTarget::MatrixElement {
             local, column, row, ..
@@ -1349,6 +1449,56 @@ fn assign_target(
     }
 }
 
+fn assign_index_target(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    dst: LowerValue,
+    index: &HirExpr,
+    ty: &LpsType,
+    value: LowerValue,
+) -> Result<(), Diagnostic> {
+    let index = lower_expr(ctx, index)?;
+    let index = single_lane(span, &index)?;
+    let width = scalar_lane_count(ty);
+    if width == 0 || width != value.lanes.len() {
+        return Err(Diagnostic::error(
+            span,
+            "index assignment value lane mismatch",
+        ));
+    }
+    let lane_types = scalar_ir_types(&value.ty)?;
+    let count = dst.lanes.len() / width;
+    for lane_index in 0..count {
+        let constant = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::IconstI32 {
+            dst: constant,
+            value: lane_index as i32,
+        });
+        let cond = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Ieq {
+            dst: cond,
+            lhs: index,
+            rhs: constant,
+        });
+        for component in 0..width {
+            let dst_index = lane_index * width + component;
+            let current = dst.lanes[dst_index];
+            let selected = ctx.fb.alloc_vreg(lane_types[component]);
+            ctx.fb.push(LpirOp::Select {
+                dst: selected,
+                cond,
+                if_true: value.lanes[component],
+                if_false: current,
+            });
+            ctx.fb.push(LpirOp::Copy {
+                dst: current,
+                src: selected,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn lower_select(
     ctx: &mut LowerCtx<'_>,
     span: Span,
@@ -1415,9 +1565,17 @@ fn read_assign_target(
     target: &HirAssignTarget,
 ) -> Result<LowerValue, Diagnostic> {
     match target {
-        HirAssignTarget::Param { param, .. } => ctx.params.get(*param).cloned().ok_or_else(|| {
-            Diagnostic::error(span, format!("parameter index {param} is out of range"))
-        }),
+        HirAssignTarget::Param { param, .. } => {
+            if is_pointer_param(ctx, *param) {
+                let addr = param_pointer(ctx, span, *param)?;
+                let param_ty = ctx.params[*param].ty.clone();
+                load_value_from_addr(ctx, span, addr, &param_ty)
+            } else {
+                ctx.params.get(*param).cloned().ok_or_else(|| {
+                    Diagnostic::error(span, format!("parameter index {param} is out of range"))
+                })
+            }
+        }
         HirAssignTarget::Local { local, .. } => {
             ctx.locals.get(*local).cloned().ok_or_else(|| {
                 Diagnostic::error(span, format!("local index {local} is out of range"))
@@ -1440,9 +1598,15 @@ fn read_assign_target(
             })
         }
         HirAssignTarget::ParamSwizzle { param, lanes, ty } => {
-            let value = ctx.params.get(*param).cloned().ok_or_else(|| {
-                Diagnostic::error(span, format!("parameter index {param} is out of range"))
-            })?;
+            let value = if is_pointer_param(ctx, *param) {
+                let addr = param_pointer(ctx, span, *param)?;
+                let param_ty = ctx.params[*param].ty.clone();
+                load_value_from_addr(ctx, span, addr, &param_ty)?
+            } else {
+                ctx.params.get(*param).cloned().ok_or_else(|| {
+                    Diagnostic::error(span, format!("parameter index {param} is out of range"))
+                })?
+            };
             let mut out = Vec::new();
             for lane in lanes {
                 let Some(value_lane) = value.lanes.get(*lane) else {
@@ -1454,6 +1618,19 @@ fn read_assign_target(
                 ty: ty.clone(),
                 lanes: out,
             })
+        }
+        HirAssignTarget::ParamIndex { param, index, ty } => {
+            let value = if is_pointer_param(ctx, *param) {
+                let addr = param_pointer(ctx, span, *param)?;
+                let param_ty = ctx.params[*param].ty.clone();
+                load_value_from_addr(ctx, span, addr, &param_ty)?
+            } else {
+                ctx.params.get(*param).cloned().ok_or_else(|| {
+                    Diagnostic::error(span, format!("parameter index {param} is out of range"))
+                })?
+            };
+            let index = lower_expr(ctx, index)?;
+            lower_index(ctx, span, value, index, ty)
         }
         HirAssignTarget::Index { local, index, ty } => {
             let value = ctx.locals.get(*local).cloned().ok_or_else(|| {
