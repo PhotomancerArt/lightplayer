@@ -65,20 +65,14 @@ pub async fn run_server_loop_async<T: ServerTransport>(
 
         // Always tick the server to advance frames, even if there are no messages
         // This ensures continuous frame progression at ~60 FPS
-        match server.tick(delta_ms.max(1), incoming_messages) {
-            Ok(responses) => {
+        match server
+            .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
+            .await
+        {
+            Ok(_) => {
                 // Record frame processing time (in microseconds)
                 let frame_time_us = tick_start.elapsed().as_micros() as u64;
                 server.set_last_frame_time(frame_time_us);
-
-                // Send responses back via transport
-                for response in responses {
-                    if let WireMessage::Server(server_msg) = response {
-                        if let Err(e) = transport.send(server_msg).await {
-                            eprintln!("Failed to send response: {e}");
-                        }
-                    }
-                }
             }
             Err(e) => {
                 eprintln!("Server error: {e}");

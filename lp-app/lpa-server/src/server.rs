@@ -13,7 +13,8 @@ use lpc_engine::LpGraphics;
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::{WireMessage, WireServerMessage};
+use lpc_shared::transport::ServerTransport;
+use lpc_wire::{ClientRequest, WireMessage, WireProjectRequest, WireServerMessage};
 use lpfs::{FsChange, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
@@ -305,6 +306,85 @@ impl LpServer {
         }
 
         Ok(responses)
+    }
+
+    /// Tick projects and send incoming-message responses through a transport.
+    ///
+    /// This avoids materializing large project-read responses before transport
+    /// serialization. Simple transports may still fall back to an in-memory
+    /// implementation internally, but firmware transports can stream directly.
+    pub async fn tick_and_send<T: ServerTransport>(
+        &mut self,
+        delta_ms: u32,
+        incoming: Vec<WireMessage>,
+        transport: &mut T,
+    ) -> Result<usize, ServerError> {
+        self.tick(delta_ms, Vec::new())?;
+
+        let mut response_count = 0usize;
+        for message in incoming {
+            match message {
+                WireMessage::Client(client_msg) => {
+                    let msg_id = client_msg.id;
+                    match client_msg.msg {
+                        ClientRequest::ProjectRequest {
+                            handle,
+                            request: WireProjectRequest::Read(request),
+                        } => {
+                            let Some(project) = self.project_manager.get_project(handle) else {
+                                transport
+                                    .send(WireServerMessage {
+                                        id: msg_id,
+                                        msg: lpc_wire::server::ServerMsgBody::Error {
+                                            error: format!(
+                                                "{}",
+                                                ServerError::ProjectNotFound(format!(
+                                                    "handle {}",
+                                                    handle.id()
+                                                ))
+                                            ),
+                                        },
+                                    })
+                                    .await
+                                    .map_err(|error| ServerError::Core(format!("{error}")))?;
+                                response_count += 1;
+                                continue;
+                            };
+                            transport
+                                .send_project_read(msg_id, handle, project.engine(), request)
+                                .await
+                                .map_err(|error| ServerError::Core(format!("{error}")))?;
+                            response_count += 1;
+                        }
+                        msg => {
+                            let theoretical_fps = self.theoretical_fps();
+                            let response = handlers::handle_client_message(
+                                &mut self.project_manager,
+                                &mut *self.base_fs,
+                                &self.output_provider,
+                                self.memory_stats.as_ref(),
+                                self.time_provider.clone(),
+                                self.graphics.clone(),
+                                lpc_wire::ClientMessage { id: msg_id, msg },
+                                theoretical_fps,
+                            )?;
+                            transport
+                                .send(response)
+                                .await
+                                .map_err(|error| ServerError::Core(format!("{error}")))?;
+                            response_count += 1;
+                        }
+                    }
+                }
+                WireMessage::Server(_) => {
+                    return Err(ServerError::Core(
+                        "Received server message on server side".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(response_count)
     }
 
     /// Get a reference to the base filesystem

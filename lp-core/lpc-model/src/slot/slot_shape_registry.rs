@@ -113,6 +113,10 @@ impl SlotShapeRegistry {
         self.shapes.contains_key(id)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.shapes.is_empty()
+    }
+
     /// Current registry-wide revision for conservative accessor invalidation.
     pub fn revision(&self) -> Revision {
         self.ids_revision
@@ -124,6 +128,10 @@ impl SlotShapeRegistry {
 
     pub fn entry(&self, id: &SlotShapeId) -> Option<&SlotShapeEntry> {
         self.shapes.get(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&SlotShapeId, &SlotShapeEntry)> {
+        self.shapes.iter()
     }
 
     pub fn snapshot(&self) -> SlotShapeRegistrySnapshot {

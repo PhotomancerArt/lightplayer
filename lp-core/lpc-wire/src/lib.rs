@@ -25,7 +25,8 @@ pub use messages::{
     ProjectReadRequest, ProjectReadResponse, ProjectReadResponseWriter, ProjectReadResult,
     ReadLevel, RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead,
     ResourceReadQuery, ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation,
-    write_project_read_response,
+    write_project_read_response, write_project_read_result_json, write_project_read_server_message,
+    write_server_message,
 };
 pub use project::{
     WireChannelSampleFormat, WireColorLayout, WireNodeStatus, WireProjectHandle,
@@ -40,8 +41,9 @@ pub use server::{
 pub use slot::{
     WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
-    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, build_slot_full_sync,
-    collect_slot_diff, snapshot_slot_root, snapshot_slot_shape,
+    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
+    build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, snapshot_slot_root,
+    snapshot_slot_shape, write_slot_shape_registry_snapshot_json,
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};

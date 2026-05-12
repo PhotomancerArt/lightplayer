@@ -4,7 +4,8 @@ use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
 use lpc_wire::{
     ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResponseWriter, ProjectReadResult,
+    ProjectReadResult, ShapeReadQuery, write_project_read_result_json,
+    write_slot_shape_registry_snapshot_json,
 };
 
 use super::Engine;
@@ -25,38 +26,81 @@ impl Engine {
     where
         W: JsonWrite,
     {
-        let revision = self.revision();
-        let since = request.since;
-        let mut response = ProjectReadResponseWriter::begin(JsonWriter::new(out), revision)?;
+        lpc_shared::transport::ProjectReadJsonSource::write_project_read_json(self, request, out)
+    }
+}
 
-        for query in request.queries {
-            let result = match query {
-                ProjectReadQuery::Shapes(query) => {
-                    ProjectReadResult::Shapes(self.read_project_shapes(query))
-                }
-                ProjectReadQuery::Nodes(query) => {
-                    ProjectReadResult::Nodes(self.read_project_nodes(since, query))
-                }
-                ProjectReadQuery::Resources(query) => {
-                    ProjectReadResult::Resources(self.read_project_resources(query))
-                }
-            };
-            response.write_result(&result)?;
+impl lpc_shared::transport::ProjectReadJsonSource for Engine {
+    fn project_read_revision(&self) -> lpc_model::Revision {
+        self.revision()
+    }
+
+    fn write_project_read_result_json<W>(
+        &self,
+        since: Option<lpc_model::Revision>,
+        query: ProjectReadQuery,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        if let ProjectReadQuery::Shapes(query) = query {
+            return self.write_project_shape_read_result_json(query, out);
         }
 
-        for probe in request.probes {
-            let result = match probe {
-                ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
-                    self.read_project_render_product_probe(request),
-                ),
-                ProjectProbeRequest::ExplainSlot(request) => {
-                    ProjectProbeResult::ExplainSlot(self.read_project_explain_slot_probe(request))
-                }
-            };
-            response.write_probe(&result)?;
-        }
+        let result = match query {
+            ProjectReadQuery::Nodes(query) => {
+                ProjectReadResult::Nodes(self.read_project_nodes(since, query))
+            }
+            ProjectReadQuery::Resources(query) => {
+                ProjectReadResult::Resources(self.read_project_resources(query))
+            }
+            ProjectReadQuery::Shapes(_) => unreachable!("handled above"),
+        };
+        let mut writer = JsonWriter::new(out);
+        write_project_read_result_json(&mut writer, &result)?;
+        Ok(writer.into_inner())
+    }
 
-        response.finish()
+    fn write_project_probe_result_json<W>(
+        &self,
+        probe: ProjectProbeRequest,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let result = match probe {
+            ProjectProbeRequest::RenderProduct(request) => {
+                ProjectProbeResult::RenderProduct(self.read_project_render_product_probe(request))
+            }
+            ProjectProbeRequest::ExplainSlot(request) => {
+                ProjectProbeResult::ExplainSlot(self.read_project_explain_slot_probe(request))
+            }
+        };
+        let mut writer = JsonWriter::new(out);
+        writer.serde(&result)?;
+        Ok(writer.into_inner())
+    }
+}
+
+impl Engine {
+    fn write_project_shape_read_result_json<W>(
+        &self,
+        query: ShapeReadQuery,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let mut writer = JsonWriter::new(out);
+        let mut result = writer.object()?;
+        let mut shapes = result.prop("shapes")?.object()?;
+        shapes.prop("level")?.serde(&query.level)?;
+        write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
+        shapes.finish()?;
+        result.finish()?;
+        Ok(writer.into_inner())
     }
 }
 

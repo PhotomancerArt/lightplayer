@@ -19,4 +19,6 @@ pub use project_read_response::{ProjectReadResponse, ProjectReadResult};
 pub use read_level::ReadLevel;
 pub use resource_read::{ResourcePayloadRead, ResourceReadQuery, ResourceReadResult};
 pub use shape_read::{ShapeReadQuery, ShapeReadResult};
-pub use stream_response::{ProjectReadResponseWriter, write_project_read_response};
+pub use stream_response::{
+    ProjectReadResponseWriter, write_project_read_response, write_project_read_result_json,
+};

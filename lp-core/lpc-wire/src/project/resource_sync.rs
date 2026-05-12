@@ -13,6 +13,7 @@ use crate::json::streaming_base64::write_base64_value;
 
 /// Classification line in a [`WireResourceSummary`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireRuntimeBufferKind {
     Texture,
@@ -23,6 +24,7 @@ pub enum WireRuntimeBufferKind {
 
 /// Summary kind aligned with [`lpc_model::resource::ResourceDomain`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireResourceKindSummary {
     RuntimeBuffer(WireRuntimeBufferKind),
@@ -30,6 +32,7 @@ pub enum WireResourceKindSummary {
 
 /// Texture-ish pixel layout for summaries and payloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireTextureFormat {
     Rgba16,
@@ -37,12 +40,14 @@ pub enum WireTextureFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireColorLayout {
     Rgb8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireChannelSampleFormat {
     U8,
@@ -51,6 +56,7 @@ pub enum WireChannelSampleFormat {
 
 /// Metadata bundled with resource summaries (no raw bytes).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireResourceMetadataSummary {
     Texture {
@@ -71,6 +77,7 @@ pub enum WireResourceMetadataSummary {
 
 /// Lifecycle / availability hints for listed resources.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireResourceAvailability {
     Available,
@@ -81,6 +88,7 @@ pub enum WireResourceAvailability {
 
 /// Store-backed resource summary for list/skeleton UX.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireResourceSummary {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
@@ -93,11 +101,13 @@ pub struct WireResourceSummary {
 
 /// Full/native runtime-buffer payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireRuntimeBufferPayload {
     #[serde(rename = "ref")]
     pub resource_ref: ResourceRef,
     pub revision: Revision,
     pub metadata: WireRuntimeBufferMetadataPayload,
+    #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
     #[serde(with = "crate::serde_base64")]
     pub bytes: Vec<u8>,
 }
@@ -123,6 +133,7 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireRuntimeBufferMetadataPayload {
     Texture {

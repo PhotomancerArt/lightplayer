@@ -9,7 +9,7 @@ use lpc_model::Revision;
 use lpc_view::apply_project_read_response;
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, ProjectReadQuery, ProjectReadRequest, ReadLevel,
-    ResourcePayloadRead, ResourceReadQuery, WireProjectHandle as ProjectHandle,
+    ResourcePayloadRead, ResourceReadQuery, ShapeReadQuery, WireProjectHandle as ProjectHandle,
 };
 
 use super::inspector::{InspectorSelection, render_debug_inspector};
@@ -120,25 +120,31 @@ fn debug_ui_project_read(
     include_slots: bool,
     selected_resource: Option<lpc_model::ResourceRef>,
 ) -> ProjectReadRequest {
+    let mut queries = Vec::new();
+    if include_slots {
+        queries.push(ProjectReadQuery::Shapes(ShapeReadQuery {
+            level: ReadLevel::Detail,
+        }));
+    }
+    queries.push(ProjectReadQuery::Nodes(NodeReadQuery {
+        level: if include_slots {
+            ReadLevel::Detail
+        } else {
+            ReadLevel::Summary
+        },
+        nodes: NodeReadSelection::All,
+        include_slots,
+    }));
+    queries.push(ProjectReadQuery::Resources(ResourceReadQuery {
+        level: ReadLevel::Summary,
+        payloads: selected_resource.map_or(ResourcePayloadRead::None, |resource_ref| {
+            ResourcePayloadRead::ByRefs(Vec::from([resource_ref]))
+        }),
+    }));
+
     ProjectReadRequest {
         since,
-        queries: Vec::from([
-            ProjectReadQuery::Nodes(NodeReadQuery {
-                level: if include_slots {
-                    ReadLevel::Detail
-                } else {
-                    ReadLevel::Summary
-                },
-                nodes: NodeReadSelection::All,
-                include_slots,
-            }),
-            ProjectReadQuery::Resources(ResourceReadQuery {
-                level: ReadLevel::Summary,
-                payloads: selected_resource.map_or(ResourcePayloadRead::None, |resource_ref| {
-                    ResourcePayloadRead::ByRefs(Vec::from([resource_ref]))
-                }),
-            }),
-        ]),
+        queries,
         probes: Vec::new(),
     }
 }

@@ -52,7 +52,7 @@ pub fn apply_project_read_response(
             ProjectReadResult::Nodes(nodes) => {
                 apply_tree_deltas(&mut view.tree, &nodes.tree_deltas, revision)?;
                 if let Some(slots) = nodes.slots {
-                    view.slots.apply_full_sync(slots);
+                    view.slots.apply_roots_snapshot(slots);
                 }
             }
             ProjectReadResult::Resources(resources) => {

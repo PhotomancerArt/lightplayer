@@ -21,6 +21,10 @@ extern crate unwinding;
 
 use core::alloc::Layout;
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+static OOM_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static OOM_ALLOC_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 /// Custom panic handler that starts stack unwinding via the `unwinding` crate.
 ///
@@ -34,6 +38,16 @@ fn panic_handler(info: &PanicInfo) -> ! {
     esp_println::println!("\n\n====================== PANIC ======================");
     esp_println::println!("{info}");
     esp_println::println!();
+
+    if OOM_IN_PROGRESS.load(Ordering::Relaxed) {
+        esp_println::println!(
+            "OOM while handling allocation failure: requested={} free={} used={}",
+            OOM_ALLOC_SIZE.load(Ordering::Relaxed),
+            esp_alloc::HEAP.free(),
+            esp_alloc::HEAP.used(),
+        );
+        loop {}
+    }
 
     let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
         #[cfg(feature = "server")]
@@ -77,6 +91,16 @@ fn panic_handler(info: &PanicInfo) -> ! {
 /// The default alloc_error_handler uses nounwind panic and cannot be caught.
 #[alloc_error_handler]
 fn on_alloc_error(layout: Layout) -> ! {
+    OOM_ALLOC_SIZE.store(layout.size(), Ordering::Relaxed);
+    OOM_IN_PROGRESS.store(true, Ordering::Relaxed);
+    esp_println::println!("\n\n====================== OOM ======================");
+    esp_println::println!(
+        "allocation failed: requested={} align={} free={} used={}",
+        layout.size(),
+        layout.align(),
+        esp_alloc::HEAP.free(),
+        esp_alloc::HEAP.used(),
+    );
     panic!("memory allocation of {} bytes failed", layout.size());
 }
 

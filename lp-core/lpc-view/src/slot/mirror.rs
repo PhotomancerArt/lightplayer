@@ -6,6 +6,7 @@ use lpc_model::{
 use lpc_wire::{
     WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection,
     WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult, WireSlotPatch,
+    WireSlotRootsSnapshot,
 };
 
 use super::apply::{
@@ -30,6 +31,10 @@ impl SlotMirrorView {
 
     pub fn apply_full_sync(&mut self, sync: WireSlotFullSync) {
         self.registry.apply_snapshot(sync.registry);
+        self.apply_roots_snapshot(WireSlotRootsSnapshot { roots: sync.roots });
+    }
+
+    pub fn apply_roots_snapshot(&mut self, sync: WireSlotRootsSnapshot) {
         self.root_shapes.clear();
         self.roots.clear();
         for root in sync.roots {

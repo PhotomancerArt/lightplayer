@@ -26,6 +26,7 @@ pub enum RenderProductProbeResult {
         width: u32,
         height: u32,
         format: WireTextureFormat,
+        #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
         #[serde(with = "crate::serde_base64")]
         bytes: Vec<u8>,
     },

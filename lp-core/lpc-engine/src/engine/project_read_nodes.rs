@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{NodeId, SlotAccess};
-use lpc_wire::{NodeReadQuery, NodeReadResult, WireSlotFullSync, WireSlotRootSnapshot};
+use lpc_wire::{NodeReadQuery, NodeReadResult, WireSlotRootSnapshot, WireSlotRootsSnapshot};
 use lpc_wire::{ReadLevel, snapshot_slot_root};
 
 use crate::artifact::ArtifactState;
@@ -38,7 +38,7 @@ impl Engine {
         }
     }
 
-    fn snapshot_node_slots(&self) -> WireSlotFullSync {
+    fn snapshot_node_slots(&self) -> WireSlotRootsSnapshot {
         let mut roots = Vec::new();
 
         for entry in self.tree().entries() {
@@ -61,10 +61,7 @@ impl Engine {
             }
         }
 
-        WireSlotFullSync {
-            registry: self.slot_shapes().snapshot(),
-            roots,
-        }
+        WireSlotRootsSnapshot { roots }
     }
 
     fn loaded_node_def(

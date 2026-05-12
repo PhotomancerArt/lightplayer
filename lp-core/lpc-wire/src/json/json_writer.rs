@@ -77,7 +77,13 @@ where
         write_serde(self, value)
     }
 
-    pub(crate) fn write_raw(&mut self, bytes: &[u8]) -> Result<(), JsonWriterError<W::Error>> {
+    /// Write already-formed JSON bytes.
+    ///
+    /// This is intentionally low level. Prefer [`JsonObject`], [`JsonArray`],
+    /// and typed value methods for normal JSON construction; direct writers use
+    /// this when they need to preserve an existing wire envelope without first
+    /// allocating an intermediate object.
+    pub fn write_raw(&mut self, bytes: &[u8]) -> Result<(), JsonWriterError<W::Error>> {
         self.out.write_all(bytes).map_err(JsonWriterError::Write)
     }
 

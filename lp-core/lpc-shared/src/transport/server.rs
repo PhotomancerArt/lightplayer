@@ -7,8 +7,73 @@
 
 extern crate alloc;
 
+use alloc::format;
 use alloc::vec::Vec;
-use lpc_wire::{TransportError, WireServerMessage, messages::ClientMessage};
+use lpc_model::Revision;
+use lpc_wire::json::json_write::JsonWrite;
+use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
+use lpc_wire::{
+    ProjectProbeRequest, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse, TransportError,
+    WireProjectHandle, WireServerMessage, messages::ClientMessage,
+};
+
+/// Source that can write a project-read response to JSON without requiring the
+/// caller to first allocate a full [`ProjectReadResponse`].
+pub trait ProjectReadJsonSource {
+    fn project_read_revision(&self) -> Revision;
+
+    fn write_project_read_result_json<W>(
+        &self,
+        since: Option<Revision>,
+        query: ProjectReadQuery,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite;
+
+    fn write_project_probe_result_json<W>(
+        &self,
+        probe: ProjectProbeRequest,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite;
+
+    fn write_project_read_json<W>(
+        &self,
+        request: ProjectReadRequest,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let mut writer = JsonWriter::new(out);
+        writer.write_raw(b"{\"revision\":")?;
+        writer.serde(&self.project_read_revision())?;
+        writer.write_raw(b",\"results\":[")?;
+
+        let since = request.since;
+        for (index, query) in request.queries.into_iter().enumerate() {
+            if index > 0 {
+                writer.write_raw(b",")?;
+            }
+            let out = self.write_project_read_result_json(since, query, writer.into_inner())?;
+            writer = JsonWriter::new(out);
+        }
+
+        writer.write_raw(b"],\"probes\":[")?;
+        for (index, probe) in request.probes.into_iter().enumerate() {
+            if index > 0 {
+                writer.write_raw(b",")?;
+            }
+            let out = self.write_project_probe_result_json(probe, writer.into_inner())?;
+            writer = JsonWriter::new(out);
+        }
+
+        writer.write_raw(b"]}")?;
+        Ok(writer.into_inner())
+    }
+}
 
 /// Trait for server-side transport implementations
 ///
@@ -57,6 +122,34 @@ use lpc_wire::{TransportError, WireServerMessage, messages::ClientMessage};
 pub trait ServerTransport {
     /// Send a server message (consumes the message)
     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError>;
+
+    /// Stream a project-read response.
+    ///
+    /// Desktop transports may use the default fallback, which collects the
+    /// response JSON and deserializes it back into the normal semantic response
+    /// before sending. Firmware transports should override this with a bounded
+    /// direct writer.
+    async fn send_project_read<S>(
+        &mut self,
+        id: u64,
+        _handle: WireProjectHandle,
+        source: &S,
+        request: ProjectReadRequest,
+    ) -> Result<(), TransportError>
+    where
+        S: ProjectReadJsonSource,
+    {
+        let bytes = source
+            .write_project_read_json(request, Vec::new())
+            .map_err(|_| TransportError::Serialization("project read JSON write failed".into()))?;
+        let response: ProjectReadResponse = lpc_wire::json::from_slice(&bytes)
+            .map_err(|error| TransportError::Serialization(format!("{error}")))?;
+        self.send(WireServerMessage {
+            id,
+            msg: lpc_wire::server::ServerMsgBody::ProjectRequest { response },
+        })
+        .await
+    }
 
     /// Receive a client message (non-blocking). Returns `Ok(None)` if no message is available.
     async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError>;

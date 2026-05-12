@@ -88,7 +88,8 @@ where
     }
 }
 
-fn write_project_read_result_json<W>(
+/// Write one [`ProjectReadResult`] in its externally tagged JSON form.
+pub fn write_project_read_result_json<W>(
     writer: &mut JsonWriter<W>,
     result: &ProjectReadResult,
 ) -> Result<(), JsonWriterError<W::Error>>

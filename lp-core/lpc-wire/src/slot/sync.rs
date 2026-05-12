@@ -11,6 +11,16 @@ pub struct WireSlotFullSync {
     pub roots: Vec<WireSlotRootSnapshot>,
 }
 
+/// Slot root snapshots without a registry payload.
+///
+/// Used when a response already carries shape registry data through another
+/// domain, such as `ProjectReadResult::Shapes`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct WireSlotRootsSnapshot {
+    pub roots: Vec<WireSlotRootSnapshot>,
+}
+
 /// One root included in a full slot sync.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]

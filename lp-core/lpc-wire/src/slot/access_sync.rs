@@ -6,7 +6,9 @@ use lpc_model::{
     SlotShape, SlotShapeId, SlotShapeRegistry, WithRevision,
 };
 
-use super::{WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot};
+use super::{
+    WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
+};
 
 /// Build a full slot sync payload from borrowed slot roots.
 pub fn build_slot_full_sync<'a>(
@@ -15,6 +17,26 @@ pub fn build_slot_full_sync<'a>(
 ) -> WireSlotFullSync {
     WireSlotFullSync {
         registry: registry.snapshot(),
+        roots: roots
+            .into_iter()
+            .map(|(name, root)| {
+                let shape_id = root.shape_id();
+                WireSlotRootSnapshot {
+                    name: name.to_string(),
+                    shape: shape_id,
+                    data: snapshot_slot_root(&shape_id, root.data(), registry),
+                }
+            })
+            .collect(),
+    }
+}
+
+/// Build root snapshots without including the shape registry.
+pub fn build_slot_roots_snapshot<'a>(
+    registry: &SlotShapeRegistry,
+    roots: impl IntoIterator<Item = (&'a str, &'a dyn SlotAccess)>,
+) -> WireSlotRootsSnapshot {
+    WireSlotRootsSnapshot {
         roots: roots
             .into_iter()
             .map(|(name, root)| {

@@ -97,19 +97,12 @@ pub async fn run_server_loop<T: ServerTransport>(
 
         // Tick server (synchronous)
         let tick_start = time_provider.now_ms();
-        match server.tick(delta_ms.max(1), incoming_messages) {
-            Ok(responses) => {
-                let response_count = responses.len();
+        match server
+            .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
+            .await
+        {
+            Ok(response_count) => {
                 let tick_done = time_provider.now_ms();
-                // Send responses
-                for response in responses {
-                    if let WireMessage::Server(server_msg) = response {
-                        if let Err(e) = transport.send(server_msg).await {
-                            log::warn!("run_server_loop: Failed to send response: {e:?}");
-                            // Transport error - continue with next message
-                        }
-                    }
-                }
                 let send_done = time_provider.now_ms();
                 server.set_last_frame_time(send_done.saturating_sub(frame_start) * 1000);
                 if frame_count % FPS_LOG_INTERVAL == 0 {

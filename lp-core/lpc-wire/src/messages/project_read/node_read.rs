@@ -1,7 +1,7 @@
 //! Node-centric project read query/result.
 
 use super::ReadLevel;
-use crate::slot::WireSlotFullSync;
+use crate::slot::WireSlotRootsSnapshot;
 use crate::tree::WireTreeDelta;
 use alloc::vec::Vec;
 use lpc_model::NodeId;
@@ -50,5 +50,5 @@ pub struct NodeReadResult {
     pub level: ReadLevel,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tree_deltas: Vec<WireTreeDelta>,
-    pub slots: Option<WireSlotFullSync>,
+    pub slots: Option<WireSlotRootsSnapshot>,
 }
