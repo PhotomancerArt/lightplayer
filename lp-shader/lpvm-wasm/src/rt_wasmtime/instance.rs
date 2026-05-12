@@ -7,8 +7,9 @@ use std::sync::Arc;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmBuffer, LpvmInstance, encode_uniform_write,
-    encode_uniform_write_q32, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
+    DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmBuffer, LpvmInstance, decode_global_read,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32, global_data_span,
+    validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 use wasmtime::{Instance, Val};
 
@@ -199,6 +200,25 @@ impl WasmLpvmInstance {
         mem.write(store, offset, data)
             .map_err(|e| WasmError::runtime(format!("vmctx write failed: {e}")))?;
         Ok(())
+    }
+
+    fn vmctx_read_bytes(&mut self, offset: usize, len: usize) -> Result<Vec<u8>, WasmError> {
+        let total = self.signatures.vmctx_buffer_size();
+        let end = offset
+            .checked_add(len)
+            .ok_or_else(|| WasmError::runtime("vmctx read: offset overflow"))?;
+        if end > total {
+            return Err(WasmError::runtime(format!(
+                "vmctx read out of bounds: end {end} total {total}"
+            )));
+        }
+        let mut guard = self.runtime.lock();
+        let mem = guard.memory;
+        let store = &mut guard.store;
+        let mut bytes = vec![0u8; len];
+        mem.read(store, offset, &mut bytes)
+            .map_err(|e| WasmError::runtime(format!("vmctx read failed: {e}")))?;
+        Ok(bytes)
     }
 
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<wasmtime::Func, WasmError> {
@@ -574,5 +594,42 @@ impl LpvmInstance for WasmLpvmInstance {
         let (off, bytes) = encode_uniform_write_q32(&self.signatures, path, value)
             .map_err(|e| WasmError::runtime(format!("set_uniform_q32: {e}")))?;
         self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_global(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_global_write(&self.signatures, path, value, self.float_mode)
+            .map_err(|e| WasmError::runtime(format!("set_global: {e}")))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn get_global(&mut self, path: &str) -> Result<LpsValueF32, Self::Error> {
+        let span = global_data_span(&self.signatures, path)
+            .map_err(|e| WasmError::runtime(format!("get_global: {e}")))?;
+        let bytes = self.vmctx_read_bytes(span.offset, span.len)?;
+        decode_global_read(&span.ty, &bytes, self.float_mode)
+            .map_err(|e| WasmError::runtime(format!("get_global: {e}")))
+    }
+
+    fn call_compute_tick(&mut self, name: &str) -> Result<(), Self::Error> {
+        let fn_sig = self
+            .signatures
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
+        validate_compute_tick_sig(fn_sig)
+            .map_err(|e| WasmError::runtime(format!("{name}: {e}")))?;
+
+        let mut guard = self.runtime.lock();
+        let mem = guard.memory;
+        let store = &mut guard.store;
+        let func = self
+            .instance
+            .get_func(&mut *store, name)
+            .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
+        self.prepare_call(store, mem)?;
+        func.call(&mut *store, &[Val::I32(0)], &mut [])
+            .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
+        Ok(())
     }
 }

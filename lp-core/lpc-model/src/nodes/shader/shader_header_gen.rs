@@ -14,7 +14,7 @@ use crate::{
     SlotShape, SlotShapeRegistry,
 };
 
-/// Generate GLSL header declarations for the M1 compute shader slot subset.
+/// Generate GLSL header declarations for authored compute shader slots.
 pub fn generate_compute_shader_header(
     def: &ComputeShaderDef,
     registry: &SlotShapeRegistry,
@@ -29,15 +29,17 @@ pub fn generate_compute_shader_header(
         emit_native_struct_if_needed(slot.value.value(), registry, &mut emitted_structs, &mut out)?;
     }
 
-    for (name, slot) in &def.consumed_slots.entries {
+    for (binding, (name, slot)) in def.consumed_slots.entries.iter().enumerate() {
         let ty = glsl_type_for_ref(slot.value.value(), registry)?;
         match slot.kind.value() {
             ShaderSlotKind::Value => {
-                writeln!(&mut out, "uniform {ty} {name};").expect("write string");
+                writeln!(&mut out, "// consumed: {name}").expect("write string");
+                writeln!(&mut out, "layout(binding = {binding}) uniform {ty} {name};")
+                    .expect("write string");
             }
             ShaderSlotKind::Map => {
                 return Err(ShaderHeaderGenError::Unsupported(
-                    "consumed map shader headers are not supported in M1",
+                    "consumed map shader headers are not supported",
                 ));
             }
         }
@@ -47,7 +49,8 @@ pub fn generate_compute_shader_header(
         let ty = glsl_type_for_ref(slot.value.value(), registry)?;
         match slot.kind.value() {
             ShaderSlotKind::Value => {
-                writeln!(&mut out, "out {ty} {name};").expect("write string");
+                writeln!(&mut out, "// produced: {name}").expect("write string");
+                writeln!(&mut out, "{ty} {name};").expect("write string");
             }
             ShaderSlotKind::Map => {
                 let mapping = slot
@@ -58,7 +61,8 @@ pub fn generate_compute_shader_header(
                 match mapping.kind.value() {
                     ShaderSlotMappingKind::Sentinel => {
                         validate_key_field(slot.value.value(), registry, mapping.key.value())?;
-                        writeln!(&mut out, "out {ty} {name}[{}];", mapping.len.value())
+                        writeln!(&mut out, "// produced: {name}").expect("write string");
+                        writeln!(&mut out, "{ty} {name}[{}];", mapping.len.value())
                             .expect("write string");
                     }
                 }
@@ -108,7 +112,7 @@ fn emit_native_struct_if_needed(
     let ty = lp_type_for_ref(value_ref, registry)?;
     let LpType::Struct { name, fields } = ty else {
         return Err(ShaderHeaderGenError::Unsupported(
-            "native shader header refs must be struct values in M1",
+            "native shader header refs must be struct values",
         ));
     };
     let name = name.ok_or(ShaderHeaderGenError::Unsupported(
@@ -135,7 +139,7 @@ fn validate_key_field(
     let ty = lp_type_for_ref(value_ref, registry)?;
     let LpType::Struct { name, fields } = ty else {
         return Err(ShaderHeaderGenError::Unsupported(
-            "sentinel mappings require struct values in M1",
+            "sentinel mappings require struct values",
         ));
     };
     if fields.iter().any(|field| field.name == key) {
@@ -178,7 +182,7 @@ fn lp_type_for_ref(
     match shape {
         SlotShape::Value { shape } => Ok(shape.ty.clone()),
         _ => Err(ShaderHeaderGenError::Unsupported(
-            "native shader refs must resolve to value shapes in M1",
+            "native shader refs must resolve to value shapes",
         )),
     }
 }
@@ -248,8 +252,10 @@ mod tests {
 
         assert!(header.contains("struct FluidEmitter"));
         assert!(header.contains("uint id;"));
-        assert!(header.contains("uniform float time;"));
-        assert!(header.contains("out FluidEmitter emitters[4];"));
+        assert!(header.contains("layout(binding = 0) uniform float time;"));
+        assert!(header.contains("// produced: emitters"));
+        assert!(header.contains("FluidEmitter emitters[4];"));
+        assert!(!header.contains("out FluidEmitter"));
     }
 
     #[test]
