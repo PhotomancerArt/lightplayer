@@ -64,7 +64,7 @@ impl Engine {
         WireSlotRootsSnapshot { roots }
     }
 
-    fn loaded_node_def(
+    pub(super) fn loaded_node_def(
         &self,
         artifact: crate::artifact::ArtifactId,
     ) -> Option<&lpc_model::NodeDef> {
@@ -81,10 +81,10 @@ impl Engine {
     }
 }
 
-fn node_def_root_name(id: NodeId) -> String {
+pub(super) fn node_def_root_name(id: NodeId) -> String {
     format!("node.{}.def", id.0)
 }
 
-fn node_state_root_name(id: NodeId) -> String {
+pub(super) fn node_state_root_name(id: NodeId) -> String {
     format!("node.{}.state", id.0)
 }

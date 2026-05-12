@@ -1,14 +1,18 @@
 //! Streaming project-read response writer for [`Engine`].
 
+use lpc_model::SlotAccess;
 use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
 use lpc_wire::{
-    ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, ShapeReadQuery, write_project_read_result_json,
+    NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
+    ProjectReadResult, ShapeReadQuery, write_project_read_result_json, write_slot_data_json,
     write_slot_shape_registry_snapshot_json,
 };
 
+use crate::node::{NodeEntryState, tree_deltas_since};
+
 use super::Engine;
+use super::project_read_nodes::{node_def_root_name, node_state_root_name};
 
 impl Engine {
     /// Write one stateless project read response directly to a JSON sink.
@@ -44,18 +48,23 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
     where
         W: JsonWrite,
     {
-        if let ProjectReadQuery::Shapes(query) = query {
-            return self.write_project_shape_read_result_json(query, out);
+        match query {
+            ProjectReadQuery::Shapes(query) => {
+                return self.write_project_shape_read_result_json(query, out);
+            }
+            ProjectReadQuery::Nodes(query) => {
+                return self.write_project_node_read_result_json(since, query, out);
+            }
+            ProjectReadQuery::Resources(_) => {}
         }
 
         let result = match query {
-            ProjectReadQuery::Nodes(query) => {
-                ProjectReadResult::Nodes(self.read_project_nodes(since, query))
-            }
             ProjectReadQuery::Resources(query) => {
                 ProjectReadResult::Resources(self.read_project_resources(query))
             }
-            ProjectReadQuery::Shapes(_) => unreachable!("handled above"),
+            ProjectReadQuery::Shapes(_) | ProjectReadQuery::Nodes(_) => {
+                unreachable!("handled above")
+            }
         };
         let mut writer = JsonWriter::new(out);
         write_project_read_result_json(&mut writer, &result)?;
@@ -99,6 +108,69 @@ impl Engine {
         shapes.prop("level")?.serde(&query.level)?;
         write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
         shapes.finish()?;
+        result.finish()?;
+        Ok(writer.into_inner())
+    }
+
+    fn write_project_node_read_result_json<W>(
+        &self,
+        since: Option<lpc_model::Revision>,
+        query: NodeReadQuery,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let since = since.unwrap_or_default();
+        let mut writer = JsonWriter::new(out);
+        let mut result = writer.object()?;
+        let mut nodes = result.prop("nodes")?.object()?;
+        nodes.prop("level")?.serde(&query.level)?;
+
+        let tree_deltas = tree_deltas_since(self.tree(), since);
+        if !tree_deltas.is_empty() {
+            nodes.prop("tree_deltas")?.serde(&tree_deltas)?;
+        }
+
+        if query.include_slots && query.level == lpc_wire::ReadLevel::Detail {
+            let mut slots = nodes.prop("slots")?.object()?;
+            let mut roots = slots.prop("roots")?.array()?;
+            for entry in self.tree().entries() {
+                if let Some(def) = self.loaded_node_def(entry.artifact()) {
+                    let mut root = roots.item()?.object()?;
+                    root.prop("name")?.string(&node_def_root_name(entry.id))?;
+                    root.prop("shape")?.serde(&def.shape_id())?;
+                    write_slot_data_json(
+                        root.prop("data")?,
+                        &def.shape_id(),
+                        def.data(),
+                        self.slot_shapes(),
+                    )?;
+                    root.finish()?;
+                }
+
+                if let NodeEntryState::Alive(node) = entry.state.value()
+                    && let Some(state) = node.runtime_state_slots()
+                {
+                    let mut root = roots.item()?.object()?;
+                    root.prop("name")?.string(&node_state_root_name(entry.id))?;
+                    root.prop("shape")?.serde(&state.shape_id())?;
+                    write_slot_data_json(
+                        root.prop("data")?,
+                        &state.shape_id(),
+                        state.data(),
+                        self.slot_shapes(),
+                    )?;
+                    root.finish()?;
+                }
+            }
+            roots.finish()?;
+            slots.finish()?;
+        } else {
+            nodes.prop("slots")?.null()?;
+        }
+
+        nodes.finish()?;
         result.finish()?;
         Ok(writer.into_inner())
     }
