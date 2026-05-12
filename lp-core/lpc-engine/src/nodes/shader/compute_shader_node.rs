@@ -194,7 +194,10 @@ fn resolve_or_default_input(
         node: ctx.node_id(),
         slot: slot_path,
     }) {
-        Ok(production) => production.product.value().clone(),
+        Ok(production) => production
+            .value_leaf()
+            .map(|value| value.value().clone())
+            .ok_or_else(|| NodeError::msg(format!("compute input {name:?} is not a value")))?,
         Err(_) => slot.default_value(),
     };
     model_value_to_lps_value_f32(&model_value)
@@ -233,7 +236,10 @@ mod tests {
         )
         .expect("resolve phase")
         .0;
-        assert_eq!(*phase.product.value(), LpValue::F32(1.25));
+        assert_eq!(
+            *phase.value_leaf().expect("value").value(),
+            LpValue::F32(1.25)
+        );
 
         let entry = engine.tree().get(node_id).expect("node");
         let NodeEntryState::Alive(node) = entry.state.value() else {

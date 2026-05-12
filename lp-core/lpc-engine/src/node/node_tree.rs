@@ -261,7 +261,23 @@ impl<N> NodeTree<N> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Option<(BindingRef, &BindingEntry)> {
-        self.binding_index
+        self.bindings_for_consumed_slot(node, slot)
+            .into_iter()
+            .next()
+    }
+
+    /// Resolve all bindings for one consumed slot at the winning owner depth.
+    ///
+    /// Multiple bindings owned at the same depth are meaningful for mergeable
+    /// aggregate receivers. Bindings owned deeper in the tree are treated as
+    /// overrides and ignored when a shallower owner binds the same consumed slot.
+    pub fn bindings_for_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Vec<(BindingRef, &BindingEntry)> {
+        let mut candidates: Vec<_> = self
+            .binding_index
             .consumed_targets(node, slot)
             .iter()
             .copied()
@@ -272,8 +288,16 @@ impl<N> NodeTree<N> {
                     .unwrap_or(usize::MAX);
                 binding_by_ref(&self.nodes, binding_ref).map(|entry| (depth, binding_ref, entry))
             })
-            .min_by_key(|(depth, _, _)| *depth)
+            .collect();
+        let Some(min_depth) = candidates.iter().map(|(depth, _, _)| *depth).min() else {
+            return Vec::new();
+        };
+        candidates.retain(|(depth, _, _)| *depth == min_depth);
+        candidates.sort_by_key(|(_, binding_ref, _)| *binding_ref);
+        candidates
+            .into_iter()
             .map(|(_, binding_ref, entry)| (binding_ref, entry))
+            .collect()
     }
 
     /// Resolve all providers for a bus channel.

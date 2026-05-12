@@ -8,6 +8,7 @@ mod slot_accessor;
 mod slot_data;
 mod slot_enum_shape;
 mod slot_lookup;
+mod slot_merge;
 mod slot_meta;
 mod slot_name;
 mod slot_owner;
@@ -29,7 +30,8 @@ pub use slot_access::{
 pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;
-pub use slot_lookup::{SlotLookupError, lookup_slot_data};
+pub use slot_lookup::{SlotLookupError, lookup_slot_data, lookup_slot_data_and_shape};
+pub use slot_merge::SlotMerge;
 pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;

@@ -515,7 +515,7 @@ mod tests {
         let prod = resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
-        let got_id = match prod.product.get() {
+        let got_id = match prod.value_leaf().expect("value").get() {
             lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
             other => panic!("expected visual product, got {other:?}"),
         };

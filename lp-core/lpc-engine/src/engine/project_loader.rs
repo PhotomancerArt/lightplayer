@@ -1006,7 +1006,10 @@ value = "f32"
         .expect("resolve phase")
         .0;
 
-        assert_eq!(*production.product.value(), LpValue::F32(2.25));
+        assert_eq!(
+            *production.value_leaf().expect("value").value(),
+            LpValue::F32(2.25)
+        );
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
