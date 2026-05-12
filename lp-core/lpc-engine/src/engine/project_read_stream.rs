@@ -1,0 +1,142 @@
+//! Streaming project-read response writer for [`Engine`].
+
+use lpc_wire::json::json_write::JsonWrite;
+use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
+use lpc_wire::{
+    ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
+    ProjectReadResponseWriter, ProjectReadResult,
+};
+
+use super::Engine;
+
+impl Engine {
+    /// Write one stateless project read response directly to a JSON sink.
+    ///
+    /// This preserves the same JSON shape as [`Self::read_project`], but writes
+    /// each query/probe result as soon as it is produced. The current
+    /// implementation may still allocate individual result objects; it avoids
+    /// allocating the whole response envelope and uses streaming base64 for
+    /// runtime-buffer payload fields.
+    pub fn write_project_read_json<W>(
+        &self,
+        request: ProjectReadRequest,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let revision = self.revision();
+        let since = request.since;
+        let mut response = ProjectReadResponseWriter::begin(JsonWriter::new(out), revision)?;
+
+        for query in request.queries {
+            let result = match query {
+                ProjectReadQuery::Shapes(query) => {
+                    ProjectReadResult::Shapes(self.read_project_shapes(query))
+                }
+                ProjectReadQuery::Nodes(query) => {
+                    ProjectReadResult::Nodes(self.read_project_nodes(since, query))
+                }
+                ProjectReadQuery::Resources(query) => {
+                    ProjectReadResult::Resources(self.read_project_resources(query))
+                }
+            };
+            response.write_result(&result)?;
+        }
+
+        for probe in request.probes {
+            let result = match probe {
+                ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
+                    self.read_project_render_product_probe(request),
+                ),
+                ProjectProbeRequest::ExplainSlot(request) => {
+                    ProjectProbeResult::ExplainSlot(self.read_project_explain_slot_probe(request))
+                }
+            };
+            response.write_probe(&result)?;
+        }
+
+        response.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use lpc_model::{Revision, TreePath, WithRevision};
+    use lpc_wire::json::json_write::ChunkCountingWrite;
+    use lpc_wire::{
+        ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery, ResourceReadResult,
+    };
+
+    use crate::engine::test_support::EngineTestBuilder;
+    use crate::resource::RuntimeBuffer;
+
+    #[test]
+    fn streaming_project_read_matches_full_debug_response() {
+        let h = EngineTestBuilder::new().output_node("output").build();
+        let request = ProjectReadRequest::default_debug(None);
+
+        assert_streams_to_full_response(&h.engine, request);
+    }
+
+    #[test]
+    fn streaming_project_read_matches_resource_payload_response() {
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::raw(vec![1, 2, 3, 253, 254, 255]),
+        ));
+        let mut request = ProjectReadRequest::default_debug(None);
+        request.queries[2] = ProjectReadQuery::Resources(ResourceReadQuery {
+            level: lpc_wire::ReadLevel::Detail,
+            payloads: ResourcePayloadRead::All,
+        });
+
+        assert_streams_to_full_response(&engine, request);
+    }
+
+    #[test]
+    fn streaming_project_read_writes_multiple_chunks() {
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::raw(vec![1, 2, 3, 253, 254, 255]),
+        ));
+
+        let out = engine
+            .write_project_read_json(
+                ProjectReadRequest::default_debug(None),
+                ChunkCountingWrite::new(16),
+            )
+            .unwrap();
+        let decoded: ProjectReadResponse = lpc_wire::json::from_slice(out.bytes()).unwrap();
+
+        assert_eq!(decoded.results.len(), 3);
+        assert!(out.chunk_count() > 1);
+    }
+
+    fn assert_streams_to_full_response(engine: &Engine, request: ProjectReadRequest) {
+        let full = engine.read_project(request.clone());
+        let streamed = engine
+            .write_project_read_json(request, Vec::new())
+            .expect("stream project read");
+        let decoded: ProjectReadResponse =
+            lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
+
+        assert_eq!(decoded, full);
+
+        let ProjectReadResult::Resources(ResourceReadResult {
+            runtime_buffer_payloads,
+            ..
+        }) = decoded.results.last().expect("resources result")
+        else {
+            panic!("last result should be resources");
+        };
+        for payload in runtime_buffer_payloads {
+            assert!(!payload.bytes.is_empty());
+        }
+    }
+}

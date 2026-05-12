@@ -368,7 +368,8 @@ async fn main(spawner: embassy_executor::Spawner) {
             esp_println::println!("[test_oom] Tests complete, continuing boot...");
         }
 
-        // Create streaming transport (serializes in io_task, never buffers full JSON)
+        // Create serial transport. Project-read responses stream through io_task;
+        // small messages use the simpler full-message serializer.
         esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
         let transport = transport::StreamingMessageRouterTransport::from_io_channels();
         esp_println::println!("[INIT] StreamingMessageRouterTransport created");

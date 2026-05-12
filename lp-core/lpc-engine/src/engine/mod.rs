@@ -15,6 +15,7 @@ mod project_read_nodes;
 mod project_read_probes;
 mod project_read_resources;
 mod project_read_shapes;
+mod project_read_stream;
 #[cfg(test)]
 pub(crate) mod test_support;
 

@@ -22,9 +22,10 @@ pub use messages::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessag
 pub use messages::{
     ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery, NodeReadResult,
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
-    ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation,
+    ProjectReadRequest, ProjectReadResponse, ProjectReadResponseWriter, ProjectReadResult,
+    ReadLevel, RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead,
+    ResourceReadQuery, ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation,
+    write_project_read_response,
 };
 pub use project::{
     WireChannelSampleFormat, WireColorLayout, WireNodeStatus, WireProjectHandle,

@@ -6,6 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 
+#[path = "json/json_write.rs"]
+pub mod json_write;
+#[path = "json/json_writer.rs"]
+pub mod json_writer;
+#[path = "json/streaming_base64.rs"]
+pub mod streaming_base64;
+
 pub use serde_json::Error;
 
 /// Serialize a value to a JSON string.

@@ -2,14 +2,14 @@
 //!
 //! Responsibilities:
 //! - Drain outgoing queue and send via serial (with M! prefix)
-//! - Drain OUTGOING_SERVER_MSG and stream JSON to serial (server feature)
+//! - Drain OUTGOING_SERVER_MSG and write JSON to serial (server feature)
 //! - Read from serial and push to incoming queue (filter M! prefix)
 //! - Monitor USB host connection; skip writes when disconnected to prevent blocking
 //! - All serial writes use timeouts to prevent blocking if host disconnects mid-write
 
 extern crate alloc;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
@@ -24,10 +24,11 @@ use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 
-/// Server messages for streaming transport (capacity 1 = backpressure)
+/// Server messages for transport serialization (capacity 1 = backpressure)
 ///
 /// When StreamingMessageRouterTransport is used, server loop sends ServerMessage here.
-/// io_task receives, serializes with ser-write-json directly to serial, never buffers full JSON.
+/// Large project-read responses are streamed field-by-field; small messages use the
+/// simpler full-message serializer.
 #[cfg(feature = "server")]
 static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
     Channel::new();
@@ -69,7 +70,7 @@ async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
     true
 }
 
-/// SerWrite impl that collects bytes into a Vec (for later timed async write).
+/// SerWrite impl that collects one small JSON value before writing it.
 #[cfg(feature = "server")]
 struct VecWriter<'a>(&'a mut Vec<u8>);
 
@@ -171,16 +172,211 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
         return;
     }
 
+    if timed_write_server_msg(tx, msg).await {
+        return;
+    }
+
+    // If a timeout interrupts a JSON frame before the trailing newline, separate the
+    // next frame so host parsers can recover instead of concatenating two `M!` messages.
+    let _ = timed_write(tx, b"\n").await;
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_server_msg<W: Write>(tx: &mut W, msg: lpc_wire::WireServerMessage) -> bool {
+    let id = msg.id;
+    match msg.msg {
+        lpc_wire::server::ServerMsgBody::ProjectRequest { response } => {
+            timed_write_project_read_server_msg(tx, id, response).await
+        }
+        msg => timed_write_full_server_msg(tx, lpc_wire::WireServerMessage { id, msg }).await,
+    }
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_full_server_msg<W: Write>(
+    tx: &mut W,
+    msg: lpc_wire::WireServerMessage,
+) -> bool {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"M!");
-    if ser_write_json::ser::to_writer(&mut VecWriter(&mut buf), &msg).is_ok() {
-        buf.push(b'\n');
-        if !timed_write_all(tx, &buf).await {
-            // If a timeout interrupts a JSON frame before the trailing newline, separate the
-            // next frame so host parsers can recover instead of concatenating two `M!` messages.
-            let _ = timed_write(tx, b"\n").await;
+    if ser_write_json::ser::to_writer(&mut VecWriter(&mut buf), &msg).is_err() {
+        return false;
+    }
+    buf.push(b'\n');
+    timed_write_all(tx, &buf).await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_project_read_server_msg<W: Write>(
+    tx: &mut W,
+    id: u64,
+    response: lpc_wire::ProjectReadResponse,
+) -> bool {
+    let header = format!(
+        "M!{{\"id\":{},\"msg\":{{\"projectRequest\":{{\"response\":{{\"revision\":{},\"results\":[",
+        id,
+        response.revision.as_i64(),
+    );
+    if !timed_write(tx, header.as_bytes()).await {
+        return false;
+    }
+
+    for (index, result) in response.results.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_project_read_result(tx, result).await {
+            return false;
         }
     }
+
+    if !timed_write(tx, b"],\"probes\":[").await {
+        return false;
+    }
+    for (index, probe) in response.probes.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_serde_json(tx, probe).await {
+            return false;
+        }
+    }
+
+    timed_write(tx, b"]}}}}\n").await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_project_read_result<W: Write>(
+    tx: &mut W,
+    result: &lpc_wire::ProjectReadResult,
+) -> bool {
+    match result {
+        lpc_wire::ProjectReadResult::Resources(resources) => {
+            timed_write_resource_read_result(tx, resources).await
+        }
+        _ => timed_write_serde_json(tx, result).await,
+    }
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_resource_read_result<W: Write>(
+    tx: &mut W,
+    resources: &lpc_wire::ResourceReadResult,
+) -> bool {
+    if !timed_write(tx, b"{\"resources\":{\"level\":").await {
+        return false;
+    }
+    if !timed_write_serde_json(tx, &resources.level).await {
+        return false;
+    }
+    if !timed_write(tx, b",\"summaries\":[").await {
+        return false;
+    }
+    for (index, summary) in resources.summaries.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_serde_json(tx, summary).await {
+            return false;
+        }
+    }
+    if !timed_write(tx, b"],\"runtime_buffer_payloads\":[").await {
+        return false;
+    }
+    for (index, payload) in resources.runtime_buffer_payloads.iter().enumerate() {
+        if index > 0 && !timed_write(tx, b",").await {
+            return false;
+        }
+        if !timed_write_runtime_buffer_payload(tx, payload).await {
+            return false;
+        }
+    }
+    timed_write(tx, b"]}}").await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_runtime_buffer_payload<W: Write>(
+    tx: &mut W,
+    payload: &lpc_wire::WireRuntimeBufferPayload,
+) -> bool {
+    if !timed_write(tx, b"{\"ref\":").await {
+        return false;
+    }
+    if !timed_write_serde_json(tx, &payload.resource_ref).await {
+        return false;
+    }
+    let revision = format!(",\"revision\":{},\"metadata\":", payload.revision.as_i64());
+    if !timed_write(tx, revision.as_bytes()).await {
+        return false;
+    }
+    if !timed_write_serde_json(tx, &payload.metadata).await {
+        return false;
+    }
+    if !timed_write(tx, b",\"bytes\":").await {
+        return false;
+    }
+    if !timed_write_base64_json_string(tx, &payload.bytes).await {
+        return false;
+    }
+    timed_write(tx, b"}").await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_serde_json<W, T>(tx: &mut W, value: &T) -> bool
+where
+    W: Write,
+    T: serde::Serialize,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    if ser_write_json::ser::to_writer(&mut VecWriter(&mut buf), value).is_err() {
+        return false;
+    }
+    timed_write_all(tx, &buf).await
+}
+
+#[cfg(feature = "server")]
+async fn timed_write_base64_json_string<W: Write>(tx: &mut W, bytes: &[u8]) -> bool {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const OUT_CAP: usize = 252;
+
+    if !timed_write(tx, b"\"").await {
+        return false;
+    }
+
+    let mut out = [0u8; OUT_CAP];
+    let mut out_len = 0usize;
+    for chunk in bytes.chunks(3) {
+        if out_len + 4 > out.len() {
+            if !timed_write(tx, &out[..out_len]).await {
+                return false;
+            }
+            out_len = 0;
+        }
+
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+
+        out[out_len] = TABLE[(b0 >> 2) as usize];
+        out[out_len + 1] = TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize];
+        out[out_len + 2] = if chunk.len() > 1 {
+            TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize]
+        } else {
+            b'='
+        };
+        out[out_len + 3] = if chunk.len() > 2 {
+            TABLE[(b2 & 0b0011_1111) as usize]
+        } else {
+            b'='
+        };
+        out_len += 4;
+    }
+
+    if out_len > 0 && !timed_write(tx, &out[..out_len]).await {
+        return false;
+    }
+
+    timed_write(tx, b"\"").await
 }
 
 /// Process read buffer and extract complete lines
