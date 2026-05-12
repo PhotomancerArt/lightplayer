@@ -265,17 +265,20 @@ impl RenderNode for ShaderNode {
                 request.format
             )));
         }
-        shader
-            .render(&mut texture, request.time_seconds)
-            .map_err(|e| NodeError::msg(format!("shader render: {e}")))?;
+        let render_result = shader.render(&mut texture, request.time_seconds);
+        if let Err(e) = render_result {
+            graphics.free_output_buffer(texture);
+            return Err(NodeError::msg(format!("shader render: {e}")));
+        }
 
-        TextureRenderProduct::new(
-            texture.width(),
-            texture.height(),
-            texture.format(),
-            texture.data().to_vec(),
-        )
-        .map_err(|e| NodeError::msg(format!("texture product: {e}")))
+        let width = texture.width();
+        let height = texture.height();
+        let format = texture.format();
+        let pixels = texture.data().to_vec();
+        graphics.free_output_buffer(texture);
+
+        TextureRenderProduct::new(width, height, format, pixels)
+            .map_err(|e| NodeError::msg(format!("texture product: {e}")))
     }
 }
 
@@ -530,6 +533,10 @@ mod tests {
             height: u32,
         ) -> Result<lp_shader::LpsTextureBuf, Error> {
             self.inner.alloc_output_buffer(width, height)
+        }
+
+        fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf) {
+            self.inner.free_output_buffer(buffer);
         }
     }
 

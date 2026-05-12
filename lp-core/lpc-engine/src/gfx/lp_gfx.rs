@@ -23,4 +23,11 @@ pub trait LpGraphics: Send + Sync {
         width: u32,
         height: u32,
     ) -> Result<lp_shader::LpsTextureBuf, Error>;
+
+    /// Release a transient shader output buffer allocated by [`Self::alloc_output_buffer`].
+    ///
+    /// Some backends use bump allocation and cannot reclaim individual buffers,
+    /// but native embedded backends return this memory to the heap. Product
+    /// materialization paths must call this for short-lived render targets.
+    fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf);
 }

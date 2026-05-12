@@ -67,6 +67,10 @@ impl LpGraphics for Graphics {
                 message: format!("alloc texture: {e:?}"),
             })
     }
+
+    fn free_output_buffer(&self, buffer: LpsTextureBuf) {
+        self.engine.free_texture(buffer);
+    }
 }
 
 struct HostShader {

@@ -120,6 +120,16 @@ impl<E: LpvmEngine> LpsEngine<E> {
         Ok(out)
     }
 
+    /// Free a texture previously allocated by [`Self::alloc_texture`].
+    ///
+    /// Backends with bump-style memory may not be able to reuse this memory, but
+    /// native embedded backends can return it to the heap. Callers should pair
+    /// transient render-target allocations with this method rather than relying
+    /// on [`LpsTextureBuf`] drop semantics.
+    pub fn free_texture(&self, texture: LpsTextureBuf) {
+        self.engine.memory().free(texture.buffer());
+    }
+
     /// Access the underlying LPVM engine.
     #[must_use]
     pub fn inner(&self) -> &E {
