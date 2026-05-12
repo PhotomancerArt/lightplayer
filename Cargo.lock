@@ -2818,6 +2818,7 @@ dependencies = [
  "lpc-shared",
  "lpc-wire",
  "lpfs",
+ "lps-builtins",
  "lps-q32",
  "ser-write-json",
  "serde",

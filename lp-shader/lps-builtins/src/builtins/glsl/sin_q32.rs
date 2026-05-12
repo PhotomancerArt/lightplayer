@@ -1,61 +1,58 @@
-//! Fixed-point 16.16 sine function.
-
-use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
+//! Fast fixed-point 16.16 sine function.
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;
+const FIX16_TWO_PI: i32 = FIX16_PI << 1;
+const FAST_B: i32 = 83_443; // 4 / pi
+const FAST_C: i32 = -26_561; // -4 / pi^2
+const FAST_P: i32 = 14_746; // 0.225
 
-/// Compute sine using Taylor series approximation.
+/// Compute sine using a shader-quality parabolic approximation.
 ///
-/// Algorithm ported from libfixmath's accurate Taylor series implementation.
-/// Accuracy: ~2.1%
-///
-/// Formula: sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040 + x⁹/362880 - x¹¹/39916800
+/// This is the normal fast rendering path. Reference/debug math should live in
+/// probe-specific code rather than making every shader pay for the old Taylor
+/// helper path.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lps_sin_q32(x: i32) -> i32 {
-    // Handle zero case early (sin(0) = 0 exactly)
+    fast_sin_folded_q32(fold_angle_q32(x))
+}
+
+#[inline(always)]
+pub(crate) fn fast_sin_q32(x: i32) -> i32 {
+    fast_sin_folded_q32(fold_angle_q32(x))
+}
+
+#[inline(always)]
+pub(crate) fn fold_angle_q32(mut x: i32) -> i32 {
     if x == 0 {
         return 0;
     }
-
-    // Range reduction: reduce to [-2π, 2π]
-    let two_pi = FIX16_PI << 1;
-    let mut temp_angle = x % two_pi;
-
-    // Further reduce to [-π, π]
-    if temp_angle > FIX16_PI {
-        temp_angle -= two_pi;
-    } else if temp_angle < -FIX16_PI {
-        temp_angle += two_pi;
+    x %= FIX16_TWO_PI;
+    if x > FIX16_PI {
+        x -= FIX16_TWO_PI;
+    } else if x < -FIX16_PI {
+        x += FIX16_TWO_PI;
     }
+    x
+}
 
-    // Compute temp_angle² for Taylor series
-    let temp_angle_sq = __lp_lpir_fmul_q32(temp_angle, temp_angle);
+#[inline(always)]
+fn fast_sin_folded_q32(x: i32) -> i32 {
+    let ax = x.wrapping_abs();
+    let y = qmul_wrap(FAST_B, x).wrapping_add(qmul_wrap(FAST_C, qmul_wrap(x, ax)));
+    let ay = y.wrapping_abs();
+    qmul_trunc_zero(FAST_P, qmul_wrap(y, ay).wrapping_sub(y)).wrapping_add(y)
+}
 
-    // Taylor series: x - x³/6 + x⁵/120 - x⁷/5040 + x⁹/362880 - x¹¹/39916800
-    let mut result = temp_angle;
+#[inline(always)]
+fn qmul_wrap(lhs: i32, rhs: i32) -> i32 {
+    (((lhs as i64) * (rhs as i64)) >> 16) as i32
+}
 
-    // x³ term: -x³/6
-    let mut term = __lp_lpir_fmul_q32(temp_angle, temp_angle_sq);
-    result -= term / 6;
-
-    // x⁵ term: +x⁵/120
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result += term / 120;
-
-    // x⁷ term: -x⁷/5040
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result -= term / 5040;
-
-    // x⁹ term: +x⁹/362880
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result += term / 362880;
-
-    // x¹¹ term: -x¹¹/39916800
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result -= term / 39916800;
-
-    result
+#[inline(always)]
+fn qmul_trunc_zero(lhs: i32, rhs: i32) -> i32 {
+    let product = lhs as i64 * rhs as i64;
+    ((product + ((product >> 63) & 0xffff)) >> 16) as i32
 }
 
 #[cfg(test)]
@@ -74,7 +71,8 @@ mod tests {
             (-1.5707963267948966, -1.0), // -π/2
         ];
 
-        // Use 3% tolerance for trig functions (~2.1% accuracy)
+        // The fast rendering approximation is intentionally shader-quality,
+        // not a reference libm replacement.
         test_q32_function_relative(|x| __lps_sin_q32(x), &tests, 0.03, 0.01);
     }
 
@@ -92,11 +90,36 @@ mod tests {
     #[test]
     fn test_sin_small_angles() {
         let tests = [
+            (1.0 / 65536.0, 1.0 / 65536.0),
             (0.1, 0.09983341664682815),
             (0.5, 0.479425538604203),
             (-0.1, -0.09983341664682815),
         ];
 
         test_q32_function_relative(|x| __lps_sin_q32(x), &tests, 0.03, 0.01);
+    }
+
+    #[test]
+    fn test_sin_fast_error_envelope_on_shader_angles() {
+        let angles = [
+            -4.0 * core::f32::consts::PI,
+            -core::f32::consts::PI,
+            -core::f32::consts::FRAC_PI_2,
+            -0.5,
+            0.0,
+            0.5,
+            core::f32::consts::FRAC_PI_2,
+            core::f32::consts::PI,
+            4.0 * core::f32::consts::PI,
+        ];
+        for angle in angles {
+            let fixed = crate::util::test_helpers::float_to_fixed(angle);
+            let got = crate::util::test_helpers::fixed_to_float(__lps_sin_q32(fixed));
+            let expected = angle.sin();
+            assert!(
+                (got - expected).abs() < 0.012,
+                "sin({angle}) got {got}, expected {expected}"
+            );
+        }
     }
 }

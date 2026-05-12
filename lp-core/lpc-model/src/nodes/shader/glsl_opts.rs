@@ -7,14 +7,14 @@ use crate::{
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
-/// Mode for Q32 add/sub: saturating (builtin) or wrapping (inline iadd/isub)
+/// Mode for Q32 add/sub: wrapping (inline iadd/isub) or saturating (debug/reference)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AddSubMode {
     /// __lp_q32_add/sub: saturates on overflow
-    #[default]
     Saturating,
     /// Inline iadd/isub: wraps on overflow, faster
+    #[default]
     Wrapping,
 }
 
@@ -37,14 +37,14 @@ impl AddSubMode {
     }
 }
 
-/// Mode for Q32 mul: saturating (builtin) or wrapping (inline imul+smulhi)
+/// Mode for Q32 mul: wrapping (inline imul+smulhi) or saturating (debug/reference)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MulMode {
     /// __lp_q32_mul: saturates on overflow
-    #[default]
     Saturating,
     /// Inline imul+smulhi: wraps on overflow, faster
+    #[default]
     Wrapping,
 }
 
@@ -67,14 +67,14 @@ impl MulMode {
     }
 }
 
-/// Mode for Q32 div: saturating (builtin) or reciprocal (inline approximate)
+/// Mode for Q32 div: reciprocal approximation or saturating reference divide
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DivMode {
     /// __lp_q32_div: exact, saturates on div-by-zero
-    #[default]
     Saturating,
     /// Reciprocal multiplication: ~0.01% typical error, faster
+    #[default]
     Reciprocal,
 }
 
@@ -111,9 +111,9 @@ pub struct GlslOpts {
 impl Default for GlslOpts {
     fn default() -> Self {
         Self {
-            add_sub: ValueSlot::new(AddSubMode::default()),
-            mul: ValueSlot::new(MulMode::default()),
-            div: ValueSlot::new(DivMode::default()),
+            add_sub: ValueSlot::new(AddSubMode::Wrapping),
+            mul: ValueSlot::new(MulMode::Wrapping),
+            div: ValueSlot::new(DivMode::Reciprocal),
         }
     }
 }
@@ -217,8 +217,8 @@ mod tests {
     #[test]
     fn test_glsl_opts_default() {
         let opts = GlslOpts::default();
-        assert_eq!(*opts.add_sub.value(), AddSubMode::Saturating);
-        assert_eq!(*opts.mul.value(), MulMode::Saturating);
-        assert_eq!(*opts.div.value(), DivMode::Saturating);
+        assert_eq!(*opts.add_sub.value(), AddSubMode::Wrapping);
+        assert_eq!(*opts.mul.value(), MulMode::Wrapping);
+        assert_eq!(*opts.div.value(), DivMode::Reciprocal);
     }
 }

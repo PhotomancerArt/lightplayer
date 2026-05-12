@@ -73,9 +73,9 @@ mod tests {
         let def = ShaderDef::default();
         assert_eq!(def.glsl_path.value(), "main.glsl");
         assert_eq!(def.render_order(), 0);
-        assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Saturating);
-        assert_eq!(*def.glsl_opts.mul.value(), MulMode::Saturating);
-        assert_eq!(*def.glsl_opts.div.value(), DivMode::Saturating);
+        assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Wrapping);
+        assert_eq!(*def.glsl_opts.mul.value(), MulMode::Wrapping);
+        assert_eq!(*def.glsl_opts.div.value(), DivMode::Reciprocal);
     }
 
     #[test]

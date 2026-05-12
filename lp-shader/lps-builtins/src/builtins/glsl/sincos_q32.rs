@@ -1,53 +1,16 @@
-//! Combined fixed-point sine and cosine (shared range folding; cos via `sin(θ + π/2)`).
+//! Combined fixed-point sine and cosine (shared fast sine approximation).
 
-use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
+use crate::builtins::glsl::sin_q32::fast_sin_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;
-
-/// Fold `x` to `[-π, π]` (same logic as `__lps_sin_q32`).
-#[inline(always)]
-fn fold_angle(mut x: i32) -> i32 {
-    if x == 0 {
-        return 0;
-    }
-    let two_pi = FIX16_PI << 1;
-    x %= two_pi;
-    if x > FIX16_PI {
-        x -= two_pi;
-    } else if x < -FIX16_PI {
-        x += two_pi;
-    }
-    x
-}
-
-/// Taylor series for sin on a pre-folded angle (matches `__lps_sin_q32` body).
-#[inline(always)]
-fn taylor_sin(temp_angle: i32) -> i32 {
-    if temp_angle == 0 {
-        return 0;
-    }
-    let temp_angle_sq = __lp_lpir_fmul_q32(temp_angle, temp_angle);
-    let mut result = temp_angle;
-    let mut term = __lp_lpir_fmul_q32(temp_angle, temp_angle_sq);
-    result -= term / 6;
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result += term / 120;
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result -= term / 5040;
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result += term / 362880;
-    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
-    result -= term / 39916800;
-    result
-}
 
 /// `sincos(x)` in Q16.16 (`sin` then `cos`). Used from Rust call sites (inlined).
 #[inline(always)]
 pub fn lps_sincos_q32_pair(x: i32) -> (i32, i32) {
     let half_pi = FIX16_PI >> 1;
-    let sin_result = taylor_sin(fold_angle(x));
-    let cos_result = taylor_sin(fold_angle(x.wrapping_add(half_pi)));
+    let sin_result = fast_sin_q32(x);
+    let cos_result = fast_sin_q32(x.wrapping_add(half_pi));
     (sin_result, cos_result)
 }
 

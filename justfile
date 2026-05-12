@@ -396,6 +396,10 @@ fwtest-msafluid-esp32c6: install-rv32-target
 fwtest-fluid-demo-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
+# Run firmware with test_jit_math_perf: Q32 JIT math kernel cycle experiment
+fwtest-jit-math-perf-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && ESPFLASH_PORT=/dev/cu.usbmodem1101 cargo run --features test_jit_math_perf,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
 cargo-update:
     cargo update -p regalloc2 \
                  -p cranelift-codegen \

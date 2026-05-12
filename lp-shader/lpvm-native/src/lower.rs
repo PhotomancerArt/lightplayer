@@ -2058,6 +2058,14 @@ mod tests {
         let q32 = Q32Options::default();
         call_lower_op_full_q32(op, float_mode, &q32, src_op, f, ir, abi)
     }
+
+    fn q32_saturating() -> Q32Options {
+        Q32Options {
+            add_sub: lps_q32::q32_options::AddSubMode::Saturating,
+            mul: lps_q32::q32_options::MulMode::Saturating,
+            div: lps_q32::q32_options::DivMode::Saturating,
+        }
+    }
     use lpir::types::{SlotId, VRegRange};
     use lpir::{IrType, LpirModule, VReg as IrVReg};
     use lps_shared::LpsModuleSig;
@@ -2306,8 +2314,16 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, pool) =
-            call_lower_op_full(&op, FloatMode::Q32, Some(3), &f, &ir, &abi).expect("ok");
+        let (v, symbols, pool) = call_lower_op_full_q32(
+            &op,
+            FloatMode::Q32,
+            &q32_saturating(),
+            Some(3),
+            &f,
+            &ir,
+            &abi,
+        )
+        .expect("ok");
         assert_eq!(v.len(), 1, "single VInst (sym_call or trivial inline)");
         match &v[0] {
             VInst::Call {
@@ -2340,8 +2356,16 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, pool) =
-            call_lower_op_full(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
+        let (v, symbols, pool) = call_lower_op_full_q32(
+            &op,
+            FloatMode::Q32,
+            &q32_saturating(),
+            Some(0),
+            &f,
+            &ir,
+            &abi,
+        )
+        .expect("ok");
         assert_eq!(v.len(), 1, "single VInst (sym_call or trivial inline)");
         match &v[0] {
             VInst::Call {
@@ -2416,16 +2440,9 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &Q32Options::default(),
-            None,
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, symbols, _pool) =
+            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
+                .expect("ok");
         assert_eq!(v.len(), 1);
         let VInst::Call { target, .. } = &v[0] else {
             panic!("expected sym_call");
@@ -2469,16 +2486,9 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &Q32Options::default(),
-            None,
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, symbols, _pool) =
+            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
+                .expect("ok");
         assert_eq!(v.len(), 1);
         let VInst::Call { target, .. } = &v[0] else {
             panic!("expected sym_call");
@@ -2539,16 +2549,9 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &Q32Options::default(),
-            None,
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, symbols, _pool) =
+            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
+                .expect("ok");
         assert_eq!(v.len(), 1);
         let VInst::Call { target, .. } = &v[0] else {
             panic!("expected sym_call");
@@ -2579,7 +2582,7 @@ mod tests {
     }
 
     #[test]
-    fn fdiv_q32_saturating_emits_sym_call_to_default() {
+    fn fdiv_q32_saturating_emits_sym_call() {
         let op = LpirOp::Fdiv {
             dst: v(2),
             lhs: v(0),
@@ -2587,16 +2590,9 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &Q32Options::default(),
-            None,
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, symbols, _pool) =
+            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
+                .expect("ok");
         assert_eq!(v.len(), 1);
         let VInst::Call { target, .. } = &v[0] else {
             panic!("expected sym_call");
