@@ -160,6 +160,10 @@ pub enum HirExprKind {
         lhs: Box<HirExpr>,
         rhs: Box<HirExpr>,
     },
+    Sequence {
+        first: Box<HirExpr>,
+        second: Box<HirExpr>,
+    },
     Conditional {
         condition: Box<HirExpr>,
         accept: Box<HirExpr>,
@@ -707,6 +711,18 @@ impl<'a> TypeCtx<'a> {
                     kind: HirExprKind::Unary {
                         op: *op,
                         expr: Box::new(inner),
+                    },
+                })
+            }
+            ParsedExprKind::Binary { op, lhs, rhs } if *op == BinaryOp::Comma => {
+                let first = self.type_expr(lhs)?;
+                let second = self.type_expr(rhs)?;
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty: second.ty.clone(),
+                    kind: HirExprKind::Sequence {
+                        first: Box::new(first),
+                        second: Box::new(second),
                     },
                 })
             }

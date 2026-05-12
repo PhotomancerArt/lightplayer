@@ -306,7 +306,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         let mut lhs = self.parse_prefix()?;
         loop {
             if self.at_punct("=") {
-                if min_binding_power > 0 {
+                if min_binding_power > 1 {
                     break;
                 }
                 let ParsedExprKind::Name(name) = &lhs.kind else {
@@ -314,7 +314,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 };
                 let name = name.clone();
                 self.bump();
-                let value = self.parse_expr(0)?;
+                let value = self.parse_expr(1)?;
                 let span = Span::new(lhs.span.start, value.span.end);
                 lhs = ParsedExpr {
                     span,
@@ -326,7 +326,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 continue;
             }
             if self.at_punct("?") {
-                if min_binding_power > 0 {
+                if min_binding_power > 1 {
                     break;
                 }
                 self.bump();
@@ -513,7 +513,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     let mut args = Vec::new();
                     if !self.at_punct(")") {
                         loop {
-                            args.push(self.parse_expr(0)?);
+                            args.push(self.parse_expr(1)?);
                             if self.at_punct(",") {
                                 self.bump();
                             } else {
@@ -562,9 +562,11 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             "&&" => BinaryOp::LogicalAnd,
             "||" => BinaryOp::LogicalOr,
             "^^" => BinaryOp::LogicalXor,
+            "," => BinaryOp::Comma,
             _ => return None,
         };
         let bp = match op {
+            BinaryOp::Comma => (0, 1),
             BinaryOp::LogicalOr => (1, 2),
             BinaryOp::LogicalXor => (3, 4),
             BinaryOp::LogicalAnd => (5, 6),

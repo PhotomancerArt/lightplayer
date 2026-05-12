@@ -387,6 +387,10 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             let rhs = lower_expr(ctx, rhs)?;
             lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
         }
+        HirExprKind::Sequence { first, second } => {
+            let _ = lower_expr(ctx, first)?;
+            lower_expr(ctx, second)
+        }
         HirExprKind::Conditional {
             condition,
             accept,

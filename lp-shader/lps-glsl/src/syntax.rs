@@ -120,6 +120,7 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
+    Comma,
     Add,
     Sub,
     Mul,
