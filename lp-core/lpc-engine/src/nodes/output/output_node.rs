@@ -65,7 +65,13 @@ impl NodeRuntime for OutputNode {
             })
             .map_err(|e| NodeError::msg(alloc::format!("resolve output input: {}", e.message)))?;
 
-        let control = match prod.product.get() {
+        let control = match prod
+            .value_leaf()
+            .ok_or_else(|| {
+                NodeError::msg("output input resolved to aggregate data, expected control product")
+            })?
+            .get()
+        {
             lpc_model::LpValue::Product(lpc_model::ProductRef::Control(product)) => *product,
             _ => return Err(NodeError::msg("output expected control product from input")),
         };

@@ -157,7 +157,13 @@ impl NodeRuntime for FixtureNode {
             })
             .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
 
-        let visual_product = match prod.product.get() {
+        let visual_product = match prod
+            .value_leaf()
+            .ok_or_else(|| {
+                NodeError::msg("fixture input resolved to aggregate data, expected visual product")
+            })?
+            .get()
+        {
             lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
             _ => return Err(NodeError::msg("fixture expected visual product from input")),
         };

@@ -1,25 +1,33 @@
-//! Resolved slot value plus production provenance for the engine cache.
+//! Resolved slot data plus production provenance for the engine cache.
 
 use crate::dataflow::binding::BindingRef;
 use crate::dataflow::resolver::resolver::model_value_to_lps_value_f32;
 use crate::gfx::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
 use alloc::rc::Rc;
-use lpc_model::{LpValue, NodeId, SlotPath, WithRevision};
+use lpc_model::{LpValue, NodeId, SlotData, SlotPath, WithRevision};
 use lps_shared::LpsValueF32;
 
-/// One cached production: versioned slot value and where it came from.
+/// One cached resolver answer: owned slot data and where it came from.
+///
+/// Durable data remains owned by nodes, artifacts, and resource stores. A
+/// `Production` is the resolver's same-frame answer for one query, including
+/// aggregate answers created by merging multiple sources.
 #[derive(Clone, Debug)]
 pub struct Production {
-    pub product: Rc<WithRevision<LpValue>>,
+    pub data: Rc<SlotData>,
     pub source: ProductionSource,
 }
 
 impl Production {
-    pub fn new(product: WithRevision<LpValue>, source: ProductionSource) -> Self {
+    pub fn new(data: SlotData, source: ProductionSource) -> Self {
         Self {
-            product: Rc::new(product),
+            data: Rc::new(data),
             source,
         }
+    }
+
+    pub fn leaf(value: WithRevision<LpValue>, source: ProductionSource) -> Self {
+        Self::new(SlotData::Value(value), source)
     }
 
     pub fn value(
@@ -28,11 +36,22 @@ impl Production {
     ) -> Result<Self, LpsValueToModelConversionError> {
         let revision = value.changed_at();
         let product = lps_value_f32_to_model_value(value.value())?;
-        Ok(Self::new(WithRevision::new(revision, product), source))
+        Ok(Self::leaf(WithRevision::new(revision, product), source))
+    }
+
+    pub fn data(&self) -> &SlotData {
+        &self.data
+    }
+
+    pub fn value_leaf(&self) -> Option<&WithRevision<LpValue>> {
+        match self.data.as_ref() {
+            SlotData::Value(value) => Some(value),
+            _ => None,
+        }
     }
 
     pub fn as_value(&self) -> Option<LpsValueF32> {
-        model_value_to_lps_value_f32(self.product.value()).ok()
+        model_value_to_lps_value_f32(self.value_leaf()?.value()).ok()
     }
 }
 
@@ -41,6 +60,7 @@ impl Production {
 pub enum ProductionSource {
     Literal,
     Default,
+    Merged,
     ProducedSlot { node: NodeId, slot: SlotPath },
     BusBinding { binding: BindingRef },
 }
@@ -85,11 +105,14 @@ mod tests {
         )
         .expect("production");
         assert!(matches!(
-            pv.product.get(),
+            pv.value_leaf().expect("leaf").get(),
             lpc_model::LpValue::F32(inner) if inner.eq(&1.25)
         ));
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(1.25)));
-        assert_eq!(pv.product.changed_at(), Revision::new(3));
+        assert_eq!(
+            pv.value_leaf().expect("leaf").changed_at(),
+            Revision::new(3)
+        );
         assert_eq!(
             pv.source,
             ProductionSource::ProducedSlot {
@@ -111,7 +134,10 @@ mod tests {
                 binding: BindingRef::new(NodeId::new(4), 0),
             }
         );
-        assert!(matches!(pv2.product.get(), lpc_model::LpValue::F32(_)));
+        assert!(matches!(
+            pv2.value_leaf().expect("leaf").get(),
+            lpc_model::LpValue::F32(_)
+        ));
     }
 
     #[test]
@@ -119,7 +145,7 @@ mod tests {
         let frame = Revision::new(42);
         let v = WithRevision::new(frame, LpsValueF32::F32(-0.5));
         let pv = Production::value(v, ProductionSource::Literal).expect("production");
-        assert_eq!(pv.product.changed_at(), frame);
+        assert_eq!(pv.value_leaf().expect("leaf").changed_at(), frame);
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(-0.5)));
     }
 }

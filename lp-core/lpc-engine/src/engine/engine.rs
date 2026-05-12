@@ -9,9 +9,8 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use lpc_model::{
-    ControlProduct, LpValue, NodeId, Revision, SlotAccessor, SlotDataAccess, SlotPath,
-    SlotShapeRegistry, TreePath, WithRevision, advance_revision, current_revision,
-    lookup_slot_data,
+    ControlProduct, NodeId, Revision, SlotAccessor, SlotData, SlotPath, SlotShapeRegistry,
+    TreePath, WithRevision, advance_revision, current_revision, lookup_slot_data_and_shape,
 };
 use lpfs::FsChange;
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -516,6 +515,18 @@ impl ResolveHost for EngineResolveHost<'_> {
             .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
     }
 
+    fn bindings_for_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
+        self.tree
+            .bindings_for_consumed_slot(node, slot)
+            .into_iter()
+            .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+            .collect()
+    }
+
     fn providers_for_bus(
         &self,
         channel: &lpc_model::ChannelName,
@@ -560,25 +571,20 @@ impl EngineResolveHost<'_> {
         &self,
         node: &dyn NodeRuntime,
         slot: &SlotPath,
-    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
+    ) -> Result<SlotData, SessionResolveError> {
         let state = node.runtime_state_slots().ok_or_else(|| {
             SessionResolveError::other("node does not expose runtime state slots")
         })?;
-        let data = lookup_slot_data(state, self.slot_shapes, slot)
+        let (data, shape) = lookup_slot_data_and_shape(state, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("runtime state lookup: {e}")))?;
-        let SlotDataAccess::Value(value) = data else {
-            return Err(SessionResolveError::other(format!(
-                "runtime state slot {slot:?} is not a value"
-            )));
-        };
-        Ok(WithRevision::new(value.changed_at(), value.value()))
+        Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
     fn read_authored_def_product(
         &self,
         handle: &crate::node::NodeDefHandle,
         slot: &SlotPath,
-    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
+    ) -> Result<SlotData, SessionResolveError> {
         if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
                 "non-root node def handles are not supported yet: {}",
@@ -602,21 +608,16 @@ impl EngineResolveHost<'_> {
                 )));
             }
         };
-        let data = lookup_slot_data(def, self.slot_shapes, slot)
+        let (data, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
-        let SlotDataAccess::Value(value) = data else {
-            return Err(SessionResolveError::other(format!(
-                "authored def slot {slot:?} is not a value"
-            )));
-        };
-        Ok(WithRevision::new(value.changed_at(), value.value()))
+        Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
     fn read_authored_def_product_by_accessor(
         &self,
         handle: &crate::node::NodeDefHandle,
         accessor: &SlotAccessor,
-    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
+    ) -> Result<SlotData, SessionResolveError> {
         if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
                 "non-root node def handles are not supported yet: {}",
@@ -643,13 +644,9 @@ impl EngineResolveHost<'_> {
         let data = accessor
             .access(def, self.slot_shapes)
             .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
-        let SlotDataAccess::Value(value) = data else {
-            return Err(SessionResolveError::other(format!(
-                "authored def slot {:?} is not a value",
-                accessor.path()
-            )));
-        };
-        Ok(WithRevision::new(value.changed_at(), value.value()))
+        let (_, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, accessor.path())
+            .map_err(|e| SessionResolveError::other(format!("authored def accessor shape: {e}")))?;
+        Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
     fn render_node_texture(
@@ -1260,7 +1257,10 @@ mod tests {
                 .expect("value")
                 .eq(&second.as_value().expect("value"))
         );
-        assert_eq!(first.product.changed_at(), second.product.changed_at());
+        assert_eq!(
+            first.value_leaf().expect("value").changed_at(),
+            second.value_leaf().expect("value").changed_at()
+        );
 
         assert_eq!(h.shader_ticks("shader"), 1);
     }
@@ -1344,10 +1344,10 @@ mod tests {
     #[test]
     fn visual_product_handle_is_node_owned_value() {
         let product = VisualProduct::new(NodeId::new(7), 0);
-        let value = LpValue::Product(lpc_model::ProductRef::visual(product));
+        let value = lpc_model::LpValue::Product(lpc_model::ProductRef::visual(product));
         assert_eq!(
             value,
-            LpValue::Product(lpc_model::ProductRef::Visual(product))
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product))
         );
     }
 
