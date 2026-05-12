@@ -99,13 +99,12 @@ render_order = 0
 target = "bus#visual.out"
 
 [param_defs.speed]
+kind = "value"
 label = "Speed"
 description = "Animation speed"
-value_type = "f32"
+value = "f32"
 default = 0.25
-
-[param_defs.speed.min]
-value = 0.0
+min = 0.0
 "#,
     )
     .unwrap();

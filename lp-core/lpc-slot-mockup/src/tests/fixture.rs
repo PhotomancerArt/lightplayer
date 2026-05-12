@@ -196,11 +196,11 @@ pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str)
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
-    let SlotData::Value(value_type) = &param_def.fields[2] else {
-        panic!("shader param def value_type");
+    let SlotData::Value(value_shape) = &param_def.fields[1] else {
+        panic!("shader slot def value");
     };
     assert_eq!(
-        value_type.value(),
+        value_shape.value(),
         &lpc_model::LpValue::String(expected.to_string())
     );
 }
@@ -210,8 +210,8 @@ pub fn assert_shader_param_def_label(data: &SlotData, name: &str, expected: &str
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
-    let SlotData::Value(label) = &param_def.fields[0] else {
-        panic!("shader param def label");
+    let SlotData::Value(label) = &param_def.fields[6] else {
+        panic!("shader slot def label");
     };
     assert_eq!(
         label.value(),

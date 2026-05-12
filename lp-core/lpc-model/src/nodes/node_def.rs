@@ -11,7 +11,7 @@ use crate::node::kind::NodeKind;
 use crate::nodes::fixture::FixtureDef;
 use crate::nodes::output::OutputDef;
 use crate::nodes::project::ProjectDef;
-use crate::nodes::shader::ShaderDef;
+use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{SlotAccess, SlotDataAccess, SlotShapeId};
 
@@ -25,6 +25,7 @@ pub enum NodeDef {
     Project(ProjectDef),
     Texture(TextureDef),
     Shader(ShaderDef),
+    ComputeShader(ComputeShaderDef),
     Output(OutputDef),
     Fixture(FixtureDef),
 }
@@ -36,6 +37,7 @@ impl NodeDef {
             Self::Project(_) => NodeKind::Project,
             Self::Texture(_) => NodeKind::Texture,
             Self::Shader(_) => NodeKind::Shader,
+            Self::ComputeShader(_) => NodeKind::ComputeShader,
             Self::Output(_) => NodeKind::Output,
             Self::Fixture(_) => NodeKind::Fixture,
         }
@@ -47,6 +49,7 @@ impl NodeDef {
             Self::Project(_) => ProjectDef::KIND,
             Self::Texture(_) => TextureDef::KIND,
             Self::Shader(_) => ShaderDef::KIND,
+            Self::ComputeShader(_) => ComputeShaderDef::KIND,
             Self::Output(_) => OutputDef::KIND,
             Self::Fixture(_) => FixtureDef::KIND,
         }
@@ -69,6 +72,13 @@ impl NodeDef {
     pub fn as_shader(&self) -> Option<&ShaderDef> {
         match self {
             Self::Shader(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_compute_shader(&self) -> Option<&ComputeShaderDef> {
+        match self {
+            Self::ComputeShader(def) => Some(def),
             _ => None,
         }
     }
@@ -97,6 +107,7 @@ impl NodeDef {
             ProjectDef::KIND => parse_variant(text).map(Self::Project),
             TextureDef::KIND => parse_variant(text).map(Self::Texture),
             ShaderDef::KIND => parse_variant(text).map(Self::Shader),
+            ComputeShaderDef::KIND => parse_variant(text).map(Self::ComputeShader),
             OutputDef::KIND => parse_variant(text).map(Self::Output),
             FixtureDef::KIND => parse_variant(text).map(Self::Fixture),
             other => Err(NodeDefParseError::UnknownKind {
@@ -112,6 +123,7 @@ impl SlotAccess for NodeDef {
             Self::Project(def) => def.shape_id(),
             Self::Texture(def) => def.shape_id(),
             Self::Shader(def) => def.shape_id(),
+            Self::ComputeShader(def) => def.shape_id(),
             Self::Output(def) => def.shape_id(),
             Self::Fixture(def) => def.shape_id(),
         }
@@ -122,6 +134,7 @@ impl SlotAccess for NodeDef {
             Self::Project(def) => def.data(),
             Self::Texture(def) => def.data(),
             Self::Shader(def) => def.data(),
+            Self::ComputeShader(def) => def.data(),
             Self::Output(def) => def.data(),
             Self::Fixture(def) => def.data(),
         }

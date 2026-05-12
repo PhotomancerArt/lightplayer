@@ -81,7 +81,7 @@ impl MockRuntime {
         param_value: [f32; 3],
     ) {
         set_current_revision(frame);
-        self.shader_def.set_param_value_type(name, "vec3");
+        self.shader_def.set_param_value_shape(name, "vec3");
         self.shader_node.set_param_vec3(name, param_value);
         self.refresh_shader_node_shape();
     }

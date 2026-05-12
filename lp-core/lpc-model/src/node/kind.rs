@@ -8,6 +8,7 @@ pub enum NodeKind {
     Project,
     Texture,
     Shader,
+    ComputeShader,
     Output,
     Fixture,
 }

@@ -250,6 +250,37 @@ impl SlotShapeRegistry {
         self.shapes.get(id)
     }
 
+    /// Find a registered root id by its human-readable shape name.
+    ///
+    /// Named lookup is for authoring and debug paths such as native shader slot
+    /// references. Runtime/wire data should continue to use compact
+    /// [`SlotShapeId`] values once a name has been resolved.
+    pub fn id_for_name(&self, name: &str) -> Option<SlotShapeId> {
+        self.shapes.iter().find_map(|(id, entry)| {
+            if entry.name() == Some(name) {
+                Some(*id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Find a registered root entry by its human-readable shape name.
+    pub fn entry_by_name(&self, name: &str) -> Option<(SlotShapeId, &SlotShapeEntry)> {
+        self.shapes.iter().find_map(|(id, entry)| {
+            if entry.name() == Some(name) {
+                Some((*id, entry))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Find a registered root shape by its human-readable shape name.
+    pub fn get_by_name(&self, name: &str) -> Option<&SlotShape> {
+        self.entry_by_name(name).map(|(_, entry)| entry.value())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&SlotShapeId, &SlotShapeEntry)> {
         self.shapes.iter()
     }
@@ -358,6 +389,21 @@ mod tests {
             snapshot.shapes.get(&id).and_then(SlotShapeEntry::name),
             Some("crate::test::NamedShape")
         );
+    }
+
+    #[test]
+    fn named_root_can_be_resolved_by_name() {
+        let mut registry = SlotShapeRegistry::default();
+        let id = SlotShapeId::from_static_name("lp::fluid::Emitter");
+        let shape = SlotShape::value(LpType::Bool);
+
+        registry
+            .ensure_root_named(id, "lp::fluid::Emitter", shape.clone())
+            .unwrap();
+
+        assert_eq!(registry.id_for_name("lp::fluid::Emitter"), Some(id));
+        assert_eq!(registry.get_by_name("lp::fluid::Emitter"), Some(&shape));
+        assert!(registry.entry_by_name("lp::missing::Shape").is_none());
     }
 
     #[test]
