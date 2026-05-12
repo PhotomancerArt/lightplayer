@@ -28,6 +28,20 @@ just demo
 just demo -- <example-name>
 ```
 
+# On-device demo (ESP32-C6)
+
+To flash firmware, push the `examples/basic` project over USB serial, and run it on real hardware:
+
+```bash
+just demo-esp32c6-host
+```
+
+You need an ESP32-C6 board connected by USB, the RISC-V target installed (the recipe runs `install-rv32-target`), and [`espflash`](https://github.com/esp-rs/espflash) on your `PATH` for flashing.
+
+**Wiring (GPIO is hardcoded today):** connect a WS2812-class addressable strip (or other device driven the same way) to **GPIO 18** as the data line—**not** the `pin` field in `examples/basic/src/strip.output/node.json`, which the firmware does not use yet. The firmware initializes a buffer for **256** LEDs; the basic demo mapping uses **241** pixels, which fits in that limit.
+
+For an empty flash and firmware only (no project push), use `just demo-esp32c6-standalone`.
+
 # Development
 
 To get started with development:
