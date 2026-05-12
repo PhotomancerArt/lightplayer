@@ -95,8 +95,8 @@ pub struct LpsPxShader {
     meta: LpsModuleSig,
     /// Format-specific synthesised entry, e.g. `"__render_texture_rgba16"`.
     render_texture_fn_name: String,
-    /// Synthesised point-sampling entry.
-    render_samples_fn_name: String,
+    /// Synthesised point-sampling entry for RGBA16 output shaders.
+    render_samples_fn_name: Option<String>,
     /// Index of `render` in `meta.functions` (preserved from compile_px).
     render_fn_index: usize,
 }
@@ -112,7 +112,7 @@ impl LpsPxShader {
         output_format: TextureStorageFormat,
         render_fn_index: usize,
         render_texture_fn_name: String,
-        render_samples_fn_name: String,
+        render_samples_fn_name: Option<String>,
     ) -> Result<Self, LpsError> {
         let synth_sig = meta
             .functions
@@ -223,10 +223,16 @@ impl LpsPxShader {
                 out.count()
             )));
         }
+        let render_samples_fn_name = self.render_samples_fn_name.as_deref().ok_or_else(|| {
+            LpsError::Render(format!(
+                "sample_points_rgba16 is only available for {:?} shaders",
+                TextureStorageFormat::Rgba16Unorm
+            ))
+        })?;
         let mut points_buf = points.buffer();
         let mut out_buf = out.buffer();
         self.inner.borrow_mut().call_render_samples(
-            &self.render_samples_fn_name,
+            render_samples_fn_name,
             &mut points_buf,
             &mut out_buf,
             points.count(),
@@ -394,7 +400,7 @@ pub(crate) fn px_shader_from_parts_for_test(
         output_format,
         meta,
         render_texture_fn_name,
-        render_samples_fn_name: String::from(crate::synth::RENDER_SAMPLES_RGBA16_FN),
+        render_samples_fn_name: Some(String::from(crate::synth::RENDER_SAMPLES_RGBA16_FN)),
         render_fn_index,
     }
 }

@@ -86,9 +86,14 @@ impl<E: LpvmEngine> LpsEngine<E> {
             output_format,
         )
         .map_err(|e| LpsError::Compile(format!("synth render_texture: {e:?}")))?;
-        let render_samples_fn_name =
-            crate::synth::synthesise_render_samples_rgba16(&mut ir, &mut meta, render_fn_index)
-                .map_err(|e| LpsError::Compile(format!("synth render_samples: {e:?}")))?;
+        let render_samples_fn_name = if output_format == TextureStorageFormat::Rgba16Unorm {
+            Some(
+                crate::synth::synthesise_render_samples_rgba16(&mut ir, &mut meta, render_fn_index)
+                    .map_err(|e| LpsError::Compile(format!("synth render_samples: {e:?}")))?,
+            )
+        } else {
+            None
+        };
 
         let module = self
             .engine
