@@ -9,11 +9,12 @@ use crate::hir::{BuiltinKind, HirExpr, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
-use super::scalar::{
-    BinaryFloatOp, UnaryFloatOp, lane_at, lower_binary, lower_binary_float_lane,
-    lower_bool_mix_lane, lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
+use super::numeric::{
+    BinaryFloatOp, UnaryFloatOp, lane_at, lower_binary_float_lane, lower_bool_mix_lane,
+    lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
     lower_unary_float_lane,
 };
+use super::scalar::lower_binary;
 
 pub(in crate::lower) fn lower_builtin(
     ctx: &mut LowerCtx<'_>,
