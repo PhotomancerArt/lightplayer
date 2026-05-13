@@ -5,8 +5,8 @@
 //! underlying types remain explicit and serializable.
 
 use crate::{
-    LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotSemantics, SlotShape, SlotShapeId,
-    SlotValueShape, SlotVariantShape,
+    LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotPolicy, SlotSemantics, SlotShape,
+    SlotShapeId, SlotValueShape, SlotVariantShape,
 };
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -56,6 +56,14 @@ pub fn field(name: &str, shape: SlotShape) -> SlotFieldShape {
     SlotFieldShape::new(name, shape).expect("valid static slot field name")
 }
 
+/// Build one record field with explicit tooling and mutation policy.
+///
+/// This panics for invalid names because these names are authored in Rust
+/// source.
+pub fn field_with_policy(name: &str, shape: SlotShape, policy: SlotPolicy) -> SlotFieldShape {
+    SlotFieldShape::with_policy(name, shape, policy).expect("valid static slot field name")
+}
+
 /// Build one record field with explicit dataflow semantics.
 ///
 /// This panics for invalid names because these names are authored in Rust
@@ -66,6 +74,20 @@ pub fn field_with_semantics(
     semantics: SlotSemantics,
 ) -> SlotFieldShape {
     SlotFieldShape::with_semantics(name, shape, semantics).expect("valid static slot field name")
+}
+
+/// Build one record field with explicit dataflow semantics and policy.
+///
+/// This panics for invalid names because these names are authored in Rust
+/// source.
+pub fn field_with_semantics_and_policy(
+    name: &str,
+    shape: SlotShape,
+    semantics: SlotSemantics,
+    policy: SlotPolicy,
+) -> SlotFieldShape {
+    SlotFieldShape::with_semantics_and_policy(name, shape, semantics, policy)
+        .expect("valid static slot field name")
 }
 
 /// Build one enum variant.

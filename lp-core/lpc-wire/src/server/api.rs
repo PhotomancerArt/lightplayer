@@ -1,4 +1,5 @@
-use crate::project::{WireProjectHandle, WireProjectRequest};
+use crate::messages::ProjectReadRequest;
+use crate::project::WireProjectHandle;
 use crate::server::fs_api::{FsRequest, FsResponse};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -17,7 +18,7 @@ pub enum ClientMsgBody {
     /// Project-specific request
     ProjectRequest {
         handle: WireProjectHandle,
-        request: WireProjectRequest,
+        request: ProjectReadRequest,
     },
     /// List available projects
     ListAvailableProjects,
@@ -104,7 +105,7 @@ pub enum LogLevel {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AvailableProject {
     pub path: LpPathBuf,
 }
@@ -128,7 +129,7 @@ pub struct LoadedProject {
 }
 
 /// Optional memory statistics (platform-dependent; ESP32 reports heap).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryStats {
     pub free_bytes: u32,

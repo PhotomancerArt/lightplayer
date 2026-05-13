@@ -77,13 +77,13 @@ pub use node::{
     RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ColorOrder, ComputeShaderDef, ComputeShaderDefView, DivMode, FixtureDef,
-    FixtureDefView, FixtureSamplingConfig, FixtureState, FluidDef, FluidDefView, FluidEmitter,
-    FluidState, GlslOpts, MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView,
-    OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder, ShaderDef, ShaderDefView,
-    ShaderHeaderGenError, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, TextureDef, TextureDefView,
-    TextureFormat, TextureState, generate_compute_shader_header,
+    AddSubMode, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder, ComputeShaderDef,
+    ComputeShaderDefView, DivMode, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState,
+    FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts, MappingConfig, MulMode,
+    NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig, PathSpec, ProjectDef,
+    RingOrder, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
+    TextureDef, TextureDefView, TextureFormat, TextureState, generate_compute_shader_header,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};
@@ -106,10 +106,10 @@ pub use slot::{
     SlotEnumAccess, SlotEnumShape, SlotFieldReader, SlotFieldShape, SlotLookupError, SlotMapDyn,
     SlotMapKey, SlotMapKeyShape, SlotMerge, SlotMeta, SlotName, SlotNameError, SlotOptionAccess,
     SlotOptionDyn, SlotOptionReader, SlotOwner, SlotPath, SlotPathError, SlotPathSegment,
-    SlotReadContext, SlotRecord, SlotRecordAccess, SlotRecordShape, SlotRef, SlotSemantics,
-    SlotShape, SlotShapeEntry, SlotShapeId, SlotShapeIdError, SlotShapeRegistry,
-    SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess, SlotVariantShape,
-    StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data,
+    SlotPersistence, SlotPolicy, SlotReadContext, SlotRecord, SlotRecordAccess, SlotRecordShape,
+    SlotRef, SlotSemantics, SlotShape, SlotShapeEntry, SlotShapeId, SlotShapeIdError,
+    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotValueAccess,
+    SlotVariantShape, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data,
     lookup_slot_data_and_shape,
 };
 pub use value::value_path::ValuePath;

@@ -2,6 +2,7 @@
 
 use core::cmp::Ordering;
 
+use alloc::string::String;
 use lpc_model::LpPathBuf;
 use lpc_source::ArtifactLocator;
 
@@ -14,11 +15,19 @@ use lpc_source::ArtifactLocator;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ArtifactLocation {
     File(LpPathBuf),
+    InlineNode { owner: LpPathBuf, name: String },
 }
 
 impl ArtifactLocation {
     pub fn file(path: impl Into<LpPathBuf>) -> Self {
         Self::File(path.into())
+    }
+
+    pub fn inline_node(owner: impl Into<LpPathBuf>, name: impl Into<String>) -> Self {
+        Self::InlineNode {
+            owner: owner.into(),
+            name: name.into(),
+        }
     }
 
     pub fn try_from_src_spec(spec: &ArtifactLocator) -> Result<Self, super::ArtifactError> {
@@ -35,6 +44,21 @@ impl Ord for ArtifactLocation {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (Self::File(a), Self::File(b)) => a.as_str().cmp(b.as_str()),
+            (Self::File(_), Self::InlineNode { .. }) => Ordering::Less,
+            (Self::InlineNode { .. }, Self::File(_)) => Ordering::Greater,
+            (
+                Self::InlineNode {
+                    owner: a_owner,
+                    name: a_name,
+                },
+                Self::InlineNode {
+                    owner: b_owner,
+                    name: b_name,
+                },
+            ) => a_owner
+                .as_str()
+                .cmp(b_owner.as_str())
+                .then_with(|| a_name.cmp(b_name)),
         }
     }
 }
@@ -56,6 +80,7 @@ mod tests {
         let location = ArtifactLocation::try_from_src_spec(&spec).unwrap();
         match location {
             ArtifactLocation::File(path) => assert_eq!(path.as_str(), "fx/../fx/a.effect.toml"),
+            ArtifactLocation::InlineNode { .. } => panic!("expected file location"),
         }
     }
 

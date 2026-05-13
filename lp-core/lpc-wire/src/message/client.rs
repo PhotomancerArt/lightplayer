@@ -1,6 +1,7 @@
 //! Client → server payloads.
 
-use crate::project::{WireProjectHandle, WireProjectRequest};
+use crate::messages::ProjectReadRequest;
+use crate::project::WireProjectHandle;
 use crate::server::FsRequest;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ pub enum ClientRequest {
     },
     ProjectRequest {
         handle: WireProjectHandle,
-        request: WireProjectRequest,
+        request: ProjectReadRequest,
     },
     ListAvailableProjects,
     ListLoadedProjects,
@@ -35,7 +36,6 @@ pub enum ClientRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::WireProjectRequest;
     use lpc_model::AsLpPathBuf;
 
     #[test]
@@ -90,9 +90,7 @@ mod tests {
     fn test_project_request() {
         let req = ClientRequest::ProjectRequest {
             handle: WireProjectHandle::new(1),
-            request: WireProjectRequest::Read(crate::messages::ProjectReadRequest::default_debug(
-                None,
-            )),
+            request: crate::messages::ProjectReadRequest::default_debug(None),
         };
         let json = crate::json::to_string(&req).unwrap();
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
@@ -101,9 +99,7 @@ mod tests {
                 assert_eq!(handle.id(), 1);
                 assert_eq!(
                     request,
-                    WireProjectRequest::Read(crate::messages::ProjectReadRequest::default_debug(
-                        None
-                    ))
+                    crate::messages::ProjectReadRequest::default_debug(None)
                 );
             }
             _ => panic!("Wrong request type"),

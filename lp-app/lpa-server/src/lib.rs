@@ -14,6 +14,7 @@ pub mod error;
 pub mod handlers;
 pub mod project;
 pub mod project_manager;
+mod project_read_source;
 pub mod server;
 pub mod template;
 

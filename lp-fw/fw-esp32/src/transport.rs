@@ -106,7 +106,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
         &mut self,
         id: u64,
         _handle: WireProjectHandle,
-        source: &S,
+        source: &mut S,
         request: ProjectReadRequest,
     ) -> Result<(), TransportError>
     where
@@ -172,7 +172,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
 fn write_project_read_chunks<S>(
     channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16>,
     id: u64,
-    source: &S,
+    source: &mut S,
     request: ProjectReadRequest,
 ) -> Result<(), TransportError>
 where

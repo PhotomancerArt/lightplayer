@@ -4,6 +4,9 @@ name = "fluid"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+kind = "clock"
+
 [nodes.compute]
 artifact = "./compute.toml"
 

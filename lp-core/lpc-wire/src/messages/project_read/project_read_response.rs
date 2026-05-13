@@ -1,6 +1,9 @@
 //! Project read response envelope.
 
-use super::{NodeReadResult, ProjectProbeResult, ResourceReadResult, ShapeReadResult};
+use super::{
+    NodeReadResult, ProjectProbeResult, ResourceReadResult, RuntimeReadResult, ShapeReadResult,
+};
+use crate::slot::WireSlotMutationResponse;
 use alloc::vec::Vec;
 use lpc_model::Revision;
 
@@ -13,6 +16,8 @@ pub struct ProjectReadResponse {
     pub results: Vec<ProjectReadResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<ProjectProbeResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mutations: Vec<WireSlotMutationResponse>,
 }
 
 /// One result aligned with a [`super::ProjectReadQuery`].
@@ -23,6 +28,7 @@ pub enum ProjectReadResult {
     Shapes(ShapeReadResult),
     Nodes(NodeReadResult),
     Resources(ResourceReadResult),
+    Runtime(RuntimeReadResult),
 }
 
 #[cfg(test)]
@@ -40,6 +46,7 @@ mod tests {
                 registry: None,
             })],
             probes: Vec::new(),
+            mutations: Vec::new(),
         };
 
         let json = serde_json::to_string(&response).unwrap();

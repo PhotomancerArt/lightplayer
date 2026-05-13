@@ -3,7 +3,8 @@ use alloc::string::String;
 /// Human-facing metadata for a slot shape.
 ///
 /// Metadata describes how a slot should be presented to authors and tools. It
-/// does not participate in value validation.
+/// does not participate in value validation, resolver behavior, permissions, or
+/// save/writeback policy.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotMeta {
@@ -12,10 +13,6 @@ pub struct SlotMeta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-
-    /// True when clients may request mutation of this slot.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub writable: bool,
 }
 
 impl SlotMeta {
@@ -25,6 +22,14 @@ impl SlotMeta {
     }
 }
 
-fn is_false(value: &bool) -> bool {
-    !*value
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slot_meta_defaults_to_no_presentation_hints() {
+        let meta = SlotMeta::default();
+        assert_eq!(meta.label, None);
+        assert_eq!(meta.description, None);
+    }
 }
