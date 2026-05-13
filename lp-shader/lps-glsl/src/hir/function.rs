@@ -62,12 +62,13 @@ impl ImportRegistry {
             name: String::from(name),
             glsl_params: glsl_params.clone(),
         };
+        let func_name = format!("{name}_{}", self.imports.len());
         self.imports
             .entry(key.clone())
             .or_insert_with(|| ImportInfo {
                 key: key.clone(),
                 module_name: String::from("lpfn"),
-                func_name: format!("{name}_0"),
+                func_name,
                 param_types,
                 return_types,
                 lpfn_glsl_params: Some(glsl_params),

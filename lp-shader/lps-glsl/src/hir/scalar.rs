@@ -29,6 +29,15 @@ pub(super) fn glsl_param_token(ty: &LpsType, span: Span) -> Result<String, Diagn
         LpsType::Vec2 => String::from("Vec2"),
         LpsType::Vec3 => String::from("Vec3"),
         LpsType::Vec4 => String::from("Vec4"),
+        LpsType::IVec2 => String::from("IVec2"),
+        LpsType::IVec3 => String::from("IVec3"),
+        LpsType::IVec4 => String::from("IVec4"),
+        LpsType::UVec2 => String::from("UVec2"),
+        LpsType::UVec3 => String::from("UVec3"),
+        LpsType::UVec4 => String::from("UVec4"),
+        LpsType::BVec2 => String::from("BVec2"),
+        LpsType::BVec3 => String::from("BVec3"),
+        LpsType::BVec4 => String::from("BVec4"),
         other => {
             return Err(Diagnostic::error(
                 span,

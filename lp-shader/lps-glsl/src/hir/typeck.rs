@@ -678,43 +678,23 @@ impl<'a> TypeCtx<'a> {
             .iter()
             .flat_map(|arg| scalar_ir_types(&arg.ty).unwrap_or_default())
             .collect::<Vec<_>>();
-        let return_ty = if name == "lpfn_worley"
-            && matches!(glsl_params.as_slice(), [a, b] if (a == "Vec2" || a == "Vec3") && b == "UInt")
-        {
-            LpsType::Float
-        } else if name == "lpfn_fbm"
-            && matches!(glsl_params.as_slice(), [a, b, c] if (a == "Vec2" || a == "Vec3") && b == "Int" && c == "UInt")
-        {
-            LpsType::Float
-        } else if name == "lpfn_hsv2rgb" && matches!(glsl_params.as_slice(), [a] if a == "Vec3") {
-            LpsType::Vec3
-        } else if name == "lpfn_hsv2rgb" && matches!(glsl_params.as_slice(), [a] if a == "Vec4") {
-            LpsType::Vec4
-        } else if name == "lpfn_psrdnoise"
-            && matches!(glsl_params.as_slice(), [a, b, c, d, e] if a == "Vec2" && b == "Vec2" && c == "Float" && d == "Vec2" && e == "UInt")
-        {
+        let return_ty = if let Some(gradient_ty) = lpfn_psrdnoise_gradient_type(&glsl_params) {
             let HirExprKind::Local { index } = args[3].kind else {
                 return Err(Diagnostic::error(
                     args[3].span,
-                    "lpfn_psrdnoise gradient argument must be a local vec2",
+                    format!("lpfn_psrdnoise gradient argument must be a local {gradient_ty:?}"),
                 ));
             };
             out = Some(HirOutArg {
                 local: index,
-                ty: LpsType::Vec2,
+                ty: gradient_ty,
                 arg_index: 3,
             });
             import_args.remove(3);
-            param_types = alloc::vec![
-                lpir::IrType::F32,
-                lpir::IrType::F32,
-                lpir::IrType::F32,
-                lpir::IrType::F32,
-                lpir::IrType::F32,
-                lpir::IrType::I32,
-                lpir::IrType::I32,
-            ];
+            param_types = psrdnoise_param_types(&glsl_params);
             LpsType::Float
+        } else if let Some(return_ty) = lpfn_return_type(name, &glsl_params) {
+            return_ty
         } else {
             return Err(Diagnostic::error(
                 span,
@@ -1133,6 +1113,77 @@ fn one_lanes_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
         ty: ty.clone(),
         kind: HirExprKind::Constructor { args },
     })
+}
+
+fn lpfn_return_type(name: &str, glsl_params: &[String]) -> Option<LpsType> {
+    match name {
+        "lpfn_hash" if matches!(glsl_params, [a, b] if (a == "UInt" || a == "UVec2" || a == "UVec3") && b == "UInt") => {
+            Some(LpsType::UInt)
+        }
+        "lpfn_saturate" if matches!(glsl_params, [a] if a == "Float") => Some(LpsType::Float),
+        "lpfn_saturate" if matches!(glsl_params, [a] if a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_saturate" if matches!(glsl_params, [a] if a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_hue2rgb" if matches!(glsl_params, [a] if a == "Float") => Some(LpsType::Vec3),
+        "lpfn_hsv2rgb" if matches!(glsl_params, [a] if a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_hsv2rgb" if matches!(glsl_params, [a] if a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_rgb2hsv" if matches!(glsl_params, [a] if a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_rgb2hsv" if matches!(glsl_params, [a] if a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_fbm" if matches!(glsl_params, [a, b, c] if (a == "Vec2" || a == "Vec3") && b == "Int" && c == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_fbm" if matches!(glsl_params, [a, b, c, d] if a == "Vec3" && b == "Float" && c == "Int" && d == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_gnoise" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_gnoise" if matches!(glsl_params, [a, b, c] if a == "Vec3" && b == "Float" && c == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_random" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_snoise" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_srandom" if matches!(glsl_params, [a, b] if (a == "Float" || a == "Vec2" || a == "Vec3") && b == "UInt") => {
+            Some(LpsType::Float)
+        }
+        "lpfn_srandom3_tile" if matches!(glsl_params, [a, b, c] if a == "Vec3" && b == "Float" && c == "UInt") => {
+            Some(LpsType::Vec3)
+        }
+        "lpfn_srandom3_vec" if matches!(glsl_params, [a, b] if a == "Vec3" && b == "UInt") => {
+            Some(LpsType::Vec3)
+        }
+        "lpfn_worley" | "lpfn_worley_value" if matches!(glsl_params, [a, b] if (a == "Vec2" || a == "Vec3") && b == "UInt") => {
+            Some(LpsType::Float)
+        }
+        _ => None,
+    }
+}
+
+fn lpfn_psrdnoise_gradient_type(glsl_params: &[String]) -> Option<LpsType> {
+    if matches!(glsl_params, [a, b, c, d, e] if a == "Vec2" && b == "Vec2" && c == "Float" && d == "Vec2" && e == "UInt")
+    {
+        Some(LpsType::Vec2)
+    } else if matches!(glsl_params, [a, b, c, d, e] if a == "Vec3" && b == "Vec3" && c == "Float" && d == "Vec3" && e == "UInt")
+    {
+        Some(LpsType::Vec3)
+    } else {
+        None
+    }
+}
+
+fn psrdnoise_param_types(glsl_params: &[String]) -> Vec<lpir::IrType> {
+    let vector_lanes = if glsl_params.first().is_some_and(|p| p == "Vec3") {
+        3
+    } else {
+        2
+    };
+    let mut param_types = alloc::vec![lpir::IrType::F32; vector_lanes * 2 + 1];
+    param_types.push(lpir::IrType::I32);
+    param_types.push(lpir::IrType::I32);
+    param_types
 }
 
 fn same_nonzero_const_expr_tree(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
