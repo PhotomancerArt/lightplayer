@@ -104,6 +104,9 @@ pub enum ParsedExprKind {
         base: alloc::boxed::Box<ParsedExpr>,
         fields: String,
     },
+    Length {
+        base: alloc::boxed::Box<ParsedExpr>,
+    },
     Index {
         base: alloc::boxed::Box<ParsedExpr>,
         index: alloc::boxed::Box<ParsedExpr>,

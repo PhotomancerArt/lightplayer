@@ -114,13 +114,23 @@ fn type_name_to_lps_with_structs(
     span: Span,
     structs: &StructTypes,
 ) -> Result<LpsType, Diagnostic> {
-    if let Some((element_name, len)) = parse_array_type_name(name) {
-        let element = type_name_to_lps_with_structs(element_name, span, structs)?;
-        return Ok(LpsType::Array {
-            element: Box::new(element),
-            len,
-        });
+    if let Some((base_name, lens)) = parse_array_type_name(name) {
+        if lens.iter().any(Option::is_none) {
+            return Err(Diagnostic::error(
+                span,
+                "array length must be specified here",
+            ));
+        }
+        return fixed_array_type(base_name, &lens, span, structs);
     }
+    scalar_or_struct_type_name_to_lps(name, span, structs)
+}
+
+fn scalar_or_struct_type_name_to_lps(
+    name: &str,
+    span: Span,
+    structs: &StructTypes,
+) -> Result<LpsType, Diagnostic> {
     if let Some(ty) = structs.get(name) {
         return Ok(ty.clone());
     }
@@ -152,12 +162,139 @@ fn type_name_to_lps_with_structs(
     }
 }
 
-fn parse_array_type_name(name: &str) -> Option<(&str, u32)> {
-    let open = name.rfind('[')?;
-    let close = name.strip_suffix(']')?;
-    let len_text = close.get(open + 1..)?;
-    let len = len_text.trim_end_matches(['u', 'U']).parse::<u32>().ok()?;
-    Some((&name[..open], len))
+fn fixed_array_type(
+    base_name: &str,
+    lens: &[Option<u32>],
+    span: Span,
+    structs: &StructTypes,
+) -> Result<LpsType, Diagnostic> {
+    let mut ty = scalar_or_struct_type_name_to_lps(base_name, span, structs)?;
+    for len in lens.iter().rev() {
+        let Some(len) = len else {
+            return Err(Diagnostic::error(
+                span,
+                "array length must be specified here",
+            ));
+        };
+        ty = LpsType::Array {
+            element: Box::new(ty),
+            len: *len,
+        };
+    }
+    Ok(ty)
+}
+
+fn parse_array_type_name(name: &str) -> Option<(&str, Vec<Option<u32>>)> {
+    let open = name.find('[')?;
+    let base = &name[..open];
+    let mut rest = &name[open..];
+    let mut lens = Vec::new();
+    while let Some(after_open) = rest.strip_prefix('[') {
+        let close = after_open.find(']')?;
+        let len_text = &after_open[..close];
+        let len = if len_text.is_empty() {
+            None
+        } else {
+            Some(len_text.trim_end_matches(['u', 'U']).parse::<u32>().ok()?)
+        };
+        lens.push(len);
+        rest = &after_open[close + 1..];
+    }
+    if rest.is_empty() {
+        Some((base, lens))
+    } else {
+        None
+    }
+}
+
+fn infer_array_decl_type(
+    span: Span,
+    base: &LpsType,
+    lens: &[Option<u32>],
+    init_ty: &LpsType,
+) -> Result<LpsType, Diagnostic> {
+    let (init_base, init_lens) = array_base_and_lens(init_ty)
+        .ok_or_else(|| Diagnostic::error(span, "unsized array initializer must have array type"))?;
+    if *base != init_base || lens.len() != init_lens.len() {
+        return Err(Diagnostic::error(
+            span,
+            "unsized array initializer type mismatch",
+        ));
+    }
+    let mut resolved = Vec::new();
+    for (decl_len, init_len) in lens.iter().zip(init_lens.iter()) {
+        if let Some(decl_len) = decl_len
+            && decl_len != init_len
+        {
+            return Err(Diagnostic::error(span, "array initializer length mismatch"));
+        }
+        resolved.push(Some(*init_len));
+    }
+    fixed_array_from_base(base.clone(), &resolved, span)
+}
+
+fn infer_array_constructor_type(
+    span: Span,
+    base: LpsType,
+    lens: &[Option<u32>],
+    args: &[HirExpr],
+) -> Result<LpsType, Diagnostic> {
+    let Some((first_len, rest_lens)) = lens.split_first() else {
+        return Ok(base);
+    };
+    let len = first_len.unwrap_or(args.len() as u32);
+    let element = if rest_lens.is_empty() {
+        base
+    } else if rest_lens.iter().all(Option::is_some) {
+        fixed_array_from_base(base, rest_lens, span)?
+    } else {
+        let first_arg = args.first().ok_or_else(|| {
+            Diagnostic::error(
+                span,
+                "unsized array constructor requires at least one argument",
+            )
+        })?;
+        infer_array_decl_type(span, &base, rest_lens, &first_arg.ty)?
+    };
+    Ok(LpsType::Array {
+        element: Box::new(element),
+        len,
+    })
+}
+
+fn fixed_array_from_base(
+    base: LpsType,
+    lens: &[Option<u32>],
+    span: Span,
+) -> Result<LpsType, Diagnostic> {
+    let mut ty = base;
+    for len in lens.iter().rev() {
+        let Some(len) = len else {
+            return Err(Diagnostic::error(
+                span,
+                "array length must be specified here",
+            ));
+        };
+        ty = LpsType::Array {
+            element: Box::new(ty),
+            len: *len,
+        };
+    }
+    Ok(ty)
+}
+
+fn array_base_and_lens(ty: &LpsType) -> Option<(LpsType, Vec<u32>)> {
+    let mut lens = Vec::new();
+    let mut current = ty;
+    while let LpsType::Array { element, len } = current {
+        lens.push(*len);
+        current = element;
+    }
+    if lens.is_empty() {
+        None
+    } else {
+        Some((current.clone(), lens))
+    }
 }
 
 fn build_struct_types(index: &TopLevelIndex) -> Result<StructTypes, Diagnostic> {
@@ -356,13 +493,15 @@ impl<'a> TypeCtx<'a> {
                 span,
                 ..
             } => {
-                let ty = self.type_name_to_lps(ty, *span)?;
                 let init = if let Some(init) = init {
                     let expr = self.type_expr(init)?;
+                    let ty = self.type_decl_ty(ty, *span, Some(&expr))?;
                     self.coerce_expr(expr, &ty)?
                 } else {
+                    let ty = self.type_decl_ty(ty, *span, None)?;
                     zero_expr(*span, &ty)?
                 };
+                let ty = init.ty.clone();
                 let local = self.locals.len();
                 self.locals.push(HirLocal {
                     name: name.clone(),
@@ -377,13 +516,16 @@ impl<'a> TypeCtx<'a> {
             ParsedStmt::LetGroup { declarations, .. } => {
                 let mut statements = Vec::new();
                 for declaration in declarations {
-                    let ty = self.type_name_to_lps(&declaration.ty, declaration.span)?;
                     let init = if let Some(init) = &declaration.init {
                         let expr = self.type_expr(init)?;
+                        let ty =
+                            self.type_decl_ty(&declaration.ty, declaration.span, Some(&expr))?;
                         self.coerce_expr(expr, &ty)?
                     } else {
+                        let ty = self.type_decl_ty(&declaration.ty, declaration.span, None)?;
                         zero_expr(declaration.span, &ty)?
                     };
+                    let ty = init.ty.clone();
                     let local = self.locals.len();
                     self.locals.push(HirLocal {
                         name: declaration.name.clone(),
@@ -583,6 +725,20 @@ impl<'a> TypeCtx<'a> {
                     },
                 })
             }
+            ParsedExprKind::Length { base } => {
+                let base = self.type_expr(base)?;
+                let len = match &base.ty {
+                    LpsType::Array { len, .. } => *len,
+                    _ => {
+                        return Err(Diagnostic::error(expr.span, "length() requires array base"));
+                    }
+                };
+                Ok(HirExpr {
+                    span: expr.span,
+                    ty: LpsType::Int,
+                    kind: HirExprKind::IntLiteral(len as i32),
+                })
+            }
             ParsedExprKind::Index { base, index } => {
                 let base = self.type_expr(base)?;
                 let ty = if base.ty.is_matrix() {
@@ -732,11 +888,11 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: &[ParsedExpr],
     ) -> Result<HirExpr, Diagnostic> {
-        let target_ty = self.type_name_to_lps(name, span)?;
         let args = args
             .iter()
             .map(|arg| self.type_expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        let target_ty = self.type_constructor_target(name, span, &args)?;
         let args = coerce_constructor_args(span, &target_ty, args)?;
         Ok(HirExpr {
             span,
@@ -1132,8 +1288,51 @@ impl<'a> TypeCtx<'a> {
         type_name_to_lps_with_structs(name, span, self.structs)
     }
 
+    fn type_decl_ty(
+        &self,
+        name: &str,
+        span: Span,
+        init: Option<&HirExpr>,
+    ) -> Result<LpsType, Diagnostic> {
+        if let Some((base_name, lens)) = parse_array_type_name(name)
+            && lens.iter().any(Option::is_none)
+        {
+            let Some(init) = init else {
+                return Err(Diagnostic::error(
+                    span,
+                    "unsized array declaration requires initializer",
+                ));
+            };
+            let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
+            return infer_array_decl_type(span, &base, &lens, &init.ty);
+        }
+        self.type_name_to_lps(name, span)
+    }
+
+    fn type_constructor_target(
+        &self,
+        name: &str,
+        span: Span,
+        args: &[HirExpr],
+    ) -> Result<LpsType, Diagnostic> {
+        if let Some((base_name, lens)) = parse_array_type_name(name)
+            && lens.iter().any(Option::is_none)
+        {
+            if args.is_empty() {
+                return Err(Diagnostic::error(
+                    span,
+                    "unsized array constructor requires at least one argument",
+                ));
+            }
+            let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
+            return infer_array_constructor_type(span, base, &lens, args);
+        }
+        self.type_name_to_lps(name, span)
+    }
+
     fn is_constructor_name(&self, name: &str) -> bool {
         self.type_name_to_lps(name, Span::new(0, 0)).is_ok()
+            || parse_array_type_name(name).is_some_and(|(_, lens)| lens.iter().any(Option::is_none))
     }
 
     fn resolve_local(&self, name: &str) -> Option<usize> {

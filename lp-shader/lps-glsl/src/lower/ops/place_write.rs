@@ -11,7 +11,7 @@ use super::super::storage::{
 };
 use super::super::{LowerCtx, LowerValue, lower_expr};
 use super::access::copy_value;
-use super::index::{assign_index_field_target, assign_index_target};
+use super::index::{assign_index_field_target, assign_index_index_target, assign_index_target};
 use super::place_read::root_value;
 use super::single_lane;
 
@@ -97,6 +97,29 @@ pub(in crate::lower) fn assign_target(
         ] if place.root_ty().is_matrix() => {
             let dst = root_value(ctx, span, &place.root)?;
             assign_matrix_element(ctx, span, dst.clone(), column, row, value)?;
+            write_root_back_if_memory_root(ctx, span, &place.root, &dst)
+        }
+        [
+            PlaceSegment::Index {
+                index: outer_index,
+                ty: outer_ty,
+            },
+            PlaceSegment::Index {
+                index: inner_index,
+                ty: inner_ty,
+            },
+        ] => {
+            let dst = root_value(ctx, span, &place.root)?;
+            assign_index_index_target(
+                ctx,
+                span,
+                dst.clone(),
+                outer_index,
+                outer_ty,
+                inner_index,
+                inner_ty,
+                value,
+            )?;
             write_root_back_if_memory_root(ctx, span, &place.root, &dst)
         }
         _ => Err(Diagnostic::error(

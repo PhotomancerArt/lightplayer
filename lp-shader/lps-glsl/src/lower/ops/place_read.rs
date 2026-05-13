@@ -10,7 +10,7 @@ use crate::{Diagnostic, Span};
 
 use super::super::storage::{is_pointer_param, load_value_from_addr, local_value, param_pointer};
 use super::super::{LowerCtx, LowerValue, lower_expr};
-use super::index::{lower_index, lower_index_field};
+use super::index::{lower_index, lower_index_field, lower_index_index};
 use super::single_lane;
 
 pub(super) fn root_value(
@@ -114,6 +114,24 @@ pub(super) fn read_assign_target(
             PlaceSegment::Index { index: column, .. },
             PlaceSegment::Index { index: row, ty },
         ] if place.root_ty().is_matrix() => read_matrix_element(ctx, span, value, column, row, ty),
+        [
+            PlaceSegment::Index {
+                index: outer_index,
+                ty: outer_ty,
+            },
+            PlaceSegment::Index {
+                index: inner_index,
+                ty: inner_ty,
+            },
+        ] => lower_index_index(
+            ctx,
+            span,
+            value,
+            outer_index,
+            outer_ty,
+            inner_index,
+            inner_ty,
+        ),
         _ => Err(Diagnostic::error(
             span,
             "unsupported assignment target path",

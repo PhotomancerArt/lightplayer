@@ -16,6 +16,10 @@ Keep syntax parsing language-specific and keep semantic HIR sufficiently languag
 
 Represent readable/writable locations and writable call arguments explicitly. This is the shared mechanism for swizzle assignment, array indexing, struct fields, globals, uniforms, and `out`/`inout` writeback.
 
+## Place Lowering Should Become a Walker
+
+Keep the current explicit pattern matches while they are small, but refactor to a place-access walker once feature work adds another layer of custom cases. The walker should separate root storage, static projections, dynamic projections, and final read/write/call-actual operations so nested aggregate paths do not become one match arm per spelling.
+
 ## Aggregate Layout Is Centralized
 
 Do not scatter scalar lane counts, field offsets, array strides, and matrix column assumptions across parser, HIR, and lowering. Reuse `lps_shared::layout` and LPVM data/path helpers for byte layout, then derive a small `lps-glsl` shape/view layer for semantic checks, lane-flat lowering, slot-backed lowering, globals, uniforms, and call ABI choices.

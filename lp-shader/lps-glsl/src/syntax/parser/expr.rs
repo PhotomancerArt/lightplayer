@@ -138,6 +138,17 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             if self.at_punct(".") {
                 self.bump();
                 let fields = self.expect_identifier_like()?.to_string();
+                if fields == "length" && self.at_punct("(") {
+                    self.bump();
+                    let end = self.expect_punct(")")?.span.end;
+                    expr = ParsedExpr {
+                        span: Span::new(expr.span.start, end),
+                        kind: ParsedExprKind::Length {
+                            base: alloc::boxed::Box::new(expr),
+                        },
+                    };
+                    continue;
+                }
                 let end = self.previous().span.end;
                 expr = ParsedExpr {
                     span: Span::new(expr.span.start, end),
@@ -149,6 +160,26 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 continue;
             }
             if self.at_punct("[") {
+                if let Some(name) = self.try_parse_array_constructor_name(&expr)? {
+                    self.expect_punct("(")?;
+                    let mut args = Vec::new();
+                    if !self.at_punct(")") {
+                        loop {
+                            args.push(self.parse_expr(1)?);
+                            if self.at_punct(",") {
+                                self.bump();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    let end = self.expect_punct(")")?.span.end;
+                    expr = ParsedExpr {
+                        span: Span::new(expr.span.start, end),
+                        kind: ParsedExprKind::Call { name, args },
+                    };
+                    continue;
+                }
                 self.bump();
                 let index = self.parse_expr(0)?;
                 let end = self.expect_punct("]")?.span.end;
@@ -284,6 +315,42 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 "expression",
                 tok.lexeme(self.source),
             )),
+        }
+    }
+
+    fn try_parse_array_constructor_name(
+        &mut self,
+        expr: &ParsedExpr,
+    ) -> Result<Option<alloc::string::String>, Diagnostic> {
+        let ParsedExprKind::Name(base_name) = &expr.kind else {
+            return Ok(None);
+        };
+        if !token_text_is_type_name(base_name, self.struct_names) {
+            return Ok(None);
+        }
+        let checkpoint = self.pos;
+        let mut name = base_name.clone();
+        while self.at_punct("[") {
+            let start = self.expect_punct("[")?.span.start;
+            if !self.at_punct("]") {
+                let Some(len) = self.current() else {
+                    self.pos = checkpoint;
+                    return Ok(None);
+                };
+                if !matches!(len.kind, TokenKind::IntLiteral | TokenKind::UintLiteral) {
+                    self.pos = checkpoint;
+                    return Ok(None);
+                }
+                self.bump();
+            }
+            let end = self.expect_punct("]")?.span.end;
+            name.push_str(&self.source[start..end]);
+        }
+        if self.at_punct("(") {
+            Ok(Some(name))
+        } else {
+            self.pos = checkpoint;
+            Ok(None)
         }
     }
 

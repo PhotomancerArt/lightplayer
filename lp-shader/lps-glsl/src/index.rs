@@ -393,6 +393,10 @@ impl<'src, 'tok> Parser<'src, 'tok> {
 
     fn parse_array_suffix(&mut self) -> Result<&'src str, Diagnostic> {
         let start = self.expect_punct("[")?.span.start;
+        if self.at_punct("]") {
+            let end = self.expect_punct("]")?.span.end;
+            return Ok(&self.source[start..end]);
+        }
         if !matches!(
             self.current().kind,
             TokenKind::IntLiteral | TokenKind::UintLiteral

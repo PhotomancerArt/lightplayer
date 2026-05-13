@@ -222,7 +222,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             false
         };
         let mut base_ty = self.expect_type_name()?.to_string();
-        if self.at_punct("[") {
+        while self.at_punct("[") {
             base_ty.push_str(self.parse_array_suffix()?);
         }
         let mut declarations = Vec::new();
@@ -230,7 +230,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             let decl_start = self.current_span().start;
             let mut ty = base_ty.clone();
             let name = self.expect_identifier_like()?.to_string();
-            if self.at_punct("[") {
+            while self.at_punct("[") {
                 ty.push_str(self.parse_array_suffix()?);
             }
             let init = if self.at_punct("=") {

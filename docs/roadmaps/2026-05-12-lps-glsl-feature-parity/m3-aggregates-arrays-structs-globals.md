@@ -52,6 +52,13 @@ The recommended lowering model is hybrid:
 
 Nested place support is the key risk. Once a target like `foo.items[i].color.xy` can be typed and lowered as a path, most aggregate assignment follows naturally.
 
+The initial implementation may use focused read/write patterns for concrete filetest shapes such as `array[i].field` and `struct.array[i].field`. If more custom patterns appear, switch to a small place-access walker before adding more arms. The desired walker shape is:
+
+- resolve the root storage: local flat, local slot, param value, param pointer, uniform/global
+- fold static projections: field, swizzle, known matrix/vector lanes, constant offsets
+- lower dynamic projections: index select/update or byte-address calculation
+- perform the final operation: read, write, or writable call-actual address
+
 Prefer creating these internal concepts before broadening the filetest sweep:
 
 - `TypeShape` / `LayoutView`: derived from `LpsType`, delegates byte layout to `lps_shared::layout`, and adds frontend-only facts like lane order and matrix value shape.

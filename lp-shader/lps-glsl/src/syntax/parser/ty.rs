@@ -22,6 +22,10 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
 
     pub(super) fn parse_array_suffix(&mut self) -> Result<&'src str, Diagnostic> {
         let start = self.expect_punct("[")?.span.start;
+        if self.at_punct("]") {
+            let end = self.expect_punct("]")?.span.end;
+            return Ok(&self.source[start..end]);
+        }
         let len = self.current().ok_or_else(|| {
             Diagnostic::expected(self.current_span(), "array length", self.current_text())
         })?;
