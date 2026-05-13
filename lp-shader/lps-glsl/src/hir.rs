@@ -14,13 +14,18 @@ use crate::body::{
 };
 use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
+mod builtin;
+mod coerce;
+mod function;
+mod place;
+mod scalar;
 mod types;
 mod typing;
 
+use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub use types::{
     BuiltinKind, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirLocal,
-    HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportInfo, ImportKey,
-    UniformInfo,
+    HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportKey, UniformInfo,
 };
 use types::{HirAccessRoot, StructTypes};
 use typing::{
@@ -29,71 +34,6 @@ use typing::{
     is_logical, type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
-
-#[derive(Debug, Clone)]
-struct FunctionSig {
-    name: String,
-    return_ty: LpsType,
-    params: Vec<HirParam>,
-}
-
-#[derive(Debug, Clone)]
-struct GlobalConst {
-    expr: HirExpr,
-}
-
-#[derive(Debug, Default)]
-struct ImportRegistry {
-    imports: BTreeMap<ImportKey, ImportInfo>,
-}
-
-impl ImportRegistry {
-    fn glsl(&mut self, name: &str, argc: usize) -> ImportKey {
-        let key = ImportKey::Glsl {
-            name: String::from(name),
-            argc,
-        };
-        self.imports
-            .entry(key.clone())
-            .or_insert_with(|| ImportInfo {
-                key: key.clone(),
-                module_name: String::from("glsl"),
-                func_name: String::from(name),
-                param_types: alloc::vec![lpir::IrType::F32; argc],
-                return_types: alloc::vec![lpir::IrType::F32],
-                lpfn_glsl_params: None,
-            });
-        key
-    }
-
-    fn lpfn(
-        &mut self,
-        name: &str,
-        glsl_params: String,
-        param_types: Vec<lpir::IrType>,
-        return_types: Vec<lpir::IrType>,
-    ) -> ImportKey {
-        let key = ImportKey::Lpfn {
-            name: String::from(name),
-            glsl_params: glsl_params.clone(),
-        };
-        self.imports
-            .entry(key.clone())
-            .or_insert_with(|| ImportInfo {
-                key: key.clone(),
-                module_name: String::from("lpfn"),
-                func_name: format!("{name}_0"),
-                param_types,
-                return_types,
-                lpfn_glsl_params: Some(glsl_params),
-            });
-        key
-    }
-
-    fn into_vec(self) -> Vec<ImportInfo> {
-        self.imports.into_values().collect()
-    }
-}
 
 pub fn build_hir(
     source: &str,
