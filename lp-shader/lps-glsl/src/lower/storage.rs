@@ -1,7 +1,7 @@
 use alloc::format;
 use alloc::vec::Vec;
 
-use lpir::{FunctionBuilder, IrType, LpirOp, SlotId, VMCTX_VREG, VReg};
+use lpir::{FunctionBuilder, IrType, LpirOp, SlotId, VReg};
 use lps_shared::{LpsType, ParamQualifier};
 
 use crate::hir::{scalar_ir_types, scalar_lane_count};
@@ -125,7 +125,7 @@ pub(super) fn lower_uniform_load(
         let dst = ctx.fb.alloc_vreg(*ir_ty);
         ctx.fb.push(LpirOp::Load {
             dst,
-            base: VMCTX_VREG,
+            base: ctx.vmctx,
             offset: byte_offset.saturating_add((i as u32).saturating_mul(4)),
         });
         lanes.push(dst);
@@ -159,7 +159,7 @@ pub(super) fn store_global(
     }
     for (i, lane) in value.lanes.iter().enumerate() {
         ctx.fb.push(LpirOp::Store {
-            base: VMCTX_VREG,
+            base: ctx.vmctx,
             offset: byte_offset.saturating_add((i as u32).saturating_mul(4)),
             value: *lane,
         });

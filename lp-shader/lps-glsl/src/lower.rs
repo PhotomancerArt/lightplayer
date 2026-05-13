@@ -94,12 +94,18 @@ fn lower_function(
             lanes,
         });
     }
+    let vmctx = fb.alloc_vreg(IrType::Pointer);
+    fb.push(LpirOp::Copy {
+        dst: vmctx,
+        src: VMCTX_VREG,
+    });
     let mut locals = Vec::new();
     for local in &function.body.locals {
         locals.push(local_storage(&mut fb, local.ty.clone())?);
     }
     let mut ctx = LowerCtx {
         fb,
+        vmctx,
         params,
         locals,
         import_map,
@@ -114,6 +120,7 @@ fn lower_function(
 
 struct LowerCtx<'a> {
     fb: FunctionBuilder,
+    vmctx: VReg,
     params: Vec<LowerValue>,
     locals: Vec<LocalStorage>,
     import_map: &'a BTreeMap<ImportKey, CalleeRef>,
@@ -388,7 +395,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             writebacks,
         } => {
             let mut writeback_slots = Vec::new();
-            let mut arg_lanes = vec![VMCTX_VREG];
+            let mut arg_lanes = vec![ctx.vmctx];
             for (arg_index, arg) in args.iter().enumerate() {
                 if let Some(writeback) = writebacks.iter().find(|w| w.arg_index == arg_index) {
                     let (_slot, addr) =
