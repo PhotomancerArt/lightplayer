@@ -10,7 +10,7 @@ pub use fixture::{
     ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, MappingConfig,
     PathSpec, RingOrder,
 };
-pub use fluid::FluidEmitter;
+pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{NodeDef, NodeDefParseError};
 pub use output::{OutputDef, OutputDefView, OutputDriverOptionsConfig};
 pub use project::ProjectDef;

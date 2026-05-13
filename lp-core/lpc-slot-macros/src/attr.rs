@@ -11,6 +11,8 @@ pub(crate) struct ContainerAttrs {
 pub(crate) struct FieldAttrs {
     pub(crate) name: Option<LitStr>,
     pub(crate) shape: FieldShapeAttr,
+    pub(crate) direction: FieldDirectionAttr,
+    pub(crate) merge: FieldMergeAttr,
 }
 
 pub(crate) enum FieldShapeAttr {
@@ -22,6 +24,20 @@ pub(crate) enum FieldShapeAttr {
     OptionRef(LitStr),
     Enum,
     Skip,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldDirectionAttr {
+    Local,
+    Consumed,
+    Produced,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldMergeAttr {
+    Latest,
+    Error,
+    ByKey,
 }
 
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
@@ -51,6 +67,8 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
 pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     let mut name = None;
     let mut shape = None;
+    let mut direction = FieldDirectionAttr::Local;
+    let mut merge = FieldMergeAttr::Latest;
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("name") {
@@ -74,6 +92,23 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
             } else if meta.path.is_ident("skip") {
                 shape = Some(FieldShapeAttr::Skip);
                 Ok(())
+            } else if meta.path.is_ident("consumed") {
+                if direction != FieldDirectionAttr::Local {
+                    return Err(meta.error("slot field can only have one direction"));
+                }
+                direction = FieldDirectionAttr::Consumed;
+                Ok(())
+            } else if meta.path.is_ident("produced") {
+                if direction != FieldDirectionAttr::Local {
+                    return Err(meta.error("slot field can only have one direction"));
+                }
+                direction = FieldDirectionAttr::Produced;
+                Ok(())
+            } else if meta.path.is_ident("merge") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                merge = parse_merge(&value)?;
+                Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
                 shape = Some(FieldShapeAttr::OptionRef(value.parse()?));
@@ -95,6 +130,8 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     Ok(FieldAttrs {
         name,
         shape: shape.unwrap_or(FieldShapeAttr::Infer),
+        direction,
+        merge,
     })
 }
 
@@ -163,6 +200,25 @@ pub(crate) fn field_access_tokens(
     }
 }
 
+pub(crate) fn field_semantics_tokens(
+    direction: FieldDirectionAttr,
+    merge: FieldMergeAttr,
+) -> TokenStream {
+    let direction_tokens = match direction {
+        FieldDirectionAttr::Local => quote::quote! { ::lpc_model::SlotDirection::Local },
+        FieldDirectionAttr::Consumed => quote::quote! { ::lpc_model::SlotDirection::Consumed },
+        FieldDirectionAttr::Produced => quote::quote! { ::lpc_model::SlotDirection::Produced },
+    };
+    let merge_tokens = match merge {
+        FieldMergeAttr::Latest => quote::quote! { ::lpc_model::SlotMerge::Latest },
+        FieldMergeAttr::Error => quote::quote! { ::lpc_model::SlotMerge::Error },
+        FieldMergeAttr::ByKey => quote::quote! { ::lpc_model::SlotMerge::ByKey },
+    };
+    quote::quote! {
+        ::lpc_model::SlotSemantics::new(#direction_tokens, #merge_tokens)
+    }
+}
+
 fn slot_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
     attrs.iter().filter(|attr| attr.path().is_ident("slot"))
 }
@@ -208,5 +264,17 @@ fn map_key_tokens(key: &LitStr) -> TokenStream {
             let message = format!("unsupported slot map key shape: {other}");
             quote::quote! { compile_error!(#message) }
         }
+    }
+}
+
+fn parse_merge(value: &LitStr) -> Result<FieldMergeAttr> {
+    match value.value().as_str() {
+        "latest" => Ok(FieldMergeAttr::Latest),
+        "error" => Ok(FieldMergeAttr::Error),
+        "by_key" => Ok(FieldMergeAttr::ByKey),
+        _ => Err(syn::Error::new_spanned(
+            value,
+            "unsupported slot merge policy; expected \"latest\", \"error\", or \"by_key\"",
+        )),
     }
 }

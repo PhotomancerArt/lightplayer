@@ -39,8 +39,9 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         let field_ty = field.ty;
 
         let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
+        let semantics = attr::field_semantics_tokens(field_attr.direction, field_attr.merge);
         shape_fields.push(quote! {
-            ::lpc_model::slot::shape::field(#field_name, #shape)
+            ::lpc_model::slot::shape::field_with_semantics(#field_name, #shape, #semantics)
         });
 
         if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)

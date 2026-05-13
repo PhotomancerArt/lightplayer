@@ -1,8 +1,8 @@
 #![cfg(feature = "derive")]
 
 use lpc_model::{
-    SlotAccess, SlotDataAccess, SlotMapValueAccess, SlotRecordAccess, SlotRecordShape, SlotShape,
-    SlotShapeRegistry, StaticSlotAccess, StaticSlotShape, ValueSlot,
+    SlotAccess, SlotDataAccess, SlotDirection, SlotMapValueAccess, SlotMerge, SlotRecordAccess,
+    SlotRecordShape, SlotShape, SlotShapeRegistry, StaticSlotAccess, StaticSlotShape, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord)]
@@ -48,6 +48,30 @@ fn derive_generates_record_shape_access_and_root_registration() {
     assert!(!DerivedRecord::ensure_registered(&mut registry).unwrap());
     DerivedRecord::register_shape(&mut registry).unwrap();
     assert!(registry.get(&DerivedRecord::SHAPE_ID).is_some());
+}
+
+#[derive(lpc_model::SlotRecord)]
+#[slot(root)]
+struct SemanticRecord {
+    #[slot(consumed, merge = "by_key")]
+    emitters: ValueSlot<u32>,
+    #[slot(produced)]
+    output: ValueSlot<u32>,
+}
+
+#[test]
+fn derive_preserves_field_semantics() {
+    let SlotShape::Record { fields, .. } = SemanticRecord::slot_record_shape() else {
+        panic!("record shape");
+    };
+
+    assert_eq!(fields[0].name.as_str(), "emitters");
+    assert_eq!(fields[0].semantics.direction, SlotDirection::Consumed);
+    assert_eq!(fields[0].semantics.merge, SlotMerge::ByKey);
+
+    assert_eq!(fields[1].name.as_str(), "output");
+    assert_eq!(fields[1].semantics.direction, SlotDirection::Produced);
+    assert_eq!(fields[1].semantics.merge, SlotMerge::Latest);
 }
 
 fn assert_static_slot_access<T: StaticSlotAccess>() {}

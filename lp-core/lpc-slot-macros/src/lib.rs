@@ -53,6 +53,10 @@
 //! - `#[slot(option_ref = "...")]`: shape an option around another shape root.
 //! - `#[slot(map(key = "...", value_ref = "..."))]`: shape a map whose values
 //!   reference another shape root.
+//! - `#[slot(consumed)]`: mark the field as a consumed dataflow slot.
+//! - `#[slot(produced)]`: mark the field as a produced dataflow slot.
+//! - `#[slot(merge = "latest" | "error" | "by_key")]`: set the receiver-owned
+//!   merge policy for aggregate consumed slots.
 
 use proc_macro::TokenStream;
 

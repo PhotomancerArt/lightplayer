@@ -10,8 +10,9 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use lpc_model::{
-    ControlProduct, NodeId, Revision, SlotAccessor, SlotData, SlotPath, SlotShapeRegistry,
-    TreePath, WithRevision, advance_revision, current_revision, lookup_slot_data_and_shape,
+    ControlProduct, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge,
+    SlotPath, SlotPathSegment, SlotSemantics, SlotShape, SlotShapeRegistry, TreePath, WithRevision,
+    advance_revision, current_revision, lookup_slot_data_and_shape,
 };
 use lpc_shared::time::TimeProvider;
 use lpfs::FsChange;
@@ -547,6 +548,17 @@ impl ResolveHost for EngineResolveHost<'_> {
             .collect()
     }
 
+    fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
+        self.tree
+            .get(node)
+            .and_then(|entry| {
+                self.read_authored_def_slot_semantics(&entry.def_handle, slot)
+                    .ok()
+            })
+            .filter(|semantics| semantics.direction == SlotDirection::Consumed)
+            .map_or(SlotMerge::Latest, |semantics| semantics.merge)
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -656,6 +668,59 @@ impl EngineResolveHost<'_> {
         let (_, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, accessor.path())
             .map_err(|e| SessionResolveError::other(format!("authored def accessor shape: {e}")))?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
+    }
+
+    fn read_authored_def_slot_semantics(
+        &self,
+        handle: &crate::node::NodeDefHandle,
+        slot: &SlotPath,
+    ) -> Result<SlotSemantics, SessionResolveError> {
+        if !handle.is_artifact_root() {
+            return Err(SessionResolveError::other(format!(
+                "non-root node def handles are not supported yet: {}",
+                handle.path()
+            )));
+        }
+        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
+            SessionResolveError::other(format!(
+                "node def artifact {:?} is not loaded",
+                handle.artifact()
+            ))
+        })?;
+        let def = match &entry.state {
+            ArtifactState::Loaded(def)
+            | ArtifactState::Prepared(def)
+            | ArtifactState::Idle(def) => def,
+            other => {
+                return Err(SessionResolveError::other(format!(
+                    "node def artifact {:?} has no loaded payload: {other:?}",
+                    handle.artifact()
+                )));
+            }
+        };
+        let mut shape = self.slot_shapes.get(&def.shape_id()).ok_or_else(|| {
+            SessionResolveError::other(format!("missing node def shape {}", def.shape_id()))
+        })?;
+        while let SlotShape::Ref { id } = shape {
+            shape = self.slot_shapes.get(id).ok_or_else(|| {
+                SessionResolveError::other(format!("missing referenced node def shape {id}"))
+            })?;
+        }
+        let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
+            return Err(SessionResolveError::other(format!(
+                "slot path {slot} does not start with a field"
+            )));
+        };
+        let SlotShape::Record { fields, .. } = shape else {
+            return Err(SessionResolveError::other("node def shape is not a record"));
+        };
+        let field = fields
+            .iter()
+            .find(|field| field.name == *name)
+            .ok_or_else(|| {
+                SessionResolveError::other(format!("node def has no slot field {name}"))
+            })?;
+        Ok(field.semantics)
     }
 
     fn render_node_texture(

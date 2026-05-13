@@ -9,6 +9,7 @@ pub enum NodeKind {
     Texture,
     Shader,
     ComputeShader,
+    Fluid,
     Output,
     Fixture,
 }

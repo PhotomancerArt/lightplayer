@@ -20,7 +20,8 @@ use crate::artifact::ArtifactLocation;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
-    ComputeShaderNode, CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode,
+    ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode, OutputNode, ShaderNode,
+    TextureNode,
 };
 
 use super::{Engine, EngineServices};
@@ -321,6 +322,33 @@ impl ProjectLoader {
                         frame,
                     )?;
                 }
+            }
+        }
+
+        for node in loaded_nodes {
+            if let NodeDef::Fluid(config) = &node.config {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach fluid runtime: {e}"),
+                    })?;
+                register_optional_source_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "emitters",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "output",
+                    &config.bindings,
+                    frame,
+                )?;
             }
         }
 

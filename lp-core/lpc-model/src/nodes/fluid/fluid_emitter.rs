@@ -5,8 +5,9 @@
 //! data so each emitter has stable identity at the slot layer.
 
 use crate::{
-    FromLpValue, LpType, LpValue, ModelStructMember, SlotMeta, SlotShape, SlotShapeId, SlotValue,
-    SlotValueShape, StaticSlotShape, ToLpValue, ValueEditorHint, ValueRootError,
+    FieldSlot, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess, SlotMeta,
+    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, StaticSlotShape, ToLpValue,
+    ValueEditorHint, ValueRootError,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -86,6 +87,26 @@ impl SlotValue for FluidEmitter {
             meta: SlotMeta::empty(),
             editor: ValueEditorHint::Plain,
         }
+    }
+}
+
+impl SlotValueAccess for FluidEmitter {
+    fn changed_at(&self) -> crate::Revision {
+        crate::current_revision()
+    }
+
+    fn value(&self) -> LpValue {
+        self.to_lp_value()
+    }
+}
+
+impl FieldSlot for FluidEmitter {
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::leaf(<Self as SlotValue>::value_shape())
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Value(self)
     }
 }
 

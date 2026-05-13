@@ -9,6 +9,7 @@ use alloc::string::String;
 
 use crate::node::kind::NodeKind;
 use crate::nodes::fixture::FixtureDef;
+use crate::nodes::fluid::FluidDef;
 use crate::nodes::output::OutputDef;
 use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
@@ -26,6 +27,7 @@ pub enum NodeDef {
     Texture(TextureDef),
     Shader(ShaderDef),
     ComputeShader(ComputeShaderDef),
+    Fluid(FluidDef),
     Output(OutputDef),
     Fixture(FixtureDef),
 }
@@ -38,6 +40,7 @@ impl NodeDef {
             Self::Texture(_) => NodeKind::Texture,
             Self::Shader(_) => NodeKind::Shader,
             Self::ComputeShader(_) => NodeKind::ComputeShader,
+            Self::Fluid(_) => NodeKind::Fluid,
             Self::Output(_) => NodeKind::Output,
             Self::Fixture(_) => NodeKind::Fixture,
         }
@@ -50,6 +53,7 @@ impl NodeDef {
             Self::Texture(_) => TextureDef::KIND,
             Self::Shader(_) => ShaderDef::KIND,
             Self::ComputeShader(_) => ComputeShaderDef::KIND,
+            Self::Fluid(_) => FluidDef::KIND,
             Self::Output(_) => OutputDef::KIND,
             Self::Fixture(_) => FixtureDef::KIND,
         }
@@ -83,6 +87,13 @@ impl NodeDef {
         }
     }
 
+    pub fn as_fluid(&self) -> Option<&FluidDef> {
+        match self {
+            Self::Fluid(def) => Some(def),
+            _ => None,
+        }
+    }
+
     pub fn as_output(&self) -> Option<&OutputDef> {
         match self {
             Self::Output(def) => Some(def),
@@ -108,6 +119,7 @@ impl NodeDef {
             TextureDef::KIND => parse_variant(text).map(Self::Texture),
             ShaderDef::KIND => parse_variant(text).map(Self::Shader),
             ComputeShaderDef::KIND => parse_variant(text).map(Self::ComputeShader),
+            FluidDef::KIND => parse_variant(text).map(Self::Fluid),
             OutputDef::KIND => parse_variant(text).map(Self::Output),
             FixtureDef::KIND => parse_variant(text).map(Self::Fixture),
             other => Err(NodeDefParseError::UnknownKind {
@@ -124,6 +136,7 @@ impl SlotAccess for NodeDef {
             Self::Texture(def) => def.shape_id(),
             Self::Shader(def) => def.shape_id(),
             Self::ComputeShader(def) => def.shape_id(),
+            Self::Fluid(def) => def.shape_id(),
             Self::Output(def) => def.shape_id(),
             Self::Fixture(def) => def.shape_id(),
         }
@@ -135,6 +148,7 @@ impl SlotAccess for NodeDef {
             Self::Texture(def) => def.data(),
             Self::Shader(def) => def.data(),
             Self::ComputeShader(def) => def.data(),
+            Self::Fluid(def) => def.data(),
             Self::Output(def) => def.data(),
             Self::Fixture(def) => def.data(),
         }
