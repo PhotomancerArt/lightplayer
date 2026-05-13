@@ -118,8 +118,8 @@ pub(crate) fn render_slot_edit_status(ui: &mut egui::Ui, status: SlotEditStatus<
 
 fn render_bool_editor(ui: &mut egui::Ui, value: bool) -> Option<LpValue> {
     let mut edited = value;
-    ui.checkbox(&mut edited, "");
-    (edited != value).then_some(LpValue::Bool(edited))
+    let response = ui.checkbox(&mut edited, "");
+    (response.changed() && edited != value).then_some(LpValue::Bool(edited))
 }
 
 fn render_f32_editor(ui: &mut egui::Ui, shape: &SlotValueShape, value: f32) -> Option<LpValue> {
@@ -150,8 +150,23 @@ fn render_f32_editor(ui: &mut egui::Ui, shape: &SlotValueShape, value: f32) -> O
         _ => return None,
     };
 
-    response
-        .changed()
+    let tolerance = f32_edit_tolerance(&shape.editor);
+    (response.changed() && response_was_user_edit(&response) && (edited - value).abs() > tolerance)
         .then_some(LpValue::F32(edited))
-        .filter(|_| edited.to_bits() != value.to_bits())
+}
+
+fn response_was_user_edit(response: &egui::Response) -> bool {
+    response.clicked() || response.dragged()
+}
+
+fn f32_edit_tolerance(editor: &ValueEditorHint) -> f32 {
+    match editor {
+        ValueEditorHint::Slider {
+            step: Some(step), ..
+        }
+        | ValueEditorHint::Number {
+            step: Some(step), ..
+        } => (step.0.abs() * 0.001).max(0.000_001),
+        _ => 0.000_001,
+    }
 }
