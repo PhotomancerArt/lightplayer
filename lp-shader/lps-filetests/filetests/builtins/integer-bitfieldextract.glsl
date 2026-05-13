@@ -15,7 +15,6 @@ int test_bitfieldextract_int_simple() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
 // run: test_bitfieldextract_int_simple() == 15
 
 int test_bitfieldextract_int_lsb() {
@@ -26,7 +25,6 @@ int test_bitfieldextract_int_lsb() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
 // run: test_bitfieldextract_int_lsb() == 10
 
 int test_bitfieldextract_int_msb() {
@@ -37,7 +35,6 @@ int test_bitfieldextract_int_msb() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
 // run: test_bitfieldextract_int_msb() == 10
 
 uint test_bitfieldextract_uint_simple() {
@@ -48,7 +45,6 @@ uint test_bitfieldextract_uint_simple() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
 // run: test_bitfieldextract_uint_simple() == 15u
 
 uint test_bitfieldextract_uint_single_bit() {
@@ -59,7 +55,6 @@ uint test_bitfieldextract_uint_single_bit() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
 // run: test_bitfieldextract_uint_single_bit() == 1u
 
 ivec2 test_bitfieldextract_ivec2() {
@@ -70,7 +65,6 @@ ivec2 test_bitfieldextract_ivec2() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
 // run: test_bitfieldextract_ivec2() == ivec2(15, 10)
 
 

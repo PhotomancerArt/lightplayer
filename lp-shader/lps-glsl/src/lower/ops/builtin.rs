@@ -100,6 +100,12 @@ pub(in crate::lower) fn lower_builtin(
                 return lower_bool_builtin(ctx, span, kind, &values[0], result_ty);
             }
             BuiltinKind::BitCount => lower_bit_count_lane(ctx, &values[0], i),
+            BuiltinKind::BitfieldExtract => {
+                lower_bitfield_extract_lane(ctx, result_ty, &values[0], &values[1], &values[2], i)
+            }
+            BuiltinKind::BitfieldInsert => {
+                lower_bitfield_insert_lane(ctx, &values[0], &values[1], &values[2], &values[3], i)
+            }
             BuiltinKind::BitfieldReverse => lower_bitfield_reverse_lane(ctx, &values[0], i),
             BuiltinKind::Equal => {
                 return lower_binary(
@@ -305,6 +311,108 @@ fn lower_bitfield_reverse_lane(
         acc = next;
     }
     acc
+}
+
+fn lower_bitfield_extract_lane(
+    ctx: &mut LowerCtx<'_>,
+    result_ty: &LpsType,
+    value: &LowerValue,
+    offset: &LowerValue,
+    bits: &LowerValue,
+    index: usize,
+) -> lpir::VReg {
+    let x = lane_at(value, index);
+    let offset = lane_at(offset, index);
+    let bits = lane_at(bits, index);
+    let shifted = ctx.fb.alloc_vreg(IrType::I32);
+    if scalar_base_type(result_ty) == Some(LpsType::Int) {
+        ctx.fb.push(LpirOp::IshrS {
+            dst: shifted,
+            lhs: x,
+            rhs: offset,
+        });
+    } else {
+        ctx.fb.push(LpirOp::IshrU {
+            dst: shifted,
+            lhs: x,
+            rhs: offset,
+        });
+    }
+    let mask = lower_low_bits_mask(ctx, bits);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Iand {
+        dst,
+        lhs: shifted,
+        rhs: mask,
+    });
+    dst
+}
+
+fn lower_bitfield_insert_lane(
+    ctx: &mut LowerCtx<'_>,
+    base: &LowerValue,
+    insert: &LowerValue,
+    offset: &LowerValue,
+    bits: &LowerValue,
+    index: usize,
+) -> lpir::VReg {
+    let offset = lane_at(offset, index);
+    let low_mask = lower_low_bits_mask(ctx, lane_at(bits, index));
+    let mask = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Ishl {
+        dst: mask,
+        lhs: low_mask,
+        rhs: offset,
+    });
+    let inv_mask = ctx.fb.alloc_vreg(IrType::I32);
+    let all_ones = iconst(ctx, -1);
+    ctx.fb.push(LpirOp::Ixor {
+        dst: inv_mask,
+        lhs: mask,
+        rhs: all_ones,
+    });
+    let cleared = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Iand {
+        dst: cleared,
+        lhs: lane_at(base, index),
+        rhs: inv_mask,
+    });
+    let shifted_insert = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Ishl {
+        dst: shifted_insert,
+        lhs: lane_at(insert, index),
+        rhs: offset,
+    });
+    let masked_insert = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Iand {
+        dst: masked_insert,
+        lhs: shifted_insert,
+        rhs: mask,
+    });
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Ior {
+        dst,
+        lhs: cleared,
+        rhs: masked_insert,
+    });
+    dst
+}
+
+fn lower_low_bits_mask(ctx: &mut LowerCtx<'_>, bits: lpir::VReg) -> lpir::VReg {
+    let one = iconst(ctx, 1);
+    let shifted_one = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Ishl {
+        dst: shifted_one,
+        lhs: one,
+        rhs: bits,
+    });
+    let mask = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Isub {
+        dst: mask,
+        lhs: shifted_one,
+        rhs: one,
+    });
+    mask
 }
 
 fn lower_find_lsb_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {

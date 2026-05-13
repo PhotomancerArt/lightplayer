@@ -233,6 +233,8 @@ pub enum BuiltinKind {
     All,
     Any,
     BitCount,
+    BitfieldExtract,
+    BitfieldInsert,
     BitfieldReverse,
     Ceil,
     Clamp,

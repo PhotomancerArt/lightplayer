@@ -17,6 +17,8 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "all" => BuiltinKind::All,
         "any" => BuiltinKind::Any,
         "bitCount" => BuiltinKind::BitCount,
+        "bitfieldExtract" => BuiltinKind::BitfieldExtract,
+        "bitfieldInsert" => BuiltinKind::BitfieldInsert,
         "bitfieldReverse" => BuiltinKind::BitfieldReverse,
         "ceil" => BuiltinKind::Ceil,
         "clamp" => BuiltinKind::Clamp,
@@ -201,7 +203,12 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Mod
         | BuiltinKind::NotEqual
         | BuiltinKind::OuterProduct => 2,
-        BuiltinKind::Clamp | BuiltinKind::Fma | BuiltinKind::Mix | BuiltinKind::Smoothstep => 3,
+        BuiltinKind::BitfieldExtract
+        | BuiltinKind::Clamp
+        | BuiltinKind::Fma
+        | BuiltinKind::Mix
+        | BuiltinKind::Smoothstep => 3,
+        BuiltinKind::BitfieldInsert => 4,
     };
     if args.len() != arity {
         return Err(Diagnostic::error(
@@ -228,6 +235,44 @@ pub(super) fn type_builtin_args(
                 ));
             }
             Ok((args, ty))
+        }
+        BuiltinKind::BitfieldExtract => {
+            let value_ty = args[0].ty.clone();
+            if value_ty.is_matrix()
+                || !matches!(
+                    scalar_base_type(&value_ty),
+                    Some(LpsType::Int | LpsType::UInt)
+                )
+                || args[1].ty != LpsType::Int
+                || args[2].ty != LpsType::Int
+            {
+                return Err(Diagnostic::error(
+                    span,
+                    "bitfieldExtract expects int/uint lanes and int offset/bits",
+                ));
+            }
+            Ok((args, value_ty))
+        }
+        BuiltinKind::BitfieldInsert => {
+            let (base, insert, value_ty) =
+                coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            if value_ty.is_matrix()
+                || !matches!(
+                    scalar_base_type(&value_ty),
+                    Some(LpsType::Int | LpsType::UInt)
+                )
+                || args[2].ty != LpsType::Int
+                || args[3].ty != LpsType::Int
+            {
+                return Err(Diagnostic::error(
+                    span,
+                    "bitfieldInsert expects int/uint lanes and int offset/bits",
+                ));
+            }
+            Ok((
+                alloc::vec![base, insert, args[2].clone(), args[3].clone()],
+                value_ty,
+            ))
         }
         BuiltinKind::Ceil
         | BuiltinKind::Degrees
