@@ -54,6 +54,22 @@ uvec4 test_umulextended_uint_max() {
 // @broken(rv32n.q32)
 // run: test_umulextended_uint_max() == uvec4(1u, 4294967294u, 0u, 0u)
 
+struct U64Parts {
+    uint msb;
+    uint lsb;
+};
+
+uvec2 test_umulextended_struct_field_out() {
+    // umulExtended writes through struct-field out places.
+    U64Parts parts;
+    umulExtended(65536u, 65536u, parts.msb, parts.lsb);
+    return uvec2(parts.lsb, parts.msb);
+}
+
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
+// run: test_umulextended_struct_field_out() == uvec2(0u, 1u)
 
 
 
