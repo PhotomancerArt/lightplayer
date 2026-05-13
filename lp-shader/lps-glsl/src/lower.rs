@@ -18,10 +18,15 @@ use crate::hir::{
 use crate::{Diagnostic, Span};
 
 mod ops;
+mod storage;
 
 use ops::{
     assign_target, copy_value, lower_binary, lower_builtin, lower_cast, lower_inc_dec, lower_index,
     lower_select, single_lane,
+};
+use storage::{
+    alloc_slot_addr, flat_value_byte_size, is_pointer_param, load_value_from_addr,
+    lower_uniform_load, param_pointer, store_value_to_addr,
 };
 
 #[derive(Debug, Clone)]
@@ -360,11 +365,8 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             let mut arg_lanes = vec![VMCTX_VREG];
             for (arg_index, arg) in args.iter().enumerate() {
                 if let Some(writeback) = writebacks.iter().find(|w| w.arg_index == arg_index) {
-                    let slot = ctx
-                        .fb
-                        .alloc_slot(scalar_lane_count(&writeback.ty) as u32 * 4);
-                    let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-                    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
+                    let (_slot, addr) =
+                        alloc_slot_addr(ctx, flat_value_byte_size(&writeback.ty), IrType::Pointer);
                     if writeback.copy_in {
                         let value = lower_expr(ctx, arg)?;
                         store_value_to_addr(ctx, expr.span, addr, &value)?;
@@ -508,9 +510,7 @@ fn lower_import_call_with_out(
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let out_lanes = scalar_lane_count(&out.ty);
-    let slot = ctx.fb.alloc_slot(out_lanes as u32 * 4);
-    let addr = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
+    let (_slot, addr) = alloc_slot_addr(ctx, out_lanes as u32 * 4, IrType::I32);
 
     let mut arg_lanes = Vec::new();
     let mut value_arg = 0usize;
@@ -558,92 +558,4 @@ fn lower_import_call_with_out(
         ty: result_ty.clone(),
         lanes: results,
     })
-}
-
-fn lower_uniform_load(
-    ctx: &mut LowerCtx<'_>,
-    span: Span,
-    byte_offset: u32,
-    ty: &LpsType,
-) -> Result<LowerValue, Diagnostic> {
-    let ir_types = scalar_ir_types(ty)?;
-    let mut lanes = Vec::new();
-    for (i, ir_ty) in ir_types.iter().enumerate() {
-        let dst = ctx.fb.alloc_vreg(*ir_ty);
-        ctx.fb.push(LpirOp::Load {
-            dst,
-            base: VMCTX_VREG,
-            offset: byte_offset.saturating_add((i as u32).saturating_mul(4)),
-        });
-        lanes.push(dst);
-    }
-    if lanes.len() != scalar_lane_count(ty) {
-        return Err(Diagnostic::error(span, "uniform lane count mismatch"));
-    }
-    Ok(LowerValue {
-        ty: ty.clone(),
-        lanes,
-    })
-}
-
-fn is_pointer_param(ctx: &LowerCtx<'_>, param: usize) -> bool {
-    ctx.param_qualifiers
-        .get(param)
-        .is_some_and(|q| matches!(q, ParamQualifier::Out | ParamQualifier::InOut))
-}
-
-fn param_pointer(ctx: &LowerCtx<'_>, span: Span, param: usize) -> Result<VReg, Diagnostic> {
-    let value = ctx.params.get(param).ok_or_else(|| {
-        Diagnostic::error(span, format!("parameter index {param} is out of range"))
-    })?;
-    value
-        .lanes
-        .first()
-        .copied()
-        .ok_or_else(|| Diagnostic::error(span, "pointer parameter has no address lane"))
-}
-
-fn load_value_from_addr(
-    ctx: &mut LowerCtx<'_>,
-    span: Span,
-    addr: VReg,
-    ty: &LpsType,
-) -> Result<LowerValue, Diagnostic> {
-    let ir_types = scalar_ir_types(ty)?;
-    let mut lanes = Vec::new();
-    for (i, ir_ty) in ir_types.iter().enumerate() {
-        let dst = ctx.fb.alloc_vreg(*ir_ty);
-        ctx.fb.push(LpirOp::Load {
-            dst,
-            base: addr,
-            offset: i as u32 * 4,
-        });
-        lanes.push(dst);
-    }
-    if lanes.len() != scalar_lane_count(ty) {
-        return Err(Diagnostic::error(span, "load lane count mismatch"));
-    }
-    Ok(LowerValue {
-        ty: ty.clone(),
-        lanes,
-    })
-}
-
-fn store_value_to_addr(
-    ctx: &mut LowerCtx<'_>,
-    span: Span,
-    addr: VReg,
-    value: &LowerValue,
-) -> Result<(), Diagnostic> {
-    if value.lanes.len() != scalar_lane_count(&value.ty) {
-        return Err(Diagnostic::error(span, "store lane count mismatch"));
-    }
-    for (i, lane) in value.lanes.iter().enumerate() {
-        ctx.fb.push(LpirOp::Store {
-            base: addr,
-            offset: i as u32 * 4,
-            value: *lane,
-        });
-    }
-    Ok(())
 }
