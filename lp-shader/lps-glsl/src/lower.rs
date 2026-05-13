@@ -22,7 +22,7 @@ mod storage;
 
 use ops::{
     assign_target, lower_binary, lower_builtin, lower_cast, lower_inc_dec, lower_index,
-    lower_select, single_lane,
+    lower_select, read_assign_target, single_lane,
 };
 use storage::{
     LocalStorage, alloc_slot_addr, flat_value_byte_size, is_pointer_param, load_value_from_addr,
@@ -482,6 +482,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             let reject = lower_expr(ctx, reject)?;
             lower_select(ctx, expr.span, condition, accept, reject, &expr.ty)
         }
+        HirExprKind::PlaceRead { target } => read_assign_target(ctx, expr.span, target),
         HirExprKind::Assign { target, value } => {
             let value = lower_expr(ctx, value)?;
             assign_target(ctx, expr.span, target, value.clone())?;

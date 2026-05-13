@@ -11,7 +11,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     pub(super) fn parse_expr(&mut self, min_binding_power: u8) -> Result<ParsedExpr, Diagnostic> {
         let mut lhs = self.parse_prefix()?;
         loop {
-            if self.at_punct("=") {
+            if let Some(op) = self.current_assign_op() {
                 if min_binding_power > 1 {
                     break;
                 }
@@ -25,6 +25,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     span,
                     kind: ParsedExprKind::Assign {
                         target: alloc::boxed::Box::new(lhs),
+                        op,
                         value: alloc::boxed::Box::new(value),
                     },
                 };
@@ -117,6 +118,10 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     expr: alloc::boxed::Box::new(expr),
                 },
             });
+        }
+        if self.at_punct("+") {
+            self.bump();
+            return self.parse_expr(15);
         }
         if self.at_punct("!") {
             let start = self.bump().span.start;
@@ -309,6 +314,27 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 let expr = self.parse_expr(0)?;
                 self.expect_punct(")")?;
                 Ok(expr)
+            }
+            TokenKind::Punct if tok.lexeme(self.source) == "{" => {
+                let mut elements = Vec::new();
+                if !self.at_punct("}") {
+                    loop {
+                        elements.push(self.parse_expr(1)?);
+                        if self.at_punct(",") {
+                            self.bump();
+                            if self.at_punct("}") {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                let end = self.expect_punct("}")?.span.end;
+                Ok(ParsedExpr {
+                    span: Span::new(tok.span.start, end),
+                    kind: ParsedExprKind::InitList { elements },
+                })
             }
             _ => Err(Diagnostic::expected(
                 tok.span,

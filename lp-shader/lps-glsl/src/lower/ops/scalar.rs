@@ -5,11 +5,10 @@ use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
 use crate::body::BinaryOp;
-use crate::hir::{BuiltinKind, scalar_base_type, scalar_lane_count};
+use crate::hir::{scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue};
-use super::builtin::lower_bool_builtin;
 use super::matrix::lower_matrix_multiply;
 use super::numeric::{lane_at, single_lane};
 
@@ -54,15 +53,39 @@ pub(in crate::lower) fn lower_binary(
             && *result_ty == LpsType::Bool
             && lhs.lanes.len() > 1
         {
-            let component_ty = LpsType::vector_type(&LpsType::Bool, lhs.lanes.len())
-                .ok_or_else(|| Diagnostic::error(span, "unsupported aggregate comparison width"))?;
-            let components = lower_binary(ctx, span, op, lhs, rhs, &component_ty)?;
-            let reduction = if op == BinaryOp::Eq {
-                BuiltinKind::All
-            } else {
-                BuiltinKind::Any
+            let Some(mut reduced) = lower_comparison_lane(ctx, span, op, &lhs, &rhs, 0)? else {
+                return Err(Diagnostic::error(
+                    span,
+                    "unsupported aggregate comparison width",
+                ));
             };
-            return lower_bool_builtin(ctx, span, reduction, &components, &LpsType::Bool);
+            for i in 1..lhs.lanes.len() {
+                let Some(component) = lower_comparison_lane(ctx, span, op, &lhs, &rhs, i)? else {
+                    return Err(Diagnostic::error(
+                        span,
+                        "unsupported aggregate comparison width",
+                    ));
+                };
+                let dst = ctx.fb.alloc_vreg(IrType::I32);
+                if op == BinaryOp::Eq {
+                    ctx.fb.push(LpirOp::Iand {
+                        dst,
+                        lhs: reduced,
+                        rhs: component,
+                    });
+                } else {
+                    ctx.fb.push(LpirOp::Ior {
+                        dst,
+                        lhs: reduced,
+                        rhs: component,
+                    });
+                }
+                reduced = dst;
+            }
+            return Ok(LowerValue {
+                ty: LpsType::Bool,
+                lanes: vec![reduced],
+            });
         }
         let width = scalar_lane_count(result_ty);
         let mut lanes = Vec::new();
@@ -274,6 +297,123 @@ pub(in crate::lower) fn lower_binary(
         ty: result_ty.clone(),
         lanes,
     })
+}
+
+fn lower_comparison_lane(
+    ctx: &mut LowerCtx<'_>,
+    _span: Span,
+    op: BinaryOp,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
+    index: usize,
+) -> Result<Option<lpir::VReg>, Diagnostic> {
+    let lhs_lane = lane_at(lhs, index);
+    let rhs_lane = lane_at(rhs, index);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    let base_ty = scalar_base_type(&lhs.ty).unwrap_or_else(|| lhs.ty.clone());
+    let op = match base_ty {
+        LpsType::Float => match op {
+            BinaryOp::Lt => LpirOp::Flt {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Le => LpirOp::Fle {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Gt => LpirOp::Fgt {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Ge => LpirOp::Fge {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Eq => LpirOp::Feq {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Ne => LpirOp::Fne {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            _ => return Ok(None),
+        },
+        LpsType::UInt => match op {
+            BinaryOp::Lt => LpirOp::IltU {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Le => LpirOp::IleU {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Gt => LpirOp::IgtU {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Ge => LpirOp::IgeU {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Eq => LpirOp::Ieq {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Ne => LpirOp::Ine {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            _ => return Ok(None),
+        },
+        _ => match op {
+            BinaryOp::Lt => LpirOp::IltS {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Le => LpirOp::IleS {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Gt => LpirOp::IgtS {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Ge => LpirOp::IgeS {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Eq => LpirOp::Ieq {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            BinaryOp::Ne => LpirOp::Ine {
+                dst,
+                lhs: lhs_lane,
+                rhs: rhs_lane,
+            },
+            _ => return Ok(None),
+        },
+    };
+    ctx.fb.push(op);
+    Ok(Some(dst))
 }
 
 fn is_comparison(op: BinaryOp) -> bool {

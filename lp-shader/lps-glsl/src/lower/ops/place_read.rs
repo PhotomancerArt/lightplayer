@@ -38,7 +38,7 @@ pub(super) fn root_value(
     }
 }
 
-pub(super) fn read_assign_target(
+pub(in crate::lower) fn read_assign_target(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     target: &HirAssignTarget,

@@ -28,6 +28,7 @@ pub(in crate::lower) fn lower_index(
         1
     };
     let source_count = base.lanes.len() / source_width;
+    let index = clamp_index(ctx, index, source_count);
     let mut lanes = Vec::new();
     for component in 0..result_width {
         let Some(mut selected) = base.lanes.get(component).copied() else {
@@ -88,6 +89,7 @@ pub(super) fn assign_index_target(
     }
     let lane_types = scalar_ir_types(&value.ty)?;
     let count = dst.lanes.len() / width;
+    let index = clamp_index(ctx, index, count);
     for lane_index in 0..count {
         let constant = ctx.fb.alloc_vreg(IrType::I32);
         ctx.fb.push(LpirOp::IconstI32 {
@@ -139,6 +141,7 @@ pub(super) fn lower_index_field(
     }
     let field_ir_types = scalar_ir_types(field_ty)?;
     let element_count = array_lane_count / element_width;
+    let index = clamp_index(ctx, index, element_count);
     let mut lanes = Vec::new();
     for component in 0..field_lane_count {
         let base_component = field_lane_offset + component;
@@ -208,6 +211,7 @@ pub(super) fn assign_index_field_target(
     }
     let lane_types = scalar_ir_types(&value.ty)?;
     let element_count = array_lane_count / element_width;
+    let index = clamp_index(ctx, index, element_count);
     for element_index in 0..element_count {
         let constant = ctx.fb.alloc_vreg(IrType::I32);
         ctx.fb.push(LpirOp::IconstI32 {
@@ -260,6 +264,8 @@ pub(super) fn lower_index_index(
     }
     let outer_count = base.lanes.len() / outer_width;
     let inner_count = outer_width / inner_width;
+    let outer_index = clamp_index(ctx, outer_index, outer_count);
+    let inner_index = clamp_index(ctx, inner_index, inner_count);
     let result_ir_types = scalar_ir_types(inner_ty)?;
     let mut lanes = Vec::new();
     for component in 0..inner_width {
@@ -334,6 +340,8 @@ pub(super) fn assign_index_index_target(
     }
     let outer_count = dst.lanes.len() / outer_width;
     let inner_count = outer_width / inner_width;
+    let outer_index = clamp_index(ctx, outer_index, outer_count);
+    let inner_index = clamp_index(ctx, inner_index, inner_count);
     let lane_types = scalar_ir_types(&value.ty)?;
     for outer in 0..outer_count {
         let outer_cond = index_eq(ctx, outer_index, outer);
@@ -378,4 +386,54 @@ fn index_eq(ctx: &mut LowerCtx<'_>, index: lpir::VReg, value: usize) -> lpir::VR
         rhs: constant,
     });
     cond
+}
+
+fn clamp_index(ctx: &mut LowerCtx<'_>, index: lpir::VReg, count: usize) -> lpir::VReg {
+    if count <= 1 {
+        let zero = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::IconstI32 {
+            dst: zero,
+            value: 0,
+        });
+        return zero;
+    }
+
+    let zero = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IconstI32 {
+        dst: zero,
+        value: 0,
+    });
+    let below_zero = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IltS {
+        dst: below_zero,
+        lhs: index,
+        rhs: zero,
+    });
+    let low_clamped = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst: low_clamped,
+        cond: below_zero,
+        if_true: zero,
+        if_false: index,
+    });
+
+    let last = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IconstI32 {
+        dst: last,
+        value: count.saturating_sub(1) as i32,
+    });
+    let above_last = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IgtS {
+        dst: above_last,
+        lhs: low_clamped,
+        rhs: last,
+    });
+    let clamped = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst: clamped,
+        cond: above_last,
+        if_true: last,
+        if_false: low_clamped,
+    });
+    clamped
 }

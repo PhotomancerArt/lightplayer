@@ -233,6 +233,39 @@ fn infer_array_decl_type(
     fixed_array_from_base(base.clone(), &resolved, span)
 }
 
+fn resolve_init_list_lens(
+    span: Span,
+    lens: &[Option<u32>],
+    init: &ParsedExpr,
+) -> Result<Vec<Option<u32>>, Diagnostic> {
+    let Some((first_len, rest_lens)) = lens.split_first() else {
+        return Ok(Vec::new());
+    };
+    let ParsedExprKind::InitList { elements } = &init.kind else {
+        return fixed_init_lens(span, lens);
+    };
+    let resolved_len = first_len.unwrap_or(elements.len() as u32);
+    let mut resolved = alloc::vec![Some(resolved_len)];
+    if !rest_lens.is_empty() {
+        if let Some(first) = elements.first() {
+            resolved.extend(resolve_init_list_lens(span, rest_lens, first)?);
+        } else {
+            resolved.extend(fixed_init_lens(span, rest_lens)?);
+        }
+    }
+    Ok(resolved)
+}
+
+fn fixed_init_lens(span: Span, lens: &[Option<u32>]) -> Result<Vec<Option<u32>>, Diagnostic> {
+    if lens.iter().any(Option::is_none) {
+        return Err(Diagnostic::error(
+            span,
+            "unsized array initializer requires elements",
+        ));
+    }
+    Ok(lens.to_vec())
+}
+
 fn infer_array_constructor_type(
     span: Span,
     base: LpsType,
@@ -494,9 +527,7 @@ impl<'a> TypeCtx<'a> {
                 ..
             } => {
                 let init = if let Some(init) = init {
-                    let expr = self.type_expr(init)?;
-                    let ty = self.type_decl_ty(ty, *span, Some(&expr))?;
-                    self.coerce_expr(expr, &ty)?
+                    self.type_decl_init(ty, *span, init)?
                 } else {
                     let ty = self.type_decl_ty(ty, *span, None)?;
                     zero_expr(*span, &ty)?
@@ -517,10 +548,7 @@ impl<'a> TypeCtx<'a> {
                 let mut statements = Vec::new();
                 for declaration in declarations {
                     let init = if let Some(init) = &declaration.init {
-                        let expr = self.type_expr(init)?;
-                        let ty =
-                            self.type_decl_ty(&declaration.ty, declaration.span, Some(&expr))?;
-                        self.coerce_expr(expr, &ty)?
+                        self.type_decl_init(&declaration.ty, declaration.span, init)?
                     } else {
                         let ty = self.type_decl_ty(&declaration.ty, declaration.span, None)?;
                         zero_expr(declaration.span, &ty)?
@@ -713,6 +741,10 @@ impl<'a> TypeCtx<'a> {
                 self.type_constructor(expr.span, name, args)
             }
             ParsedExprKind::Call { name, args } => self.type_call(expr.span, name, args),
+            ParsedExprKind::InitList { .. } => Err(Diagnostic::error(
+                expr.span,
+                "initializer list requires declaration type",
+            )),
             ParsedExprKind::Swizzle { base, fields } => {
                 let base = self.type_expr(base)?;
                 let (lanes, ty) = access_lanes(expr.span, &base.ty, fields)?;
@@ -808,10 +840,9 @@ impl<'a> TypeCtx<'a> {
                 accept,
                 reject,
             } => self.type_conditional(expr.span, condition, accept, reject),
-            ParsedExprKind::Assign { target, value } => {
+            ParsedExprKind::Assign { target, op, value } => {
                 let target = self.type_assign_target(target)?;
-                let value = self.type_expr(value)?;
-                let value = self.coerce_expr(value, target.ty())?;
+                let value = self.type_assign_value(expr.span, &target, *op, value)?;
                 Ok(HirExpr {
                     span: expr.span,
                     ty: value.ty.clone(),
@@ -1107,6 +1138,9 @@ impl<'a> TypeCtx<'a> {
         lhs: HirExpr,
         rhs: HirExpr,
     ) -> Result<HirExpr, Diagnostic> {
+        if let Some(folded) = fold_float_binary(span, op, &lhs, &rhs) {
+            return Ok(folded);
+        }
         if is_logical(op) {
             let lhs = self.coerce_expr(lhs, &LpsType::Bool)?;
             let rhs = self.coerce_expr(rhs, &LpsType::Bool)?;
@@ -1121,6 +1155,21 @@ impl<'a> TypeCtx<'a> {
             });
         }
         if is_comparison(op) {
+            if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
+                && lhs.ty == rhs.ty
+                && scalar_base_type(&lhs.ty).is_some()
+                && scalar_lane_count(&lhs.ty) > 1
+            {
+                return Ok(HirExpr {
+                    span,
+                    ty: LpsType::Bool,
+                    kind: HirExprKind::Binary {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                });
+            }
             let (lhs, rhs, ty) = coerce_comparison_pair(span, lhs, rhs)?;
             let ty = if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
                 LpsType::Bool
@@ -1268,15 +1317,8 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn read_assign_target_kind(&self, target: &HirAssignTarget) -> HirExprKind {
-        if !target.place.segments.is_empty() {
-            unreachable!("compound assignment statement only has simple name targets");
-        }
-        match &target.place.root {
-            PlaceRoot::Param { param, .. } => HirExprKind::Param { index: *param },
-            PlaceRoot::Local { local, .. } => HirExprKind::Local { index: *local },
-            PlaceRoot::Uniform { .. } => {
-                unreachable!("assignment target cannot be a uniform")
-            }
+        HirExprKind::PlaceRead {
+            target: target.clone(),
         }
     }
 
@@ -1286,6 +1328,70 @@ impl<'a> TypeCtx<'a> {
 
     fn type_name_to_lps(&self, name: &str, span: Span) -> Result<LpsType, Diagnostic> {
         type_name_to_lps_with_structs(name, span, self.structs)
+    }
+
+    fn type_decl_init(
+        &mut self,
+        name: &str,
+        span: Span,
+        init: &ParsedExpr,
+    ) -> Result<HirExpr, Diagnostic> {
+        if matches!(init.kind, ParsedExprKind::InitList { .. }) {
+            let ty = self.type_init_list_decl_ty(name, span, init)?;
+            return self.type_init_list(init, &ty);
+        }
+        let expr = self.type_expr(init)?;
+        let ty = self.type_decl_ty(name, span, Some(&expr))?;
+        self.coerce_expr(expr, &ty)
+    }
+
+    fn type_init_list_decl_ty(
+        &self,
+        name: &str,
+        span: Span,
+        init: &ParsedExpr,
+    ) -> Result<LpsType, Diagnostic> {
+        if let Some((base_name, lens)) = parse_array_type_name(name) {
+            let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
+            let lens = resolve_init_list_lens(span, &lens, init)?;
+            return fixed_array_from_base(base, &lens, span);
+        }
+        self.type_name_to_lps(name, span)
+    }
+
+    fn type_init_list(
+        &mut self,
+        init: &ParsedExpr,
+        target: &LpsType,
+    ) -> Result<HirExpr, Diagnostic> {
+        let ParsedExprKind::InitList { elements } = &init.kind else {
+            let expr = self.type_expr(init)?;
+            return self.coerce_expr(expr, target);
+        };
+        let LpsType::Array { element, len } = target else {
+            return Err(Diagnostic::error(
+                init.span,
+                "initializer list target must be array",
+            ));
+        };
+        if elements.len() > *len as usize {
+            return Err(Diagnostic::error(
+                init.span,
+                "too many array initializer elements",
+            ));
+        }
+        let mut args = Vec::new();
+        for element_init in elements {
+            args.push(self.type_init_list(element_init, element)?);
+        }
+        while args.len() < *len as usize {
+            args.push(zero_expr(init.span, element)?);
+        }
+        Ok(HirExpr {
+            span: init.span,
+            ty: target.clone(),
+            kind: HirExprKind::Constructor { args },
+        })
     }
 
     fn type_decl_ty(
@@ -1341,4 +1447,24 @@ impl<'a> TypeCtx<'a> {
             .rev()
             .find_map(|scope| scope.get(name).copied())
     }
+}
+
+fn fold_float_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Option<HirExpr> {
+    let (HirExprKind::FloatLiteral(lhs), HirExprKind::FloatLiteral(rhs)) = (&lhs.kind, &rhs.kind)
+    else {
+        return None;
+    };
+    let value = match op {
+        BinaryOp::Add => lhs + rhs,
+        BinaryOp::Sub => lhs - rhs,
+        BinaryOp::Mul => lhs * rhs,
+        BinaryOp::Div if *rhs != 0.0 => lhs / rhs,
+        BinaryOp::Mod if *rhs != 0.0 => lhs % rhs,
+        _ => return None,
+    };
+    Some(HirExpr {
+        span,
+        ty: LpsType::Float,
+        kind: HirExprKind::FloatLiteral(value),
+    })
 }

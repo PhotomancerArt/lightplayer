@@ -100,6 +100,9 @@ pub enum ParsedExprKind {
         name: String,
         args: Vec<ParsedExpr>,
     },
+    InitList {
+        elements: Vec<ParsedExpr>,
+    },
     Swizzle {
         base: alloc::boxed::Box<ParsedExpr>,
         fields: String,
@@ -127,6 +130,7 @@ pub enum ParsedExprKind {
     },
     Assign {
         target: alloc::boxed::Box<ParsedExpr>,
+        op: AssignOp,
         value: alloc::boxed::Box<ParsedExpr>,
     },
     IncDec {

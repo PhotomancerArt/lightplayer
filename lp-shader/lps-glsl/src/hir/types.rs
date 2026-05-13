@@ -175,6 +175,9 @@ pub enum HirExprKind {
         accept: Box<HirExpr>,
         reject: Box<HirExpr>,
     },
+    PlaceRead {
+        target: HirAssignTarget,
+    },
     Assign {
         target: HirAssignTarget,
         value: Box<HirExpr>,
