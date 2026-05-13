@@ -183,6 +183,17 @@ pub(super) fn comparison_result_type(operand_ty: &LpsType) -> Option<LpsType> {
 }
 
 pub(super) fn zero_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
+    if let LpsType::Array { element, len } = ty {
+        let mut args = Vec::new();
+        for _ in 0..*len {
+            args.push(zero_expr(span, element)?);
+        }
+        return Ok(HirExpr {
+            span,
+            ty: ty.clone(),
+            kind: HirExprKind::Constructor { args },
+        });
+    }
     if let LpsType::Struct { members, .. } = ty {
         let args = members
             .iter()

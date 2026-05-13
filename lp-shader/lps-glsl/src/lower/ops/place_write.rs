@@ -5,10 +5,13 @@ use lpir::{IrType, LpirOp};
 use crate::hir::{HirAssignTarget, HirExpr, PlaceRoot, PlaceSegment};
 use crate::{Diagnostic, Span};
 
-use super::super::storage::{is_pointer_param, param_pointer, store_value_to_addr};
+use super::super::storage::{
+    is_pointer_param, local_is_slot, param_pointer, store_local, store_local_lanes,
+    store_value_to_addr,
+};
 use super::super::{LowerCtx, LowerValue, lower_expr};
 use super::access::copy_value;
-use super::index::assign_index_target;
+use super::index::{assign_index_field_target, assign_index_target};
 use super::place_read::root_value;
 use super::single_lane;
 
@@ -29,7 +32,31 @@ pub(in crate::lower) fn assign_target(
         [PlaceSegment::Index { index, ty }] => {
             let dst = root_value(ctx, span, &place.root)?;
             assign_index_target(ctx, span, dst.clone(), index, ty, value)?;
-            write_root_back_if_pointer_param(ctx, span, &place.root, &dst)
+            write_root_back_if_memory_root(ctx, span, &place.root, &dst)
+        }
+        [
+            PlaceSegment::Index {
+                index,
+                ty: element_ty,
+            },
+            PlaceSegment::Field {
+                lane_offset,
+                lane_count,
+                ..
+            },
+        ] => {
+            let dst = root_value(ctx, span, &place.root)?;
+            assign_index_field_target(
+                ctx,
+                span,
+                dst.clone(),
+                index,
+                element_ty,
+                *lane_offset,
+                *lane_count,
+                value,
+            )?;
+            write_root_back_if_memory_root(ctx, span, &place.root, &dst)
         }
         [
             PlaceSegment::Index { index: column, .. },
@@ -37,7 +64,7 @@ pub(in crate::lower) fn assign_target(
         ] if place.root_ty().is_matrix() => {
             let dst = root_value(ctx, span, &place.root)?;
             assign_matrix_element(ctx, span, dst.clone(), column, row, value)?;
-            write_root_back_if_pointer_param(ctx, span, &place.root, &dst)
+            write_root_back_if_memory_root(ctx, span, &place.root, &dst)
         }
         _ => Err(Diagnostic::error(
             span,
@@ -53,12 +80,7 @@ fn assign_root(
     value: LowerValue,
 ) -> Result<(), Diagnostic> {
     match root {
-        PlaceRoot::Local { local, .. } => {
-            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
-                Diagnostic::error(span, format!("local index {local} is out of range"))
-            })?;
-            copy_value(ctx, dst, value, span)
-        }
+        PlaceRoot::Local { local, .. } => store_local(ctx, span, *local, &value),
         PlaceRoot::Param { param, .. } => {
             if is_pointer_param(ctx, *param) {
                 let addr = param_pointer(ctx, span, *param)?;
@@ -88,12 +110,7 @@ fn assign_root_lanes(
         return Err(Diagnostic::error(span, "lane assignment width mismatch"));
     }
     match root {
-        PlaceRoot::Local { local, .. } => {
-            let dst = ctx.locals.get(*local).cloned().ok_or_else(|| {
-                Diagnostic::error(span, format!("local index {local} is out of range"))
-            })?;
-            copy_lanes(ctx, span, &dst, lanes, &value)
-        }
+        PlaceRoot::Local { local, .. } => store_local_lanes(ctx, span, *local, lanes, &value),
         PlaceRoot::Param { param, .. } => {
             if is_pointer_param(ctx, *param) {
                 let addr = param_pointer(ctx, span, *param)?;
@@ -138,17 +155,21 @@ fn copy_lanes(
     Ok(())
 }
 
-fn write_root_back_if_pointer_param(
+fn write_root_back_if_memory_root(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     root: &PlaceRoot,
     value: &LowerValue,
 ) -> Result<(), Diagnostic> {
-    if let PlaceRoot::Param { param, .. } = root
-        && is_pointer_param(ctx, *param)
-    {
-        let addr = param_pointer(ctx, span, *param)?;
-        return store_value_to_addr(ctx, span, addr, value);
+    match root {
+        PlaceRoot::Local { local, .. } if local_is_slot(ctx, *local) => {
+            return store_local(ctx, span, *local, value);
+        }
+        PlaceRoot::Param { param, .. } if is_pointer_param(ctx, *param) => {
+            let addr = param_pointer(ctx, span, *param)?;
+            return store_value_to_addr(ctx, span, addr, value);
+        }
+        _ => {}
     }
     Ok(())
 }

@@ -234,6 +234,32 @@ mod tests {
         assert!(output.meta.functions.iter().any(|f| f.name == "render"));
     }
 
+    #[test]
+    fn synchronous_compile_uses_slots_for_array_of_struct_locals() {
+        let source = r#"
+struct Point {
+    float x;
+    float y;
+};
+
+vec4 sample() {
+    Point ps[2];
+    ps[0].x = 1.0;
+    ps[1].y = 4.0;
+    return vec4(ps[0].x, ps[0].y, ps[1].x, ps[1].y);
+}
+"#;
+        let output = compile(source, &CompileOptions::default()).expect("compile array struct");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        let sample = output
+            .ir
+            .functions
+            .values()
+            .find(|function| function.name == "sample")
+            .expect("sample function");
+        assert!(!sample.slots.is_empty());
+    }
+
     fn compile_with_single_steps(source: &str) -> CompileOutput {
         let mut job = CompileJob::new(source, CompileOptions::default());
         loop {

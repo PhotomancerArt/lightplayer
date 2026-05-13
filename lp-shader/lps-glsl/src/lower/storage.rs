@@ -1,7 +1,7 @@
 use alloc::format;
 use alloc::vec::Vec;
 
-use lpir::{IrType, LpirOp, SlotId, VMCTX_VREG, VReg};
+use lpir::{FunctionBuilder, IrType, LpirOp, SlotId, VMCTX_VREG, VReg};
 use lps_shared::{LpsType, ParamQualifier};
 
 use crate::hir::{scalar_ir_types, scalar_lane_count};
@@ -9,8 +9,93 @@ use crate::{Diagnostic, Span};
 
 use super::{LowerCtx, LowerValue};
 
+#[derive(Debug, Clone)]
+pub(super) enum LocalStorage {
+    Flat(LowerValue),
+    Slot { ty: LpsType, addr: VReg },
+}
+
 pub(super) fn flat_value_byte_size(ty: &LpsType) -> u32 {
     scalar_lane_count(ty) as u32 * 4
+}
+
+pub(super) fn local_storage(
+    fb: &mut FunctionBuilder,
+    ty: LpsType,
+) -> Result<LocalStorage, Diagnostic> {
+    if should_slot_back_local(&ty) {
+        let (_slot, addr) = alloc_slot_addr_in(fb, flat_value_byte_size(&ty), IrType::Pointer);
+        return Ok(LocalStorage::Slot { ty, addr });
+    }
+
+    let mut lanes = Vec::new();
+    for ir_ty in scalar_ir_types(&ty)? {
+        lanes.push(fb.alloc_vreg(ir_ty));
+    }
+    Ok(LocalStorage::Flat(LowerValue { ty, lanes }))
+}
+
+pub(super) fn local_value(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    local: usize,
+) -> Result<LowerValue, Diagnostic> {
+    let storage =
+        ctx.locals.get(local).cloned().ok_or_else(|| {
+            Diagnostic::error(span, format!("local index {local} is out of range"))
+        })?;
+    match storage {
+        LocalStorage::Flat(value) => Ok(value),
+        LocalStorage::Slot { ty, addr, .. } => load_value_from_addr(ctx, span, addr, &ty),
+    }
+}
+
+pub(super) fn store_local(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    local: usize,
+    value: &LowerValue,
+) -> Result<(), Diagnostic> {
+    let storage =
+        ctx.locals.get(local).cloned().ok_or_else(|| {
+            Diagnostic::error(span, format!("local index {local} is out of range"))
+        })?;
+    match storage {
+        LocalStorage::Flat(dst) => copy_lanes_to_value(ctx, span, &dst, value),
+        LocalStorage::Slot { addr, .. } => store_value_to_addr(ctx, span, addr, value),
+    }
+}
+
+pub(super) fn store_local_lanes(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    local: usize,
+    lanes: &[usize],
+    value: &LowerValue,
+) -> Result<(), Diagnostic> {
+    if lanes.len() != value.lanes.len() {
+        return Err(Diagnostic::error(span, "lane assignment width mismatch"));
+    }
+    let storage =
+        ctx.locals.get(local).cloned().ok_or_else(|| {
+            Diagnostic::error(span, format!("local index {local} is out of range"))
+        })?;
+    match storage {
+        LocalStorage::Flat(dst) => copy_selected_lanes(ctx, span, &dst, lanes, value),
+        LocalStorage::Slot { ty, addr, .. } => {
+            let dst = load_value_from_addr(ctx, span, addr, &ty)?;
+            copy_selected_lanes(ctx, span, &dst, lanes, value)?;
+            store_value_to_addr(ctx, span, addr, &dst)
+        }
+    }
+}
+
+pub(super) fn local_is_slot(ctx: &LowerCtx<'_>, local: usize) -> bool {
+    matches!(ctx.locals.get(local), Some(LocalStorage::Slot { .. }))
+}
+
+fn should_slot_back_local(ty: &LpsType) -> bool {
+    matches!(ty, LpsType::Array { .. })
 }
 
 pub(super) fn alloc_slot_addr(
@@ -18,9 +103,13 @@ pub(super) fn alloc_slot_addr(
     byte_size: u32,
     addr_ty: IrType,
 ) -> (SlotId, VReg) {
-    let slot = ctx.fb.alloc_slot(byte_size);
-    let addr = ctx.fb.alloc_vreg(addr_ty);
-    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
+    alloc_slot_addr_in(&mut ctx.fb, byte_size, addr_ty)
+}
+
+fn alloc_slot_addr_in(fb: &mut FunctionBuilder, byte_size: u32, addr_ty: IrType) -> (SlotId, VReg) {
+    let slot = fb.alloc_slot(byte_size);
+    let addr = fb.alloc_vreg(addr_ty);
+    fb.push(LpirOp::SlotAddr { dst: addr, slot });
     (slot, addr)
 }
 
@@ -111,6 +200,43 @@ pub(super) fn store_value_to_addr(
             base: addr,
             offset: i as u32 * 4,
             value: *lane,
+        });
+    }
+    Ok(())
+}
+
+fn copy_lanes_to_value(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    dst: &LowerValue,
+    src: &LowerValue,
+) -> Result<(), Diagnostic> {
+    if dst.lanes.len() != src.lanes.len() {
+        return Err(Diagnostic::error(span, "copy lane count mismatch"));
+    }
+    copy_selected_lanes(
+        ctx,
+        span,
+        dst,
+        &(0..dst.lanes.len()).collect::<Vec<_>>(),
+        src,
+    )
+}
+
+fn copy_selected_lanes(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    dst: &LowerValue,
+    lanes: &[usize],
+    value: &LowerValue,
+) -> Result<(), Diagnostic> {
+    for (dst_lane, src_lane) in lanes.iter().zip(value.lanes.iter()) {
+        let Some(dst) = dst.lanes.get(*dst_lane) else {
+            return Err(Diagnostic::error(span, "assignment lane out of range"));
+        };
+        ctx.fb.push(LpirOp::Copy {
+            dst: *dst,
+            src: *src_lane,
         });
     }
     Ok(())

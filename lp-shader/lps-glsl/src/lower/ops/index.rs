@@ -118,3 +118,119 @@ pub(super) fn assign_index_target(
     }
     Ok(())
 }
+
+pub(super) fn lower_index_field(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    base: LowerValue,
+    index: &HirExpr,
+    element_ty: &LpsType,
+    field_lane_offset: usize,
+    field_lane_count: usize,
+    field_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let index = lower_expr(ctx, index)?;
+    let index = single_lane(span, &index)?;
+    let element_width = scalar_lane_count(element_ty);
+    if element_width == 0 || field_lane_count == 0 {
+        return Err(Diagnostic::error(span, "index field has no lanes"));
+    }
+    let field_ir_types = scalar_ir_types(field_ty)?;
+    let element_count = base.lanes.len() / element_width;
+    let mut lanes = Vec::new();
+    for component in 0..field_lane_count {
+        let base_component = field_lane_offset + component;
+        let Some(mut selected) = base.lanes.get(base_component).copied() else {
+            return Err(Diagnostic::error(span, "index field lane out of range"));
+        };
+        let result_ir_ty = field_ir_types
+            .get(component)
+            .copied()
+            .ok_or_else(|| Diagnostic::error(span, "index field result has no type"))?;
+        for element_index in 1..element_count {
+            let src_index = element_index * element_width + base_component;
+            let Some(lane) = base.lanes.get(src_index) else {
+                return Err(Diagnostic::error(
+                    span,
+                    "index field base lane out of range",
+                ));
+            };
+            let constant = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::IconstI32 {
+                dst: constant,
+                value: element_index as i32,
+            });
+            let cond = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(LpirOp::Ieq {
+                dst: cond,
+                lhs: index,
+                rhs: constant,
+            });
+            let dst = ctx.fb.alloc_vreg(result_ir_ty);
+            ctx.fb.push(LpirOp::Select {
+                dst,
+                cond,
+                if_true: *lane,
+                if_false: selected,
+            });
+            selected = dst;
+        }
+        lanes.push(selected);
+    }
+    Ok(LowerValue {
+        ty: field_ty.clone(),
+        lanes,
+    })
+}
+
+pub(super) fn assign_index_field_target(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    dst: LowerValue,
+    index: &HirExpr,
+    element_ty: &LpsType,
+    field_lane_offset: usize,
+    field_lane_count: usize,
+    value: LowerValue,
+) -> Result<(), Diagnostic> {
+    let index = lower_expr(ctx, index)?;
+    let index = single_lane(span, &index)?;
+    let element_width = scalar_lane_count(element_ty);
+    if element_width == 0 || field_lane_count == 0 || field_lane_count != value.lanes.len() {
+        return Err(Diagnostic::error(
+            span,
+            "index field assignment value lane mismatch",
+        ));
+    }
+    let lane_types = scalar_ir_types(&value.ty)?;
+    let element_count = dst.lanes.len() / element_width;
+    for element_index in 0..element_count {
+        let constant = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::IconstI32 {
+            dst: constant,
+            value: element_index as i32,
+        });
+        let cond = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Ieq {
+            dst: cond,
+            lhs: index,
+            rhs: constant,
+        });
+        for component in 0..field_lane_count {
+            let dst_index = element_index * element_width + field_lane_offset + component;
+            let current = dst.lanes[dst_index];
+            let selected = ctx.fb.alloc_vreg(lane_types[component]);
+            ctx.fb.push(LpirOp::Select {
+                dst: selected,
+                cond,
+                if_true: value.lanes[component],
+                if_false: current,
+            });
+            ctx.fb.push(LpirOp::Copy {
+                dst: current,
+                src: selected,
+            });
+        }
+    }
+    Ok(())
+}

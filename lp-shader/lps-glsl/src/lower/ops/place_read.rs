@@ -8,9 +8,9 @@ use lps_shared::LpsType;
 use crate::hir::{HirAssignTarget, HirExpr, PlaceRoot, PlaceSegment};
 use crate::{Diagnostic, Span};
 
-use super::super::storage::{is_pointer_param, load_value_from_addr, param_pointer};
+use super::super::storage::{is_pointer_param, load_value_from_addr, local_value, param_pointer};
 use super::super::{LowerCtx, LowerValue, lower_expr};
-use super::index::lower_index;
+use super::index::{lower_index, lower_index_field};
 use super::single_lane;
 
 pub(super) fn root_value(
@@ -19,11 +19,7 @@ pub(super) fn root_value(
     root: &PlaceRoot,
 ) -> Result<LowerValue, Diagnostic> {
     match root {
-        PlaceRoot::Local { local, .. } => {
-            ctx.locals.get(*local).cloned().ok_or_else(|| {
-                Diagnostic::error(span, format!("local index {local} is out of range"))
-            })
-        }
+        PlaceRoot::Local { local, .. } => local_value(ctx, span, *local),
         PlaceRoot::Param { param, .. } => {
             if is_pointer_param(ctx, *param) {
                 let addr = param_pointer(ctx, span, *param)?;
@@ -60,6 +56,27 @@ pub(super) fn read_assign_target(
             let index = lower_expr(ctx, index)?;
             lower_index(ctx, span, value, index, ty)
         }
+        [
+            PlaceSegment::Index {
+                index,
+                ty: element_ty,
+            },
+            PlaceSegment::Field {
+                lane_offset,
+                lane_count,
+                ty,
+                ..
+            },
+        ] => lower_index_field(
+            ctx,
+            span,
+            value,
+            index,
+            element_ty,
+            *lane_offset,
+            *lane_count,
+            ty,
+        ),
         [
             PlaceSegment::Index { index: column, .. },
             PlaceSegment::Index { index: row, ty },

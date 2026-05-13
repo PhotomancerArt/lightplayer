@@ -21,12 +21,13 @@ mod ops;
 mod storage;
 
 use ops::{
-    assign_target, copy_value, lower_binary, lower_builtin, lower_cast, lower_inc_dec, lower_index,
+    assign_target, lower_binary, lower_builtin, lower_cast, lower_inc_dec, lower_index,
     lower_select, single_lane,
 };
 use storage::{
-    alloc_slot_addr, flat_value_byte_size, is_pointer_param, load_value_from_addr,
-    lower_uniform_load, param_pointer, store_value_to_addr,
+    LocalStorage, alloc_slot_addr, flat_value_byte_size, is_pointer_param, load_value_from_addr,
+    local_storage, local_value, lower_uniform_load, param_pointer, store_local,
+    store_value_to_addr,
 };
 
 #[derive(Debug, Clone)]
@@ -95,14 +96,7 @@ fn lower_function(
     }
     let mut locals = Vec::new();
     for local in &function.body.locals {
-        let mut lanes = Vec::new();
-        for ty in scalar_ir_types(&local.ty)? {
-            lanes.push(fb.alloc_vreg(ty));
-        }
-        locals.push(LowerValue {
-            ty: local.ty.clone(),
-            lanes,
-        });
+        locals.push(local_storage(&mut fb, local.ty.clone())?);
     }
     let mut ctx = LowerCtx {
         fb,
@@ -121,7 +115,7 @@ fn lower_function(
 struct LowerCtx<'a> {
     fb: FunctionBuilder,
     params: Vec<LowerValue>,
-    locals: Vec<LowerValue>,
+    locals: Vec<LocalStorage>,
     import_map: &'a BTreeMap<ImportKey, CalleeRef>,
     param_qualifiers: Vec<ParamQualifier>,
 }
@@ -143,12 +137,12 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
     match stmt {
         HirStmt::Let { local, init } => {
             let value = lower_expr(ctx, init)?;
-            copy_value(ctx, ctx.locals[*local].clone(), value, init.span)
+            store_local(ctx, init.span, *local, &value)
         }
         HirStmt::Assign { local, value } => {
             let span = value.span;
             let value = lower_expr(ctx, value)?;
-            copy_value(ctx, ctx.locals[*local].clone(), value, span)
+            store_local(ctx, span, *local, &value)
         }
         HirStmt::If {
             condition,
@@ -291,9 +285,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 })
             }
         }
-        HirExprKind::Local { index } => ctx.locals.get(*index).cloned().ok_or_else(|| {
-            Diagnostic::error(expr.span, format!("local index {index} is out of range"))
-        }),
+        HirExprKind::Local { index } => local_value(ctx, expr.span, *index),
         HirExprKind::Uniform {
             name: _,
             byte_offset,
@@ -532,27 +524,21 @@ fn lower_import_call_with_out(
         .collect::<Vec<_>>();
     ctx.fb.push_call(callee, &arg_lanes, &results);
 
-    let Some(local) = ctx.locals.get(out.local).cloned() else {
-        return Err(Diagnostic::error(span, "internal lpfn out local missing"));
-    };
-    if local.lanes.len() != out_lanes {
-        return Err(Diagnostic::error(
-            span,
-            "internal lpfn out local width mismatch",
-        ));
-    }
-    for (i, dst) in local.lanes.iter().enumerate() {
+    let mut lanes = Vec::new();
+    for i in 0..out_lanes {
         let tmp = ctx.fb.alloc_vreg(IrType::F32);
         ctx.fb.push(LpirOp::Load {
             dst: tmp,
             base: addr,
             offset: i as u32 * 4,
         });
-        ctx.fb.push(LpirOp::Copy {
-            dst: *dst,
-            src: tmp,
-        });
+        lanes.push(tmp);
     }
+    let out_value = LowerValue {
+        ty: out.ty.clone(),
+        lanes,
+    };
+    store_local(ctx, span, out.local, &out_value)?;
 
     Ok(LowerValue {
         ty: result_ty.clone(),
