@@ -91,6 +91,12 @@ struct Parser<'src, 'tok> {
     struct_names: Vec<String>,
 }
 
+enum FunctionParse {
+    NotFunction,
+    Prototype,
+    Definition(FunctionDecl),
+}
+
 impl<'src, 'tok> Parser<'src, 'tok> {
     fn new(source: &'src str, tokens: &'tok [Token]) -> Self {
         Self {
@@ -116,10 +122,10 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             } else if self.at_keyword(Keyword::Const) {
                 index.consts.push(self.parse_const()?);
             } else if self.starts_type_name() {
-                if let Some(function) = self.try_parse_function()? {
-                    index.functions.push(function);
-                } else {
-                    index.globals.extend(self.parse_global_decl()?);
+                match self.try_parse_function()? {
+                    FunctionParse::Definition(function) => index.functions.push(function),
+                    FunctionParse::Prototype => {}
+                    FunctionParse::NotFunction => index.globals.extend(self.parse_global_decl()?),
                 }
             } else {
                 return Err(Diagnostic::error(
@@ -319,13 +325,13 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         Ok(members)
     }
 
-    fn try_parse_function(&mut self) -> Result<Option<FunctionDecl>, Diagnostic> {
+    fn try_parse_function(&mut self) -> Result<FunctionParse, Diagnostic> {
         let checkpoint = self.pos;
         let return_ty = self.expect_type_ref()?;
         let name = self.expect_identifier_like()?.to_string();
         if !self.at_punct("(") {
             self.pos = checkpoint;
-            return Ok(None);
+            return Ok(FunctionParse::NotFunction);
         }
         self.expect_punct("(")?;
         let params = self.parse_params()?;
@@ -333,12 +339,12 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let signature_end = self.previous().span.end;
         if self.at_punct(";") {
             self.bump();
-            return Ok(None);
+            return Ok(FunctionParse::Prototype);
         }
         let body_start = self.expect_punct("{")?.span.start;
         let body_end = self.skip_balanced_brace_body()?;
         let signature_span = Span::new(return_ty.span.start, signature_end);
-        Ok(Some(FunctionDecl {
+        Ok(FunctionParse::Definition(FunctionDecl {
             name,
             return_ty,
             params,
