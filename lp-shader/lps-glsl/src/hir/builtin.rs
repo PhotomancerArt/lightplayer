@@ -80,6 +80,7 @@ pub(super) fn is_glsl_import(name: &str) -> bool {
             | "exp2"
             | "log"
             | "log2"
+            | "ldexp"
             | "pow"
     )
 }
@@ -130,6 +131,22 @@ pub(super) fn type_glsl_import_args(
             return Err(Diagnostic::error(span, "atan expects float lanes"));
         }
         return Ok((alloc::vec![a, b], ty));
+    }
+    if name == "ldexp" && args.len() == 2 {
+        let x = args[0].clone();
+        if x.ty.is_matrix() || scalar_base_type(&x.ty) != Some(LpsType::Float) {
+            return Err(Diagnostic::error(span, "ldexp expects float lanes"));
+        }
+        let exp_ty = match scalar_lane_count(&x.ty) {
+            1 => LpsType::Int,
+            2 => LpsType::IVec2,
+            3 => LpsType::IVec3,
+            4 => LpsType::IVec4,
+            _ => return Err(Diagnostic::error(span, "unsupported ldexp vector width")),
+        };
+        let exp = coerce_expr(args[1].clone(), &exp_ty)?;
+        let ty = x.ty.clone();
+        return Ok((alloc::vec![x, exp], ty));
     }
 
     Err(Diagnostic::error(

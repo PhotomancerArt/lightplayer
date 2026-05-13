@@ -16,6 +16,7 @@ vec2 test_frexp_one() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_frexp_one() ~= vec2(0.5, 1.0)
 
@@ -29,6 +30,7 @@ vec2 test_frexp_two() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_frexp_two() ~= vec2(0.5, 2.0)
 
@@ -42,6 +44,7 @@ vec2 test_frexp_half() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_frexp_half() ~= vec2(0.5, 0.0)
 
@@ -55,6 +58,7 @@ vec2 test_frexp_four() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_frexp_four() ~= vec2(0.5, 3.0)
 
@@ -68,6 +72,7 @@ vec2 test_frexp_eight() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_frexp_eight() ~= vec2(0.5, 4.0)
 
@@ -81,6 +86,7 @@ vec4 test_frexp_vec2() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_frexp_vec2() ~= vec4(0.5, 0.5, 1.0, 2.0)
 

@@ -13,6 +13,7 @@ uvec2 test_packdouble2x32_zeros() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packdouble2x32_zeros() == uvec2(0u, 0u)
 
@@ -24,6 +25,7 @@ uvec2 test_packdouble2x32_ones() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packdouble2x32_ones() == uvec2(0u, 1072693248u)
 
@@ -35,6 +37,7 @@ uvec2 test_packdouble2x32_half() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packdouble2x32_half() == uvec2(0u, 1071644672u)
 
@@ -46,6 +49,7 @@ uvec2 test_packdouble2x32_neg_one() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packdouble2x32_neg_one() == uvec2(0u, 1072693248u)
 
@@ -57,6 +61,7 @@ uvec2 test_packdouble2x32_two() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packdouble2x32_two() == uvec2(0u, 1073741824u)
 
@@ -68,6 +73,7 @@ uvec2 test_packdouble2x32_small() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packdouble2x32_small() == uvec2(0u, 1069128089u)
 

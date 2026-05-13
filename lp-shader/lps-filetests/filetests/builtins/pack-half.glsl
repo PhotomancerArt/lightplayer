@@ -13,6 +13,7 @@ uint test_packhalf2x16_zeros() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packhalf2x16_zeros() == 0u
 
@@ -24,6 +25,7 @@ uint test_packhalf2x16_ones() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packhalf2x16_ones() == 100664832u
 
@@ -35,6 +37,7 @@ uint test_packhalf2x16_half() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packhalf2x16_half() == 50331648u
 
@@ -46,6 +49,7 @@ uint test_packhalf2x16_neg_one() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packhalf2x16_neg_one() == 100664832u
 
@@ -57,6 +61,7 @@ uint test_packhalf2x16_two() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packhalf2x16_two() == 100663296u
 
@@ -68,6 +73,7 @@ uint test_packhalf2x16_small() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // @unsupported(jit.q32)
 // run: test_packhalf2x16_small() == 50331648u
 

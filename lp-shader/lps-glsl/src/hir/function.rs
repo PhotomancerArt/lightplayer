@@ -40,7 +40,11 @@ impl ImportRegistry {
                 } else {
                     name
                 }),
-                param_types: alloc::vec![lpir::IrType::F32; argc],
+                param_types: if name == "ldexp" && argc == 2 {
+                    alloc::vec![lpir::IrType::F32, lpir::IrType::I32]
+                } else {
+                    alloc::vec![lpir::IrType::F32; argc]
+                },
                 return_types: alloc::vec![lpir::IrType::F32],
                 lpfn_glsl_params: None,
             });
