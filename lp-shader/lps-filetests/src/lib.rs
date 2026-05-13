@@ -184,6 +184,10 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
             stats.total = 1;
             return stats;
         }
+        if contents.lines().any(|l| l.trim() == "// test compile") {
+            stats.total = 1;
+            return stats;
+        }
         for (line_num, line) in contents.lines().enumerate() {
             let line_number = line_num + 1;
 
@@ -273,7 +277,9 @@ pub fn run_filetest_with_line_filter(
 
     // Validate line number if provided (only for run tests; error tests ignore line filter)
     if let Some(line_number) = line_filter {
-        if !test_file.test_types.contains(&parse::TestType::Error) {
+        if test_file.test_types.contains(&parse::TestType::Run)
+            && !test_file.test_types.contains(&parse::TestType::Error)
+        {
             let has_matching_directive = test_file
                 .run_directives
                 .iter()
@@ -284,10 +290,18 @@ pub fn run_filetest_with_line_filter(
         }
     }
 
-    // Run compile test if requested
-    // TODO: Implement compile test in Phase 4
     if test_file.test_types.contains(&parse::TestType::Compile) {
-        // test_compile::run_compile_test(...)?;
+        let (result, per_target, stats, compile_failed_by_target, compile_failed) =
+            test_compile::run_compile_test(&test_file, path, targets)?;
+        return Ok((
+            result,
+            per_target,
+            stats,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            compile_failed_by_target,
+            compile_failed,
+        ));
     }
 
     // Run transform test if requested

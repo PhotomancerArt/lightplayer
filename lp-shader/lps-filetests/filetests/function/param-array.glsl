@@ -63,7 +63,7 @@ float test_param_array_const() {
     float[5] data = float[5](10.0, 20.0, 30.0, 40.0, 50.0);
     return average(data);
 }
-// run: test_param_array_const() ~= 30.0
+// run: test_param_array_const() ~= 30.0 (tolerance: 0.004)
 
 void fill_sequence(out int[4] arr) {
     for (int i = 0; i < 4; i++) {

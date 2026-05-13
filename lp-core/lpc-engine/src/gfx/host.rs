@@ -9,7 +9,7 @@
 use alloc::boxed::Box;
 use alloc::format;
 
-use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, LpsTextureBuf};
 use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
@@ -49,7 +49,10 @@ impl LpGraphics for Graphics {
         let cfg = options.to_compiler_config();
         let px = self
             .engine
-            .compile_px(source, lps_shared::TextureStorageFormat::Rgba16Unorm, &cfg)
+            .compile_px_desc(
+                CompilePxDesc::new(source, lps_shared::TextureStorageFormat::Rgba16Unorm, cfg)
+                    .with_frontend(options.frontend),
+            )
             .map_err(|e| Error::Other {
                 message: format!("{e}"),
             })?;

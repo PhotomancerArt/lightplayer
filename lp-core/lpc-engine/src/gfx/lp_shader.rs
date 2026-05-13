@@ -7,6 +7,8 @@ pub struct ShaderCompileOptions {
     pub q32_options: lps_q32::q32_options::Q32Options,
     /// Maximum semantic errors from the GLSL → LPIR front-end.
     pub max_errors: Option<usize>,
+    /// GLSL frontend used before LPIR lowering.
+    pub frontend: lp_shader::ShaderFrontend,
 }
 
 impl Default for ShaderCompileOptions {
@@ -14,6 +16,7 @@ impl Default for ShaderCompileOptions {
         Self {
             q32_options: lps_q32::q32_options::Q32Options::default(),
             max_errors: Some(20),
+            frontend: default_shader_frontend(),
         }
     }
 }
@@ -25,6 +28,10 @@ impl ShaderCompileOptions {
             ..Default::default()
         }
     }
+}
+
+fn default_shader_frontend() -> lp_shader::ShaderFrontend {
+    lp_shader::ShaderFrontend::default()
 }
 
 /// A compiled, runnable shader (pixel loop lives in `lp_shader::LpsPxShader::render_frame`).

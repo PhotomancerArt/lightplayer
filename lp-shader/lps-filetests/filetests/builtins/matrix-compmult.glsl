@@ -55,7 +55,7 @@ mat4 test_matrixcompmult_mat4() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
-// run: test_matrixcompmult_mat4() ~= mat4(3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0)
+// run: test_matrixcompmult_mat4() ~= mat4(3.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 3.0)
 
 mat2 test_matrixcompmult_mat2_zeros() {
     mat2 a = mat2(1.0, 2.0, 3.0, 4.0);

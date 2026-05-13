@@ -11,6 +11,7 @@ workspace = true
 default = ["std"]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
+naga = ["lp-shader/naga"]
 std = [
     "lpc-shared/std",
     "lpc-source/std",
@@ -26,7 +27,6 @@ lpir = { path = "../../lp-shader/lpir", default-features = false }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
 lpvm = { path = "../../lp-shader/lpvm", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
-lps-frontend = { path = "../../lp-shader/lps-frontend", default-features = false }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 

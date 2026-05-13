@@ -17,6 +17,15 @@ pub enum Backend {
     Wasm,
 }
 
+/// GLSL frontend used before LPIR backend compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Frontend {
+    /// Existing Naga-based frontend.
+    Naga,
+    /// New LightPlayer-shaped GLSL frontend.
+    Lp,
+}
+
 /// Instruction set architecture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Isa {
@@ -49,6 +58,8 @@ pub enum FloatMode {
 /// Concrete target configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Target {
+    /// Frontend used to lower GLSL to LPIR.
+    pub frontend: Frontend,
     /// Backend to use.
     pub backend: Backend,
     /// Float representation.
@@ -60,27 +71,38 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, jit, rv32c, rv32n — used for error messages and CLI.
+/// Order: wasm, jit, rv32c, rv32n, rv32lpn — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
+        frontend: Frontend::Naga,
         backend: Backend::Wasm,
         float_mode: FloatMode::Q32,
         isa: Isa::Wasm32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
+        frontend: Frontend::Naga,
         backend: Backend::Jit,
         float_mode: FloatMode::Q32,
         isa: Isa::Native,
         exec_mode: ExecMode::Jit,
     },
     Target {
+        frontend: Frontend::Naga,
         backend: Backend::Rv32,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Rv32fa,
+        float_mode: FloatMode::Q32,
+        isa: Isa::Riscv32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Lp,
         backend: Backend::Rv32fa,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,

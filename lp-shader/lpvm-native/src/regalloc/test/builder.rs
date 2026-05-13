@@ -349,6 +349,71 @@ mod tests {
         assert!(r.rendered.contains("Call big sret"));
     }
 
+    #[test]
+    fn sret_call_ret_regs_are_not_overwritten_by_arg_restores() {
+        let input = "\
+            i0 = IConst32 1
+            i1 = IConst32 2
+            i2 = IConst32 3
+            i3 = IConst32 4
+            i4 = IConst32 5
+            i5 = IConst32 6
+            i6 = IConst32 7
+            i7 = IConst32 8
+            i8 = IConst32 9
+            i9 = IConst32 10
+            i10 = IConst32 11
+            i11 = IConst32 12
+            (i12, i13, i14, i15) = Call big (i0, i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11)
+            i16 = Add i12, i0
+            i17 = Add i13, i0
+            i18 = Add i14, i0
+            i19 = Add i15, i0
+            Ret (i16, i17, i18, i19)";
+        let (mut vinsts, symbols, vreg_pool) =
+            vinst::parse(input).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+        for inst in &mut vinsts {
+            if let VInst::Call {
+                callee_uses_sret, ..
+            } = inst
+            {
+                *callee_uses_sret = true;
+            }
+        }
+
+        let r = alloc_test()
+            .pool_size(8)
+            .abi_return("vec4")
+            .run_vinst_inner(vinsts, vreg_pool, symbols);
+        let call_idx: u16 = 12;
+        let ret_regs = (0..4)
+            .filter_map(|operand| r.output.operand_alloc(call_idx, operand).reg())
+            .collect::<Vec<_>>();
+
+        assert!(
+            !ret_regs.is_empty(),
+            "test setup expected sret lanes in pool registers"
+        );
+        for (_, edit) in r
+            .output
+            .edits
+            .iter()
+            .filter(|(point, _)| *point == crate::regalloc::EditPoint::After(call_idx))
+        {
+            if let crate::regalloc::Edit::Move {
+                from: crate::regalloc::Alloc::Stack(_),
+                to: crate::regalloc::Alloc::Reg(reg),
+            } = edit
+            {
+                assert!(
+                    !ret_regs.contains(reg),
+                    "post-call restore overwrites sret return register x{reg}\n{}",
+                    r.rendered
+                );
+            }
+        }
+    }
+
     /// Dead value: i1 is defined but never used. Should not be allocated.
     #[rstest]
     fn dead_value_not_allocated(#[values(1, 2, 4, 16)] pool: usize) {

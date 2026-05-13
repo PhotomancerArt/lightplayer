@@ -68,7 +68,14 @@ impl FrameLayout {
         // Frame pointer is only needed when we have spills (for addressing) or
         // callee-saved registers to restore. Leaf functions with neither can
         // skip fp entirely, saving 4 instructions (save/setup/restore).
-        let save_fp = spill_count > 0 || used_callee_saved != PregSet::EMPTY || !is_leaf;
+        let has_incoming_stack_args = func_abi
+            .param_locs()
+            .iter()
+            .any(|loc| matches!(loc, crate::abi::classify::ArgLoc::Stack { .. }));
+        let save_fp = spill_count > 0
+            || used_callee_saved != PregSet::EMPTY
+            || !is_leaf
+            || has_incoming_stack_args;
 
         let mut callee_list: Vec<PReg> = used_callee_saved.iter().collect();
         callee_list.sort_by_key(|p| (p.class as u8, p.hw));
@@ -223,6 +230,26 @@ mod tests {
         assert!(!frame.save_ra);
         assert!(frame.save_fp, "leaf with spills needs fp");
         assert!(frame.fp_offset_from_sp.is_some());
+    }
+
+    #[test]
+    fn leaf_with_incoming_stack_args_keeps_fp() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Float,
+            parameters: vec![lps_shared::FnParam {
+                name: "v".into(),
+                ty: LpsType::Mat4,
+                qualifier: lps_shared::ParamQualifier::In,
+            }],
+            kind: LpsFnKind::UserDefined,
+        };
+        let abi = rv32::func_abi_rv32(&sig, None);
+        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], true, 0, 0);
+        assert!(
+            frame.save_fp,
+            "leaf with stack-passed incoming args needs fp for entry loads"
+        );
     }
 
     #[test]

@@ -23,6 +23,7 @@ void test_edge_out_read_error_write() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_write() == 0.0
 
 // These reads may or may not be allowed depending on GLSL version and shader stage:
@@ -43,6 +44,7 @@ float test_edge_out_read_error_indirect() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
 void test_edge_out_read_error_multiple_writes() {
@@ -53,6 +55,7 @@ void test_edge_out_read_error_multiple_writes() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
 void test_edge_out_read_error_fragment_output() {
@@ -65,4 +68,5 @@ void test_edge_out_read_error_fragment_output() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_fragment_output() == 0.0

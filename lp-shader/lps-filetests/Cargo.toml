@@ -12,6 +12,7 @@ workspace = true
 lps-shared = { path = "../lps-shared" }
 lps-diagnostics = { path = "../lps-diagnostics", features = ["std"] }
 lps-frontend = { path = "../lps-frontend" }
+lps-glsl = { path = "../lps-glsl" }
 lpvm = { path = "../lpvm", features = ["std"] }
 lpir = { path = "../lpir" }
 lpvm-cranelift = { path = "../lpvm-cranelift", features = ["riscv32-object"] }

@@ -65,8 +65,7 @@ ivec2 test_bitfieldinsert_ivec2() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
-// run: test_bitfieldinsert_ivec2() == ivec2(175, 243)
-
+// run: test_bitfieldinsert_ivec2() == ivec2(175, 48)
 
 
 

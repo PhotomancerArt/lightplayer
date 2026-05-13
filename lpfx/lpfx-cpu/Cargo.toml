@@ -20,7 +20,7 @@ std = [
 
 [dependencies]
 lpfx       = { path = "../lpfx",                          default-features = false }
-lp-shader  = { path = "../../lp-shader/lp-shader",        default-features = false }
+lp-shader  = { path = "../../lp-shader/lp-shader",        default-features = false, features = ["naga"] }
 lps-shared = { path = "../../lp-shader/lps-shared",       default-features = false }
 lpvm       = { path = "../../lp-shader/lpvm",             default-features = false }
 lpir       = { path = "../../lp-shader/lpir",             default-features = false }

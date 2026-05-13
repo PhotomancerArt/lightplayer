@@ -25,24 +25,50 @@ pub extern "C" fn __lps_atan2_q32(y: i32, x: i32) -> i32 {
 
     // Compute absolute value of y
     let mask = y >> 31;
-    let abs_y = (y + mask) ^ mask;
+    let abs_y = sat_add_i32(y, mask) ^ mask;
 
     let base_angle = if x >= 0 {
         // First quadrant: x >= 0
-        let r = __lp_lpir_fdiv_q32(x - abs_y, x + abs_y);
+        let r = __lp_lpir_fdiv_q32(sat_sub_i32(x, abs_y), sat_add_i32(x, abs_y));
         let r_3 = __lp_lpir_fmul_q32(__lp_lpir_fmul_q32(r, r), r);
         // Polynomial: 0x00003240 * r³ - 0x0000FB50 * r + π/4
-        __lp_lpir_fmul_q32(0x00003240, r_3) - __lp_lpir_fmul_q32(0x0000FB50, r) + PI_DIV_4
+        sat_add_i32(
+            sat_sub_i32(
+                __lp_lpir_fmul_q32(0x00003240, r_3),
+                __lp_lpir_fmul_q32(0x0000FB50, r),
+            ),
+            PI_DIV_4,
+        )
     } else {
         // Second/third quadrant: x < 0
-        let r = __lp_lpir_fdiv_q32(x + abs_y, abs_y - x);
+        let r = __lp_lpir_fdiv_q32(sat_add_i32(x, abs_y), sat_sub_i32(abs_y, x));
         let r_3 = __lp_lpir_fmul_q32(__lp_lpir_fmul_q32(r, r), r);
         // Polynomial: 0x00003240 * r³ - 0x0000FB50 * r + 3π/4
-        __lp_lpir_fmul_q32(0x00003240, r_3) - __lp_lpir_fmul_q32(0x0000FB50, r) + THREE_PI_DIV_4
+        sat_add_i32(
+            sat_sub_i32(
+                __lp_lpir_fmul_q32(0x00003240, r_3),
+                __lp_lpir_fmul_q32(0x0000FB50, r),
+            ),
+            THREE_PI_DIV_4,
+        )
     };
 
     // Negate if y < 0
-    if y < 0 { -base_angle } else { base_angle }
+    if y < 0 {
+        base_angle.saturating_neg()
+    } else {
+        base_angle
+    }
+}
+
+fn sat_add_i32(lhs: i32, rhs: i32) -> i32 {
+    let sum = i64::from(lhs) + i64::from(rhs);
+    sum.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+fn sat_sub_i32(lhs: i32, rhs: i32) -> i32 {
+    let diff = i64::from(lhs) - i64::from(rhs);
+    diff.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 #[cfg(test)]
@@ -88,5 +114,16 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn test_atan2_saturated_inputs_do_not_panic() {
+        let max = i32::MAX;
+        let min = i32::MIN;
+
+        let _ = __lps_atan2_q32(max, max);
+        let _ = __lps_atan2_q32(max, min);
+        let _ = __lps_atan2_q32(min, max);
+        let _ = __lps_atan2_q32(min, min);
     }
 }

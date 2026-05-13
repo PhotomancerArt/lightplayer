@@ -11,12 +11,14 @@ workspace = true
 [features]
 default = []
 std = []
+naga = ["dep:lps-frontend"]
 
 [dependencies]
 lpir = { path = "../lpir" }
 lps-shared = { path = "../lps-shared" }
 lpvm = { path = "../lpvm" }
-lps-frontend = { path = "../lps-frontend" }
+lps-frontend = { path = "../lps-frontend", optional = true, default-features = false }
+lps-glsl = { path = "../lps-glsl" }
 
 [dev-dependencies]
 lpvm-wasm = { path = "../lpvm-wasm" }

@@ -1,0 +1,13 @@
+[package]
+name = "lps-glsl"
+description = "LightPlayer-native GLSL frontend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }
