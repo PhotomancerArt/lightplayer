@@ -103,7 +103,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             if self.current().lexeme(self.source) == "struct" {
                 index.structs.push(self.parse_struct()?);
             } else if self.at_keyword(Keyword::Uniform) {
-                index.uniforms.push(self.parse_uniform(binding)?);
+                self.parse_uniform(binding, &mut index)?;
             } else if self.at_keyword(Keyword::Const) {
                 index.consts.push(self.parse_const()?);
             } else if self.starts_type_name() {
@@ -147,19 +147,49 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         Ok(binding)
     }
 
-    fn parse_uniform(&mut self, binding: Option<u32>) -> Result<UniformDecl, Diagnostic> {
+    fn parse_uniform(
+        &mut self,
+        binding: Option<u32>,
+        index: &mut TopLevelIndex,
+    ) -> Result<(), Diagnostic> {
         let start = self.expect_keyword(Keyword::Uniform)?.span.start;
         let ty = self.expect_type_ref()?;
+        if self.at_punct("{") {
+            let block_name = ty.name.clone();
+            self.struct_names.push(block_name.clone());
+            let members = self.parse_struct_members()?;
+            self.expect_punct("}")?;
+            let name = self.expect_identifier_like()?.to_string();
+            let mut uniform_ty = TypeRef {
+                name: block_name.clone(),
+                span: ty.span,
+            };
+            self.append_array_suffixes(&mut uniform_ty)?;
+            let end = self.expect_punct(";")?.span.end;
+            index.structs.push(StructDecl {
+                name: block_name,
+                members,
+                span: Span::new(start, end),
+            });
+            index.uniforms.push(UniformDecl {
+                name,
+                ty: uniform_ty,
+                binding,
+                span: Span::new(start, end),
+            });
+            return Ok(());
+        }
         let name = self.expect_identifier_like()?.to_string();
         let mut ty = ty;
         self.append_array_suffixes(&mut ty)?;
         let end = self.expect_punct(";")?.span.end;
-        Ok(UniformDecl {
+        index.uniforms.push(UniformDecl {
             name,
             ty,
             binding,
             span: Span::new(start, end),
-        })
+        });
+        Ok(())
     }
 
     fn parse_const(&mut self) -> Result<ConstDecl, Diagnostic> {
@@ -187,6 +217,17 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let name_tok = self.current();
         let name = self.expect_identifier_like()?.to_string();
         self.struct_names.push(name.clone());
+        let members = self.parse_struct_members()?;
+        self.expect_punct("}")?;
+        let end = self.expect_punct(";")?.span.end;
+        Ok(StructDecl {
+            name,
+            members,
+            span: Span::new(start, end.max(name_tok.span.end)),
+        })
+    }
+
+    fn parse_struct_members(&mut self) -> Result<Vec<StructMemberDecl>, Diagnostic> {
         self.expect_punct("{")?;
         let mut members = Vec::new();
         while !self.at_punct("}") {
@@ -209,13 +250,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             }
             self.expect_punct(";")?;
         }
-        self.expect_punct("}")?;
-        let end = self.expect_punct(";")?.span.end;
-        Ok(StructDecl {
-            name,
-            members,
-            span: Span::new(start, end.max(name_tok.span.end)),
-        })
+        Ok(members)
     }
 
     fn try_parse_function(&mut self) -> Result<Option<FunctionDecl>, Diagnostic> {
