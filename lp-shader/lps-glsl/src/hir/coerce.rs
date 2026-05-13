@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use alloc::format;
 use alloc::vec::Vec;
 
@@ -6,6 +5,7 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
+use super::const_fold::cast_expr;
 use super::scalar::{scalar_base_type, scalar_lane_count};
 use super::types::{HirExpr, HirExprKind};
 
@@ -128,13 +128,7 @@ pub(super) fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Di
         && scalar_base_type(&expr.ty).is_some()
         && scalar_base_type(target).is_some()
     {
-        return Ok(HirExpr {
-            span: expr.span,
-            ty: target.clone(),
-            kind: HirExprKind::Cast {
-                expr: Box::new(expr),
-            },
-        });
+        return Ok(cast_expr(expr.span, target.clone(), expr));
     }
     match (&expr.ty, target) {
         (LpsType::Int, LpsType::Float)
@@ -142,25 +136,13 @@ pub(super) fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Di
         | (LpsType::Float, LpsType::Int)
         | (LpsType::Float, LpsType::UInt)
         | (LpsType::Int, LpsType::UInt)
-        | (LpsType::UInt, LpsType::Int) => Ok(HirExpr {
-            span: expr.span,
-            ty: target.clone(),
-            kind: HirExprKind::Cast {
-                expr: Box::new(expr),
-            },
-        }),
+        | (LpsType::UInt, LpsType::Int) => Ok(cast_expr(expr.span, target.clone(), expr)),
         (LpsType::Bool, LpsType::Float)
         | (LpsType::Bool, LpsType::Int)
         | (LpsType::Bool, LpsType::UInt)
         | (LpsType::Float, LpsType::Bool)
         | (LpsType::Int, LpsType::Bool)
-        | (LpsType::UInt, LpsType::Bool) => Ok(HirExpr {
-            span: expr.span,
-            ty: target.clone(),
-            kind: HirExprKind::Cast {
-                expr: Box::new(expr),
-            },
-        }),
+        | (LpsType::UInt, LpsType::Bool) => Ok(cast_expr(expr.span, target.clone(), expr)),
         (LpsType::Bool, LpsType::Bool) => Ok(expr),
         _ => Err(Diagnostic::error(
             expr.span,

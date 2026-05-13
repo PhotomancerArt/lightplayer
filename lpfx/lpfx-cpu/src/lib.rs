@@ -16,7 +16,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, LpsTextureBuf, ShaderFrontend};
 use lpir::CompilerConfig;
 use lps_shared::TextureStorageFormat;
 use lps_shared::lps_value_f32::LpsValueF32;
@@ -109,9 +109,11 @@ impl FxEngine for CpuFxEngine {
             .ok_or_else(|| format!("unknown texture id {}", output.raw()))?;
 
         let cfg = CompilerConfig::default();
+        let desc = CompilePxDesc::new(&module.glsl_source, TextureStorageFormat::Rgba16Unorm, cfg)
+            .with_frontend(host_shader_frontend());
         let px = self
             .engine
-            .compile_px(&module.glsl_source, TextureStorageFormat::Rgba16Unorm, &cfg)
+            .compile_px_desc(desc)
             .map_err(|e| format!("compile_px: {e}"))?;
 
         compile::validate_inputs(&module.manifest, px.meta())?;
@@ -165,6 +167,18 @@ fn fx_value_to_lps(value: &FxValue) -> LpsValueF32 {
         FxValue::I32(v) => LpsValueF32::I32(*v),
         FxValue::Bool(v) => LpsValueF32::Bool(*v),
         FxValue::Vec3(v) => LpsValueF32::Vec3(*v),
+    }
+}
+
+fn host_shader_frontend() -> ShaderFrontend {
+    #[cfg(target_arch = "riscv32")]
+    {
+        ShaderFrontend::LpsGlsl
+    }
+
+    #[cfg(not(target_arch = "riscv32"))]
+    {
+        ShaderFrontend::Naga
     }
 }
 

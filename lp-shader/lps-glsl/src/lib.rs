@@ -1,4 +1,10 @@
-//! LightPlayer-shaped GLSL frontend scaffold.
+//! LightPlayer-native GLSL frontend.
+//!
+//! `lps-glsl` parses the LightPlayer GLSL surface directly into LPIR without
+//! routing through a general-purpose GPU shader compiler. The frontend is
+//! designed for on-device ESP32-C6 runtime compilation: `no_std + alloc`,
+//! budgeted/resumable compilation, source-spanned diagnostics, and a small
+//! dependency surface.
 
 #![no_std]
 

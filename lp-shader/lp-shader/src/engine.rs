@@ -189,7 +189,7 @@ fn lower_glsl(
     }
 }
 
-#[cfg(feature = "naga-frontend")]
+#[cfg(feature = "naga")]
 fn lower_glsl_with_naga(
     glsl: &str,
     textures: &TextureBindingSpecs,
@@ -204,7 +204,7 @@ fn lower_glsl_with_naga(
         .map_err(|e| LpsError::Lower(format!("{e}")))
 }
 
-#[cfg(not(feature = "naga-frontend"))]
+#[cfg(not(feature = "naga"))]
 fn lower_glsl_with_naga(
     _glsl: &str,
     _textures: &TextureBindingSpecs,

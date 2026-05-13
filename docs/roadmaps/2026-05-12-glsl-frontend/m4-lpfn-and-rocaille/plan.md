@@ -11,12 +11,12 @@ as the shader frontend and without linking Naga at all.
 In scope:
 
 - Add an explicit shader frontend selector at the `lp-shader` compile descriptor boundary.
-- Keep Naga as the default frontend for existing host and firmware builds.
+- Keep Naga available as an explicit reference frontend.
 - Make the Naga frontend optional so a no-default firmware build can omit both `lps-frontend` and
   Naga.
 - Thread the selected frontend through `lpc-engine` shader compile options.
-- Add a firmware feature and Just recipe for the current vertical slice:
-  `just demo-esp32c6-host-lps-glsl`.
+- Add a firmware Just recipe for the current vertical slice:
+  `just demo-esp32c6-host`.
 - Use `examples/basic2` for the first demo because it is already covered by the M3 native frontend
   surface.
 
@@ -32,16 +32,15 @@ Out of scope for this slice:
 - `lp-shader::ShaderFrontend` is the public switch:
   - `Naga`
   - `LpsGlsl`
-- `lp-shader` default features include `naga-frontend`.
+- `lp-shader` exposes a short default-off `naga` feature.
 - `lp-shader --no-default-features` still builds and defaults the frontend enum to `LpsGlsl`.
-- `lpc-engine` exposes `lps-glsl-default` to select the native frontend for normal shader nodes.
-- `fw-esp32` exposes `server-lps-glsl`, which enables the server dependency set and selects
-  `lps-glsl` without enabling `naga-frontend`.
+- `lpc-engine` defaults normal shader nodes to the native frontend when `naga` is absent.
+- `fw-esp32` defaults the server build to `lps-glsl`; `naga` opts into the reference path.
 
 ## Validation
 
 - Check that the no-default firmware dependency graph contains no `naga` or `lps-frontend`.
-- Check the `fw-esp32` no-default `server-lps-glsl` RV32 build.
+- Check the default `fw-esp32` RV32 server build.
 - Check the normal `fw-esp32` server RV32 build.
 - Re-run focused `lps-glsl` filetests and unit tests.
 

@@ -8,11 +8,10 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["std", "naga-frontend"]
+default = ["std"]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
-naga-frontend = ["lp-shader/naga-frontend"]
-lps-glsl-default = ["lp-shader/lps-glsl-frontend"]
+naga = ["lp-shader/naga"]
 std = [
     "lpc-shared/std",
     "lpc-source/std",

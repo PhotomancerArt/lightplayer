@@ -12,6 +12,7 @@ use crate::body::{AssignOp, BinaryOp, ParsedExpr, ParsedExprKind, ParsedStmt, Un
 use crate::{Diagnostic, Span};
 
 use super::array_size::ArraySizeConsts;
+use super::const_fold::{fold_binary, fold_builtin_call, fold_glsl_import_call, fold_unary};
 use super::function::{FunctionSig, GlobalConst, ImportRegistry};
 use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use super::types::StructTypes;
@@ -430,6 +431,9 @@ impl<'a> TypeCtx<'a> {
                 } else {
                     inner
                 };
+                if let Some(folded) = fold_unary(expr.span, *op, &inner) {
+                    return Ok(folded);
+                }
                 Ok(HirExpr {
                     span: expr.span,
                     ty,
@@ -651,6 +655,9 @@ impl<'a> TypeCtx<'a> {
 
         if let Some(kind) = builtin_kind(name) {
             let (args, ty) = type_builtin_args(span, kind, args)?;
+            if let Some(folded) = fold_builtin_call(span, kind, &args, &ty) {
+                return Ok(folded);
+            }
             return Ok(HirExpr {
                 span,
                 ty,
@@ -664,6 +671,9 @@ impl<'a> TypeCtx<'a> {
 
         if is_glsl_import(name) {
             let (args, ty) = type_glsl_import_args(span, name, args)?;
+            if let Some(folded) = fold_glsl_import_call(span, name, &args, &ty) {
+                return Ok(folded);
+            }
             let key = self.imports.glsl(name, args.len());
             return Ok(HirExpr {
                 span,
@@ -695,7 +705,7 @@ impl<'a> TypeCtx<'a> {
 
         Err(Diagnostic::error(
             span,
-            format!("M3 lps-glsl does not support call `{name}`"),
+            format!("unsupported call `{name}`"),
         ))
     }
 
@@ -879,7 +889,7 @@ impl<'a> TypeCtx<'a> {
         } else {
             return Err(Diagnostic::error(
                 span,
-                format!("M3 lps-glsl does not support LPFN signature `{name}({glsl_params_csv})`"),
+                format!("unsupported LPFN signature `{name}({glsl_params_csv})`"),
             ));
         };
         let key = self.imports.lpfn(
@@ -927,7 +937,7 @@ impl<'a> TypeCtx<'a> {
         lhs: HirExpr,
         rhs: HirExpr,
     ) -> Result<HirExpr, Diagnostic> {
-        if let Some(folded) = fold_float_binary(span, op, &lhs, &rhs) {
+        if let Some(folded) = fold_binary(span, op, &lhs, &rhs) {
             return Ok(folded);
         }
         if is_logical(op) {
@@ -1261,26 +1271,6 @@ impl<'a> TypeCtx<'a> {
             .rev()
             .find_map(|scope| scope.get(name).copied())
     }
-}
-
-fn fold_float_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Option<HirExpr> {
-    let (HirExprKind::FloatLiteral(lhs), HirExprKind::FloatLiteral(rhs)) = (&lhs.kind, &rhs.kind)
-    else {
-        return None;
-    };
-    let value = match op {
-        BinaryOp::Add => lhs + rhs,
-        BinaryOp::Sub => lhs - rhs,
-        BinaryOp::Mul => lhs * rhs,
-        BinaryOp::Div if *rhs != 0.0 => lhs / rhs,
-        BinaryOp::Mod if *rhs != 0.0 => lhs % rhs,
-        _ => return None,
-    };
-    Some(HirExpr {
-        span,
-        ty: LpsType::Float,
-        kind: HirExprKind::FloatLiteral(value),
-    })
 }
 
 fn one_lanes_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {

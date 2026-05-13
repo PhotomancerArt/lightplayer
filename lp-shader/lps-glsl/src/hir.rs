@@ -15,6 +15,7 @@ mod array_size;
 mod builtin;
 mod builtin_out;
 mod coerce;
+mod const_fold;
 mod function;
 mod place;
 mod scalar;
@@ -209,7 +210,7 @@ fn scalar_or_struct_type_name_to_lps(
         "sampler2D" | "texture2D" => Ok(LpsType::Texture2D),
         other => Err(Diagnostic::error(
             span,
-            format!("M3 lps-glsl does not support type `{other}`"),
+            format!("unsupported type `{other}`"),
         )),
     }
 }

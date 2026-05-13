@@ -53,5 +53,4 @@ Then add targeted fixtures for:
 - existing `lps-glsl` fixtures still pass
 - the broad scalar/vector/operator/control slice passes or has documented intentional skips
 - diagnostics for parse/semantic failures show source line and span
-- no Naga dependency is introduced into the `server-lps-glsl` firmware path
-
+- no Naga dependency is introduced into the default firmware path

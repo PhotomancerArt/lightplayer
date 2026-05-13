@@ -31,11 +31,7 @@ impl ShaderCompileOptions {
 }
 
 fn default_shader_frontend() -> lp_shader::ShaderFrontend {
-    if cfg!(feature = "lps-glsl-default") {
-        lp_shader::ShaderFrontend::LpsGlsl
-    } else {
-        lp_shader::ShaderFrontend::default()
-    }
+    lp_shader::ShaderFrontend::default()
 }
 
 /// A compiled, runnable shader (pixel loop lives in `lp_shader::LpsPxShader::render_frame`).

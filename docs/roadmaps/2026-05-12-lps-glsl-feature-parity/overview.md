@@ -6,7 +6,7 @@ Bring `lp-shader/lps-glsl` close enough to the existing Naga-backed frontend tha
 
 The working definition of parity is:
 
-- existing examples compile and render correctly through `server-lps-glsl`
+- existing examples compile and render correctly through the default firmware path
 - the existing success-path filetests pass on `rv32lpn.q32`, except for explicitly documented out-of-scope cases
 - diagnostics have source spans and useful line indicators
 - the firmware can still build without Naga in the lps-glsl path
@@ -134,8 +134,8 @@ cargo run -p lps-filetests-app -- test --target rv32lpn.q32 --concise function a
 Before hardware claims:
 
 ```bash
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --no-default-features --features esp32c6,server-lps-glsl
-just demo-esp32c6-host-lps-glsl
+cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+just demo-esp32c6-host
 ```
 
 Before landing a major milestone:

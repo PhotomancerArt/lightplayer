@@ -6,7 +6,7 @@ Use the existing shader filetests as the compatibility driver. Add focused `lps-
 
 ## Naga Is a Reference, Not a Runtime Dependency
 
-The existing Naga-backed path is the behavior reference during implementation. The `server-lps-glsl` firmware path must continue to build without Naga so size and compile-time benefits remain measurable.
+The existing Naga-backed path is the behavior reference during implementation. The default firmware path must continue to build without Naga so size and compile-time benefits remain measurable.
 
 ## HIR Is the Frontend Boundary
 

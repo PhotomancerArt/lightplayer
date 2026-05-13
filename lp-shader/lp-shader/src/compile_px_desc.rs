@@ -19,7 +19,7 @@ pub enum ShaderFrontend {
 
 impl Default for ShaderFrontend {
     fn default() -> Self {
-        if cfg!(feature = "naga-frontend") {
+        if cfg!(feature = "naga") {
             Self::Naga
         } else {
             Self::LpsGlsl

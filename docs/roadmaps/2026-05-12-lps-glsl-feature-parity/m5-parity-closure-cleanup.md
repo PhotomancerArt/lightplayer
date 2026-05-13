@@ -52,7 +52,7 @@ cargo run -p lps-filetests-app -- test --target rv32n.q32 --concise
 Final build checks:
 
 ```bash
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --no-default-features --features esp32c6,server-lps-glsl
+cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 cargo check -p lpa-server
 cargo test -p lpa-server --no-run
 cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
@@ -66,4 +66,3 @@ cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
 - the no-Naga firmware build remains intact
 - the experiment report has updated size/time numbers and a fair caveat about parity level
 - the codebase is split into small, navigable files
-

@@ -103,7 +103,7 @@ pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
     let Some(base) = scalar_base_type(ty) else {
         return Err(Diagnostic::error(
             Span::new(0, 0),
-            format!("M3 lps-glsl cannot scalarize type {ty:?}"),
+            format!("cannot scalarize type {ty:?}"),
         ));
     };
     let lane = match base {
@@ -112,7 +112,7 @@ pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
         _ => {
             return Err(Diagnostic::error(
                 Span::new(0, 0),
-                format!("M3 lps-glsl cannot scalarize type {ty:?}"),
+                format!("cannot scalarize type {ty:?}"),
             ));
         }
     };

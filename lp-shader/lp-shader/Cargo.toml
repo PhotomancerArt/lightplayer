@@ -9,10 +9,9 @@ description = "High-level shader compilation and texture API"
 workspace = true
 
 [features]
-default = ["naga-frontend"]
+default = []
 std = []
-naga-frontend = ["dep:lps-frontend"]
-lps-glsl-frontend = []
+naga = ["dep:lps-frontend"]
 
 [dependencies]
 lpir = { path = "../lpir" }

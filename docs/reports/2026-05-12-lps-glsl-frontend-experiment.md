@@ -25,11 +25,22 @@ For this vertical slice, that is:
 - `413ms` less shader compile latency, about `3.5x` faster
 - `26.02` percentage points of app partition headroom recovered
 
-The binary-size comparison is not a final apples-to-apples product comparison
-yet. `lps-glsl` does not have full GLSL/filetest parity with the Naga frontend,
-so some of the size delta is missing functionality. Treat the size result as a
-promising upper-bound signal from the vertical slice, not as the final expected
-parity savings.
+After the parity push, the closer-to-final `lps-glsl` firmware build measured:
+
+- firmware app size: `2,071,568` bytes (`65.85%` of app partition)
+- shader compile time: `195ms`
+
+That makes the current comparison against the original Naga-backed build:
+
+- `609,728` fewer firmware bytes, about `22.7%` smaller than the Naga build
+- `383ms` less shader compile latency, about `3.0x` faster
+- `19.39` percentage points of app partition headroom recovered
+
+The binary-size comparison is now much more representative than the first
+vertical slice, but it is still not a claim of general GLSL completeness.
+Intentional exclusions remain: bit reinterpret builtins, pack/unpack, broad GPU
+stage metadata, and NaN/inf/domain edge behavior outside the current
+LightPlayer shader surface.
 
 ## Measurement
 
@@ -39,7 +50,8 @@ the current rainbow demo shader.
 | Build | App size | Partition use | Shader bytes | Compile time |
 | --- | ---: | ---: | ---: | ---: |
 | Naga frontend | `2,681,296` | `85.24%` | `3922` | `578ms` |
-| `lps-glsl` frontend | `1,862,848` | `59.22%` | `3922` | `165ms` |
+| `lps-glsl` vertical slice | `1,862,848` | `59.22%` | `3922` | `165ms` |
+| `lps-glsl` parity closure | `2,071,568` | `65.85%` | `3922` | `195ms` |
 
 The earlier `57ms` result was real but came from `examples/basic2`, a smaller
 `1171` byte shader. It was useful as an initial vertical-slice smoke test, but
@@ -47,8 +59,9 @@ The earlier `57ms` result was real but came from `examples/basic2`, a smaller
 
 ## What Worked
 
-- The `server-lps-glsl` firmware build excludes Naga and shows the expected
-  binary-size benefit.
+- The default firmware build now excludes Naga and shows the expected
+  binary-size benefit. The Naga-backed path remains available through the
+  explicit `naga` feature.
 - The frontend now compiles the current `examples/basic` rainbow shader:
   vector math, palette helpers, `lpfn_fbm`, and `lpfn_psrdnoise` are enough for
   this demo slice.
@@ -60,9 +73,9 @@ The earlier `57ms` result was real but came from `examples/basic2`, a smaller
 
 ## Gates Added
 
-- `just test-lps-glsl-rainbow`
+- `just test-native-rainbow`
   - Runs `lps-glsl/rainbow.glsl` as a compile-only filetest on `rv32lpn.q32`.
-  - `just demo-esp32c6-host-lps-glsl` depends on this gate.
+  - `just demo-esp32c6-host` depends on this gate.
 
 - `lp-cli` example-project validation test
   - Recursively loads checked-in `examples/**/project.toml` through
@@ -76,37 +89,33 @@ The earlier `57ms` result was real but came from `examples/basic2`, a smaller
 
 ## Caveats
 
-This is not yet full GLSL compatibility. The goal of this experiment was a
-vertical slice that can run an existing demo and show the size/latency trade.
-The result is strong enough to justify continuing, but compatibility work is
-still ahead.
+This is not full desktop GLSL compatibility. The goal is the LightPlayer shader
+surface, not every GPU compiler feature. The native frontend now covers the
+practical examples and filetests needed for the current runtime path, with a
+small set of intentional exclusions.
 
-Important remaining language areas:
+Known exclusions:
 
-- broader control-flow coverage, especially `for` loops
-- more complete overload/builtin coverage
-- arrays and structs beyond the current slice
-- better error recovery, not just good first-error diagnostics
-- broader filetest compatibility against the existing GLSL corpus
+- bit reinterpret builtins: `floatBitsToInt`, `intBitsToFloat`
+- pack/unpack builtins
+- broad NaN/inf/domain propagation edge behavior
+- shader-stage IO, buffers, and `shared` globals
+- `frexp` and `modf`, pending an explicit Q32 semantics decision
 
 ## Interpretation
 
-The size result is the main product signal, with the caveat above. Recovering
-about `818KB` of flash headroom at this stage suggests the native frontend can
-make the on-device compiler path much more comfortable on ESP32-C6, but the
-number will almost certainly move as language coverage grows.
+The size result is the main product signal. Recovering about `610KB` of flash
+headroom while keeping the current LightPlayer shader surface makes the
+on-device compiler path much more comfortable on ESP32-C6.
 
-The compile-time result is also important: `165ms` is still visible, but it is
+The compile-time result is also important: `195ms` is still visible, but it is
 comfortably in "interactive reload" territory for the current demo. The old
 `578ms` path worked, but it felt much closer to a heavy compile step.
 
 ## Next Steps
 
-1. Expand `lps-glsl` toward the existing filetest language surface while keeping
-   the implementation `no_std + alloc`.
-2. Keep `rv32lpn.q32` beside the existing Naga targets until compatibility is
-   boring.
-3. Add focused filetests as each language feature lands, preferring small
-   compile/run fixtures over one huge compatibility jump.
-4. Continue measuring both firmware size and compile time after major language
-   features, because parser/HIR convenience can quietly become binary bloat.
+1. Make the default firmware path use `lps-glsl`; keep Naga behind the explicit
+   `naga` feature as a reference.
+2. Run a short CPU and allocation profile pass on `examples/basic`.
+3. Clean up stale diagnostics and milestone labels in frontend errors.
+4. Decide whether `frexp` and `modf` are worth adding with Q32 semantics.

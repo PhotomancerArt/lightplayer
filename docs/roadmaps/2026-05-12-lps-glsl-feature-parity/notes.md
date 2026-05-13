@@ -9,7 +9,7 @@ This roadmap is for moving `lp-shader/lps-glsl` from the current vertical slice 
 The target is still the on-device compiler path:
 
 - `no_std + alloc`
-- no Naga dependency in the `server-lps-glsl` firmware path
+- no Naga dependency in the default firmware path
 - no host precompile workaround
 - `rv32lpn.q32` remains the short-term comparison target beside the existing Naga/native targets
 
@@ -33,7 +33,7 @@ Out of scope unless a filetest proves otherwise:
 - HIR with typed expressions, locals, uniforms, builtins, user calls, import calls, and partial aggregate support
 - LPIR lowering for scalar/vector values
 - `rv32lpn.q32` filetest target
-- `just demo-esp32c6-host-lps-glsl`
+- `just demo-esp32c6-host`
 
 The vertical slice is real:
 
