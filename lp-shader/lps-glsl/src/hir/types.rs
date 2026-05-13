@@ -238,12 +238,6 @@ pub enum HirAssignTarget {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) enum HirAccessRoot {
-    Local(usize),
-    Param(usize),
-}
-
 impl HirAssignTarget {
     pub(super) fn ty(&self) -> &LpsType {
         match self {

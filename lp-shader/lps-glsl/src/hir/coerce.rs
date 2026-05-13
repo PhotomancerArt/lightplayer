@@ -26,8 +26,7 @@ pub(super) fn coerce_constructor_args(
         return Err(Diagnostic::error(
             span,
             format!(
-                "constructor for {:?} expects {expected_lanes} scalar lanes, got {actual_lanes}",
-                target_ty
+                "constructor for {target_ty:?} expects {expected_lanes} scalar lanes, got {actual_lanes}"
             ),
         ));
     }
@@ -57,8 +56,7 @@ pub(super) fn coerce_constructor_args(
     Err(Diagnostic::error(
         span,
         format!(
-            "constructor for {:?} expects {expected_lanes} scalar lanes, got {actual_lanes}",
-            target_ty
+            "constructor for {target_ty:?} expects {expected_lanes} scalar lanes, got {actual_lanes}"
         ),
     ))
 }

@@ -19,15 +19,17 @@ mod coerce;
 mod function;
 mod place;
 mod scalar;
+mod shape;
 mod types;
 mod typing;
 
 use function::{FunctionSig, GlobalConst, ImportRegistry};
+use place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
+use types::StructTypes;
 pub use types::{
     BuiltinKind, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirLocal,
     HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportKey, UniformInfo,
 };
-use types::{HirAccessRoot, StructTypes};
 use typing::{
     access_lanes, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
     coerce_constructor_args, coerce_expr, glsl_param_token, is_comparison, is_glsl_import,
@@ -401,7 +403,10 @@ impl<'a> TypeCtx<'a> {
                 value,
                 span,
             } => {
-                let target = self.type_name_assign_target(*span, name)?;
+                let target = self.type_assign_target(&ParsedExpr {
+                    span: *span,
+                    kind: ParsedExprKind::Name(name.clone()),
+                })?;
                 let value = self.type_assign_value(*span, &target, *op, value)?;
                 Ok(alloc::vec![HirStmt::Expr(HirExpr {
                     span: *span,
@@ -1051,129 +1056,48 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn type_assign_target(&mut self, expr: &ParsedExpr) -> Result<HirAssignTarget, Diagnostic> {
-        match &expr.kind {
-            ParsedExprKind::Name(name) => self.type_name_assign_target(expr.span, name),
-            ParsedExprKind::Swizzle { base, fields } => {
-                let (root, base_lanes, base_ty) = self.type_access_root(base)?;
-                let (relative_lanes, ty) = access_lanes(expr.span, &base_ty, fields)?;
-                let lanes = relative_lanes
-                    .into_iter()
-                    .map(|lane| {
-                        base_lanes
-                            .get(lane)
-                            .copied()
-                            .ok_or_else(|| Diagnostic::error(expr.span, "field lane out of range"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                match root {
-                    HirAccessRoot::Local(local) => {
-                        Ok(HirAssignTarget::Swizzle { local, lanes, ty })
-                    }
-                    HirAccessRoot::Param(param) => {
-                        Ok(HirAssignTarget::ParamSwizzle { param, lanes, ty })
-                    }
-                }
-            }
-            ParsedExprKind::Index { base, index } => match &base.kind {
-                ParsedExprKind::Name(name) => {
-                    if let Some(local) = self.resolve_local(name) {
-                        let ty = if self.locals[local].ty.is_matrix() {
-                            self.locals[local].ty.matrix_column_type().ok_or_else(|| {
-                                Diagnostic::error(expr.span, "index base must be matrix")
-                            })?
-                        } else if let Some(element) = self.locals[local].ty.array_element_type() {
-                            element
-                        } else {
-                            scalar_base_type(&self.locals[local].ty).ok_or_else(|| {
-                                Diagnostic::error(expr.span, "index base must be vector")
-                            })?
-                        };
-                        let index = self.type_expr(index)?;
-                        let index = self.coerce_expr(index, &LpsType::Int)?;
-                        return Ok(HirAssignTarget::Index {
-                            local,
-                            index: Box::new(index),
-                            ty,
-                        });
-                    }
-                    if let Some((param, p)) = self
-                        .params
-                        .iter()
-                        .enumerate()
-                        .find(|(_, p)| p.name.as_deref() == Some(name))
-                    {
-                        let ty = if p.ty.is_matrix() {
-                            p.ty.matrix_column_type().ok_or_else(|| {
-                                Diagnostic::error(expr.span, "index base must be matrix")
-                            })?
-                        } else if let Some(element) = p.ty.array_element_type() {
-                            element
-                        } else {
-                            scalar_base_type(&p.ty).ok_or_else(|| {
-                                Diagnostic::error(expr.span, "index base must be vector")
-                            })?
-                        };
-                        let index = self.type_expr(index)?;
-                        let index = self.coerce_expr(index, &LpsType::Int)?;
-                        return Ok(HirAssignTarget::ParamIndex {
-                            param,
-                            index: Box::new(index),
-                            ty,
-                        });
-                    }
-                    Err(Diagnostic::error(
-                        expr.span,
-                        format!("unknown local `{name}`"),
-                    ))
-                }
-                ParsedExprKind::Index {
-                    base: matrix_base,
-                    index: column,
-                } => {
-                    let ParsedExprKind::Name(name) = &matrix_base.kind else {
-                        return Err(Diagnostic::error(
-                            expr.span,
-                            "unsupported matrix element assignment base",
-                        ));
-                    };
-                    let local = self.resolve_local(name).ok_or_else(|| {
-                        Diagnostic::error(expr.span, format!("unknown local `{name}`"))
-                    })?;
-                    if !self.locals[local].ty.is_matrix() {
-                        return Err(Diagnostic::error(
-                            expr.span,
-                            "nested index assignment base must be matrix",
-                        ));
-                    }
-                    let column = self.type_expr(column)?;
-                    let column = self.coerce_expr(column, &LpsType::Int)?;
-                    let row = self.type_expr(index)?;
-                    let row = self.coerce_expr(row, &LpsType::Int)?;
-                    Ok(HirAssignTarget::MatrixElement {
-                        local,
-                        column: Box::new(column),
-                        row: Box::new(row),
-                        ty: LpsType::Float,
-                    })
-                }
-                _ => Err(Diagnostic::error(
-                    expr.span,
-                    "unsupported index assignment base",
-                )),
-            },
-            _ => Err(Diagnostic::error(expr.span, "invalid assignment target")),
-        }
+        let place = self.type_place(expr, AccessMode::Write)?;
+        self.assign_target_from_place(expr.span, place)
     }
 
-    fn type_name_assign_target(
-        &self,
-        span: Span,
-        name: &str,
-    ) -> Result<HirAssignTarget, Diagnostic> {
+    fn type_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<HirPlace, Diagnostic> {
+        let place = match &expr.kind {
+            ParsedExprKind::Name(name) => self.type_name_place(expr.span, name)?,
+            ParsedExprKind::Swizzle { base, fields } => {
+                let mut base = self.type_place(base, mode)?;
+                base.push_field(expr.span, fields)?;
+                base
+            }
+            ParsedExprKind::Index { base, index } => {
+                let mut base = self.type_place(base, mode)?;
+                let index = self.type_expr(index)?;
+                let index = self.coerce_expr(index, &LpsType::Int)?;
+                base.push_index(index)?;
+                base
+            }
+            _ => return Err(Diagnostic::error(expr.span, "invalid place expression")),
+        };
+        if mode != AccessMode::Read && !place.root.is_writable() {
+            return Err(Diagnostic::error(
+                expr.span,
+                "cannot write to uniform variable",
+            ));
+        }
+        Ok(place)
+    }
+
+    fn type_name_place(&self, span: Span, name: &str) -> Result<HirPlace, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
-            return Ok(HirAssignTarget::Local {
-                local,
-                ty: self.locals[local].ty.clone(),
+            let ty = self.locals[local].ty.clone();
+            let lanes = (0..scalar_lane_count(&ty)).collect();
+            return Ok(HirPlace {
+                root: PlaceRoot::Local {
+                    local,
+                    ty: ty.clone(),
+                },
+                segments: Vec::new(),
+                ty,
+                lanes: Some(lanes),
             });
         }
         if let Some((param, p)) = self
@@ -1182,64 +1106,127 @@ impl<'a> TypeCtx<'a> {
             .enumerate()
             .find(|(_, p)| p.name.as_deref() == Some(name))
         {
-            return Ok(HirAssignTarget::Param {
-                param,
-                ty: p.ty.clone(),
+            let ty = p.ty.clone();
+            let lanes = (0..scalar_lane_count(&ty)).collect();
+            return Ok(HirPlace {
+                root: PlaceRoot::Param {
+                    param,
+                    ty: ty.clone(),
+                },
+                segments: Vec::new(),
+                ty,
+                lanes: Some(lanes),
+            });
+        }
+        if let Some(uniform) = self.uniforms.get(name) {
+            let ty = uniform.ty.clone();
+            let lanes = (0..scalar_lane_count(&ty)).collect();
+            return Ok(HirPlace {
+                root: PlaceRoot::Uniform {
+                    name: String::from(name),
+                    byte_offset: uniform.byte_offset,
+                    ty: ty.clone(),
+                },
+                segments: Vec::new(),
+                ty,
+                lanes: Some(lanes),
             });
         }
         Err(Diagnostic::error(span, format!("unknown local `{name}`")))
     }
 
-    fn type_access_root(
+    fn assign_target_from_place(
         &self,
-        expr: &ParsedExpr,
-    ) -> Result<(HirAccessRoot, Vec<usize>, LpsType), Diagnostic> {
-        match &expr.kind {
-            ParsedExprKind::Name(name) => {
-                if let Some(local) = self.resolve_local(name) {
-                    let ty = self.locals[local].ty.clone();
-                    return Ok((
-                        HirAccessRoot::Local(local),
-                        (0..scalar_lane_count(&ty)).collect(),
-                        ty,
-                    ));
-                }
-                if let Some((param, p)) = self
-                    .params
-                    .iter()
-                    .enumerate()
-                    .find(|(_, p)| p.name.as_deref() == Some(name))
-                {
-                    return Ok((
-                        HirAccessRoot::Param(param),
-                        (0..scalar_lane_count(&p.ty)).collect(),
-                        p.ty.clone(),
-                    ));
-                }
-                Err(Diagnostic::error(
-                    expr.span,
-                    format!("unknown local `{name}`"),
-                ))
+        span: Span,
+        place: HirPlace,
+    ) -> Result<HirAssignTarget, Diagnostic> {
+        match place.root {
+            PlaceRoot::Local { local, ty } if place.segments.is_empty() => {
+                Ok(HirAssignTarget::Local { local, ty })
             }
-            ParsedExprKind::Swizzle { base, fields } => {
-                let (root, base_lanes, base_ty) = self.type_access_root(base)?;
-                let (relative_lanes, ty) = access_lanes(expr.span, &base_ty, fields)?;
-                let lanes = relative_lanes
-                    .into_iter()
-                    .map(|lane| {
-                        base_lanes
-                            .get(lane)
-                            .copied()
-                            .ok_or_else(|| Diagnostic::error(expr.span, "field lane out of range"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok((root, lanes, ty))
+            PlaceRoot::Param { param, ty } if place.segments.is_empty() => {
+                Ok(HirAssignTarget::Param { param, ty })
             }
-            _ => Err(Diagnostic::error(
-                expr.span,
-                "unsupported field assignment base",
-            )),
+            PlaceRoot::Uniform { .. } => {
+                Err(Diagnostic::error(span, "cannot write to uniform variable"))
+            }
+            PlaceRoot::Local { local, .. } => {
+                self.local_assign_target_from_place(span, local, &place)
+            }
+            PlaceRoot::Param { param, .. } => {
+                self.param_assign_target_from_place(span, param, &place)
+            }
         }
+    }
+
+    fn local_assign_target_from_place(
+        &self,
+        span: Span,
+        local: usize,
+        place: &HirPlace,
+    ) -> Result<HirAssignTarget, Diagnostic> {
+        if let Some(lanes) = place.single_root_lane_path() {
+            if !lanes.is_empty() && lanes.len() == scalar_lane_count(&place.ty) {
+                return Ok(HirAssignTarget::Swizzle {
+                    local,
+                    lanes,
+                    ty: place.ty.clone(),
+                });
+            }
+        }
+        if let [PlaceSegment::Index { index, ty }] = place.segments.as_slice() {
+            return Ok(HirAssignTarget::Index {
+                local,
+                index: index.clone(),
+                ty: ty.clone(),
+            });
+        }
+        if let [
+            PlaceSegment::Index { index: column, .. },
+            PlaceSegment::Index { index: row, ty },
+        ] = place.segments.as_slice()
+        {
+            if place.root_ty().is_matrix() {
+                return Ok(HirAssignTarget::MatrixElement {
+                    local,
+                    column: column.clone(),
+                    row: row.clone(),
+                    ty: ty.clone(),
+                });
+            }
+        }
+        Err(Diagnostic::error(
+            span,
+            "unsupported assignment target path",
+        ))
+    }
+
+    fn param_assign_target_from_place(
+        &self,
+        span: Span,
+        param: usize,
+        place: &HirPlace,
+    ) -> Result<HirAssignTarget, Diagnostic> {
+        if let Some(lanes) = place.single_root_lane_path() {
+            if !lanes.is_empty() && lanes.len() == scalar_lane_count(&place.ty) {
+                return Ok(HirAssignTarget::ParamSwizzle {
+                    param,
+                    lanes,
+                    ty: place.ty.clone(),
+                });
+            }
+        }
+        if let [PlaceSegment::Index { index, ty }] = place.segments.as_slice() {
+            return Ok(HirAssignTarget::ParamIndex {
+                param,
+                index: index.clone(),
+                ty: ty.clone(),
+            });
+        }
+        Err(Diagnostic::error(
+            span,
+            "unsupported parameter assignment target path",
+        ))
     }
 
     fn read_assign_target_kind(&self, target: &HirAssignTarget) -> HirExprKind {
