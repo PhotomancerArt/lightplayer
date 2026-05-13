@@ -1,5 +1,6 @@
 //! Temporary debug UI shell.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -11,11 +12,13 @@ use lpc_wire::{
     NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, RuntimeReadResult, ShapeReadQuery,
-    WireProjectHandle as ProjectHandle, WireTextureFormat,
+    WireProjectHandle as ProjectHandle, WireSlotMutationId, WireSlotMutationRequest,
+    WireTextureFormat,
 };
 
 use super::inspector::{InspectorSelection, render_debug_inspector};
 use super::node_cards::render_node_workspace;
+use super::slot_edit::{SlotEditIntent, SlotEditKey, SlotEditStatusContext};
 
 type ProjectReadResult = Result<lpc_wire::ProjectReadResponse, String>;
 
@@ -36,6 +39,9 @@ pub struct DebugUiState {
     selected: Option<InspectorSelection>,
     last_render_product_probe: Option<RenderProductProbeResult>,
     last_runtime_status: Option<RuntimeReadResult>,
+    next_mutation_id: u64,
+    queued_mutations: BTreeMap<SlotEditKey, WireSlotMutationRequest>,
+    last_mutation_by_slot: BTreeMap<SlotEditKey, WireSlotMutationId>,
 }
 
 impl DebugUiState {
@@ -60,6 +66,9 @@ impl DebugUiState {
             selected: None,
             last_render_product_probe: None,
             last_runtime_status: None,
+            next_mutation_id: 1,
+            queued_mutations: BTreeMap::new(),
+            last_mutation_by_slot: BTreeMap::new(),
         }
     }
 
@@ -96,6 +105,7 @@ impl DebugUiState {
 
         self.last_poll = Instant::now();
         self.poll_in_flight = true;
+        let mutations = self.drain_queued_mutations();
         let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
             self.next_project_read_context();
         let client = self.async_client.clone();
@@ -111,6 +121,7 @@ impl DebugUiState {
                         needs_slot_snapshot,
                         selected_resource,
                         selected_visual_product,
+                        mutations,
                     ),
                 )
                 .await
@@ -148,6 +159,56 @@ impl DebugUiState {
             selected_visual_product,
         )
     }
+
+    fn queue_slot_edit_intents(&mut self, intents: Vec<SlotEditIntent>) {
+        if intents.is_empty() {
+            return;
+        }
+
+        let mut prepared = Vec::new();
+        let mut next_mutation_id = self.next_mutation_id;
+        let mut last_error = None;
+
+        match self.project_view.lock() {
+            Ok(mut view) => {
+                for intent in intents {
+                    let id = WireSlotMutationId::new(next_mutation_id);
+                    next_mutation_id = next_mutation_id.saturating_add(1);
+                    let key = intent.key();
+                    match view.slots.prepare_set_value(
+                        id,
+                        &intent.root,
+                        intent.path.clone(),
+                        intent.value,
+                    ) {
+                        Ok(request) => prepared.push((key, id, request)),
+                        Err(error) => {
+                            last_error = Some(format!("slot edit rejected locally: {error}"));
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                self.last_error = Some(String::from("Project view locked"));
+                return;
+            }
+        }
+
+        self.next_mutation_id = next_mutation_id;
+        for (key, id, request) in prepared {
+            self.last_mutation_by_slot.insert(key.clone(), id);
+            self.queued_mutations.insert(key, request);
+        }
+        if let Some(error) = last_error {
+            self.last_error = Some(error);
+        }
+    }
+
+    fn drain_queued_mutations(&mut self) -> Vec<WireSlotMutationRequest> {
+        core::mem::take(&mut self.queued_mutations)
+            .into_values()
+            .collect()
+    }
 }
 
 fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProbeResult> {
@@ -169,6 +230,7 @@ fn debug_ui_project_read(
     include_slots: bool,
     selected_resource: Option<lpc_model::ResourceRef>,
     selected_visual_product: Option<lpc_model::VisualProduct>,
+    mutations: Vec<WireSlotMutationRequest>,
 ) -> ProjectReadRequest {
     let mut queries = Vec::new();
     if include_slots {
@@ -208,7 +270,7 @@ fn debug_ui_project_read(
         since,
         queries,
         probes,
-        mutations: Vec::new(),
+        mutations,
     }
 }
 
@@ -238,11 +300,21 @@ impl eframe::App for DebugUiState {
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            let mut edit_intents = Vec::new();
             let Ok(view) = self.project_view.lock() else {
                 ui.label("Project view locked");
                 return;
             };
-            render_node_workspace(ui, &view, &mut self.selected);
+            let status = SlotEditStatusContext::new(&self.last_mutation_by_slot, &view.slots);
+            render_node_workspace(
+                ui,
+                &view,
+                &mut self.selected,
+                Some(&status),
+                Some(&mut edit_intents),
+            );
+            drop(view);
+            self.queue_slot_edit_intents(edit_intents);
         });
 
         ctx.request_repaint_after(UI_REPAINT_INTERVAL);
