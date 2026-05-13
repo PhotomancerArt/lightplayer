@@ -26,6 +26,11 @@ pub enum LpirOp {
         lhs: VReg,
         rhs: VReg,
     },
+    FdivConstF32 {
+        dst: VReg,
+        lhs: VReg,
+        rhs: f32,
+    },
     Fneg {
         dst: VReg,
         src: VReg,
@@ -468,6 +473,7 @@ impl LpirOp {
             | LpirOp::Fsub { dst, .. }
             | LpirOp::Fmul { dst, .. }
             | LpirOp::Fdiv { dst, .. }
+            | LpirOp::FdivConstF32 { dst, .. }
             | LpirOp::Fneg { dst, .. }
             | LpirOp::Fabs { dst, .. }
             | LpirOp::Fsqrt { dst, .. }

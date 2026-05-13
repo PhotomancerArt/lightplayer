@@ -1,4 +1,4 @@
-//! Q32Options-driven wasm lowering: wrapping / reciprocal paths vs defaults.
+//! Q32Options-driven wasm lowering: fast defaults and legacy explicit modes.
 
 use lpir::CompilerConfig;
 use lps_builtins::builtins::lpir::fdiv_recip_q32::__lp_lpir_fdiv_recip_q32;
@@ -38,7 +38,7 @@ fn wrapping_mul_q32(a: i32, b: i32) -> i32 {
 }
 
 #[test]
-fn fadd_q32_saturating_unchanged_bytes() {
+fn fadd_q32_default_matches_wrapping_bytes() {
     let src = "float add(float a, float b) { return a + b; }";
     let naga = compile(src).expect("parse");
     let (ir, meta) = lower(&naga).expect("lower");
@@ -50,7 +50,7 @@ fn fadd_q32_saturating_unchanged_bytes() {
         &ir,
         &meta,
         &opts_q32(Q32Options {
-            add_sub: AddSubMode::Saturating,
+            add_sub: AddSubMode::Wrapping,
             ..Default::default()
         }),
     )
@@ -59,7 +59,7 @@ fn fadd_q32_saturating_unchanged_bytes() {
     .to_vec();
     assert_eq!(
         a, b,
-        "explicit saturating add_sub must match default wasm bytes"
+        "default add_sub must match explicit wrapping wasm bytes"
     );
 }
 
@@ -69,12 +69,12 @@ fn fadd_q32_wrap_vs_sat_runtime() {
     let naga = compile(src).expect("parse");
     let (ir, meta) = lower(&naga).expect("lower");
 
-    let sat_engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
-    let wrap_engine = WasmLpvmEngine::new(opts_q32(Q32Options {
-        add_sub: AddSubMode::Wrapping,
+    let sat_engine = WasmLpvmEngine::new(opts_q32(Q32Options {
+        add_sub: AddSubMode::Saturating,
         ..Default::default()
     }))
     .expect("engine");
+    let wrap_engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
 
     let sat_m = sat_engine.compile(&ir, &meta).expect("compile");
     let wrap_m = wrap_engine.compile(&ir, &meta).expect("compile");
@@ -113,12 +113,12 @@ fn fsub_q32_wrap_vs_sat_runtime() {
     let naga = compile(src).expect("parse");
     let (ir, meta) = lower(&naga).expect("lower");
 
-    let sat_engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
-    let wrap_engine = WasmLpvmEngine::new(opts_q32(Q32Options {
-        add_sub: AddSubMode::Wrapping,
+    let sat_engine = WasmLpvmEngine::new(opts_q32(Q32Options {
+        add_sub: AddSubMode::Saturating,
         ..Default::default()
     }))
     .expect("engine");
+    let wrap_engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
 
     let mut sat_i = sat_engine
         .compile(&ir, &meta)
@@ -252,7 +252,7 @@ fn fdiv_recip_matches_native_helper_runtime() {
 }
 
 #[test]
-fn fsub_q32_saturating_unchanged_bytes() {
+fn fsub_q32_default_matches_wrapping_bytes() {
     let src = "float sub(float a, float b) { return a - b; }";
     let naga = compile(src).expect("parse");
     let (ir, meta) = lower(&naga).expect("lower");
@@ -264,18 +264,18 @@ fn fsub_q32_saturating_unchanged_bytes() {
         &ir,
         &meta,
         &opts_q32(Q32Options {
-            add_sub: AddSubMode::Saturating,
+            add_sub: AddSubMode::Wrapping,
             ..Default::default()
         }),
     )
     .expect("emit")
     .bytes()
     .to_vec();
-    assert_eq!(a, b);
+    assert_eq!(a, b, "default fsub must match explicit wrapping");
 }
 
 #[test]
-fn fmul_q32_saturating_unchanged_bytes() {
+fn fmul_q32_default_matches_wrapping_bytes() {
     let src = "float mul(float a, float b) { return a * b; }";
     let naga = compile(src).expect("parse");
     let (ir, meta) = lower(&naga).expect("lower");
@@ -287,18 +287,18 @@ fn fmul_q32_saturating_unchanged_bytes() {
         &ir,
         &meta,
         &opts_q32(Q32Options {
-            mul: MulMode::Saturating,
+            mul: MulMode::Wrapping,
             ..Default::default()
         }),
     )
     .expect("emit")
     .bytes()
     .to_vec();
-    assert_eq!(a, b);
+    assert_eq!(a, b, "default fmul must match explicit wrapping");
 }
 
 #[test]
-fn fdiv_q32_saturating_unchanged_bytes() {
+fn fdiv_q32_default_matches_reciprocal_bytes() {
     let src = "float div(float a, float b) { return a / b; }";
     let naga = compile(src).expect("parse");
     let (ir, meta) = lower(&naga).expect("lower");
@@ -310,7 +310,7 @@ fn fdiv_q32_saturating_unchanged_bytes() {
         &ir,
         &meta,
         &opts_q32(Q32Options {
-            div: DivMode::Saturating,
+            div: DivMode::Reciprocal,
             ..Default::default()
         }),
     )
@@ -319,6 +319,6 @@ fn fdiv_q32_saturating_unchanged_bytes() {
     .to_vec();
     assert_eq!(
         a, b,
-        "explicit saturating div must match default wasm bytes"
+        "default fdiv must match explicit reciprocal wasm bytes"
     );
 }

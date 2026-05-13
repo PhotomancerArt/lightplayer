@@ -35,8 +35,8 @@ use lpc_wire::{WireMessage, WireServerMessage};
 
 use crate::time::Esp32TimeProvider;
 
-/// FPS logging interval (log every N frames)
-const FPS_LOG_INTERVAL: u32 = 60;
+/// Performance logging interval.
+const PERF_LOG_INTERVAL_MS: u64 = 5000;
 
 /// Heartbeat message interval (send every N milliseconds)
 const HEARTBEAT_INTERVAL_MS: u64 = 5000; // Send every 5 seconds
@@ -97,7 +97,7 @@ pub async fn run_server_loop<T: ServerTransport>(
 
         // Tick server (synchronous)
         let tick_start = time_provider.now_ms();
-        match server
+        let (tick_ms, send_ms, total_ms, response_count) = match server
             .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
             .await
         {
@@ -105,46 +105,47 @@ pub async fn run_server_loop<T: ServerTransport>(
                 let tick_done = time_provider.now_ms();
                 let send_done = time_provider.now_ms();
                 server.set_last_frame_time(send_done.saturating_sub(frame_start) * 1000);
-                if frame_count % FPS_LOG_INTERVAL == 0 {
-                    log::info!(
-                        "[perf] frame={} recv={}ms tick={}ms send={}ms total={}ms responses={}",
-                        frame_count,
-                        receive_done.saturating_sub(receive_start),
-                        tick_done.saturating_sub(tick_start),
-                        send_done.saturating_sub(tick_done),
-                        send_done.saturating_sub(frame_start),
-                        response_count,
-                    );
-                }
+                (
+                    tick_done.saturating_sub(tick_start),
+                    send_done.saturating_sub(tick_done),
+                    send_done.saturating_sub(frame_start),
+                    response_count,
+                )
             }
             Err(e) => {
                 let tick_done = time_provider.now_ms();
                 server.set_last_frame_time(tick_done.saturating_sub(frame_start) * 1000);
-                if frame_count % FPS_LOG_INTERVAL == 0 {
-                    log::info!(
-                        "[perf] frame={} recv={}ms tick={}ms send=0ms total={}ms responses=0",
-                        frame_count,
-                        receive_done.saturating_sub(receive_start),
-                        tick_done.saturating_sub(tick_start),
-                        tick_done.saturating_sub(frame_start),
-                    );
-                }
                 log::warn!("run_server_loop: Server tick error: {e:?}");
                 // Server error - continue
+                (
+                    tick_done.saturating_sub(tick_start),
+                    0,
+                    tick_done.saturating_sub(frame_start),
+                    0,
+                )
             }
-        }
+        };
 
         last_tick = frame_start;
         frame_count += 1;
 
-        // Log FPS periodically
         let current_time = time_provider.now_ms();
-        if frame_count % FPS_LOG_INTERVAL == 0 {
+        if current_time.saturating_sub(fps_tracker.last_log_time_ms()) >= PERF_LOG_INTERVAL_MS {
             let elapsed_ms = current_time.saturating_sub(fps_tracker.last_log_time_ms());
             if elapsed_ms > 0 {
                 let frames_done = frame_count.saturating_sub(fps_tracker.last_log_frame());
                 let fps = (frames_done as u64 * 1000) / elapsed_ms;
-                log::info!("FPS: {fps} (frame_count: {frame_count}, elapsed: {elapsed_ms}ms)");
+                log::info!(
+                    "[perf] frame={} fps={} elapsed={}ms recv={}ms tick={}ms send={}ms total={}ms responses={}",
+                    frame_count,
+                    fps,
+                    elapsed_ms,
+                    receive_done.saturating_sub(receive_start),
+                    tick_ms,
+                    send_ms,
+                    total_ms,
+                    response_count,
+                );
                 fps_tracker.record_log(frame_count, current_time);
             }
         }

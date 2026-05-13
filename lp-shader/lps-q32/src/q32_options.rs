@@ -1,11 +1,9 @@
 //! Q32 arithmetic mode selection for code generation.
 //!
-//! Per-shader fast-math options wired through `lpir::CompilerConfig::q32`
-//! and consumed by `lpvm-native::lower` and `lpvm-wasm::emit`. Defaults
-//! to fully-saturating arithmetic; opt-in faster modes trade precision /
-//! overflow protection for code-size and speed. Native and WASM produce
-//! bit-identical output for the same `(mode, inputs)` so the browser
-//! preview matches the device.
+//! Per-shader Q32 arithmetic options wired through `lpir::CompilerConfig::q32`
+//! and consumed by `lpvm-native::lower` and `lpvm-wasm::emit`. Defaults are the
+//! normal fast rendering path. Saturating/reference modes remain available for
+//! tests and future debug probes, not as the product default.
 
 use core::str::FromStr;
 
@@ -23,17 +21,17 @@ pub struct Q32Options {
 impl Default for Q32Options {
     fn default() -> Self {
         Self {
-            add_sub: AddSubMode::default(),
-            mul: MulMode::default(),
-            div: DivMode::default(),
+            add_sub: AddSubMode::Wrapping,
+            mul: MulMode::Wrapping,
+            div: DivMode::Reciprocal,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AddSubMode {
-    #[default]
     Saturating,
+    #[default]
     Wrapping,
 }
 
@@ -51,8 +49,8 @@ impl FromStr for AddSubMode {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MulMode {
-    #[default]
     Saturating,
+    #[default]
     Wrapping,
 }
 
@@ -70,8 +68,8 @@ impl FromStr for MulMode {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DivMode {
-    #[default]
     Saturating,
+    #[default]
     Reciprocal,
 }
 

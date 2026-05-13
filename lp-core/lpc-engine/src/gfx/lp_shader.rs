@@ -37,7 +37,7 @@ pub trait LpShader: Send + Sync {
         uniforms: &LpsValueF32,
     ) -> Result<(), Error>;
 
-    /// Run the shader at caller-provided Q16.16 normalized points.
+    /// Run the shader at caller-provided Q16.16 pixel-space points.
     fn sample_rgba16(
         &mut self,
         _points: &mut lp_shader::LpsSamplePointBuf,

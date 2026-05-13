@@ -57,6 +57,32 @@ fn validate_simple_add_passes() {
 }
 
 #[test]
+fn validate_fdiv_const_f32_passes() {
+    let ir = "func @div_const(v1:f32) -> f32 {
+  v2:f32 = fdiv_const.f32 v1, 2.0
+  return v2
+}
+";
+    let m = parse_module(ir).unwrap();
+    validate_module(&m).unwrap();
+}
+
+#[test]
+fn validate_err_fdiv_const_lhs_not_f32() {
+    let ir = "func @bad(v1:i32) -> f32 {
+  v2:f32 = fdiv_const.f32 v1, 2.0
+  return v2
+}
+";
+    let m = parse_module(ir).unwrap();
+    let errs = validate_module(&m).expect_err("expected fdiv_const lhs type error");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("fdiv_const.f32 lhs"))
+    );
+}
+
+#[test]
 fn validate_err_break_outside_loop() {
     let f = IrFunction {
         name: String::from("bad"),

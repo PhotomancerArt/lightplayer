@@ -2818,6 +2818,7 @@ dependencies = [
  "lpc-shared",
  "lpc-wire",
  "lpfs",
+ "lps-builtins",
  "lps-q32",
  "ser-write-json",
  "serde",
@@ -3950,6 +3951,7 @@ dependencies = [
  "lp-shader",
  "lpa-client",
  "lpa-server",
+ "lpc-engine",
  "lpc-model",
  "lpc-shared",
  "lpc-source",
@@ -5505,7 +5507,6 @@ dependencies = [
 [[package]]
 name = "pp-rs"
 version = "0.2.2"
-source = "git+https://github.com/light-player/pp-rs?branch=main#51d7cbe3fea2c93b527b4303f667ac4552bac715"
 dependencies = [
  "hashbrown 0.15.5",
  "unicode-xid",

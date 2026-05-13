@@ -3,7 +3,7 @@ name = "lp-riscv-emu"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license = "Apache-2.0 WITH LLVM-exception"
+license.workspace = true
 description = "RISC-V 32-bit emulator runtime"
 
 [lints]

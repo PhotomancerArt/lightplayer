@@ -123,8 +123,8 @@ impl FixtureNode {
                     .into_iter()
                     .map(|point| DirectSamplePoint {
                         channel: point.channel,
-                        x_q16: normalized_f32_to_q16(point.center[0]),
-                        y_q16: normalized_f32_to_q16(point.center[1]),
+                        x_norm_q16: normalized_f32_to_q16(point.center[0]),
+                        y_norm_q16: normalized_f32_to_q16(point.center[1]),
                     })
                     .collect();
             self.direct_points = Some((mapping_ver, points));
@@ -135,13 +135,18 @@ impl FixtureNode {
 #[derive(Clone, Copy)]
 struct DirectSamplePoint {
     channel: u32,
-    x_q16: i32,
-    y_q16: i32,
+    x_norm_q16: i32,
+    y_norm_q16: i32,
 }
 
 fn normalized_f32_to_q16(value: f32) -> i32 {
     let clamped = value.clamp(0.0, 1.0);
     (clamped * 65536.0) as i32
+}
+
+fn normalized_q16_to_pixel_q16(value: i32, extent: u32) -> i32 {
+    let scaled = i64::from(value) * i64::from(extent);
+    scaled.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 pub fn fixture_input_path() -> SlotPath {
@@ -361,6 +366,8 @@ fn ensure_fixture_sample_target<'a>(
 fn ensure_fixture_sample_points<'a>(
     current: &'a mut Option<lp_shader::LpsSamplePointBuf>,
     points: &[DirectSamplePoint],
+    output_width: u32,
+    output_height: u32,
     ctx: &ControlRenderContext<'_>,
 ) -> Result<&'a mut lp_shader::LpsSamplePointBuf, NodeError> {
     let count = points.len() as u32;
@@ -383,8 +390,8 @@ fn ensure_fixture_sample_points<'a>(
         .as_mut()
         .ok_or_else(|| NodeError::msg("fixture sample points missing after allocation"))?;
     for (dst, point) in buffer.data_mut().chunks_exact_mut(2).zip(points) {
-        dst[0] = point.x_q16;
-        dst[1] = point.y_q16;
+        dst[0] = normalized_q16_to_pixel_q16(point.x_norm_q16, output_width);
+        dst[1] = normalized_q16_to_pixel_q16(point.y_norm_q16, output_height);
     }
     Ok(buffer)
 }
@@ -418,12 +425,15 @@ fn render_direct_fixture_control(
         ));
     }
 
-    let point_buf = ensure_fixture_sample_points(sample_points, points, ctx)?;
+    let point_buf =
+        ensure_fixture_sample_points(sample_points, points, settings.width, settings.height, ctx)?;
     let sample_buf = ensure_fixture_sample_target(sample_target, points.len() as u32, ctx)?;
     ctx.sample_visual_into(
         visual_product,
         crate::products::visual::VisualSampleBufferRequest {
             points: point_buf,
+            output_width: settings.width,
+            output_height: settings.height,
             time_seconds: ctx.time_seconds(),
         },
         crate::products::visual::VisualSampleTarget {
@@ -843,6 +853,86 @@ mod tests {
         }
     }
 
+    struct FixtureExpectedSampleProducer {
+        state: ShaderState,
+        expected_points: Vec<i32>,
+        colors: Vec<[u16; 4]>,
+        expected_width: u32,
+        expected_height: u32,
+    }
+
+    impl NodeRuntime for FixtureExpectedSampleProducer {
+        fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+            self.state
+                .output
+                .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
+            Ok(())
+        }
+
+        fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+            Ok(())
+        }
+
+        fn handle_memory_pressure(
+            &mut self,
+            _level: PressureLevel,
+            _ctx: &mut MemPressureCtx<'_>,
+        ) -> Result<(), NodeError> {
+            Ok(())
+        }
+
+        fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+            Some(&self.state)
+        }
+
+        fn register_runtime_state_shapes(
+            &self,
+            registry: &mut SlotShapeRegistry,
+        ) -> Result<(), SlotShapeRegistryError> {
+            ShaderState::ensure_registered(registry).map(|_| ())
+        }
+
+        fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
+            Some(self)
+        }
+    }
+
+    impl RenderNode for FixtureExpectedSampleProducer {
+        fn render_texture(
+            &mut self,
+            request: VisualProduct,
+            _texture_request: &RenderTextureRequest,
+            _ctx: &mut RenderContext<'_>,
+        ) -> Result<TextureRenderProduct, NodeError> {
+            Err(NodeError::msg(format!(
+                "unexpected texture render for {:?}",
+                request
+            )))
+        }
+
+        fn sample_visual_into(
+            &mut self,
+            _product: VisualProduct,
+            request: VisualSampleBufferRequest<'_>,
+            target: VisualSampleTarget<'_>,
+            _ctx: &mut RenderContext<'_>,
+        ) -> Result<(), NodeError> {
+            assert_eq!(request.output_width, self.expected_width);
+            assert_eq!(request.output_height, self.expected_height);
+            assert_eq!(request.points.data(), self.expected_points.as_slice());
+            assert_eq!(target.samples.count() as usize, self.colors.len());
+            for (sample, color) in target
+                .samples
+                .data_mut()
+                .chunks_exact_mut(4)
+                .zip(self.colors.iter())
+            {
+                sample.copy_from_slice(color);
+            }
+            Ok(())
+        }
+    }
+
     fn solid_texture(
         width: u32,
         height: u32,
@@ -1210,5 +1300,139 @@ mod tests {
         assert_eq!(samples, vec![65535u16, 0, 0]);
         assert_eq!(layout.spans.len(), 1);
         assert_eq!(layout.spans[0].len, 3);
+    }
+
+    #[test]
+    fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let (spine, artifact) = test_placeholder_spine();
+
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").unwrap(),
+                lpc_model::NodeName::parse("shader").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        let out_path = shader_output_path();
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(FixtureExpectedSampleProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    expected_points: vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
+                    colors: vec![[1000, 2000, 3000, u16::MAX], [4000, 5000, 6000, u16::MAX]],
+                    expected_width: 4,
+                    expected_height: 4,
+                }),
+                frame,
+            )
+            .unwrap();
+
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                2,
+                &[1, 1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::Direct,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path,
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        engine.add_demand_root(fix_id);
+        engine.tick(10).unwrap();
+
+        let extent = ControlExtent::new(1, 6);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        engine
+            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .expect("control render");
+
+        assert_eq!(samples, vec![1000u16, 2000, 3000, 4000, 5000, 6000]);
+    }
+
+    #[test]
+    fn direct_sampling_scales_normalized_points_to_render_pixel_space() {
+        assert_eq!(normalized_q16_to_pixel_q16(0, 16), 0);
+        assert_eq!(normalized_q16_to_pixel_q16(32768, 16), 8 * 65536);
+        assert_eq!(normalized_q16_to_pixel_q16(65536, 16), 16 * 65536);
     }
 }

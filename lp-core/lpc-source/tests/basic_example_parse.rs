@@ -1,8 +1,8 @@
+use lpc_model::BindingEndpoint;
 use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
-use lpc_model::{BindingEndpoint, RelativeNodeRef};
 
 #[test]
 fn flat_basic_example_artifacts_parse_as_source_defs() {
@@ -33,14 +33,14 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     assert!(!*output.options().unwrap().dithering_enabled.value());
 
     let fixture: FixtureDef = read_basic_toml("fixture.toml");
-    assert_eq!(
-        fixture.output_loc(),
-        &RelativeNodeRef::parse("..output").unwrap()
-    );
     assert_eq!(fixture.render_width(), 16);
     assert_eq!(fixture.render_height(), 16);
     assert!(matches!(
         fixture.bindings.entries()["input"].source,
+        Some(BindingEndpoint::Bus(_))
+    ));
+    assert!(matches!(
+        fixture.bindings.entries()["output"].target,
         Some(BindingEndpoint::Bus(_))
     ));
 }

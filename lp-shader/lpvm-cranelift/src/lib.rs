@@ -104,11 +104,11 @@ mod tests_options {
     }
 
     #[test]
-    fn q32_options_default_is_saturating() {
+    fn q32_options_default_is_fast() {
         let q = Q32Options::default();
-        assert_eq!(q.add_sub, AddSubMode::Saturating);
-        assert_eq!(q.mul, MulMode::Saturating);
-        assert_eq!(q.div, DivMode::Saturating);
+        assert_eq!(q.add_sub, AddSubMode::Wrapping);
+        assert_eq!(q.mul, MulMode::Wrapping);
+        assert_eq!(q.div, DivMode::Reciprocal);
     }
 }
 

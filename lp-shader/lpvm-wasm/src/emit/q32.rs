@@ -66,6 +66,46 @@ pub(crate) fn emit_q32_fmul_wrap(sink: &mut InstructionSink<'_>, lhs: u32, rhs: 
         .local_set(dst);
 }
 
+/// Fast Q32 division by a compile-time constant.
+///
+/// Normal rendering favors throughput over reciprocal-helper edge semantics, so
+/// nonzero constants lower to `lhs * q32(1.0 / rhs)`.
+pub(crate) fn emit_q32_fdiv_const_fast(
+    sink: &mut InstructionSink<'_>,
+    lhs: u32,
+    rhs: f32,
+    dst: u32,
+) {
+    if rhs == 0.0 {
+        emit_q32_fdiv_const_zero(sink, lhs, dst);
+        return;
+    }
+
+    let recip = f32_to_q16_16(1.0 / rhs);
+    sink.local_get(lhs)
+        .i64_extend_i32_s()
+        .i64_const(i64::from(recip))
+        .i64_mul()
+        .i64_const(16)
+        .i64_shr_s()
+        .i32_wrap_i64()
+        .local_set(dst);
+}
+
+fn emit_q32_fdiv_const_zero(sink: &mut InstructionSink<'_>, lhs: u32, dst: u32) {
+    let t = BlockType::Result(ValType::I32);
+    sink.local_get(lhs).i32_const(0).i32_eq().if_(t);
+    sink.i32_const(0);
+    sink.else_();
+    sink.local_get(lhs).i32_const(0).i32_gt_s().if_(t);
+    sink.i32_const(MAX_FIXED);
+    sink.else_();
+    sink.i32_const(MIN_FIXED);
+    sink.end();
+    sink.end();
+    sink.local_set(dst);
+}
+
 pub(crate) fn emit_q32_fadd(
     sink: &mut InstructionSink<'_>,
     lhs: u32,

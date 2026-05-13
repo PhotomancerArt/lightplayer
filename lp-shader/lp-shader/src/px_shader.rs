@@ -95,7 +95,7 @@ pub struct LpsPxShader {
     meta: LpsModuleSig,
     /// Format-specific synthesised entry, e.g. `"__render_texture_rgba16"`.
     render_texture_fn_name: String,
-    /// Synthesised point-sampling entry, currently available for RGBA16 shaders.
+    /// Synthesised point-sampling entry for RGBA16 output shaders.
     render_samples_fn_name: Option<String>,
     /// Index of `render` in `meta.functions` (preserved from compile_px).
     render_fn_index: usize,
@@ -223,9 +223,10 @@ impl LpsPxShader {
                 out.count()
             )));
         }
-        let render_samples_fn_name = self.render_samples_fn_name.as_ref().ok_or_else(|| {
-            LpsError::Render(String::from(
-                "sample_points_rgba16 is only available for RGBA16 pixel shaders",
+        let render_samples_fn_name = self.render_samples_fn_name.as_deref().ok_or_else(|| {
+            LpsError::Render(format!(
+                "sample_points_rgba16 is only available for {:?} shaders",
+                TextureStorageFormat::Rgba16Unorm
             ))
         })?;
         let mut points_buf = points.buffer();

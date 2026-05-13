@@ -86,6 +86,7 @@ impl ShaderNode {
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
         };
 
+        let compile_start_ms = ctx.now_ms();
         #[cfg(feature = "panic-recovery")]
         let compile_result: Result<Box<dyn LpShader>, String> = {
             use core::panic::AssertUnwindSafe;
@@ -101,24 +102,41 @@ impl ShaderNode {
         let compile_result: Result<Box<dyn LpShader>, String> = graphics
             .compile_shader(self.glsl_source.as_str(), &compile_opts)
             .map_err(|e| format!("{e}"));
+        let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
         lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
 
         match compile_result {
             Ok(shader) => {
                 self.shader = Some(shader);
-                log::info!(
-                    "[shader-node] compilation succeeded (node={:?})",
-                    self.node_id
-                );
+                if let Some(compile_elapsed_ms) = compile_elapsed_ms {
+                    log::info!(
+                        "[shader-node] compilation succeeded (node={:?}, elapsed={}ms)",
+                        self.node_id,
+                        compile_elapsed_ms
+                    );
+                } else {
+                    log::info!(
+                        "[shader-node] compilation succeeded (node={:?})",
+                        self.node_id
+                    );
+                }
                 Ok(())
             }
             Err(error) => {
                 self.compilation_error = Some(error.clone());
                 self.shader = None;
-                log::warn!(
-                    "[shader-node] compilation failed (node={:?}): {error}",
-                    self.node_id
-                );
+                if let Some(compile_elapsed_ms) = compile_elapsed_ms {
+                    log::warn!(
+                        "[shader-node] compilation failed (node={:?}, elapsed={}ms): {error}",
+                        self.node_id,
+                        compile_elapsed_ms
+                    );
+                } else {
+                    log::warn!(
+                        "[shader-node] compilation failed (node={:?}): {error}",
+                        self.node_id
+                    );
+                }
                 Err(NodeError::msg(format!("shader compile: {error}")))
             }
         }
@@ -343,7 +361,11 @@ impl RenderNode for ShaderNode {
         }
 
         self.ensure_compiled(ctx)?;
-        let uniforms = build_uniforms(1, request.points.count(), &self.visual_uniforms);
+        let uniforms = build_uniforms(
+            request.output_width,
+            request.output_height,
+            &self.visual_uniforms,
+        );
         let shader = self
             .shader
             .as_mut()
