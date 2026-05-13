@@ -40,7 +40,7 @@ pub struct DebugUiState {
     last_render_product_probe: Option<RenderProductProbeResult>,
     last_runtime_status: Option<RuntimeReadResult>,
     next_mutation_id: u64,
-    queued_mutations: BTreeMap<SlotEditKey, WireSlotMutationRequest>,
+    queued_mutations: BTreeMap<SlotEditKey, SlotEditIntent>,
     last_mutation_by_slot: BTreeMap<SlotEditKey, WireSlotMutationId>,
 }
 
@@ -105,7 +105,7 @@ impl DebugUiState {
 
         self.last_poll = Instant::now();
         self.poll_in_flight = true;
-        let mutations = self.drain_queued_mutations();
+        let mutations = self.prepare_queued_mutations();
         let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
             self.next_project_read_context();
         let include_slots = needs_slot_snapshot || !mutations.is_empty();
@@ -166,23 +166,36 @@ impl DebugUiState {
             return;
         }
 
-        let mut prepared = Vec::new();
+        for intent in intents {
+            self.queued_mutations.insert(intent.key(), intent);
+        }
+    }
+
+    fn prepare_queued_mutations(&mut self) -> Vec<WireSlotMutationRequest> {
+        if self.queued_mutations.is_empty() {
+            return Vec::new();
+        }
+
+        let queued = core::mem::take(&mut self.queued_mutations);
+        let mut requests = Vec::new();
         let mut next_mutation_id = self.next_mutation_id;
         let mut last_error = None;
 
         match self.project_view.lock() {
             Ok(mut view) => {
-                for intent in intents {
+                for (key, intent) in queued {
                     let id = WireSlotMutationId::new(next_mutation_id);
                     next_mutation_id = next_mutation_id.saturating_add(1);
-                    let key = intent.key();
                     match view.slots.prepare_set_value(
                         id,
                         &intent.root,
                         intent.path.clone(),
                         intent.value,
                     ) {
-                        Ok(request) => prepared.push((key, id, request)),
+                        Ok(request) => {
+                            self.last_mutation_by_slot.insert(key, id);
+                            requests.push(request);
+                        }
                         Err(error) => {
                             last_error = Some(format!("slot edit rejected locally: {error}"));
                         }
@@ -191,24 +204,16 @@ impl DebugUiState {
             }
             Err(_) => {
                 self.last_error = Some(String::from("Project view locked"));
-                return;
+                self.queued_mutations = queued;
+                return Vec::new();
             }
         }
 
         self.next_mutation_id = next_mutation_id;
-        for (key, id, request) in prepared {
-            self.last_mutation_by_slot.insert(key.clone(), id);
-            self.queued_mutations.insert(key, request);
-        }
         if let Some(error) = last_error {
             self.last_error = Some(error);
         }
-    }
-
-    fn drain_queued_mutations(&mut self) -> Vec<WireSlotMutationRequest> {
-        core::mem::take(&mut self.queued_mutations)
-            .into_values()
-            .collect()
+        requests
     }
 }
 
