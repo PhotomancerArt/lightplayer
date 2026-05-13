@@ -52,6 +52,39 @@ pub(in crate::lower) fn assign_target(
                 dst.clone(),
                 index,
                 element_ty,
+                0,
+                dst.lanes.len(),
+                *lane_offset,
+                *lane_count,
+                value,
+            )?;
+            write_root_back_if_memory_root(ctx, span, &place.root, &dst)
+        }
+        [
+            PlaceSegment::Field {
+                lane_offset: array_lane_offset,
+                lane_count: array_lane_count,
+                ..
+            },
+            PlaceSegment::Index {
+                index,
+                ty: element_ty,
+            },
+            PlaceSegment::Field {
+                lane_offset,
+                lane_count,
+                ..
+            },
+        ] => {
+            let dst = root_value(ctx, span, &place.root)?;
+            assign_index_field_target(
+                ctx,
+                span,
+                dst.clone(),
+                index,
+                element_ty,
+                *array_lane_offset,
+                *array_lane_count,
                 *lane_offset,
                 *lane_count,
                 value,

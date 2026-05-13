@@ -192,9 +192,11 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             loop {
                 let member_start = self.current().span.start;
                 let member_name = self.expect_identifier_like()?.to_string();
+                let mut member_ty = ty.clone();
+                self.append_array_suffixes(&mut member_ty)?;
                 members.push(StructMemberDecl {
                     name: member_name,
-                    ty: ty.clone(),
+                    ty: member_ty,
                     span: Span::new(member_start, self.previous().span.end),
                 });
                 if self.at_punct(",") {
@@ -255,6 +257,8 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             } else {
                 None
             };
+            let mut ty = ty;
+            self.append_array_suffixes(&mut ty)?;
             let span_end = self.previous().span.end;
             let span_start = ty.span.start;
             params.push(FunctionParam {
@@ -356,9 +360,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         if self.is_type_name(tok) {
             self.bump();
             let mut name = tok.lexeme(self.source).to_string();
-            while self.at_punct("[") {
-                name.push_str(self.parse_array_suffix()?);
-            }
+            self.append_array_suffix_text(&mut name)?;
             Ok(TypeRef {
                 name,
                 span: Span::new(tok.span.start, self.previous().span.end),
@@ -370,6 +372,23 @@ impl<'src, 'tok> Parser<'src, 'tok> {
                 self.describe_current(),
             ))
         }
+    }
+
+    fn append_array_suffixes(&mut self, ty: &mut TypeRef) -> Result<(), Diagnostic> {
+        let mut suffix = String::new();
+        self.append_array_suffix_text(&mut suffix)?;
+        if !suffix.is_empty() {
+            ty.name.push_str(&suffix);
+            ty.span = Span::new(ty.span.start, self.previous().span.end);
+        }
+        Ok(())
+    }
+
+    fn append_array_suffix_text(&mut self, name: &mut String) -> Result<(), Diagnostic> {
+        while self.at_punct("[") {
+            name.push_str(self.parse_array_suffix()?);
+        }
+        Ok(())
     }
 
     fn parse_array_suffix(&mut self) -> Result<&'src str, Diagnostic> {

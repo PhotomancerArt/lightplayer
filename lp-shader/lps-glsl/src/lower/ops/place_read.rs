@@ -67,12 +67,45 @@ pub(super) fn read_assign_target(
                 ty,
                 ..
             },
+        ] => {
+            let array_lane_count = value.lanes.len();
+            lower_index_field(
+                ctx,
+                span,
+                value,
+                index,
+                element_ty,
+                0,
+                array_lane_count,
+                *lane_offset,
+                *lane_count,
+                ty,
+            )
+        }
+        [
+            PlaceSegment::Field {
+                lane_offset: array_lane_offset,
+                lane_count: array_lane_count,
+                ..
+            },
+            PlaceSegment::Index {
+                index,
+                ty: element_ty,
+            },
+            PlaceSegment::Field {
+                lane_offset,
+                lane_count,
+                ty,
+                ..
+            },
         ] => lower_index_field(
             ctx,
             span,
             value,
             index,
             element_ty,
+            *array_lane_offset,
+            *array_lane_count,
             *lane_offset,
             *lane_count,
             ty,

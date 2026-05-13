@@ -19,6 +19,14 @@ pub(super) fn coerce_constructor_args(
         .iter()
         .map(|arg| scalar_lane_count(&arg.ty))
         .sum::<usize>();
+    if let LpsType::Array { element, len } = target_ty
+        && args.len() == *len as usize
+    {
+        return args
+            .into_iter()
+            .map(|arg| coerce_expr(arg, element))
+            .collect();
+    }
     if matches!(target_ty, LpsType::Struct { .. }) {
         if actual_lanes == expected_lanes {
             return Ok(args);

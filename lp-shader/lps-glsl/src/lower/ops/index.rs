@@ -125,6 +125,8 @@ pub(super) fn lower_index_field(
     base: LowerValue,
     index: &HirExpr,
     element_ty: &LpsType,
+    array_lane_offset: usize,
+    array_lane_count: usize,
     field_lane_offset: usize,
     field_lane_count: usize,
     field_ty: &LpsType,
@@ -136,11 +138,11 @@ pub(super) fn lower_index_field(
         return Err(Diagnostic::error(span, "index field has no lanes"));
     }
     let field_ir_types = scalar_ir_types(field_ty)?;
-    let element_count = base.lanes.len() / element_width;
+    let element_count = array_lane_count / element_width;
     let mut lanes = Vec::new();
     for component in 0..field_lane_count {
         let base_component = field_lane_offset + component;
-        let Some(mut selected) = base.lanes.get(base_component).copied() else {
+        let Some(mut selected) = base.lanes.get(array_lane_offset + base_component).copied() else {
             return Err(Diagnostic::error(span, "index field lane out of range"));
         };
         let result_ir_ty = field_ir_types
@@ -148,7 +150,7 @@ pub(super) fn lower_index_field(
             .copied()
             .ok_or_else(|| Diagnostic::error(span, "index field result has no type"))?;
         for element_index in 1..element_count {
-            let src_index = element_index * element_width + base_component;
+            let src_index = array_lane_offset + element_index * element_width + base_component;
             let Some(lane) = base.lanes.get(src_index) else {
                 return Err(Diagnostic::error(
                     span,
@@ -189,6 +191,8 @@ pub(super) fn assign_index_field_target(
     dst: LowerValue,
     index: &HirExpr,
     element_ty: &LpsType,
+    array_lane_offset: usize,
+    array_lane_count: usize,
     field_lane_offset: usize,
     field_lane_count: usize,
     value: LowerValue,
@@ -203,7 +207,7 @@ pub(super) fn assign_index_field_target(
         ));
     }
     let lane_types = scalar_ir_types(&value.ty)?;
-    let element_count = dst.lanes.len() / element_width;
+    let element_count = array_lane_count / element_width;
     for element_index in 0..element_count {
         let constant = ctx.fb.alloc_vreg(IrType::I32);
         ctx.fb.push(LpirOp::IconstI32 {
@@ -217,7 +221,8 @@ pub(super) fn assign_index_field_target(
             rhs: constant,
         });
         for component in 0..field_lane_count {
-            let dst_index = element_index * element_width + field_lane_offset + component;
+            let dst_index =
+                array_lane_offset + element_index * element_width + field_lane_offset + component;
             let current = dst.lanes[dst_index];
             let selected = ctx.fb.alloc_vreg(lane_types[component]);
             ctx.fb.push(LpirOp::Select {
