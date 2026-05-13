@@ -1,6 +1,8 @@
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float time;
 
+vec4 worley_demo(vec2 scaledCoord, float time);
+
 vec4 render(vec2 pos) {
     // Pan through noise using time with oscillation to stay bounded
     // Oscillate between minZoom and maxZoom to avoid unbounded growth
