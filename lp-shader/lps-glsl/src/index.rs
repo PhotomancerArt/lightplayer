@@ -151,6 +151,8 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let start = self.expect_keyword(Keyword::Uniform)?.span.start;
         let ty = self.expect_type_ref()?;
         let name = self.expect_identifier_like()?.to_string();
+        let mut ty = ty;
+        self.append_array_suffixes(&mut ty)?;
         let end = self.expect_punct(";")?.span.end;
         Ok(UniformDecl {
             name,

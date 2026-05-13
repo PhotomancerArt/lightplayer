@@ -32,6 +32,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "mix" => BuiltinKind::Mix,
         "mod" => BuiltinKind::Mod,
         "not" => BuiltinKind::Not,
+        "normalize" => BuiltinKind::Normalize,
         "notEqual" => BuiltinKind::NotEqual,
         "smoothstep" => BuiltinKind::Smoothstep,
         "sqrt" => BuiltinKind::Sqrt,
@@ -86,6 +87,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Floor
         | BuiltinKind::Fract
         | BuiltinKind::Length
+        | BuiltinKind::Normalize
         | BuiltinKind::Not
         | BuiltinKind::Sqrt => 1,
         BuiltinKind::Equal
@@ -119,11 +121,16 @@ pub(super) fn type_builtin_args(
             let ty = args[0].ty.clone();
             Ok((args, ty))
         }
-        BuiltinKind::Length => {
+        BuiltinKind::Length | BuiltinKind::Normalize => {
             if scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
-                return Err(Diagnostic::error(span, "length expects float lanes"));
+                return Err(Diagnostic::error(span, "builtin expects float lanes"));
             }
-            Ok((args, LpsType::Float))
+            let ty = match kind {
+                BuiltinKind::Length => LpsType::Float,
+                BuiltinKind::Normalize => args[0].ty.clone(),
+                _ => unreachable!(),
+            };
+            Ok((args, ty))
         }
         BuiltinKind::Distance | BuiltinKind::Dot => {
             let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;

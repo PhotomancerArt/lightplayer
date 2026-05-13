@@ -797,7 +797,12 @@ impl<'a> TypeCtx<'a> {
             ParsedExprKind::Unary { op, expr: inner } => {
                 let inner = self.type_expr(inner)?;
                 let ty = match op {
-                    UnaryOp::Neg if inner.ty == LpsType::Float || inner.ty == LpsType::Int => {
+                    UnaryOp::Neg
+                        if matches!(
+                            scalar_base_type(&inner.ty),
+                            Some(LpsType::Float | LpsType::Int)
+                        ) =>
+                    {
                         inner.ty.clone()
                     }
                     UnaryOp::Not => LpsType::Bool,
@@ -1186,6 +1191,19 @@ impl<'a> TypeCtx<'a> {
                 },
             });
         }
+        if op == BinaryOp::Mul
+            && let Some(ty) = matrix_vector_multiply_type(&lhs.ty, &rhs.ty)
+        {
+            return Ok(HirExpr {
+                span,
+                ty,
+                kind: HirExprKind::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+            });
+        }
         let (lhs, rhs, ty) = coerce_arithmetic_pair(span, lhs, rhs)?;
         if op == BinaryOp::Mod && scalar_base_type(&ty) == Some(LpsType::Float) {
             return Err(Diagnostic::error(span, "modulo requires integer operands"));
@@ -1467,4 +1485,20 @@ fn fold_float_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> 
         ty: LpsType::Float,
         kind: HirExprKind::FloatLiteral(value),
     })
+}
+
+fn matrix_vector_multiply_type(lhs: &LpsType, rhs: &LpsType) -> Option<LpsType> {
+    if let Some((cols, rows)) = lhs.matrix_dims()
+        && scalar_base_type(rhs) == Some(LpsType::Float)
+        && scalar_lane_count(rhs) == cols
+    {
+        return LpsType::vector_type(&LpsType::Float, rows);
+    }
+    if let Some((cols, rows)) = rhs.matrix_dims()
+        && scalar_base_type(lhs) == Some(LpsType::Float)
+        && scalar_lane_count(lhs) == rows
+    {
+        return LpsType::vector_type(&LpsType::Float, cols);
+    }
+    None
 }

@@ -236,6 +236,7 @@ pub enum BuiltinKind {
     Mix,
     Mod,
     Not,
+    Normalize,
     NotEqual,
     Smoothstep,
     Sqrt,

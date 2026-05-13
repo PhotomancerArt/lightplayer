@@ -54,3 +54,108 @@ pub(in crate::lower::ops) fn lower_matrix_multiply(
         lanes,
     })
 }
+
+pub(in crate::lower::ops) fn lower_matrix_vector_multiply(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    lhs: LowerValue,
+    rhs: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if lhs.ty.is_matrix() {
+        return lower_matrix_times_vector(ctx, span, lhs, rhs, result_ty);
+    }
+    if rhs.ty.is_matrix() {
+        return lower_vector_times_matrix(ctx, span, lhs, rhs, result_ty);
+    }
+    Err(Diagnostic::error(
+        span,
+        "matrix-vector multiply requires a matrix operand",
+    ))
+}
+
+fn lower_matrix_times_vector(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    matrix: LowerValue,
+    vector: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let Some((cols, rows)) = matrix.ty.matrix_dims() else {
+        return Err(Diagnostic::error(span, "left operand must be matrix"));
+    };
+    if matrix.lanes.len() != cols * rows || vector.lanes.len() != cols {
+        return Err(Diagnostic::error(
+            span,
+            "unsupported matrix-vector multiply shape",
+        ));
+    }
+    let mut lanes = Vec::new();
+    for row in 0..rows {
+        let mut acc = None;
+        for col in 0..cols {
+            let product = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(LpirOp::Fmul {
+                dst: product,
+                lhs: matrix.lanes[col * rows + row],
+                rhs: vector.lanes[col],
+            });
+            acc = Some(sum_product(ctx, acc, product));
+        }
+        lanes.push(acc.ok_or_else(|| Diagnostic::error(span, "empty matrix-vector multiply"))?);
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
+}
+
+fn lower_vector_times_matrix(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    vector: LowerValue,
+    matrix: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let Some((cols, rows)) = matrix.ty.matrix_dims() else {
+        return Err(Diagnostic::error(span, "right operand must be matrix"));
+    };
+    if matrix.lanes.len() != cols * rows || vector.lanes.len() != rows {
+        return Err(Diagnostic::error(
+            span,
+            "unsupported vector-matrix multiply shape",
+        ));
+    }
+    let mut lanes = Vec::new();
+    for col in 0..cols {
+        let mut acc = None;
+        for row in 0..rows {
+            let product = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(LpirOp::Fmul {
+                dst: product,
+                lhs: vector.lanes[row],
+                rhs: matrix.lanes[col * rows + row],
+            });
+            acc = Some(sum_product(ctx, acc, product));
+        }
+        lanes.push(acc.ok_or_else(|| Diagnostic::error(span, "empty vector-matrix multiply"))?);
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
+}
+
+fn sum_product(ctx: &mut LowerCtx<'_>, acc: Option<lpir::VReg>, product: lpir::VReg) -> lpir::VReg {
+    if let Some(prev) = acc {
+        let sum = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Fadd {
+            dst: sum,
+            lhs: prev,
+            rhs: product,
+        });
+        sum
+    } else {
+        product
+    }
+}

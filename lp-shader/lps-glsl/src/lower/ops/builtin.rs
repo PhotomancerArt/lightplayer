@@ -41,6 +41,9 @@ pub(in crate::lower) fn lower_builtin(
     if kind == BuiltinKind::Dot {
         return lower_dot(ctx, span, &values[0], &values[1], result_ty);
     }
+    if kind == BuiltinKind::Normalize {
+        return lower_normalize(ctx, span, &values[0], result_ty);
+    }
     let width = scalar_lane_count(result_ty);
     let mut lanes = Vec::new();
     for i in 0..width {
@@ -138,6 +141,9 @@ pub(in crate::lower) fn lower_builtin(
                 lower_min_max_lane(ctx, span, result_ty, &values[0], &values[1], i, false)?
             }
             BuiltinKind::Mod => lower_mod_lane(ctx, &values[0], &values[1], i),
+            BuiltinKind::Normalize => {
+                unreachable!("normalize returns before lane-wise builtin lowering")
+            }
             BuiltinKind::Clamp => {
                 let maxed =
                     lower_binary_float_lane(ctx, &values[0], &values[1], i, BinaryFloatOp::Max);
@@ -256,6 +262,19 @@ fn lower_dot(
         ty: LpsType::Float,
         lanes: vec![acc],
     })
+}
+
+fn lower_normalize(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    value: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if scalar_base_type(result_ty) != Some(LpsType::Float) || value.ty != *result_ty {
+        return Err(Diagnostic::error(span, "normalize expects float lanes"));
+    }
+    let length = lower_length(ctx, span, value, &LpsType::Float)?;
+    lower_binary(ctx, span, BinaryOp::Div, value.clone(), length, result_ty)
 }
 
 pub(in crate::lower::ops) fn lower_bool_builtin(

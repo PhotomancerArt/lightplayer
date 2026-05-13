@@ -9,7 +9,7 @@ use crate::hir::{scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue};
-use super::matrix::lower_matrix_multiply;
+use super::matrix::{lower_matrix_multiply, lower_matrix_vector_multiply};
 use super::numeric::{lane_at, single_lane};
 
 pub(in crate::lower) fn lower_binary(
@@ -210,6 +210,9 @@ pub(in crate::lower) fn lower_binary(
         && *result_ty == lhs.ty
     {
         return lower_matrix_multiply(ctx, span, lhs, rhs, result_ty);
+    }
+    if op == BinaryOp::Mul && (lhs.ty.is_matrix() || rhs.ty.is_matrix()) {
+        return lower_matrix_vector_multiply(ctx, span, lhs, rhs, result_ty);
     }
     let width = scalar_lane_count(result_ty);
     let mut lanes = Vec::new();

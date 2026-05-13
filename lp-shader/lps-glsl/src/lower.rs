@@ -12,8 +12,8 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 
 use crate::body::UnaryOp;
 use crate::hir::{
-    HirExpr, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey, scalar_ir_types,
-    scalar_lane_count,
+    HirExpr, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey, scalar_base_type,
+    scalar_ir_types, scalar_lane_count,
 };
 use crate::{Diagnostic, Span};
 
@@ -427,23 +427,29 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
         HirExprKind::Unary { op, expr: inner } => {
             let inner = lower_expr(ctx, inner)?;
             match (op, inner.ty.clone()) {
-                (UnaryOp::Neg, LpsType::Float) => {
-                    let src = single_lane(expr.span, &inner)?;
-                    let dst = ctx.fb.alloc_vreg(IrType::F32);
-                    ctx.fb.push(LpirOp::Fneg { dst, src });
-                    Ok(LowerValue {
-                        ty: LpsType::Float,
-                        lanes: vec![dst],
-                    })
+                (UnaryOp::Neg, ty) if scalar_base_type(&ty) == Some(LpsType::Float) => {
+                    let lanes = inner
+                        .lanes
+                        .iter()
+                        .map(|src| {
+                            let dst = ctx.fb.alloc_vreg(IrType::F32);
+                            ctx.fb.push(LpirOp::Fneg { dst, src: *src });
+                            dst
+                        })
+                        .collect::<Vec<_>>();
+                    Ok(LowerValue { ty, lanes })
                 }
-                (UnaryOp::Neg, LpsType::Int) => {
-                    let src = single_lane(expr.span, &inner)?;
-                    let dst = ctx.fb.alloc_vreg(IrType::I32);
-                    ctx.fb.push(LpirOp::Ineg { dst, src });
-                    Ok(LowerValue {
-                        ty: LpsType::Int,
-                        lanes: vec![dst],
-                    })
+                (UnaryOp::Neg, ty) if scalar_base_type(&ty) == Some(LpsType::Int) => {
+                    let lanes = inner
+                        .lanes
+                        .iter()
+                        .map(|src| {
+                            let dst = ctx.fb.alloc_vreg(IrType::I32);
+                            ctx.fb.push(LpirOp::Ineg { dst, src: *src });
+                            dst
+                        })
+                        .collect::<Vec<_>>();
+                    Ok(LowerValue { ty, lanes })
                 }
                 (UnaryOp::Not, LpsType::Bool) => {
                     let src = single_lane(expr.span, &inner)?;
