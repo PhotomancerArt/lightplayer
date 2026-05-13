@@ -246,6 +246,8 @@ pub enum BuiltinKind {
     GreaterThanEqual,
     Inverse,
     InverseSqrt,
+    IsInf,
+    IsNan,
     Length,
     LessThan,
     LessThanEqual,

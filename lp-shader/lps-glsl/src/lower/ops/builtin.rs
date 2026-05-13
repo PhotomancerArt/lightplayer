@@ -154,6 +154,7 @@ pub(in crate::lower) fn lower_builtin(
                 unreachable!("inverse returns before lane-wise builtin lowering")
             }
             BuiltinKind::InverseSqrt => lower_inversesqrt_lane(ctx, &values[0], i),
+            BuiltinKind::IsInf | BuiltinKind::IsNan => iconst(ctx, 0),
             BuiltinKind::MatrixCompMult => {
                 unreachable!("matrixCompMult returns before lane-wise builtin lowering")
             }

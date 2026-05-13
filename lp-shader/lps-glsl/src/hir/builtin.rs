@@ -31,6 +31,8 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
         "inverse" => BuiltinKind::Inverse,
         "inversesqrt" => BuiltinKind::InverseSqrt,
+        "isinf" => BuiltinKind::IsInf,
+        "isnan" => BuiltinKind::IsNan,
         "length" => BuiltinKind::Length,
         "lessThan" => BuiltinKind::LessThan,
         "lessThanEqual" => BuiltinKind::LessThanEqual,
@@ -148,6 +150,8 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Fract
         | BuiltinKind::Inverse
         | BuiltinKind::InverseSqrt
+        | BuiltinKind::IsInf
+        | BuiltinKind::IsNan
         | BuiltinKind::Length
         | BuiltinKind::Normalize
         | BuiltinKind::Not
@@ -212,6 +216,22 @@ pub(super) fn type_builtin_args(
                     "sign expects numeric scalar/vector lanes",
                 ));
             }
+            Ok((args, ty))
+        }
+        BuiltinKind::IsInf | BuiltinKind::IsNan => {
+            if args[0].ty.is_matrix() || scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
+                return Err(Diagnostic::error(
+                    span,
+                    "builtin expects float scalar/vector lanes",
+                ));
+            }
+            let ty = match scalar_lane_count(&args[0].ty) {
+                1 => LpsType::Bool,
+                2 => LpsType::BVec2,
+                3 => LpsType::BVec3,
+                4 => LpsType::BVec4,
+                _ => return Err(Diagnostic::error(span, "unsupported builtin vector width")),
+            };
             Ok((args, ty))
         }
         BuiltinKind::Length | BuiltinKind::Normalize => {
