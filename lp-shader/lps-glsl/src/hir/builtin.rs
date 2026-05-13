@@ -18,6 +18,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "any" => BuiltinKind::Any,
         "ceil" => BuiltinKind::Ceil,
         "clamp" => BuiltinKind::Clamp,
+        "cross" => BuiltinKind::Cross,
         "degrees" => BuiltinKind::Degrees,
         "distance" => BuiltinKind::Distance,
         "dot" => BuiltinKind::Dot,
@@ -115,6 +116,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Sqrt
         | BuiltinKind::Trunc => 1,
         BuiltinKind::Equal
+        | BuiltinKind::Cross
         | BuiltinKind::Distance
         | BuiltinKind::Dot
         | BuiltinKind::GreaterThan
@@ -160,6 +162,11 @@ pub(super) fn type_builtin_args(
                 _ => unreachable!(),
             };
             Ok((args, ty))
+        }
+        BuiltinKind::Cross => {
+            let a = coerce_expr(args[0].clone(), &LpsType::Vec3)?;
+            let b = coerce_expr(args[1].clone(), &LpsType::Vec3)?;
+            Ok((alloc::vec![a, b], LpsType::Vec3))
         }
         BuiltinKind::Distance | BuiltinKind::Dot => {
             let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;

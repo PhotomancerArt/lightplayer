@@ -3,7 +3,9 @@ use alloc::format;
 use crate::hir::{HirAssignTarget, PlaceRoot};
 use crate::{Diagnostic, Span};
 
-use super::super::storage::{is_pointer_param, load_value_from_addr, local_value, param_pointer};
+use super::super::storage::{
+    is_pointer_param, load_value_from_addr, local_value, lower_global_load, param_pointer,
+};
 use super::super::{LowerCtx, LowerValue};
 use super::place_project::read_segments;
 
@@ -29,6 +31,9 @@ pub(super) fn root_value(
             span,
             "assignment target cannot be a uniform",
         )),
+        PlaceRoot::Global {
+            byte_offset, ty, ..
+        } => lower_global_load(ctx, span, *byte_offset, ty),
     }
 }
 

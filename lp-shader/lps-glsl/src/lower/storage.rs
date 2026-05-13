@@ -139,6 +139,34 @@ pub(super) fn lower_uniform_load(
     })
 }
 
+pub(super) fn lower_global_load(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    byte_offset: u32,
+    ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    lower_uniform_load(ctx, span, byte_offset, ty)
+}
+
+pub(super) fn store_global(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    byte_offset: u32,
+    value: &LowerValue,
+) -> Result<(), Diagnostic> {
+    if value.lanes.len() != scalar_lane_count(&value.ty) {
+        return Err(Diagnostic::error(span, "global store lane count mismatch"));
+    }
+    for (i, lane) in value.lanes.iter().enumerate() {
+        ctx.fb.push(LpirOp::Store {
+            base: VMCTX_VREG,
+            offset: byte_offset.saturating_add((i as u32).saturating_mul(4)),
+            value: *lane,
+        });
+    }
+    Ok(())
+}
+
 pub(super) fn is_pointer_param(ctx: &LowerCtx<'_>, param: usize) -> bool {
     ctx.param_qualifiers
         .get(param)

@@ -28,6 +28,14 @@ pub struct ConstDecl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    pub init_span: Option<Span>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructMemberDecl {
     pub name: String,
     pub ty: TypeRef,
@@ -63,6 +71,7 @@ pub struct TopLevelIndex {
     pub structs: Vec<StructDecl>,
     pub uniforms: Vec<UniformDecl>,
     pub consts: Vec<ConstDecl>,
+    pub globals: Vec<GlobalDecl>,
     pub functions: Vec<FunctionDecl>,
 }
 
@@ -110,7 +119,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
                 if let Some(function) = self.try_parse_function()? {
                     index.functions.push(function);
                 } else {
-                    self.skip_to_semicolon()?;
+                    index.globals.extend(self.parse_global_decl()?);
                 }
             } else {
                 return Err(Diagnostic::error(
@@ -228,6 +237,44 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             init_span,
             span: Span::new(start, end),
         })
+    }
+
+    fn parse_global_decl(&mut self) -> Result<Vec<GlobalDecl>, Diagnostic> {
+        let start = self.current().span.start;
+        let mut base_ty = self.expect_type_ref()?;
+        self.append_array_suffixes(&mut base_ty)?;
+        let mut declarations = Vec::new();
+        loop {
+            let decl_start = self.current().span.start;
+            let name = self.expect_identifier_like()?.to_string();
+            let mut ty = base_ty.clone();
+            self.append_array_suffixes(&mut ty)?;
+            let init_span = if self.at_punct("=") {
+                self.bump();
+                Some(self.span_until_decl_separator()?)
+            } else {
+                None
+            };
+            declarations.push(GlobalDecl {
+                name,
+                ty,
+                init_span,
+                span: Span::new(decl_start, self.previous().span.end),
+            });
+            if self.at_punct(",") {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        let end = self.expect_punct(";")?.span.end;
+        if let Some(first) = declarations.first_mut() {
+            first.span = Span::new(start, first.span.end);
+        }
+        if let Some(last) = declarations.last_mut() {
+            last.span = Span::new(last.span.start, end);
+        }
+        Ok(declarations)
     }
 
     fn parse_struct(&mut self) -> Result<StructDecl, Diagnostic> {
@@ -376,19 +423,6 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         ))
     }
 
-    fn skip_to_semicolon(&mut self) -> Result<usize, Diagnostic> {
-        while !self.at_eof() {
-            let tok = self.bump();
-            if tok.lexeme(self.source) == ";" {
-                return Ok(tok.span.end);
-            }
-        }
-        Err(Diagnostic::error(
-            self.previous().span,
-            "expected ';' before end of file",
-        ))
-    }
-
     fn span_until_semicolon(&mut self) -> Result<Span, Diagnostic> {
         let start = self.current().span.start;
         let mut end = start;
@@ -408,6 +442,38 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         Err(Diagnostic::error(
             self.previous().span,
             "expected ';' before end of file",
+        ))
+    }
+
+    fn span_until_decl_separator(&mut self) -> Result<Span, Diagnostic> {
+        let start = self.current().span.start;
+        let mut end = start;
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        while !self.at_eof() {
+            if paren_depth == 0
+                && brace_depth == 0
+                && bracket_depth == 0
+                && (self.at_punct(",") || self.at_punct(";"))
+            {
+                return Ok(Span::new(start, end));
+            }
+            let tok = self.bump();
+            match tok.lexeme(self.source) {
+                "(" => paren_depth += 1,
+                ")" => paren_depth = paren_depth.saturating_sub(1),
+                "{" => brace_depth += 1,
+                "}" => brace_depth = brace_depth.saturating_sub(1),
+                "[" => bracket_depth += 1,
+                "]" => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
+            end = tok.span.end;
+        }
+        Err(Diagnostic::error(
+            self.previous().span,
+            "expected global declaration separator before end of file",
         ))
     }
 

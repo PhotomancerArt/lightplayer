@@ -38,6 +38,9 @@ pub(in crate::lower) fn lower_builtin(
         )?;
         return lower_length(ctx, span, &delta, result_ty);
     }
+    if kind == BuiltinKind::Cross {
+        return lower_cross(ctx, span, &values[0], &values[1], result_ty);
+    }
     if kind == BuiltinKind::Dot {
         return lower_dot(ctx, span, &values[0], &values[1], result_ty);
     }
@@ -69,6 +72,7 @@ pub(in crate::lower) fn lower_builtin(
                 )?
                 .lanes[i]
             }
+            BuiltinKind::Cross => unreachable!("cross returns before lane-wise builtin lowering"),
             BuiltinKind::Distance => {
                 unreachable!("distance returns before lane-wise builtin lowering")
             }
@@ -300,6 +304,47 @@ fn lower_dot(
     Ok(LowerValue {
         ty: LpsType::Float,
         lanes: vec![acc],
+    })
+}
+
+fn lower_cross(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if *result_ty != LpsType::Vec3 || lhs.ty != LpsType::Vec3 || rhs.ty != LpsType::Vec3 {
+        return Err(Diagnostic::error(span, "cross expects vec3 operands"));
+    }
+    let mut component = |a: usize, b: usize, c: usize, d: usize| {
+        let left = ctx.fb.alloc_vreg(IrType::F32);
+        let right = ctx.fb.alloc_vreg(IrType::F32);
+        let dst = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Fmul {
+            dst: left,
+            lhs: lhs.lanes[a],
+            rhs: rhs.lanes[b],
+        });
+        ctx.fb.push(LpirOp::Fmul {
+            dst: right,
+            lhs: lhs.lanes[c],
+            rhs: rhs.lanes[d],
+        });
+        ctx.fb.push(LpirOp::Fsub {
+            dst,
+            lhs: left,
+            rhs: right,
+        });
+        dst
+    };
+    Ok(LowerValue {
+        ty: LpsType::Vec3,
+        lanes: vec![
+            component(1, 2, 2, 1),
+            component(2, 0, 0, 2),
+            component(0, 1, 1, 0),
+        ],
     })
 }
 

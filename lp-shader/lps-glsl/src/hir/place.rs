@@ -44,6 +44,11 @@ pub(crate) enum PlaceRoot {
         byte_offset: u32,
         ty: LpsType,
     },
+    Global {
+        name: String,
+        byte_offset: u32,
+        ty: LpsType,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +106,20 @@ impl HirPlace {
         let lanes = (0..scalar_lane_count(&ty)).collect();
         Self {
             root: PlaceRoot::Uniform {
+                name,
+                byte_offset,
+                ty: ty.clone(),
+            },
+            segments: Vec::new(),
+            ty,
+            lanes: Some(lanes),
+        }
+    }
+
+    pub(super) fn global(name: String, byte_offset: u32, ty: LpsType) -> Self {
+        let lanes = (0..scalar_lane_count(&ty)).collect();
+        Self {
+            root: PlaceRoot::Global {
                 name,
                 byte_offset,
                 ty: ty.clone(),

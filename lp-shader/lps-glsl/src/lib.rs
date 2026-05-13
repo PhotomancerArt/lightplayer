@@ -20,7 +20,9 @@ mod token;
 pub use compile::{CompileOptions, CompileOutput, compile, index_source};
 pub use diagnostic::{Diagnostic, DiagnosticSeverity};
 pub use hir::HirModule;
-pub use index::{ConstDecl, FunctionDecl, FunctionParam, TopLevelIndex, TypeRef, UniformDecl};
+pub use index::{
+    ConstDecl, FunctionDecl, FunctionParam, GlobalDecl, TopLevelIndex, TypeRef, UniformDecl,
+};
 pub use job::{CompileBudget, CompileJob, CompileStage, CompileStepResult};
 pub use lexer::lex;
 pub use lvalue::{LvalueBase, LvaluePath, LvalueProjection, SwizzleComponent};

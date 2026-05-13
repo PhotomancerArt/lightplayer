@@ -14,11 +14,18 @@ pub struct HirModule {
     pub functions: Vec<HirFunction>,
     pub meta: LpsModuleSig,
     pub uniforms: BTreeMap<String, UniformInfo>,
+    pub globals: BTreeMap<String, GlobalInfo>,
     pub imports: Vec<ImportInfo>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UniformInfo {
+    pub ty: LpsType,
+    pub byte_offset: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobalInfo {
     pub ty: LpsType,
     pub byte_offset: u32,
 }
@@ -129,6 +136,10 @@ pub enum HirExprKind {
         name: String,
         byte_offset: u32,
     },
+    Global {
+        name: String,
+        byte_offset: u32,
+    },
     Constructor {
         args: Vec<HirExpr>,
     },
@@ -222,6 +233,7 @@ pub enum BuiltinKind {
     Any,
     Ceil,
     Clamp,
+    Cross,
     Degrees,
     Distance,
     Dot,

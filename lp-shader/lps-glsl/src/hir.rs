@@ -29,8 +29,9 @@ use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use types::StructTypes;
 pub use types::{
-    BuiltinKind, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirLocal,
-    HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportKey, UniformInfo,
+    BuiltinKind, GlobalInfo, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody,
+    HirLocal, HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportKey,
+    UniformInfo,
 };
 use typing::{
     access_lanes, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
@@ -47,7 +48,16 @@ pub fn build_hir(
 ) -> Result<HirModule, Diagnostic> {
     let array_size_consts = build_array_size_consts(source, tokens, index)?;
     let structs = build_struct_types(index, &array_size_consts)?;
-    let (uniforms, uniforms_type) = build_uniforms(index, &structs, &array_size_consts)?;
+    let (uniforms, uniforms_type, uniforms_size) =
+        build_uniforms(index, &structs, &array_size_consts)?;
+    let (global_vars, globals_type, global_inits) = build_global_vars(
+        source,
+        tokens,
+        index,
+        &structs,
+        &array_size_consts,
+        uniforms_size,
+    )?;
     let functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
     let mut imports = ImportRegistry::default();
     let globals = build_global_consts(
@@ -55,6 +65,7 @@ pub fn build_hir(
         tokens,
         index,
         &uniforms,
+        &global_vars,
         &functions_sigs,
         &structs,
         &array_size_consts,
@@ -89,6 +100,7 @@ pub fn build_hir(
             &functions_sigs,
             &uniforms,
             &globals,
+            &global_vars,
             &structs,
             &array_size_consts,
             &mut imports,
@@ -102,15 +114,37 @@ pub fn build_hir(
         });
     }
 
+    if let Some(init) = synthesize_shader_init(
+        source,
+        tokens,
+        &global_inits,
+        &functions_sigs,
+        &uniforms,
+        &globals,
+        &global_vars,
+        &structs,
+        &array_size_consts,
+        &mut imports,
+    )? {
+        function_meta.push(LpsFnSig {
+            name: String::from("__shader_init"),
+            return_type: LpsType::Void,
+            parameters: Vec::new(),
+            kind: LpsFnKind::Synthetic,
+        });
+        functions.push(init);
+    }
+
     Ok(HirModule {
         functions,
         meta: LpsModuleSig {
             functions: function_meta,
             uniforms_type,
-            globals_type: None,
+            globals_type,
             ..Default::default()
         },
         uniforms,
+        globals: global_vars,
         imports: imports.into_vec(),
     })
 }
@@ -463,7 +497,7 @@ fn build_uniforms(
     index: &TopLevelIndex,
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
-) -> Result<(BTreeMap<String, UniformInfo>, Option<LpsType>), Diagnostic> {
+) -> Result<(BTreeMap<String, UniformInfo>, Option<LpsType>, usize), Diagnostic> {
     let mut uniforms = BTreeMap::new();
     let mut members = Vec::new();
     let mut offset = lps_shared::VMCTX_HEADER_SIZE;
@@ -487,7 +521,93 @@ fn build_uniforms(
             members,
         })
     };
-    Ok((uniforms, uniforms_type))
+    Ok((
+        uniforms,
+        uniforms_type,
+        offset - lps_shared::VMCTX_HEADER_SIZE,
+    ))
+}
+
+#[derive(Debug, Clone)]
+struct GlobalInit {
+    name: String,
+    ty: LpsType,
+    byte_offset: u32,
+    init_span: Span,
+}
+
+fn build_global_vars(
+    source: &str,
+    tokens: &[Token],
+    index: &TopLevelIndex,
+    structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
+    uniforms_size: usize,
+) -> Result<
+    (
+        BTreeMap<String, GlobalInfo>,
+        Option<LpsType>,
+        Vec<GlobalInit>,
+    ),
+    Diagnostic,
+> {
+    let mut order = Vec::<String>::new();
+    let mut by_name = BTreeMap::<String, (LpsType, Span, Option<Span>)>::new();
+    for global in &index.globals {
+        let ty = type_ref_to_lps_with_structs(&global.ty, structs, array_size_consts)?;
+        if let Some((existing_ty, _span, init_span)) = by_name.get_mut(&global.name) {
+            if *existing_ty != ty {
+                return Err(Diagnostic::error(
+                    global.span,
+                    format!("conflicting global declaration `{}`", global.name),
+                ));
+            }
+            if global.init_span.is_some() {
+                *init_span = global.init_span;
+            }
+            continue;
+        }
+        order.push(global.name.clone());
+        by_name.insert(global.name.clone(), (ty, global.span, global.init_span));
+    }
+
+    let mut globals = BTreeMap::new();
+    let mut members = Vec::new();
+    let mut inits = Vec::new();
+    let mut offset = lps_shared::VMCTX_HEADER_SIZE + uniforms_size;
+    for name in order {
+        let (ty, _span, init_span) = by_name
+            .remove(&name)
+            .ok_or_else(|| Diagnostic::error(Span::new(0, 0), "internal global map mismatch"))?;
+        let align = lps_shared::type_alignment(&ty, LayoutRules::Std430);
+        offset = lps_shared::layout::round_up(offset, align);
+        let byte_offset = offset as u32;
+        offset += lps_shared::type_size(&ty, LayoutRules::Std430);
+        members.push(lps_shared::StructMember {
+            name: Some(name.clone()),
+            ty: ty.clone(),
+        });
+        if let Some(init_span) = init_span {
+            let _ = parse_expr_tokens(source, tokens, init_span)?;
+            inits.push(GlobalInit {
+                name: name.clone(),
+                ty: ty.clone(),
+                byte_offset,
+                init_span,
+            });
+        }
+        globals.insert(name, GlobalInfo { ty, byte_offset });
+    }
+
+    let globals_type = if members.is_empty() {
+        None
+    } else {
+        Some(LpsType::Struct {
+            name: Some(String::from("__globals")),
+            members,
+        })
+    };
+    Ok((globals, globals_type, inits))
 }
 
 fn build_global_consts(
@@ -495,6 +615,7 @@ fn build_global_consts(
     tokens: &[Token],
     index: &TopLevelIndex,
     uniforms: &BTreeMap<String, UniformInfo>,
+    global_vars: &BTreeMap<String, GlobalInfo>,
     functions: &[FunctionSig],
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
@@ -514,6 +635,7 @@ fn build_global_consts(
             functions,
             uniforms,
             &globals,
+            global_vars,
             structs,
             array_size_consts,
             imports,
@@ -525,11 +647,71 @@ fn build_global_consts(
     Ok(globals)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "synthetic init needs the same typing context as functions"
+)]
+fn synthesize_shader_init(
+    source: &str,
+    tokens: &[Token],
+    inits: &[GlobalInit],
+    functions: &[FunctionSig],
+    uniforms: &BTreeMap<String, UniformInfo>,
+    global_consts: &BTreeMap<String, GlobalConst>,
+    global_vars: &BTreeMap<String, GlobalInfo>,
+    structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
+    imports: &mut ImportRegistry,
+) -> Result<Option<HirFunction>, Diagnostic> {
+    if inits.is_empty() {
+        return Ok(None);
+    }
+    let sig = FunctionSig {
+        name: String::from("__shader_init"),
+        return_ty: LpsType::Void,
+        params: Vec::new(),
+    };
+    let mut ctx = TypeCtx::new(
+        &sig,
+        functions,
+        uniforms,
+        global_consts,
+        global_vars,
+        structs,
+        array_size_consts,
+        imports,
+    );
+    let mut statements = Vec::new();
+    for init in inits {
+        let parsed = parse_expr_tokens(source, tokens, init.init_span)?;
+        let expr = ctx.type_expr(&parsed)?;
+        let value = ctx.coerce_expr(expr, &init.ty)?;
+        statements.push(HirStmt::Expr(HirExpr {
+            span: init.init_span,
+            ty: value.ty.clone(),
+            kind: HirExprKind::Assign {
+                target: HirAssignTarget {
+                    place: HirPlace::global(init.name.clone(), init.byte_offset, init.ty.clone()),
+                },
+                value: Box::new(value),
+            },
+        }));
+    }
+    let locals = core::mem::take(&mut ctx.locals);
+    Ok(Some(HirFunction {
+        name: sig.name.clone(),
+        return_ty: sig.return_ty.clone(),
+        params: Vec::new(),
+        body: HirFunctionBody { locals, statements },
+    }))
+}
+
 struct TypeCtx<'a> {
     params: &'a [HirParam],
     functions: &'a [FunctionSig],
     uniforms: &'a BTreeMap<String, UniformInfo>,
     globals: &'a BTreeMap<String, GlobalConst>,
+    global_vars: &'a BTreeMap<String, GlobalInfo>,
     structs: &'a StructTypes,
     array_size_consts: &'a ArraySizeConsts,
     imports: &'a mut ImportRegistry,
@@ -544,6 +726,7 @@ impl<'a> TypeCtx<'a> {
         functions: &'a [FunctionSig],
         uniforms: &'a BTreeMap<String, UniformInfo>,
         globals: &'a BTreeMap<String, GlobalConst>,
+        global_vars: &'a BTreeMap<String, GlobalInfo>,
         structs: &'a StructTypes,
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
@@ -553,6 +736,7 @@ impl<'a> TypeCtx<'a> {
             functions,
             uniforms,
             globals,
+            global_vars,
             structs,
             array_size_consts,
             imports,
@@ -566,6 +750,7 @@ impl<'a> TypeCtx<'a> {
         functions: &'a [FunctionSig],
         uniforms: &'a BTreeMap<String, UniformInfo>,
         globals: &'a BTreeMap<String, GlobalConst>,
+        global_vars: &'a BTreeMap<String, GlobalInfo>,
         structs: &'a StructTypes,
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
@@ -575,6 +760,7 @@ impl<'a> TypeCtx<'a> {
             functions,
             uniforms,
             globals,
+            global_vars,
             structs,
             array_size_consts,
             imports,
@@ -999,6 +1185,16 @@ impl<'a> TypeCtx<'a> {
         }
         if let Some(global) = self.globals.get(name) {
             return Ok(global.expr.clone());
+        }
+        if let Some(global) = self.global_vars.get(name) {
+            return Ok(HirExpr {
+                span,
+                ty: global.ty.clone(),
+                kind: HirExprKind::Global {
+                    name: name.to_string(),
+                    byte_offset: global.byte_offset,
+                },
+            });
         }
         if let Some(uniform) = self.uniforms.get(name) {
             return Ok(HirExpr {
@@ -1425,6 +1621,10 @@ impl<'a> TypeCtx<'a> {
                 uniform.byte_offset,
                 ty,
             ));
+        }
+        if let Some(global) = self.global_vars.get(name) {
+            let ty = global.ty.clone();
+            return Ok(HirPlace::global(String::from(name), global.byte_offset, ty));
         }
         Err(Diagnostic::error(span, format!("unknown local `{name}`")))
     }

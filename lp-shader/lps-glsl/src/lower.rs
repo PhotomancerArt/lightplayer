@@ -26,7 +26,7 @@ use ops::{
 };
 use storage::{
     LocalStorage, alloc_slot_addr, flat_value_byte_size, is_pointer_param, load_value_from_addr,
-    local_storage, local_value, lower_uniform_load, param_pointer, store_local,
+    local_storage, local_value, lower_global_load, lower_uniform_load, param_pointer, store_local,
     store_value_to_addr,
 };
 
@@ -290,6 +290,10 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             name: _,
             byte_offset,
         } => lower_uniform_load(ctx, expr.span, *byte_offset, &expr.ty),
+        HirExprKind::Global {
+            name: _,
+            byte_offset,
+        } => lower_global_load(ctx, expr.span, *byte_offset, &expr.ty),
         HirExprKind::Constructor { args } => {
             let mut lanes = Vec::new();
             if expr.ty.is_matrix() && args.len() == 1 && scalar_lane_count(&args[0].ty) == 1 {

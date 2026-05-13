@@ -6,7 +6,7 @@ use crate::hir::{HirAssignTarget, PlaceRoot};
 use crate::{Diagnostic, Span};
 
 use super::super::storage::{
-    is_pointer_param, local_is_slot, param_pointer, store_local, store_local_lanes,
+    is_pointer_param, local_is_slot, param_pointer, store_global, store_local, store_local_lanes,
     store_value_to_addr,
 };
 use super::super::{LowerCtx, LowerValue};
@@ -55,6 +55,7 @@ fn assign_root(
             span,
             "assignment target cannot be a uniform",
         )),
+        PlaceRoot::Global { byte_offset, .. } => store_global(ctx, span, *byte_offset, &value),
     }
 }
 
@@ -92,6 +93,11 @@ fn assign_root_lanes(
             span,
             "assignment target cannot be a uniform",
         )),
+        PlaceRoot::Global { byte_offset, .. } => {
+            let dst = super::place_read::root_value(ctx, span, root)?;
+            copy_lanes(ctx, span, &dst, lanes, &value)?;
+            store_global(ctx, span, *byte_offset, &dst)
+        }
     }
 }
 
@@ -127,6 +133,9 @@ fn write_root_back_if_memory_root(
         PlaceRoot::Param { param, .. } if is_pointer_param(ctx, *param) => {
             let addr = param_pointer(ctx, span, *param)?;
             return store_value_to_addr(ctx, span, addr, value);
+        }
+        PlaceRoot::Global { byte_offset, .. } => {
+            return store_global(ctx, span, *byte_offset, value);
         }
         _ => {}
     }
