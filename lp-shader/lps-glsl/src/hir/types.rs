@@ -260,6 +260,7 @@ pub enum BuiltinKind {
     OuterProduct,
     Radians,
     Round,
+    RoundEven,
     Sign,
     Smoothstep,
     Sqrt,

@@ -45,6 +45,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "outerProduct" => BuiltinKind::OuterProduct,
         "radians" => BuiltinKind::Radians,
         "round" => BuiltinKind::Round,
+        "roundEven" => BuiltinKind::RoundEven,
         "sign" => BuiltinKind::Sign,
         "smoothstep" => BuiltinKind::Smoothstep,
         "sqrt" => BuiltinKind::Sqrt,
@@ -152,6 +153,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Not
         | BuiltinKind::Radians
         | BuiltinKind::Round
+        | BuiltinKind::RoundEven
         | BuiltinKind::Sign
         | BuiltinKind::Sqrt
         | BuiltinKind::Transpose
@@ -188,6 +190,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::InverseSqrt
         | BuiltinKind::Radians
         | BuiltinKind::Round
+        | BuiltinKind::RoundEven
         | BuiltinKind::Sqrt
         | BuiltinKind::Trunc => {
             if args[0].ty.is_matrix() || scalar_base_type(&args[0].ty) != Some(LpsType::Float) {

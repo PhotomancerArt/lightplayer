@@ -212,6 +212,14 @@ pub(in crate::lower) fn lower_builtin(
                 .lanes[i]
             }
             BuiltinKind::Round => lower_round_lane(ctx, &values[0], i),
+            BuiltinKind::RoundEven => {
+                let dst = ctx.fb.alloc_vreg(IrType::F32);
+                ctx.fb.push(LpirOp::Fnearest {
+                    dst,
+                    src: lane_at(&values[0], i),
+                });
+                dst
+            }
             BuiltinKind::Clamp => {
                 let maxed =
                     lower_binary_float_lane(ctx, &values[0], &values[1], i, BinaryFloatOp::Max);
