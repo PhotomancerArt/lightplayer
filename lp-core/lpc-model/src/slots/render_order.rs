@@ -1,6 +1,7 @@
 use crate::{
-    FieldSlot, LpType, LpValue, OrderedF32, Revision, SlotDataAccess, SlotMeta, SlotShape,
-    SlotShapeId, SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision, current_revision,
+    FieldSlot, FieldSlotMut, LpType, LpValue, OrderedF32, Revision, SlotDataAccess,
+    SlotDataAccessMut, SlotMeta, SlotShape, SlotShapeId, SlotValueAccess, SlotValueMut,
+    SlotValueShape, ValueEditorHint, ValueRootError, WithRevision, current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -69,6 +70,22 @@ impl FieldSlot for RenderOrderSlot {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
+    }
+}
+
+impl SlotValueMut for RenderOrderSlot {
+    fn set_lp_value(&mut self, revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
+        let LpValue::I32(value) = value else {
+            return Err(ValueRootError::new("expected i32"));
+        };
+        self.inner.set(revision, value);
+        Ok(())
+    }
+}
+
+impl FieldSlotMut for RenderOrderSlot {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Value(self)
     }
 }
 

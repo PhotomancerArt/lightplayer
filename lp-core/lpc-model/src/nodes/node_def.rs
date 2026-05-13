@@ -4,7 +4,6 @@
 //! LightPlayer model. Adding a core node kind should start here, then add the
 //! concrete definition type and loader/runtime handling that variant requires.
 
-use alloc::format;
 use alloc::string::String;
 
 use crate::node::kind::NodeKind;
@@ -15,7 +14,7 @@ use crate::nodes::output::OutputDef;
 use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
-use crate::{SlotAccess, SlotDataAccess, SlotShapeId};
+use crate::{SlotAccess, SlotAccessMut, SlotDataAccess, SlotDataAccessMut, SlotShapeId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Authored body of a node artifact.
@@ -58,9 +57,7 @@ impl<'de> Deserialize<'de> for NodeDef {
     where
         D: Deserializer<'de>,
     {
-        let value = toml::Value::deserialize(deserializer)?;
-        let text = toml::to_string(&value).map_err(serde::de::Error::custom)?;
-        Self::from_toml_str(&text).map_err(serde::de::Error::custom)
+        NodeDefTagged::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -151,23 +148,9 @@ impl NodeDef {
 
     /// Parse a TOML node artifact into the canonical node-definition enum.
     pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
-        let probe: NodeDefKindProbe =
-            toml::from_str(text).map_err(|error| NodeDefParseError::Toml {
-                error: format!("{error}"),
-            })?;
-        match probe.kind.as_str() {
-            ProjectDef::KIND => parse_variant(text).map(Self::Project),
-            ClockDef::KIND => parse_variant(text).map(Self::Clock),
-            TextureDef::KIND => parse_variant(text).map(Self::Texture),
-            ShaderDef::KIND => parse_variant(text).map(Self::Shader),
-            ComputeShaderDef::KIND => parse_variant(text).map(Self::ComputeShader),
-            FluidDef::KIND => parse_variant(text).map(Self::Fluid),
-            OutputDef::KIND => parse_variant(text).map(Self::Output),
-            FixtureDef::KIND => parse_variant(text).map(Self::Fixture),
-            other => Err(NodeDefParseError::UnknownKind {
-                kind: String::from(other),
-            }),
-        }
+        toml::from_str(text).map_err(|error| NodeDefParseError::Toml {
+            error: alloc::format!("{error}"),
+        })
     }
 }
 
@@ -199,6 +182,21 @@ impl SlotAccess for NodeDef {
     }
 }
 
+impl SlotAccessMut for NodeDef {
+    fn data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        match self {
+            Self::Project(def) => def.data_mut(),
+            Self::Clock(def) => def.data_mut(),
+            Self::Texture(def) => def.data_mut(),
+            Self::Shader(def) => def.data_mut(),
+            Self::ComputeShader(def) => def.data_mut(),
+            Self::Fluid(def) => def.data_mut(),
+            Self::Output(def) => def.data_mut(),
+            Self::Fixture(def) => def.data_mut(),
+        }
+    }
+}
+
 /// Failure parsing an authored node definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeDefParseError {
@@ -215,18 +213,40 @@ impl core::fmt::Display for NodeDefParseError {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct NodeDefKindProbe {
-    kind: String,
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+enum NodeDefTagged {
+    #[serde(rename = "project")]
+    Project(ProjectDef),
+    #[serde(rename = "clock")]
+    Clock(ClockDef),
+    #[serde(rename = "texture")]
+    Texture(TextureDef),
+    #[serde(rename = "shader/visual", alias = "shader")]
+    Shader(ShaderDef),
+    #[serde(rename = "shader/compute")]
+    ComputeShader(ComputeShaderDef),
+    #[serde(rename = "fluid")]
+    Fluid(FluidDef),
+    #[serde(rename = "output")]
+    Output(OutputDef),
+    #[serde(rename = "fixture")]
+    Fixture(FixtureDef),
 }
 
-fn parse_variant<T>(text: &str) -> Result<T, NodeDefParseError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    toml::from_str(text).map_err(|error| NodeDefParseError::Toml {
-        error: format!("{error}"),
-    })
+impl From<NodeDefTagged> for NodeDef {
+    fn from(value: NodeDefTagged) -> Self {
+        match value {
+            NodeDefTagged::Project(def) => Self::Project(def),
+            NodeDefTagged::Clock(def) => Self::Clock(def),
+            NodeDefTagged::Texture(def) => Self::Texture(def),
+            NodeDefTagged::Shader(def) => Self::Shader(def),
+            NodeDefTagged::ComputeShader(def) => Self::ComputeShader(def),
+            NodeDefTagged::Fluid(def) => Self::Fluid(def),
+            NodeDefTagged::Output(def) => Self::Output(def),
+            NodeDefTagged::Fixture(def) => Self::Fixture(def),
+        }
+    }
 }
 
 #[cfg(test)]

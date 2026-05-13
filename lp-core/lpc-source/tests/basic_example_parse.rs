@@ -9,15 +9,15 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     let project: ProjectDef = read_basic_toml("project.toml");
     assert_eq!(project.kind, ProjectDef::KIND);
     assert_eq!(project.name(), Some("basic"));
-    assert_eq!(project.nodes.entries.len(), 3);
+    assert_eq!(project.nodes.entries.len(), 4);
     assert_eq!(
         project
             .nodes
             .entries
             .get("shader")
             .unwrap()
-            .artifact
-            .value(),
+            .artifact_path_text()
+            .unwrap(),
         "./shader.toml"
     );
 
@@ -33,8 +33,8 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     assert!(!*output.options().unwrap().dithering_enabled.value());
 
     let fixture: FixtureDef = read_basic_toml("fixture.toml");
-    assert_eq!(fixture.render_width(), 16);
-    assert_eq!(fixture.render_height(), 16);
+    assert_eq!(fixture.render_width(), 10);
+    assert_eq!(fixture.render_height(), 10);
     assert!(matches!(
         fixture.bindings.entries()["input"].source,
         Some(BindingEndpoint::Bus(_))

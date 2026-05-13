@@ -74,4 +74,48 @@ fn derive_preserves_field_semantics() {
     assert_eq!(fields[1].semantics.merge, SlotMerge::Latest);
 }
 
+#[derive(lpc_model::SlotRecord)]
+#[slot(root)]
+struct WritableDefaultRecord {
+    enabled: ValueSlot<bool>,
+    #[slot(policy = "read_only_persisted")]
+    locked: ValueSlot<bool>,
+}
+
+#[test]
+fn derive_defaults_fields_to_writable_with_field_override() {
+    let SlotShape::Record { fields, .. } = WritableDefaultRecord::slot_record_shape() else {
+        panic!("record shape");
+    };
+
+    assert!(fields[0].policy.writable);
+    assert_eq!(
+        fields[0].policy,
+        lpc_model::SlotPolicy::writable_persisted()
+    );
+    assert!(!fields[1].policy.writable);
+    assert_eq!(
+        fields[1].policy,
+        lpc_model::SlotPolicy::read_only_persisted()
+    );
+}
+
+#[derive(lpc_model::SlotRecord)]
+#[slot(root, default_policy = "read_only_transient")]
+struct RuntimeStateRecord {
+    frame: ValueSlot<u32>,
+}
+
+#[test]
+fn derive_supports_read_only_state_policy_override() {
+    let SlotShape::Record { fields, .. } = RuntimeStateRecord::slot_record_shape() else {
+        panic!("record shape");
+    };
+
+    assert_eq!(
+        fields[0].policy,
+        lpc_model::SlotPolicy::read_only_transient()
+    );
+}
+
 fn assert_static_slot_access<T: StaticSlotAccess>() {}

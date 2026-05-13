@@ -1094,7 +1094,7 @@ artifact = "./broken.toml"
     }
 
     #[test]
-    fn unknown_child_kind_returns_error() {
+    fn unknown_child_kind_returns_toml_parse_error() {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.toml".as_path(),
@@ -1116,8 +1116,8 @@ artifact = "./weird.toml"
             Ok(_) => panic!("expected load error"),
         };
         assert!(
-            matches!(err, ProjectLoadError::UnknownKind { .. }),
-            "expected UnknownKind, got {err:?}"
+            matches!(err, ProjectLoadError::TomlParse { .. }),
+            "expected TomlParse, got {err:?}"
         );
     }
 

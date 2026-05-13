@@ -1,7 +1,8 @@
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, ModelStructMember, Revision, SlotDataAccess, SlotMeta,
-    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, WithRevision, current_revision,
+    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, ModelStructMember, Revision,
+    SlotDataAccess, SlotDataAccessMut, SlotMeta, SlotShape, SlotShapeId, SlotValue,
+    SlotValueAccess, SlotValueMut, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
+    WithRevision, current_revision,
 };
 use alloc::string::String;
 use alloc::vec;
@@ -96,6 +97,19 @@ impl FieldSlot for Affine2dSlot {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
+    }
+}
+
+impl SlotValueMut for Affine2dSlot {
+    fn set_lp_value(&mut self, revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
+        self.inner.set(revision, Affine2d::from_lp_value(&value)?);
+        Ok(())
+    }
+}
+
+impl FieldSlotMut for Affine2dSlot {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Value(self)
     }
 }
 

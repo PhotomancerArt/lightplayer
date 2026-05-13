@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use super::SlotPersistence;
 
 /// Client mutation and persistence policy for one slot field.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotPolicy {
     /// True when clients may request mutation of this slot.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default = "default_writable", skip_serializing_if = "is_true")]
     pub writable: bool,
 
     /// Save/writeback hint for user-editable slot data.
@@ -59,8 +59,18 @@ impl SlotPolicy {
     }
 }
 
-fn is_false(value: &bool) -> bool {
-    !*value
+impl Default for SlotPolicy {
+    fn default() -> Self {
+        Self::writable_persisted()
+    }
+}
+
+fn default_writable() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[cfg(test)]
@@ -68,15 +78,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slot_policy_defaults_to_read_only_persisted() {
-        assert_eq!(SlotPolicy::default(), SlotPolicy::read_only_persisted());
+    fn slot_policy_defaults_to_writable_persisted() {
+        assert_eq!(SlotPolicy::default(), SlotPolicy::writable_persisted());
     }
 
     #[test]
     fn writable_transient_policy_round_trips() {
         let policy = SlotPolicy::writable_transient();
         let json = serde_json::to_string(&policy).unwrap();
-        assert!(json.contains("writable"));
+        assert!(!json.contains("writable"));
         assert!(json.contains("transient"));
         let back: SlotPolicy = serde_json::from_str(&json).unwrap();
         assert_eq!(back, policy);

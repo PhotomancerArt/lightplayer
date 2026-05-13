@@ -4,7 +4,7 @@ use crate::{VisualProduct, VisualProductSlot};
 
 /// Runtime state exposed by a fluid node.
 #[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, default_policy = "read_only_transient")]
 pub struct FluidState {
     /// Renderable visual output produced by this fluid node.
     #[slot(produced)]

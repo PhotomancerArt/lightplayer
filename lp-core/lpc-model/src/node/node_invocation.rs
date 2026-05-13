@@ -9,7 +9,7 @@ use crate::ArtifactPathSlot;
 use crate::artifact::artifact_loc::ArtifactLocator;
 use crate::{
     FieldSlot, LpType, LpValue, ModelStructMember, NodeDef, Revision, SlotDataAccess, SlotMeta,
-    SlotShape, SlotValueAccess, SlotValueShape,
+    SlotShape, SlotValueAccess, SlotValueMut, SlotValueShape, ValueRootError,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -99,6 +99,32 @@ impl SlotValueAccess for NodeInvocation {
     }
 }
 
+impl SlotValueMut for NodeInvocation {
+    fn set_lp_value(&mut self, _revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
+        let LpValue::Struct { fields, .. } = value else {
+            return Err(ValueRootError::new(
+                "node invocation value must be a struct",
+            ));
+        };
+        let form = struct_string_field(&fields, "form")?;
+        match form {
+            "artifact" => {
+                let artifact = struct_string_field(&fields, "artifact")?;
+                *self = NodeInvocation::new(ArtifactLocator::parse(artifact).map_err(|err| {
+                    ValueRootError::new(alloc::format!("invalid artifact locator: {err}"))
+                })?);
+                Ok(())
+            }
+            "inline" => Err(ValueRootError::new(
+                "inline node invocation mutation is not implemented yet",
+            )),
+            other => Err(ValueRootError::new(alloc::format!(
+                "unknown node invocation form {other:?}"
+            ))),
+        }
+    }
+}
+
 impl FieldSlot for NodeInvocation {
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(node_invocation_shape())
@@ -107,6 +133,23 @@ impl FieldSlot for NodeInvocation {
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
     }
+}
+
+fn struct_string_field<'a>(
+    fields: &'a [(String, LpValue)],
+    name: &str,
+) -> Result<&'a str, ValueRootError> {
+    fields
+        .iter()
+        .find_map(|(field_name, value)| {
+            if field_name == name
+                && let LpValue::String(value) = value
+            {
+                return Some(value.as_str());
+            }
+            None
+        })
+        .ok_or_else(|| ValueRootError::new(alloc::format!("missing string field {name:?}")))
 }
 
 fn node_invocation_shape() -> SlotValueShape {

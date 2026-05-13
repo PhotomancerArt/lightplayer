@@ -7,11 +7,12 @@ use std::time::{Duration, Instant};
 use crate::client::LpClient;
 use eframe::egui;
 use lpc_model::{Revision, SlotShapeId};
-use lpc_view::apply_project_read_response;
+use lpc_view::{ProjectView, apply_project_read_response};
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
-    ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, RuntimeReadResult, ShapeReadQuery,
+    ProjectReadRequest, ProjectReadResponse, ProjectReadResult as WireProjectReadResult, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    RuntimeReadQuery, RuntimeReadResult, ShapeReadQuery, ShapeReadResult,
     WireProjectHandle as ProjectHandle, WireSlotMutationId, WireSlotMutationRequest,
     WireTextureFormat,
 };
@@ -83,6 +84,7 @@ impl DebugUiState {
             self.poll_in_flight = false;
             match result {
                 Ok(response) => {
+                    let paged_shape_sync_in_progress = !self.shapes_synced;
                     if let Some(probe) = response.probes.iter().find_map(render_product_probe) {
                         self.last_render_product_probe = Some(probe.clone());
                     }
@@ -94,7 +96,11 @@ impl DebugUiState {
                         self.next_shape_cursor = shape.next;
                     }
                     if let Ok(mut view) = self.project_view.lock() {
-                        if let Err(error) = apply_project_read_response(&mut view, response) {
+                        if let Err(error) = apply_debug_ui_project_read_response(
+                            &mut view,
+                            response,
+                            paged_shape_sync_in_progress,
+                        ) {
                             self.last_error = Some(error.to_string());
                         } else {
                             self.last_error = None;
@@ -254,6 +260,34 @@ fn shape_result(result: &lpc_wire::ProjectReadResult) -> Option<&lpc_wire::Shape
     }
 }
 
+fn apply_debug_ui_project_read_response(
+    view: &mut ProjectView,
+    mut response: ProjectReadResponse,
+    paged_shape_sync_in_progress: bool,
+) -> Result<(), lpc_view::ProjectReadApplyError> {
+    if paged_shape_sync_in_progress {
+        for shapes in take_shape_results(&mut response) {
+            if let Some(registry) = shapes.registry {
+                view.slots.apply_registry_page(registry);
+            }
+        }
+    }
+    apply_project_read_response(view, response)
+}
+
+fn take_shape_results(response: &mut ProjectReadResponse) -> Vec<ShapeReadResult> {
+    let mut results = Vec::with_capacity(response.results.len());
+    let mut remaining = Vec::with_capacity(response.results.len());
+    for result in response.results.drain(..) {
+        match result {
+            WireProjectReadResult::Shapes(shapes) => results.push(shapes),
+            other => remaining.push(other),
+        }
+    }
+    response.results = remaining;
+    results
+}
+
 fn debug_ui_project_read(
     since: Option<Revision>,
     needs_shape_page: bool,
@@ -354,6 +388,50 @@ impl eframe::App for DebugUiState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_model::{LpType, Revision, SlotShape, SlotShapeId, SlotShapeRegistry};
+
+    #[test]
+    fn paged_shape_sync_keeps_prior_pages_when_final_page_is_complete() {
+        let first_id = SlotShapeId::new(10);
+        let second_id = SlotShapeId::new(20);
+
+        let mut first_page_registry = SlotShapeRegistry::default();
+        first_page_registry
+            .register_root(first_id, SlotShape::value(LpType::Bool))
+            .unwrap();
+
+        let mut final_page_registry = SlotShapeRegistry::default();
+        final_page_registry
+            .register_root(second_id, SlotShape::value(LpType::U32))
+            .unwrap();
+
+        let mut view = ProjectView::new();
+        view.slots
+            .apply_registry_page(first_page_registry.snapshot());
+
+        let response = ProjectReadResponse {
+            revision: Revision::new(7),
+            results: vec![WireProjectReadResult::Shapes(ShapeReadResult {
+                level: ReadLevel::Detail,
+                registry: Some(final_page_registry.snapshot()),
+                complete: true,
+                next: None,
+            })],
+            probes: vec![],
+            mutations: vec![],
+        };
+
+        apply_debug_ui_project_read_response(&mut view, response, true).unwrap();
+
+        assert!(view.slots.registry.get(&first_id).is_some());
+        assert!(view.slots.registry.get(&second_id).is_some());
+        assert_eq!(view.revision, Revision::new(7));
+    }
+}
+
 impl DebugUiState {
     fn render_status(&self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
@@ -363,10 +441,14 @@ impl DebugUiState {
             ui.separator();
             if let Ok(view) = self.project_view.lock() {
                 ui.separator();
-                ui.label(format!("rev {}", view.revision.0));
-                ui.label(format!("nodes {}", view.tree.nodes.len()));
-                ui.label(format!("slots {}", view.slots.roots.len()));
-                ui.label(format!("resources {}", view.resource_cache.summary_count()));
+                let revision = view.revision.0;
+                let node_count = view.tree.nodes.len();
+                let slot_count = view.slots.roots.len();
+                let resource_count = view.resource_cache.summary_count();
+                ui.label(format!("rev {revision}"));
+                ui.label(format!("nodes {node_count}"));
+                ui.label(format!("slots {slot_count}"));
+                ui.label(format!("resources {resource_count}"));
             }
             if let Some(runtime) = &self.last_runtime_status {
                 ui.separator();
@@ -375,17 +457,20 @@ impl DebugUiState {
                     .as_ref()
                     .and_then(|server| server.theoretical_fps)
                 {
-                    ui.label(format!("server {:.0} fps", fps));
+                    ui.label(format!("server {fps:.0} fps"));
                 }
                 if let Some(frame_us) = runtime
                     .server
                     .as_ref()
                     .and_then(|server| server.last_frame_time_us)
                 {
-                    ui.label(format!("frame {:.1}ms", frame_us as f32 / 1000.0));
+                    let frame_ms = frame_us as f32 / 1000.0;
+                    ui.label(format!("frame {frame_ms:.1}ms"));
                 }
-                ui.label(format!("engine frame {}", runtime.project.frame_num));
-                ui.label(format!("dt {}ms", runtime.project.frame_delta_ms));
+                let frame_num = runtime.project.frame_num;
+                let frame_delta_ms = runtime.project.frame_delta_ms;
+                ui.label(format!("engine frame {frame_num}"));
+                ui.label(format!("dt {frame_delta_ms}ms"));
                 if let Some(memory) = runtime
                     .server
                     .as_ref()

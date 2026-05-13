@@ -2,7 +2,7 @@ use crate::ValueSlot;
 
 /// Runtime state exposed by the clock node.
 #[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, default_policy = "read_only_transient")]
 pub struct ClockState {
     /// Clock time in seconds after rate and scrub offset are applied.
     #[slot(produced)]

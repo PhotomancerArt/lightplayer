@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use alloc::vec;
 
 use crate::{
-    FieldSlot, LpType, OrderedF32, Revision, SlotDataAccess, SlotMeta, SlotPolicy,
-    SlotRecordAccess, SlotShape, SlotShapeId, SlotValueShape, ValueEditorHint, ValueSlot,
+    FieldSlot, FieldSlotMut, LpType, OrderedF32, Revision, SlotDataAccess, SlotDataAccessMut,
+    SlotMapValueAccessMut, SlotMeta, SlotPolicy, SlotRecordAccess, SlotRecordAccessMut, SlotShape,
+    SlotShapeId, SlotValueShape, ValueEditorHint, ValueSlot,
 };
 
 const FRAME_SECONDS_60HZ: f32 = 1.0 / 60.0;
@@ -63,6 +64,12 @@ impl FieldSlot for ClockControls {
     }
 }
 
+impl FieldSlotMut for ClockControls {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Record(self)
+    }
+}
+
 impl SlotRecordAccess for ClockControls {
     fn fields_revision(&self) -> Revision {
         Revision::default()
@@ -75,6 +82,23 @@ impl SlotRecordAccess for ClockControls {
             2 => Some(self.scrub_offset_seconds.slot_field_data()),
             _ => None,
         }
+    }
+}
+
+impl SlotRecordAccessMut for ClockControls {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataAccessMut<'_>> {
+        match index {
+            0 => Some(SlotDataAccessMut::Value(&mut self.running)),
+            1 => Some(SlotDataAccessMut::Value(&mut self.rate)),
+            2 => Some(SlotDataAccessMut::Value(&mut self.scrub_offset_seconds)),
+            _ => None,
+        }
+    }
+}
+
+impl SlotMapValueAccessMut for ClockControls {
+    fn slot_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Record(self)
     }
 }
 

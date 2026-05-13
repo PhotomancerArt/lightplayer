@@ -1,5 +1,6 @@
 use super::{BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError};
 use crate::LpValue;
+use alloc::format;
 use alloc::string::{String, ToString};
 use core::fmt;
 use serde::{
@@ -104,7 +105,7 @@ impl<'de> Deserialize<'de> for BindingEndpoint {
                             if literal.is_some() {
                                 return Err(serde::de::Error::duplicate_field("literal"));
                             }
-                            literal = Some(access.next_value::<LpValue>()?);
+                            literal = Some(access.next_value::<AuthoredLiteral>()?.0);
                         }
                         other => return Err(serde::de::Error::unknown_field(other, &["literal"])),
                     }
@@ -116,6 +117,103 @@ impl<'de> Deserialize<'de> for BindingEndpoint {
         }
 
         deserializer.deserialize_any(EndpointVisitor)
+    }
+}
+
+struct AuthoredLiteral(LpValue);
+
+impl<'de> Deserialize<'de> for AuthoredLiteral {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(AuthoredLiteralVisitor)
+    }
+}
+
+struct AuthoredLiteralVisitor;
+
+impl<'de> Visitor<'de> for AuthoredLiteralVisitor {
+    type Value = AuthoredLiteral;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a scalar literal or tagged scalar LpValue")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(AuthoredLiteral(LpValue::Bool(value)))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let value = i32::try_from(value)
+            .map_err(|_| E::custom(format!("literal integer {value} does not fit i32")))?;
+        Ok(AuthoredLiteral(LpValue::I32(value)))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let value = u32::try_from(value)
+            .map_err(|_| E::custom(format!("literal integer {value} does not fit u32")))?;
+        Ok(AuthoredLiteral(LpValue::U32(value)))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(AuthoredLiteral(LpValue::F32(value as f32)))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(AuthoredLiteral(LpValue::String(String::from(value))))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(AuthoredLiteral(LpValue::String(value)))
+    }
+
+    fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let Some(key) = access.next_key::<String>()? else {
+            return Err(serde::de::Error::custom("literal map cannot be empty"));
+        };
+        let value = match key.as_str() {
+            "string" => LpValue::String(access.next_value()?),
+            "i32" => LpValue::I32(access.next_value()?),
+            "u32" => LpValue::U32(access.next_value()?),
+            "f32" => LpValue::F32(access.next_value()?),
+            "bool" => LpValue::Bool(access.next_value()?),
+            other => {
+                return Err(serde::de::Error::unknown_field(
+                    other,
+                    &["string", "i32", "u32", "f32", "bool"],
+                ));
+            }
+        };
+
+        if access.next_key::<String>()?.is_some() {
+            return Err(serde::de::Error::custom(
+                "tagged literal map must have exactly one field",
+            ));
+        }
+
+        Ok(AuthoredLiteral(value))
     }
 }
 
@@ -169,5 +267,23 @@ mod tests {
         assert_eq!(json, r#"{"literal":{"f32":0.5}}"#);
         let back: BindingEndpoint = serde_json::from_str(&json).unwrap();
         assert_eq!(back, endpoint);
+    }
+
+    #[test]
+    fn literal_endpoint_loads_scalar_toml_without_full_lp_value_shape() {
+        #[derive(serde::Deserialize)]
+        struct Wrapper {
+            source: BindingEndpoint,
+        }
+
+        let back: Wrapper = toml::from_str(
+            r#"
+[source]
+literal = 0.5
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(back.source, BindingEndpoint::Literal(LpValue::F32(0.5)));
     }
 }

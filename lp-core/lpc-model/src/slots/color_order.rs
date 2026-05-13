@@ -1,7 +1,8 @@
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, Revision, SlotDataAccess, SlotEnumOption, SlotMeta,
-    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, WithRevision, current_revision,
+    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, Revision, SlotDataAccess,
+    SlotDataAccessMut, SlotEnumOption, SlotMeta, SlotShape, SlotShapeId, SlotValue,
+    SlotValueAccess, SlotValueMut, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
+    WithRevision, current_revision,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -129,6 +130,20 @@ impl FieldSlot for ColorOrderSlot {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
+    }
+}
+
+impl SlotValueMut for ColorOrderSlot {
+    fn set_lp_value(&mut self, revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
+        self.inner
+            .set(revision, ColorOrderValue::from_lp_value(&value)?);
+        Ok(())
+    }
+}
+
+impl FieldSlotMut for ColorOrderSlot {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Value(self)
     }
 }
 

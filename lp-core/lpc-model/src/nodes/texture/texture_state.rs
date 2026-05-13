@@ -4,7 +4,7 @@ use crate::{Revision, ValueSlot};
 
 /// Runtime metadata exposed by a texture node.
 #[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, default_policy = "read_only_transient")]
 pub struct TextureState {
     pub width: ValueSlot<i32>,
     pub height: ValueSlot<i32>,

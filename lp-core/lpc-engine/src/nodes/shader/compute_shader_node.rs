@@ -6,8 +6,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ComputeShaderDef, NodeId, ShaderSlotKind, SlotAccess, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError, StaticSlotShape,
+    AddSubMode, ComputeShaderDef, DivMode, MulMode, NodeId, ShaderSlotKind, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
 };
 use lps_shared::LpsValueF32;
 
@@ -17,7 +17,10 @@ use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLe
 
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
-use super::shader_node::map_model_q32_options;
+use super::shader_node::{
+    map_model_q32_options, read_authored_value, set_slot_if_changed,
+    sync_shader_slot_def_from_authored,
+};
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
 pub struct ComputeShaderNode {
@@ -134,10 +137,44 @@ impl ComputeShaderNode {
         }
         Ok(())
     }
+
+    fn sync_def_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let mut compile_changed = false;
+        compile_changed |= set_slot_if_changed(
+            &mut self.def.glsl_opts.add_sub,
+            read_authored_value::<AddSubMode>(ctx, "glsl_opts.add_sub")?,
+        );
+        compile_changed |= set_slot_if_changed(
+            &mut self.def.glsl_opts.mul,
+            read_authored_value::<MulMode>(ctx, "glsl_opts.mul")?,
+        );
+        compile_changed |= set_slot_if_changed(
+            &mut self.def.glsl_opts.div,
+            read_authored_value::<DivMode>(ctx, "glsl_opts.div")?,
+        );
+
+        let consumed_keys: Vec<String> = self.def.consumed_slots.entries.keys().cloned().collect();
+        for key in consumed_keys {
+            let Some(slot) = self.def.consumed_slots.entries.get_mut(&key) else {
+                continue;
+            };
+            compile_changed |= sync_shader_slot_def_from_authored(
+                ctx,
+                &alloc::format!("consumed_slots[{key}]"),
+                slot,
+            )?;
+        }
+
+        if compile_changed {
+            self.shader = None;
+        }
+        Ok(())
+    }
 }
 
 impl NodeRuntime for ComputeShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        self.sync_def_from_view(ctx)?;
         let input_pairs = self.collect_inputs(ctx)?;
         let inputs: Vec<_> = input_pairs
             .iter()

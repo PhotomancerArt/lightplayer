@@ -10,9 +10,9 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use lpc_model::{
-    ControlProduct, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge,
-    SlotPath, SlotPathSegment, SlotSemantics, SlotShape, SlotShapeRegistry, TreePath, WithRevision,
-    advance_revision, current_revision, lookup_slot_data_and_shape,
+    ControlProduct, NodeDef, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection,
+    SlotMerge, SlotPath, SlotPathSegment, SlotSemantics, SlotShape, SlotShapeRegistry, TreePath,
+    WithRevision, advance_revision, current_revision, lookup_slot_data_and_shape,
 };
 use lpc_shared::time::TimeProvider;
 use lpfs::FsChange;
@@ -223,6 +223,7 @@ impl Engine {
         let result = (|| {
             self.tick_nodes(delta_ms)?;
             let revision = self.revision;
+            self.refresh_output_sink_configs();
             let buffers = &self.runtime_buffers;
             self.services
                 .flush_dirty_output_sinks(revision, buffers)
@@ -233,6 +234,23 @@ impl Engine {
         })();
         lp_perf::emit_end!(lp_perf::EVENT_FRAME);
         result
+    }
+
+    fn refresh_output_sink_configs(&mut self) {
+        let mut updates = Vec::new();
+        for entry in self.tree.entries() {
+            let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
+                continue;
+            };
+            let Some(NodeDef::Output(def)) = self.loaded_node_def(entry.artifact()) else {
+                continue;
+            };
+            updates.push((buffer_id, def.clone()));
+        }
+
+        for (buffer_id, def) in updates {
+            self.services.update_output_sink_config(buffer_id, &def);
+        }
     }
 
     fn tick_nodes(&mut self, delta_ms: u32) -> Result<(), EngineError> {
