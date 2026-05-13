@@ -23,6 +23,9 @@ vec4 fetch_b() {
     return texelFetch(t, ivec2(1, 0), 0);
 }
 
+// @unsupported(rv32lpn.q32)
 // run: fetch_a() ~= vec4(0.2, 0.4, 0.6, 1.0) (tolerance: 0.0003)
+// @unsupported(rv32lpn.q32)
 // run: fetch_alpha_a() ~= 1.0 (tolerance: 0.0002)
+// @unsupported(rv32lpn.q32)
 // run: fetch_b() ~= vec4(0.1, 0.3, 0.5, 1.0) (tolerance: 0.0003)

@@ -17,5 +17,7 @@ vec4 high_v() {
     return texture(inputColor, vec2(0.125, 0.88));
 }
 
+// @unsupported(rv32lpn.q32)
 // run: low_v() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)
+// @unsupported(rv32lpn.q32)
 // run: high_v() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)

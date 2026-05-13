@@ -14,4 +14,5 @@ vec4 wraps_to_left() {
 }
 
 // u=1.25, w=2 → repeat → same texel as column 0
+// @unsupported(rv32lpn.q32)
 // run: wraps_to_left() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)

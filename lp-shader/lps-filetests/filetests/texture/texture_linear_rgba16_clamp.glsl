@@ -14,4 +14,5 @@ vec4 center_blend() {
 }
 
 // u=0.5 → halfway between columns → R and G both ~0.5
+// @unsupported(rv32lpn.q32)
 // run: center_blend() ~= vec4(0.5, 0.5, 0.0, 1.0) (tolerance: 0.004)

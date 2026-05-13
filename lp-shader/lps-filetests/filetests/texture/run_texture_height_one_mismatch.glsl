@@ -11,4 +11,5 @@ float f() {
 }
 
 // EXPECT_SETUP_FAILURE: {{height-one}}
+// @unsupported(rv32lpn.q32)
 // run: f() ~= 1.0

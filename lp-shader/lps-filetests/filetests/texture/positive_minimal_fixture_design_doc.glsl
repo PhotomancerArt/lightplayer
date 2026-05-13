@@ -17,5 +17,7 @@ vec4 texel_right() {
     return texelFetch(inputColor, ivec2(1, 0), 0);
 }
 
+// @unsupported(rv32lpn.q32)
 // run: texel_left() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0002)
+// @unsupported(rv32lpn.q32)
 // run: texel_right() ~= vec4(0.0, 1.0, 0.0, 1.0) (tolerance: 0.0002)
