@@ -128,10 +128,12 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let mut binding = None;
         while !self.at_punct(")") {
             let key = self.expect_identifier_like()?;
-            self.expect_punct("=")?;
-            let value = self.expect_number_text()?;
-            if key == "binding" {
-                binding = parse_u32_text(value);
+            if self.at_punct("=") {
+                self.bump();
+                let value = self.expect_number_text()?;
+                if key == "binding" {
+                    binding = parse_u32_text(value);
+                }
             }
             if self.at_punct(",") {
                 self.bump();
@@ -159,6 +161,23 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             self.struct_names.push(block_name.clone());
             let members = self.parse_struct_members()?;
             self.expect_punct("}")?;
+            if self.at_punct(";") {
+                let end = self.expect_punct(";")?.span.end;
+                index.structs.push(StructDecl {
+                    name: block_name,
+                    members: members.clone(),
+                    span: Span::new(start, end),
+                });
+                for member in members {
+                    index.uniforms.push(UniformDecl {
+                        name: member.name,
+                        ty: member.ty,
+                        binding,
+                        span: member.span,
+                    });
+                }
+                return Ok(());
+            }
             let name = self.expect_identifier_like()?.to_string();
             let mut uniform_ty = TypeRef {
                 name: block_name.clone(),
