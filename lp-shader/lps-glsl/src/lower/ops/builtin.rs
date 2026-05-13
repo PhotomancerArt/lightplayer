@@ -205,9 +205,7 @@ pub(in crate::lower) fn lower_builtin(
                 )?
                 .lanes[i]
             }
-            BuiltinKind::Round => {
-                lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Round)?
-            }
+            BuiltinKind::Round => lower_round_lane(ctx, &values[0], i),
             BuiltinKind::Clamp => {
                 let maxed =
                     lower_binary_float_lane(ctx, &values[0], &values[1], i, BinaryFloatOp::Max);
@@ -274,17 +272,74 @@ fn lower_fma_lane(
 }
 
 fn lower_inversesqrt_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {
+    let src = lane_at(value, index);
     let sqrt = ctx.fb.alloc_vreg(IrType::F32);
-    let dst = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(LpirOp::Fsqrt {
-        dst: sqrt,
-        src: lane_at(value, index),
-    });
+    ctx.fb.push(LpirOp::Fsqrt { dst: sqrt, src });
     let one = fconst(ctx, 1.0);
+    let raw = ctx.fb.alloc_vreg(IrType::F32);
     ctx.fb.push(LpirOp::Fdiv {
-        dst,
+        dst: raw,
         lhs: one,
         rhs: sqrt,
+    });
+    let zero = fconst(ctx, 0.0);
+    let positive = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Fgt {
+        dst: positive,
+        lhs: src,
+        rhs: zero,
+    });
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: positive,
+        if_true: raw,
+        if_false: zero,
+    });
+    dst
+}
+
+fn lower_round_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {
+    let x = lane_at(value, index);
+    let zero = fconst(ctx, 0.0);
+    let half = fconst(ctx, 0.5);
+    let positive = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Fge {
+        dst: positive,
+        lhs: x,
+        rhs: zero,
+    });
+
+    let positive_shifted = ctx.fb.alloc_vreg(IrType::F32);
+    let positive_rounded = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fadd {
+        dst: positive_shifted,
+        lhs: x,
+        rhs: half,
+    });
+    ctx.fb.push(LpirOp::Ffloor {
+        dst: positive_rounded,
+        src: positive_shifted,
+    });
+
+    let negative_shifted = ctx.fb.alloc_vreg(IrType::F32);
+    let negative_rounded = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fsub {
+        dst: negative_shifted,
+        lhs: x,
+        rhs: half,
+    });
+    ctx.fb.push(LpirOp::Fceil {
+        dst: negative_rounded,
+        src: negative_shifted,
+    });
+
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: positive,
+        if_true: positive_rounded,
+        if_false: negative_rounded,
     });
     dst
 }

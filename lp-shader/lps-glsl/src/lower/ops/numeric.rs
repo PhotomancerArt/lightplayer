@@ -11,7 +11,6 @@ pub(in crate::lower::ops) enum UnaryFloatOp {
     Abs,
     Ceil,
     Floor,
-    Round,
     Trunc,
 }
 
@@ -35,7 +34,6 @@ pub(in crate::lower::ops) fn lower_unary_float_lane(
         UnaryFloatOp::Abs => LpirOp::Fabs { dst, src },
         UnaryFloatOp::Ceil => LpirOp::Fceil { dst, src },
         UnaryFloatOp::Floor => LpirOp::Ffloor { dst, src },
-        UnaryFloatOp::Round => LpirOp::Fnearest { dst, src },
         UnaryFloatOp::Trunc => LpirOp::Ftrunc { dst, src },
     });
     Ok(dst)
@@ -148,7 +146,33 @@ pub(in crate::lower::ops) fn lower_mod_lane(
         lhs,
         rhs: scaled,
     });
-    dst
+    let delta = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fsub {
+        dst: delta,
+        lhs: dst,
+        rhs,
+    });
+    let distance = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fabs {
+        dst: distance,
+        src: delta,
+    });
+    let eps = fconst(ctx, 0.001);
+    let close_to_divisor = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Flt {
+        dst: close_to_divisor,
+        lhs: distance,
+        rhs: eps,
+    });
+    let zero = fconst(ctx, 0.0);
+    let corrected = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Select {
+        dst: corrected,
+        cond: close_to_divisor,
+        if_true: zero,
+        if_false: dst,
+    });
+    corrected
 }
 
 pub(in crate::lower::ops) fn lower_mix_lane(

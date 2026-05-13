@@ -35,7 +35,11 @@ impl ImportRegistry {
             .or_insert_with(|| ImportInfo {
                 key: key.clone(),
                 module_name: String::from("glsl"),
-                func_name: String::from(name),
+                func_name: String::from(if name == "atan" && argc == 2 {
+                    "atan2"
+                } else {
+                    name
+                }),
                 param_types: alloc::vec![lpir::IrType::F32; argc],
                 return_types: alloc::vec![lpir::IrType::F32],
                 lpfn_glsl_params: None,

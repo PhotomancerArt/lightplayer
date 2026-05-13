@@ -56,7 +56,23 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
 pub(super) fn is_glsl_import(name: &str) -> bool {
     matches!(
         name,
-        "sin" | "cos" | "tan" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2" | "pow" | "atan"
+        "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "asinh"
+            | "acosh"
+            | "atanh"
+            | "exp"
+            | "exp2"
+            | "log"
+            | "log2"
+            | "pow"
     )
 }
 
@@ -67,7 +83,22 @@ pub(super) fn type_glsl_import_args(
 ) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
     if matches!(
         name,
-        "sin" | "cos" | "tan" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2"
+        "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "asinh"
+            | "acosh"
+            | "atanh"
+            | "exp"
+            | "exp2"
+            | "log"
+            | "log2"
     ) && args.len() == 1
     {
         let arg = args[0].clone();
@@ -85,21 +116,18 @@ pub(super) fn type_glsl_import_args(
         }
         return Ok((alloc::vec![a, b], ty));
     }
-
-    let args = args
-        .into_iter()
-        .map(|arg| coerce_expr(arg, &LpsType::Float))
-        .collect::<Result<Vec<_>, _>>()?;
-    let ty = match name {
-        "atan" if args.len() == 1 || args.len() == 2 => LpsType::Float,
-        _ => {
-            return Err(Diagnostic::error(
-                span,
-                format!("unsupported GLSL import signature `{name}`"),
-            ));
+    if name == "atan" && args.len() == 2 {
+        let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+        if scalar_base_type(&ty) != Some(LpsType::Float) {
+            return Err(Diagnostic::error(span, "atan expects float lanes"));
         }
-    };
-    Ok((args, ty))
+        return Ok((alloc::vec![a, b], ty));
+    }
+
+    Err(Diagnostic::error(
+        span,
+        format!("unsupported GLSL import signature `{name}`"),
+    ))
 }
 
 pub(super) fn type_builtin_args(
