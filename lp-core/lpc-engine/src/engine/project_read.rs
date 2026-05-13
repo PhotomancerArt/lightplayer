@@ -9,7 +9,8 @@ use super::Engine;
 
 impl Engine {
     /// Answer one stateless project read request from the current engine state.
-    pub fn read_project(&self, request: ProjectReadRequest) -> ProjectReadResponse {
+    pub fn read_project(&mut self, request: ProjectReadRequest) -> ProjectReadResponse {
+        let mutations = self.mutate_project_slots(request.mutations);
         let revision = self.revision();
         let results = request
             .queries
@@ -23,6 +24,9 @@ impl Engine {
                 }
                 ProjectReadQuery::Resources(query) => {
                     ProjectReadResult::Resources(self.read_project_resources(query))
+                }
+                ProjectReadQuery::Runtime(query) => {
+                    ProjectReadResult::Runtime(self.read_project_runtime(query, None))
                 }
             })
             .collect();
@@ -43,6 +47,7 @@ impl Engine {
             revision,
             results,
             probes,
+            mutations,
         }
     }
 }
@@ -66,7 +71,7 @@ mod tests {
 
         let response = engine.read_project(ProjectReadRequest::default_debug(None));
 
-        assert_eq!(response.results.len(), 3);
+        assert_eq!(response.results.len(), 4);
         assert!(matches!(response.results[0], ProjectReadResult::Shapes(_)));
         assert!(matches!(response.results[1], ProjectReadResult::Nodes(_)));
         let ProjectReadResult::Resources(resources) = &response.results[2] else {
@@ -74,11 +79,12 @@ mod tests {
         };
         assert_eq!(resources.summaries.len(), 1);
         assert!(resources.runtime_buffer_payloads.is_empty());
+        assert!(matches!(response.results[3], ProjectReadResult::Runtime(_)));
     }
 
     #[test]
     fn default_debug_read_skips_nodes_without_runtime_state_roots() {
-        let h = EngineTestBuilder::new().output_node("output").build();
+        let mut h = EngineTestBuilder::new().output_node("output").build();
 
         let response = h
             .engine

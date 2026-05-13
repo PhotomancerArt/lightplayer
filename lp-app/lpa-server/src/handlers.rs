@@ -12,7 +12,8 @@ use lpc_model::{AsLpPath, LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    WireServerMessage, WireServerMsgBody as ServerMessagePayload,
+    ProjectReadRequest, WireServerMessage, WireServerMsgBody as ServerMessagePayload,
+    WireSlotMutationRequest,
     messages::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
@@ -168,7 +169,7 @@ fn handle_unload_project(
 fn handle_project_request(
     project_manager: &mut ProjectManager,
     handle: lpc_wire::WireProjectHandle,
-    request: lpc_wire::WireProjectRequest,
+    request: ProjectReadRequest,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
     let project = project_manager
@@ -176,10 +177,25 @@ fn handle_project_request(
         .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
     let _ = theoretical_fps;
 
-    match request {
-        lpc_wire::WireProjectRequest::Read(request) => Ok(ServerMessagePayload::ProjectRequest {
-            response: project.engine().read_project(request),
-        }),
+    log_project_mutations(&request.mutations);
+    Ok(ServerMessagePayload::ProjectRequest {
+        response: project.engine_mut().read_project(request),
+    })
+}
+
+fn log_project_mutations(mutations: &[WireSlotMutationRequest]) {
+    if mutations.is_empty() {
+        return;
+    }
+    log::info!("received {} project slot mutation(s)", mutations.len());
+    for mutation in mutations {
+        log::info!(
+            "slot mutation id={} root={} path={} op={:?}",
+            mutation.id.id(),
+            mutation.root,
+            mutation.path,
+            mutation.op
+        );
     }
 }
 

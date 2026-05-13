@@ -62,6 +62,7 @@ mod tests {
                 registry: None,
             })],
             probes: vec![],
+            mutations: vec![],
         };
         let bytes = write_project_read_server_message(JsonWriter::new(Vec::new()), 42, &response)
             .expect("write server message");

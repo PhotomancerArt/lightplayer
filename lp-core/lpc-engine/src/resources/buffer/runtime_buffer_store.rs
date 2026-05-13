@@ -74,6 +74,10 @@ impl RuntimeBufferStore {
         self.buffers.get(&id)
     }
 
+    pub fn len(&self) -> usize {
+        self.buffers.len()
+    }
+
     pub fn get_mut(&mut self, id: RuntimeBufferId) -> Option<&mut WithRevision<RuntimeBuffer>> {
         self.buffers.get_mut(&id)
     }

@@ -1,3 +1,4 @@
+pub mod clock;
 pub mod fixture;
 pub mod fluid;
 pub mod node_def;
@@ -6,6 +7,7 @@ pub mod project;
 pub mod shader;
 pub mod texture;
 
+pub use clock::{ClockControls, ClockDef, ClockDefView, ClockState};
 pub use fixture::{
     ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, MappingConfig,
     PathSpec, RingOrder,

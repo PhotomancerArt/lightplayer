@@ -5,8 +5,9 @@ use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
 use lpc_wire::{
     NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, ShapeReadQuery, write_project_read_result_json, write_slot_data_json,
-    write_slot_shape_registry_snapshot_json,
+    ProjectReadResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
+    WireSlotMutationRequest, WireSlotMutationResponse, write_project_read_result_json,
+    write_slot_data_json, write_slot_shape_registry_snapshot_json,
 };
 
 use crate::node::{NodeEntryState, tree_deltas_since};
@@ -23,7 +24,7 @@ impl Engine {
     /// allocating the whole response envelope and uses streaming base64 for
     /// runtime-buffer payload fields.
     pub fn write_project_read_json<W>(
-        &self,
+        &mut self,
         request: ProjectReadRequest,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
@@ -39,8 +40,15 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
         self.revision()
     }
 
+    fn apply_project_mutations(
+        &mut self,
+        mutations: alloc::vec::Vec<WireSlotMutationRequest>,
+    ) -> alloc::vec::Vec<WireSlotMutationResponse> {
+        self.mutate_project_slots(mutations)
+    }
+
     fn write_project_read_result_json<W>(
-        &self,
+        &mut self,
         since: Option<lpc_model::Revision>,
         query: ProjectReadQuery,
         out: W,
@@ -55,6 +63,9 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
             ProjectReadQuery::Nodes(query) => {
                 return self.write_project_node_read_result_json(since, query, out);
             }
+            ProjectReadQuery::Runtime(query) => {
+                return self.write_project_runtime_read_result_json(query, None, out);
+            }
             ProjectReadQuery::Resources(_) => {}
         }
 
@@ -62,7 +73,9 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
             ProjectReadQuery::Resources(query) => {
                 ProjectReadResult::Resources(self.read_project_resources(query))
             }
-            ProjectReadQuery::Shapes(_) | ProjectReadQuery::Nodes(_) => {
+            ProjectReadQuery::Shapes(_)
+            | ProjectReadQuery::Nodes(_)
+            | ProjectReadQuery::Runtime(_) => {
                 unreachable!("handled above")
             }
         };
@@ -72,7 +85,7 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
     }
 
     fn write_project_probe_result_json<W>(
-        &self,
+        &mut self,
         probe: ProjectProbeRequest,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
@@ -95,7 +108,7 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
 
 impl Engine {
     fn write_project_shape_read_result_json<W>(
-        &self,
+        &mut self,
         query: ShapeReadQuery,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
@@ -112,8 +125,23 @@ impl Engine {
         Ok(writer.into_inner())
     }
 
+    pub fn write_project_runtime_read_result_json<W>(
+        &mut self,
+        query: RuntimeReadQuery,
+        server: Option<ServerRuntimeStatus>,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let result = ProjectReadResult::Runtime(self.read_project_runtime(query, server));
+        let mut writer = JsonWriter::new(out);
+        write_project_read_result_json(&mut writer, &result)?;
+        Ok(writer.into_inner())
+    }
+
     fn write_project_node_read_result_json<W>(
-        &self,
+        &mut self,
         since: Option<lpc_model::Revision>,
         query: NodeReadQuery,
         out: W,
@@ -183,19 +211,17 @@ mod tests {
     use alloc::vec::Vec;
     use lpc_model::{Revision, TreePath, WithRevision};
     use lpc_wire::json::json_write::ChunkCountingWrite;
-    use lpc_wire::{
-        ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery, ResourceReadResult,
-    };
+    use lpc_wire::{ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery};
 
     use crate::engine::test_support::EngineTestBuilder;
     use crate::resource::RuntimeBuffer;
 
     #[test]
     fn streaming_project_read_matches_full_debug_response() {
-        let h = EngineTestBuilder::new().output_node("output").build();
+        let mut h = EngineTestBuilder::new().output_node("output").build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_streams_to_full_response(&h.engine, request);
+        assert_streams_to_full_response(&mut h.engine, request);
     }
 
     #[test]
@@ -211,7 +237,7 @@ mod tests {
             payloads: ResourcePayloadRead::All,
         });
 
-        assert_streams_to_full_response(&engine, request);
+        assert_streams_to_full_response(&mut engine, request);
     }
 
     #[test]
@@ -230,11 +256,11 @@ mod tests {
             .unwrap();
         let decoded: ProjectReadResponse = lpc_wire::json::from_slice(out.bytes()).unwrap();
 
-        assert_eq!(decoded.results.len(), 3);
+        assert_eq!(decoded.results.len(), 4);
         assert!(out.chunk_count() > 1);
     }
 
-    fn assert_streams_to_full_response(engine: &Engine, request: ProjectReadRequest) {
+    fn assert_streams_to_full_response(engine: &mut Engine, request: ProjectReadRequest) {
         let full = engine.read_project(request.clone());
         let streamed = engine
             .write_project_read_json(request, Vec::new())
@@ -244,14 +270,15 @@ mod tests {
 
         assert_eq!(decoded, full);
 
-        let ProjectReadResult::Resources(ResourceReadResult {
-            runtime_buffer_payloads,
-            ..
-        }) = decoded.results.last().expect("resources result")
-        else {
-            panic!("last result should be resources");
-        };
-        for payload in runtime_buffer_payloads {
+        let resources = decoded
+            .results
+            .iter()
+            .find_map(|result| match result {
+                ProjectReadResult::Resources(resources) => Some(resources),
+                _ => None,
+            })
+            .expect("resources result");
+        for payload in &resources.runtime_buffer_payloads {
             assert!(!payload.bytes.is_empty());
         }
     }

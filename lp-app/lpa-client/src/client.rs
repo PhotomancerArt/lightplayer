@@ -5,8 +5,7 @@
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    ProjectReadRequest, ProjectReadResponse, WireProjectHandle as ProjectHandle,
-    WireProjectRequest, WireServerMessage,
+    ProjectReadRequest, ProjectReadResponse, WireProjectHandle as ProjectHandle, WireServerMessage,
     messages::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
@@ -422,7 +421,7 @@ impl LpClient {
     ) -> Result<ProjectReadResponse> {
         let request = ClientRequest::ProjectRequest {
             handle,
-            request: WireProjectRequest::Read(read),
+            request: read,
         };
 
         let response = self.send_request(request).await?;

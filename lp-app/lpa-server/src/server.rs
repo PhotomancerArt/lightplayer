@@ -5,6 +5,7 @@ extern crate alloc;
 use crate::error::ServerError;
 use crate::handlers;
 use crate::project_manager::ProjectManager;
+use crate::project_read_source::ServerProjectReadSource;
 use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
@@ -14,7 +15,7 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::{ClientRequest, WireMessage, WireProjectRequest, WireServerMessage};
+use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
 use lpfs::{FsChange, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
@@ -327,11 +328,9 @@ impl LpServer {
                 WireMessage::Client(client_msg) => {
                     let msg_id = client_msg.id;
                     match client_msg.msg {
-                        ClientRequest::ProjectRequest {
-                            handle,
-                            request: WireProjectRequest::Read(request),
-                        } => {
-                            let Some(project) = self.project_manager.get_project(handle) else {
+                        ClientRequest::ProjectRequest { handle, request } => {
+                            let server_status = self.runtime_status();
+                            let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
                                     .send(WireServerMessage {
                                         id: msg_id,
@@ -350,8 +349,12 @@ impl LpServer {
                                 response_count += 1;
                                 continue;
                             };
+                            let mut source = ServerProjectReadSource::new(
+                                project.engine_mut(),
+                                Some(server_status),
+                            );
                             transport
-                                .send_project_read(msg_id, handle, project.engine(), request)
+                                .send_project_read(msg_id, handle, &mut source, request)
                                 .await
                                 .map_err(|error| ServerError::Core(format!("{error}")))?;
                             response_count += 1;
@@ -460,5 +463,20 @@ impl LpServer {
     pub fn theoretical_fps(&self) -> Option<f32> {
         self.last_frame_time_us()
             .map(|time_us| 1_000_000.0 / time_us as f32)
+    }
+
+    fn runtime_status(&self) -> lpc_wire::ServerRuntimeStatus {
+        let memory = self.memory_stats.and_then(|memory_stats| {
+            memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::MemoryStats {
+                free_bytes,
+                used_bytes,
+                total_bytes: free_bytes.saturating_add(used_bytes),
+            })
+        });
+        lpc_wire::ServerRuntimeStatus {
+            theoretical_fps: self.theoretical_fps(),
+            last_frame_time_us: self.last_frame_time_us(),
+            memory,
+        }
     }
 }

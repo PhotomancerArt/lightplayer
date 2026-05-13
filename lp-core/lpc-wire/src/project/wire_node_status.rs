@@ -1,15 +1,7 @@
-//! Wire-visible project request / node status types.
+//! Wire-visible node lifecycle status.
 
-use crate::messages::ProjectReadRequest;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
-
-/// Project-scoped request from client.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum WireProjectRequest {
-    /// Stateless project read.
-    Read(ProjectReadRequest),
-}
 
 /// Node lifecycle / health status on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,14 +22,6 @@ pub enum WireNodeStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wire_project_read_round_trips() {
-        let request = WireProjectRequest::Read(ProjectReadRequest::default_debug(None));
-        let json = crate::json::to_string(&request).unwrap();
-        let decoded: WireProjectRequest = crate::json::from_str(&json).unwrap();
-        assert_eq!(decoded, request);
-    }
 
     #[test]
     fn wire_node_status_variants() {

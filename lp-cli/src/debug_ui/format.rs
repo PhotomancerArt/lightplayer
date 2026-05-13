@@ -1,6 +1,6 @@
 //! Formatting helpers for the temporary debug UI.
 
-use lpc_model::{LpType, LpValue, ProductRef, ResourceRef};
+use lpc_model::{LpType, LpValue, ProductRef, ResourceRef, ValueEditorHint};
 use lpc_wire::{
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
     WireResourceSummary, WireRuntimeBufferKind,
@@ -32,15 +32,48 @@ pub(crate) fn format_lp_value(value: &LpValue) -> String {
         LpValue::Mat3x3(value) => format!("{value:?}"),
         LpValue::Mat4x4(value) => format!("{value:?}"),
         LpValue::Array(values) => format!("array[{}]", values.len()),
-        LpValue::Struct { name, fields } => {
-            format!(
-                "{} struct[{}]",
-                name.as_deref().unwrap_or("anonymous"),
-                fields.len()
-            )
-        }
+        LpValue::Struct { name, fields } => format_struct_value(name.as_deref(), fields),
         LpValue::Resource(value) => format_resource_ref(*value),
         LpValue::Product(value) => format_product_ref(*value),
+    }
+}
+
+pub(crate) fn format_value_editor_hint(editor: &ValueEditorHint) -> Option<String> {
+    match editor {
+        ValueEditorHint::Plain => None,
+        ValueEditorHint::NodeRef => Some(String::from("node ref")),
+        ValueEditorHint::Path => Some(String::from("path")),
+        ValueEditorHint::Number { min, max, step } => {
+            let mut parts = Vec::new();
+            if let Some(min) = min {
+                parts.push(format!("min {}", min.0));
+            }
+            if let Some(max) = max {
+                parts.push(format!("max {}", max.0));
+            }
+            if let Some(step) = step {
+                parts.push(format!("step {}", step.0));
+            }
+            Some(if parts.is_empty() {
+                String::from("number")
+            } else {
+                format!("number {}", parts.join(", "))
+            })
+        }
+        ValueEditorHint::Slider { min, max, step } => {
+            let step = step
+                .map(|step| format!(", step {}", step.0))
+                .unwrap_or_default();
+            Some(format!("slider {}..{}{step}", min.0, max.0))
+        }
+        ValueEditorHint::Xy => Some(String::from("xy")),
+        ValueEditorHint::Dimensions => Some(String::from("dimensions")),
+        ValueEditorHint::Affine2d => Some(String::from("affine 2d")),
+        ValueEditorHint::Resource => Some(String::from("resource")),
+        ValueEditorHint::RuntimeBufferResource => Some(String::from("runtime buffer")),
+        ValueEditorHint::VisualProduct => Some(String::from("visual product")),
+        ValueEditorHint::ControlProduct => Some(String::from("control product")),
+        ValueEditorHint::Dropdown { options } => Some(format!("dropdown[{}]", options.len())),
     }
 }
 
@@ -85,16 +118,12 @@ pub(crate) fn format_resource_ref(resource_ref: ResourceRef) -> String {
 pub(crate) fn format_product_ref(product: ProductRef) -> String {
     match product {
         ProductRef::Visual(product) => {
-            format!(
-                "visual product node={} output={}",
-                product.node().0,
-                product.output()
-            )
+            format!("visual product #{}:{}", product.node().0, product.output())
         }
         ProductRef::Control(product) => {
             let extent = product.preferred_extent();
             format!(
-                "control product node={} output={} extent={}x{}",
+                "control product #{}:{}  {}x{}",
                 product.node().0,
                 product.output(),
                 extent.rows,
@@ -156,4 +185,41 @@ fn format_resource_availability(availability: &WireResourceAvailability) -> Stri
         WireResourceAvailability::NotFound => String::from("not found"),
         WireResourceAvailability::Error(message) => format!("error: {message}"),
     }
+}
+
+fn format_struct_value(name: Option<&str>, fields: &[(String, LpValue)]) -> String {
+    match name {
+        Some("BindingDef") => format_binding_def(fields),
+        Some(name) => format!("{name} {{ {} }}", format_struct_fields(fields, 3)),
+        None => format!("{{ {} }}", format_struct_fields(fields, 3)),
+    }
+}
+
+fn format_binding_def(fields: &[(String, LpValue)]) -> String {
+    let direction = struct_string_field(fields, "direction").unwrap_or("binding");
+    let endpoint = struct_string_field(fields, "endpoint").unwrap_or("<invalid>");
+    format!("{direction} {endpoint}")
+}
+
+fn struct_string_field<'a>(fields: &'a [(String, LpValue)], name: &str) -> Option<&'a str> {
+    fields.iter().find_map(|(field, value)| {
+        (field == name)
+            .then_some(value)
+            .and_then(|value| match value {
+                LpValue::String(value) => Some(value.as_str()),
+                _ => None,
+            })
+    })
+}
+
+fn format_struct_fields(fields: &[(String, LpValue)], limit: usize) -> String {
+    let mut parts = fields
+        .iter()
+        .take(limit)
+        .map(|(name, value)| format!("{name}: {}", format_lp_value(value)))
+        .collect::<Vec<_>>();
+    if fields.len() > limit {
+        parts.push(format!("+{} more", fields.len() - limit));
+    }
+    parts.join(", ")
 }

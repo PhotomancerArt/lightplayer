@@ -31,7 +31,17 @@ pub(crate) fn render_resource_payload_preview(
             width,
             height,
             format,
-        } => render_texture_preview(ui, *width, *height, *format, bytes),
+        } => render_texture_payload_preview(
+            ui,
+            format!(
+                "resource-texture-{:?}-{}",
+                resource_ref.domain, resource_ref.id
+            ),
+            *width,
+            *height,
+            *format,
+            bytes,
+        ),
         WireRuntimeBufferMetadataPayload::Raw => render_byte_preview(ui, bytes),
     }
 }
@@ -110,16 +120,33 @@ fn render_output_channel_preview(
     }
 }
 
-fn render_texture_preview(
+pub(crate) fn render_texture_payload_preview(
     ui: &mut egui::Ui,
+    texture_id: String,
     width: u32,
     height: u32,
     format: WireTextureFormat,
     bytes: &[u8],
 ) {
     ui.strong(format!("texture  {width}x{height}  {format:?}"));
+    if let Some(rgb) = texture_rgb8_for_display(width, height, format, bytes) {
+        let image = egui::ColorImage::from_rgb([width as usize, height as usize], &rgb);
+        let texture = ui
+            .ctx()
+            .load_texture(texture_id, image, egui::TextureOptions::NEAREST);
+        let max_side = ui.available_width().min(280.0).max(32.0);
+        let scale = (max_side / width.max(height) as f32).clamp(1.0, 16.0);
+        let size = egui::vec2(width as f32 * scale, height as f32 * scale);
+        ui.image((texture.id(), size));
+    } else {
+        ui.colored_label(
+            egui::Color32::LIGHT_RED,
+            "payload length does not match texture shape",
+        );
+    }
+
     match format {
-        WireTextureFormat::Rgb8 => render_rgb_swatches(
+        WireTextureFormat::Srgb8 => render_rgb_swatches(
             ui,
             bytes
                 .chunks_exact(3)
@@ -134,6 +161,40 @@ fn render_texture_preview(
             128,
         ),
     }
+}
+
+fn texture_rgb8_for_display(
+    width: u32,
+    height: u32,
+    format: WireTextureFormat,
+    bytes: &[u8],
+) -> Option<Vec<u8>> {
+    let pixels = width.checked_mul(height)? as usize;
+    match format {
+        WireTextureFormat::Srgb8 => (bytes.len() == pixels.checked_mul(3)?).then(|| bytes.to_vec()),
+        WireTextureFormat::Rgba16 => {
+            if bytes.len() != pixels.checked_mul(8)? {
+                return None;
+            }
+            let mut out = Vec::with_capacity(pixels * 3);
+            for px in bytes.chunks_exact(8) {
+                out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[0], px[1]])));
+                out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[2], px[3]])));
+                out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[4], px[5]])));
+            }
+            Some(out)
+        }
+    }
+}
+
+fn linear_unorm16_to_srgb8(value: u16) -> u8 {
+    let linear = value as f32 / u16::MAX as f32;
+    let srgb = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn render_rgb_swatches<I>(ui: &mut egui::Ui, colors: I, limit: usize)

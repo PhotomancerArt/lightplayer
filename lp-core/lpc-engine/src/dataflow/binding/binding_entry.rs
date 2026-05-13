@@ -63,6 +63,14 @@ impl BindingPriority {
         Self(p)
     }
 
+    pub fn authored() -> Self {
+        Self(0)
+    }
+
+    pub fn default_fallback() -> Self {
+        Self(-1000)
+    }
+
     pub fn as_i32(self) -> i32 {
         self.0
     }

@@ -4,6 +4,9 @@ glsl_path = "compute.glsl"
 [bindings.emitters]
 target = "bus#fluid.emitters"
 
+[bindings.time]
+source = "bus#time.seconds"
+
 [consumed.time]
 kind = "value"
 value = "f32"

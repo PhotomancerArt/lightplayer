@@ -31,7 +31,9 @@ fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount()
     assert_eq!(mgr.content_frame(&r), Some(Revision::new(1)));
 
     mgr.load_with(&r, Revision::new(20), |location| {
-        let ArtifactLocation::File(path) = location;
+        let ArtifactLocation::File(path) = location else {
+            panic!("expected file artifact location");
+        };
         assert_eq!(path.as_str(), "dummy/test.lp");
         Ok(texture_def(12, 8))
     })
@@ -68,7 +70,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
 
     let mut mgr = ArtifactStore::new();
     let ar = mgr.acquire_location(
-        ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap()).unwrap(),
+        ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap().unwrap()).unwrap(),
         Revision::new(0),
     );
     mgr.load_with(&ar, Revision::new(40), |_location| Ok(texture_def(7, 7)))

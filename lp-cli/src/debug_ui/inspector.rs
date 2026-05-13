@@ -1,17 +1,19 @@
 //! Right-side debug inspector for nodes, resources, and shapes.
 
 use eframe::egui;
-use lpc_model::{NodeId, ResourceRef, SlotShape, SlotShapeId};
+use lpc_model::{NodeId, ResourceRef, SlotShape, SlotShapeId, VisualProduct};
 use lpc_view::project::ProjectView;
+use lpc_wire::RenderProductProbeResult;
 
 use super::format::{format_resource_metadata, format_resource_summary};
-use super::resource_preview::render_resource_payload_preview;
+use super::resource_preview::{render_resource_payload_preview, render_texture_payload_preview};
 use super::slot_render::{render_slot_root_debug, render_slot_shape_summary, root_name};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InspectorSelection {
     Node(NodeId),
     Resource(ResourceRef),
+    VisualProduct(VisualProduct),
     Shape(SlotShapeId),
 }
 
@@ -19,6 +21,7 @@ pub(crate) fn render_debug_inspector(
     ui: &mut egui::Ui,
     view: &ProjectView,
     selection: &mut Option<InspectorSelection>,
+    render_product_probe: Option<&RenderProductProbeResult>,
 ) {
     ensure_selection(view, selection);
 
@@ -33,7 +36,7 @@ pub(crate) fn render_debug_inspector(
             ui.separator();
             render_shape_tree(ui, view, selection);
             ui.separator();
-            render_selected_detail(ui, view, *selection);
+            render_selected_detail(ui, view, *selection, render_product_probe);
         });
 }
 
@@ -42,6 +45,9 @@ fn ensure_selection(view: &ProjectView, selection: &mut Option<InspectorSelectio
         Some(InspectorSelection::Node(id)) => view.tree.nodes.contains_key(id),
         Some(InspectorSelection::Resource(resource_ref)) => {
             view.resource_cache.summary(*resource_ref).is_some()
+        }
+        Some(InspectorSelection::VisualProduct(product)) => {
+            view.tree.nodes.contains_key(&product.node())
         }
         Some(InspectorSelection::Shape(id)) => view.slots.registry.contains(id),
         None => false,
@@ -174,6 +180,7 @@ fn render_selected_detail(
     ui: &mut egui::Ui,
     view: &ProjectView,
     selection: Option<InspectorSelection>,
+    render_product_probe: Option<&RenderProductProbeResult>,
 ) {
     ui.heading("Details");
     match selection {
@@ -181,9 +188,62 @@ fn render_selected_detail(
         Some(InspectorSelection::Resource(resource_ref)) => {
             render_resource_detail(ui, view, resource_ref);
         }
+        Some(InspectorSelection::VisualProduct(product)) => {
+            render_visual_product_detail(ui, view, product, render_product_probe);
+        }
         Some(InspectorSelection::Shape(id)) => render_shape_detail(ui, view, id),
         None => {
             ui.label("No selection.");
+        }
+    }
+}
+
+fn render_visual_product_detail(
+    ui: &mut egui::Ui,
+    view: &ProjectView,
+    product: VisualProduct,
+    probe: Option<&RenderProductProbeResult>,
+) {
+    ui.monospace(format!(
+        "visual product node={} output={}",
+        product.node().0,
+        product.output()
+    ));
+    if let Some(node) = view.tree.nodes.get(&product.node()) {
+        ui.label(format!("owner #{} {}", product.node().0, node.path));
+    }
+
+    match probe {
+        Some(RenderProductProbeResult::Texture {
+            product: probe_product,
+            revision,
+            width,
+            height,
+            format,
+            bytes,
+        }) if *probe_product == product => {
+            ui.label(format!("probe revision {}", revision.0));
+            render_texture_payload_preview(
+                ui,
+                format!(
+                    "render-product-probe-{}-{}",
+                    product.node().0,
+                    product.output()
+                ),
+                *width,
+                *height,
+                *format,
+                bytes,
+            );
+        }
+        Some(RenderProductProbeResult::Unsupported { reason }) => {
+            ui.colored_label(egui::Color32::YELLOW, reason);
+        }
+        Some(RenderProductProbeResult::Error { message }) => {
+            ui.colored_label(egui::Color32::LIGHT_RED, message);
+        }
+        _ => {
+            ui.label("waiting for probe result");
         }
     }
 }

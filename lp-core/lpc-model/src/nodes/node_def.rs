@@ -8,6 +8,7 @@ use alloc::format;
 use alloc::string::String;
 
 use crate::node::kind::NodeKind;
+use crate::nodes::clock::ClockDef;
 use crate::nodes::fixture::FixtureDef;
 use crate::nodes::fluid::FluidDef;
 use crate::nodes::output::OutputDef;
@@ -15,6 +16,7 @@ use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{SlotAccess, SlotDataAccess, SlotShapeId};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Authored body of a node artifact.
 ///
@@ -24,6 +26,7 @@ use crate::{SlotAccess, SlotDataAccess, SlotShapeId};
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeDef {
     Project(ProjectDef),
+    Clock(ClockDef),
     Texture(TextureDef),
     Shader(ShaderDef),
     ComputeShader(ComputeShaderDef),
@@ -32,11 +35,41 @@ pub enum NodeDef {
     Fixture(FixtureDef),
 }
 
+impl Serialize for NodeDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Project(def) => def.serialize(serializer),
+            Self::Clock(def) => def.serialize(serializer),
+            Self::Texture(def) => def.serialize(serializer),
+            Self::Shader(def) => def.serialize(serializer),
+            Self::ComputeShader(def) => def.serialize(serializer),
+            Self::Fluid(def) => def.serialize(serializer),
+            Self::Output(def) => def.serialize(serializer),
+            Self::Fixture(def) => def.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeDef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        let text = toml::to_string(&value).map_err(serde::de::Error::custom)?;
+        Self::from_toml_str(&text).map_err(serde::de::Error::custom)
+    }
+}
+
 impl NodeDef {
     /// Core node kind for this definition.
     pub fn kind(&self) -> NodeKind {
         match self {
             Self::Project(_) => NodeKind::Project,
+            Self::Clock(_) => NodeKind::Clock,
             Self::Texture(_) => NodeKind::Texture,
             Self::Shader(_) => NodeKind::Shader,
             Self::ComputeShader(_) => NodeKind::ComputeShader,
@@ -50,6 +83,7 @@ impl NodeDef {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Project(_) => ProjectDef::KIND,
+            Self::Clock(_) => ClockDef::KIND,
             Self::Texture(_) => TextureDef::KIND,
             Self::Shader(_) => ShaderDef::KIND,
             Self::ComputeShader(_) => ComputeShaderDef::KIND,
@@ -62,6 +96,13 @@ impl NodeDef {
     pub fn as_project(&self) -> Option<&ProjectDef> {
         match self {
             Self::Project(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_clock(&self) -> Option<&ClockDef> {
+        match self {
+            Self::Clock(def) => Some(def),
             _ => None,
         }
     }
@@ -116,6 +157,7 @@ impl NodeDef {
             })?;
         match probe.kind.as_str() {
             ProjectDef::KIND => parse_variant(text).map(Self::Project),
+            ClockDef::KIND => parse_variant(text).map(Self::Clock),
             TextureDef::KIND => parse_variant(text).map(Self::Texture),
             ShaderDef::KIND => parse_variant(text).map(Self::Shader),
             ComputeShaderDef::KIND => parse_variant(text).map(Self::ComputeShader),
@@ -133,6 +175,7 @@ impl SlotAccess for NodeDef {
     fn shape_id(&self) -> SlotShapeId {
         match self {
             Self::Project(def) => def.shape_id(),
+            Self::Clock(def) => def.shape_id(),
             Self::Texture(def) => def.shape_id(),
             Self::Shader(def) => def.shape_id(),
             Self::ComputeShader(def) => def.shape_id(),
@@ -145,6 +188,7 @@ impl SlotAccess for NodeDef {
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
             Self::Project(def) => def.data(),
+            Self::Clock(def) => def.data(),
             Self::Texture(def) => def.data(),
             Self::Shader(def) => def.data(),
             Self::ComputeShader(def) => def.data(),

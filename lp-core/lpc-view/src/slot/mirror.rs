@@ -267,12 +267,18 @@ mod tests {
                         fields: vec![SlotFieldShape {
                             name: SlotName::parse("exposure").unwrap(),
                             shape: SlotShape::value(LpType::F32),
+                            semantics: Default::default(),
+                            policy: Default::default(),
                         }],
                     },
+                    semantics: Default::default(),
+                    policy: Default::default(),
                 },
                 SlotFieldShape {
                     name: SlotName::parse("compile_error").unwrap(),
                     shape: SlotShape::value(LpType::String),
+                    semantics: Default::default(),
+                    policy: Default::default(),
                 },
             ],
         }

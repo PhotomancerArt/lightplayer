@@ -20,8 +20,8 @@ use crate::artifact::ArtifactLocation;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
-    ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode, OutputNode, ShaderNode,
-    TextureNode,
+    ClockNode, ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode, OutputNode,
+    ShaderNode, TextureNode,
 };
 
 use super::{Engine, EngineServices};
@@ -131,28 +131,50 @@ impl ProjectLoader {
                     path: project_path.as_str().to_string(),
                     reason: format!("{e}"),
                 })?;
-            let artifact_locator =
-                invocation
-                    .artifact_locator()
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            let (artifact_path, config, artifact_id, has_artifact_path) =
+                if let Some(artifact_locator) = invocation.artifact_locator() {
+                    let artifact_locator =
+                        artifact_locator.map_err(|e| ProjectLoadError::InvalidSourcePath {
+                            path: project_path.as_str().to_string(),
+                            reason: format!(
+                                "invalid artifact locator `{}`: {e}",
+                                invocation.artifact_path_text().unwrap_or("<missing>")
+                            ),
+                        })?;
+                    let artifact_path =
+                        resolve_child_artifact_locator(&project_path, &artifact_locator)?;
+                    let config = load_node_def(root, artifact_path.as_path())?;
+                    let artifact_id = runtime
+                        .artifacts_mut()
+                        .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+                    runtime
+                        .artifacts_mut()
+                        .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
+                        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                            path: artifact_path.as_str().to_string(),
+                            reason: format!("load node artifact payload: {e:?}"),
+                        })?;
+                    (artifact_path, config, artifact_id, true)
+                } else if let Some(config) = invocation.inline_def().cloned() {
+                    let artifact_path = project_path.clone();
+                    let artifact_id = runtime.artifacts_mut().acquire_location(
+                        ArtifactLocation::inline_node(project_path.clone(), name.clone()),
+                        frame,
+                    );
+                    runtime
+                        .artifacts_mut()
+                        .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
+                        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                            path: project_path.as_str().to_string(),
+                            reason: format!("load inline node payload `{name}`: {e:?}"),
+                        })?;
+                    (artifact_path, config, artifact_id, false)
+                } else {
+                    return Err(ProjectLoadError::InvalidSourcePath {
                         path: project_path.as_str().to_string(),
-                        reason: format!(
-                            "invalid artifact locator `{}`: {e}",
-                            invocation.artifact.value()
-                        ),
-                    })?;
-            let artifact_path = resolve_child_artifact_locator(&project_path, &artifact_locator)?;
-            let config = load_node_def(root, artifact_path.as_path())?;
-            let artifact_id = runtime
-                .artifacts_mut()
-                .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
-            runtime
-                .artifacts_mut()
-                .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: artifact_path.as_str().to_string(),
-                    reason: format!("load node artifact payload: {e:?}"),
-                })?;
+                        reason: format!("node invocation `{name}` has no artifact or inline def"),
+                    });
+                };
             let ty = node_kind_name(&config, artifact_path.as_path())?;
             let leaf_id = runtime
                 .tree_mut()
@@ -169,7 +191,9 @@ impl ProjectLoader {
                 )
                 .map_err(ProjectLoadError::Tree)?;
 
-            runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
+            if has_artifact_path {
+                runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
+            }
             loaded_nodes.push(LoadedNode {
                 name: node_name,
                 artifact_path,
@@ -193,6 +217,34 @@ impl ProjectLoader {
         R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
+        for node in loaded_nodes {
+            if let NodeDef::Clock(config) = &node.config {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach clock runtime: {e}"),
+                    })?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "seconds",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "delta_seconds",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
+            }
+        }
+
         for node in loaded_nodes {
             if let NodeDef::Texture(_config) = &node.config {
                 runtime
@@ -582,7 +634,7 @@ fn register_source_binding(
                     slot: target_slot,
                 },
                 priority: BindingPriority::new(0),
-                kind: Kind::Color,
+                kind: binding_kind_for_slot(slot_name),
                 owner: current.id,
             },
             frame,
@@ -633,8 +685,8 @@ fn register_target_binding(
                     slot: source_slot,
                 },
                 target,
-                priority: BindingPriority::new(0),
-                kind: Kind::Color,
+                priority: BindingPriority::authored(),
+                kind: binding_kind_for_slot(slot_name),
                 owner: current.id,
             },
             frame,
@@ -642,6 +694,43 @@ fn register_target_binding(
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
             reason: format!("register {slot_name} target binding: {e}"),
+        })?;
+    Ok(())
+}
+
+fn binding_kind_for_slot(slot_name: &str) -> Kind {
+    match slot_name {
+        "time" | "seconds" | "delta_seconds" => Kind::Instant,
+        _ => Kind::Color,
+    }
+}
+
+fn register_clock_default_time_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_target(bindings, "seconds").is_some() {
+        return Ok(());
+    }
+    engine
+        .add_binding(
+            BindingDraft {
+                source: BindingSource::ProducedSlot {
+                    node: current.id,
+                    slot: SlotPath::parse("seconds").expect("clock seconds slot path"),
+                },
+                target: BindingTarget::BusChannel(ChannelName(String::from("time.seconds"))),
+                priority: BindingPriority::default_fallback(),
+                kind: Kind::Instant,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register clock default time binding: {e}"),
         })?;
     Ok(())
 }
@@ -711,7 +800,10 @@ mod tests {
     use alloc::sync::Arc;
     use lpc_model::TreePath;
     use lpc_model::{NodeName, ProductRef, SlotData};
-    use lpc_wire::{ProjectReadRequest, ProjectReadResult};
+    use lpc_wire::{
+        ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
+        RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
+    };
     use lpfs::lp_path::AsLpPath;
     use lpfs::{LpFs, LpFsMemory, LpFsStd};
     use lps_shared::TextureStorageFormat;
@@ -794,6 +886,63 @@ mod tests {
         assert!(
             !rt.demand_roots().contains(&tex_id),
             "texture is not demand root"
+        );
+    }
+
+    #[test]
+    fn project_loader_loads_inline_clock_and_default_time_bus() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "project"
+
+[nodes.clock]
+kind = "clock"
+"#,
+        )
+        .expect("project.toml");
+
+        let services = EngineServices::new(TreePath::parse("/clock.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let root = rt.tree().root();
+        let clock = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("clock").unwrap())
+            .expect("clock node");
+        assert!(
+            rt.tree()
+                .get(clock)
+                .expect("clock")
+                .state
+                .value()
+                .is_alive()
+        );
+
+        rt.tick(1000).expect("first tick");
+        let first = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve time bus")
+        .0;
+        assert_eq!(
+            *first.value_leaf().expect("time value").value(),
+            LpValue::F32(0.0)
+        );
+
+        rt.tick(1000).expect("second tick");
+        let second = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve time bus")
+        .0;
+        assert_eq!(
+            *second.value_leaf().expect("time value").value(),
+            LpValue::F32(1.0)
         );
     }
 
@@ -1124,6 +1273,34 @@ value = "f32"
                 .chunks_exact(8)
                 .any(|px| px[..6].iter().any(|byte| *byte != 0)),
             "fluid visual should contain nonzero RGB data"
+        );
+
+        let probe_response = rt.read_project(ProjectReadRequest {
+            since: None,
+            queries: alloc::vec::Vec::new(),
+            probes: alloc::vec![ProjectProbeRequest::RenderProduct(
+                RenderProductProbeRequest {
+                    product: *product,
+                    width: 16,
+                    height: 16,
+                    format: WireTextureFormat::Srgb8,
+                },
+            )],
+            mutations: alloc::vec::Vec::new(),
+        });
+        let Some(ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            format,
+            bytes,
+            ..
+        })) = probe_response.probes.first()
+        else {
+            panic!("fluid visual probe should return a texture");
+        };
+        assert_eq!(*format, WireTextureFormat::Srgb8);
+        assert_eq!(bytes.len(), 16 * 16 * 3);
+        assert!(
+            bytes.iter().any(|byte| *byte != 0),
+            "fluid visual probe should contain nonzero display bytes"
         );
 
         let response = rt.read_project(ProjectReadRequest::default_debug(None));

@@ -3,7 +3,8 @@ use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::{
-    LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
+    LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, SlotValueAccess,
+    StaticSlotShape,
 };
 use lpc_wire::build_slot_full_sync;
 
@@ -52,11 +53,23 @@ fn real_source_defs_sync_as_slot_roots() {
             project_data,
             ProjectDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "nodes[shader].artifact"
+            "nodes[shader]"
         ),
         &SlotData::Value(lpc_model::WithRevision::new(
-            project.nodes.entries["shader"].artifact.revision(),
-            LpValue::String(String::from("./shader.toml")),
+            project.nodes.entries["shader"].changed_at(),
+            LpValue::Struct {
+                name: Some(String::from("NodeInvocation")),
+                fields: vec![
+                    (
+                        String::from("form"),
+                        LpValue::String(String::from("artifact"))
+                    ),
+                    (
+                        String::from("artifact"),
+                        LpValue::String(String::from("./shader.toml"))
+                    ),
+                ],
+            },
         )),
     );
 

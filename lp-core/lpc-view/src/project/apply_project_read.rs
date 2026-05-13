@@ -60,7 +60,11 @@ pub fn apply_project_read_response(
                 view.resource_cache
                     .apply_runtime_buffer_payloads(&resources.runtime_buffer_payloads);
             }
+            ProjectReadResult::Runtime(_) => {}
         }
+    }
+    for mutation in response.mutations {
+        view.slots.apply_mutation_response(mutation);
     }
     view.revision = revision;
     Ok(())
@@ -98,6 +102,7 @@ mod tests {
                 slots: None,
             })],
             probes: vec![],
+            mutations: vec![],
         };
 
         apply_project_read_response(&mut view, response).unwrap();
@@ -117,6 +122,7 @@ mod tests {
                 runtime_buffer_payloads: vec![],
             })],
             probes: vec![],
+            mutations: vec![],
         };
 
         apply_project_read_response(&mut view, response).unwrap();

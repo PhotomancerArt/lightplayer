@@ -141,6 +141,10 @@ impl ArtifactStore {
         self.by_handle.get(&r.handle())
     }
 
+    pub fn entry_mut(&mut self, r: &ArtifactId) -> Option<&mut ArtifactEntry> {
+        self.by_handle.get_mut(&r.handle())
+    }
+
     pub fn content_frame(&self, r: &ArtifactId) -> Option<Revision> {
         self.entry(r).map(|e| e.content_frame)
     }

@@ -89,6 +89,10 @@ impl Engine {
         self.revision
     }
 
+    pub(super) fn set_revision(&mut self, revision: Revision) {
+        self.revision = revision;
+    }
+
     pub fn frame_num(&self) -> FrameNum {
         self.frame_num
     }
@@ -289,8 +293,7 @@ impl Engine {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn render_texture_for_test(
+    pub(crate) fn render_texture_product(
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
@@ -307,6 +310,15 @@ impl Engine {
             frame_time_seconds: time_s,
         };
         host.render_node_texture(product, request)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_texture_for_test(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, SessionResolveError> {
+        self.render_texture_product(product, request)
     }
 
     #[cfg(test)]
