@@ -16,6 +16,7 @@ uvec2 test_usubborrow_uint_no_borrow() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_usubborrow_uint_no_borrow() == uvec2(2u, 0u)
 
 uvec2 test_usubborrow_uint_with_borrow() {
@@ -28,6 +29,7 @@ uvec2 test_usubborrow_uint_with_borrow() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_usubborrow_uint_with_borrow() == uvec2(4294967294u, 1u)
 
 uvec2 test_usubborrow_uint_zero() {
@@ -40,6 +42,7 @@ uvec2 test_usubborrow_uint_zero() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_usubborrow_uint_zero() == uvec2(0u, 0u)
 
 uvec2 test_usubborrow_uint_equal() {
@@ -52,6 +55,7 @@ uvec2 test_usubborrow_uint_equal() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_usubborrow_uint_equal() == uvec2(0u, 0u)
 
 uvec4 test_usubborrow_uvec2() {
@@ -64,6 +68,7 @@ uvec4 test_usubborrow_uvec2() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u)
 
 
