@@ -66,7 +66,7 @@ impl MockRuntime {
 
     pub fn add_shader_param_def(&mut self, frame: Revision, name: &str, default: f32) {
         set_current_revision(frame);
-        self.shader_def.add_param_def(name, default);
+        self.shader_def.add_consumed_slot(name, default);
     }
 
     pub fn set_shader_param(&mut self, frame: Revision, name: &str, value: f32) {
@@ -227,7 +227,7 @@ impl MockRuntime {
         path: &str,
     ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
         match path {
-            "param_defs[exposure].label" => Ok(MutationTargetInfo {
+            "consumed_slots[exposure].label" => Ok(MutationTargetInfo {
                 target: MutationTarget::ShaderExposureLabel,
                 shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
                 data_version: self
@@ -236,7 +236,7 @@ impl MockRuntime {
                     .ok_or(WireSlotMutationRejection::UnknownPath)?,
                 ty: LpType::String,
             }),
-            "param_defs[exposure].default" => Ok(MutationTargetInfo {
+            "consumed_slots[exposure].default" => Ok(MutationTargetInfo {
                 target: MutationTarget::Unsupported,
                 shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
                 data_version: self

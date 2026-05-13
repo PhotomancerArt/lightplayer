@@ -118,10 +118,13 @@ struct HostShader {
 }
 
 impl LpShader for HostShader {
-    fn render(&mut self, buf: &mut LpsTextureBuf, time: f32) -> Result<(), Error> {
-        let uniforms = build_uniforms(buf.width(), buf.height(), time);
+    fn render(
+        &mut self,
+        buf: &mut LpsTextureBuf,
+        uniforms: &lps_shared::LpsValueF32,
+    ) -> Result<(), Error> {
         self.px
-            .render_frame(&uniforms, buf)
+            .render_frame(uniforms, buf)
             .map_err(|e| Error::Other {
                 message: format!("render_frame: {e}"),
             })
@@ -131,13 +134,10 @@ impl LpShader for HostShader {
         &mut self,
         points: &mut lp_shader::LpsSamplePointBuf,
         out: &mut lp_shader::LpsSampleRgba16Buf,
-        output_width: u32,
-        output_height: u32,
-        time: f32,
+        uniforms: &lps_shared::LpsValueF32,
     ) -> Result<(), Error> {
-        let uniforms = build_uniforms(output_width, output_height, time);
         self.px
-            .sample_points_rgba16(&uniforms, points, out)
+            .sample_points_rgba16(uniforms, points, out)
             .map_err(|e| Error::Other {
                 message: format!("sample_points_rgba16: {e}"),
             })
@@ -169,9 +169,10 @@ mod tests {
             .data_mut()
             .copy_from_slice(&[0, 0, 2 * 65536, 4 * 65536]);
         let mut out = graphics.alloc_sample_rgba16(2).expect("out");
+        let uniforms = build_uniforms(4, 8, &[]);
 
         shader
-            .sample_rgba16(&mut points, &mut out, 4, 8, 0.0)
+            .sample_rgba16(&mut points, &mut out, &uniforms)
             .expect("sample");
 
         assert_eq!(&out.data()[0..4], &[0, 0, 0, 65535]);

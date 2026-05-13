@@ -33,7 +33,7 @@ fn incremental_changes_patch_client_state() {
         )),
     );
 
-    println!("server updating source.shader#param_defs[gain].default to 0.5");
+    println!("server updating source.shader#consumed_slots[gain].default to 0.5");
     harness
         .runtime
         .add_shader_param_def(Revision::new(3), "gain", 0.5);
@@ -42,7 +42,7 @@ fn incremental_changes_patch_client_state() {
     harness.print_client_tree("source.shader");
     assert_map_has_key(
         harness.client.roots.get("source.shader").unwrap(),
-        "param_defs",
+        "consumed_slots",
         SlotMapKey::String("gain".to_string()),
     );
 

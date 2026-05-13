@@ -27,7 +27,7 @@ fn generated_basic_source_toml_round_trips_and_documents_authored_shape() {
     let _shader: ShaderDef = toml::from_str(&shader_toml).expect("shader toml round-trip");
     let _fixture: FixtureDef = toml::from_str(&fixture_toml).expect("fixture toml round-trip");
 
-    assert!(shader_toml.contains("[param_defs.exposure]"));
+    assert!(shader_toml.contains("[consumed.exposure]"));
     assert!(shader_toml.contains("texture_loc = \"..texture\""));
     assert!(fixture_toml.contains("kind = \"path_points\""));
     assert!(fixture_toml.contains("[mapping.points.1]"));

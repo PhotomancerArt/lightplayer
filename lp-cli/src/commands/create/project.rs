@@ -3,11 +3,12 @@
 //! Functions for creating new projects with sensible defaults.
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
 use lpc_model::nodes::output::OutputDef;
-use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
@@ -78,10 +79,10 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         render_order: RenderOrderSlot::new(0),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
-        param_defs: MapSlot::default(),
+        consumed_slots: default_visual_consumed_slots(),
     };
     let shader_toml = with_kind(
-        "shader",
+        ShaderDef::KIND,
         toml::to_string(&shader_config).context("Failed to serialize shader def to TOML")?,
     );
     fs.write_file("/shader.toml".as_path(), shader_toml.as_bytes())
@@ -200,6 +201,9 @@ name = "{name}"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+kind = "clock"
+
 [nodes.texture]
 artifact = "./texture.toml"
 
@@ -217,6 +221,15 @@ artifact = "./fixture.toml"
 
 fn with_kind(kind: &str, body: String) -> String {
     format!("kind = \"{kind}\"\n{body}")
+}
+
+fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
+    let mut slots = BTreeMap::new();
+    slots.insert(
+        String::from("time"),
+        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
+    );
+    MapSlot::new(slots)
 }
 
 fn bus_input_binding_defs(slot: &str) -> BindingDefs {

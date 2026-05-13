@@ -5,6 +5,9 @@ name = "perf-fastmath"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+kind = "clock"
+
 [nodes.texture]
 artifact = "./texture.toml"
 

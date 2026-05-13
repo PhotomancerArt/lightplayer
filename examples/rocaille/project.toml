@@ -5,6 +5,9 @@ name = "rocaille"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+kind = "clock"
+
 [nodes.texture]
 artifact = "./texture.toml"
 

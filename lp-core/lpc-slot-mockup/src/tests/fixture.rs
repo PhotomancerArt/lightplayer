@@ -192,7 +192,7 @@ fn shader_param_index(name: &str) -> usize {
 }
 
 pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str) {
-    let selected = select(data, &format!("param_defs[{name}]"));
+    let selected = select(data, &format!("consumed_slots[{name}]"));
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
@@ -206,7 +206,7 @@ pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str)
 }
 
 pub fn assert_shader_param_def_label(data: &SlotData, name: &str, expected: &str) {
-    let selected = select(data, &format!("param_defs[{name}]"));
+    let selected = select(data, &format!("consumed_slots[{name}]"));
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
@@ -239,7 +239,7 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                     panic!("expected record field segment {segment:?}");
                 };
                 let index = match segment.as_str() {
-                    "source.shader.param_defs" | "param_defs" => 4,
+                    "source.shader.consumed_slots" | "consumed_slots" => 4,
                     "engine.shader_node.params" | "params" => 0,
                     "engine.fixture_node.touches" | "touches" => 0,
                     "mapping" => 2,

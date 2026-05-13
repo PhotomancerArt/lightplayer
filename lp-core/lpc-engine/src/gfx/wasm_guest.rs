@@ -15,7 +15,6 @@ use lpvm_wasm::rt_browser::BrowserLpvmEngine;
 use super::lp_gfx::LpGraphics;
 use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
 use crate::engine::error::Error;
-use crate::gfx::uniforms::build_uniforms;
 
 /// Wasm32 guest shader graphics backed by `lpvm-wasm` + browser host.
 pub struct Graphics {
@@ -117,10 +116,13 @@ struct WasmGuestShader {
 }
 
 impl LpShader for WasmGuestShader {
-    fn render(&mut self, buf: &mut LpsTextureBuf, time: f32) -> Result<(), Error> {
-        let uniforms = build_uniforms(buf.width(), buf.height(), time);
+    fn render(
+        &mut self,
+        buf: &mut LpsTextureBuf,
+        uniforms: &lps_shared::LpsValueF32,
+    ) -> Result<(), Error> {
         self.px
-            .render_frame(&uniforms, buf)
+            .render_frame(uniforms, buf)
             .map_err(|e| Error::Other {
                 message: format!("render_frame: {e}"),
             })
@@ -130,13 +132,10 @@ impl LpShader for WasmGuestShader {
         &mut self,
         points: &mut lp_shader::LpsSamplePointBuf,
         out: &mut lp_shader::LpsSampleRgba16Buf,
-        output_width: u32,
-        output_height: u32,
-        time: f32,
+        uniforms: &lps_shared::LpsValueF32,
     ) -> Result<(), Error> {
-        let uniforms = build_uniforms(output_width, output_height, time);
         self.px
-            .sample_points_rgba16(&uniforms, points, out)
+            .sample_points_rgba16(uniforms, points, out)
             .map_err(|e| Error::Other {
                 message: format!("sample_points_rgba16: {e}"),
             })

@@ -22,13 +22,13 @@ impl ShaderNode {
 
     pub fn from_def_with_shape_id(def: &ShaderDef, shape_id: SlotShapeId) -> Self {
         let param_names = def
-            .param_defs
+            .consumed_slots
             .entries
             .keys()
             .map(|name| SlotName::parse(name).expect("shader param name"))
             .collect::<Vec<_>>();
         let params = def
-            .param_defs
+            .consumed_slots
             .entries
             .values()
             .map(|param_def| {
