@@ -29,7 +29,7 @@ use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
     BuiltinKind, GlobalInfo, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody,
-    HirModule, HirOutArg, HirParam, HirStmt, ImportKey, UniformInfo,
+    HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportKey, UniformInfo,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 

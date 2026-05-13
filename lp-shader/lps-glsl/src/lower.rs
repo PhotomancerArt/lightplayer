@@ -388,7 +388,11 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             let index = lower_expr(ctx, index)?;
             lower_index(ctx, expr.span, base, index, &expr.ty)
         }
-        HirExprKind::Builtin { kind, args } => lower_builtin(ctx, expr.span, *kind, args, &expr.ty),
+        HirExprKind::Builtin {
+            kind,
+            args,
+            writebacks,
+        } => lower_builtin(ctx, expr.span, *kind, args, writebacks, &expr.ty),
         HirExprKind::UserCall {
             function,
             args,

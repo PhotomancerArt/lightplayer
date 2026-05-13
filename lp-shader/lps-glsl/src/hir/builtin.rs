@@ -35,6 +35,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "fract" => BuiltinKind::Fract,
         "greaterThan" => BuiltinKind::GreaterThan,
         "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
+        "imulExtended" => BuiltinKind::ImulExtended,
         "inverse" => BuiltinKind::Inverse,
         "inversesqrt" => BuiltinKind::InverseSqrt,
         "isinf" => BuiltinKind::IsInf,
@@ -59,8 +60,21 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "sqrt" => BuiltinKind::Sqrt,
         "transpose" => BuiltinKind::Transpose,
         "trunc" => BuiltinKind::Trunc,
+        "uaddCarry" => BuiltinKind::UaddCarry,
+        "umulExtended" => BuiltinKind::UmulExtended,
+        "usubBorrow" => BuiltinKind::UsubBorrow,
         _ => return None,
     })
+}
+
+pub(super) fn builtin_has_out_args(kind: BuiltinKind) -> bool {
+    matches!(
+        kind,
+        BuiltinKind::ImulExtended
+            | BuiltinKind::UaddCarry
+            | BuiltinKind::UmulExtended
+            | BuiltinKind::UsubBorrow
+    )
 }
 
 pub(super) fn is_glsl_import(name: &str) -> bool {
@@ -162,6 +176,12 @@ pub(super) fn type_builtin_args(
     kind: BuiltinKind,
     args: Vec<HirExpr>,
 ) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
+    if builtin_has_out_args(kind) {
+        return Err(Diagnostic::error(
+            span,
+            "builtin with out arguments requires lvalue-aware typing",
+        ));
+    }
     let arity = match kind {
         BuiltinKind::Abs
         | BuiltinKind::All
@@ -209,6 +229,10 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Mix
         | BuiltinKind::Smoothstep => 3,
         BuiltinKind::BitfieldInsert => 4,
+        BuiltinKind::ImulExtended
+        | BuiltinKind::UaddCarry
+        | BuiltinKind::UmulExtended
+        | BuiltinKind::UsubBorrow => unreachable!("out-arg builtins return before arity checks"),
     };
     if args.len() != arity {
         return Err(Diagnostic::error(
@@ -470,5 +494,9 @@ pub(super) fn type_builtin_args(
             };
             Ok((alloc::vec![x, y, a], ty))
         }
+        BuiltinKind::ImulExtended
+        | BuiltinKind::UaddCarry
+        | BuiltinKind::UmulExtended
+        | BuiltinKind::UsubBorrow => unreachable!("out-arg builtins return before type checks"),
     }
 }

@@ -1,5 +1,5 @@
 pub(super) use super::builtin::{
-    builtin_kind, is_glsl_import, type_builtin_args, type_glsl_import_args,
+    builtin_has_out_args, builtin_kind, is_glsl_import, type_builtin_args, type_glsl_import_args,
 };
 pub(super) use super::coerce::{
     coerce_arithmetic_pair, coerce_comparison_pair, coerce_constructor_args, coerce_expr,

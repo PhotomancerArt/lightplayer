@@ -5,7 +5,7 @@ use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
 use crate::body::BinaryOp;
-use crate::hir::{BuiltinKind, HirExpr, scalar_base_type, scalar_lane_count};
+use crate::hir::{BuiltinKind, HirExpr, HirUserCallWriteback, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
@@ -15,6 +15,7 @@ use super::numeric::{
     lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
     lower_unary_float_lane,
 };
+use super::place_write::assign_target;
 use super::scalar::lower_binary;
 
 pub(in crate::lower) fn lower_builtin(
@@ -22,12 +23,22 @@ pub(in crate::lower) fn lower_builtin(
     span: Span,
     kind: BuiltinKind,
     args: &[HirExpr],
+    writebacks: &[HirUserCallWriteback],
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let values = args
         .iter()
         .map(|arg| lower_expr(ctx, arg))
         .collect::<Result<Vec<_>, _>>()?;
+    match kind {
+        BuiltinKind::UaddCarry | BuiltinKind::UsubBorrow => {
+            return lower_add_sub_carry_builtin(ctx, span, kind, &values, writebacks, result_ty);
+        }
+        BuiltinKind::UmulExtended | BuiltinKind::ImulExtended => {
+            return lower_mul_extended_builtin(ctx, span, kind, &values, writebacks, result_ty);
+        }
+        _ => {}
+    }
     if kind == BuiltinKind::Distance {
         let delta = lower_binary(
             ctx,
@@ -157,6 +168,9 @@ pub(in crate::lower) fn lower_builtin(
                     result_ty,
                 );
             }
+            BuiltinKind::ImulExtended => {
+                unreachable!("imulExtended returns before lane-wise builtin lowering")
+            }
             BuiltinKind::Length => return lower_length(ctx, span, &values[0], result_ty),
             BuiltinKind::Inverse => {
                 unreachable!("inverse returns before lane-wise builtin lowering")
@@ -265,6 +279,15 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Trunc => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Trunc)?
             }
+            BuiltinKind::UaddCarry => {
+                unreachable!("uaddCarry returns before lane-wise builtin lowering")
+            }
+            BuiltinKind::UmulExtended => {
+                unreachable!("umulExtended returns before lane-wise builtin lowering")
+            }
+            BuiltinKind::UsubBorrow => {
+                unreachable!("usubBorrow returns before lane-wise builtin lowering")
+            }
         };
         lanes.push(lane);
     }
@@ -272,6 +295,171 @@ pub(in crate::lower) fn lower_builtin(
         ty: result_ty.clone(),
         lanes,
     })
+}
+
+fn lower_add_sub_carry_builtin(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    kind: BuiltinKind,
+    values: &[LowerValue],
+    writebacks: &[HirUserCallWriteback],
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let [carry_writeback] = writebacks else {
+        return Err(Diagnostic::error(span, "carry builtin writeback mismatch"));
+    };
+    let width = scalar_lane_count(result_ty);
+    let mut result_lanes = Vec::new();
+    let mut carry_lanes = Vec::new();
+    for i in 0..width {
+        let lhs = lane_at(&values[0], i);
+        let rhs = lane_at(&values[1], i);
+        let result = ctx.fb.alloc_vreg(IrType::I32);
+        let carry = ctx.fb.alloc_vreg(IrType::I32);
+        match kind {
+            BuiltinKind::UaddCarry => {
+                ctx.fb.push(LpirOp::Iadd {
+                    dst: result,
+                    lhs,
+                    rhs,
+                });
+                ctx.fb.push(LpirOp::IltU {
+                    dst: carry,
+                    lhs: result,
+                    rhs: lhs,
+                });
+            }
+            BuiltinKind::UsubBorrow => {
+                ctx.fb.push(LpirOp::Isub {
+                    dst: result,
+                    lhs,
+                    rhs,
+                });
+                ctx.fb.push(LpirOp::IltU {
+                    dst: carry,
+                    lhs,
+                    rhs,
+                });
+            }
+            _ => unreachable!("not an add/sub carry builtin"),
+        }
+        result_lanes.push(result);
+        carry_lanes.push(carry);
+    }
+    assign_target(
+        ctx,
+        span,
+        &carry_writeback.target,
+        LowerValue {
+            ty: carry_writeback.ty.clone(),
+            lanes: carry_lanes,
+        },
+    )?;
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes: result_lanes,
+    })
+}
+
+fn lower_mul_extended_builtin(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    kind: BuiltinKind,
+    values: &[LowerValue],
+    writebacks: &[HirUserCallWriteback],
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let [msb_writeback, lsb_writeback] = writebacks else {
+        return Err(Diagnostic::error(
+            span,
+            "multiply-extended builtin writeback mismatch",
+        ));
+    };
+    let width = scalar_lane_count(&msb_writeback.ty);
+    let mut msb_lanes = Vec::new();
+    let mut lsb_lanes = Vec::new();
+    for i in 0..width {
+        let lhs = lane_at(&values[0], i);
+        let rhs = lane_at(&values[1], i);
+        let lsb = lower_mul_low_lane(ctx, lhs, rhs);
+        let unsigned_msb = lower_umul_high_lane(ctx, lhs, rhs);
+        let msb = match kind {
+            BuiltinKind::UmulExtended => unsigned_msb,
+            BuiltinKind::ImulExtended => lower_signed_mul_high_lane(ctx, lhs, rhs, unsigned_msb),
+            _ => unreachable!("not a multiply-extended builtin"),
+        };
+        msb_lanes.push(msb);
+        lsb_lanes.push(lsb);
+    }
+    assign_target(
+        ctx,
+        span,
+        &msb_writeback.target,
+        LowerValue {
+            ty: msb_writeback.ty.clone(),
+            lanes: msb_lanes,
+        },
+    )?;
+    assign_target(
+        ctx,
+        span,
+        &lsb_writeback.target,
+        LowerValue {
+            ty: lsb_writeback.ty.clone(),
+            lanes: lsb_lanes,
+        },
+    )?;
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes: Vec::new(),
+    })
+}
+
+fn lower_mul_low_lane(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Imul { dst, lhs, rhs });
+    dst
+}
+
+fn lower_umul_high_lane(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let mask = iconst(ctx, 0xffff);
+    let lhs_lo = iand(ctx, lhs, mask);
+    let rhs_lo = iand(ctx, rhs, mask);
+    let lhs_hi = ishr_u_imm(ctx, lhs, 16);
+    let rhs_hi = ishr_u_imm(ctx, rhs, 16);
+
+    let p0 = imul(ctx, lhs_lo, rhs_lo);
+    let p1 = imul(ctx, lhs_lo, rhs_hi);
+    let p2 = imul(ctx, lhs_hi, rhs_lo);
+    let p3 = imul(ctx, lhs_hi, rhs_hi);
+
+    let p0_hi = ishr_u_imm(ctx, p0, 16);
+    let p1_lo = iand(ctx, p1, mask);
+    let p2_lo = iand(ctx, p2, mask);
+    let t0 = iadd(ctx, p0_hi, p1_lo);
+    let t = iadd(ctx, t0, p2_lo);
+
+    let p1_hi = ishr_u_imm(ctx, p1, 16);
+    let p2_hi = ishr_u_imm(ctx, p2, 16);
+    let t_hi = ishr_u_imm(ctx, t, 16);
+    let hi0 = iadd(ctx, p3, p1_hi);
+    let hi1 = iadd(ctx, hi0, p2_hi);
+    iadd(ctx, hi1, t_hi)
+}
+
+fn lower_signed_mul_high_lane(
+    ctx: &mut LowerCtx<'_>,
+    lhs: lpir::VReg,
+    rhs: lpir::VReg,
+    unsigned_high: lpir::VReg,
+) -> lpir::VReg {
+    let zero = iconst(ctx, 0);
+    let lhs_neg = ilt_s(ctx, lhs, zero);
+    let rhs_neg = ilt_s(ctx, rhs, zero);
+    let lhs_correction = select(ctx, lhs_neg, rhs, zero);
+    let rhs_correction = select(ctx, rhs_neg, lhs, zero);
+    let corrected_lhs = isub(ctx, unsigned_high, lhs_correction);
+    isub(ctx, corrected_lhs, rhs_correction)
 }
 
 fn lower_bit_count_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {
@@ -503,6 +691,52 @@ fn ishr_u_imm(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, imm: i32) -> lpir::VReg {
     let rhs = iconst(ctx, imm);
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(LpirOp::IshrU { dst, lhs, rhs });
+    dst
+}
+
+fn iand(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Iand { dst, lhs, rhs });
+    dst
+}
+
+fn iadd(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Iadd { dst, lhs, rhs });
+    dst
+}
+
+fn isub(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Isub { dst, lhs, rhs });
+    dst
+}
+
+fn imul(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Imul { dst, lhs, rhs });
+    dst
+}
+
+fn ilt_s(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IltS { dst, lhs, rhs });
+    dst
+}
+
+fn select(
+    ctx: &mut LowerCtx<'_>,
+    cond: lpir::VReg,
+    if_true: lpir::VReg,
+    if_false: lpir::VReg,
+) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond,
+        if_true,
+        if_false,
+    });
     dst
 }
 

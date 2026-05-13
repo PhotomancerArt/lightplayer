@@ -158,6 +158,7 @@ pub enum HirExprKind {
     Builtin {
         kind: BuiltinKind,
         args: Vec<HirExpr>,
+        writebacks: Vec<HirUserCallWriteback>,
     },
     UserCall {
         function: usize,
@@ -251,6 +252,7 @@ pub enum BuiltinKind {
     FindMsb,
     GreaterThan,
     GreaterThanEqual,
+    ImulExtended,
     Inverse,
     InverseSqrt,
     IsInf,
@@ -275,4 +277,7 @@ pub enum BuiltinKind {
     Sqrt,
     Transpose,
     Trunc,
+    UaddCarry,
+    UmulExtended,
+    UsubBorrow,
 }
