@@ -29,8 +29,8 @@ Out of scope unless a filetest proves otherwise:
 - lexer/token/source span plumbing
 - resumable `LpCompileJob` shape
 - top-level indexing for uniforms, consts, and functions
-- body parser for declarations, simple assignment, `if`, and `return`
-- HIR with typed expressions, locals, uniforms, builtins, user calls, and import calls
+- parser support for declarations, assignment forms, control flow, calls, and many expression operators
+- HIR with typed expressions, locals, uniforms, builtins, user calls, import calls, and partial aggregate support
 - LPIR lowering for scalar/vector values
 - `rv32lpn.q32` filetest target
 - `just demo-esp32c6-host-lps-glsl`
@@ -44,22 +44,58 @@ The vertical slice is real:
 
 ## Current Limits
 
-The parser currently accepts only a narrow M3 statement set:
+The initial control/function/struct slices are now real enough to compile the demos and a focused set of filetests, but the aggregate foundation is still incomplete.
 
-- declarations
-- simple name assignment
-- `if`
-- `return`
+The important remaining gaps are:
 
-HIR/lowering currently handles scalar and vector values, but not the full aggregate surface:
-
-- no loops, `break`, or `continue`
-- no compound assignment, increment/decrement, ternary, or full logical short-circuiting
-- no general lvalue model for swizzles, members, array indexes, or nested paths
-- no arrays, structs, matrices, or global mutable values
-- limited overload and qualifier handling
+- no single place model for swizzles, fields, indexes, globals, uniforms, and writable call arguments
+- array/struct support is still more lane-flattened and case-based than it should be for feature parity
+- arrays of structs, structs containing arrays, multidimensional arrays, and dynamic aggregate indexing need a stronger layout/access model
+- aggregate `out`/`inout` needs the same machinery as ordinary assignment instead of bespoke writeback paths
+- globals, uniform aggregates, and mutable global lifecycle semantics need to be tied into the same layout model
+- aggregate return support may require a focused ABI design if filetests demand it
+- matrix layout should be represented by the same aggregate shape layer instead of ad hoc column/vector handling
 - limited builtin coverage
 - diagnostics have spans, but not yet the friendly line/indicator presentation everywhere
+
+## Aggregate Foundation Notes
+
+The current hard part is not parsing `struct` or `float a[4]`. It is preserving one coherent notion of data shape through semantic analysis and lowering.
+
+Recommended model:
+
+- derive an `lps-glsl` `TypeShape` / `LayoutView` from `LpsType`
+- delegate byte layout to the existing `lps_shared::layout` and LPVM data/path helpers
+- expose frontend-only value-shape facts, such as scalar lane order and matrix column shape, beside shared byte-layout facts
+- represent access as `PlaceRoot + PlacePath`, not as separate enum variants for every combination
+- let lowering choose lane-flat or slot-backed representation behind the place API
+- treat pointer ABI changes as a stop-and-design boundary, because they can affect LPIR/backends and firmware size
+
+Existing layout anchors:
+
+- `lp-shader/lps-shared/src/layout.rs`: std430 `LpsType` size, alignment, and array stride
+- `lp-shader/lpvm/src/lpvm_data_q32.rs`: byte-backed data with path access over `LpsType`
+- `lp-shader/lps-frontend/src/lower_aggregate_layout.rs`: example frontend adaptor over shared layout logic
+- `lp-shader/lps-frontend/src/naga_util.rs`: current aggregate layout metadata for the Naga path
+
+## Naga Frontend Inspiration
+
+The Naga-backed frontend has already solved several aggregate problems that should influence `lps-glsl`:
+
+- `lower_ctx::AggregateSlot` and `AggregateInfo` are a good conceptual model: aggregate values have storage, layout metadata, and a type identity.
+- `lower_call.rs` uses one pointer argument for aggregate `in`, `out`, and `inout` cases, with optional sret for aggregate returns. This is the likely ABI shape if `lps-glsl` needs true aggregate pointer behavior.
+- `lower_array.rs` centralizes array element address calculation, including dynamic index clamping and row-major multidimensional flattening.
+- `lower_aggregate_write.rs` has the right fast path: whole slot-backed aggregate copies should become `Memcpy` instead of scalar-by-scalar stores when possible.
+- `lower_lvalue.rs` validates the need for a writable actual abstraction with optional post-call writeback for projected scalar/vector leaves.
+
+The warning from the Naga path is that much of the complexity comes from peeling Naga expression trees after the fact. `lps-glsl` can do better by constructing a typed `PlaceRoot + PlacePath` during semantic analysis and carrying it into lowering directly.
+
+Useful reference material:
+
+- `docs-archive/roadmaps/2026-04-22-lp-shader-aggregates/`
+- especially the pointer ABI foundation and struct lowering notes
+
+The archived roadmap was written for the old Naga-backed frontend and broader LPIR/backends. It should inform the design, not dictate it.
 
 ## Filetest Inventory
 
@@ -99,6 +135,7 @@ Current focused `lps-glsl` fixtures:
 - Work mostly autonomously and stop when actual product or semantic questions come up.
 - The filetests should become the gate before hardware testing.
 - The implementation has a reference path: existing Naga frontend behavior plus existing filetests.
+- Arrays, structs, pointers, and data shape should be designed deliberately rather than accreted as late special cases.
 
 ## Working Assumptions
 
@@ -126,6 +163,6 @@ Autonomous work should stop and ask for direction when:
 - a filetest depends on preprocessor behavior or GPU metadata that may be intentionally out of scope
 - matching Naga would require changing LightPlayer runtime semantics
 - an LPIR/runtime ABI change is needed, especially around textures, imports, or aggregate values
+- aggregate returns or aggregate `inout` require a new pointer ABI rather than frontend-only copy-in/copy-out
 - firmware size regresses enough to threaten the original benefit
 - a feature wants a large architecture split beyond the roadmap
-
