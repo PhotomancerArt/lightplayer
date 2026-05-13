@@ -25,12 +25,15 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "dot" => BuiltinKind::Dot,
         "equal" => BuiltinKind::Equal,
         "floor" => BuiltinKind::Floor,
+        "fma" => BuiltinKind::Fma,
         "fract" => BuiltinKind::Fract,
         "greaterThan" => BuiltinKind::GreaterThan,
         "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
+        "inversesqrt" => BuiltinKind::InverseSqrt,
         "length" => BuiltinKind::Length,
         "lessThan" => BuiltinKind::LessThan,
         "lessThanEqual" => BuiltinKind::LessThanEqual,
+        "matrixCompMult" => BuiltinKind::MatrixCompMult,
         "max" => BuiltinKind::Max,
         "min" => BuiltinKind::Min,
         "mix" => BuiltinKind::Mix,
@@ -38,8 +41,10 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "not" => BuiltinKind::Not,
         "normalize" => BuiltinKind::Normalize,
         "notEqual" => BuiltinKind::NotEqual,
+        "outerProduct" => BuiltinKind::OuterProduct,
         "radians" => BuiltinKind::Radians,
         "round" => BuiltinKind::Round,
+        "sign" => BuiltinKind::Sign,
         "smoothstep" => BuiltinKind::Smoothstep,
         "sqrt" => BuiltinKind::Sqrt,
         "transpose" => BuiltinKind::Transpose,
@@ -51,7 +56,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
 pub(super) fn is_glsl_import(name: &str) -> bool {
     matches!(
         name,
-        "sin" | "cos" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2" | "pow" | "atan"
+        "sin" | "cos" | "tan" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2" | "pow" | "atan"
     )
 }
 
@@ -62,7 +67,7 @@ pub(super) fn type_glsl_import_args(
 ) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
     if matches!(
         name,
-        "sin" | "cos" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2"
+        "sin" | "cos" | "tan" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2"
     ) && args.len() == 1
     {
         let arg = args[0].clone();
@@ -111,11 +116,13 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Determinant
         | BuiltinKind::Floor
         | BuiltinKind::Fract
+        | BuiltinKind::InverseSqrt
         | BuiltinKind::Length
         | BuiltinKind::Normalize
         | BuiltinKind::Not
         | BuiltinKind::Radians
         | BuiltinKind::Round
+        | BuiltinKind::Sign
         | BuiltinKind::Sqrt
         | BuiltinKind::Transpose
         | BuiltinKind::Trunc => 1,
@@ -127,11 +134,13 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::GreaterThanEqual
         | BuiltinKind::LessThan
         | BuiltinKind::LessThanEqual
+        | BuiltinKind::MatrixCompMult
         | BuiltinKind::Max
         | BuiltinKind::Min
         | BuiltinKind::Mod
-        | BuiltinKind::NotEqual => 2,
-        BuiltinKind::Clamp | BuiltinKind::Mix | BuiltinKind::Smoothstep => 3,
+        | BuiltinKind::NotEqual
+        | BuiltinKind::OuterProduct => 2,
+        BuiltinKind::Clamp | BuiltinKind::Fma | BuiltinKind::Mix | BuiltinKind::Smoothstep => 3,
     };
     if args.len() != arity {
         return Err(Diagnostic::error(
@@ -146,14 +155,30 @@ pub(super) fn type_builtin_args(
         }
         BuiltinKind::Ceil
         | BuiltinKind::Degrees
+        | BuiltinKind::InverseSqrt
         | BuiltinKind::Radians
         | BuiltinKind::Round
         | BuiltinKind::Sqrt
         | BuiltinKind::Trunc => {
-            if scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
+            if args[0].ty.is_matrix() || scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
                 return Err(Diagnostic::error(span, "builtin expects float lanes"));
             }
             let ty = args[0].ty.clone();
+            Ok((args, ty))
+        }
+        BuiltinKind::Sign => {
+            let ty = args[0].ty.clone();
+            if ty.is_matrix()
+                || !matches!(
+                    scalar_base_type(&ty),
+                    Some(LpsType::Float | LpsType::Int | LpsType::UInt)
+                )
+            {
+                return Err(Diagnostic::error(
+                    span,
+                    "sign expects numeric scalar/vector lanes",
+                ));
+            }
             Ok((args, ty))
         }
         BuiltinKind::Length | BuiltinKind::Normalize => {
@@ -211,6 +236,49 @@ pub(super) fn type_builtin_args(
             let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
             Ok((alloc::vec![a, b], ty))
         }
+        BuiltinKind::MatrixCompMult => {
+            if !args[0].ty.is_matrix() || args[0].ty != args[1].ty {
+                return Err(Diagnostic::error(
+                    span,
+                    "matrixCompMult expects matching matrix operands",
+                ));
+            }
+            let ty = args[0].ty.clone();
+            Ok((args, ty))
+        }
+        BuiltinKind::OuterProduct => {
+            let a_ty = &args[0].ty;
+            let b_ty = &args[1].ty;
+            if scalar_base_type(a_ty) != Some(LpsType::Float)
+                || scalar_base_type(b_ty) != Some(LpsType::Float)
+                || !a_ty.is_vector()
+                || !b_ty.is_vector()
+            {
+                return Err(Diagnostic::error(
+                    span,
+                    "outerProduct expects float vector operands",
+                ));
+            }
+            let Some(a_width) = a_ty.component_count() else {
+                return Err(Diagnostic::error(span, "outerProduct expects vectors"));
+            };
+            let Some(b_width) = b_ty.component_count() else {
+                return Err(Diagnostic::error(span, "outerProduct expects vectors"));
+            };
+            if a_width != b_width {
+                return Err(Diagnostic::error(
+                    span,
+                    "lps-glsl currently supports square outerProduct results only",
+                ));
+            }
+            let ty = match a_width {
+                2 => LpsType::Mat2,
+                3 => LpsType::Mat3,
+                4 => LpsType::Mat4,
+                _ => return Err(Diagnostic::error(span, "unsupported outerProduct shape")),
+            };
+            Ok((args, ty))
+        }
         BuiltinKind::Equal
         | BuiltinKind::GreaterThan
         | BuiltinKind::GreaterThanEqual
@@ -236,6 +304,17 @@ pub(super) fn type_builtin_args(
                 ],
                 ty,
             ))
+        }
+        BuiltinKind::Fma => {
+            let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            if ty.is_matrix() || scalar_base_type(&ty) != Some(LpsType::Float) {
+                return Err(Diagnostic::error(
+                    span,
+                    "fma expects float scalar/vector lanes",
+                ));
+            }
+            let c = coerce_expr(args[2].clone(), &ty)?;
+            Ok((alloc::vec![a, b, c], ty))
         }
         BuiltinKind::Mix => {
             let (x, y, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;

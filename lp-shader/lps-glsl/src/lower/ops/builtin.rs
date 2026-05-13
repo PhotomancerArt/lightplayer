@@ -51,6 +51,12 @@ pub(in crate::lower) fn lower_builtin(
     if kind == BuiltinKind::Normalize {
         return lower_normalize(ctx, span, &values[0], result_ty);
     }
+    if kind == BuiltinKind::MatrixCompMult {
+        return lower_matrix_comp_mult(ctx, span, &values[0], &values[1], result_ty);
+    }
+    if kind == BuiltinKind::OuterProduct {
+        return lower_outer_product(ctx, span, &values[0], &values[1], result_ty);
+    }
     if kind == BuiltinKind::Transpose {
         return lower_matrix_transpose(ctx, span, values[0].clone(), result_ty);
     }
@@ -141,6 +147,10 @@ pub(in crate::lower) fn lower_builtin(
                 );
             }
             BuiltinKind::Length => return lower_length(ctx, span, &values[0], result_ty),
+            BuiltinKind::InverseSqrt => lower_inversesqrt_lane(ctx, &values[0], i),
+            BuiltinKind::MatrixCompMult => {
+                unreachable!("matrixCompMult returns before lane-wise builtin lowering")
+            }
             BuiltinKind::NotEqual => {
                 return lower_binary(
                     ctx,
@@ -154,6 +164,7 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Floor => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Floor)?
             }
+            BuiltinKind::Fma => lower_fma_lane(ctx, &values[0], &values[1], &values[2], i),
             BuiltinKind::Fract => {
                 let x = lane_at(&values[0], i);
                 let f = ctx.fb.alloc_vreg(IrType::F32);
@@ -175,6 +186,9 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Mod => lower_mod_lane(ctx, &values[0], &values[1], i),
             BuiltinKind::Normalize => {
                 unreachable!("normalize returns before lane-wise builtin lowering")
+            }
+            BuiltinKind::OuterProduct => {
+                unreachable!("outerProduct returns before lane-wise builtin lowering")
             }
             BuiltinKind::Radians => {
                 let scale = LowerValue {
@@ -213,6 +227,7 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Smoothstep => {
                 lower_smoothstep_lane(ctx, &values[0], &values[1], &values[2], i)
             }
+            BuiltinKind::Sign => lower_sign_lane(ctx, span, result_ty, &values[0], i)?,
             BuiltinKind::Sqrt => {
                 let dst = ctx.fb.alloc_vreg(IrType::F32);
                 ctx.fb.push(LpirOp::Fsqrt {
@@ -234,6 +249,217 @@ pub(in crate::lower) fn lower_builtin(
         ty: result_ty.clone(),
         lanes,
     })
+}
+
+fn lower_fma_lane(
+    ctx: &mut LowerCtx<'_>,
+    a: &LowerValue,
+    b: &LowerValue,
+    c: &LowerValue,
+    index: usize,
+) -> lpir::VReg {
+    let product = ctx.fb.alloc_vreg(IrType::F32);
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fmul {
+        dst: product,
+        lhs: lane_at(a, index),
+        rhs: lane_at(b, index),
+    });
+    ctx.fb.push(LpirOp::Fadd {
+        dst,
+        lhs: product,
+        rhs: lane_at(c, index),
+    });
+    dst
+}
+
+fn lower_inversesqrt_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {
+    let sqrt = ctx.fb.alloc_vreg(IrType::F32);
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fsqrt {
+        dst: sqrt,
+        src: lane_at(value, index),
+    });
+    let one = fconst(ctx, 1.0);
+    ctx.fb.push(LpirOp::Fdiv {
+        dst,
+        lhs: one,
+        rhs: sqrt,
+    });
+    dst
+}
+
+fn lower_sign_lane(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    result_ty: &LpsType,
+    value: &LowerValue,
+    index: usize,
+) -> Result<lpir::VReg, Diagnostic> {
+    let x = lane_at(value, index);
+    match scalar_base_type(result_ty).unwrap_or_else(|| result_ty.clone()) {
+        LpsType::Float => Ok(lower_float_sign_lane(ctx, x)),
+        LpsType::Int => Ok(lower_int_sign_lane(ctx, x)),
+        LpsType::UInt => Ok(lower_uint_sign_lane(ctx, x)),
+        _ => Err(Diagnostic::error(span, "sign expects numeric lanes")),
+    }
+}
+
+fn lower_float_sign_lane(ctx: &mut LowerCtx<'_>, x: lpir::VReg) -> lpir::VReg {
+    let zero = fconst(ctx, 0.0);
+    let one = fconst(ctx, 1.0);
+    let neg_one = fconst(ctx, -1.0);
+    let gt = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Fgt {
+        dst: gt,
+        lhs: x,
+        rhs: zero,
+    });
+    let lt = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Flt {
+        dst: lt,
+        lhs: x,
+        rhs: zero,
+    });
+    let positive_or_zero = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Select {
+        dst: positive_or_zero,
+        cond: gt,
+        if_true: one,
+        if_false: zero,
+    });
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: lt,
+        if_true: neg_one,
+        if_false: positive_or_zero,
+    });
+    dst
+}
+
+fn lower_int_sign_lane(ctx: &mut LowerCtx<'_>, x: lpir::VReg) -> lpir::VReg {
+    let zero = iconst(ctx, 0);
+    let gt = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IgtS {
+        dst: gt,
+        lhs: x,
+        rhs: zero,
+    });
+    let lt = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IltS {
+        dst: lt,
+        lhs: x,
+        rhs: zero,
+    });
+    let one = iconst(ctx, 1);
+    let neg_one = iconst(ctx, -1);
+    let positive_or_zero = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst: positive_or_zero,
+        cond: gt,
+        if_true: one,
+        if_false: zero,
+    });
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: lt,
+        if_true: neg_one,
+        if_false: positive_or_zero,
+    });
+    dst
+}
+
+fn lower_uint_sign_lane(ctx: &mut LowerCtx<'_>, x: lpir::VReg) -> lpir::VReg {
+    let zero = iconst(ctx, 0);
+    let gt = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IgtU {
+        dst: gt,
+        lhs: x,
+        rhs: zero,
+    });
+    let one = iconst(ctx, 1);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: gt,
+        if_true: one,
+        if_false: zero,
+    });
+    dst
+}
+
+fn lower_matrix_comp_mult(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if !result_ty.is_matrix() || lhs.ty != *result_ty || rhs.ty != *result_ty {
+        return Err(Diagnostic::error(
+            span,
+            "matrixCompMult expects matching matrices",
+        ));
+    }
+    if lhs.lanes.len() != rhs.lanes.len() {
+        return Err(Diagnostic::error(span, "matrixCompMult lane counts differ"));
+    }
+    let mut lanes = Vec::new();
+    for (l, r) in lhs.lanes.iter().zip(rhs.lanes.iter()) {
+        let dst = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Fmul {
+            dst,
+            lhs: *l,
+            rhs: *r,
+        });
+        lanes.push(dst);
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
+}
+
+fn lower_outer_product(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let Some((cols, rows)) = result_ty.matrix_dims() else {
+        return Err(Diagnostic::error(
+            span,
+            "outerProduct result must be a matrix",
+        ));
+    };
+    if lhs.lanes.len() != rows || rhs.lanes.len() != cols {
+        return Err(Diagnostic::error(span, "unsupported outerProduct shape"));
+    }
+    let mut lanes = Vec::new();
+    for col in 0..cols {
+        for row in 0..rows {
+            let dst = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(LpirOp::Fmul {
+                dst,
+                lhs: lhs.lanes[row],
+                rhs: rhs.lanes[col],
+            });
+            lanes.push(dst);
+        }
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
+}
+
+fn iconst(ctx: &mut LowerCtx<'_>, value: i32) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IconstI32 { dst, value });
+    dst
 }
 
 fn lower_length(
