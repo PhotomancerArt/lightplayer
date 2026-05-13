@@ -15,22 +15,22 @@ use super::types::HirExpr;
     dead_code,
     reason = "call-actual places land when aggregate out/inout lowering moves here"
 )]
-pub(super) enum AccessMode {
+pub(crate) enum AccessMode {
     Read,
     Write,
     CallActual,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct HirPlace {
-    pub(super) root: PlaceRoot,
-    pub(super) segments: Vec<PlaceSegment>,
-    pub(super) ty: LpsType,
-    pub(super) lanes: Option<Vec<usize>>,
+pub(crate) struct HirPlace {
+    pub(crate) root: PlaceRoot,
+    pub(crate) segments: Vec<PlaceSegment>,
+    pub(crate) ty: LpsType,
+    pub(crate) lanes: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum PlaceRoot {
+pub(crate) enum PlaceRoot {
     Local {
         local: usize,
         ty: LpsType,
@@ -51,7 +51,7 @@ pub(super) enum PlaceRoot {
     dead_code,
     reason = "place paths intentionally carry layout metadata before slot-backed lowering consumes it"
 )]
-pub(super) enum PlaceSegment {
+pub(crate) enum PlaceSegment {
     Field {
         name: String,
         ty: LpsType,
@@ -71,7 +71,7 @@ pub(super) enum PlaceSegment {
 }
 
 impl HirPlace {
-    pub(super) fn root_ty(&self) -> &LpsType {
+    pub(crate) fn root_ty(&self) -> &LpsType {
         self.root.ty()
     }
 
@@ -155,13 +155,13 @@ impl HirPlace {
         ))
     }
 
-    pub(super) fn single_root_lane_path(&self) -> Option<Vec<usize>> {
+    pub(crate) fn single_root_lane_path(&self) -> Option<Vec<usize>> {
         self.lanes.clone()
     }
 }
 
 impl PlaceRoot {
-    pub(super) fn ty(&self) -> &LpsType {
+    pub(crate) fn ty(&self) -> &LpsType {
         match self {
             PlaceRoot::Local { ty, .. }
             | PlaceRoot::Param { ty, .. }
@@ -169,7 +169,7 @@ impl PlaceRoot {
         }
     }
 
-    pub(super) fn is_writable(&self) -> bool {
+    pub(crate) fn is_writable(&self) -> bool {
         !matches!(self, PlaceRoot::Uniform { .. })
     }
 }

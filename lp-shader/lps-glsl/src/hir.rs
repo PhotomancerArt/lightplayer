@@ -24,7 +24,7 @@ mod types;
 mod typing;
 
 use function::{FunctionSig, GlobalConst, ImportRegistry};
-use place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
+pub(crate) use place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use types::StructTypes;
 pub use types::{
     BuiltinKind, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirLocal,
@@ -1057,7 +1057,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_assign_target(&mut self, expr: &ParsedExpr) -> Result<HirAssignTarget, Diagnostic> {
         let place = self.type_place(expr, AccessMode::Write)?;
-        self.assign_target_from_place(expr.span, place)
+        Ok(HirAssignTarget { place })
     }
 
     fn type_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<HirPlace, Diagnostic> {
@@ -1135,110 +1135,15 @@ impl<'a> TypeCtx<'a> {
         Err(Diagnostic::error(span, format!("unknown local `{name}`")))
     }
 
-    fn assign_target_from_place(
-        &self,
-        span: Span,
-        place: HirPlace,
-    ) -> Result<HirAssignTarget, Diagnostic> {
-        match place.root {
-            PlaceRoot::Local { local, ty } if place.segments.is_empty() => {
-                Ok(HirAssignTarget::Local { local, ty })
-            }
-            PlaceRoot::Param { param, ty } if place.segments.is_empty() => {
-                Ok(HirAssignTarget::Param { param, ty })
-            }
-            PlaceRoot::Uniform { .. } => {
-                Err(Diagnostic::error(span, "cannot write to uniform variable"))
-            }
-            PlaceRoot::Local { local, .. } => {
-                self.local_assign_target_from_place(span, local, &place)
-            }
-            PlaceRoot::Param { param, .. } => {
-                self.param_assign_target_from_place(span, param, &place)
-            }
-        }
-    }
-
-    fn local_assign_target_from_place(
-        &self,
-        span: Span,
-        local: usize,
-        place: &HirPlace,
-    ) -> Result<HirAssignTarget, Diagnostic> {
-        if let Some(lanes) = place.single_root_lane_path() {
-            if !lanes.is_empty() && lanes.len() == scalar_lane_count(&place.ty) {
-                return Ok(HirAssignTarget::Swizzle {
-                    local,
-                    lanes,
-                    ty: place.ty.clone(),
-                });
-            }
-        }
-        if let [PlaceSegment::Index { index, ty }] = place.segments.as_slice() {
-            return Ok(HirAssignTarget::Index {
-                local,
-                index: index.clone(),
-                ty: ty.clone(),
-            });
-        }
-        if let [
-            PlaceSegment::Index { index: column, .. },
-            PlaceSegment::Index { index: row, ty },
-        ] = place.segments.as_slice()
-        {
-            if place.root_ty().is_matrix() {
-                return Ok(HirAssignTarget::MatrixElement {
-                    local,
-                    column: column.clone(),
-                    row: row.clone(),
-                    ty: ty.clone(),
-                });
-            }
-        }
-        Err(Diagnostic::error(
-            span,
-            "unsupported assignment target path",
-        ))
-    }
-
-    fn param_assign_target_from_place(
-        &self,
-        span: Span,
-        param: usize,
-        place: &HirPlace,
-    ) -> Result<HirAssignTarget, Diagnostic> {
-        if let Some(lanes) = place.single_root_lane_path() {
-            if !lanes.is_empty() && lanes.len() == scalar_lane_count(&place.ty) {
-                return Ok(HirAssignTarget::ParamSwizzle {
-                    param,
-                    lanes,
-                    ty: place.ty.clone(),
-                });
-            }
-        }
-        if let [PlaceSegment::Index { index, ty }] = place.segments.as_slice() {
-            return Ok(HirAssignTarget::ParamIndex {
-                param,
-                index: index.clone(),
-                ty: ty.clone(),
-            });
-        }
-        Err(Diagnostic::error(
-            span,
-            "unsupported parameter assignment target path",
-        ))
-    }
-
     fn read_assign_target_kind(&self, target: &HirAssignTarget) -> HirExprKind {
-        match target {
-            HirAssignTarget::Param { param, .. } => HirExprKind::Param { index: *param },
-            HirAssignTarget::Local { local, .. } => HirExprKind::Local { index: *local },
-            HirAssignTarget::Swizzle { .. }
-            | HirAssignTarget::ParamSwizzle { .. }
-            | HirAssignTarget::ParamIndex { .. }
-            | HirAssignTarget::Index { .. }
-            | HirAssignTarget::MatrixElement { .. } => {
-                unreachable!("compound assignment statement only has simple name targets")
+        if !target.place.segments.is_empty() {
+            unreachable!("compound assignment statement only has simple name targets");
+        }
+        match &target.place.root {
+            PlaceRoot::Param { param, .. } => HirExprKind::Param { index: *param },
+            PlaceRoot::Local { local, .. } => HirExprKind::Local { index: *local },
+            PlaceRoot::Uniform { .. } => {
+                unreachable!("assignment target cannot be a uniform")
             }
         }
     }

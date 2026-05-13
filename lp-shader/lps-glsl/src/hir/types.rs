@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 
+use super::place::HirPlace;
 use crate::Span;
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 
@@ -201,54 +202,13 @@ pub struct HirUserCallWriteback {
 }
 
 #[derive(Debug, Clone)]
-pub enum HirAssignTarget {
-    Param {
-        param: usize,
-        ty: LpsType,
-    },
-    Local {
-        local: usize,
-        ty: LpsType,
-    },
-    Swizzle {
-        local: usize,
-        lanes: Vec<usize>,
-        ty: LpsType,
-    },
-    ParamSwizzle {
-        param: usize,
-        lanes: Vec<usize>,
-        ty: LpsType,
-    },
-    ParamIndex {
-        param: usize,
-        index: Box<HirExpr>,
-        ty: LpsType,
-    },
-    Index {
-        local: usize,
-        index: Box<HirExpr>,
-        ty: LpsType,
-    },
-    MatrixElement {
-        local: usize,
-        column: Box<HirExpr>,
-        row: Box<HirExpr>,
-        ty: LpsType,
-    },
+pub struct HirAssignTarget {
+    pub(crate) place: HirPlace,
 }
 
 impl HirAssignTarget {
     pub(super) fn ty(&self) -> &LpsType {
-        match self {
-            HirAssignTarget::Param { ty, .. }
-            | HirAssignTarget::Local { ty, .. }
-            | HirAssignTarget::Swizzle { ty, .. }
-            | HirAssignTarget::ParamSwizzle { ty, .. }
-            | HirAssignTarget::ParamIndex { ty, .. }
-            | HirAssignTarget::Index { ty, .. }
-            | HirAssignTarget::MatrixElement { ty, .. } => ty,
-        }
+        &self.place.ty
     }
 }
 
