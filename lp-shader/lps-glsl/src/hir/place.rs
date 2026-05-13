@@ -71,6 +71,46 @@ pub(crate) enum PlaceSegment {
 }
 
 impl HirPlace {
+    pub(super) fn local(local: usize, ty: LpsType) -> Self {
+        let lanes = (0..scalar_lane_count(&ty)).collect();
+        Self {
+            root: PlaceRoot::Local {
+                local,
+                ty: ty.clone(),
+            },
+            segments: Vec::new(),
+            ty,
+            lanes: Some(lanes),
+        }
+    }
+
+    pub(super) fn param(param: usize, ty: LpsType) -> Self {
+        let lanes = (0..scalar_lane_count(&ty)).collect();
+        Self {
+            root: PlaceRoot::Param {
+                param,
+                ty: ty.clone(),
+            },
+            segments: Vec::new(),
+            ty,
+            lanes: Some(lanes),
+        }
+    }
+
+    pub(super) fn uniform(name: String, byte_offset: u32, ty: LpsType) -> Self {
+        let lanes = (0..scalar_lane_count(&ty)).collect();
+        Self {
+            root: PlaceRoot::Uniform {
+                name,
+                byte_offset,
+                ty: ty.clone(),
+            },
+            segments: Vec::new(),
+            ty,
+            lanes: Some(lanes),
+        }
+    }
+
     pub(crate) fn root_ty(&self) -> &LpsType {
         self.root.ty()
     }
@@ -288,15 +328,7 @@ mod tests {
     }
 
     fn local_place(local: usize, ty: LpsType) -> HirPlace {
-        HirPlace {
-            root: PlaceRoot::Local {
-                local,
-                ty: ty.clone(),
-            },
-            segments: Vec::new(),
-            lanes: Some((0..scalar_lane_count(&ty)).collect()),
-            ty,
-        }
+        HirPlace::local(local, ty)
     }
 
     fn int_expr(value: i32) -> HirExpr {

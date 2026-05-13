@@ -1089,16 +1089,7 @@ impl<'a> TypeCtx<'a> {
     fn type_name_place(&self, span: Span, name: &str) -> Result<HirPlace, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
             let ty = self.locals[local].ty.clone();
-            let lanes = (0..scalar_lane_count(&ty)).collect();
-            return Ok(HirPlace {
-                root: PlaceRoot::Local {
-                    local,
-                    ty: ty.clone(),
-                },
-                segments: Vec::new(),
-                ty,
-                lanes: Some(lanes),
-            });
+            return Ok(HirPlace::local(local, ty));
         }
         if let Some((param, p)) = self
             .params
@@ -1107,30 +1098,15 @@ impl<'a> TypeCtx<'a> {
             .find(|(_, p)| p.name.as_deref() == Some(name))
         {
             let ty = p.ty.clone();
-            let lanes = (0..scalar_lane_count(&ty)).collect();
-            return Ok(HirPlace {
-                root: PlaceRoot::Param {
-                    param,
-                    ty: ty.clone(),
-                },
-                segments: Vec::new(),
-                ty,
-                lanes: Some(lanes),
-            });
+            return Ok(HirPlace::param(param, ty));
         }
         if let Some(uniform) = self.uniforms.get(name) {
             let ty = uniform.ty.clone();
-            let lanes = (0..scalar_lane_count(&ty)).collect();
-            return Ok(HirPlace {
-                root: PlaceRoot::Uniform {
-                    name: String::from(name),
-                    byte_offset: uniform.byte_offset,
-                    ty: ty.clone(),
-                },
-                segments: Vec::new(),
+            return Ok(HirPlace::uniform(
+                String::from(name),
+                uniform.byte_offset,
                 ty,
-                lanes: Some(lanes),
-            });
+            ));
         }
         Err(Diagnostic::error(span, format!("unknown local `{name}`")))
     }
