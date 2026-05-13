@@ -6,6 +6,7 @@
 mod slot_access;
 mod slot_accessor;
 mod slot_data;
+mod slot_direction;
 mod slot_enum_shape;
 mod slot_lookup;
 mod slot_merge;
@@ -16,6 +17,7 @@ mod slot_path;
 mod slot_reader;
 mod slot_record_shape;
 mod slot_ref;
+mod slot_semantics;
 mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
@@ -29,6 +31,7 @@ pub use slot_access::{
 };
 pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
+pub use slot_direction::SlotDirection;
 pub use slot_enum_shape::SlotEnumShape;
 pub use slot_lookup::{SlotLookupError, lookup_slot_data, lookup_slot_data_and_shape};
 pub use slot_merge::SlotMerge;
@@ -39,6 +42,7 @@ pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};
 pub use slot_reader::{SlotFieldReader, SlotOptionReader, SlotReadContext};
 pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
+pub use slot_semantics::SlotSemantics;
 pub use slot_shape::{
     SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError, SlotVariantShape,
 };
@@ -48,7 +52,7 @@ pub use slot_value::{
 };
 pub mod shape {
     pub use super::slot_shape_builder::{
-        field, id, leaf, map, option, record, reference, unit, value, variant,
+        field, field_with_semantics, id, leaf, map, option, record, reference, unit, value, variant,
     };
 }
 pub use slot_shape_registry::{

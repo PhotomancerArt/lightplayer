@@ -2,8 +2,16 @@
 //!
 //! This crate is host-only. A crate build script points it at that crate's
 //! source tree, and it writes an `OUT_DIR` Rust module that can register every
-//! static `#[slot(root)]` shape discovered in that crate. Runtime-owned dynamic
-//! shapes are intentionally outside this discovery pass.
+//! static shape discovered in that crate.
+//!
+//! There are two static-shape sources:
+//!
+//! - `#[derive(SlotRecord)] #[slot(root)]` records, used by Rust-authored slot
+//!   roots such as node definitions and runtime state.
+//! - Manual `impl StaticSlotShape for Type` blocks, used by native value roots
+//!   that are referenced by name from other shapes.
+//!
+//! Runtime-owned dynamic shapes are intentionally outside this discovery pass.
 
 use std::{
     error::Error as StdError,
@@ -121,19 +129,52 @@ fn discover_static_slot_roots(
             source,
         })?;
         for item in syntax.items {
-            let syn::Item::Struct(item) = item else {
-                continue;
-            };
-            if !has_slot_record_derive(&item.attrs) || !has_slot_root_attr(&item.attrs) {
-                continue;
+            match item {
+                syn::Item::Struct(item)
+                    if has_slot_record_derive(&item.attrs) && has_slot_root_attr(&item.attrs) =>
+                {
+                    push_unique_root(
+                        &mut roots,
+                        infer_type_path(src_dir, &path, &item.ident.to_string())?,
+                    );
+                }
+                syn::Item::Impl(item) => {
+                    if let Some(type_name) = static_slot_shape_impl_type_name(&item) {
+                        push_unique_root(&mut roots, infer_type_path(src_dir, &path, &type_name)?);
+                    }
+                }
+                _ => {}
             }
-            roots.push(StaticSlotRoot {
-                type_path: infer_type_path(src_dir, &path, &item.ident.to_string())?,
-            });
         }
     }
 
     Ok(roots)
+}
+
+fn push_unique_root(roots: &mut Vec<StaticSlotRoot>, type_path: String) {
+    if !roots.iter().any(|root| root.type_path == type_path) {
+        roots.push(StaticSlotRoot { type_path });
+    }
+}
+
+fn static_slot_shape_impl_type_name(item: &syn::ItemImpl) -> Option<String> {
+    let (_, trait_path, _) = item.trait_.as_ref()?;
+    if !trait_path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "StaticSlotShape")
+    {
+        return None;
+    }
+
+    let syn::Type::Path(self_ty) = item.self_ty.as_ref() else {
+        return None;
+    };
+    self_ty
+        .path
+        .segments
+        .last()
+        .map(|segment| segment.ident.to_string())
 }
 
 fn discover_static_slot_views(
@@ -574,6 +615,37 @@ pub struct ProjectDef {}
             roots,
             vec![StaticSlotRoot {
                 type_path: String::from("crate::node::project::ProjectDef"),
+            }]
+        );
+    }
+
+    #[test]
+    fn discovers_manual_static_slot_shape_impls() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(src.join("nodes").join("fluid")).unwrap();
+        fs::write(
+            src.join("nodes").join("fluid").join("fluid_emitter.rs"),
+            r#"
+pub struct FluidEmitter;
+
+impl StaticSlotShape for FluidEmitter {
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("lp::fluid::Emitter");
+
+    fn slot_shape() -> SlotShape {
+        todo!()
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let roots = discover_static_slot_roots(&src).unwrap();
+
+        assert_eq!(
+            roots,
+            vec![StaticSlotRoot {
+                type_path: String::from("crate::nodes::fluid::FluidEmitter"),
             }]
         );
     }
