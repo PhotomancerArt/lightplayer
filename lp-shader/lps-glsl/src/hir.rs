@@ -9,7 +9,7 @@ use lps_shared::{FnParam, LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsTyp
 use crate::body::{
     BinaryOp, ParsedExpr, ParsedExprKind, ParsedFunctionBody, UnaryOp, parse_expr_tokens,
 };
-use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
+use crate::{CompileOptions, Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
 mod array_size;
 mod builtin;
@@ -30,7 +30,8 @@ use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
     BuiltinKind, GlobalInfo, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody,
-    HirModule, HirOutArg, HirParam, HirStmt, HirUserCallWriteback, ImportKey, UniformInfo,
+    HirModule, HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportKey,
+    UniformInfo,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 
@@ -39,6 +40,7 @@ pub fn build_hir(
     tokens: &[Token],
     index: &TopLevelIndex,
     bodies: Vec<(String, ParsedFunctionBody)>,
+    options: &CompileOptions,
 ) -> Result<HirModule, Diagnostic> {
     let array_size_consts = build_array_size_consts(source, tokens, index)?;
     let structs = build_struct_types(index, &array_size_consts)?;
@@ -64,6 +66,7 @@ pub fn build_hir(
         &structs,
         &array_size_consts,
         &mut imports,
+        &options.texture_specs,
     )?;
     let body_map = bodies.into_iter().collect::<BTreeMap<_, _>>();
     let mut functions = Vec::new();
@@ -98,6 +101,7 @@ pub fn build_hir(
             &structs,
             &array_size_consts,
             &mut imports,
+            &options.texture_specs,
         );
         let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
         functions.push(HirFunction {
@@ -119,6 +123,7 @@ pub fn build_hir(
         &structs,
         &array_size_consts,
         &mut imports,
+        &options.texture_specs,
     )? {
         function_meta.push(LpsFnSig {
             name: String::from("__shader_init"),
@@ -135,11 +140,14 @@ pub fn build_hir(
             functions: function_meta,
             uniforms_type,
             globals_type,
+            texture_specs: options.texture_specs.clone(),
             ..Default::default()
         },
         uniforms,
         globals: global_vars,
         imports: imports.into_vec(),
+        texture_specs: options.texture_specs.clone(),
+        texel_fetch_bounds: options.texel_fetch_bounds,
     })
 }
 
@@ -198,6 +206,7 @@ fn scalar_or_struct_type_name_to_lps(
         "mat2" => Ok(LpsType::Mat2),
         "mat3" => Ok(LpsType::Mat3),
         "mat4" => Ok(LpsType::Mat4),
+        "sampler2D" | "texture2D" => Ok(LpsType::Texture2D),
         other => Err(Diagnostic::error(
             span,
             format!("M3 lps-glsl does not support type `{other}`"),
@@ -614,6 +623,7 @@ fn build_global_consts(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
+    texture_specs: &BTreeMap<String, lps_shared::TextureBindingSpec>,
 ) -> Result<BTreeMap<String, GlobalConst>, Diagnostic> {
     let mut globals = BTreeMap::new();
     for konst in &index.consts {
@@ -633,6 +643,7 @@ fn build_global_consts(
             structs,
             array_size_consts,
             imports,
+            texture_specs,
         );
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
@@ -656,6 +667,7 @@ fn synthesize_shader_init(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
+    texture_specs: &BTreeMap<String, lps_shared::TextureBindingSpec>,
 ) -> Result<Option<HirFunction>, Diagnostic> {
     if inits.is_empty() {
         return Ok(None);
@@ -674,6 +686,7 @@ fn synthesize_shader_init(
         structs,
         array_size_consts,
         imports,
+        texture_specs,
     );
     let mut statements = Vec::new();
     for init in inits {

@@ -14,5 +14,4 @@ float f() {
 }
 
 // EXPECT_SETUP_FAILURE: {{width and height must be positive}}
-// @unsupported(rv32lpn.q32)
 // run: f() ~= 1.0

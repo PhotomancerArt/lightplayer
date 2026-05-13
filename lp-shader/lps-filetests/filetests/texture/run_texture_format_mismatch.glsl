@@ -11,5 +11,4 @@ float f() {
 }
 
 // EXPECT_SETUP_FAILURE: {{does not match // texture-spec: format}}
-// @unsupported(rv32lpn.q32)
 // run: f() ~= 1.0

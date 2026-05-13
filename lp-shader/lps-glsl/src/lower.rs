@@ -8,7 +8,7 @@ use lpir::{
     CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrType, LpirModule, LpirOp, ModuleBuilder,
     VMCTX_VREG, VReg,
 };
-use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
+use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
 use crate::body::UnaryOp;
 use crate::hir::{
@@ -22,7 +22,7 @@ mod storage;
 
 use ops::{
     assign_target, lower_binary, lower_builtin, lower_cast, lower_inc_dec, lower_index,
-    lower_select, read_assign_target, single_lane,
+    lower_select, lower_texel_fetch, lower_texture_sample, read_assign_target, single_lane,
 };
 use storage::{
     LocalStorage, alloc_slot_addr, flat_value_byte_size, is_pointer_param, load_value_from_addr,
@@ -47,13 +47,13 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
             return_types: import.return_types.clone(),
             lpfn_glsl_params: import.lpfn_glsl_params.clone(),
             needs_vmctx: matches!(import.key, ImportKey::Vm { .. }),
-            sret: false,
+            sret: import.sret,
         });
         import_map.insert(import.key.clone(), callee);
     }
 
     for function in &module.functions {
-        let lowered = lower_function(function, &import_map)?;
+        let lowered = lower_function(function, &module, &import_map)?;
         mb.add_function(lowered);
     }
     let ir = mb.finish();
@@ -75,6 +75,7 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
 
 fn lower_function(
     function: &HirFunction,
+    module: &HirModule,
     import_map: &BTreeMap<ImportKey, CalleeRef>,
 ) -> Result<lpir::IrFunction, Diagnostic> {
     let return_types = scalar_ir_types(&function.return_ty)?;
@@ -110,6 +111,8 @@ fn lower_function(
         locals,
         import_map,
         param_qualifiers: function.params.iter().map(|p| p.qualifier).collect(),
+        texture_specs: &module.texture_specs,
+        texel_fetch_bounds: module.texel_fetch_bounds,
     };
     lower_statements(&mut ctx, &function.body.statements)?;
     if function.return_ty == LpsType::Void {
@@ -125,6 +128,8 @@ struct LowerCtx<'a> {
     locals: Vec<LocalStorage>,
     import_map: &'a BTreeMap<ImportKey, CalleeRef>,
     param_qualifiers: Vec<ParamQualifier>,
+    texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+    texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 
 #[derive(Debug, Clone)]
@@ -476,6 +481,16 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 lanes: results,
             })
         }
+        HirExprKind::TexelFetch {
+            sampler,
+            coord,
+            lod,
+        } => lower_texel_fetch(ctx, expr.span, sampler, coord, lod),
+        HirExprKind::Texture {
+            sampler,
+            coord,
+            import,
+        } => lower_texture_sample(ctx, expr.span, sampler, coord, import),
         HirExprKind::Unary { op, expr: inner } => {
             let inner = lower_expr(ctx, inner)?;
             match (op, inner.ty.clone()) {

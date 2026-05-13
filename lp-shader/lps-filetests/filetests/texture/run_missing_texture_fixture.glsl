@@ -9,5 +9,4 @@ float f() {
 }
 
 // EXPECT_SETUP_FAILURE: {{no runtime fixture}}
-// @unsupported(rv32lpn.q32)
 // run: f() ~= 1.0

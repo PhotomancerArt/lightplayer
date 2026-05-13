@@ -47,6 +47,7 @@ impl ImportRegistry {
                 },
                 return_types: alloc::vec![lpir::IrType::F32],
                 lpfn_glsl_params: None,
+                sret: false,
             });
         key
     }
@@ -72,6 +73,7 @@ impl ImportRegistry {
                 param_types,
                 return_types,
                 lpfn_glsl_params: Some(glsl_params),
+                sret: false,
             });
         key
     }
@@ -90,6 +92,31 @@ impl ImportRegistry {
                 param_types: Vec::new(),
                 return_types: alloc::vec![lpir::IrType::I32],
                 lpfn_glsl_params: None,
+                sret: false,
+            });
+        key
+    }
+
+    pub(super) fn texture(&mut self, name: &str, argc: usize) -> ImportKey {
+        let key = ImportKey::Texture {
+            name: String::from(name),
+            argc,
+        };
+        self.imports
+            .entry(key.clone())
+            .or_insert_with(|| ImportInfo {
+                key: key.clone(),
+                module_name: String::from("texture"),
+                func_name: String::from(name),
+                param_types: {
+                    let mut tys = Vec::with_capacity(argc);
+                    tys.push(lpir::IrType::Pointer);
+                    tys.extend((1..argc).map(|_| lpir::IrType::I32));
+                    tys
+                },
+                return_types: Vec::new(),
+                lpfn_glsl_params: None,
+                sret: true,
             });
         key
     }

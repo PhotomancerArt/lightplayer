@@ -1,10 +1,16 @@
 use lpir::LpirModule;
-use lps_shared::LpsModuleSig;
+use lps_shared::{LpsModuleSig, TextureBindingSpec};
 
 use crate::{CompileJob, CompileStepResult, Diagnostic, TopLevelIndex};
 
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+
 #[derive(Debug, Clone, Default)]
-pub struct CompileOptions {}
+pub struct CompileOptions {
+    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
+}
 
 #[derive(Debug, Clone)]
 pub struct CompileOutput {

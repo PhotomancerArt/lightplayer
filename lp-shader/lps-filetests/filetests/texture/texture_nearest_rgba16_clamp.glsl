@@ -19,7 +19,5 @@ vec4 sample_right_edge() {
 }
 
 // u<0 → column 0; u>1 → column 1
-// @unsupported(rv32lpn.q32)
 // run: sample_left_edge() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)
-// @unsupported(rv32lpn.q32)
 // run: sample_right_edge() ~= vec4(0.0, 1.0, 0.0, 1.0) (tolerance: 0.0003)

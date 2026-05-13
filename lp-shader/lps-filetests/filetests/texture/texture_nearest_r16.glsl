@@ -13,5 +13,4 @@ vec4 sample_left_texel() {
     return texture(inputColor, vec2(0.125, 0.5));
 }
 
-// @unsupported(rv32lpn.q32)
 // run: sample_left_texel() ~= vec4(0.75, 0.0, 0.0, 1.0) (tolerance: 0.0004)

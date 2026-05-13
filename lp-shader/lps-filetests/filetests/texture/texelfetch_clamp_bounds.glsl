@@ -33,17 +33,13 @@ vec4 clamp_x_only() {
 }
 
 // Negative → (0,0)
-// @unsupported(rv32lpn.q32)
 // run: corner_negative_clamp() ~= vec4(1.0, 0.2, 0.1, 1.0) (tolerance: 0.0003)
 
 // Oversized → last texel along each axis → (1,1)
-// @unsupported(rv32lpn.q32)
 // run: corner_large_clamp() ~= vec4(1.0, 1.0, 1.0, 1.0) (tolerance: 0.0003)
 
 // In-range sanity
-// @unsupported(rv32lpn.q32)
 // run: interior() ~= vec4(1.0, 1.0, 1.0, 1.0) (tolerance: 0.0003)
 
 // y in range but x past edge → clamps x to width-1 → (1,0)
-// @unsupported(rv32lpn.q32)
 // run: clamp_x_only() ~= vec4(0.0, 0.7, 0.2, 1.0) (tolerance: 0.0003)

@@ -51,6 +51,7 @@ pub fn scalar_lane_count(ty: &LpsType) -> usize {
     match ty {
         LpsType::Void => 0,
         LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
+        LpsType::Texture2D => 4,
         LpsType::Array { element, len } => scalar_lane_count(element).saturating_mul(*len as usize),
         LpsType::Struct { members, .. } => members
             .iter()
@@ -80,6 +81,9 @@ pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
 pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
     if *ty == LpsType::Void {
         return Ok(Vec::new());
+    }
+    if *ty == LpsType::Texture2D {
+        return Ok(alloc::vec![lpir::IrType::I32; 4]);
     }
     if let LpsType::Array { element, len } = ty {
         let element_tys = scalar_ir_types(element)?;

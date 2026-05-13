@@ -810,6 +810,50 @@ vec4 render(vec2 pos) {
     }
 }
 
+#[test]
+fn render_frame_lps_glsl_texel_fetch_with_typed_texture_binding_succeeds() {
+    let engine = test_engine();
+    let glsl = r#"
+uniform sampler2D inputColor;
+vec4 render(vec2 pos) {
+    return texelFetch(inputColor, ivec2(0, 0), 0);
+}
+"#;
+    let desc = CompilePxDesc::new(
+        glsl,
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    )
+    .with_texture_spec("inputColor", test_default_texture_binding_spec())
+    .with_frontend(ShaderFrontend::LpsGlsl);
+    let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
+
+    let mut input_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let r = unorm16_bytes_from_f32(0.25);
+    let g = unorm16_bytes_from_f32(0.5);
+    let b = unorm16_bytes_from_f32(0.75);
+    let a = unorm16_bytes_from_f32(1.0);
+    let pixel = [r[0], r[1], g[0], g[1], b[0], b[1], a[0], a[1]];
+    input_tex.data_mut()[..8].copy_from_slice(&pixel);
+
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![(
+            String::from("inputColor"),
+            LpsValueF32::Texture2D(input_tex.to_texture2d_value()),
+        )],
+    };
+    let mut out_tex = engine
+        .alloc_texture(1, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    shader
+        .render_frame(&uniforms, &mut out_tex)
+        .expect("render_frame");
+    assert_eq!(out_tex.data(), &pixel[..]);
+}
+
 /// Two top-level uniforms (`pad` + `u`) keep a nested struct member; `u.x` uses a dotted path.
 #[test]
 fn render_frame_nested_scalar_field_compiles_and_renders() {

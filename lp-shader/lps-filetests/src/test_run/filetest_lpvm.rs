@@ -199,7 +199,11 @@ impl CompiledShader {
                 compiler_config.texture.texel_fetch_bounds,
             )?,
             Frontend::Lp => {
-                let output = lps_glsl::compile(source, &lps_glsl::CompileOptions::default())
+                let options = lps_glsl::CompileOptions {
+                    texture_specs: texture_specs.clone(),
+                    texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
+                };
+                let output = lps_glsl::compile(source, &options)
                     .map_err(|e| anyhow::anyhow!("{}", e.render(source)))?;
                 (output.ir, output.meta)
             }

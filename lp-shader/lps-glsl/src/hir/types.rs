@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
+use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
 use super::place::HirPlace;
 use crate::Span;
@@ -16,6 +16,8 @@ pub struct HirModule {
     pub uniforms: BTreeMap<String, UniformInfo>,
     pub globals: BTreeMap<String, GlobalInfo>,
     pub imports: Vec<ImportInfo>,
+    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +40,7 @@ pub struct ImportInfo {
     pub param_types: Vec<lpir::IrType>,
     pub return_types: Vec<lpir::IrType>,
     pub lpfn_glsl_params: Option<String>,
+    pub sret: bool,
 }
 
 pub(super) type StructTypes = BTreeMap<String, LpsType>;
@@ -47,6 +50,7 @@ pub enum ImportKey {
     Glsl { name: String, argc: usize },
     Lpfn { name: String, glsl_params: String },
     Vm { name: String, argc: usize },
+    Texture { name: String, argc: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +174,16 @@ pub enum HirExprKind {
         args: Vec<HirExpr>,
         out: Option<HirOutArg>,
     },
+    TexelFetch {
+        sampler: HirTextureOperand,
+        coord: Box<HirExpr>,
+        lod: Box<HirExpr>,
+    },
+    Texture {
+        sampler: HirTextureOperand,
+        coord: Box<HirExpr>,
+        import: ImportKey,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<HirExpr>,
@@ -207,6 +221,12 @@ pub struct HirOutArg {
     pub local: usize,
     pub ty: LpsType,
     pub arg_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirTextureOperand {
+    pub path: String,
+    pub descriptor_byte_offset: u32,
 }
 
 #[derive(Debug, Clone)]

@@ -169,12 +169,13 @@ impl<'src> CompileJob<'src> {
                         "compile job missing token tape for lowering",
                     ));
                 };
-                let result = crate::hir::build_hir(self.source, tokens, index, bodies)
-                    .and_then(crate::lower::lower_hir)
-                    .map(|lowered| CompileOutput {
-                        ir: lowered.ir,
-                        meta: lowered.meta,
-                    });
+                let result =
+                    crate::hir::build_hir(self.source, tokens, index, bodies, &self.options)
+                        .and_then(crate::lower::lower_hir)
+                        .map(|lowered| CompileOutput {
+                            ir: lowered.ir,
+                            meta: lowered.meta,
+                        });
                 self.stage = CompileStage::Done;
                 match result {
                     Ok(output) => CompileStepResult::Finished(output),

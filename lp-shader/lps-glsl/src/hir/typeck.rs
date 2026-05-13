@@ -4,18 +4,20 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lps_shared::{LpsType, ParamQualifier};
+use lps_shared::{
+    LpsType, ParamQualifier, TextureBindingSpec, TextureShapeHint, TextureStorageFormat,
+};
 
 use crate::body::{AssignOp, BinaryOp, ParsedExpr, ParsedExprKind, ParsedStmt, UnaryOp};
 use crate::{Diagnostic, Span};
 
 use super::array_size::ArraySizeConsts;
 use super::function::{FunctionSig, GlobalConst, ImportRegistry};
-use super::place::{AccessMode, HirPlace};
+use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use super::types::StructTypes;
 use super::types::{
     GlobalInfo, HirAssignTarget, HirExpr, HirExprKind, HirFunctionBody, HirLocal, HirOutArg,
-    HirParam, HirStmt, HirUserCallWriteback, UniformInfo,
+    HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, UniformInfo,
 };
 use super::typing::builtin_has_out_args;
 use super::typing::{
@@ -39,6 +41,7 @@ pub(super) struct TypeCtx<'a> {
     structs: &'a StructTypes,
     array_size_consts: &'a ArraySizeConsts,
     imports: &'a mut ImportRegistry,
+    texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
     scopes: Vec<BTreeMap<String, usize>>,
     loop_depth: usize,
@@ -54,6 +57,7 @@ impl<'a> TypeCtx<'a> {
         structs: &'a StructTypes,
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
+        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
     ) -> Self {
         Self {
             params: &function.params,
@@ -64,6 +68,7 @@ impl<'a> TypeCtx<'a> {
             structs,
             array_size_consts,
             imports,
+            texture_specs,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
             loop_depth: 0,
@@ -78,6 +83,7 @@ impl<'a> TypeCtx<'a> {
         structs: &'a StructTypes,
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
+        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
     ) -> Self {
         Self {
             params: &[],
@@ -88,6 +94,7 @@ impl<'a> TypeCtx<'a> {
             structs,
             array_size_consts,
             imports,
+            texture_specs,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
             loop_depth: 0,
@@ -630,6 +637,13 @@ impl<'a> TypeCtx<'a> {
             }
         }
 
+        if name == "texelFetch" {
+            return self.type_texel_fetch_call(span, args);
+        }
+        if name == "texture" {
+            return self.type_texture_call(span, args);
+        }
+
         let args = args
             .iter()
             .map(|arg| self.type_expr(arg))
@@ -683,6 +697,149 @@ impl<'a> TypeCtx<'a> {
             span,
             format!("M3 lps-glsl does not support call `{name}`"),
         ))
+    }
+
+    fn type_texel_fetch_call(
+        &mut self,
+        span: Span,
+        args: &[ParsedExpr],
+    ) -> Result<HirExpr, Diagnostic> {
+        if args.len() != 3 {
+            return Err(Diagnostic::error(span, "texelFetch expects 3 arguments"));
+        }
+        let sampler = self.type_texture_operand(&args[0], "texelFetch")?;
+        let coord = self.type_expr(&args[1])?;
+        if coord.ty != LpsType::IVec2 {
+            return Err(Diagnostic::error(
+                args[1].span,
+                "texelFetch coordinate must be ivec2",
+            ));
+        }
+        let lod = self.type_expr(&args[2])?;
+        let lod = self.coerce_expr(lod, &LpsType::Int)?;
+        Ok(HirExpr {
+            span,
+            ty: LpsType::Vec4,
+            kind: HirExprKind::TexelFetch {
+                sampler,
+                coord: Box::new(coord),
+                lod: Box::new(lod),
+            },
+        })
+    }
+
+    fn type_texture_call(
+        &mut self,
+        span: Span,
+        args: &[ParsedExpr],
+    ) -> Result<HirExpr, Diagnostic> {
+        if args.len() != 2 {
+            return Err(Diagnostic::error(
+                span,
+                "texture expects sampler2D and vec2 arguments",
+            ));
+        }
+        let sampler = self.type_texture_operand(&args[0], "texture")?;
+        let coord = self.type_expr(&args[1])?;
+        if coord.ty != LpsType::Vec2 {
+            return Err(Diagnostic::error(
+                args[1].span,
+                "texture coordinate must be vec2",
+            ));
+        }
+        let spec = self
+            .texture_specs
+            .get(sampler.path.as_str())
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    args[0].span,
+                    format!(
+                        "texture `{}`: no texture binding spec for sampler uniform `{}`",
+                        sampler.path, sampler.path
+                    ),
+                )
+            })?;
+        let (func_name, argc) = match (spec.format, spec.shape_hint) {
+            (TextureStorageFormat::Rgba16Unorm, TextureShapeHint::General2D) => {
+                ("texture2d_rgba16_unorm", 10)
+            }
+            (TextureStorageFormat::Rgba16Unorm, TextureShapeHint::HeightOne) => {
+                ("texture1d_rgba16_unorm", 7)
+            }
+            (TextureStorageFormat::R16Unorm, TextureShapeHint::General2D) => {
+                ("texture2d_r16_unorm", 10)
+            }
+            (TextureStorageFormat::R16Unorm, TextureShapeHint::HeightOne) => {
+                ("texture1d_r16_unorm", 7)
+            }
+            (TextureStorageFormat::Rgb16Unorm, _) => {
+                return Err(Diagnostic::error(
+                    span,
+                    "texture does not support Rgb16Unorm filtered sampling",
+                ));
+            }
+        };
+        let import = self.imports.texture(func_name, argc);
+        Ok(HirExpr {
+            span,
+            ty: LpsType::Vec4,
+            kind: HirExprKind::Texture {
+                sampler,
+                coord: Box::new(coord),
+                import,
+            },
+        })
+    }
+
+    fn type_texture_operand(
+        &mut self,
+        expr: &ParsedExpr,
+        fn_name: &str,
+    ) -> Result<HirTextureOperand, Diagnostic> {
+        let place = self.type_place(expr, AccessMode::Read)?;
+        if place.ty != LpsType::Texture2D {
+            return Err(Diagnostic::error(
+                expr.span,
+                format!("{fn_name} expects sampler2D uniform"),
+            ));
+        }
+        let PlaceRoot::Uniform {
+            name,
+            byte_offset,
+            ty: _,
+        } = place.root
+        else {
+            return Err(Diagnostic::error(
+                expr.span,
+                format!("{fn_name} sampler must be a uniform sampler2D"),
+            ));
+        };
+        let mut path = name;
+        let mut descriptor_byte_offset = byte_offset;
+        for segment in place.segments {
+            match segment {
+                PlaceSegment::Field {
+                    name, byte_offset, ..
+                } => {
+                    path.push('.');
+                    path.push_str(&name);
+                    descriptor_byte_offset =
+                        descriptor_byte_offset.saturating_add(byte_offset as u32);
+                }
+                PlaceSegment::Index { .. } | PlaceSegment::Swizzle { .. } => {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        format!(
+                            "{fn_name}: texture arrays and swizzled texture operands are not supported"
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(HirTextureOperand {
+            path,
+            descriptor_byte_offset,
+        })
     }
 
     fn type_lpfn_call(

@@ -81,6 +81,8 @@ pub(super) fn token_is_type_name(
                 | "mat2"
                 | "mat3"
                 | "mat4"
+                | "sampler2D"
+                | "texture2D"
                 | "void"
         ),
         _ => false,
@@ -113,6 +115,8 @@ pub(in crate::syntax::parser) fn token_text_is_type_name(
                 | "mat2"
                 | "mat3"
                 | "mat4"
+                | "sampler2D"
+                | "texture2D"
                 | "void"
         )
 }

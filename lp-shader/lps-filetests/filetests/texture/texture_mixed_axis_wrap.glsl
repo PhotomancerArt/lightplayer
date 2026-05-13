@@ -16,5 +16,4 @@ vec4 repeat_x_clamp_y() {
 }
 
 // x repeats to column 0; y clamps to row 0 → same as texelFetch corner (0,0)
-// @unsupported(rv32lpn.q32)
 // run: repeat_x_clamp_y() ~= vec4(1.0, 0.2, 0.1, 1.0) (tolerance: 0.0004)

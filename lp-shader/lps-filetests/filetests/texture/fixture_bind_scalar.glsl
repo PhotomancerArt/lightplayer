@@ -10,5 +10,4 @@ float fixture_bound_scalar_return() {
     return 1.0;
 }
 
-// @unsupported(rv32lpn.q32)
 // run: fixture_bound_scalar_return() ~= 1.0

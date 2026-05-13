@@ -178,13 +178,12 @@ fn lower_glsl(
     match frontend {
         ShaderFrontend::Naga => lower_glsl_with_naga(glsl, textures, compiler_config),
         ShaderFrontend::LpsGlsl => {
-            if !textures.is_empty() {
-                return Err(LpsError::Validation(String::from(
-                    "lps-glsl frontend does not support texture bindings yet",
-                )));
-            }
-            let output = lps_glsl::compile(glsl, &lps_glsl::CompileOptions::default())
-                .map_err(|e| LpsError::Parse(e.render(glsl)))?;
+            let options = lps_glsl::CompileOptions {
+                texture_specs: textures.clone(),
+                texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
+            };
+            let output =
+                lps_glsl::compile(glsl, &options).map_err(|e| LpsError::Parse(e.render(glsl)))?;
             Ok((output.ir, output.meta))
         }
     }
