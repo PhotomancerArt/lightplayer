@@ -46,7 +46,7 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
             param_types: import.param_types.clone(),
             return_types: import.return_types.clone(),
             lpfn_glsl_params: import.lpfn_glsl_params.clone(),
-            needs_vmctx: false,
+            needs_vmctx: matches!(import.key, ImportKey::Vm { .. }),
             sret: false,
         });
         import_map.insert(import.key.clone(), callee);
@@ -456,6 +456,9 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 });
             }
             let mut arg_lanes = Vec::new();
+            if matches!(import, ImportKey::Vm { .. }) {
+                arg_lanes.push(ctx.vmctx);
+            }
             for arg in args {
                 arg_lanes.extend(lower_expr(ctx, arg)?.lanes);
             }

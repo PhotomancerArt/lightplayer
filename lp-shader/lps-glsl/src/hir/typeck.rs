@@ -651,6 +651,19 @@ impl<'a> TypeCtx<'a> {
             });
         }
 
+        if name == "__lp_get_fuel" && args.is_empty() {
+            let key = self.imports.vm(name, 0);
+            return Ok(HirExpr {
+                span,
+                ty: LpsType::UInt,
+                kind: HirExprKind::ImportCall {
+                    import: key,
+                    args,
+                    out: None,
+                },
+            });
+        }
+
         if name.starts_with("lpfn_") {
             return self.type_lpfn_call(span, name, args);
         }

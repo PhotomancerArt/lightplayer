@@ -76,6 +76,24 @@ impl ImportRegistry {
         key
     }
 
+    pub(super) fn vm(&mut self, name: &str, argc: usize) -> ImportKey {
+        let key = ImportKey::Vm {
+            name: String::from(name),
+            argc,
+        };
+        self.imports
+            .entry(key.clone())
+            .or_insert_with(|| ImportInfo {
+                key: key.clone(),
+                module_name: String::from("vm"),
+                func_name: String::from(name),
+                param_types: Vec::new(),
+                return_types: alloc::vec![lpir::IrType::I32],
+                lpfn_glsl_params: None,
+            });
+        key
+    }
+
     pub(super) fn into_vec(self) -> Vec<ImportInfo> {
         self.imports.into_values().collect()
     }

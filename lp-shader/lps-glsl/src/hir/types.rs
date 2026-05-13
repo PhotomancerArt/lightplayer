@@ -46,6 +46,7 @@ pub(super) type StructTypes = BTreeMap<String, LpsType>;
 pub enum ImportKey {
     Glsl { name: String, argc: usize },
     Lpfn { name: String, glsl_params: String },
+    Vm { name: String, argc: usize },
 }
 
 #[derive(Debug, Clone)]
