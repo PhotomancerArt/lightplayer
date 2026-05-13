@@ -15,11 +15,16 @@ use crate::{MapSlot, OptionSlot, ValueSlot};
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
     #[slot(skip)]
+    #[serde(default = "default_kind")]
     pub kind: String,
     #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub name: OptionSlot<ValueSlot<String>>,
     #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub nodes: MapSlot<String, NodeInvocation>,
+}
+
+fn default_kind() -> String {
+    String::from(ProjectDef::KIND)
 }
 
 impl ProjectDef {

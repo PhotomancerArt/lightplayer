@@ -9,6 +9,7 @@ use crate::{BindingDefs, ClockControls};
 #[slot(root, view)]
 pub struct ClockDef {
     #[slot(skip)]
+    #[serde(default = "default_kind")]
     pub kind: String,
 
     /// Authored slot bindings for clock outputs.
@@ -20,10 +21,14 @@ pub struct ClockDef {
     pub controls: ClockControls,
 }
 
+fn default_kind() -> String {
+    String::from(ClockDef::KIND)
+}
+
 impl Default for ClockDef {
     fn default() -> Self {
         Self {
-            kind: String::from(Self::KIND),
+            kind: default_kind(),
             bindings: BindingDefs::default(),
             controls: ClockControls::default(),
         }

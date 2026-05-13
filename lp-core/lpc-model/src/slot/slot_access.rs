@@ -16,6 +16,11 @@ pub trait SlotAccess {
     fn data(&self) -> SlotDataAccess<'_>;
 }
 
+/// Mutable root object that exposes slot-addressable data for in-place updates.
+pub trait SlotAccessMut: SlotAccess {
+    fn data_mut(&mut self) -> SlotDataAccessMut<'_>;
+}
+
 /// Static slot shape root authored by a Rust type.
 ///
 /// Static shapes are type-owned descriptions, not per-instance data. They are
@@ -63,6 +68,11 @@ pub trait FieldSlot {
     fn slot_field_data(&self) -> SlotDataAccess<'_>;
 }
 
+/// Mutable field-level slot access used by typed mutation traversal.
+pub trait FieldSlotMut: FieldSlot {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_>;
+}
+
 /// Borrowed access to one slot-data node.
 #[derive(Clone, Copy)]
 pub enum SlotDataAccess<'a> {
@@ -74,10 +84,29 @@ pub enum SlotDataAccess<'a> {
     Option(&'a dyn SlotOptionAccess),
 }
 
+/// Mutable access to one slot-data node.
+pub enum SlotDataAccessMut<'a> {
+    Unit(&'a mut Revision),
+    Value(&'a mut dyn SlotValueMut),
+    Record(&'a mut dyn SlotRecordAccessMut),
+    Map(&'a mut dyn MapSlotAccessMut),
+    Enum(&'a mut dyn SlotEnumAccessMut),
+    Option(&'a mut dyn SlotOptionAccessMut),
+}
+
 /// Borrowed access to an atomic slot value.
 pub trait SlotValueAccess {
     fn changed_at(&self) -> Revision;
     fn value(&self) -> LpValue;
+}
+
+/// Mutable access to an atomic slot value.
+pub trait SlotValueMut {
+    fn set_lp_value(
+        &mut self,
+        revision: Revision,
+        value: LpValue,
+    ) -> Result<(), crate::ValueRootError>;
 }
 
 /// Borrowed access to a record slot.
@@ -89,11 +118,21 @@ pub trait SlotRecordAccess {
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>>;
 }
 
+/// Mutable access to a record slot.
+pub trait SlotRecordAccessMut {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataAccessMut<'_>>;
+}
+
 /// Borrowed access to a stable-key map slot.
 pub trait MapSlotAccess {
     fn keys_revision(&self) -> Revision;
     fn keys(&self) -> Vec<SlotMapKey>;
     fn get(&self, key: &SlotMapKey) -> Option<SlotDataAccess<'_>>;
+}
+
+/// Mutable access to a stable-key map slot.
+pub trait MapSlotAccessMut {
+    fn get_mut(&mut self, key: &SlotMapKey) -> Option<SlotDataAccessMut<'_>>;
 }
 
 /// Borrowed access to an enum slot with one active variant.
@@ -103,10 +142,21 @@ pub trait SlotEnumAccess {
     fn data(&self) -> SlotDataAccess<'_>;
 }
 
+/// Mutable access to an enum slot with one active variant.
+pub trait SlotEnumAccessMut {
+    fn variant(&self) -> &str;
+    fn data_mut(&mut self) -> SlotDataAccessMut<'_>;
+}
+
 /// Borrowed access to an optional slot.
 pub trait SlotOptionAccess {
     fn presence_revision(&self) -> Revision;
     fn data(&self) -> Option<SlotDataAccess<'_>>;
+}
+
+/// Mutable access to an optional slot.
+pub trait SlotOptionAccessMut {
+    fn data_mut(&mut self) -> Option<SlotDataAccessMut<'_>>;
 }
 
 impl SlotData {
@@ -120,6 +170,17 @@ impl SlotData {
             Self::Option(option) => SlotDataAccess::Option(option),
         }
     }
+
+    pub fn access_mut(&mut self) -> SlotDataAccessMut<'_> {
+        match self {
+            Self::Unit { revision } => SlotDataAccessMut::Unit(revision),
+            Self::Value(value) => SlotDataAccessMut::Value(value),
+            Self::Record(record) => SlotDataAccessMut::Record(record),
+            Self::Map(map) => SlotDataAccessMut::Map(map),
+            Self::Enum(en) => SlotDataAccessMut::Enum(en),
+            Self::Option(option) => SlotDataAccessMut::Option(option),
+        }
+    }
 }
 
 impl SlotValueAccess for WithRevision<LpValue> {
@@ -129,6 +190,17 @@ impl SlotValueAccess for WithRevision<LpValue> {
 
     fn value(&self) -> LpValue {
         self.value().clone()
+    }
+}
+
+impl SlotValueMut for WithRevision<LpValue> {
+    fn set_lp_value(
+        &mut self,
+        revision: Revision,
+        value: LpValue,
+    ) -> Result<(), crate::ValueRootError> {
+        self.set(revision, value);
+        Ok(())
     }
 }
 
@@ -192,6 +264,12 @@ impl SlotRecordAccess for SlotRecord {
     }
 }
 
+impl SlotRecordAccessMut for SlotRecord {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataAccessMut<'_>> {
+        self.fields.get_mut(index).map(SlotData::access_mut)
+    }
+}
+
 impl MapSlotAccess for SlotMapDyn {
     fn keys_revision(&self) -> Revision {
         self.keys_revision
@@ -203,6 +281,12 @@ impl MapSlotAccess for SlotMapDyn {
 
     fn get(&self, key: &SlotMapKey) -> Option<SlotDataAccess<'_>> {
         self.entries.get(key).map(SlotData::access)
+    }
+}
+
+impl MapSlotAccessMut for SlotMapDyn {
+    fn get_mut(&mut self, key: &SlotMapKey) -> Option<SlotDataAccessMut<'_>> {
+        self.entries.get_mut(key).map(SlotData::access_mut)
     }
 }
 
@@ -220,6 +304,16 @@ impl SlotEnumAccess for SlotEnum {
     }
 }
 
+impl SlotEnumAccessMut for SlotEnum {
+    fn variant(&self) -> &str {
+        self.variant.as_str()
+    }
+
+    fn data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        self.data.access_mut()
+    }
+}
+
 impl SlotOptionAccess for SlotOptionDyn {
     fn presence_revision(&self) -> Revision {
         self.presence_revision
@@ -227,5 +321,11 @@ impl SlotOptionAccess for SlotOptionDyn {
 
     fn data(&self) -> Option<SlotDataAccess<'_>> {
         self.data.as_ref().map(|data| data.access())
+    }
+}
+
+impl SlotOptionAccessMut for SlotOptionDyn {
+    fn data_mut(&mut self) -> Option<SlotDataAccessMut<'_>> {
+        self.data.as_mut().map(|data| data.access_mut())
     }
 }

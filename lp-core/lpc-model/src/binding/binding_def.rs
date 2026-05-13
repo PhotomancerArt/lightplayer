@@ -1,7 +1,7 @@
 use super::BindingEndpoint;
 use crate::{
     FieldSlot, LpType, LpValue, ModelStructMember, Revision, SlotDataAccess, SlotShape,
-    SlotValueAccess,
+    SlotValueAccess, SlotValueMut, ValueRootError,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -88,6 +88,32 @@ impl SlotValueAccess for BindingDef {
     }
 }
 
+impl SlotValueMut for BindingDef {
+    fn set_lp_value(&mut self, _revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
+        let LpValue::Struct { fields, .. } = value else {
+            return Err(ValueRootError::new("binding value must be a struct"));
+        };
+        let direction = struct_string_field(&fields, "direction")?;
+        let endpoint = BindingEndpoint::parse_ref(struct_string_field(&fields, "endpoint")?)
+            .map_err(|err| ValueRootError::new(err.to_string()))?;
+        match direction {
+            "source" => {
+                self.source = Some(endpoint);
+                self.target = None;
+                Ok(())
+            }
+            "target" => {
+                self.source = None;
+                self.target = Some(endpoint);
+                Ok(())
+            }
+            other => Err(ValueRootError::new(alloc::format!(
+                "unknown binding direction {other:?}"
+            ))),
+        }
+    }
+}
+
 impl FieldSlot for BindingDef {
     fn slot_field_shape() -> SlotShape {
         SlotShape::value(LpType::Struct {
@@ -108,6 +134,23 @@ impl FieldSlot for BindingDef {
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
     }
+}
+
+fn struct_string_field<'a>(
+    fields: &'a [(String, LpValue)],
+    name: &str,
+) -> Result<&'a str, ValueRootError> {
+    fields
+        .iter()
+        .find_map(|(field_name, value)| {
+            if field_name == name
+                && let LpValue::String(value) = value
+            {
+                return Some(value.as_str());
+            }
+            None
+        })
+        .ok_or_else(|| ValueRootError::new(alloc::format!("missing string field {name:?}")))
 }
 
 /// Error returned by [`BindingDef::validate`].

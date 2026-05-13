@@ -1,6 +1,7 @@
 use super::{BindingDef, BindingDefError};
 use crate::{
-    FieldSlot, MapSlot, SlotDataAccess, SlotMapKeyShape, SlotMeta, SlotShape, SlotValueShape,
+    FieldSlot, FieldSlotMut, MapSlot, SlotDataAccess, SlotDataAccessMut, SlotMapKeyShape, SlotMeta,
+    SlotShape, SlotValueShape,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -67,6 +68,12 @@ impl FieldSlot for BindingDefs {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Map(&self.0)
+    }
+}
+
+impl FieldSlotMut for BindingDefs {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Map(&mut self.0)
     }
 }
 

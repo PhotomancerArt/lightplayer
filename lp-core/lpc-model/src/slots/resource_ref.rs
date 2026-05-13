@@ -1,7 +1,7 @@
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, ResourceRef, Revision, SlotDataAccess, SlotMeta,
-    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, WithRevision, current_revision,
+    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, ResourceRef, Revision, SlotDataAccess,
+    SlotDataAccessMut, SlotMeta, SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueMut,
+    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, WithRevision, current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -70,6 +70,20 @@ impl FieldSlot for ResourceRefSlot {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
+    }
+}
+
+impl SlotValueMut for ResourceRefSlot {
+    fn set_lp_value(&mut self, revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
+        self.inner
+            .set(revision, ResourceRef::from_lp_value(&value)?);
+        Ok(())
+    }
+}
+
+impl FieldSlotMut for ResourceRefSlot {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Value(self)
     }
 }
 

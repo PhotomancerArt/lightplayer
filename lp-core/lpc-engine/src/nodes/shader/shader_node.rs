@@ -6,8 +6,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, DivMode, GlslOpts, MapSlot, MulMode, NodeId, ShaderSlotDef, ShaderSlotKind,
-    ShaderState, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    AddSubMode, DivMode, GlslOpts, MapSlot, MulMode, NodeId, ShaderMapKeyDef, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lps_shared::LpsValueF32;
@@ -164,6 +165,24 @@ impl ShaderNode {
         Ok(())
     }
 
+    fn update_consumed_slots_from_view(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<(), NodeError> {
+        let keys: Vec<String> = self.consumed_slots.entries.keys().cloned().collect();
+        for key in keys {
+            let Some(slot) = self.consumed_slots.entries.get_mut(&key) else {
+                continue;
+            };
+            sync_shader_slot_def_from_authored(
+                ctx,
+                &alloc::format!("consumed_slots[{key}]"),
+                slot,
+            )?;
+        }
+        Ok(())
+    }
+
     fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut uniforms = Vec::new();
         for (name, slot) in &self.consumed_slots.entries {
@@ -182,6 +201,7 @@ impl ShaderNode {
 impl NodeRuntime for ShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.update_config_from_view(ctx)?;
+        self.update_consumed_slots_from_view(ctx)?;
         self.update_visual_uniforms(ctx)?;
         self.state
             .output
@@ -215,6 +235,123 @@ impl NodeRuntime for ShaderNode {
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         Some(self)
     }
+}
+
+pub(super) fn sync_shader_slot_def_from_authored(
+    ctx: &mut TickContext<'_>,
+    base_path: &str,
+    slot: &mut ShaderSlotDef,
+) -> Result<bool, NodeError> {
+    let mut changed = false;
+    let Some(kind) = try_read_authored_value(ctx, &alloc::format!("{base_path}.kind"))? else {
+        return Ok(false);
+    };
+    changed |= set_slot_if_changed(&mut slot.kind, kind);
+    let Some(value) =
+        try_read_authored_value::<ShaderValueShapeRef>(ctx, &alloc::format!("{base_path}.value"))?
+    else {
+        return Ok(changed);
+    };
+    changed |= set_slot_if_changed(&mut slot.value, value);
+    if let Some(key) = slot.key.data.as_mut() {
+        if let Some(value) = try_read_authored_value::<ShaderMapKeyDef>(
+            ctx,
+            &alloc::format!("{base_path}.key.some"),
+        )? {
+            changed |= set_slot_if_changed(key, value);
+        }
+    }
+    if let Some(default) = slot.default.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.default.some"))?
+        {
+            changed |= set_slot_if_changed(default, value);
+        }
+    }
+    if let Some(min) = slot.min.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
+        {
+            changed |= set_slot_if_changed(min, value);
+        }
+    }
+    if let Some(mapping) = slot.mapping.data.as_mut() {
+        if let Some(value) = try_read_authored_value::<ShaderSlotMappingKind>(
+            ctx,
+            &alloc::format!("{base_path}.mapping.some.kind"),
+        )? {
+            changed |= set_slot_if_changed(&mut mapping.kind, value);
+        }
+        if let Some(value) =
+            try_read_authored_value::<u32>(ctx, &alloc::format!("{base_path}.mapping.some.len"))?
+        {
+            changed |= set_slot_if_changed(&mut mapping.len, value);
+        }
+        if let Some(value) =
+            try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.mapping.some.key"))?
+        {
+            changed |= set_slot_if_changed(&mut mapping.key, value);
+        }
+        if let Some(value) = try_read_authored_value::<u32>(
+            ctx,
+            &alloc::format!("{base_path}.mapping.some.empty_key"),
+        )? {
+            changed |= set_slot_if_changed(&mut mapping.empty_key, value);
+        }
+    }
+    if let Some(value) =
+        try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.label"))?
+    {
+        changed |= set_slot_if_changed(&mut slot.label, value);
+    }
+    if let Some(value) =
+        try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.description"))?
+    {
+        changed |= set_slot_if_changed(&mut slot.description, value);
+    }
+    Ok(changed)
+}
+
+pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+) -> Result<T, NodeError> {
+    ctx.resolve_consumed_slot_value(&SlotPath::parse(path).map_err(|e| {
+        NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
+    })?)
+}
+
+fn try_read_authored_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+) -> Result<Option<T>, NodeError> {
+    let slot = SlotPath::parse(path).map_err(|e| {
+        NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
+    })?;
+    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot,
+    }) {
+        Ok(production) => production,
+        Err(_) => return Ok(None),
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved shader path is not a value"))?;
+    T::from_lp_value(value.value())
+        .map(Some)
+        .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
+}
+
+pub(super) fn set_slot_if_changed<T>(slot: &mut ValueSlot<T>, value: T) -> bool
+where
+    T: PartialEq,
+{
+    if slot.value() == &value {
+        return false;
+    }
+    slot.set(value);
+    true
 }
 
 struct ShaderConfigAccessors {

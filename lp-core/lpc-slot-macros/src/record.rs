@@ -19,6 +19,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
     let mut shape_fields = Vec::new();
     let mut access_arms = Vec::new();
+    let mut access_mut_arms = Vec::new();
     let mut access_index = 0usize;
 
     for field in fields.named {
@@ -40,8 +41,17 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
         let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
         let semantics = attr::field_semantics_tokens(field_attr.direction, field_attr.merge);
+        let selected_policy = field_attr.policy.or(container_attrs.default_policy);
+        let policy = selected_policy
+            .map(attr::field_policy_tokens)
+            .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::default() });
         shape_fields.push(quote! {
-            ::lpc_model::slot::shape::field_with_semantics(#field_name, #shape, #semantics)
+            ::lpc_model::slot::shape::field_with_semantics_and_policy(
+                #field_name,
+                #shape,
+                #semantics,
+                #policy,
+            )
         });
 
         if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
@@ -50,6 +60,14 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             access_arms.push(quote! {
                 #index => Some(#access),
             });
+            if selected_policy.is_none_or(|policy| !attr::policy_is_read_only(policy))
+                && let Some(access_mut) =
+                    attr::field_access_mut_tokens(&field_attr.shape, &field_ty, &field_ident)
+            {
+                access_mut_arms.push(quote! {
+                    #index => Some(#access_mut),
+                });
+            }
             access_index += 1;
         }
     }
@@ -73,6 +91,12 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
                 fn data(&self) -> ::lpc_model::SlotDataAccess<'_> {
                     ::lpc_model::SlotDataAccess::Record(self)
+                }
+            }
+
+            impl ::lpc_model::SlotAccessMut for #ident {
+                fn data_mut(&mut self) -> ::lpc_model::SlotDataAccessMut<'_> {
+                    ::lpc_model::SlotDataAccessMut::Record(self)
                 }
             }
 
@@ -113,9 +137,24 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
         }
 
+        impl ::lpc_model::SlotRecordAccessMut for #ident {
+            fn field_mut(&mut self, index: usize) -> Option<::lpc_model::SlotDataAccessMut<'_>> {
+                match index {
+                    #(#access_mut_arms)*
+                    _ => None,
+                }
+            }
+        }
+
         impl ::lpc_model::SlotMapValueAccess for #ident {
             fn slot_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
                 ::lpc_model::SlotDataAccess::Record(self)
+            }
+        }
+
+        impl ::lpc_model::SlotMapValueAccessMut for #ident {
+            fn slot_data_mut(&mut self) -> ::lpc_model::SlotDataAccessMut<'_> {
+                ::lpc_model::SlotDataAccessMut::Record(self)
             }
         }
 
@@ -126,6 +165,12 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
             fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
                 ::lpc_model::SlotDataAccess::Record(self)
+            }
+        }
+
+        impl ::lpc_model::FieldSlotMut for #ident {
+            fn slot_field_data_mut(&mut self) -> ::lpc_model::SlotDataAccessMut<'_> {
+                ::lpc_model::SlotDataAccessMut::Record(self)
             }
         }
 

@@ -28,14 +28,18 @@ mod value_ref;
 mod value_slot;
 
 pub use slot_access::{
-    FieldSlot, MapSlotAccess, SlotAccess, SlotDataAccess, SlotEnumAccess, SlotOptionAccess,
-    SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
+    FieldSlot, FieldSlotMut, MapSlotAccess, MapSlotAccessMut, SlotAccess, SlotAccessMut,
+    SlotDataAccess, SlotDataAccessMut, SlotEnumAccess, SlotEnumAccessMut, SlotOptionAccess,
+    SlotOptionAccessMut, SlotRecordAccess, SlotRecordAccessMut, SlotValueAccess, SlotValueMut,
+    StaticSlotAccess, StaticSlotShape,
 };
 pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_direction::SlotDirection;
 pub use slot_enum_shape::SlotEnumShape;
-pub use slot_lookup::{SlotLookupError, lookup_slot_data, lookup_slot_data_and_shape};
+pub use slot_lookup::{
+    SlotLookupError, lookup_slot_data, lookup_slot_data_and_shape, lookup_slot_data_mut,
+};
 pub use slot_merge::SlotMerge;
 pub use slot_meta::SlotMeta;
 pub use slot_name::{SlotName, SlotNameError};
@@ -74,4 +78,6 @@ pub use crate::slots::{
     xy_shape,
 };
 pub use value_ref::ValueRef;
-pub use value_slot::{MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, ValueSlot};
+pub use value_slot::{
+    MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, SlotMapValueAccessMut, ValueSlot,
+};

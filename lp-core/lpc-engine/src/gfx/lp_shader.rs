@@ -74,13 +74,13 @@ pub trait LpComputeShader {
 impl LpComputeShader for lp_shader::LpsComputeShader {
     fn tick(&mut self, inputs: &[(&str, LpsValueF32)]) -> Result<(), Error> {
         lp_shader::LpsComputeShader::tick(self, inputs).map_err(|e| Error::Other {
-            message: String::from(e.to_string()),
+            message: e.to_string(),
         })
     }
 
     fn get_output(&mut self, path: &str) -> Result<LpsValueF32, Error> {
         lp_shader::LpsComputeShader::get_output(self, path).map_err(|e| Error::Other {
-            message: String::from(e.to_string()),
+            message: e.to_string(),
         })
     }
 }

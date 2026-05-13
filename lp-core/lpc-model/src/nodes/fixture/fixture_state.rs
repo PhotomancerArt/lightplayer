@@ -4,7 +4,7 @@ use crate::{ControlExtent, ControlProduct, ControlProductSlot, NodeId};
 
 /// Runtime state exposed by a fixture node.
 #[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root)]
+#[slot(root, default_policy = "read_only_transient")]
 pub struct FixtureState {
     /// Renderable control output produced by this fixture node.
     pub output: ControlProductSlot,

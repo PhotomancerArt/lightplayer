@@ -3,10 +3,11 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32Slot, Revision, SlotDataAccess,
-    SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta,
-    SlotRecordAccess, SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError, ValueSlot, XySlot, current_revision,
+    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, MapSlot, PositiveF32Slot, Revision,
+    SlotDataAccess, SlotDataAccessMut, SlotEnumAccess, SlotEnumAccessMut, SlotEnumOption,
+    SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMapValueAccessMut, SlotMeta,
+    SlotRecordAccess, SlotRecordAccessMut, SlotShape, SlotShapeId, SlotValue, SlotValueShape,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, XySlot, current_revision,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -92,6 +93,18 @@ impl SlotEnumAccess for MappingConfig {
     }
 }
 
+impl SlotEnumAccessMut for MappingConfig {
+    fn variant(&self) -> &str {
+        match self {
+            Self::PathPoints { .. } => "path_points",
+        }
+    }
+
+    fn data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Record(self)
+    }
+}
+
 impl SlotRecordAccess for MappingConfig {
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
         match self {
@@ -108,9 +121,31 @@ impl SlotRecordAccess for MappingConfig {
     }
 }
 
+impl SlotRecordAccessMut for MappingConfig {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataAccessMut<'_>> {
+        match self {
+            Self::PathPoints {
+                paths,
+                sample_diameter,
+                ..
+            } => match index {
+                0 => Some(SlotDataAccessMut::Map(paths)),
+                1 => Some(SlotDataAccessMut::Value(sample_diameter)),
+                _ => None,
+            },
+        }
+    }
+}
+
 impl SlotMapValueAccess for MappingConfig {
     fn slot_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Enum(self)
+    }
+}
+
+impl SlotMapValueAccessMut for MappingConfig {
+    fn slot_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Enum(self)
     }
 }
 
@@ -121,6 +156,12 @@ impl FieldSlot for MappingConfig {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Enum(self)
+    }
+}
+
+impl FieldSlotMut for MappingConfig {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Enum(self)
     }
 }
 
@@ -197,6 +238,18 @@ impl SlotEnumAccess for PathSpec {
     }
 }
 
+impl SlotEnumAccessMut for PathSpec {
+    fn variant(&self) -> &str {
+        match self {
+            Self::RingArray { .. } => "ring_array",
+        }
+    }
+
+    fn data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Record(self)
+    }
+}
+
 impl SlotRecordAccess for PathSpec {
     fn field(&self, index: usize) -> Option<SlotDataAccess<'_>> {
         match self {
@@ -223,9 +276,41 @@ impl SlotRecordAccess for PathSpec {
     }
 }
 
+impl SlotRecordAccessMut for PathSpec {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataAccessMut<'_>> {
+        match self {
+            Self::RingArray {
+                center,
+                diameter,
+                start_ring_inclusive,
+                end_ring_exclusive,
+                ring_lamp_counts,
+                offset_angle,
+                order,
+                ..
+            } => match index {
+                0 => Some(SlotDataAccessMut::Value(center)),
+                1 => Some(SlotDataAccessMut::Value(diameter)),
+                2 => Some(SlotDataAccessMut::Value(start_ring_inclusive)),
+                3 => Some(SlotDataAccessMut::Value(end_ring_exclusive)),
+                4 => Some(SlotDataAccessMut::Map(ring_lamp_counts)),
+                5 => Some(SlotDataAccessMut::Value(offset_angle)),
+                6 => Some(SlotDataAccessMut::Value(order)),
+                _ => None,
+            },
+        }
+    }
+}
+
 impl SlotMapValueAccess for PathSpec {
     fn slot_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Enum(self)
+    }
+}
+
+impl SlotMapValueAccessMut for PathSpec {
+    fn slot_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Enum(self)
     }
 }
 
@@ -236,6 +321,12 @@ impl FieldSlot for PathSpec {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Enum(self)
+    }
+}
+
+impl FieldSlotMut for PathSpec {
+    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
+        SlotDataAccessMut::Enum(self)
     }
 }
 

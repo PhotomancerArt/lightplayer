@@ -95,7 +95,10 @@ fn default_true_slot() -> ValueSlot<bool> {
 mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
-    use crate::{OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{
+        OutputDefView, SlotPath, SlotPolicy, SlotRecordShape, SlotShape, SlotShapeRegistry,
+        StaticSlotShape,
+    };
 
     #[test]
     fn test_output_def_kind() {
@@ -133,5 +136,25 @@ dithering_enabled = false
         assert!(view.is_valid_for(&registry));
         assert_eq!(view.pin().path(), &SlotPath::parse("pin").unwrap());
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
+    }
+
+    #[test]
+    fn output_options_nested_fields_default_to_writable_persisted() {
+        let SlotShape::Record { fields, .. } = OutputDriverOptionsConfig::slot_record_shape()
+        else {
+            panic!("output options shape");
+        };
+
+        let brightness = fields
+            .iter()
+            .find(|field| field.name.as_str() == "brightness")
+            .expect("brightness field");
+        assert_eq!(brightness.policy, SlotPolicy::writable_persisted());
+
+        let white_point = fields
+            .iter()
+            .find(|field| field.name.as_str() == "white_point")
+            .expect("white point field");
+        assert_eq!(white_point.policy, SlotPolicy::writable_persisted());
     }
 }
