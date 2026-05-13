@@ -60,7 +60,6 @@ impl<'a> SlotEditStatusContext<'a> {
             return SlotEditStatus::default();
         };
         SlotEditStatus {
-            pending: self.slots.is_pending(id),
             error: self.slots.error(id),
         }
     }
@@ -69,7 +68,6 @@ impl<'a> SlotEditStatusContext<'a> {
 /// Per-row mutation status.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SlotEditStatus<'a> {
-    pub pending: bool,
     pub error: Option<&'a WireSlotMutationRejection>,
 }
 
@@ -107,9 +105,6 @@ pub(crate) fn slot_value_editor_supported(shape: &SlotValueShape, value: &LpValu
 }
 
 pub(crate) fn render_slot_edit_status(ui: &mut egui::Ui, status: SlotEditStatus<'_>) {
-    if status.pending {
-        ui.small("pending");
-    }
     if let Some(error) = status.error {
         ui.colored_label(egui::Color32::LIGHT_RED, "rejected")
             .on_hover_text(format!("{error:?}"));
