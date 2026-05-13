@@ -115,9 +115,11 @@ impl LpShader for HostShader {
         &mut self,
         points: &mut lp_shader::LpsSamplePointBuf,
         out: &mut lp_shader::LpsSampleRgba16Buf,
+        output_width: u32,
+        output_height: u32,
         time: f32,
     ) -> Result<(), Error> {
-        let uniforms = build_uniforms(1, points.count(), time);
+        let uniforms = build_uniforms(output_width, output_height, time);
         self.px
             .sample_points_rgba16(&uniforms, points, out)
             .map_err(|e| Error::Other {
@@ -127,5 +129,36 @@ impl LpShader for HostShader {
 
     fn has_render(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gfx::{LpGraphics, ShaderCompileOptions};
+
+    #[test]
+    fn direct_sampling_uses_requested_output_size_uniform() {
+        let graphics = Graphics::new();
+        let mut shader = graphics
+            .compile_shader(
+                "layout(binding = 0) uniform vec2 outputSize;\n\
+                 vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+                &ShaderCompileOptions::default(),
+            )
+            .expect("compile shader");
+
+        let mut points = graphics.alloc_sample_points(2).expect("points");
+        points
+            .data_mut()
+            .copy_from_slice(&[0, 0, 2 * 65536, 4 * 65536]);
+        let mut out = graphics.alloc_sample_rgba16(2).expect("out");
+
+        shader
+            .sample_rgba16(&mut points, &mut out, 4, 8, 0.0)
+            .expect("sample");
+
+        assert_eq!(&out.data()[0..4], &[0, 0, 0, 65535]);
+        assert_eq!(&out.data()[4..8], &[32768, 32768, 0, 65535]);
     }
 }

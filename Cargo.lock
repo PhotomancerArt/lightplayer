@@ -3951,6 +3951,7 @@ dependencies = [
  "lp-shader",
  "lpa-client",
  "lpa-server",
+ "lpc-engine",
  "lpc-model",
  "lpc-shared",
  "lpc-source",

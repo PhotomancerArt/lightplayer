@@ -114,9 +114,11 @@ impl LpShader for WasmGuestShader {
         &mut self,
         points: &mut lp_shader::LpsSamplePointBuf,
         out: &mut lp_shader::LpsSampleRgba16Buf,
+        output_width: u32,
+        output_height: u32,
         time: f32,
     ) -> Result<(), Error> {
-        let uniforms = build_uniforms(1, points.count(), time);
+        let uniforms = build_uniforms(output_width, output_height, time);
         self.px
             .sample_points_rgba16(&uniforms, points, out)
             .map_err(|e| Error::Other {

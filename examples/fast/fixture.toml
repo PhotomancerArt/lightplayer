@@ -1,50 +1,41 @@
 kind = "fixture"
-output_loc = "..output"
-texture_loc = "..texture"
-color_order = "Rgb"
-transform = [
-    [
-    1.0,
-    0.0,
-    0.0,
-    0.0,
-],
-    [
-    0.0,
-    1.0,
-    0.0,
-    0.0,
-],
-    [
-    0.0,
-    0.0,
-    1.0,
-    0.0,
-],
-    [
-    0.0,
-    0.0,
-    0.0,
-    1.0,
-],
-]
+color_order = "rgb"
 brightness = 64
 gamma_correction = true
 
-[mapping.PathPoints]
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[transform]
+m00 = 1.0
+m01 = 0.0
+m10 = 0.0
+m11 = 1.0
+tx = 0.0
+ty = 0.0
+
+[sampling]
+kind = "direct"
+
+[render_size]
+width = 16
+height = 16
+
+[mapping]
+kind = "path_points"
 sample_diameter = 2.0
 
-[[mapping.PathPoints.paths]]
-
-[mapping.PathPoints.paths.RingArray]
-center = [
-    0.5,
-    0.5,
-]
+[mapping.paths.0]
+kind = "ring_array"
+center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0
 end_ring_exclusive = 1
-ring_lamp_counts = [1]
 offset_angle = 0.0
-order = "InnerFirst"
+order = "inner_first"
 
+[mapping.paths.0.ring_lamp_counts]
+0 = 1
