@@ -108,6 +108,7 @@ impl DebugUiState {
         let mutations = self.drain_queued_mutations();
         let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
             self.next_project_read_context();
+        let include_slots = needs_slot_snapshot || !mutations.is_empty();
         let client = self.async_client.clone();
         let handle = self.project_handle;
         let tx = self.response_tx.clone();
@@ -118,7 +119,7 @@ impl DebugUiState {
                     handle,
                     debug_ui_project_read(
                         since,
-                        needs_slot_snapshot,
+                        include_slots,
                         selected_resource,
                         selected_visual_product,
                         mutations,
