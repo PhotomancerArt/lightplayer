@@ -1,0 +1,16 @@
+kind = "shader/compute"
+glsl_path = "compute.glsl"
+
+[bindings.emitters]
+target = "bus#fluid.emitters"
+
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0
+
+[produced.emitters]
+kind = "map"
+key = "u32"
+value = "lp::fluid::Emitter"
+mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }

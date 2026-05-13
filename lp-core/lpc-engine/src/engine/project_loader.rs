@@ -706,20 +706,29 @@ where
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use alloc::sync::Arc;
-    use lpc_model::NodeName;
     use lpc_model::TreePath;
+    use lpc_model::{NodeName, ProductRef, SlotData};
+    use lpc_wire::{ProjectReadRequest, ProjectReadResult};
     use lpfs::lp_path::AsLpPath;
-    use lpfs::{LpFs, LpFsMemory};
+    use lpfs::{LpFs, LpFsMemory, LpFsStd};
+    use lps_shared::TextureStorageFormat;
 
     use super::*;
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::resolve_with_engine_host;
+    use crate::products::visual::RenderTextureRequest;
 
     fn flat_project() -> LpFsMemory {
         let fs = LpFsMemory::new();
         write_flat_basic_files(&fs);
         fs
+    }
+
+    fn examples_fluid_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fluid"))
     }
 
     #[test]
@@ -1037,6 +1046,104 @@ value = "f32"
         assert_eq!(
             *production.value_leaf().expect("value").value(),
             LpValue::F32(2.25)
+        );
+    }
+
+    #[test]
+    fn fluid_example_loads_compute_fluid_fixture_flow() {
+        let fs = examples_fluid_fs();
+        let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load fluid example");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let root = rt.tree().root();
+
+        let compute = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("compute").unwrap())
+            .expect("compute node");
+        let fluid = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fluid").unwrap())
+            .expect("fluid node");
+        let fixture = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
+            .expect("fixture node");
+        let output = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("output").unwrap())
+            .expect("output node");
+
+        for id in [compute, fluid, fixture, output] {
+            assert!(rt.tree().get(id).expect("entry").state.value().is_alive());
+        }
+
+        let (emitters, _) = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node: compute,
+                slot: SlotPath::parse("emitters").expect("emitters"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("compute emitters");
+        let SlotData::Map(map) = emitters.data() else {
+            panic!("compute emitters should be a map");
+        };
+        assert!(!map.entries.is_empty());
+
+        let (fluid_output, _) = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node: fluid,
+                slot: SlotPath::parse("output").expect("output"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("fluid output");
+        let LpValue::Product(ProductRef::Visual(product)) =
+            fluid_output.value_leaf().expect("visual product").value()
+        else {
+            panic!("fluid output should be a visual product");
+        };
+        let texture = rt
+            .render_texture_for_test(
+                *product,
+                &RenderTextureRequest {
+                    width: 16,
+                    height: 16,
+                    format: TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.0,
+                },
+            )
+            .expect("fluid texture");
+        assert!(
+            texture
+                .try_raw_bytes()
+                .expect("bytes")
+                .chunks_exact(8)
+                .any(|px| px[..6].iter().any(|byte| *byte != 0)),
+            "fluid visual should contain nonzero RGB data"
+        );
+
+        let response = rt.read_project(ProjectReadRequest::default_debug(None));
+        let ProjectReadResult::Nodes(nodes) = &response.results[1] else {
+            panic!("node read result");
+        };
+        let slots = nodes.slots.as_ref().expect("slot roots");
+        assert!(
+            slots
+                .roots
+                .iter()
+                .any(|root| root.name == format!("node.{}.state", compute.0)),
+            "compute state should be visible in debug read"
+        );
+        assert!(
+            slots
+                .roots
+                .iter()
+                .any(|root| root.name == format!("node.{}.state", fluid.0)),
+            "fluid state should be visible in debug read"
         );
     }
 
