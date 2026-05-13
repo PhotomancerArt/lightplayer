@@ -1,25 +1,23 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    LpValue, MapSlot, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef, RelativeNodeRefSlot,
-    RenderOrderSlot, Revision, SourcePathSlot, ValueSlot,
+    AddSubMode, BindingDefs, DivMode, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot,
+    PositiveF32Slot, RatioSlot, RenderOrderSlot, Revision, SourcePathSlot, ValueSlot,
 };
 
 #[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
 pub struct ShaderDef {
+    #[slot(skip)]
+    pub kind: String,
     glsl_path: SourcePathSlot,
-    texture_loc: RelativeNodeRefSlot,
     render_order: RenderOrderSlot,
-    compiler_options: CompilerOptions,
+    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
+    bindings: BindingDefs,
+    #[serde(default)]
+    glsl_opts: GlslOpts,
+    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub param_defs: MapSlot<String, ShaderParamDef>,
-}
-
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
-pub struct CompilerOptions {
-    add_sub: ValueSlot<String>,
-    mul: ValueSlot<String>,
-    div: ValueSlot<String>,
 }
 
 #[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
@@ -37,6 +35,8 @@ pub struct ScalarHint {
 }
 
 impl ShaderDef {
+    pub const KIND: &'static str = "shader";
+
     pub fn new() -> Self {
         let mut param_defs = BTreeMap::new();
         param_defs.insert(
@@ -49,10 +49,15 @@ impl ShaderDef {
         );
 
         Self {
-            glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
-            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..texture").unwrap()),
+            kind: Self::KIND.to_string(),
+            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
             render_order: RenderOrderSlot::new(0),
-            compiler_options: CompilerOptions::default(),
+            bindings: BindingDefs::default(),
+            glsl_opts: GlslOpts {
+                add_sub: ValueSlot::new(AddSubMode::Wrapping),
+                mul: ValueSlot::new(MulMode::Wrapping),
+                div: ValueSlot::new(DivMode::Reciprocal),
+            },
             param_defs: MapSlot::new(param_defs),
         }
     }
@@ -92,16 +97,6 @@ impl ShaderDef {
 impl Default for ShaderDef {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl Default for CompilerOptions {
-    fn default() -> Self {
-        Self {
-            add_sub: ValueSlot::new(String::from("saturating")),
-            mul: ValueSlot::new(String::from("saturating")),
-            div: ValueSlot::new(String::from("saturating")),
-        }
     }
 }
 

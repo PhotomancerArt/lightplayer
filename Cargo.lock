@@ -4197,6 +4197,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "serde",
+ "serde_json",
  "toml",
 ]
 

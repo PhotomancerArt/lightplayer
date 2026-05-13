@@ -1,11 +1,16 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ArtifactPathSlot, MapSlot};
+use lpc_model::{ArtifactPathSlot, MapSlot, OptionSlot, ValueSlot};
 
 #[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
 #[slot(root)]
 pub struct ProjectDef {
-    nodes: MapSlot<String, NodeInvocationDef>,
+    #[slot(skip)]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub name: OptionSlot<ValueSlot<String>>,
+    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
+    pub nodes: MapSlot<String, NodeInvocationDef>,
 }
 
 #[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
@@ -14,6 +19,8 @@ pub struct NodeInvocationDef {
 }
 
 impl ProjectDef {
+    pub const KIND: &'static str = "project";
+
     pub fn new() -> Self {
         let mut nodes = BTreeMap::new();
         nodes.insert(
@@ -34,6 +41,8 @@ impl ProjectDef {
         );
 
         Self {
+            kind: Self::KIND.to_string(),
+            name: OptionSlot::some(ValueSlot::new("basic".to_string())),
             nodes: MapSlot::new(nodes),
         }
     }
@@ -46,7 +55,7 @@ impl Default for ProjectDef {
 }
 
 impl NodeInvocationDef {
-    fn new(artifact: &str) -> Self {
+    pub fn new(artifact: &str) -> Self {
         Self {
             artifact: ArtifactPathSlot::new(artifact.to_string()),
         }

@@ -27,13 +27,13 @@ fn generated_basic_source_toml_round_trips_and_documents_authored_shape() {
     let _shader: ShaderDef = toml::from_str(&shader_toml).expect("shader toml round-trip");
     let _fixture: FixtureDef = toml::from_str(&fixture_toml).expect("fixture toml round-trip");
 
+    assert!(shader_toml.contains("kind = \"shader\""));
+    assert!(shader_toml.contains("glsl_path = \"main.glsl\""));
     assert!(shader_toml.contains("[param_defs.exposure]"));
-    assert!(shader_toml.contains("texture_loc = \"..texture\""));
     assert!(fixture_toml.contains("kind = \"path_points\""));
-    assert!(fixture_toml.contains("[mapping.points.1]"));
-    assert!(fixture_toml.contains("[mapping.path]"));
-    assert!(fixture_toml.contains("ring_lamp_counts = ["));
-    assert!(!fixture_toml.contains("[mapping.path.ring_lamp_counts]"));
+    assert!(fixture_toml.contains("[mapping.paths.0]"));
+    assert!(fixture_toml.contains("[mapping.paths.0.ring_lamp_counts]"));
+    assert!(!fixture_toml.contains("ring_lamp_counts = ["));
 }
 
 fn evidence_dir() -> PathBuf {

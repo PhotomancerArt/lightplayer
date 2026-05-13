@@ -39,11 +39,13 @@ pub use server::{
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use slot::{
-    WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
+    SlotTomlError, WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
     WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, snapshot_slot_root,
-    snapshot_slot_shape, write_slot_data_json, write_slot_shape_registry_snapshot_json,
+    build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, decode_slot_data_toml,
+    decode_slot_data_toml_with_ignored_fields, encode_slot_data_access_toml, encode_slot_data_toml,
+    snapshot_slot_root, snapshot_slot_shape, write_slot_data_json,
+    write_slot_shape_registry_snapshot_json,
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};

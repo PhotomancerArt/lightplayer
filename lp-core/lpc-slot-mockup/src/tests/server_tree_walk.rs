@@ -24,14 +24,14 @@ fn server_tree_walk_prints_runtime_and_source_roots() {
         &harness.runtime.registry,
     );
     assert!(fixture_lines.iter().any(|line| {
-        line.contains("mapping.path_points.path.ring_array.ring_lamp_counts: Array")
+        line.contains("mapping.path_points.paths[0].ring_array.ring_lamp_counts: map")
     }));
     assert!(fixture_lines.iter().any(|line| {
-        line.contains("mapping.path_points.path.ring_array.semantic_ring_lamp_counts: Array")
+        line.contains("mapping.path_points.paths[0].ring_array.ring_lamp_counts[0]: U32")
     }));
     assert!(
-        !fixture_lines
+        fixture_lines
             .iter()
-            .any(|line| line.contains("ring_lamp_counts[0]"))
+            .any(|line| line.contains("mapping.path_points.sample_diameter: F32"))
     );
 }
