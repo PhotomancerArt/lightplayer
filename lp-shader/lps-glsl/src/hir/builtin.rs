@@ -20,6 +20,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "clamp" => BuiltinKind::Clamp,
         "cross" => BuiltinKind::Cross,
         "degrees" => BuiltinKind::Degrees,
+        "determinant" => BuiltinKind::Determinant,
         "distance" => BuiltinKind::Distance,
         "dot" => BuiltinKind::Dot,
         "equal" => BuiltinKind::Equal,
@@ -41,6 +42,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "round" => BuiltinKind::Round,
         "smoothstep" => BuiltinKind::Smoothstep,
         "sqrt" => BuiltinKind::Sqrt,
+        "transpose" => BuiltinKind::Transpose,
         "trunc" => BuiltinKind::Trunc,
         _ => return None,
     })
@@ -106,6 +108,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Any
         | BuiltinKind::Ceil
         | BuiltinKind::Degrees
+        | BuiltinKind::Determinant
         | BuiltinKind::Floor
         | BuiltinKind::Fract
         | BuiltinKind::Length
@@ -114,6 +117,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Radians
         | BuiltinKind::Round
         | BuiltinKind::Sqrt
+        | BuiltinKind::Transpose
         | BuiltinKind::Trunc => 1,
         BuiltinKind::Equal
         | BuiltinKind::Cross
@@ -161,6 +165,19 @@ pub(super) fn type_builtin_args(
                 BuiltinKind::Normalize => args[0].ty.clone(),
                 _ => unreachable!(),
             };
+            Ok((args, ty))
+        }
+        BuiltinKind::Determinant => {
+            if !args[0].ty.is_matrix() {
+                return Err(Diagnostic::error(span, "determinant expects a matrix"));
+            }
+            Ok((args, LpsType::Float))
+        }
+        BuiltinKind::Transpose => {
+            if !args[0].ty.is_matrix() {
+                return Err(Diagnostic::error(span, "transpose expects a matrix"));
+            }
+            let ty = args[0].ty.clone();
             Ok((args, ty))
         }
         BuiltinKind::Cross => {

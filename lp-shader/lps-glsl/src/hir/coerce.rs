@@ -19,6 +19,9 @@ pub(super) fn coerce_constructor_args(
         .iter()
         .map(|arg| scalar_lane_count(&arg.ty))
         .sum::<usize>();
+    if target_ty.is_matrix() && args.len() == 1 && args[0].ty.is_matrix() {
+        return Ok(args);
+    }
     if let LpsType::Array { element, len } = target_ty
         && args.len() == *len as usize
     {
@@ -76,7 +79,22 @@ pub(super) fn coerce_arithmetic_pair(
 ) -> Result<(HirExpr, HirExpr, LpsType), Diagnostic> {
     let ty = vector_dominant_type(&[&lhs.ty, &rhs.ty])
         .ok_or_else(|| Diagnostic::error(span, "unsupported arithmetic operand types"))?;
+    if ty.is_matrix() {
+        let lhs = coerce_matrix_arithmetic_operand(lhs, &ty)?;
+        let rhs = coerce_matrix_arithmetic_operand(rhs, &ty)?;
+        return Ok((lhs, rhs, ty));
+    }
     Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?, ty))
+}
+
+fn coerce_matrix_arithmetic_operand(
+    expr: HirExpr,
+    matrix_ty: &LpsType,
+) -> Result<HirExpr, Diagnostic> {
+    if expr.ty == *matrix_ty {
+        return Ok(expr);
+    }
+    coerce_expr(expr, &LpsType::Float)
 }
 
 pub(super) fn coerce_comparison_pair(

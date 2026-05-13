@@ -9,6 +9,7 @@ use crate::hir::{BuiltinKind, HirExpr, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
+use super::matrix::{lower_matrix_determinant, lower_matrix_transpose};
 use super::numeric::{
     BinaryFloatOp, UnaryFloatOp, fconst, lane_at, lower_binary_float_lane, lower_bool_mix_lane,
     lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
@@ -41,11 +42,17 @@ pub(in crate::lower) fn lower_builtin(
     if kind == BuiltinKind::Cross {
         return lower_cross(ctx, span, &values[0], &values[1], result_ty);
     }
+    if kind == BuiltinKind::Determinant {
+        return lower_matrix_determinant(ctx, span, values[0].clone(), result_ty);
+    }
     if kind == BuiltinKind::Dot {
         return lower_dot(ctx, span, &values[0], &values[1], result_ty);
     }
     if kind == BuiltinKind::Normalize {
         return lower_normalize(ctx, span, &values[0], result_ty);
+    }
+    if kind == BuiltinKind::Transpose {
+        return lower_matrix_transpose(ctx, span, values[0].clone(), result_ty);
     }
     let width = scalar_lane_count(result_ty);
     let mut lanes = Vec::new();
@@ -73,6 +80,9 @@ pub(in crate::lower) fn lower_builtin(
                 .lanes[i]
             }
             BuiltinKind::Cross => unreachable!("cross returns before lane-wise builtin lowering"),
+            BuiltinKind::Determinant => {
+                unreachable!("determinant returns before lane-wise builtin lowering")
+            }
             BuiltinKind::Distance => {
                 unreachable!("distance returns before lane-wise builtin lowering")
             }
@@ -210,6 +220,9 @@ pub(in crate::lower) fn lower_builtin(
                     src: lane_at(&values[0], i),
                 });
                 dst
+            }
+            BuiltinKind::Transpose => {
+                unreachable!("transpose returns before lane-wise builtin lowering")
             }
             BuiltinKind::Trunc => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Trunc)?

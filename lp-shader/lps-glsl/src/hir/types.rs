@@ -235,6 +235,7 @@ pub enum BuiltinKind {
     Clamp,
     Cross,
     Degrees,
+    Determinant,
     Distance,
     Dot,
     Equal,
@@ -256,5 +257,6 @@ pub enum BuiltinKind {
     Round,
     Smoothstep,
     Sqrt,
+    Transpose,
     Trunc,
 }

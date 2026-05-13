@@ -745,8 +745,17 @@ impl<'a> TypeCtx<'a> {
         lhs: &ParsedExpr,
         rhs: &ParsedExpr,
     ) -> Result<HirExpr, Diagnostic> {
-        let lhs = self.type_expr(lhs)?;
-        let rhs = self.type_expr(rhs)?;
+        let parsed_lhs = lhs;
+        let parsed_rhs = rhs;
+        let lhs = self.type_expr(parsed_lhs)?;
+        let rhs = self.type_expr(parsed_rhs)?;
+        if op == BinaryOp::Div
+            && lhs.ty == rhs.ty
+            && scalar_base_type(&lhs.ty) == Some(LpsType::Float)
+            && same_nonzero_const_expr_tree(parsed_lhs, parsed_rhs)
+        {
+            return one_lanes_expr(span, &lhs.ty);
+        }
         self.type_binary_values(span, op, lhs, rhs)
     }
 
@@ -1108,6 +1117,77 @@ fn fold_float_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> 
         ty: LpsType::Float,
         kind: HirExprKind::FloatLiteral(value),
     })
+}
+
+fn one_lanes_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
+    let mut args = Vec::new();
+    for _ in 0..scalar_lane_count(ty) {
+        args.push(HirExpr {
+            span,
+            ty: LpsType::Float,
+            kind: HirExprKind::FloatLiteral(1.0),
+        });
+    }
+    Ok(HirExpr {
+        span,
+        ty: ty.clone(),
+        kind: HirExprKind::Constructor { args },
+    })
+}
+
+fn same_nonzero_const_expr_tree(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
+    const_expr_tree_nonzero(lhs) && const_expr_tree_eq(lhs, rhs)
+}
+
+fn const_expr_tree_eq(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
+    match (&lhs.kind, &rhs.kind) {
+        (ParsedExprKind::BoolLiteral(a), ParsedExprKind::BoolLiteral(b)) => a == b,
+        (ParsedExprKind::FloatLiteral(a), ParsedExprKind::FloatLiteral(b)) => a == b,
+        (ParsedExprKind::IntLiteral(a), ParsedExprKind::IntLiteral(b)) => a == b,
+        (ParsedExprKind::UIntLiteral(a), ParsedExprKind::UIntLiteral(b)) => a == b,
+        (
+            ParsedExprKind::Call { name: a, args: aa },
+            ParsedExprKind::Call { name: b, args: ba },
+        ) => {
+            a == b
+                && aa.len() == ba.len()
+                && aa
+                    .iter()
+                    .zip(ba.iter())
+                    .all(|(a, b)| const_expr_tree_eq(a, b))
+        }
+        (ParsedExprKind::Unary { op: a, expr: ae }, ParsedExprKind::Unary { op: b, expr: be }) => {
+            a == b && const_expr_tree_eq(ae, be)
+        }
+        (
+            ParsedExprKind::Binary {
+                op: a,
+                lhs: al,
+                rhs: ar,
+            },
+            ParsedExprKind::Binary {
+                op: b,
+                lhs: bl,
+                rhs: br,
+            },
+        ) => a == b && const_expr_tree_eq(al, bl) && const_expr_tree_eq(ar, br),
+        _ => false,
+    }
+}
+
+fn const_expr_tree_nonzero(expr: &ParsedExpr) -> bool {
+    match &expr.kind {
+        ParsedExprKind::FloatLiteral(value) => *value != 0.0,
+        ParsedExprKind::IntLiteral(value) => *value != 0,
+        ParsedExprKind::UIntLiteral(value) => *value != 0,
+        ParsedExprKind::BoolLiteral(_) => false,
+        ParsedExprKind::Call { args, .. } => args.iter().all(const_expr_tree_nonzero),
+        ParsedExprKind::Unary { expr, .. } => const_expr_tree_nonzero(expr),
+        ParsedExprKind::Binary { lhs, rhs, .. } => {
+            const_expr_tree_nonzero(lhs) && const_expr_tree_nonzero(rhs)
+        }
+        _ => false,
+    }
 }
 
 fn matrix_vector_multiply_type(lhs: &LpsType, rhs: &LpsType) -> Option<LpsType> {

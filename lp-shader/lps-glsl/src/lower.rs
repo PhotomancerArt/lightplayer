@@ -296,7 +296,37 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
         } => lower_global_load(ctx, expr.span, *byte_offset, &expr.ty),
         HirExprKind::Constructor { args } => {
             let mut lanes = Vec::new();
-            if expr.ty.is_matrix() && args.len() == 1 && scalar_lane_count(&args[0].ty) == 1 {
+            if expr.ty.is_matrix() && args.len() == 1 && args[0].ty.is_matrix() {
+                let value = lower_expr(ctx, &args[0])?;
+                let Some((dst_cols, dst_rows)) = expr.ty.matrix_dims() else {
+                    return Err(Diagnostic::error(expr.span, "invalid matrix constructor"));
+                };
+                let Some((src_cols, src_rows)) = args[0].ty.matrix_dims() else {
+                    return Err(Diagnostic::error(args[0].span, "invalid source matrix"));
+                };
+                for col in 0..dst_cols {
+                    for row in 0..dst_rows {
+                        if col < src_cols && row < src_rows {
+                            lanes.push(value.lanes[col * src_rows + row]);
+                        } else if col == row {
+                            let one = ctx.fb.alloc_vreg(IrType::F32);
+                            ctx.fb.push(LpirOp::FconstF32 {
+                                dst: one,
+                                value: 1.0,
+                            });
+                            lanes.push(one);
+                        } else {
+                            let zero = ctx.fb.alloc_vreg(IrType::F32);
+                            ctx.fb.push(LpirOp::FconstF32 {
+                                dst: zero,
+                                value: 0.0,
+                            });
+                            lanes.push(zero);
+                        }
+                    }
+                }
+            } else if expr.ty.is_matrix() && args.len() == 1 && scalar_lane_count(&args[0].ty) == 1
+            {
                 let value = lower_expr(ctx, &args[0])?;
                 let diagonal = single_lane(args[0].span, &value)?;
                 let Some((cols, rows)) = expr.ty.matrix_dims() else {
