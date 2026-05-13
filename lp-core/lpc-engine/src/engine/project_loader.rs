@@ -9,8 +9,8 @@ use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::{
-    BindingDefs, BindingEndpoint, ChannelName, Kind, LpValue, NodeDef, NodeId, NodeName, Revision,
-    SlotPath,
+    BindingDefs, BindingEndpoint, ChannelName, Kind, LpType, LpValue, NodeDef, NodeId, NodeName,
+    Revision, ShaderDef, ShaderSlotKind, SlotPath,
 };
 use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -309,7 +309,7 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(ShaderNode::new(node.id, glsl_source)),
+                        Box::new(ShaderNode::new(node.id, config.clone(), glsl_source)),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
@@ -324,6 +324,17 @@ impl ProjectLoader {
                     &config.bindings,
                     frame,
                 )?;
+                for name in config.consumed_slots.entries.keys() {
+                    register_optional_source_binding(
+                        runtime,
+                        loaded_nodes,
+                        node,
+                        name.as_str(),
+                        &config.bindings,
+                        frame,
+                    )?;
+                }
+                register_visual_default_time_binding(runtime, node, config, frame)?;
             }
         }
 
@@ -557,6 +568,7 @@ fn resolve_path_relative_to_file(
 fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLoadError> {
     let name = match config {
         NodeDef::ComputeShader(_) => "compute_shader",
+        NodeDef::Shader(_) => "shader",
         _ => config.kind_name(),
     };
     NodeName::parse(name).map_err(|e| ProjectLoadError::InvalidNodeName {
@@ -735,6 +747,44 @@ fn register_clock_default_time_binding(
     Ok(())
 }
 
+fn register_visual_default_time_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    config: &ShaderDef,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_source(&config.bindings, "time").is_some() {
+        return Ok(());
+    }
+    let Some(slot) = config.consumed_slots.entries.get("time") else {
+        return Ok(());
+    };
+    if *slot.kind.value() != ShaderSlotKind::Value
+        || slot.value.value().as_lp_type() != Some(LpType::F32)
+    {
+        return Ok(());
+    }
+    engine
+        .add_binding(
+            BindingDraft {
+                source: BindingSource::BusChannel(ChannelName(String::from("time.seconds"))),
+                target: BindingTarget::ConsumedSlot {
+                    node: current.id,
+                    slot: SlotPath::parse("time").expect("visual shader time slot path"),
+                },
+                priority: BindingPriority::default_fallback(),
+                kind: Kind::Instant,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register visual shader default time binding: {e}"),
+        })?;
+    Ok(())
+}
+
 fn binding_source_endpoint(
     loaded_nodes: &[LoadedNode],
     current: &LoadedNode,
@@ -899,9 +949,31 @@ kind = "project"
 
 [nodes.clock]
 kind = "clock"
+
+[nodes.shader]
+artifact = "./shader.toml"
 "#,
         )
         .expect("project.toml");
+        fs.write_file(
+            "/shader.toml".as_path(),
+            br#"
+kind = "shader/visual"
+glsl_path = "shader.glsl"
+render_order = 0
+
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0
+"#,
+        )
+        .expect("shader.toml");
+        fs.write_file(
+            "/shader.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+        )
+        .expect("shader.glsl");
 
         let services = EngineServices::new(TreePath::parse("/clock.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
@@ -918,6 +990,10 @@ kind = "clock"
                 .value()
                 .is_alive()
         );
+        let shader = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("shader").unwrap())
+            .expect("shader node");
 
         rt.tick(1000).expect("first tick");
         let first = resolve_with_engine_host(
@@ -931,6 +1007,20 @@ kind = "clock"
             *first.value_leaf().expect("time value").value(),
             LpValue::F32(0.0)
         );
+        let shader_first = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ConsumedSlot {
+                node: shader,
+                slot: SlotPath::parse("time").expect("time slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve visual shader time")
+        .0;
+        assert_eq!(
+            *shader_first.value_leaf().expect("time value").value(),
+            LpValue::F32(0.0)
+        );
 
         rt.tick(1000).expect("second tick");
         let second = resolve_with_engine_host(
@@ -942,6 +1032,20 @@ kind = "clock"
         .0;
         assert_eq!(
             *second.value_leaf().expect("time value").value(),
+            LpValue::F32(1.0)
+        );
+        let shader_second = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ConsumedSlot {
+                node: shader,
+                slot: SlotPath::parse("time").expect("time slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve visual shader time")
+        .0;
+        assert_eq!(
+            *shader_second.value_leaf().expect("time value").value(),
             LpValue::F32(1.0)
         );
     }
@@ -1361,7 +1465,7 @@ source = "bus#visual.out"
         fs.write_file(
             "/shader.toml".as_path(),
             br#"
-kind = "shader"
+kind = "shader/visual"
 glsl_path = "shader.glsl"
 render_order = 0
 

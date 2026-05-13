@@ -5,7 +5,7 @@ use core::cell::RefCell;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
@@ -285,11 +285,11 @@ impl ShaderBuilder {
             render_order: RenderOrderSlot::new(self.render_order),
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
-            param_defs: MapSlot::default(),
+            consumed_slots: default_visual_consumed_slots(),
         };
 
         let toml = prepend_kind(
-            "shader",
+            ShaderDef::KIND,
             toml::to_string(&config).expect("Failed to serialize shader def to TOML"),
         );
 
@@ -431,6 +431,15 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
+}
+
+fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
+    let mut slots = BTreeMap::new();
+    slots.insert(
+        String::from("time"),
+        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
+    );
+    MapSlot::new(slots)
 }
 
 fn fixture_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {

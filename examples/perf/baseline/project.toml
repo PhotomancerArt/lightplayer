@@ -5,6 +5,9 @@ name = "perf-baseline"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+kind = "clock"
+
 [nodes.texture]
 artifact = "./texture.toml"
 

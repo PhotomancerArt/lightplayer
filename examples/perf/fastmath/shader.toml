@@ -1,6 +1,5 @@
-kind = "shader"
+kind = "shader/visual"
 glsl_path = "shader.glsl"
-texture_loc = "..texture"
 render_order = 0
 
 [glsl_opts]
@@ -8,3 +7,9 @@ add_sub = "wrapping"
 mul = "wrapping"
 div = "reciprocal"
 
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0
+label = "Time"
+description = "Project clock time in seconds"

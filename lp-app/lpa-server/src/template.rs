@@ -18,6 +18,9 @@ const PROJECT_TOML: &[u8] = br#"kind = "project"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+kind = "clock"
+
 [nodes.texture]
 artifact = "./texture.toml"
 
@@ -35,15 +38,21 @@ height = 64
 "#;
 
 /// TOML for the default shader node.
-const SHADER_NODE_TOML: &[u8] = br#"kind = "shader"
+const SHADER_NODE_TOML: &[u8] = br#"kind = "shader/visual"
 glsl_path = "shader.glsl"
-texture_loc = "..texture"
 render_order = 0
 
 [glsl_opts]
 add_sub = "saturating"
 mul = "saturating"
 div = "saturating"
+
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0
+label = "Time"
+description = "Project clock time in seconds"
 "#;
 
 /// TOML for GPIO strip output.

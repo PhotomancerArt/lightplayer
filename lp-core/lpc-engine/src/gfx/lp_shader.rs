@@ -31,14 +31,18 @@ impl ShaderCompileOptions {
 /// A compiled, runnable shader (pixel loop lives in `lp_shader::LpsPxShader::render_frame`).
 pub trait LpShader: Send + Sync {
     /// Run the shader into an RGBA16 texture buffer allocated from the same graphics engine.
-    fn render(&mut self, texture: &mut lp_shader::LpsTextureBuf, time: f32) -> Result<(), Error>;
+    fn render(
+        &mut self,
+        texture: &mut lp_shader::LpsTextureBuf,
+        uniforms: &LpsValueF32,
+    ) -> Result<(), Error>;
 
     /// Run the shader at caller-provided Q16.16 normalized points.
     fn sample_rgba16(
         &mut self,
         _points: &mut lp_shader::LpsSamplePointBuf,
         _out: &mut lp_shader::LpsSampleRgba16Buf,
-        _time: f32,
+        _uniforms: &LpsValueF32,
     ) -> Result<(), Error> {
         Err(Error::Other {
             message: String::from("shader backend does not support direct sampling"),

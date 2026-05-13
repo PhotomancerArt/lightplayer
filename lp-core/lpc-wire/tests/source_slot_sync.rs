@@ -104,14 +104,14 @@ fn real_source_defs_sync_as_slot_roots() {
 
     let shader_with_params: ShaderDef = toml::from_str(
         r#"
-kind = "shader"
+kind = "shader/visual"
 glsl_path = "shader.glsl"
 render_order = 0
 
 [bindings.output]
 target = "bus#visual.out"
 
-[param_defs.speed]
+[consumed.speed]
 kind = "value"
 label = "Speed"
 description = "Animation speed"
@@ -131,7 +131,7 @@ min = 0.0
             shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "param_defs[speed].label",
+            "consumed_slots[speed].label",
         ),
         LpValue::String(String::from("Speed")),
     );
