@@ -49,6 +49,7 @@ pub fn build_hir(
     let structs = build_struct_types(index, &array_size_consts)?;
     let (uniforms, uniforms_type) = build_uniforms(index, &structs, &array_size_consts)?;
     let functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
+    let mut imports = ImportRegistry::default();
     let globals = build_global_consts(
         source,
         tokens,
@@ -57,9 +58,9 @@ pub fn build_hir(
         &functions_sigs,
         &structs,
         &array_size_consts,
+        &mut imports,
     )?;
     let body_map = bodies.into_iter().collect::<BTreeMap<_, _>>();
-    let mut imports = ImportRegistry::default();
     let mut functions = Vec::new();
     let mut function_meta = Vec::new();
 
@@ -497,9 +498,9 @@ fn build_global_consts(
     functions: &[FunctionSig],
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
+    imports: &mut ImportRegistry,
 ) -> Result<BTreeMap<String, GlobalConst>, Diagnostic> {
     let mut globals = BTreeMap::new();
-    let mut imports = ImportRegistry::default();
     for konst in &index.consts {
         let ty = type_ref_to_lps_with_structs(&konst.ty, structs, array_size_consts)?;
         let Some(init_span) = konst.init_span else {
@@ -515,7 +516,7 @@ fn build_global_consts(
             &globals,
             structs,
             array_size_consts,
-            &mut imports,
+            imports,
         );
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;

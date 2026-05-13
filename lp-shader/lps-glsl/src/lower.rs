@@ -394,15 +394,19 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             if let Some(out) = out {
                 return lower_import_call_with_out(ctx, expr.span, callee, args, out, &expr.ty);
             }
-            if matches!(import, ImportKey::Glsl { .. })
-                && args.len() == 1
-                && scalar_lane_count(&expr.ty) > 1
-            {
-                let arg = lower_expr(ctx, &args[0])?;
+            if matches!(import, ImportKey::Glsl { .. }) && scalar_lane_count(&expr.ty) > 1 {
+                let args = args
+                    .iter()
+                    .map(|arg| lower_expr(ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let mut results = Vec::new();
-                for lane in arg.lanes {
+                for i in 0..scalar_lane_count(&expr.ty) {
+                    let call_args = args
+                        .iter()
+                        .map(|arg| ops::lane_at(arg, i))
+                        .collect::<Vec<_>>();
                     let dst = ctx.fb.alloc_vreg(IrType::F32);
-                    ctx.fb.push_call(callee, &[lane], &[dst]);
+                    ctx.fb.push_call(callee, &call_args, &[dst]);
                     results.push(dst);
                 }
                 return Ok(LowerValue {

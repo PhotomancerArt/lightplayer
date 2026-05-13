@@ -16,7 +16,9 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "abs" => BuiltinKind::Abs,
         "all" => BuiltinKind::All,
         "any" => BuiltinKind::Any,
+        "ceil" => BuiltinKind::Ceil,
         "clamp" => BuiltinKind::Clamp,
+        "degrees" => BuiltinKind::Degrees,
         "distance" => BuiltinKind::Distance,
         "dot" => BuiltinKind::Dot,
         "equal" => BuiltinKind::Equal,
@@ -34,14 +36,20 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "not" => BuiltinKind::Not,
         "normalize" => BuiltinKind::Normalize,
         "notEqual" => BuiltinKind::NotEqual,
+        "radians" => BuiltinKind::Radians,
+        "round" => BuiltinKind::Round,
         "smoothstep" => BuiltinKind::Smoothstep,
         "sqrt" => BuiltinKind::Sqrt,
+        "trunc" => BuiltinKind::Trunc,
         _ => return None,
     })
 }
 
 pub(super) fn is_glsl_import(name: &str) -> bool {
-    matches!(name, "sin" | "cos" | "exp" | "atan")
+    matches!(
+        name,
+        "sin" | "cos" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2" | "pow" | "atan"
+    )
 }
 
 pub(super) fn type_glsl_import_args(
@@ -49,7 +57,11 @@ pub(super) fn type_glsl_import_args(
     name: &str,
     args: Vec<HirExpr>,
 ) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
-    if matches!(name, "sin" | "cos" | "exp" | "sqrt") && args.len() == 1 {
+    if matches!(
+        name,
+        "sin" | "cos" | "asin" | "acos" | "exp" | "exp2" | "log" | "log2"
+    ) && args.len() == 1
+    {
         let arg = args[0].clone();
         let arg_base = scalar_base_type(&arg.ty).unwrap_or_else(|| arg.ty.clone());
         if arg_base == LpsType::Float {
@@ -57,6 +69,13 @@ pub(super) fn type_glsl_import_args(
         }
         let arg = coerce_expr(arg, &LpsType::Float)?;
         return Ok((alloc::vec![arg], LpsType::Float));
+    }
+    if name == "pow" && args.len() == 2 {
+        let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+        if scalar_base_type(&ty) != Some(LpsType::Float) {
+            return Err(Diagnostic::error(span, "pow expects float lanes"));
+        }
+        return Ok((alloc::vec![a, b], ty));
     }
 
     let args = args
@@ -84,12 +103,17 @@ pub(super) fn type_builtin_args(
         BuiltinKind::Abs
         | BuiltinKind::All
         | BuiltinKind::Any
+        | BuiltinKind::Ceil
+        | BuiltinKind::Degrees
         | BuiltinKind::Floor
         | BuiltinKind::Fract
         | BuiltinKind::Length
         | BuiltinKind::Normalize
         | BuiltinKind::Not
-        | BuiltinKind::Sqrt => 1,
+        | BuiltinKind::Radians
+        | BuiltinKind::Round
+        | BuiltinKind::Sqrt
+        | BuiltinKind::Trunc => 1,
         BuiltinKind::Equal
         | BuiltinKind::Distance
         | BuiltinKind::Dot
@@ -114,9 +138,14 @@ pub(super) fn type_builtin_args(
             let ty = args[0].ty.clone();
             Ok((args, ty))
         }
-        BuiltinKind::Sqrt => {
+        BuiltinKind::Ceil
+        | BuiltinKind::Degrees
+        | BuiltinKind::Radians
+        | BuiltinKind::Round
+        | BuiltinKind::Sqrt
+        | BuiltinKind::Trunc => {
             if scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
-                return Err(Diagnostic::error(span, "sqrt expects float lanes"));
+                return Err(Diagnostic::error(span, "builtin expects float lanes"));
             }
             let ty = args[0].ty.clone();
             Ok((args, ty))

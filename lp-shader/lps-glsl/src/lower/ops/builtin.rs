@@ -10,7 +10,7 @@ use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
 use super::numeric::{
-    BinaryFloatOp, UnaryFloatOp, lane_at, lower_binary_float_lane, lower_bool_mix_lane,
+    BinaryFloatOp, UnaryFloatOp, fconst, lane_at, lower_binary_float_lane, lower_bool_mix_lane,
     lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
     lower_unary_float_lane,
 };
@@ -50,6 +50,24 @@ pub(in crate::lower) fn lower_builtin(
         let lane = match kind {
             BuiltinKind::Abs => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Abs)?
+            }
+            BuiltinKind::Ceil => {
+                lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Ceil)?
+            }
+            BuiltinKind::Degrees => {
+                let scale = LowerValue {
+                    ty: LpsType::Float,
+                    lanes: vec![fconst(ctx, 180.0 / core::f32::consts::PI)],
+                };
+                lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Mul,
+                    values[0].clone(),
+                    scale,
+                    result_ty,
+                )?
+                .lanes[i]
             }
             BuiltinKind::Distance => {
                 unreachable!("distance returns before lane-wise builtin lowering")
@@ -144,6 +162,24 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::Normalize => {
                 unreachable!("normalize returns before lane-wise builtin lowering")
             }
+            BuiltinKind::Radians => {
+                let scale = LowerValue {
+                    ty: LpsType::Float,
+                    lanes: vec![fconst(ctx, core::f32::consts::PI / 180.0)],
+                };
+                lower_binary(
+                    ctx,
+                    span,
+                    BinaryOp::Mul,
+                    values[0].clone(),
+                    scale,
+                    result_ty,
+                )?
+                .lanes[i]
+            }
+            BuiltinKind::Round => {
+                lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Round)?
+            }
             BuiltinKind::Clamp => {
                 let maxed =
                     lower_binary_float_lane(ctx, &values[0], &values[1], i, BinaryFloatOp::Max);
@@ -170,6 +206,9 @@ pub(in crate::lower) fn lower_builtin(
                     src: lane_at(&values[0], i),
                 });
                 dst
+            }
+            BuiltinKind::Trunc => {
+                lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Trunc)?
             }
         };
         lanes.push(lane);

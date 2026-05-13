@@ -9,7 +9,10 @@ use super::super::{LowerCtx, LowerValue};
 #[derive(Debug, Clone, Copy)]
 pub(in crate::lower::ops) enum UnaryFloatOp {
     Abs,
+    Ceil,
     Floor,
+    Round,
+    Trunc,
 }
 
 pub(in crate::lower::ops) fn lower_unary_float_lane(
@@ -30,7 +33,10 @@ pub(in crate::lower::ops) fn lower_unary_float_lane(
     let dst = ctx.fb.alloc_vreg(IrType::F32);
     ctx.fb.push(match op {
         UnaryFloatOp::Abs => LpirOp::Fabs { dst, src },
+        UnaryFloatOp::Ceil => LpirOp::Fceil { dst, src },
         UnaryFloatOp::Floor => LpirOp::Ffloor { dst, src },
+        UnaryFloatOp::Round => LpirOp::Fnearest { dst, src },
+        UnaryFloatOp::Trunc => LpirOp::Ftrunc { dst, src },
     });
     Ok(dst)
 }
@@ -277,7 +283,7 @@ pub(in crate::lower::ops) fn fconst(ctx: &mut LowerCtx<'_>, value: f32) -> VReg 
     dst
 }
 
-pub(in crate::lower::ops) fn lane_at(value: &LowerValue, index: usize) -> VReg {
+pub(in crate::lower) fn lane_at(value: &LowerValue, index: usize) -> VReg {
     value.lanes[index.min(value.lanes.len().saturating_sub(1))]
 }
 
