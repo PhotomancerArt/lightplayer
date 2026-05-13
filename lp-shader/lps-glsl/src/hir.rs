@@ -13,6 +13,7 @@ use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
 mod array_size;
 mod builtin;
+mod builtin_out;
 mod coerce;
 mod function;
 mod place;

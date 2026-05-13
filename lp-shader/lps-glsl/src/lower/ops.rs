@@ -1,5 +1,6 @@
 mod access;
 mod builtin;
+mod builtin_integer;
 mod cast;
 mod index;
 mod matrix;
