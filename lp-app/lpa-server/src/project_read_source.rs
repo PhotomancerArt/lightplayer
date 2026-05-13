@@ -9,7 +9,7 @@ use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
 use lpc_wire::{
     ProjectProbeRequest, ProjectReadQuery, ProjectReadResult, RuntimeReadQuery,
-    ServerRuntimeStatus, WireSlotMutationRequest, WireSlotMutationResponse,
+    ServerRuntimeStatus, WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult,
     write_project_read_result_json,
 };
 
@@ -38,7 +38,9 @@ impl ProjectReadJsonSource for ServerProjectReadSource<'_> {
         mutations: Vec<WireSlotMutationRequest>,
     ) -> Vec<WireSlotMutationResponse> {
         log_project_mutations(&mutations);
-        self.engine.mutate_project_slots(mutations)
+        let responses = self.engine.mutate_project_slots(mutations);
+        log_project_mutation_responses(&responses);
+        responses
     }
 
     fn write_project_read_result_json<W>(
@@ -84,8 +86,31 @@ fn log_project_mutations(mutations: &[WireSlotMutationRequest]) {
             mutation.id.id(),
             mutation.root,
             mutation.path,
-            mutation.op
+            mutation.op,
         );
+        log::info!(
+            "slot mutation id={} expected shape_rev={} data_rev={}",
+            mutation.id.id(),
+            mutation.expected_shape_version.0,
+            mutation.expected_data_version.0,
+        );
+    }
+}
+
+fn log_project_mutation_responses(responses: &[WireSlotMutationResponse]) {
+    for response in responses {
+        match &response.result {
+            WireSlotMutationResult::Accepted => {
+                log::info!("slot mutation id={} accepted", response.id.id());
+            }
+            WireSlotMutationResult::Rejected(rejection) => {
+                log::warn!(
+                    "slot mutation id={} rejected: {:?}",
+                    response.id.id(),
+                    rejection,
+                );
+            }
+        }
     }
 }
 

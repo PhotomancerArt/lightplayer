@@ -13,7 +13,7 @@ use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
     ProjectReadRequest, WireServerMessage, WireServerMsgBody as ServerMessagePayload,
-    WireSlotMutationRequest,
+    WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult,
     messages::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
@@ -178,9 +178,9 @@ fn handle_project_request(
     let _ = theoretical_fps;
 
     log_project_mutations(&request.mutations);
-    Ok(ServerMessagePayload::ProjectRequest {
-        response: project.engine_mut().read_project(request),
-    })
+    let response = project.engine_mut().read_project(request);
+    log_project_mutation_responses(&response.mutations);
+    Ok(ServerMessagePayload::ProjectRequest { response })
 }
 
 fn log_project_mutations(mutations: &[WireSlotMutationRequest]) {
@@ -194,8 +194,31 @@ fn log_project_mutations(mutations: &[WireSlotMutationRequest]) {
             mutation.id.id(),
             mutation.root,
             mutation.path,
-            mutation.op
+            mutation.op,
         );
+        log::info!(
+            "slot mutation id={} expected shape_rev={} data_rev={}",
+            mutation.id.id(),
+            mutation.expected_shape_version.0,
+            mutation.expected_data_version.0,
+        );
+    }
+}
+
+fn log_project_mutation_responses(responses: &[WireSlotMutationResponse]) {
+    for response in responses {
+        match &response.result {
+            WireSlotMutationResult::Accepted => {
+                log::info!("slot mutation id={} accepted", response.id.id());
+            }
+            WireSlotMutationResult::Rejected(rejection) => {
+                log::warn!(
+                    "slot mutation id={} rejected: {:?}",
+                    response.id.id(),
+                    rejection,
+                );
+            }
+        }
     }
 }
 

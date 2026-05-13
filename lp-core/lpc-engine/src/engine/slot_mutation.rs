@@ -56,6 +56,13 @@ impl Engine {
             .ok_or(WireSlotMutationRejection::UnknownRoot)?
             .changed_at();
         if shape_version != request.expected_shape_version {
+            log::warn!(
+                "slot mutation shape conflict root={} path={} expected={} current={}",
+                request.root,
+                request.path,
+                request.expected_shape_version.0,
+                shape_version.0,
+            );
             return Err(WireSlotMutationRejection::ShapeConflict {
                 current_version: shape_version,
             });
@@ -66,6 +73,13 @@ impl Engine {
             .and_then(|def| clock_def_data_version(def, &request.path))
             .ok_or(WireSlotMutationRejection::UnknownPath)?;
         if current_data_version != request.expected_data_version {
+            log::warn!(
+                "slot mutation data conflict root={} path={} expected={} current={}",
+                request.root,
+                request.path,
+                request.expected_data_version.0,
+                current_data_version.0,
+            );
             return Err(WireSlotMutationRejection::DataConflict {
                 current_version: current_data_version,
             });
