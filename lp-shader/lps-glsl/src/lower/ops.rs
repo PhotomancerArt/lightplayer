@@ -4,6 +4,7 @@ mod cast;
 mod index;
 mod matrix;
 mod numeric;
+mod place_project;
 mod place_read;
 mod place_write;
 mod scalar;

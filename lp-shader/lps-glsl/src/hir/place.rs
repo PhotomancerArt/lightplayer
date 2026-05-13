@@ -111,10 +111,6 @@ impl HirPlace {
         }
     }
 
-    pub(crate) fn root_ty(&self) -> &LpsType {
-        self.root.ty()
-    }
-
     pub(super) fn push_field(&mut self, span: Span, name: &str) -> Result<(), Diagnostic> {
         let shape = TypeShape::new(&self.ty);
         if let Some(field) = shape.field(name) {
@@ -201,14 +197,6 @@ impl HirPlace {
 }
 
 impl PlaceRoot {
-    pub(crate) fn ty(&self) -> &LpsType {
-        match self {
-            PlaceRoot::Local { ty, .. }
-            | PlaceRoot::Param { ty, .. }
-            | PlaceRoot::Uniform { ty, .. } => ty,
-        }
-    }
-
     pub(crate) fn is_writable(&self) -> bool {
         !matches!(self, PlaceRoot::Uniform { .. })
     }
