@@ -6,14 +6,23 @@ use super::Engine;
 
 impl Engine {
     pub(super) fn read_project_shapes(&self, query: ShapeReadQuery) -> ShapeReadResult {
-        let registry = match query.level {
+        let (registry, complete, next) = match query.level {
             ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => {
-                Some(self.slot_shapes().snapshot())
+                if let Some(limit) = query.limit {
+                    let (snapshot, next) = self
+                        .slot_shapes()
+                        .snapshot_page(query.after, usize::try_from(limit).unwrap_or(usize::MAX));
+                    (Some(snapshot), next.is_none(), next)
+                } else {
+                    (Some(self.slot_shapes().snapshot()), true, None)
+                }
             }
         };
         ShapeReadResult {
             level: query.level,
             registry,
+            complete,
+            next,
         }
     }
 }

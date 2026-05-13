@@ -7,6 +7,8 @@ use crate::{
     SlotRecordAccess, SlotShape, SlotShapeId, SlotValueShape, ValueEditorHint, ValueSlot,
 };
 
+const FRAME_SECONDS_60HZ: f32 = 1.0 / 60.0;
+
 /// Transient user controls for the project clock.
 ///
 /// Clock controls live in authored node-def slot data so the UI can mutate them
@@ -105,7 +107,7 @@ fn clock_scrub_offset_shape() -> SlotValueShape {
         editor: ValueEditorHint::Slider {
             min: OrderedF32(-10.0),
             max: OrderedF32(10.0),
-            step: Some(OrderedF32(0.05)),
+            step: Some(OrderedF32(FRAME_SECONDS_60HZ)),
         },
     }
 }

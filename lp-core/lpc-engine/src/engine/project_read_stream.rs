@@ -119,7 +119,19 @@ impl Engine {
         let mut result = writer.object()?;
         let mut shapes = result.prop("shapes")?.object()?;
         shapes.prop("level")?.serde(&query.level)?;
-        write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
+        if let Some(limit) = query.limit {
+            let (snapshot, next) = self
+                .slot_shapes()
+                .snapshot_page(query.after, usize::try_from(limit).unwrap_or(usize::MAX));
+            shapes.prop("registry")?.serde(&snapshot)?;
+            shapes.prop("complete")?.bool(next.is_none())?;
+            if let Some(next) = next {
+                shapes.prop("next")?.serde(&next)?;
+            }
+        } else {
+            write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
+            shapes.prop("complete")?.bool(true)?;
+        }
         shapes.finish()?;
         result.finish()?;
         Ok(writer.into_inner())

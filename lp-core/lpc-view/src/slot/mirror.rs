@@ -47,6 +47,10 @@ impl SlotMirrorView {
         self.registry.apply_snapshot(snapshot);
     }
 
+    pub fn apply_registry_page(&mut self, snapshot: SlotShapeRegistrySnapshot) {
+        self.registry.apply_partial_snapshot(snapshot);
+    }
+
     pub fn apply_patches(&mut self, patches: &[WireSlotPatch]) -> Result<(), SlotMirrorError> {
         for patch in patches {
             apply_patch(&mut self.roots, &self.root_shapes, &self.registry, patch)?;
