@@ -14,6 +14,7 @@ use crate::body::{
 };
 use crate::{Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
+mod array_size;
 mod builtin;
 mod coerce;
 mod function;
@@ -23,6 +24,7 @@ mod shape;
 mod types;
 mod typing;
 
+use array_size::{ArraySizeConsts, eval_array_size_expr};
 use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use types::StructTypes;
@@ -43,10 +45,19 @@ pub fn build_hir(
     index: &TopLevelIndex,
     bodies: Vec<(String, ParsedFunctionBody)>,
 ) -> Result<HirModule, Diagnostic> {
-    let structs = build_struct_types(index)?;
-    let (uniforms, uniforms_type) = build_uniforms(index, &structs)?;
-    let functions_sigs = build_function_sigs(index, &structs)?;
-    let globals = build_global_consts(source, tokens, index, &uniforms, &functions_sigs, &structs)?;
+    let array_size_consts = build_array_size_consts(source, tokens, index)?;
+    let structs = build_struct_types(index, &array_size_consts)?;
+    let (uniforms, uniforms_type) = build_uniforms(index, &structs, &array_size_consts)?;
+    let functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
+    let globals = build_global_consts(
+        source,
+        tokens,
+        index,
+        &uniforms,
+        &functions_sigs,
+        &structs,
+        &array_size_consts,
+    )?;
     let body_map = bodies.into_iter().collect::<BTreeMap<_, _>>();
     let mut imports = ImportRegistry::default();
     let mut functions = Vec::new();
@@ -78,6 +89,7 @@ pub fn build_hir(
             &uniforms,
             &globals,
             &structs,
+            &array_size_consts,
             &mut imports,
         );
         let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
@@ -105,16 +117,18 @@ pub fn build_hir(
 fn type_ref_to_lps_with_structs(
     ty: &TypeRef,
     structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
 ) -> Result<LpsType, Diagnostic> {
-    type_name_to_lps_with_structs(&ty.name, ty.span, structs)
+    type_name_to_lps_with_structs(&ty.name, ty.span, structs, array_size_consts)
 }
 
 fn type_name_to_lps_with_structs(
     name: &str,
     span: Span,
     structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
 ) -> Result<LpsType, Diagnostic> {
-    if let Some((base_name, lens)) = parse_array_type_name(name) {
+    if let Some((base_name, lens)) = parse_array_type_name(name, array_size_consts) {
         if lens.iter().any(Option::is_none) {
             return Err(Diagnostic::error(
                 span,
@@ -184,7 +198,10 @@ fn fixed_array_type(
     Ok(ty)
 }
 
-fn parse_array_type_name(name: &str) -> Option<(&str, Vec<Option<u32>>)> {
+fn parse_array_type_name<'a>(
+    name: &'a str,
+    array_size_consts: &ArraySizeConsts,
+) -> Option<(&'a str, Vec<Option<u32>>)> {
     let open = name.find('[')?;
     let base = &name[..open];
     let mut rest = &name[open..];
@@ -195,7 +212,7 @@ fn parse_array_type_name(name: &str) -> Option<(&str, Vec<Option<u32>>)> {
         let len = if len_text.is_empty() {
             None
         } else {
-            Some(len_text.trim_end_matches(['u', 'U']).parse::<u32>().ok()?)
+            Some(eval_array_size_expr(len_text, array_size_consts)?)
         };
         lens.push(len);
         rest = &after_open[close + 1..];
@@ -330,14 +347,72 @@ fn array_base_and_lens(ty: &LpsType) -> Option<(LpsType, Vec<u32>)> {
     }
 }
 
-fn build_struct_types(index: &TopLevelIndex) -> Result<StructTypes, Diagnostic> {
+fn build_array_size_consts(
+    source: &str,
+    tokens: &[Token],
+    index: &TopLevelIndex,
+) -> Result<ArraySizeConsts, Diagnostic> {
+    let mut consts = BTreeMap::new();
+    for konst in &index.consts {
+        if !matches!(konst.ty.name.as_str(), "int" | "uint") {
+            continue;
+        }
+        let Some(init_span) = konst.init_span else {
+            continue;
+        };
+        let parsed = parse_expr_tokens(source, tokens, init_span)?;
+        if let Some(value) = eval_parsed_array_size_expr(&parsed, &consts) {
+            consts.insert(konst.name.clone(), value);
+        }
+    }
+    Ok(consts)
+}
+
+fn eval_parsed_array_size_expr(expr: &ParsedExpr, consts: &ArraySizeConsts) -> Option<u32> {
+    let value = eval_parsed_const_int(expr, consts)?;
+    if value < 0 {
+        return None;
+    }
+    u32::try_from(value).ok()
+}
+
+fn eval_parsed_const_int(expr: &ParsedExpr, consts: &ArraySizeConsts) -> Option<i64> {
+    match &expr.kind {
+        ParsedExprKind::IntLiteral(value) => Some(i64::from(*value)),
+        ParsedExprKind::UIntLiteral(value) => Some(i64::from(*value)),
+        ParsedExprKind::Name(name) => consts.get(name).copied().map(i64::from),
+        ParsedExprKind::Unary {
+            op: UnaryOp::Neg,
+            expr,
+        } => eval_parsed_const_int(expr, consts)?.checked_neg(),
+        ParsedExprKind::Unary { .. } => None,
+        ParsedExprKind::Binary { op, lhs, rhs } => {
+            let lhs = eval_parsed_const_int(lhs, consts)?;
+            let rhs = eval_parsed_const_int(rhs, consts)?;
+            match op {
+                BinaryOp::Add => lhs.checked_add(rhs),
+                BinaryOp::Sub => lhs.checked_sub(rhs),
+                BinaryOp::Mul => lhs.checked_mul(rhs),
+                BinaryOp::Div => lhs.checked_div(rhs),
+                BinaryOp::Mod => lhs.checked_rem(rhs),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn build_struct_types(
+    index: &TopLevelIndex,
+    array_size_consts: &ArraySizeConsts,
+) -> Result<StructTypes, Diagnostic> {
     let mut structs = BTreeMap::new();
     for decl in &index.structs {
         let mut members = Vec::new();
         for member in &decl.members {
             members.push(StructMember {
                 name: Some(member.name.clone()),
-                ty: type_ref_to_lps_with_structs(&member.ty, &structs)?,
+                ty: type_ref_to_lps_with_structs(&member.ty, &structs, array_size_consts)?,
             });
         }
         structs.insert(
@@ -354,6 +429,7 @@ fn build_struct_types(index: &TopLevelIndex) -> Result<StructTypes, Diagnostic> 
 fn build_function_sigs(
     index: &TopLevelIndex,
     structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
 ) -> Result<Vec<FunctionSig>, Diagnostic> {
     index
         .functions
@@ -361,14 +437,18 @@ fn build_function_sigs(
         .map(|function| {
             Ok(FunctionSig {
                 name: function.name.clone(),
-                return_ty: type_ref_to_lps_with_structs(&function.return_ty, structs)?,
+                return_ty: type_ref_to_lps_with_structs(
+                    &function.return_ty,
+                    structs,
+                    array_size_consts,
+                )?,
                 params: function
                     .params
                     .iter()
                     .map(|p| {
                         Ok(HirParam {
                             name: p.name.clone(),
-                            ty: type_ref_to_lps_with_structs(&p.ty, structs)?,
+                            ty: type_ref_to_lps_with_structs(&p.ty, structs, array_size_consts)?,
                             qualifier: p.qualifier,
                         })
                     })
@@ -381,12 +461,13 @@ fn build_function_sigs(
 fn build_uniforms(
     index: &TopLevelIndex,
     structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
 ) -> Result<(BTreeMap<String, UniformInfo>, Option<LpsType>), Diagnostic> {
     let mut uniforms = BTreeMap::new();
     let mut members = Vec::new();
     let mut offset = lps_shared::VMCTX_HEADER_SIZE;
     for uniform in &index.uniforms {
-        let ty = type_ref_to_lps_with_structs(&uniform.ty, structs)?;
+        let ty = type_ref_to_lps_with_structs(&uniform.ty, structs, array_size_consts)?;
         let align = lps_shared::type_alignment(&ty, LayoutRules::Std430);
         offset = lps_shared::layout::round_up(offset, align);
         let byte_offset = offset as u32;
@@ -415,11 +496,12 @@ fn build_global_consts(
     uniforms: &BTreeMap<String, UniformInfo>,
     functions: &[FunctionSig],
     structs: &StructTypes,
+    array_size_consts: &ArraySizeConsts,
 ) -> Result<BTreeMap<String, GlobalConst>, Diagnostic> {
     let mut globals = BTreeMap::new();
     let mut imports = ImportRegistry::default();
     for konst in &index.consts {
-        let ty = type_ref_to_lps_with_structs(&konst.ty, structs)?;
+        let ty = type_ref_to_lps_with_structs(&konst.ty, structs, array_size_consts)?;
         let Some(init_span) = konst.init_span else {
             return Err(Diagnostic::error(
                 konst.span,
@@ -427,7 +509,14 @@ fn build_global_consts(
             ));
         };
         let parsed = parse_expr_tokens(source, tokens, init_span)?;
-        let mut ctx = TypeCtx::global_const(functions, uniforms, &globals, structs, &mut imports);
+        let mut ctx = TypeCtx::global_const(
+            functions,
+            uniforms,
+            &globals,
+            structs,
+            array_size_consts,
+            &mut imports,
+        );
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
         globals.insert(konst.name.clone(), GlobalConst { expr });
@@ -441,6 +530,7 @@ struct TypeCtx<'a> {
     uniforms: &'a BTreeMap<String, UniformInfo>,
     globals: &'a BTreeMap<String, GlobalConst>,
     structs: &'a StructTypes,
+    array_size_consts: &'a ArraySizeConsts,
     imports: &'a mut ImportRegistry,
     locals: Vec<HirLocal>,
     scopes: Vec<BTreeMap<String, usize>>,
@@ -454,6 +544,7 @@ impl<'a> TypeCtx<'a> {
         uniforms: &'a BTreeMap<String, UniformInfo>,
         globals: &'a BTreeMap<String, GlobalConst>,
         structs: &'a StructTypes,
+        array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
     ) -> Self {
         Self {
@@ -462,6 +553,7 @@ impl<'a> TypeCtx<'a> {
             uniforms,
             globals,
             structs,
+            array_size_consts,
             imports,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
@@ -474,6 +566,7 @@ impl<'a> TypeCtx<'a> {
         uniforms: &'a BTreeMap<String, UniformInfo>,
         globals: &'a BTreeMap<String, GlobalConst>,
         structs: &'a StructTypes,
+        array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
     ) -> Self {
         Self {
@@ -482,6 +575,7 @@ impl<'a> TypeCtx<'a> {
             uniforms,
             globals,
             structs,
+            array_size_consts,
             imports,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
@@ -1345,7 +1439,7 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn type_name_to_lps(&self, name: &str, span: Span) -> Result<LpsType, Diagnostic> {
-        type_name_to_lps_with_structs(name, span, self.structs)
+        type_name_to_lps_with_structs(name, span, self.structs, self.array_size_consts)
     }
 
     fn type_decl_init(
@@ -1369,7 +1463,7 @@ impl<'a> TypeCtx<'a> {
         span: Span,
         init: &ParsedExpr,
     ) -> Result<LpsType, Diagnostic> {
-        if let Some((base_name, lens)) = parse_array_type_name(name) {
+        if let Some((base_name, lens)) = parse_array_type_name(name, self.array_size_consts) {
             let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
             let lens = resolve_init_list_lens(span, &lens, init)?;
             return fixed_array_from_base(base, &lens, span);
@@ -1418,7 +1512,7 @@ impl<'a> TypeCtx<'a> {
         span: Span,
         init: Option<&HirExpr>,
     ) -> Result<LpsType, Diagnostic> {
-        if let Some((base_name, lens)) = parse_array_type_name(name)
+        if let Some((base_name, lens)) = parse_array_type_name(name, self.array_size_consts)
             && lens.iter().any(Option::is_none)
         {
             let Some(init) = init else {
@@ -1439,7 +1533,7 @@ impl<'a> TypeCtx<'a> {
         span: Span,
         args: &[HirExpr],
     ) -> Result<LpsType, Diagnostic> {
-        if let Some((base_name, lens)) = parse_array_type_name(name)
+        if let Some((base_name, lens)) = parse_array_type_name(name, self.array_size_consts)
             && lens.iter().any(Option::is_none)
         {
             if args.is_empty() {
@@ -1456,7 +1550,8 @@ impl<'a> TypeCtx<'a> {
 
     fn is_constructor_name(&self, name: &str) -> bool {
         self.type_name_to_lps(name, Span::new(0, 0)).is_ok()
-            || parse_array_type_name(name).is_some_and(|(_, lens)| lens.iter().any(Option::is_none))
+            || parse_array_type_name(name, self.array_size_consts)
+                .is_some_and(|(_, lens)| lens.iter().any(Option::is_none))
     }
 
     fn resolve_local(&self, name: &str) -> Option<usize> {

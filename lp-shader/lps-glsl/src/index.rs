@@ -434,17 +434,18 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             let end = self.expect_punct("]")?.span.end;
             return Ok(&self.source[start..end]);
         }
-        if !matches!(
-            self.current().kind,
-            TokenKind::IntLiteral | TokenKind::UintLiteral
-        ) {
-            return Err(Diagnostic::expected(
-                self.current().span,
-                "array length",
-                self.describe_current(),
-            ));
+        let mut paren_depth = 0usize;
+        while !self.at_eof() {
+            if paren_depth == 0 && self.at_punct("]") {
+                break;
+            }
+            if self.at_punct("(") {
+                paren_depth += 1;
+            } else if self.at_punct(")") {
+                paren_depth = paren_depth.saturating_sub(1);
+            }
+            self.bump();
         }
-        self.bump();
         let end = self.expect_punct("]")?.span.end;
         Ok(&self.source[start..end])
     }

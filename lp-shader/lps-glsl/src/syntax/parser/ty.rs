@@ -26,17 +26,18 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             let end = self.expect_punct("]")?.span.end;
             return Ok(&self.source[start..end]);
         }
-        let len = self.current().ok_or_else(|| {
-            Diagnostic::expected(self.current_span(), "array length", self.current_text())
-        })?;
-        if !matches!(len.kind, TokenKind::IntLiteral | TokenKind::UintLiteral) {
-            return Err(Diagnostic::expected(
-                len.span,
-                "array length",
-                len.lexeme(self.source),
-            ));
+        let mut paren_depth = 0usize;
+        while !self.at_end() {
+            if paren_depth == 0 && self.at_punct("]") {
+                break;
+            }
+            if self.at_punct("(") {
+                paren_depth += 1;
+            } else if self.at_punct(")") {
+                paren_depth = paren_depth.saturating_sub(1);
+            }
+            self.bump();
         }
-        self.bump();
         let end = self.expect_punct("]")?.span.end;
         Ok(&self.source[start..end])
     }
