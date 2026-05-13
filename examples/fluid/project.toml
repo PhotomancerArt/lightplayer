@@ -1,0 +1,14 @@
+kind = "project"
+name = "fluid"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.compute]
+artifact = "./compute.toml"
+
+[nodes.fluid]
+artifact = "./fluid.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"
