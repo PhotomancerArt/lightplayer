@@ -28,6 +28,20 @@ pub struct ConstDecl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructMemberDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructDecl {
+    pub name: String,
+    pub members: Vec<StructMemberDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionParam {
     pub name: Option<String>,
     pub ty: TypeRef,
@@ -46,6 +60,7 @@ pub struct FunctionDecl {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TopLevelIndex {
+    pub structs: Vec<StructDecl>,
     pub uniforms: Vec<UniformDecl>,
     pub consts: Vec<ConstDecl>,
     pub functions: Vec<FunctionDecl>,
@@ -64,6 +79,7 @@ struct Parser<'src, 'tok> {
     source: &'src str,
     tokens: &'tok [Token],
     pos: usize,
+    struct_names: Vec<String>,
 }
 
 impl<'src, 'tok> Parser<'src, 'tok> {
@@ -72,6 +88,7 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             source,
             tokens,
             pos: 0,
+            struct_names: Vec::new(),
         }
     }
 
@@ -83,7 +100,9 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             } else {
                 None
             };
-            if self.at_keyword(Keyword::Uniform) {
+            if self.current().lexeme(self.source) == "struct" {
+                index.structs.push(self.parse_struct()?);
+            } else if self.at_keyword(Keyword::Uniform) {
                 index.uniforms.push(self.parse_uniform(binding)?);
             } else if self.at_keyword(Keyword::Const) {
                 index.consts.push(self.parse_const()?);
@@ -160,6 +179,41 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         })
     }
 
+    fn parse_struct(&mut self) -> Result<StructDecl, Diagnostic> {
+        let start = self.current().span.start;
+        self.expect_identifier_text("struct")?;
+        let name_tok = self.current();
+        let name = self.expect_identifier_like()?.to_string();
+        self.struct_names.push(name.clone());
+        self.expect_punct("{")?;
+        let mut members = Vec::new();
+        while !self.at_punct("}") {
+            let ty = self.expect_type_ref()?;
+            loop {
+                let member_start = self.current().span.start;
+                let member_name = self.expect_identifier_like()?.to_string();
+                members.push(StructMemberDecl {
+                    name: member_name,
+                    ty: ty.clone(),
+                    span: Span::new(member_start, self.previous().span.end),
+                });
+                if self.at_punct(",") {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+            self.expect_punct(";")?;
+        }
+        self.expect_punct("}")?;
+        let end = self.expect_punct(";")?.span.end;
+        Ok(StructDecl {
+            name,
+            members,
+            span: Span::new(start, end.max(name_tok.span.end)),
+        })
+    }
+
     fn try_parse_function(&mut self) -> Result<Option<FunctionDecl>, Diagnostic> {
         let checkpoint = self.pos;
         let return_ty = self.expect_type_ref()?;
@@ -219,6 +273,9 @@ impl<'src, 'tok> Parser<'src, 'tok> {
     }
 
     fn parse_param_qualifier(&mut self) -> ParamQualifier {
+        if self.current().lexeme(self.source) == "const" {
+            self.bump();
+        }
         let tok = self.current();
         if tok.kind != TokenKind::Identifier {
             return ParamQualifier::In;
@@ -366,6 +423,20 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             Err(Diagnostic::expected(
                 tok.span,
                 "identifier",
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn expect_identifier_text(&mut self, text: &str) -> Result<Token, Diagnostic> {
+        let tok = self.current();
+        if matches!(tok.kind, TokenKind::Identifier) && tok.lexeme(self.source) == text {
+            self.bump();
+            Ok(tok)
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                text,
                 self.describe_current(),
             ))
         }

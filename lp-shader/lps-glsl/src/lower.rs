@@ -652,6 +652,20 @@ fn lower_builtin(
         .iter()
         .map(|arg| lower_expr(ctx, arg))
         .collect::<Result<Vec<_>, _>>()?;
+    if kind == BuiltinKind::Distance {
+        let delta = lower_binary(
+            ctx,
+            span,
+            BinaryOp::Sub,
+            values[0].clone(),
+            values[1].clone(),
+            &values[0].ty,
+        )?;
+        return lower_length(ctx, span, &delta, result_ty);
+    }
+    if kind == BuiltinKind::Dot {
+        return lower_dot(ctx, span, &values[0], &values[1], result_ty);
+    }
     let width = scalar_lane_count(result_ty);
     let mut lanes = Vec::new();
     for i in 0..width {
@@ -659,6 +673,10 @@ fn lower_builtin(
             BuiltinKind::Abs => {
                 lower_unary_float_lane(ctx, span, result_ty, &values[0], i, UnaryFloatOp::Abs)?
             }
+            BuiltinKind::Distance => {
+                unreachable!("distance returns before lane-wise builtin lowering")
+            }
+            BuiltinKind::Dot => unreachable!("dot returns before lane-wise builtin lowering"),
             BuiltinKind::All | BuiltinKind::Any | BuiltinKind::Not => {
                 return lower_bool_builtin(ctx, span, kind, &values[0], result_ty);
             }
@@ -764,6 +782,14 @@ fn lower_builtin(
             BuiltinKind::Smoothstep => {
                 lower_smoothstep_lane(ctx, &values[0], &values[1], &values[2], i)
             }
+            BuiltinKind::Sqrt => {
+                let dst = ctx.fb.alloc_vreg(IrType::F32);
+                ctx.fb.push(LpirOp::Fsqrt {
+                    dst,
+                    src: lane_at(&values[0], i),
+                });
+                dst
+            }
         };
         lanes.push(lane);
     }
@@ -811,6 +837,49 @@ fn lower_length(
     Ok(LowerValue {
         ty: LpsType::Float,
         lanes: vec![dst],
+    })
+}
+
+fn lower_dot(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    lhs: &LowerValue,
+    rhs: &LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    if *result_ty != LpsType::Float
+        || scalar_base_type(&lhs.ty) != Some(LpsType::Float)
+        || lhs.lanes.len() != rhs.lanes.len()
+    {
+        return Err(Diagnostic::error(span, "dot expects matching float lanes"));
+    }
+    let Some((&first_lhs, &first_rhs)) = lhs.lanes.first().zip(rhs.lanes.first()) else {
+        return Err(Diagnostic::error(span, "dot has no lanes"));
+    };
+    let mut acc = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fmul {
+        dst: acc,
+        lhs: first_lhs,
+        rhs: first_rhs,
+    });
+    for (l, r) in lhs.lanes.iter().zip(rhs.lanes.iter()).skip(1) {
+        let product = ctx.fb.alloc_vreg(IrType::F32);
+        let sum = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Fmul {
+            dst: product,
+            lhs: *l,
+            rhs: *r,
+        });
+        ctx.fb.push(LpirOp::Fadd {
+            dst: sum,
+            lhs: acc,
+            rhs: product,
+        });
+        acc = sum;
+    }
+    Ok(LowerValue {
+        ty: LpsType::Float,
+        lanes: vec![acc],
     })
 }
 
@@ -1043,6 +1112,14 @@ fn lower_binary(
             lanes,
         });
     }
+    if op == BinaryOp::Mul
+        && lhs.ty.is_matrix()
+        && rhs.ty.is_matrix()
+        && lhs.ty == rhs.ty
+        && *result_ty == lhs.ty
+    {
+        return lower_matrix_multiply(ctx, span, lhs, rhs, result_ty);
+    }
     let width = scalar_lane_count(result_ty);
     let mut lanes = Vec::new();
     for i in 0..width {
@@ -1219,6 +1296,54 @@ fn lower_scalar_cast(
         }
     }
     Ok(dst)
+}
+
+fn lower_matrix_multiply(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    lhs: LowerValue,
+    rhs: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let Some((cols, rows)) = result_ty.matrix_dims() else {
+        return Err(Diagnostic::error(
+            span,
+            "matrix multiply result must be matrix",
+        ));
+    };
+    if cols != rows || lhs.lanes.len() != cols * rows || rhs.lanes.len() != cols * rows {
+        return Err(Diagnostic::error(span, "unsupported matrix multiply shape"));
+    }
+    let mut lanes = Vec::new();
+    for col in 0..cols {
+        for row in 0..rows {
+            let mut acc = None;
+            for k in 0..cols {
+                let product = ctx.fb.alloc_vreg(IrType::F32);
+                ctx.fb.push(LpirOp::Fmul {
+                    dst: product,
+                    lhs: lhs.lanes[k * rows + row],
+                    rhs: rhs.lanes[col * rows + k],
+                });
+                acc = Some(if let Some(prev) = acc {
+                    let sum = ctx.fb.alloc_vreg(IrType::F32);
+                    ctx.fb.push(LpirOp::Fadd {
+                        dst: sum,
+                        lhs: prev,
+                        rhs: product,
+                    });
+                    sum
+                } else {
+                    product
+                });
+            }
+            lanes.push(acc.ok_or_else(|| Diagnostic::error(span, "empty matrix multiply"))?);
+        }
+    }
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
 }
 
 fn lower_index(

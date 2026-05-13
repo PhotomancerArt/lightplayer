@@ -5,7 +5,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lps_shared::{
-    FnParam, LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier,
+    FnParam, LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, StructMember,
 };
 
 use crate::body::{
@@ -37,6 +37,8 @@ pub struct ImportInfo {
     pub return_types: Vec<lpir::IrType>,
     pub lpfn_glsl_params: Option<String>,
 }
+
+type StructTypes = BTreeMap<String, LpsType>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImportKey {
@@ -242,6 +244,12 @@ pub enum HirAssignTarget {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+enum HirAccessRoot {
+    Local(usize),
+    Param(usize),
+}
+
 impl HirAssignTarget {
     fn ty(&self) -> &LpsType {
         match self {
@@ -262,6 +270,8 @@ pub enum BuiltinKind {
     All,
     Any,
     Clamp,
+    Distance,
+    Dot,
     Equal,
     Floor,
     Fract,
@@ -277,6 +287,7 @@ pub enum BuiltinKind {
     Not,
     NotEqual,
     Smoothstep,
+    Sqrt,
 }
 
 #[derive(Debug, Clone)]
@@ -350,9 +361,10 @@ pub fn build_hir(
     index: &TopLevelIndex,
     bodies: Vec<(String, ParsedFunctionBody)>,
 ) -> Result<HirModule, Diagnostic> {
-    let (uniforms, uniforms_type) = build_uniforms(index)?;
-    let functions_sigs = build_function_sigs(index)?;
-    let globals = build_global_consts(source, tokens, index, &uniforms, &functions_sigs)?;
+    let structs = build_struct_types(index)?;
+    let (uniforms, uniforms_type) = build_uniforms(index, &structs)?;
+    let functions_sigs = build_function_sigs(index, &structs)?;
+    let globals = build_global_consts(source, tokens, index, &uniforms, &functions_sigs, &structs)?;
     let body_map = bodies.into_iter().collect::<BTreeMap<_, _>>();
     let mut imports = ImportRegistry::default();
     let mut functions = Vec::new();
@@ -378,7 +390,14 @@ pub fn build_hir(
         let parsed_body = body_map
             .get(sig.name.as_str())
             .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
-        let mut ctx = TypeCtx::new(sig, &functions_sigs, &uniforms, &globals, &mut imports);
+        let mut ctx = TypeCtx::new(
+            sig,
+            &functions_sigs,
+            &uniforms,
+            &globals,
+            &structs,
+            &mut imports,
+        );
         let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
         functions.push(HirFunction {
             name: sig.name.clone(),
@@ -401,17 +420,27 @@ pub fn build_hir(
     })
 }
 
-pub fn type_ref_to_lps(ty: &TypeRef) -> Result<LpsType, Diagnostic> {
-    type_name_to_lps(&ty.name, ty.span)
+fn type_ref_to_lps_with_structs(
+    ty: &TypeRef,
+    structs: &StructTypes,
+) -> Result<LpsType, Diagnostic> {
+    type_name_to_lps_with_structs(&ty.name, ty.span, structs)
 }
 
-fn type_name_to_lps(name: &str, span: Span) -> Result<LpsType, Diagnostic> {
+fn type_name_to_lps_with_structs(
+    name: &str,
+    span: Span,
+    structs: &StructTypes,
+) -> Result<LpsType, Diagnostic> {
     if let Some((element_name, len)) = parse_array_type_name(name) {
-        let element = type_name_to_lps(element_name, span)?;
+        let element = type_name_to_lps_with_structs(element_name, span, structs)?;
         return Ok(LpsType::Array {
             element: Box::new(element),
             len,
         });
+    }
+    if let Some(ty) = structs.get(name) {
+        return Ok(ty.clone());
     }
     match name {
         "void" => Ok(LpsType::Void),
@@ -449,21 +478,45 @@ fn parse_array_type_name(name: &str) -> Option<(&str, u32)> {
     Some((&name[..open], len))
 }
 
-fn build_function_sigs(index: &TopLevelIndex) -> Result<Vec<FunctionSig>, Diagnostic> {
+fn build_struct_types(index: &TopLevelIndex) -> Result<StructTypes, Diagnostic> {
+    let mut structs = BTreeMap::new();
+    for decl in &index.structs {
+        let mut members = Vec::new();
+        for member in &decl.members {
+            members.push(StructMember {
+                name: Some(member.name.clone()),
+                ty: type_ref_to_lps_with_structs(&member.ty, &structs)?,
+            });
+        }
+        structs.insert(
+            decl.name.clone(),
+            LpsType::Struct {
+                name: Some(decl.name.clone()),
+                members,
+            },
+        );
+    }
+    Ok(structs)
+}
+
+fn build_function_sigs(
+    index: &TopLevelIndex,
+    structs: &StructTypes,
+) -> Result<Vec<FunctionSig>, Diagnostic> {
     index
         .functions
         .iter()
         .map(|function| {
             Ok(FunctionSig {
                 name: function.name.clone(),
-                return_ty: type_ref_to_lps(&function.return_ty)?,
+                return_ty: type_ref_to_lps_with_structs(&function.return_ty, structs)?,
                 params: function
                     .params
                     .iter()
                     .map(|p| {
                         Ok(HirParam {
                             name: p.name.clone(),
-                            ty: type_ref_to_lps(&p.ty)?,
+                            ty: type_ref_to_lps_with_structs(&p.ty, structs)?,
                             qualifier: p.qualifier,
                         })
                     })
@@ -475,12 +528,13 @@ fn build_function_sigs(index: &TopLevelIndex) -> Result<Vec<FunctionSig>, Diagno
 
 fn build_uniforms(
     index: &TopLevelIndex,
+    structs: &StructTypes,
 ) -> Result<(BTreeMap<String, UniformInfo>, Option<LpsType>), Diagnostic> {
     let mut uniforms = BTreeMap::new();
     let mut members = Vec::new();
     let mut offset = lps_shared::VMCTX_HEADER_SIZE;
     for uniform in &index.uniforms {
-        let ty = type_ref_to_lps(&uniform.ty)?;
+        let ty = type_ref_to_lps_with_structs(&uniform.ty, structs)?;
         let align = lps_shared::type_alignment(&ty, LayoutRules::Std430);
         offset = lps_shared::layout::round_up(offset, align);
         let byte_offset = offset as u32;
@@ -508,11 +562,12 @@ fn build_global_consts(
     index: &TopLevelIndex,
     uniforms: &BTreeMap<String, UniformInfo>,
     functions: &[FunctionSig],
+    structs: &StructTypes,
 ) -> Result<BTreeMap<String, GlobalConst>, Diagnostic> {
     let mut globals = BTreeMap::new();
     let mut imports = ImportRegistry::default();
     for konst in &index.consts {
-        let ty = type_ref_to_lps(&konst.ty)?;
+        let ty = type_ref_to_lps_with_structs(&konst.ty, structs)?;
         let Some(init_span) = konst.init_span else {
             return Err(Diagnostic::error(
                 konst.span,
@@ -520,7 +575,7 @@ fn build_global_consts(
             ));
         };
         let parsed = parse_expr_tokens(source, tokens, init_span)?;
-        let mut ctx = TypeCtx::global_const(functions, uniforms, &globals, &mut imports);
+        let mut ctx = TypeCtx::global_const(functions, uniforms, &globals, structs, &mut imports);
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
         globals.insert(konst.name.clone(), GlobalConst { expr });
@@ -533,6 +588,7 @@ struct TypeCtx<'a> {
     functions: &'a [FunctionSig],
     uniforms: &'a BTreeMap<String, UniformInfo>,
     globals: &'a BTreeMap<String, GlobalConst>,
+    structs: &'a StructTypes,
     imports: &'a mut ImportRegistry,
     locals: Vec<HirLocal>,
     scopes: Vec<BTreeMap<String, usize>>,
@@ -545,6 +601,7 @@ impl<'a> TypeCtx<'a> {
         functions: &'a [FunctionSig],
         uniforms: &'a BTreeMap<String, UniformInfo>,
         globals: &'a BTreeMap<String, GlobalConst>,
+        structs: &'a StructTypes,
         imports: &'a mut ImportRegistry,
     ) -> Self {
         Self {
@@ -552,6 +609,7 @@ impl<'a> TypeCtx<'a> {
             functions,
             uniforms,
             globals,
+            structs,
             imports,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
@@ -563,6 +621,7 @@ impl<'a> TypeCtx<'a> {
         functions: &'a [FunctionSig],
         uniforms: &'a BTreeMap<String, UniformInfo>,
         globals: &'a BTreeMap<String, GlobalConst>,
+        structs: &'a StructTypes,
         imports: &'a mut ImportRegistry,
     ) -> Self {
         Self {
@@ -570,6 +629,7 @@ impl<'a> TypeCtx<'a> {
             functions,
             uniforms,
             globals,
+            structs,
             imports,
             locals: Vec::new(),
             scopes: alloc::vec![BTreeMap::new()],
@@ -614,7 +674,7 @@ impl<'a> TypeCtx<'a> {
                 span,
                 ..
             } => {
-                let ty = type_name_to_lps(ty, *span)?;
+                let ty = self.type_name_to_lps(ty, *span)?;
                 let init = if let Some(init) = init {
                     let expr = self.type_expr(init)?;
                     self.coerce_expr(expr, &ty)?
@@ -635,7 +695,7 @@ impl<'a> TypeCtx<'a> {
             ParsedStmt::LetGroup { declarations, .. } => {
                 let mut statements = Vec::new();
                 for declaration in declarations {
-                    let ty = type_name_to_lps(&declaration.ty, declaration.span)?;
+                    let ty = self.type_name_to_lps(&declaration.ty, declaration.span)?;
                     let init = if let Some(init) = &declaration.init {
                         let expr = self.type_expr(init)?;
                         self.coerce_expr(expr, &ty)?
@@ -822,13 +882,13 @@ impl<'a> TypeCtx<'a> {
                 kind: HirExprKind::UIntLiteral(*v),
             }),
             ParsedExprKind::Name(name) => self.type_name(expr.span, name),
-            ParsedExprKind::Call { name, args } if is_constructor_name(name) => {
+            ParsedExprKind::Call { name, args } if self.is_constructor_name(name) => {
                 self.type_constructor(expr.span, name, args)
             }
             ParsedExprKind::Call { name, args } => self.type_call(expr.span, name, args),
             ParsedExprKind::Swizzle { base, fields } => {
                 let base = self.type_expr(base)?;
-                let (lanes, ty) = swizzle_lanes(expr.span, &base.ty, fields)?;
+                let (lanes, ty) = access_lanes(expr.span, &base.ty, fields)?;
                 Ok(HirExpr {
                     span: expr.span,
                     ty,
@@ -987,7 +1047,7 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: &[ParsedExpr],
     ) -> Result<HirExpr, Diagnostic> {
-        let target_ty = type_name_to_lps(name, span)?;
+        let target_ty = self.type_name_to_lps(name, span)?;
         let args = args
             .iter()
             .map(|arg| self.type_expr(arg))
@@ -1314,29 +1374,25 @@ impl<'a> TypeCtx<'a> {
         match &expr.kind {
             ParsedExprKind::Name(name) => self.type_name_assign_target(expr.span, name),
             ParsedExprKind::Swizzle { base, fields } => {
-                let ParsedExprKind::Name(name) = &base.kind else {
-                    return Err(Diagnostic::error(
-                        expr.span,
-                        "unsupported swizzle assignment base",
-                    ));
-                };
-                if let Some(local) = self.resolve_local(name) {
-                    let (lanes, ty) = swizzle_lanes(expr.span, &self.locals[local].ty, fields)?;
-                    return Ok(HirAssignTarget::Swizzle { local, lanes, ty });
+                let (root, base_lanes, base_ty) = self.type_access_root(base)?;
+                let (relative_lanes, ty) = access_lanes(expr.span, &base_ty, fields)?;
+                let lanes = relative_lanes
+                    .into_iter()
+                    .map(|lane| {
+                        base_lanes
+                            .get(lane)
+                            .copied()
+                            .ok_or_else(|| Diagnostic::error(expr.span, "field lane out of range"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                match root {
+                    HirAccessRoot::Local(local) => {
+                        Ok(HirAssignTarget::Swizzle { local, lanes, ty })
+                    }
+                    HirAccessRoot::Param(param) => {
+                        Ok(HirAssignTarget::ParamSwizzle { param, lanes, ty })
+                    }
                 }
-                if let Some((param, p)) = self
-                    .params
-                    .iter()
-                    .enumerate()
-                    .find(|(_, p)| p.name.as_deref() == Some(name))
-                {
-                    let (lanes, ty) = swizzle_lanes(expr.span, &p.ty, fields)?;
-                    return Ok(HirAssignTarget::ParamSwizzle { param, lanes, ty });
-                }
-                Err(Diagnostic::error(
-                    expr.span,
-                    format!("unknown local `{name}`"),
-                ))
             }
             ParsedExprKind::Index { base, index } => match &base.kind {
                 ParsedExprKind::Name(name) => {
@@ -1454,6 +1510,58 @@ impl<'a> TypeCtx<'a> {
         Err(Diagnostic::error(span, format!("unknown local `{name}`")))
     }
 
+    fn type_access_root(
+        &self,
+        expr: &ParsedExpr,
+    ) -> Result<(HirAccessRoot, Vec<usize>, LpsType), Diagnostic> {
+        match &expr.kind {
+            ParsedExprKind::Name(name) => {
+                if let Some(local) = self.resolve_local(name) {
+                    let ty = self.locals[local].ty.clone();
+                    return Ok((
+                        HirAccessRoot::Local(local),
+                        (0..scalar_lane_count(&ty)).collect(),
+                        ty,
+                    ));
+                }
+                if let Some((param, p)) = self
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.name.as_deref() == Some(name))
+                {
+                    return Ok((
+                        HirAccessRoot::Param(param),
+                        (0..scalar_lane_count(&p.ty)).collect(),
+                        p.ty.clone(),
+                    ));
+                }
+                Err(Diagnostic::error(
+                    expr.span,
+                    format!("unknown local `{name}`"),
+                ))
+            }
+            ParsedExprKind::Swizzle { base, fields } => {
+                let (root, base_lanes, base_ty) = self.type_access_root(base)?;
+                let (relative_lanes, ty) = access_lanes(expr.span, &base_ty, fields)?;
+                let lanes = relative_lanes
+                    .into_iter()
+                    .map(|lane| {
+                        base_lanes
+                            .get(lane)
+                            .copied()
+                            .ok_or_else(|| Diagnostic::error(expr.span, "field lane out of range"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((root, lanes, ty))
+            }
+            _ => Err(Diagnostic::error(
+                expr.span,
+                "unsupported field assignment base",
+            )),
+        }
+    }
+
     fn read_assign_target_kind(&self, target: &HirAssignTarget) -> HirExprKind {
         match target {
             HirAssignTarget::Param { param, .. } => HirExprKind::Param { index: *param },
@@ -1472,6 +1580,14 @@ impl<'a> TypeCtx<'a> {
         coerce_expr(expr, target)
     }
 
+    fn type_name_to_lps(&self, name: &str, span: Span) -> Result<LpsType, Diagnostic> {
+        type_name_to_lps_with_structs(name, span, self.structs)
+    }
+
+    fn is_constructor_name(&self, name: &str) -> bool {
+        self.type_name_to_lps(name, Span::new(0, 0)).is_ok()
+    }
+
     fn resolve_local(&self, name: &str) -> Option<usize> {
         self.scopes
             .iter()
@@ -1480,16 +1596,14 @@ impl<'a> TypeCtx<'a> {
     }
 }
 
-fn is_constructor_name(name: &str) -> bool {
-    type_name_to_lps(name, Span::new(0, 0)).is_ok()
-}
-
 fn builtin_kind(name: &str) -> Option<BuiltinKind> {
     Some(match name {
         "abs" => BuiltinKind::Abs,
         "all" => BuiltinKind::All,
         "any" => BuiltinKind::Any,
         "clamp" => BuiltinKind::Clamp,
+        "distance" => BuiltinKind::Distance,
+        "dot" => BuiltinKind::Dot,
         "equal" => BuiltinKind::Equal,
         "floor" => BuiltinKind::Floor,
         "fract" => BuiltinKind::Fract,
@@ -1505,6 +1619,7 @@ fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "not" => BuiltinKind::Not,
         "notEqual" => BuiltinKind::NotEqual,
         "smoothstep" => BuiltinKind::Smoothstep,
+        "sqrt" => BuiltinKind::Sqrt,
         _ => return None,
     })
 }
@@ -1518,7 +1633,7 @@ fn type_glsl_import_args(
     name: &str,
     args: Vec<HirExpr>,
 ) -> Result<(Vec<HirExpr>, LpsType), Diagnostic> {
-    if matches!(name, "sin" | "cos" | "exp") && args.len() == 1 {
+    if matches!(name, "sin" | "cos" | "exp" | "sqrt") && args.len() == 1 {
         let arg = args[0].clone();
         let arg_base = scalar_base_type(&arg.ty).unwrap_or_else(|| arg.ty.clone());
         if arg_base == LpsType::Float {
@@ -1556,8 +1671,11 @@ fn type_builtin_args(
         | BuiltinKind::Floor
         | BuiltinKind::Fract
         | BuiltinKind::Length
-        | BuiltinKind::Not => 1,
+        | BuiltinKind::Not
+        | BuiltinKind::Sqrt => 1,
         BuiltinKind::Equal
+        | BuiltinKind::Distance
+        | BuiltinKind::Dot
         | BuiltinKind::GreaterThan
         | BuiltinKind::GreaterThanEqual
         | BuiltinKind::LessThan
@@ -1579,11 +1697,25 @@ fn type_builtin_args(
             let ty = args[0].ty.clone();
             Ok((args, ty))
         }
+        BuiltinKind::Sqrt => {
+            if scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
+                return Err(Diagnostic::error(span, "sqrt expects float lanes"));
+            }
+            let ty = args[0].ty.clone();
+            Ok((args, ty))
+        }
         BuiltinKind::Length => {
             if scalar_base_type(&args[0].ty) != Some(LpsType::Float) {
                 return Err(Diagnostic::error(span, "length expects float lanes"));
             }
             Ok((args, LpsType::Float))
+        }
+        BuiltinKind::Distance | BuiltinKind::Dot => {
+            let (a, b, ty) = coerce_arithmetic_pair(span, args[0].clone(), args[1].clone())?;
+            if scalar_base_type(&ty) != Some(LpsType::Float) {
+                return Err(Diagnostic::error(span, "builtin expects float lanes"));
+            }
+            Ok((alloc::vec![a, b], LpsType::Float))
         }
         BuiltinKind::All | BuiltinKind::Any => {
             let arg = coerce_expr(args[0].clone(), &args[0].ty)?;
@@ -1652,6 +1784,18 @@ fn coerce_constructor_args(
         .iter()
         .map(|arg| scalar_lane_count(&arg.ty))
         .sum::<usize>();
+    if matches!(target_ty, LpsType::Struct { .. }) {
+        if actual_lanes == expected_lanes {
+            return Ok(args);
+        }
+        return Err(Diagnostic::error(
+            span,
+            format!(
+                "constructor for {:?} expects {expected_lanes} scalar lanes, got {actual_lanes}",
+                target_ty
+            ),
+        ));
+    }
     if actual_lanes >= expected_lanes {
         let expected_scalar = scalar_base_type(target_ty).unwrap_or_else(|| target_ty.clone());
         return args
@@ -1806,6 +1950,17 @@ fn comparison_result_type(operand_ty: &LpsType) -> Option<LpsType> {
 }
 
 fn zero_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
+    if let LpsType::Struct { members, .. } = ty {
+        let args = members
+            .iter()
+            .map(|member| zero_expr(span, &member.ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(HirExpr {
+            span,
+            ty: ty.clone(),
+            kind: HirExprKind::Constructor { args },
+        });
+    }
     let scalar = match scalar_base_type(ty).unwrap_or_else(|| ty.clone()) {
         LpsType::Float => HirExpr {
             span,
@@ -1830,6 +1985,32 @@ fn zero_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
         _ => return Err(Diagnostic::error(span, "unsupported zero initializer type")),
     };
     coerce_expr(scalar, ty)
+}
+
+fn access_lanes(
+    span: Span,
+    ty: &LpsType,
+    fields: &str,
+) -> Result<(Vec<usize>, LpsType), Diagnostic> {
+    if let Some((offset, field_ty)) = struct_field_lanes(ty, fields) {
+        let width = scalar_lane_count(&field_ty);
+        return Ok(((offset..offset + width).collect(), field_ty));
+    }
+    swizzle_lanes(span, ty, fields)
+}
+
+fn struct_field_lanes(ty: &LpsType, field: &str) -> Option<(usize, LpsType)> {
+    let LpsType::Struct { members, .. } = ty else {
+        return None;
+    };
+    let mut offset = 0usize;
+    for member in members {
+        if member.name.as_deref() == Some(field) {
+            return Some((offset, member.ty.clone()));
+        }
+        offset = offset.saturating_add(scalar_lane_count(&member.ty));
+    }
+    None
 }
 
 fn swizzle_lanes(
@@ -1901,6 +2082,10 @@ pub fn scalar_lane_count(ty: &LpsType) -> usize {
         LpsType::Void => 0,
         LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
         LpsType::Array { element, len } => scalar_lane_count(element).saturating_mul(*len as usize),
+        LpsType::Struct { members, .. } => members
+            .iter()
+            .map(|member| scalar_lane_count(&member.ty))
+            .sum(),
         _ => ty
             .component_count()
             .or_else(|| ty.matrix_element_count())
@@ -1925,6 +2110,21 @@ pub fn scalar_base_type(ty: &LpsType) -> Option<LpsType> {
 pub fn scalar_ir_types(ty: &LpsType) -> Result<Vec<lpir::IrType>, Diagnostic> {
     if *ty == LpsType::Void {
         return Ok(Vec::new());
+    }
+    if let LpsType::Array { element, len } = ty {
+        let element_tys = scalar_ir_types(element)?;
+        let mut tys = Vec::new();
+        for _ in 0..*len {
+            tys.extend(element_tys.iter().copied());
+        }
+        return Ok(tys);
+    }
+    if let LpsType::Struct { members, .. } = ty {
+        let mut tys = Vec::new();
+        for member in members {
+            tys.extend(scalar_ir_types(&member.ty)?);
+        }
+        return Ok(tys);
     }
     let Some(base) = scalar_base_type(ty) else {
         return Err(Diagnostic::error(

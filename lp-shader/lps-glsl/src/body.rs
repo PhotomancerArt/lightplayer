@@ -12,6 +12,7 @@ pub fn parse_function_body(
     source: &str,
     tokens: &[Token],
     body_span: Span,
+    struct_names: &[alloc::string::String],
 ) -> Result<ParsedFunctionBody, Diagnostic> {
     let body_tokens = tokens
         .iter()
@@ -22,7 +23,7 @@ pub fn parse_function_body(
                 && !matches!(t.kind, TokenKind::Eof)
         })
         .collect::<Vec<_>>();
-    BodyParser::new(source, &body_tokens).parse()
+    BodyParser::new(source, &body_tokens, struct_names).parse()
 }
 
 pub fn parse_expr_tokens(
@@ -39,7 +40,7 @@ pub fn parse_expr_tokens(
                 && !matches!(t.kind, TokenKind::Eof)
         })
         .collect::<Vec<_>>();
-    let mut parser = BodyParser::new(source, &expr_tokens);
+    let mut parser = BodyParser::new(source, &expr_tokens, &[]);
     let expr = parser.parse_expr(0)?;
     if !parser.at_end() {
         return Err(Diagnostic::error(
@@ -53,14 +54,20 @@ pub fn parse_expr_tokens(
 struct BodyParser<'src, 'tok> {
     source: &'src str,
     tokens: &'tok [Token],
+    struct_names: &'tok [alloc::string::String],
     pos: usize,
 }
 
 impl<'src, 'tok> BodyParser<'src, 'tok> {
-    fn new(source: &'src str, tokens: &'tok [Token]) -> Self {
+    fn new(
+        source: &'src str,
+        tokens: &'tok [Token],
+        struct_names: &'tok [alloc::string::String],
+    ) -> Self {
         Self {
             source,
             tokens,
+            struct_names,
             pos: 0,
         }
     }
@@ -497,7 +504,8 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     },
                 };
                 if self.at_punct("(")
-                    && let Some(name) = array_constructor_name(&expr, self.source)
+                    && let Some(name) =
+                        array_constructor_name(&expr, self.source, self.struct_names)
                 {
                     self.bump();
                     let mut args = Vec::new();
@@ -671,7 +679,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
 
     fn starts_type_name(&self) -> bool {
         self.current()
-            .is_some_and(|t| token_is_type_name(t, self.source))
+            .is_some_and(|t| token_is_type_name(t, self.source, self.struct_names))
     }
 
     fn expect_type_name(&mut self) -> Result<&'src str, Diagnostic> {
@@ -817,14 +825,18 @@ fn is_assignment_target(expr: &ParsedExpr) -> bool {
     )
 }
 
-fn array_constructor_name(expr: &ParsedExpr, source: &str) -> Option<alloc::string::String> {
+fn array_constructor_name(
+    expr: &ParsedExpr,
+    source: &str,
+    struct_names: &[alloc::string::String],
+) -> Option<alloc::string::String> {
     let ParsedExprKind::Index { base, index } = &expr.kind else {
         return None;
     };
     let ParsedExprKind::Name(base_name) = &base.kind else {
         return None;
     };
-    if !token_text_is_type_name(base_name) {
+    if !token_text_is_type_name(base_name, struct_names) {
         return None;
     }
     Some(alloc::format!(
@@ -834,8 +846,9 @@ fn array_constructor_name(expr: &ParsedExpr, source: &str) -> Option<alloc::stri
     ))
 }
 
-fn token_is_type_name(tok: Token, source: &str) -> bool {
+fn token_is_type_name(tok: Token, source: &str, struct_names: &[alloc::string::String]) -> bool {
     match tok.kind {
+        TokenKind::Identifier if struct_names.iter().any(|name| name == tok.lexeme(source)) => true,
         TokenKind::Keyword(
             Keyword::Bool
             | Keyword::Float
@@ -873,30 +886,31 @@ fn token_is_type_name(tok: Token, source: &str) -> bool {
     }
 }
 
-fn token_text_is_type_name(text: &str) -> bool {
-    matches!(
-        text,
-        "bool"
-            | "float"
-            | "int"
-            | "uint"
-            | "vec2"
-            | "vec3"
-            | "vec4"
-            | "ivec2"
-            | "ivec3"
-            | "ivec4"
-            | "uvec2"
-            | "uvec3"
-            | "uvec4"
-            | "bvec2"
-            | "bvec3"
-            | "bvec4"
-            | "mat2"
-            | "mat3"
-            | "mat4"
-            | "void"
-    )
+fn token_text_is_type_name(text: &str, struct_names: &[alloc::string::String]) -> bool {
+    struct_names.iter().any(|name| name == text)
+        || matches!(
+            text,
+            "bool"
+                | "float"
+                | "int"
+                | "uint"
+                | "vec2"
+                | "vec3"
+                | "vec4"
+                | "ivec2"
+                | "ivec3"
+                | "ivec4"
+                | "uvec2"
+                | "uvec3"
+                | "uvec4"
+                | "bvec2"
+                | "bvec3"
+                | "bvec4"
+                | "mat2"
+                | "mat3"
+                | "mat4"
+                | "void"
+        )
 }
 
 trait SpanText {

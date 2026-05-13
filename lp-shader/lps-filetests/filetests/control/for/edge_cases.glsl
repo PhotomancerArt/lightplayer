@@ -181,3 +181,13 @@ int test_for_multiple_variables_in_init_and_continuing() {
 }
 
 // run: test_for_multiple_variables_in_init_and_continuing() == 10
+
+int test_for_multiple_variable_declarations_in_init() {
+    int sum = 0;
+    for (int i = 0, j = 4; i < 4; i++, j--) {
+        sum = sum + i * j;
+    }
+    return sum;
+}
+
+// run: test_for_multiple_variable_declarations_in_init() == 10
