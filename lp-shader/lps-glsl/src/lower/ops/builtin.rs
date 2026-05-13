@@ -99,6 +99,8 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::All | BuiltinKind::Any | BuiltinKind::Not => {
                 return lower_bool_builtin(ctx, span, kind, &values[0], result_ty);
             }
+            BuiltinKind::BitCount => lower_bit_count_lane(ctx, &values[0], i),
+            BuiltinKind::BitfieldReverse => lower_bitfield_reverse_lane(ctx, &values[0], i),
             BuiltinKind::Equal => {
                 return lower_binary(
                     ctx,
@@ -184,6 +186,8 @@ pub(in crate::lower) fn lower_builtin(
                 });
                 dst
             }
+            BuiltinKind::FindLsb => lower_find_lsb_lane(ctx, &values[0], i),
+            BuiltinKind::FindMsb => lower_find_msb_lane(ctx, result_ty, &values[0], i),
             BuiltinKind::Min => {
                 lower_min_max_lane(ctx, span, result_ty, &values[0], &values[1], i, true)?
             }
@@ -262,6 +266,150 @@ pub(in crate::lower) fn lower_builtin(
         ty: result_ty.clone(),
         lanes,
     })
+}
+
+fn lower_bit_count_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {
+    let x = lane_at(value, index);
+    let one = iconst(ctx, 1);
+    let mut acc = iconst(ctx, 0);
+    for bit in 0..32 {
+        let bit_value = lower_u32_bit_at(ctx, x, bit, one);
+        let next = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Iadd {
+            dst: next,
+            lhs: acc,
+            rhs: bit_value,
+        });
+        acc = next;
+    }
+    acc
+}
+
+fn lower_bitfield_reverse_lane(
+    ctx: &mut LowerCtx<'_>,
+    value: &LowerValue,
+    index: usize,
+) -> lpir::VReg {
+    let x = lane_at(value, index);
+    let one = iconst(ctx, 1);
+    let mut acc = iconst(ctx, 0);
+    for bit in 0..32 {
+        let bit_value = lower_u32_bit_at(ctx, x, bit, one);
+        let reversed = ishl_imm(ctx, bit_value, 31 - bit);
+        let next = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Ior {
+            dst: next,
+            lhs: acc,
+            rhs: reversed,
+        });
+        acc = next;
+    }
+    acc
+}
+
+fn lower_find_lsb_lane(ctx: &mut LowerCtx<'_>, value: &LowerValue, index: usize) -> lpir::VReg {
+    let x = lane_at(value, index);
+    let one = iconst(ctx, 1);
+    let mut result = iconst(ctx, -1);
+    for bit in (0..32).rev() {
+        let bit_value = lower_u32_bit_at(ctx, x, bit, one);
+        let present = ine_zero(ctx, bit_value);
+        let bit_index = iconst(ctx, bit);
+        let next = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Select {
+            dst: next,
+            cond: present,
+            if_true: bit_index,
+            if_false: result,
+        });
+        result = next;
+    }
+    result
+}
+
+fn lower_find_msb_lane(
+    ctx: &mut LowerCtx<'_>,
+    result_ty: &LpsType,
+    value: &LowerValue,
+    index: usize,
+) -> lpir::VReg {
+    let mut x = lane_at(value, index);
+    if scalar_base_type(result_ty) == Some(LpsType::Int) {
+        let negative = ctx.fb.alloc_vreg(IrType::I32);
+        let zero = iconst(ctx, 0);
+        ctx.fb.push(LpirOp::IltS {
+            dst: negative,
+            lhs: x,
+            rhs: zero,
+        });
+        let inverted = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Ibnot {
+            dst: inverted,
+            src: x,
+        });
+        let selected = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Select {
+            dst: selected,
+            cond: negative,
+            if_true: inverted,
+            if_false: x,
+        });
+        x = selected;
+    }
+
+    let one = iconst(ctx, 1);
+    let mut result = iconst(ctx, -1);
+    for bit in 0..32 {
+        let bit_value = lower_u32_bit_at(ctx, x, bit, one);
+        let present = ine_zero(ctx, bit_value);
+        let bit_index = iconst(ctx, bit);
+        let next = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(LpirOp::Select {
+            dst: next,
+            cond: present,
+            if_true: bit_index,
+            if_false: result,
+        });
+        result = next;
+    }
+    result
+}
+
+fn lower_u32_bit_at(
+    ctx: &mut LowerCtx<'_>,
+    value: lpir::VReg,
+    bit: i32,
+    one: lpir::VReg,
+) -> lpir::VReg {
+    let shifted = ishr_u_imm(ctx, value, bit);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Iand {
+        dst,
+        lhs: shifted,
+        rhs: one,
+    });
+    dst
+}
+
+fn ishr_u_imm(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, imm: i32) -> lpir::VReg {
+    let rhs = iconst(ctx, imm);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::IshrU { dst, lhs, rhs });
+    dst
+}
+
+fn ishl_imm(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, imm: i32) -> lpir::VReg {
+    let rhs = iconst(ctx, imm);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Ishl { dst, lhs, rhs });
+    dst
+}
+
+fn ine_zero(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg) -> lpir::VReg {
+    let rhs = iconst(ctx, 0);
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Ine { dst, lhs, rhs });
+    dst
 }
 
 fn lower_fma_lane(

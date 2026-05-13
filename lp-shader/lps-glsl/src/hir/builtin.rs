@@ -16,6 +16,8 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "abs" => BuiltinKind::Abs,
         "all" => BuiltinKind::All,
         "any" => BuiltinKind::Any,
+        "bitCount" => BuiltinKind::BitCount,
+        "bitfieldReverse" => BuiltinKind::BitfieldReverse,
         "ceil" => BuiltinKind::Ceil,
         "clamp" => BuiltinKind::Clamp,
         "cross" => BuiltinKind::Cross,
@@ -26,6 +28,8 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "equal" => BuiltinKind::Equal,
         "floor" => BuiltinKind::Floor,
         "fma" => BuiltinKind::Fma,
+        "findLSB" => BuiltinKind::FindLsb,
+        "findMSB" => BuiltinKind::FindMsb,
         "fract" => BuiltinKind::Fract,
         "greaterThan" => BuiltinKind::GreaterThan,
         "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
@@ -143,10 +147,14 @@ pub(super) fn type_builtin_args(
         BuiltinKind::Abs
         | BuiltinKind::All
         | BuiltinKind::Any
+        | BuiltinKind::BitCount
+        | BuiltinKind::BitfieldReverse
         | BuiltinKind::Ceil
         | BuiltinKind::Degrees
         | BuiltinKind::Determinant
         | BuiltinKind::Floor
+        | BuiltinKind::FindLsb
+        | BuiltinKind::FindMsb
         | BuiltinKind::Fract
         | BuiltinKind::Inverse
         | BuiltinKind::InverseSqrt
@@ -187,6 +195,21 @@ pub(super) fn type_builtin_args(
     match kind {
         BuiltinKind::Abs | BuiltinKind::Floor | BuiltinKind::Fract => {
             let ty = args[0].ty.clone();
+            Ok((args, ty))
+        }
+        BuiltinKind::BitCount
+        | BuiltinKind::BitfieldReverse
+        | BuiltinKind::FindLsb
+        | BuiltinKind::FindMsb => {
+            let ty = args[0].ty.clone();
+            if ty.is_matrix()
+                || !matches!(scalar_base_type(&ty), Some(LpsType::Int | LpsType::UInt))
+            {
+                return Err(Diagnostic::error(
+                    span,
+                    "integer builtin expects int/uint scalar/vector lanes",
+                ));
+            }
             Ok((args, ty))
         }
         BuiltinKind::Ceil

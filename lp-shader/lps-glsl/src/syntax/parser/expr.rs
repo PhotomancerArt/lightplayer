@@ -259,8 +259,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             }
             TokenKind::IntLiteral => {
                 let text = tok.lexeme(self.source);
-                let value = text
-                    .parse::<i32>()
+                let value = parse_i32_literal(text)
                     .map_err(|_| Diagnostic::error(tok.span, "failed to parse int literal"))?;
                 Ok(ParsedExpr {
                     span: tok.span,
@@ -432,6 +431,11 @@ pub(super) fn is_assignment_target(expr: &ParsedExpr) -> bool {
         expr.kind,
         ParsedExprKind::Name(_) | ParsedExprKind::Swizzle { .. } | ParsedExprKind::Index { .. }
     )
+}
+
+fn parse_i32_literal(text: &str) -> Result<i32, core::num::ParseIntError> {
+    text.parse::<i32>()
+        .or_else(|_| text.parse::<u32>().map(|value| value as i32))
 }
 
 pub(super) fn array_constructor_name(
