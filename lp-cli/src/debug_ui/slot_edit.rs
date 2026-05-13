@@ -123,7 +123,9 @@ fn render_f32_editor(ui: &mut egui::Ui, shape: &SlotValueShape, value: f32) -> O
         ValueEditorHint::Slider { min, max, step } => {
             let mut slider = egui::Slider::new(&mut edited, min.0..=max.0);
             if let Some(step) = step {
-                slider = slider.step_by(f64::from(step.0));
+                slider = slider
+                    .step_by(f64::from(step.0))
+                    .fixed_decimals(decimals_for_step(step.0));
             }
             ui.add(slider)
         }
@@ -163,5 +165,17 @@ fn f32_edit_tolerance(editor: &ValueEditorHint) -> f32 {
             step: Some(step), ..
         } => (step.0.abs() * 0.001).max(0.000_001),
         _ => 0.000_001,
+    }
+}
+
+fn decimals_for_step(step: f32) -> usize {
+    if step >= 1.0 {
+        0
+    } else if step >= 0.1 {
+        1
+    } else if step >= 0.01 {
+        3
+    } else {
+        4
     }
 }

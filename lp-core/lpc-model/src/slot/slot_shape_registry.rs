@@ -292,9 +292,53 @@ impl SlotShapeRegistry {
         }
     }
 
+    /// Return a stable id-ordered page of shape entries.
+    ///
+    /// `after` is an exclusive cursor. The returned cursor is the last id in the
+    /// page when more entries remain.
+    pub fn snapshot_page(
+        &self,
+        after: Option<SlotShapeId>,
+        limit: usize,
+    ) -> (SlotShapeRegistrySnapshot, Option<SlotShapeId>) {
+        let limit = limit.max(1);
+        let mut shapes = BTreeMap::new();
+        let mut next_cursor = None;
+
+        for (id, entry) in self
+            .shapes
+            .iter()
+            .filter(|(id, _)| after.is_none_or(|after| **id > after))
+        {
+            if shapes.len() >= limit {
+                next_cursor = shapes.keys().next_back().copied();
+                break;
+            }
+            shapes.insert(*id, entry.clone());
+        }
+
+        (
+            SlotShapeRegistrySnapshot {
+                ids_revision: self.ids_revision,
+                shapes,
+            },
+            next_cursor,
+        )
+    }
+
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.ids_revision = snapshot.ids_revision;
         self.shapes = snapshot.shapes;
+    }
+
+    /// Merge a partial snapshot page into the registry.
+    ///
+    /// Partial pages are used by low-bandwidth transports where a complete shape
+    /// registry can exceed a single message budget. They do not remove missing
+    /// ids; callers should use [`Self::apply_snapshot`] for complete snapshots.
+    pub fn apply_partial_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
+        self.ids_revision = snapshot.ids_revision;
+        self.shapes.extend(snapshot.shapes);
     }
 }
 
@@ -332,6 +376,7 @@ mod tests {
     use crate::{LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotVariantShape};
     use alloc::boxed::Box;
     use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn ensure_root_inserts_new_shape() {
@@ -404,6 +449,32 @@ mod tests {
         assert_eq!(registry.id_for_name("lp::fluid::Emitter"), Some(id));
         assert_eq!(registry.get_by_name("lp::fluid::Emitter"), Some(&shape));
         assert!(registry.entry_by_name("lp::missing::Shape").is_none());
+    }
+
+    #[test]
+    fn snapshot_page_returns_ordered_partial_pages() {
+        let mut registry = SlotShapeRegistry::default();
+        let a = SlotShapeId::new(10);
+        let b = SlotShapeId::new(20);
+        let c = SlotShapeId::new(30);
+
+        registry
+            .register_root(a, SlotShape::value(LpType::Bool))
+            .unwrap();
+        registry
+            .register_root(b, SlotShape::value(LpType::U32))
+            .unwrap();
+        registry
+            .register_root(c, SlotShape::value(LpType::String))
+            .unwrap();
+
+        let (first, next) = registry.snapshot_page(None, 2);
+        assert_eq!(first.shapes.keys().copied().collect::<Vec<_>>(), vec![a, b]);
+        assert_eq!(next, Some(b));
+
+        let (second, next) = registry.snapshot_page(next, 2);
+        assert_eq!(second.shapes.keys().copied().collect::<Vec<_>>(), vec![c]);
+        assert_eq!(next, None);
     }
 
     #[test]

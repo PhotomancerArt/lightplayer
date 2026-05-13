@@ -63,10 +63,14 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
 }
 
 vec4 rainbow_main(vec2 fragCoord, vec2 outputSize, float time) {
-    float cyclePhase = mod(time, 5.0);
-    float palette = min(floor(mod(time * 0.2, 5.0)), 4.0);
-    float nextPalette = mod(palette + 1.0, 5.0);
-    float blend = smoothstep(4.0, 5.0, cyclePhase);
+    float palettePhase = mod(time, 25.0) * 0.2;
+    float palette = min(floor(palettePhase), 4.0);
+    float cyclePhase = palettePhase - palette;
+    float nextPalette = palette + 1.0;
+    if (nextPalette > 4.5) {
+        nextPalette = 0.0;
+    }
+    float blend = smoothstep(0.8, 1.0, cyclePhase);
 
     float panSpeed = .3;
     float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
@@ -132,4 +136,4 @@ vec4 test_rainbow_main_corner_t5() {
 }
 
 // @unsupported(rv32c.q32)
-// run: test_rainbow_main_corner_t5() ~= vec4(0.64064026, 0.0, 0.64637756, 1.0) (tolerance: 0.002)
+// run: test_rainbow_main_corner_t5() ~= vec4(0.64055, 0.0, 0.64708, 1.0) (tolerance: 0.002)

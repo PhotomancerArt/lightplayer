@@ -57,6 +57,8 @@ impl ProjectReadQuery {
         Vec::from([
             Self::Shapes(ShapeReadQuery {
                 level: ReadLevel::Detail,
+                after: None,
+                limit: None,
             }),
             Self::Nodes(NodeReadQuery::detail_all()),
             Self::Resources(ResourceReadQuery {

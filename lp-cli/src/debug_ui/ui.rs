@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::client::LpClient;
 use eframe::egui;
-use lpc_model::Revision;
+use lpc_model::{Revision, SlotShapeId};
 use lpc_view::apply_project_read_response;
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
@@ -22,8 +22,10 @@ use super::slot_edit::{SlotEditIntent, SlotEditKey, SlotEditStatusContext};
 
 type ProjectReadResult = Result<lpc_wire::ProjectReadResponse, String>;
 
-const PROJECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const UI_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
+const TARGET_UI_FPS: u64 = 30;
+const TARGET_UI_FRAME_MS: u64 = 1000 / TARGET_UI_FPS;
+const PROJECT_POLL_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
+const UI_REPAINT_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
 
 /// Debug UI application state.
 pub struct DebugUiState {
@@ -39,6 +41,8 @@ pub struct DebugUiState {
     selected: Option<InspectorSelection>,
     last_render_product_probe: Option<RenderProductProbeResult>,
     last_runtime_status: Option<RuntimeReadResult>,
+    shapes_synced: bool,
+    next_shape_cursor: Option<SlotShapeId>,
     next_mutation_id: u64,
     queued_mutations: BTreeMap<SlotEditKey, SlotEditIntent>,
     last_mutation_by_slot: BTreeMap<SlotEditKey, WireSlotMutationId>,
@@ -66,6 +70,8 @@ impl DebugUiState {
             selected: None,
             last_render_product_probe: None,
             last_runtime_status: None,
+            shapes_synced: false,
+            next_shape_cursor: None,
             next_mutation_id: 1,
             queued_mutations: BTreeMap::new(),
             last_mutation_by_slot: BTreeMap::new(),
@@ -82,6 +88,10 @@ impl DebugUiState {
                     }
                     if let Some(runtime) = response.results.iter().find_map(runtime_result) {
                         self.last_runtime_status = Some(runtime.clone());
+                    }
+                    if let Some(shape) = response.results.iter().find_map(shape_result) {
+                        self.shapes_synced = shape.complete;
+                        self.next_shape_cursor = shape.next;
                     }
                     if let Ok(mut view) = self.project_view.lock() {
                         if let Err(error) = apply_project_read_response(&mut view, response) {
@@ -108,7 +118,11 @@ impl DebugUiState {
         let mutations = self.prepare_queued_mutations();
         let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
             self.next_project_read_context();
-        let include_slots = needs_slot_snapshot || !mutations.is_empty();
+        let shape_page_after = (!self.shapes_synced)
+            .then_some(self.next_shape_cursor)
+            .flatten();
+        let needs_shape_page = !self.shapes_synced;
+        let include_slots = (needs_slot_snapshot && self.shapes_synced) || !mutations.is_empty();
         let client = self.async_client.clone();
         let handle = self.project_handle;
         let tx = self.response_tx.clone();
@@ -119,6 +133,8 @@ impl DebugUiState {
                     handle,
                     debug_ui_project_read(
                         since,
+                        needs_shape_page,
+                        shape_page_after,
                         include_slots,
                         selected_resource,
                         selected_visual_product,
@@ -231,17 +247,28 @@ fn runtime_result(result: &lpc_wire::ProjectReadResult) -> Option<&RuntimeReadRe
     }
 }
 
+fn shape_result(result: &lpc_wire::ProjectReadResult) -> Option<&lpc_wire::ShapeReadResult> {
+    match result {
+        lpc_wire::ProjectReadResult::Shapes(shapes) => Some(shapes),
+        _ => None,
+    }
+}
+
 fn debug_ui_project_read(
     since: Option<Revision>,
+    needs_shape_page: bool,
+    shape_page_after: Option<SlotShapeId>,
     include_slots: bool,
     selected_resource: Option<lpc_model::ResourceRef>,
     selected_visual_product: Option<lpc_model::VisualProduct>,
     mutations: Vec<WireSlotMutationRequest>,
 ) -> ProjectReadRequest {
     let mut queries = Vec::new();
-    if include_slots {
+    if needs_shape_page {
         queries.push(ProjectReadQuery::Shapes(ShapeReadQuery {
             level: ReadLevel::Detail,
+            after: shape_page_after,
+            limit: Some(1),
         }));
     }
     queries.push(ProjectReadQuery::Nodes(NodeReadQuery {

@@ -21,8 +21,8 @@ ty = 0.0
 kind = "direct"
 
 [render_size]
-width = 16
-height = 16
+width = 10
+height = 10
 
 [mapping]
 kind = "path_points"
