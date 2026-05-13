@@ -244,6 +244,7 @@ pub enum BuiltinKind {
     Fract,
     GreaterThan,
     GreaterThanEqual,
+    Inverse,
     InverseSqrt,
     Length,
     LessThan,

@@ -9,7 +9,7 @@ use crate::hir::{BuiltinKind, HirExpr, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
-use super::matrix::{lower_matrix_determinant, lower_matrix_transpose};
+use super::matrix::{lower_matrix_determinant, lower_matrix_inverse, lower_matrix_transpose};
 use super::numeric::{
     BinaryFloatOp, UnaryFloatOp, fconst, lane_at, lower_binary_float_lane, lower_bool_mix_lane,
     lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
@@ -44,6 +44,9 @@ pub(in crate::lower) fn lower_builtin(
     }
     if kind == BuiltinKind::Determinant {
         return lower_matrix_determinant(ctx, span, values[0].clone(), result_ty);
+    }
+    if kind == BuiltinKind::Inverse {
+        return lower_matrix_inverse(ctx, span, values[0].clone(), result_ty);
     }
     if kind == BuiltinKind::Dot {
         return lower_dot(ctx, span, &values[0], &values[1], result_ty);
@@ -147,6 +150,9 @@ pub(in crate::lower) fn lower_builtin(
                 );
             }
             BuiltinKind::Length => return lower_length(ctx, span, &values[0], result_ty),
+            BuiltinKind::Inverse => {
+                unreachable!("inverse returns before lane-wise builtin lowering")
+            }
             BuiltinKind::InverseSqrt => lower_inversesqrt_lane(ctx, &values[0], i),
             BuiltinKind::MatrixCompMult => {
                 unreachable!("matrixCompMult returns before lane-wise builtin lowering")

@@ -29,6 +29,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "fract" => BuiltinKind::Fract,
         "greaterThan" => BuiltinKind::GreaterThan,
         "greaterThanEqual" => BuiltinKind::GreaterThanEqual,
+        "inverse" => BuiltinKind::Inverse,
         "inversesqrt" => BuiltinKind::InverseSqrt,
         "length" => BuiltinKind::Length,
         "lessThan" => BuiltinKind::LessThan,
@@ -144,6 +145,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Determinant
         | BuiltinKind::Floor
         | BuiltinKind::Fract
+        | BuiltinKind::Inverse
         | BuiltinKind::InverseSqrt
         | BuiltinKind::Length
         | BuiltinKind::Normalize
@@ -225,6 +227,13 @@ pub(super) fn type_builtin_args(
                 return Err(Diagnostic::error(span, "determinant expects a matrix"));
             }
             Ok((args, LpsType::Float))
+        }
+        BuiltinKind::Inverse => {
+            if !args[0].ty.is_matrix() {
+                return Err(Diagnostic::error(span, "inverse expects a matrix"));
+            }
+            let ty = args[0].ty.clone();
+            Ok((args, ty))
         }
         BuiltinKind::Transpose => {
             if !args[0].ty.is_matrix() {

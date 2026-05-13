@@ -117,6 +117,26 @@ pub(in crate::lower::ops) fn lower_matrix_determinant(
     })
 }
 
+pub(in crate::lower::ops) fn lower_matrix_inverse(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    value: LowerValue,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let Some((cols, rows)) = value.ty.matrix_dims() else {
+        return Err(Diagnostic::error(span, "inverse expects matrix"));
+    };
+    if cols != rows || value.ty != *result_ty {
+        return Err(Diagnostic::error(span, "unsupported inverse shape"));
+    }
+    let det = determinant_lanes(ctx, rows, &value.lanes)?;
+    let lanes = inverse_lanes(ctx, span, rows, &value.lanes, det)?;
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
+}
+
 fn lower_matrix_times_vector(
     ctx: &mut LowerCtx<'_>,
     span: Span,
@@ -237,6 +257,82 @@ fn determinant_lanes(
     acc.ok_or_else(|| Diagnostic::error(Span::new(0, 0), "empty determinant"))
 }
 
+fn inverse_lanes(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    size: usize,
+    lanes: &[lpir::VReg],
+    det: lpir::VReg,
+) -> Result<Vec<lpir::VReg>, Diagnostic> {
+    match size {
+        2 => inverse2(ctx, lanes, det),
+        3 | 4 => inverse_by_cofactors(ctx, span, size, lanes, det),
+        _ => Err(Diagnostic::error(span, "unsupported inverse size")),
+    }
+}
+
+fn inverse2(
+    ctx: &mut LowerCtx<'_>,
+    lanes: &[lpir::VReg],
+    det: lpir::VReg,
+) -> Result<Vec<lpir::VReg>, Diagnostic> {
+    if lanes.len() != 4 {
+        return Err(Diagnostic::error(Span::new(0, 0), "invalid mat2 inverse"));
+    }
+    let inv_det = fdiv_one(ctx, det);
+    let neg_b = fneg(ctx, lanes[1]);
+    let neg_c = fneg(ctx, lanes[2]);
+    Ok(alloc::vec![
+        fmul(ctx, lanes[3], inv_det),
+        fmul(ctx, neg_b, inv_det),
+        fmul(ctx, neg_c, inv_det),
+        fmul(ctx, lanes[0], inv_det),
+    ])
+}
+
+fn inverse_by_cofactors(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    size: usize,
+    lanes: &[lpir::VReg],
+    det: lpir::VReg,
+) -> Result<Vec<lpir::VReg>, Diagnostic> {
+    let inv_det = fdiv_one(ctx, det);
+    let mut out = Vec::new();
+    for col in 0..size {
+        for row in 0..size {
+            let cofactor = cofactor(ctx, span, lanes, size, col, row)?;
+            out.push(fmul(ctx, cofactor, inv_det));
+        }
+    }
+    Ok(out)
+}
+
+fn cofactor(
+    ctx: &mut LowerCtx<'_>,
+    _span: Span,
+    lanes: &[lpir::VReg],
+    size: usize,
+    skip_col: usize,
+    skip_row: usize,
+) -> Result<lpir::VReg, Diagnostic> {
+    let mut minor = Vec::new();
+    for col in 0..size {
+        for row in 0..size {
+            if col == skip_col || row == skip_row {
+                continue;
+            }
+            minor.push(lanes[col * size + row]);
+        }
+    }
+    let det = determinant_lanes(ctx, size - 1, &minor)?;
+    if (skip_col + skip_row).is_multiple_of(2) {
+        Ok(det)
+    } else {
+        Ok(fneg(ctx, det))
+    }
+}
+
 fn lower_vector_times_matrix(
     ctx: &mut LowerCtx<'_>,
     span: Span,
@@ -285,4 +381,27 @@ fn sum_product(ctx: &mut LowerCtx<'_>, acc: Option<lpir::VReg>, product: lpir::V
     } else {
         product
     }
+}
+
+fn fmul(ctx: &mut LowerCtx<'_>, lhs: lpir::VReg, rhs: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fmul { dst, lhs, rhs });
+    dst
+}
+
+fn fneg(ctx: &mut LowerCtx<'_>, src: lpir::VReg) -> lpir::VReg {
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fneg { dst, src });
+    dst
+}
+
+fn fdiv_one(ctx: &mut LowerCtx<'_>, rhs: lpir::VReg) -> lpir::VReg {
+    let one = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::FconstF32 {
+        dst: one,
+        value: 1.0,
+    });
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Fdiv { dst, lhs: one, rhs });
+    dst
 }
