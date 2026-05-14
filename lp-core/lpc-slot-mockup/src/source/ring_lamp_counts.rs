@@ -8,8 +8,7 @@ use lpc_model::{
 /// The list is editable and inspectable as value structure, but it is not a map
 /// of independently versioned slots. Changing one count produces a new complete
 /// value for the `ring_lamp_counts` slot.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RingLampCounts(pub Vec<u32>);
 
 impl RingLampCounts {

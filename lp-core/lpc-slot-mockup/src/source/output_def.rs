@@ -1,30 +1,22 @@
 use lpc_model::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(lpc_model::SlotRecord)]
 #[slot(root)]
 pub struct OutputDef {
     #[slot(skip)]
     pub kind: String,
     pin: ValueSlot<u32>,
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     bindings: BindingDefs,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     options: OptionSlot<OutputDriverOptionsConfig>,
 }
 
-#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord)]
 pub struct OutputDriverOptionsConfig {
-    #[serde(default = "default_lum_power_slot")]
     lum_power: PositiveF32Slot,
-    #[serde(default = "default_white_point_slot")]
     white_point: ValueSlot<[f32; 3]>,
-    #[serde(default = "default_brightness_slot")]
     brightness: RatioSlot,
-    #[serde(default = "default_true_slot")]
     interpolation_enabled: ValueSlot<bool>,
-    #[serde(default = "default_true_slot")]
     dithering_enabled: ValueSlot<bool>,
-    #[serde(default = "default_true_slot")]
     lut_enabled: ValueSlot<bool>,
 }
 

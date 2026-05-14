@@ -1,12 +1,11 @@
 use lpc_model::{BindingDefs, Dim2u, Dim2uSlot};
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(lpc_model::SlotRecord)]
 #[slot(root)]
 pub struct TextureDef {
     #[slot(skip)]
     pub kind: String,
     size: Dim2uSlot,
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     bindings: BindingDefs,
 }
 
@@ -22,6 +21,22 @@ impl TextureDef {
             }),
             bindings: BindingDefs::default(),
         }
+    }
+
+    pub fn from_codec(size: Dim2u) -> Self {
+        Self {
+            kind: Self::KIND.to_string(),
+            size: Dim2uSlot::new(size),
+            bindings: BindingDefs::default(),
+        }
+    }
+
+    pub fn size(&self) -> Dim2u {
+        *self.size.value()
+    }
+
+    pub fn bindings(&self) -> &BindingDefs {
+        &self.bindings
     }
 }
 

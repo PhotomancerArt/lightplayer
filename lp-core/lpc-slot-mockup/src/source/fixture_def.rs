@@ -5,24 +5,20 @@ use lpc_model::{
 
 use super::{MappingConfig, shader_def::ScalarHint};
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(lpc_model::SlotRecord)]
 #[slot(root)]
 pub struct FixtureDef {
     #[slot(skip)]
     pub kind: String,
-    #[serde(default = "default_render_size")]
     render_size: Dim2uSlot,
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     bindings: BindingDefs,
     #[slot(skip)]
-    #[serde(default)]
     sampling: FixtureSamplingConfig,
     #[slot(enum)]
     mapping: MappingConfig,
     color_order: ColorOrderSlot,
     transform: Affine2dSlot,
     brightness: OptionSlot<ScalarHint>,
-    #[serde(default = "default_gamma_correction")]
     gamma_correction: OptionSlot<ValueSlot<bool>>,
 }
 
@@ -43,6 +39,33 @@ impl FixtureDef {
         }
     }
 
+    pub fn from_codec(
+        render_size: Dim2u,
+        mapping: MappingConfig,
+        color_order: ColorOrderValue,
+        transform: Affine2d,
+        brightness: Option<ScalarHint>,
+        gamma_correction: Option<bool>,
+    ) -> Self {
+        Self {
+            kind: Self::KIND.to_string(),
+            render_size: Dim2uSlot::new(render_size),
+            bindings: BindingDefs::default(),
+            sampling: FixtureSamplingConfig::TextureArea,
+            mapping,
+            color_order: ColorOrderSlot::new(color_order),
+            transform: Affine2dSlot::new(transform),
+            brightness: match brightness {
+                Some(brightness) => OptionSlot::some(brightness),
+                None => OptionSlot::none(),
+            },
+            gamma_correction: match gamma_correction {
+                Some(value) => OptionSlot::some(ValueSlot::new(value)),
+                None => OptionSlot::none(),
+            },
+        }
+    }
+
     pub fn switch_mapping_to_square(&mut self) {
         self.mapping = MappingConfig::square();
     }
@@ -53,6 +76,37 @@ impl FixtureDef {
 
     pub fn clear_brightness(&mut self) {
         self.brightness.set_none();
+    }
+
+    pub fn sampling(&self) -> FixtureSamplingConfig {
+        self.sampling
+    }
+
+    pub fn render_size(&self) -> Dim2u {
+        *self.render_size.value()
+    }
+
+    pub fn mapping(&self) -> &MappingConfig {
+        &self.mapping
+    }
+
+    pub fn color_order(&self) -> ColorOrderValue {
+        *self.color_order.value()
+    }
+
+    pub fn transform(&self) -> Affine2d {
+        *self.transform.value()
+    }
+
+    pub fn brightness(&self) -> Option<&ScalarHint> {
+        self.brightness.data.as_ref()
+    }
+
+    pub fn gamma_correction(&self) -> Option<bool> {
+        self.gamma_correction
+            .data
+            .as_ref()
+            .map(|value| *value.value())
     }
 
     pub fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
@@ -66,12 +120,17 @@ impl Default for FixtureDef {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FixtureSamplingConfig {
     #[default]
     TextureArea,
     Point,
+}
+
+impl FixtureSamplingConfig {
+    pub fn point() -> Self {
+        Self::Point
+    }
 }
 
 fn default_render_size() -> Dim2uSlot {

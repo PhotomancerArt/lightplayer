@@ -1,4 +1,3 @@
-mod authored_serde;
 mod client_tree_walk;
 mod dynamic_param_shape;
 mod fixture;

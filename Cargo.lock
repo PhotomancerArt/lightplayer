@@ -4197,8 +4197,6 @@ dependencies = [
  "lpc-slot-codegen",
  "lpc-view",
  "lpc-wire",
- "serde",
- "serde_json",
  "toml",
 ]
 

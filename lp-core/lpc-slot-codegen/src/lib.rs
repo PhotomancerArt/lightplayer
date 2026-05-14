@@ -443,8 +443,14 @@ fn render_mockup_slot_codec() -> String {
 const MOCKUP_SLOT_CODEC_IMPORTS_AND_TYPES: &str = r#"
 use std::collections::BTreeMap;
 
-use crate::source::{NodeInvocationDef, OutputDef, OutputDriverOptionsConfig, ProjectDef};
-use lpc_model::{MapSlot, OptionSlot, ValueSlot};
+use crate::source::{
+    FixtureDef, MappingConfig, NodeInvocationDef, OutputDef, OutputDriverOptionsConfig, PathSpec,
+    ProjectDef, RingOrder, ScalarHint, ShaderDef, ShaderParamDef, TextureDef,
+};
+use lpc_model::{
+    AddSubMode, Affine2d, ColorOrderValue, Dim2u, DivMode, GlslOpts, MapSlot, MulMode,
+    OptionSlot, SlotEnumAccess, ValueSlot,
+};
 use lpc_model::SlotShapeRegistry;
 use lpc_model::slot_codec::{
     JsonSyntaxSource, ObjectReader, SlotJsonValue, SlotJsonWrite, SlotJsonWriter, SlotReader,
@@ -951,6 +957,619 @@ where
         .bool(options.dithering_enabled())
         .unwrap();
     object.prop("lut_enabled").unwrap().bool(options.lut_enabled()).unwrap();
+    object.finish().unwrap();
+}
+
+pub fn read_texture_def_json(json: &str) -> Result<TextureDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(JsonSyntaxSource::new(json)?, &registry);
+    read_texture_def(&mut reader)
+}
+
+pub fn read_texture_def_toml(value: &toml::Value) -> Result<TextureDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(TomlSyntaxSource::new(value)?, &registry);
+    read_texture_def(&mut reader)
+}
+
+pub fn read_texture_def<S>(reader: &mut SlotReader<'_, S>) -> Result<TextureDef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["kind", "size", "bindings"];
+    let defaults = TextureDef::default();
+    let mut size = defaults.size();
+    let mut object = reader.object()?;
+    let _kind = object.expect_discriminator("kind", &[TextureDef::KIND])?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "size" => size = read_dim2u(prop.value())?,
+            "bindings" => prop.value().skip_value()?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(TextureDef::from_codec(size))
+}
+
+fn read_dim2u<S>(value: ValueReader<'_, '_, S>) -> Result<Dim2u, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["width", "height"];
+    let mut width = None;
+    let mut height = None;
+    let mut object = value.object()?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "width" => width = Some(prop.value().u32()?),
+            "height" => height = Some(prop.value().u32()?),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(Dim2u {
+        width: width.ok_or_else(|| object.missing_required_field("width"))?,
+        height: height.ok_or_else(|| object.missing_required_field("height"))?,
+    })
+}
+
+pub fn write_texture_def_json(texture: &TextureDef) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut writer = SlotJsonWriter::new(&mut out);
+    let mut object = writer.object().unwrap();
+    object.prop("kind").unwrap().string(TextureDef::KIND).unwrap();
+    write_dim2u(object.prop("size").unwrap(), texture.size());
+    object.finish().unwrap();
+    out
+}
+
+fn write_dim2u<W>(value: SlotJsonValue<'_, W>, size: Dim2u)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    object.prop("width").unwrap().u32(size.width).unwrap();
+    object.prop("height").unwrap().u32(size.height).unwrap();
+    object.finish().unwrap();
+}
+
+pub fn read_fixture_def_json(json: &str) -> Result<FixtureDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(JsonSyntaxSource::new(json)?, &registry);
+    read_fixture_def(&mut reader)
+}
+
+pub fn read_fixture_def_toml(value: &toml::Value) -> Result<FixtureDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(TomlSyntaxSource::new(value)?, &registry);
+    read_fixture_def(&mut reader)
+}
+
+pub fn read_fixture_def<S>(reader: &mut SlotReader<'_, S>) -> Result<FixtureDef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &[
+        "kind",
+        "render_size",
+        "bindings",
+        "sampling",
+        "mapping",
+        "color_order",
+        "transform",
+        "brightness",
+        "gamma_correction",
+    ];
+    let defaults = FixtureDef::default();
+    let mut render_size = defaults.render_size();
+    let mut mapping = defaults.mapping().clone();
+    let mut color_order = defaults.color_order();
+    let mut transform = defaults.transform();
+    let mut brightness = defaults.brightness().cloned();
+    let mut gamma_correction = defaults.gamma_correction();
+    let mut object = reader.object()?;
+    let _kind = object.expect_discriminator("kind", &[FixtureDef::KIND])?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "render_size" => render_size = read_dim2u(prop.value())?,
+            "bindings" | "sampling" => prop.value().skip_value()?,
+            "mapping" => mapping = read_mapping_config(prop.value())?,
+            "color_order" => {
+                let text = prop.value().string()?;
+                color_order = ColorOrderValue::parse(&text).unwrap_or(color_order);
+            }
+            "transform" => transform = read_affine2d(prop.value())?,
+            "brightness" => brightness = Some(read_scalar_hint(prop.value())?),
+            "gamma_correction" => gamma_correction = Some(prop.value().bool()?),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(FixtureDef::from_codec(
+        render_size,
+        mapping,
+        color_order,
+        transform,
+        brightness,
+        gamma_correction,
+    ))
+}
+
+fn read_affine2d<S>(value: ValueReader<'_, '_, S>) -> Result<Affine2d, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["m00", "m01", "m10", "m11", "tx", "ty"];
+    let mut transform = Affine2d::identity();
+    let mut object = value.object()?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "m00" => transform.m00 = prop.value().f32()?,
+            "m01" => transform.m01 = prop.value().f32()?,
+            "m10" => transform.m10 = prop.value().f32()?,
+            "m11" => transform.m11 = prop.value().f32()?,
+            "tx" => transform.tx = prop.value().f32()?,
+            "ty" => transform.ty = prop.value().f32()?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(transform)
+}
+
+fn read_scalar_hint<S>(value: ValueReader<'_, '_, S>) -> Result<ScalarHint, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["value"];
+    let mut scalar = None;
+    let mut object = value.object()?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "value" => scalar = Some(prop.value().f32()?),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(ScalarHint::new(
+        scalar.ok_or_else(|| object.missing_required_field("value"))?,
+    ))
+}
+
+fn read_mapping_config<S>(value: ValueReader<'_, '_, S>) -> Result<MappingConfig, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let mut object = value.object()?;
+    let kind = object.expect_discriminator("kind", &["disabled", "square", "path_points"])?;
+    match kind.as_str() {
+        "disabled" => {
+            object.finish()?;
+            Ok(MappingConfig::disabled())
+        }
+        "square" => read_mapping_square_body(object),
+        "path_points" => read_mapping_path_points_body(object),
+        _ => unreachable!("expect_discriminator validated variants"),
+    }
+}
+
+fn read_mapping_square_body<S>(
+    mut object: ObjectReader<'_, '_, S>,
+) -> Result<MappingConfig, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["kind", "origin", "size"];
+    let mut origin = None;
+    let mut size = None;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "origin" => origin = Some(prop.value().f32_array()?),
+            "size" => size = Some(prop.value().f32_array()?),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(MappingConfig::square_from_codec(
+        origin.ok_or_else(|| object.missing_required_field("origin"))?,
+        size.ok_or_else(|| object.missing_required_field("size"))?,
+    ))
+}
+
+fn read_mapping_path_points_body<S>(
+    mut object: ObjectReader<'_, '_, S>,
+) -> Result<MappingConfig, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["kind", "paths", "sample_diameter"];
+    let mut paths = None;
+    let mut sample_diameter = None;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "paths" => paths = Some(prop.value().u32_key_map(read_path_spec)?),
+            "sample_diameter" => sample_diameter = Some(prop.value().f32()?),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(MappingConfig::path_points(
+        MapSlot::new(paths.ok_or_else(|| object.missing_required_field("paths"))?),
+        sample_diameter.ok_or_else(|| object.missing_required_field("sample_diameter"))?,
+    ))
+}
+
+fn read_path_spec<S>(value: ValueReader<'_, '_, S>) -> Result<PathSpec, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let mut object = value.object()?;
+    let kind = object.expect_discriminator("kind", &["ring_array", "manual"])?;
+    match kind.as_str() {
+        "manual" => {
+            object.finish()?;
+            Ok(PathSpec::manual())
+        }
+        "ring_array" => read_ring_array_body(object),
+        _ => unreachable!("expect_discriminator validated variants"),
+    }
+}
+
+fn read_ring_array_body<S>(mut object: ObjectReader<'_, '_, S>) -> Result<PathSpec, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &[
+        "kind",
+        "center",
+        "diameter",
+        "start_ring_inclusive",
+        "end_ring_exclusive",
+        "ring_lamp_counts",
+        "offset_angle",
+        "order",
+    ];
+    let mut center = None;
+    let mut diameter = None;
+    let mut start_ring_inclusive = None;
+    let mut end_ring_exclusive = None;
+    let mut ring_lamp_counts = None;
+    let mut offset_angle = None;
+    let mut order = None;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "center" => center = Some(prop.value().f32_array()?),
+            "diameter" => diameter = Some(prop.value().f32()?),
+            "start_ring_inclusive" => start_ring_inclusive = Some(prop.value().u32()?),
+            "end_ring_exclusive" => end_ring_exclusive = Some(prop.value().u32()?),
+            "ring_lamp_counts" => {
+                ring_lamp_counts = Some(
+                    prop.value()
+                        .u32_key_map(|value| value.u32().map(ValueSlot::new))?,
+                )
+            }
+            "offset_angle" => offset_angle = Some(prop.value().f32()?),
+            "order" => {
+                let text = prop.value().string()?;
+                order = Some(RingOrder::parse(&text).unwrap_or_default());
+            }
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(PathSpec::ring_array(
+        center.ok_or_else(|| object.missing_required_field("center"))?,
+        diameter.ok_or_else(|| object.missing_required_field("diameter"))?,
+        start_ring_inclusive
+            .ok_or_else(|| object.missing_required_field("start_ring_inclusive"))?,
+        end_ring_exclusive.ok_or_else(|| object.missing_required_field("end_ring_exclusive"))?,
+        MapSlot::new(
+            ring_lamp_counts.ok_or_else(|| object.missing_required_field("ring_lamp_counts"))?,
+        ),
+        offset_angle.ok_or_else(|| object.missing_required_field("offset_angle"))?,
+        order.ok_or_else(|| object.missing_required_field("order"))?,
+    ))
+}
+
+pub fn write_fixture_def_json(fixture: &FixtureDef) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut writer = SlotJsonWriter::new(&mut out);
+    let mut object = writer.object().unwrap();
+    object.prop("kind").unwrap().string(FixtureDef::KIND).unwrap();
+    write_dim2u(object.prop("render_size").unwrap(), fixture.render_size());
+    write_mapping_config(object.prop("mapping").unwrap(), fixture.mapping());
+    object
+        .prop("color_order")
+        .unwrap()
+        .string(fixture.color_order().as_str())
+        .unwrap();
+    write_affine2d(object.prop("transform").unwrap(), fixture.transform());
+    if let Some(brightness) = fixture.brightness() {
+        write_scalar_hint(object.prop("brightness").unwrap(), brightness);
+    }
+    if let Some(gamma_correction) = fixture.gamma_correction() {
+        object
+            .prop("gamma_correction")
+            .unwrap()
+            .bool(gamma_correction)
+            .unwrap();
+    }
+    object.finish().unwrap();
+    out
+}
+
+fn write_affine2d<W>(value: SlotJsonValue<'_, W>, transform: Affine2d)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    object.prop("m00").unwrap().f32(transform.m00).unwrap();
+    object.prop("m01").unwrap().f32(transform.m01).unwrap();
+    object.prop("m10").unwrap().f32(transform.m10).unwrap();
+    object.prop("m11").unwrap().f32(transform.m11).unwrap();
+    object.prop("tx").unwrap().f32(transform.tx).unwrap();
+    object.prop("ty").unwrap().f32(transform.ty).unwrap();
+    object.finish().unwrap();
+}
+
+fn write_scalar_hint<W>(value: SlotJsonValue<'_, W>, hint: &ScalarHint)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    object.prop("value").unwrap().f32(hint.value()).unwrap();
+    object.finish().unwrap();
+}
+
+fn write_mapping_config<W>(value: SlotJsonValue<'_, W>, mapping: &MappingConfig)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    match mapping.variant() {
+        "disabled" => {
+            object.prop("kind").unwrap().string("disabled").unwrap();
+        }
+        "square" => {
+            let (origin, size) = mapping.square_fields().unwrap();
+            object.prop("kind").unwrap().string("square").unwrap();
+            object.prop("origin").unwrap().f32_array(&origin).unwrap();
+            object.prop("size").unwrap().f32_array(&size).unwrap();
+        }
+        "path_points" => {
+            let (paths, sample_diameter) = mapping.path_points_fields().unwrap();
+            object.prop("kind").unwrap().string("path_points").unwrap();
+            object
+                .prop("paths")
+                .unwrap()
+                .u32_key_map(&paths.entries, |value, path| {
+                    write_path_spec(value, path);
+                    Ok(())
+                })
+                .unwrap();
+            object
+                .prop("sample_diameter")
+                .unwrap()
+                .f32(sample_diameter)
+                .unwrap();
+        }
+        _ => unreachable!("known mapping variant"),
+    }
+    object.finish().unwrap();
+}
+
+fn write_path_spec<W>(value: SlotJsonValue<'_, W>, path: &PathSpec)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    match path.variant() {
+        "manual" => object.prop("kind").unwrap().string("manual").unwrap(),
+        "ring_array" => {
+            let (
+                center,
+                diameter,
+                start_ring_inclusive,
+                end_ring_exclusive,
+                ring_lamp_counts,
+                offset_angle,
+                order,
+            ) = path.ring_array_fields().unwrap();
+            object.prop("kind").unwrap().string("ring_array").unwrap();
+            object.prop("center").unwrap().f32_array(&center).unwrap();
+            object.prop("diameter").unwrap().f32(diameter).unwrap();
+            object
+                .prop("start_ring_inclusive")
+                .unwrap()
+                .u32(start_ring_inclusive)
+                .unwrap();
+            object
+                .prop("end_ring_exclusive")
+                .unwrap()
+                .u32(end_ring_exclusive)
+                .unwrap();
+            object
+                .prop("ring_lamp_counts")
+                .unwrap()
+                .u32_key_map(&ring_lamp_counts.entries, |value, count| value.u32(*count.value()))
+                .unwrap();
+            object.prop("offset_angle").unwrap().f32(offset_angle).unwrap();
+            object.prop("order").unwrap().string(order.as_str()).unwrap();
+        }
+        _ => unreachable!("known path variant"),
+    }
+    object.finish().unwrap();
+}
+
+pub fn read_shader_def_json(json: &str) -> Result<ShaderDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(JsonSyntaxSource::new(json)?, &registry);
+    read_shader_def(&mut reader)
+}
+
+pub fn read_shader_def_toml(value: &toml::Value) -> Result<ShaderDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(TomlSyntaxSource::new(value)?, &registry);
+    read_shader_def(&mut reader)
+}
+
+pub fn read_shader_def<S>(reader: &mut SlotReader<'_, S>) -> Result<ShaderDef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &[
+        "kind",
+        "glsl_path",
+        "render_order",
+        "bindings",
+        "glsl_opts",
+        "param_defs",
+    ];
+    let defaults = ShaderDef::default();
+    let mut glsl_path = defaults.glsl_path().to_string();
+    let mut render_order = defaults.render_order();
+    let mut glsl_opts = defaults.glsl_opts().clone();
+    let mut param_defs = defaults.param_defs.entries.clone();
+    let mut object = reader.object()?;
+    let _kind = object.expect_discriminator("kind", &[ShaderDef::KIND])?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "glsl_path" => glsl_path = prop.value().string()?,
+            "render_order" => render_order = prop.value().i32()?,
+            "bindings" => prop.value().skip_value()?,
+            "glsl_opts" => glsl_opts = read_glsl_opts(prop.value())?,
+            "param_defs" => param_defs = prop.value().string_key_map(read_shader_param_def)?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(ShaderDef::from_codec(
+        glsl_path,
+        render_order,
+        glsl_opts,
+        param_defs,
+    ))
+}
+
+fn read_glsl_opts<S>(value: ValueReader<'_, '_, S>) -> Result<GlslOpts, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["add_sub", "mul", "div"];
+    let defaults = GlslOpts::default();
+    let mut add_sub = *defaults.add_sub.value();
+    let mut mul = *defaults.mul.value();
+    let mut div = *defaults.div.value();
+    let mut object = value.object()?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "add_sub" => {
+                let text = prop.value().string()?;
+                add_sub = AddSubMode::parse(&text).unwrap_or(add_sub);
+            }
+            "mul" => {
+                let text = prop.value().string()?;
+                mul = MulMode::parse(&text).unwrap_or(mul);
+            }
+            "div" => {
+                let text = prop.value().string()?;
+                div = DivMode::parse(&text).unwrap_or(div);
+            }
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(GlslOpts {
+        add_sub: ValueSlot::new(add_sub),
+        mul: ValueSlot::new(mul),
+        div: ValueSlot::new(div),
+    })
+}
+
+fn read_shader_param_def<S>(value: ValueReader<'_, '_, S>) -> Result<ShaderParamDef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["label", "description", "value_type", "default", "min"];
+    let mut label = None;
+    let mut description = None;
+    let mut value_type = String::from("f32");
+    let mut default = None;
+    let mut min = None;
+    let mut object = value.object()?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "label" => label = Some(prop.value().string()?),
+            "description" => description = Some(prop.value().string()?),
+            "value_type" => value_type = prop.value().string()?,
+            "default" => default = Some(prop.value().f32()?),
+            "min" => min = Some(read_scalar_hint(prop.value())?.value()),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    let mut param = ShaderParamDef::new(
+        &label.ok_or_else(|| object.missing_required_field("label"))?,
+        &description.ok_or_else(|| object.missing_required_field("description"))?,
+        default.ok_or_else(|| object.missing_required_field("default"))?,
+        min,
+    );
+    param.set_value_type_for_codec(&value_type);
+    Ok(param)
+}
+
+pub fn write_shader_def_json(shader: &ShaderDef) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut writer = SlotJsonWriter::new(&mut out);
+    let mut object = writer.object().unwrap();
+    object.prop("kind").unwrap().string(ShaderDef::KIND).unwrap();
+    object.prop("glsl_path").unwrap().string(shader.glsl_path()).unwrap();
+    object
+        .prop("render_order")
+        .unwrap()
+        .i32(shader.render_order())
+        .unwrap();
+    write_glsl_opts(object.prop("glsl_opts").unwrap(), shader.glsl_opts());
+    object
+        .prop("param_defs")
+        .unwrap()
+        .string_key_map(&shader.param_defs.entries, |value, param| {
+            write_shader_param_def(value, param);
+            Ok(())
+        })
+        .unwrap();
+    object.finish().unwrap();
+    out
+}
+
+fn write_glsl_opts<W>(value: SlotJsonValue<'_, W>, opts: &GlslOpts)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    object.prop("add_sub").unwrap().string(opts.add_sub.value().as_str()).unwrap();
+    object.prop("mul").unwrap().string(opts.mul.value().as_str()).unwrap();
+    object.prop("div").unwrap().string(opts.div.value().as_str()).unwrap();
+    object.finish().unwrap();
+}
+
+fn write_shader_param_def<W>(value: SlotJsonValue<'_, W>, param: &ShaderParamDef)
+where
+    W: SlotJsonWrite,
+    W::Error: core::fmt::Debug,
+{
+    let mut object = value.object().unwrap();
+    object.prop("label").unwrap().string(param.label()).unwrap();
+    object
+        .prop("description")
+        .unwrap()
+        .string(param.description())
+        .unwrap();
+    object
+        .prop("value_type")
+        .unwrap()
+        .string(param.value_type())
+        .unwrap();
+    object.prop("default").unwrap().f32(param.default_scalar()).unwrap();
+    if let Some(min) = param.min() {
+        write_scalar_hint(object.prop("min").unwrap(), min);
+    }
     object.finish().unwrap();
 }
 "#;

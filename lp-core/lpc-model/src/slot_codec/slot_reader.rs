@@ -459,6 +459,14 @@ where
             .map_err(|_| SyntaxError::new(path, span, "expected u32"))
     }
 
+    pub fn i32(self) -> Result<i32, SyntaxError> {
+        let span = self.span;
+        let path = self.reader.path.clone();
+        let text = read_number_text(self.reader, span, "i32")?;
+        text.parse()
+            .map_err(|_| SyntaxError::new(path, span, "expected i32"))
+    }
+
     pub fn bool(self) -> Result<bool, SyntaxError> {
         match self.reader.next_event()? {
             Some(SyntaxEvent::Bool { value, .. }) => Ok(value),

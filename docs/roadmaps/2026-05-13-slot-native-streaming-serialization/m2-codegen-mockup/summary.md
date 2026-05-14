@@ -12,6 +12,10 @@
 - Added a real mockup `OutputDef` slice that reads current authored TOML,
   round-trips generated JSON, and proves default leaf handling by reading a
   partial `options` object over `OutputDriverOptionsConfig::default()`.
+- Expanded generated source-root coverage to all mockup source definitions:
+  `ProjectDef`, `OutputDef`, `TextureDef`, `FixtureDef`, and `ShaderDef`.
+- Removed direct Serde derives, attributes, and dependencies from
+  `lpc-slot-mockup`.
 - Moved writer map and fixed-array loops into `lpc_model::slot_codec` so
   generated code can call shared helpers instead of carrying repeated loops.
 - Split the mockup codec generator into named template sections so each area
@@ -61,8 +65,8 @@
   pushing repeated read/write policy into shared helpers.
 - Private field access is now visible as a real design pressure. `ProjectDef`
   needed only `NodeInvocationDef::artifact()`, while `OutputDef` needed
-  intentional codec constructors and value accessors. Broader roots likely need
-  either module-local generation, derive-emitted codec impls, or explicit
-  constructors/accessors.
+  intentional codec constructors and value accessors. `FixtureDef` and
+  `ShaderDef` made this clearer: broader roots likely need either module-local
+  generation, derive-emitted codec impls, or explicit constructors/accessors.
 - Cleanup scan found existing print-heavy mockup tests outside the new codec
   path; no new scratch/debug output was added to `slot_codec` or codegen.

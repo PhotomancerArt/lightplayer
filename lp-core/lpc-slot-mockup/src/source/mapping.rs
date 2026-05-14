@@ -8,21 +8,17 @@ use lpc_model::{
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MappingConfig {
     Disabled {
-        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
     },
     Square {
-        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         origin: XySlot,
         size: XySlot,
     },
     PathPoints {
-        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         paths: MapSlot<u32, PathSpec>,
         sample_diameter: PositiveF32Slot,
@@ -30,11 +26,9 @@ pub enum MappingConfig {
 }
 
 /// Specifies one path for a fixture.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PathSpec {
     RingArray {
-        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
         center: XySlot,
         diameter: PositiveF32Slot,
@@ -45,13 +39,11 @@ pub enum PathSpec {
         order: ValueSlot<RingOrder>,
     },
     Manual {
-        #[serde(skip, default = "current_revision")]
         variant_revision: Revision,
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum RingOrder {
     #[default]
     InnerFirst,
@@ -66,10 +58,14 @@ impl MappingConfig {
     }
 
     pub fn square() -> Self {
+        Self::square_from_codec([0.1, 0.2], [0.8, 0.7])
+    }
+
+    pub fn square_from_codec(origin: [f32; 2], size: [f32; 2]) -> Self {
         Self::Square {
             variant_revision: current_revision(),
-            origin: XySlot::new([0.1, 0.2]),
-            size: XySlot::new([0.8, 0.7]),
+            origin: XySlot::new(origin),
+            size: XySlot::new(size),
         }
     }
 
@@ -106,6 +102,25 @@ impl MappingConfig {
             return false;
         };
         path.set_ring_lamp_counts(counts)
+    }
+
+    pub fn square_fields(&self) -> Option<([f32; 2], [f32; 2])> {
+        let Self::Square { origin, size, .. } = self else {
+            return None;
+        };
+        Some((*origin.value(), *size.value()))
+    }
+
+    pub fn path_points_fields(&self) -> Option<(&MapSlot<u32, PathSpec>, f32)> {
+        let Self::PathPoints {
+            paths,
+            sample_diameter,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        Some((paths, *sample_diameter.value()))
     }
 }
 
@@ -228,6 +243,12 @@ impl PathSpec {
         )
     }
 
+    pub fn manual() -> Self {
+        Self::Manual {
+            variant_revision: current_revision(),
+        }
+    }
+
     fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
         let Self::RingArray {
             ring_lamp_counts, ..
@@ -242,6 +263,41 @@ impl PathSpec {
             .collect();
         *ring_lamp_counts = MapSlot::new(entries);
         true
+    }
+
+    pub fn ring_array_fields(
+        &self,
+    ) -> Option<(
+        [f32; 2],
+        f32,
+        u32,
+        u32,
+        &MapSlot<u32, ValueSlot<u32>>,
+        f32,
+        RingOrder,
+    )> {
+        let Self::RingArray {
+            center,
+            diameter,
+            start_ring_inclusive,
+            end_ring_exclusive,
+            ring_lamp_counts,
+            offset_angle,
+            order,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        Some((
+            *center.value(),
+            *diameter.value(),
+            *start_ring_inclusive.value(),
+            *end_ring_exclusive.value(),
+            ring_lamp_counts,
+            *offset_angle.value(),
+            *order.value(),
+        ))
     }
 }
 

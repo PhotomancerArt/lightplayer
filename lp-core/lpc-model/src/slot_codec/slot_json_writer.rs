@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::convert::Infallible;
 use core::fmt;
 
@@ -243,6 +247,10 @@ where
         self.writer.write_display(value)
     }
 
+    pub fn i32(self, value: i32) -> Result<(), SlotJsonWriterError<W::Error>> {
+        self.writer.write_display(value)
+    }
+
     pub fn bool(self, value: bool) -> Result<(), SlotJsonWriterError<W::Error>> {
         self.writer
             .write_raw(if value { b"true" } else { b"false" })
@@ -270,6 +278,21 @@ where
         let mut object = self.object()?;
         for (key, entry) in map {
             write_value(object.prop(key)?, entry)?;
+        }
+        object.finish()
+    }
+
+    pub fn u32_key_map<T>(
+        self,
+        map: &BTreeMap<u32, T>,
+        mut write_value: impl FnMut(
+            SlotJsonValue<'_, W>,
+            &T,
+        ) -> Result<(), SlotJsonWriterError<W::Error>>,
+    ) -> Result<(), SlotJsonWriterError<W::Error>> {
+        let mut object = self.object()?;
+        for (key, entry) in map {
+            write_value(object.prop(&key.to_string())?, entry)?;
         }
         object.finish()
     }

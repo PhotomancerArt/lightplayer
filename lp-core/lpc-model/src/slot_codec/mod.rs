@@ -54,29 +54,33 @@ mod tests {
     fn slot_reader_scans_typed_properties_from_json() {
         let registry = SlotShapeRegistry::default();
         let mut reader = SlotReader::new(
-            JsonSyntaxSource::new(r#"{"brightness":0.25,"pin":18,"name":"main"}"#).unwrap(),
+            JsonSyntaxSource::new(r#"{"brightness":0.25,"pin":18,"order":-1,"name":"main"}"#)
+                .unwrap(),
             &registry,
         );
 
         let mut object = reader.object().unwrap();
         let mut brightness = None;
         let mut pin = None;
+        let mut order = None;
         let mut name = None;
 
         while let Some(mut prop) = object.next_prop().unwrap() {
             match prop.name() {
                 "brightness" => brightness = Some(prop.value().f32().unwrap()),
                 "pin" => pin = Some(prop.value().u32().unwrap()),
+                "order" => order = Some(prop.value().i32().unwrap()),
                 "name" => name = Some(prop.value().string().unwrap()),
                 other => panic!(
                     "{}",
-                    prop.unknown_field(other, &["brightness", "pin", "name"])
+                    prop.unknown_field(other, &["brightness", "pin", "order", "name"])
                 ),
             }
         }
 
         assert_eq!(brightness, Some(0.25));
         assert_eq!(pin, Some(18));
+        assert_eq!(order, Some(-1));
         assert_eq!(name.as_deref(), Some("main"));
     }
 

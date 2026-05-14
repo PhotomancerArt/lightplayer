@@ -5,22 +5,19 @@ use lpc_model::{
     PositiveF32Slot, RatioSlot, RenderOrderSlot, Revision, SourcePathSlot, ValueSlot,
 };
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(lpc_model::SlotRecord)]
 #[slot(root)]
 pub struct ShaderDef {
     #[slot(skip)]
     pub kind: String,
     glsl_path: SourcePathSlot,
     render_order: RenderOrderSlot,
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     bindings: BindingDefs,
-    #[serde(default)]
     glsl_opts: GlslOpts,
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord)]
 pub struct ShaderParamDef {
     label: ValueSlot<String>,
     description: ValueSlot<String>,
@@ -29,7 +26,7 @@ pub struct ShaderParamDef {
     min: OptionSlot<ScalarHint>,
 }
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord)]
 pub struct ScalarHint {
     value: PositiveF32Slot,
 }
@@ -60,6 +57,38 @@ impl ShaderDef {
             },
             param_defs: MapSlot::new(param_defs),
         }
+    }
+
+    pub fn from_codec(
+        glsl_path: String,
+        render_order: i32,
+        glsl_opts: GlslOpts,
+        param_defs: BTreeMap<String, ShaderParamDef>,
+    ) -> Self {
+        Self {
+            kind: Self::KIND.to_string(),
+            glsl_path: SourcePathSlot::new(glsl_path),
+            render_order: RenderOrderSlot::new(render_order),
+            bindings: BindingDefs::default(),
+            glsl_opts,
+            param_defs: MapSlot::new(param_defs),
+        }
+    }
+
+    pub fn glsl_path(&self) -> &str {
+        self.glsl_path.value()
+    }
+
+    pub fn render_order(&self) -> i32 {
+        *self.render_order.value()
+    }
+
+    pub fn glsl_opts(&self) -> &GlslOpts {
+        &self.glsl_opts
+    }
+
+    pub fn bindings(&self) -> &BindingDefs {
+        &self.bindings
     }
 
     pub fn add_param_def(&mut self, name: &str, default: f32) {
@@ -101,7 +130,7 @@ impl Default for ShaderDef {
 }
 
 impl ShaderParamDef {
-    fn new(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
+    pub fn new(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
             label: ValueSlot::new(label.to_string()),
             description: ValueSlot::new(description.to_string()),
@@ -118,8 +147,32 @@ impl ShaderParamDef {
         LpValue::F32(*self.default.value())
     }
 
+    pub fn label(&self) -> &str {
+        self.label.value()
+    }
+
+    pub fn description(&self) -> &str {
+        self.description.value()
+    }
+
+    pub fn value_type(&self) -> &str {
+        self.value_type.value()
+    }
+
+    pub fn default_scalar(&self) -> f32 {
+        *self.default.value()
+    }
+
+    pub fn min(&self) -> Option<&ScalarHint> {
+        self.min.data.as_ref()
+    }
+
     fn set_value_type(&mut self, value_type: &str) {
         self.value_type.set(value_type.to_string());
+    }
+
+    pub fn set_value_type_for_codec(&mut self, value_type: &str) {
+        self.set_value_type(value_type);
     }
 
     fn set_label(&mut self, label: &str) {
@@ -136,7 +189,7 @@ impl ShaderParamDef {
 }
 
 impl ScalarHint {
-    fn new(value: f32) -> Self {
+    pub fn new(value: f32) -> Self {
         Self {
             value: PositiveF32Slot::new(value),
         }
@@ -144,5 +197,9 @@ impl ScalarHint {
 
     pub fn mock(value: f32) -> Self {
         Self::new(value)
+    }
+
+    pub fn value(&self) -> f32 {
+        *self.value.value()
     }
 }
