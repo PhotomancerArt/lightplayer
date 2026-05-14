@@ -16,6 +16,9 @@ serialization must not crowd out compiler code or memory.
 The direction is to make slots the source of truth, while treating TOML and
 JSON as syntax frontends.
 
+For the durable slot design docs, see `docs/design/slots/overview.md` and
+`docs/design/slots/serialization.md`.
+
 ## Architecture
 
 The roadmap centers on a syntax stream plus a slot-aware reader/writer layer:
@@ -73,6 +76,8 @@ writers, and object round trips share one storage model.
 
 - Persisted domain concepts should be slot roots, slot records, slot enums,
   slot maps, slot options, or semantic slot leaves.
+- SlotCodec is allowed to be opinionated and slot-only. General-purpose Rust
+  serialization is explicitly out of scope.
 - Type-specific codec branches are bugs waiting to happen.
 - Codec logic can know slot shapes and storage metadata; it should not know
   `BindingDef`, `OutputDef`, or other concrete domain names.
@@ -87,6 +92,8 @@ writers, and object round trips share one storage model.
   names.
 - Compact single-value enum storage may be explicitly enabled for cases such
   as `{ ref = "..." }` and `{ value = 123 }`.
+- Generated code size and embedded binary size should be measured before and
+  after major adoption steps.
 
 ## Alternatives Considered
 
@@ -132,4 +139,3 @@ real domain while staying small enough to reshape.
 This is a multi-milestone architecture change. The first two milestones should
 stay experimental and mockup-heavy. Production adoption should begin only after
 manual and generated reader/writer tests prove the shape.
-

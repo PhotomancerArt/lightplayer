@@ -60,3 +60,26 @@
 - **Rejected alternatives:** Remove Serde before replacement behavior is
   proven.
 
+#### SlotCodec Is Opinionated And Slot-Only
+
+- **Decision:** Design SlotCodec for LightPlayer slot roots, records, enums,
+  maps, options, values, and semantic leaves rather than as a generic Rust
+  serialization framework.
+- **Why:** The narrower model is the point: it should produce smaller code,
+  clearer storage rules, and less duplicated domain language than Serde.
+- **Rejected alternatives:** Clone Serde's full generic data model; support
+  arbitrary Rust types as a primary goal.
+- **Revisit when:** A non-slot use case appears that can reuse the same shape
+  without broadening the embedded runtime surface.
+
+#### Code Size Is An Acceptance Criterion
+
+- **Decision:** Track generated source size and embedded binary size before and
+  after major SlotCodec adoption steps, and plan a minimize-the-monomorphs pass
+  before production rollout.
+- **Why:** Reducing Serde-generated embedded code size is a leading motivation,
+  so replacement code must be measured instead of assumed smaller.
+- **Rejected alternatives:** Treat generated-code compactness as a final polish
+  task.
+- **Revisit when:** Measurements show generated SlotCodec code is not a
+  meaningful contributor to firmware size.

@@ -20,6 +20,8 @@
   generated code can call shared helpers instead of carrying repeated loops.
 - Split the mockup codec generator into named template sections so each area
   can be replaced by metadata-driven renderers independently.
+- Added a `SlotCodec` metadata model and replaced the five real source-root
+  reader/writer templates with metadata-driven renderers.
 
 ## Decisions for future reference
 
@@ -57,12 +59,13 @@
 
 ## Rough edges before M3
 
-- `render_mockup_slot_codec()` is now sectioned, but those sections are still
-  hardcoded generated-output templates. The next step is replacing one section
-  at a time with renderers over discovered slot metadata.
-- The generated file is currently about 645 lines for the M2 slice. Some of
-  that is test fixture type definition, but the real generator should keep
-  pushing repeated read/write policy into shared helpers.
+- The root adapters are now metadata-driven, but the metadata still contains
+  Rust expression strings for construction and field hooks. The next step is to
+  move those hooks closer to derive-emitted or module-local codegen.
+- The generated file is currently about 1264 lines for the full mockup slice.
+  Some of that is test fixture type definition and explicit semantic helpers,
+  but the real generator should keep pushing repeated read/write policy into
+  shared helpers.
 - Private field access is now visible as a real design pressure. `ProjectDef`
   needed only `NodeInvocationDef::artifact()`, while `OutputDef` needed
   intentional codec constructors and value accessors. `FixtureDef` and
