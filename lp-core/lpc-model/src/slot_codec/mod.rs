@@ -140,6 +140,96 @@ name = "aux"
     }
 
     #[test]
+    fn object_reader_expect_discriminator_reports_expected_values() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"kind":"Blark12","pin":18}"#).unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+
+        let error = object
+            .expect_discriminator("kind", &["TextureDef", "OutputDef"])
+            .unwrap_err();
+
+        assert!(error.message().contains("Blark12"));
+        assert!(error.message().contains("TextureDef"));
+        assert!(error.message().contains("OutputDef"));
+    }
+
+    #[test]
+    fn object_finish_consumes_unit_variant_end() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"mapping":{"kind":"Disabled"},"after":true}"#).unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+        let mut mapping = object.next_prop().unwrap().unwrap();
+        let mut mapping_object = mapping.value().object().unwrap();
+
+        assert_eq!(
+            mapping_object
+                .expect_discriminator("kind", &["Disabled"])
+                .unwrap(),
+            "Disabled"
+        );
+        mapping_object.finish().unwrap();
+        drop(mapping);
+
+        let mut after = object.next_prop().unwrap().unwrap();
+        assert!(after.value().bool().unwrap());
+    }
+
+    #[test]
+    fn value_reader_reads_fixed_f32_arrays_with_length_errors() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"xy":[0.1,0.2]}"#).unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+        let mut prop = object.next_prop().unwrap().unwrap();
+
+        assert_eq!(prop.value().f32_array::<2>().unwrap(), [0.1, 0.2]);
+
+        let mut reader =
+            SlotReader::new(JsonSyntaxSource::new(r#"{"xy":[0.1]}"#).unwrap(), &registry);
+        let mut object = reader.object().unwrap();
+        let mut prop = object.next_prop().unwrap().unwrap();
+        let error = prop.value().f32_array::<2>().unwrap_err();
+
+        assert!(error.message().contains("expected array of 2 f32 values"));
+        assert!(error.message().contains("found 1"));
+    }
+
+    #[test]
+    fn array_reader_uses_stable_item_paths() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"items":[{"ok":true},{"bad":"x"}]}"#).unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+        let mut prop = object.next_prop().unwrap().unwrap();
+        let mut array = prop.value().array().unwrap();
+
+        let first = array.next_item().unwrap().unwrap();
+        let mut first_object = first.object().unwrap();
+        let mut ok = first_object.next_prop().unwrap().unwrap();
+        assert!(ok.value().bool().unwrap());
+        drop(ok);
+        first_object.finish().unwrap();
+
+        let second = array.next_item().unwrap().unwrap();
+        let mut second_object = second.object().unwrap();
+        let mut bad = second_object.next_prop().unwrap().unwrap();
+        let error = bad.value().u32().unwrap_err();
+
+        assert_eq!(error.path(), "items[1].bad");
+    }
+
+    #[test]
     fn discriminator_reports_expected_values() {
         let registry = SlotShapeRegistry::default();
         let mut reader = SlotReader::new(

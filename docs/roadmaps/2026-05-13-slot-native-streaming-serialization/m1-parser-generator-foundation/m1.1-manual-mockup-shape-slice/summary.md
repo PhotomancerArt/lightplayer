@@ -24,29 +24,28 @@
 
 ## What Still Feels Rough
 
-- Unit enum variants need an explicit body finish step after reading `kind`.
-  Forgetting this leaves the closing object token in the stream and makes the
-  parent record terminate early.
-- Field enum readers naturally receive a `ValueReader`, while
-  `expect_discriminator` currently lives on `SlotReader`. The manual slice uses
-  an `ObjectReader` helper instead. M2 codegen should either get an
-  object-level discriminator helper or a first-class enum reader helper.
-- Fixed-size array helpers in the manual test are enough for valid fixtures, but
-  M2 should add friendly length errors before relying on generated code for
-  authored data.
+- Map helpers are still hand-written in the mockup slice. This is acceptable
+  for codegen, but handwritten code remains verbose.
 
 ## Reader/Writer API Changes Before M2
 
 - Added `SlotReader::missing_required_field`.
 - Added `ObjectReader::missing_required_field`.
 - Added `ObjectReader::invalid_discriminator_value`.
+- Added `ObjectReader::expect_discriminator("kind", expected)` so enum readers
+  can validate the first property from object context.
+- Made `ObjectReader::finish()` consume and validate the end of an unfinished
+  object, which gives unit enum variants a safe generated-code target.
+- Added `ValueReader::f32_array::<N>()` with friendly fixed-size length errors.
+- Fixed array item path tracking so sibling items use stable paths such as
+  `items[0]` and `items[1]` instead of accumulating segments.
 
-Recommended follow-up before or during M2:
+Resolved rough edges:
 
-- Add `ObjectReader::expect_discriminator("kind", expected)` that consumes the
-  first field and validates the value.
-- Consider making `ObjectReader::finish()` consume and validate the object end
-  instead of being a no-op, or add an explicit `finish_empty_variant()` helper.
+- Unit variants now read `kind` and call `object.finish()?`.
+- Enum readers now use `object.expect_discriminator(...)`.
+- Fixed numeric arrays no longer use test-local indexing helpers.
+- Nested array diagnostics now report stable item paths.
 
 ## Domain Shape Notes
 

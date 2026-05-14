@@ -528,7 +528,7 @@ where
 {
     const FIELDS: &[&str] = &["kind", "name", "nodes"];
     let mut object = value.object()?;
-    let _kind = read_kind(&mut object, &["ProjectDef"])?;
+    let _kind = object.expect_discriminator("kind", &["ProjectDef"])?;
     let mut name = None;
     let mut nodes = None;
     while let Some(mut prop) = object.next_prop()? {
@@ -562,8 +562,8 @@ where
     S: SyntaxEventSource,
 {
     let mut object = value.object()?;
-    let kind = read_kind(
-        &mut object,
+    let kind = object.expect_discriminator(
+        "kind",
         &["OutputDef", "TextureDef", "ShaderDef", "FixtureDef"],
     )?;
     match kind.as_str() {
@@ -571,7 +571,7 @@ where
         "TextureDef" => read_texture_def_body(object).map(ManualNodeDef::Texture),
         "ShaderDef" => read_shader_def_body(object).map(ManualNodeDef::Shader),
         "FixtureDef" => read_fixture_def_body(object).map(ManualNodeDef::Fixture),
-        _ => unreachable!("read_kind validated variants"),
+        _ => unreachable!("expect_discriminator validated variants"),
     }
 }
 
@@ -762,7 +762,7 @@ where
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
             "lum_power" => lum_power = Some(prop.value().f32()?),
-            "white_point" => white_point = Some(read_f32_array_3(prop.value())?),
+            "white_point" => white_point = Some(prop.value().f32_array()?),
             "brightness" => brightness = Some(prop.value().f32()?),
             "interpolation_enabled" => interpolation_enabled = Some(prop.value().bool()?),
             "dithering_enabled" => dithering_enabled = Some(prop.value().bool()?),
@@ -861,15 +861,15 @@ where
     S: SyntaxEventSource,
 {
     let mut object = value.object()?;
-    let kind = read_kind(&mut object, &["Disabled", "Square", "PathPoints"])?;
+    let kind = object.expect_discriminator("kind", &["Disabled", "Square", "PathPoints"])?;
     match kind.as_str() {
         "Disabled" => {
-            finish_unit_variant(object)?;
+            object.finish()?;
             Ok(MappingConfig::Disabled)
         }
         "Square" => read_square_mapping_body(object),
         "PathPoints" => read_path_points_mapping_body(object),
-        _ => unreachable!("read_kind validated variants"),
+        _ => unreachable!("expect_discriminator validated variants"),
     }
 }
 
@@ -884,8 +884,8 @@ where
     let mut size = None;
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
-            "origin" => origin = Some(read_f32_array_2(prop.value())?),
-            "size" => size = Some(read_f32_array_2(prop.value())?),
+            "origin" => origin = Some(prop.value().f32_array()?),
+            "size" => size = Some(prop.value().f32_array()?),
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
@@ -923,14 +923,14 @@ where
     S: SyntaxEventSource,
 {
     let mut object = value.object()?;
-    let kind = read_kind(&mut object, &["RingArray", "Manual"])?;
+    let kind = object.expect_discriminator("kind", &["RingArray", "Manual"])?;
     match kind.as_str() {
         "RingArray" => read_ring_array_path_body(object),
         "Manual" => {
-            finish_unit_variant(object)?;
+            object.finish()?;
             Ok(PathSpec::Manual)
         }
-        _ => unreachable!("read_kind validated variants"),
+        _ => unreachable!("expect_discriminator validated variants"),
     }
 }
 
@@ -960,7 +960,7 @@ where
 
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
-            "center" => center = Some(read_f32_array_2(prop.value())?),
+            "center" => center = Some(prop.value().f32_array()?),
             "diameter" => diameter = Some(prop.value().f32()?),
             "start_ring_inclusive" => start_ring_inclusive = Some(prop.value().u32()?),
             "end_ring_exclusive" => end_ring_exclusive = Some(prop.value().u32()?),
@@ -1017,7 +1017,7 @@ where
     let mut object = value.object()?;
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
-            "matrix" => matrix = Some(read_f32_array_6(prop.value())?),
+            "matrix" => matrix = Some(prop.value().f32_array()?),
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
@@ -1110,77 +1110,6 @@ where
         entries.insert(key, value);
     }
     Ok(entries)
-}
-
-fn read_f32_array_2<S>(value: ValueReader<'_, '_, S>) -> Result<[f32; 2], SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let values = read_f32_vec(value)?;
-    Ok([values[0], values[1]])
-}
-
-fn read_f32_array_3<S>(value: ValueReader<'_, '_, S>) -> Result<[f32; 3], SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let values = read_f32_vec(value)?;
-    Ok([values[0], values[1], values[2]])
-}
-
-fn read_f32_array_6<S>(value: ValueReader<'_, '_, S>) -> Result<[f32; 6], SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let values = read_f32_vec(value)?;
-    Ok([
-        values[0], values[1], values[2], values[3], values[4], values[5],
-    ])
-}
-
-fn read_f32_vec<S>(value: ValueReader<'_, '_, S>) -> Result<Vec<f32>, SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let mut values = Vec::new();
-    let mut array = value.array()?;
-    while let Some(item) = array.next_item()? {
-        values.push(item.f32()?);
-    }
-    Ok(values)
-}
-
-fn read_kind<S>(
-    object: &mut ObjectReader<'_, '_, S>,
-    expected: &[&str],
-) -> Result<String, SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let Some(mut prop) = object.next_prop()? else {
-        return Err(object.missing_required_field("kind"));
-    };
-    if prop.name() != "kind" {
-        let actual = prop.name().to_string();
-        return Err(prop.unknown_field(&actual, &["kind"]));
-    }
-    let kind = prop.value().string()?;
-    drop(prop);
-    if expected.contains(&kind.as_str()) {
-        Ok(kind)
-    } else {
-        Err(object.invalid_discriminator_value("kind", &kind, expected))
-    }
-}
-
-fn finish_unit_variant<S>(mut object: ObjectReader<'_, '_, S>) -> Result<(), SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    if let Some(prop) = object.next_prop()? {
-        return Err(prop.unknown_field(prop.name(), &[]));
-    }
-    Ok(())
 }
 
 fn write_bundle_json(bundle: &ManualSourceBundle) -> Vec<u8> {

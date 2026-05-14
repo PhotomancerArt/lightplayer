@@ -1,5 +1,5 @@
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use base64::Engine;
@@ -47,7 +47,10 @@ where
 
     pub fn object(&mut self) -> Result<ObjectReader<'_, 'a, S>, SyntaxError> {
         self.start_object()?;
-        Ok(ObjectReader { reader: self })
+        Ok(ObjectReader {
+            reader: self,
+            ended: false,
+        })
     }
 
     pub fn start_array(&mut self) -> Result<(), SyntaxError> {
@@ -61,9 +64,11 @@ where
 
     pub fn array(&mut self) -> Result<ArrayReader<'_, 'a, S>, SyntaxError> {
         self.start_array()?;
+        let path = self.path.clone();
         Ok(ArrayReader {
             reader: self,
             index: 0,
+            path,
         })
     }
 
@@ -195,6 +200,7 @@ where
     S: SyntaxEventSource,
 {
     reader: &'r mut SlotReader<'a, S>,
+    ended: bool,
 }
 
 impl<'r, 'a, S> ObjectReader<'r, 'a, S>
@@ -202,6 +208,10 @@ where
     S: SyntaxEventSource,
 {
     pub fn next_prop(&mut self) -> Result<Option<PropReader<'_, 'a, S>>, SyntaxError> {
+        if self.ended {
+            return Ok(None);
+        }
+
         match self.reader.next_event()? {
             Some(SyntaxEvent::Prop { name, span }) => {
                 let next_path = join_prop_path(&self.reader.path, &name);
@@ -214,7 +224,10 @@ where
                     consumed: false,
                 }))
             }
-            Some(SyntaxEvent::EndObject { .. }) => Ok(None),
+            Some(SyntaxEvent::EndObject { .. }) => {
+                self.ended = true;
+                Ok(None)
+            }
             Some(event) => Err(self
                 .reader
                 .error_at(event.span(), "expected object property or end of object")),
@@ -222,8 +235,33 @@ where
         }
     }
 
-    pub fn finish(self) -> Result<(), SyntaxError> {
+    pub fn finish(mut self) -> Result<(), SyntaxError> {
+        if self.next_prop()?.is_some() {
+            return Err(self.reader.error("expected end of object"));
+        }
         Ok(())
+    }
+
+    pub fn expect_discriminator(
+        &mut self,
+        name: &str,
+        expected: &[&str],
+    ) -> Result<String, SyntaxError> {
+        let Some(mut prop) = self.next_prop()? else {
+            return Err(self.missing_required_field(name));
+        };
+        let actual_name = prop.name().to_string();
+        if actual_name != name {
+            return Err(prop.unknown_field(&actual_name, &[name]));
+        }
+        let actual = prop.value().string()?;
+        drop(prop);
+
+        if expected.contains(&actual.as_str()) {
+            Ok(actual)
+        } else {
+            Err(self.invalid_discriminator_value(name, &actual, expected))
+        }
     }
 
     pub fn missing_required_field(&self, name: &str) -> SyntaxError {
@@ -299,6 +337,7 @@ where
 {
     reader: &'r mut SlotReader<'a, S>,
     index: usize,
+    path: String,
 }
 
 impl<'r, 'a, S> ArrayReader<'r, 'a, S>
@@ -307,12 +346,15 @@ where
 {
     pub fn next_item(&mut self) -> Result<Option<ValueReader<'_, 'a, S>>, SyntaxError> {
         match self.reader.next_event()? {
-            Some(SyntaxEvent::EndArray { .. }) => Ok(None),
+            Some(SyntaxEvent::EndArray { .. }) => {
+                self.reader.path = self.path.clone();
+                Ok(None)
+            }
             Some(event) => {
                 self.reader.push_back(event);
                 let index = self.index;
                 self.index += 1;
-                self.reader.path = format!("{}[{index}]", self.reader.path);
+                self.reader.path = format!("{}[{index}]", self.path);
                 Ok(Some(ValueReader {
                     reader: self.reader,
                     span: None,
@@ -342,6 +384,31 @@ where
 
     pub fn array(self) -> Result<ArrayReader<'r, 'a, S>, SyntaxError> {
         self.reader.array()
+    }
+
+    pub fn f32_array<const N: usize>(self) -> Result<[f32; N], SyntaxError> {
+        let mut array = self.array()?;
+        let mut values = [0.0; N];
+        let mut count = 0;
+
+        while let Some(item) = array.next_item()? {
+            if count >= N {
+                item.skip_value()?;
+                return Err(array
+                    .reader
+                    .error(format!("expected array of {N} f32 values, found more")));
+            }
+            values[count] = item.f32()?;
+            count += 1;
+        }
+
+        if count != N {
+            return Err(array
+                .reader
+                .error(format!("expected array of {N} f32 values, found {count}")));
+        }
+
+        Ok(values)
     }
 
     pub fn f32(self) -> Result<f32, SyntaxError> {

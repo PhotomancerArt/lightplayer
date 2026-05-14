@@ -132,13 +132,11 @@ fn read_manual_node_def<S>(reader: &mut SlotReader<'_, S>) -> Result<(), SyntaxE
 where
     S: SyntaxEventSource,
 {
-    reader.start_object()?;
-    let kind = reader.expect_discriminator("kind")?.string()?;
+    let mut object = reader.object()?;
+    let kind = object.expect_discriminator("kind", &["TextureDef", "OutputDef"])?;
     match kind.as_str() {
         "TextureDef" | "OutputDef" => Ok(()),
-        other => {
-            Err(reader.invalid_discriminator_value("kind", other, &["TextureDef", "OutputDef"]))
-        }
+        _ => unreachable!("expect_discriminator validated variants"),
     }
 }
 
