@@ -1,3 +1,4 @@
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -409,6 +410,37 @@ where
         }
 
         Ok(values)
+    }
+
+    pub fn string_key_map<T>(
+        self,
+        mut read_value: impl FnMut(ValueReader<'_, 'a, S>) -> Result<T, SyntaxError>,
+    ) -> Result<BTreeMap<String, T>, SyntaxError> {
+        let mut entries = BTreeMap::new();
+        let mut object = self.object()?;
+        while let Some(mut prop) = object.next_prop()? {
+            let key = prop.name().to_string();
+            let value = read_value(prop.value())?;
+            entries.insert(key, value);
+        }
+        Ok(entries)
+    }
+
+    pub fn u32_key_map<T>(
+        self,
+        mut read_value: impl FnMut(ValueReader<'_, 'a, S>) -> Result<T, SyntaxError>,
+    ) -> Result<BTreeMap<u32, T>, SyntaxError> {
+        let mut entries = BTreeMap::new();
+        let mut object = self.object()?;
+        while let Some(mut prop) = object.next_prop()? {
+            let key = match prop.name().parse::<u32>() {
+                Ok(key) => key,
+                Err(_) => return Err(prop.unknown_field(prop.name(), &["numeric map key"])),
+            };
+            let value = read_value(prop.value())?;
+            entries.insert(key, value);
+        }
+        Ok(entries)
     }
 
     pub fn f32(self) -> Result<f32, SyntaxError> {

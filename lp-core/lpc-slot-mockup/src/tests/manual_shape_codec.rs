@@ -534,7 +534,7 @@ where
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
             "name" => name = Some(prop.value().string()?),
-            "nodes" => nodes = Some(read_string_map(prop.value(), read_node_invocation)?),
+            "nodes" => nodes = Some(prop.value().string_key_map(read_node_invocation)?),
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
@@ -589,7 +589,7 @@ where
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
             "pin" => pin = Some(prop.value().u32()?),
-            "bindings" => bindings = read_string_map(prop.value(), read_binding_def)?,
+            "bindings" => bindings = prop.value().string_key_map(read_binding_def)?,
             "options" => options = Some(read_output_options(prop.value())?),
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
@@ -615,7 +615,7 @@ where
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
             "size" => size = Some(read_dim2u(prop.value())?),
-            "bindings" => bindings = read_string_map(prop.value(), read_binding_def)?,
+            "bindings" => bindings = prop.value().string_key_map(read_binding_def)?,
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
@@ -650,9 +650,9 @@ where
         match prop.name() {
             "glsl_path" => glsl_path = Some(prop.value().string()?),
             "render_order" => render_order = Some(prop.value().u32()?),
-            "bindings" => bindings = read_string_map(prop.value(), read_binding_def)?,
+            "bindings" => bindings = prop.value().string_key_map(read_binding_def)?,
             "glsl_opts" => glsl_opts = Some(read_glsl_opts(prop.value())?),
-            "param_defs" => param_defs = read_string_map(prop.value(), read_shader_param_def)?,
+            "param_defs" => param_defs = prop.value().string_key_map(read_shader_param_def)?,
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
@@ -695,7 +695,7 @@ where
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
             "render_size" => render_size = Some(read_dim2u(prop.value())?),
-            "bindings" => bindings = read_string_map(prop.value(), read_binding_def)?,
+            "bindings" => bindings = prop.value().string_key_map(read_binding_def)?,
             "mapping" => mapping = Some(read_mapping_config(prop.value())?),
             "disabled_mapping_probe" => {
                 disabled_mapping_probe = Some(read_mapping_config(prop.value())?)
@@ -906,7 +906,7 @@ where
     let mut sample_diameter = None;
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
-            "paths" => paths = Some(read_u32_map(prop.value(), read_path_spec)?),
+            "paths" => paths = Some(prop.value().u32_key_map(read_path_spec)?),
             "sample_diameter" => sample_diameter = Some(prop.value().f32()?),
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
@@ -965,7 +965,7 @@ where
             "start_ring_inclusive" => start_ring_inclusive = Some(prop.value().u32()?),
             "end_ring_exclusive" => end_ring_exclusive = Some(prop.value().u32()?),
             "ring_lamp_counts" => {
-                ring_lamp_counts = Some(read_u32_map(prop.value(), |value| value.u32())?)
+                ring_lamp_counts = Some(prop.value().u32_key_map(|value| value.u32())?)
             }
             "offset_angle" => offset_angle = Some(prop.value().f32()?),
             "order" => order = Some(prop.value().string()?),
@@ -1073,43 +1073,6 @@ where
     S: SyntaxEventSource,
 {
     value.f32().map(LpValueLike::F32)
-}
-
-fn read_string_map<S, T>(
-    value: ValueReader<'_, '_, S>,
-    mut read_value: impl FnMut(ValueReader<'_, '_, S>) -> Result<T, SyntaxError>,
-) -> Result<BTreeMap<String, T>, SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let mut entries = BTreeMap::new();
-    let mut object = value.object()?;
-    while let Some(mut prop) = object.next_prop()? {
-        let key = prop.name().to_string();
-        let value = read_value(prop.value())?;
-        entries.insert(key, value);
-    }
-    Ok(entries)
-}
-
-fn read_u32_map<S, T>(
-    value: ValueReader<'_, '_, S>,
-    mut read_value: impl FnMut(ValueReader<'_, '_, S>) -> Result<T, SyntaxError>,
-) -> Result<BTreeMap<u32, T>, SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let mut entries = BTreeMap::new();
-    let mut object = value.object()?;
-    while let Some(mut prop) = object.next_prop()? {
-        let key = match prop.name().parse::<u32>() {
-            Ok(key) => key,
-            Err(_) => return Err(prop.unknown_field(prop.name(), &["numeric map key"])),
-        };
-        let value = read_value(prop.value())?;
-        entries.insert(key, value);
-    }
-    Ok(entries)
 }
 
 fn write_bundle_json(bundle: &ManualSourceBundle) -> Vec<u8> {

@@ -230,6 +230,27 @@ name = "aux"
     }
 
     #[test]
+    fn value_reader_reads_string_and_u32_key_maps() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"nodes":{"output":18},"counts":{"0":1,"1":96}}"#).unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+
+        {
+            let mut prop = object.next_prop().unwrap().unwrap();
+            let nodes = prop.value().string_key_map(|value| value.u32()).unwrap();
+            assert_eq!(nodes.get("output"), Some(&18));
+        }
+
+        let mut counts = object.next_prop().unwrap().unwrap();
+        let counts = counts.value().u32_key_map(|value| value.u32()).unwrap();
+        assert_eq!(counts.get(&0), Some(&1));
+        assert_eq!(counts.get(&1), Some(&96));
+    }
+
+    #[test]
     fn discriminator_reports_expected_values() {
         let registry = SlotShapeRegistry::default();
         let mut reader = SlotReader::new(
