@@ -34,7 +34,7 @@ test_oom = []   # Allocate until OOM, verify catch_unwind recovers (for panic re
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
-test_shader_compile_incremental = ["dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
+test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
@@ -49,6 +49,7 @@ esp-println = { version = "0.16.1", default-features = false, features = ["esp32
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
+fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }

@@ -419,14 +419,7 @@ fwtest-shader-compile-incremental-esp32c6: install-rv32-target
 
 # Run the shader compile stress harness on ESP32-C6, save serial output to a trace file, and stop once the harness reports DONE.
 fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
-    ROOT="$(pwd)"; \
-    PORT="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' | sort | head -n 1)"; \
-    test -n "$PORT"; \
-    echo "Using ESPFLASH_PORT=$PORT"; \
-    cd lp-fw/fw-esp32 && ESPFLASH_PORT="$PORT" python3 ../../scripts/run_until_marker.py \
-      --marker "[inc-shader-compile] === DONE ===" \
-      --output "$ROOT/traces/$(date +%Y-%m-%dT%H-%M-%S)-inc-shader-compile-stress.txt" \
-      -- cargo run --features test_shader_compile_incremental,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cargo run -p lp-cli -- fwcheck run esp32c6 shader-compile-stress
 
 cargo-update:
     cargo update -p regalloc2 \

@@ -2660,6 +2660,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fw-checks"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fw-core"
 version = "40.0.0"
 dependencies = [
@@ -2716,6 +2725,7 @@ dependencies = [
  "esp-println",
  "esp-rtos",
  "esp-storage",
+ "fw-checks",
  "fw-core",
  "hashbrown 0.15.5",
  "libm",
@@ -3705,6 +3715,7 @@ dependencies = [
  "egui",
  "env_logger 0.11.9",
  "futures-util",
+ "fw-checks",
  "log",
  "lp-perf",
  "lp-riscv-elf",
