@@ -3,10 +3,11 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32Slot, Revision, SlotDataAccess,
-    SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta,
-    SlotRecordAccess, SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError, ValueSlot, XySlot, current_revision,
+    FieldSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, Revision,
+    SlotDataAccess, SlotEnumAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape,
+    SlotMapValueAccess, SlotMeta, SlotRecordAccess, SlotShape, SlotShapeId, SlotValue,
+    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
+    current_revision,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -53,7 +54,7 @@ impl MappingConfig {
         Self::PathPoints {
             variant_revision: current_revision(),
             paths,
-            sample_diameter: PositiveF32Slot::new(sample_diameter),
+            sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
         }
     }
 
@@ -136,8 +137,8 @@ impl PathSpec {
     ) -> Self {
         Self::RingArray {
             variant_revision: current_revision(),
-            center: XySlot::new(center),
-            diameter: PositiveF32Slot::new(diameter),
+            center: XySlot::new(Xy(center)),
+            diameter: PositiveF32Slot::new(PositiveF32(diameter)),
             start_ring_inclusive: ValueSlot::new(start_ring_inclusive),
             end_ring_exclusive: ValueSlot::new(end_ring_exclusive),
             ring_lamp_counts,
@@ -276,7 +277,7 @@ impl FromLpValue for RingOrder {
 }
 
 impl SlotValue for RingOrder {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.ring_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("RingOrder");
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

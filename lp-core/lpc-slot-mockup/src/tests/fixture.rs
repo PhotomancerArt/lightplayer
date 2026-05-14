@@ -242,7 +242,7 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                     "source.shader.param_defs" | "param_defs" => 4,
                     "engine.shader_node.params" | "params" => 0,
                     "engine.fixture_node.touches" | "touches" => 0,
-                    "mapping" => 2,
+                    "mapping" => 3,
                     "paths" => 0,
                     "sample_diameter" => 1,
                     "center" => 0,
@@ -252,8 +252,8 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                     "ring_lamp_counts" => 4,
                     "offset_angle" => 5,
                     "order" => 6,
-                    "transform" => 4,
-                    "brightness" => 5,
+                    "transform" => 5,
+                    "brightness" => 6,
                     _ => panic!("unknown test record segment {segment}"),
                 };
                 &record.fields[index]

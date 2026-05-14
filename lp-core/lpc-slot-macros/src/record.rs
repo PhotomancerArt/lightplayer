@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, Result, parse2};
+use syn::{Data, DeriveInput, Fields, Result, Visibility, parse2};
 
-use crate::attr::{self, FieldShapeAttr};
+use crate::attr;
 
 pub(crate) fn derive(input: TokenStream) -> TokenStream {
     match derive_inner(input) {
@@ -25,10 +25,8 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         let Some(field_ident) = field.ident else {
             continue;
         };
+        require_public(&field.vis, &field_ident)?;
         let field_attr = attr::parse_field(&field.attrs)?;
-        if matches!(field_attr.shape, FieldShapeAttr::Skip) {
-            continue;
-        }
 
         let field_name = field_attr
             .name
@@ -167,6 +165,17 @@ fn validate_slot_name(name: &str, span: proc_macro2::Span) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn require_public(vis: &Visibility, ident: &syn::Ident) -> Result<()> {
+    if matches!(vis, Visibility::Public(_)) {
+        Ok(())
+    } else {
+        Err(syn::Error::new_spanned(
+            ident,
+            "SlotRecord derive requires public fields; use a separate slot data struct or a custom impl for private runtime state",
+        ))
+    }
 }
 
 fn is_ident_start(c: char) -> bool {

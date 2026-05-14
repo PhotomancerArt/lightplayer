@@ -1,24 +1,22 @@
 use lpc_model::{
     Affine2d, Affine2dSlot, BindingDefs, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    OptionSlot, SlotRecord, ValueSlot,
+    FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotRecord, SlotShapeId, SlotValue,
+    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 use super::{MappingConfig, shader_def::ScalarHint};
 
 #[derive(SlotRecord)]
 pub struct FixtureDef {
-    #[slot(skip)]
-    pub kind: String,
-    render_size: Dim2uSlot,
-    bindings: BindingDefs,
-    #[slot(skip)]
-    sampling: FixtureSamplingConfig,
+    pub render_size: Dim2uSlot,
+    pub bindings: BindingDefs,
+    pub sampling: ValueSlot<FixtureSamplingConfig>,
     #[slot(enum)]
-    mapping: MappingConfig,
-    color_order: ColorOrderSlot,
-    transform: Affine2dSlot,
-    brightness: OptionSlot<ScalarHint>,
-    gamma_correction: OptionSlot<ValueSlot<bool>>,
+    pub mapping: MappingConfig,
+    pub color_order: ColorOrderSlot,
+    pub transform: Affine2dSlot,
+    pub brightness: OptionSlot<ScalarHint>,
+    pub gamma_correction: OptionSlot<ValueSlot<bool>>,
 }
 
 impl FixtureDef {
@@ -26,10 +24,9 @@ impl FixtureDef {
 
     pub fn new() -> Self {
         Self {
-            kind: Self::KIND.to_string(),
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
-            sampling: FixtureSamplingConfig::TextureArea,
+            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             mapping: MappingConfig::path_points_default(),
             color_order: ColorOrderSlot::new(ColorOrderValue::Grb),
             transform: Affine2dSlot::new(Affine2d::identity()),
@@ -47,10 +44,9 @@ impl FixtureDef {
         gamma_correction: Option<bool>,
     ) -> Self {
         Self {
-            kind: Self::KIND.to_string(),
             render_size: Dim2uSlot::new(render_size),
             bindings: BindingDefs::default(),
-            sampling: FixtureSamplingConfig::TextureArea,
+            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             mapping,
             color_order: ColorOrderSlot::new(color_order),
             transform: Affine2dSlot::new(transform),
@@ -78,7 +74,7 @@ impl FixtureDef {
     }
 
     pub fn sampling(&self) -> FixtureSamplingConfig {
-        self.sampling
+        *self.sampling.value()
     }
 
     pub fn render_size(&self) -> Dim2u {
@@ -129,6 +125,53 @@ pub enum FixtureSamplingConfig {
 impl FixtureSamplingConfig {
     pub fn point() -> Self {
         Self::Point
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TextureArea => "texture_area",
+            Self::Point => "point",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "texture_area" => Some(Self::TextureArea),
+            "point" => Some(Self::Point),
+            _ => None,
+        }
+    }
+}
+
+impl ToLpValue for FixtureSamplingConfig {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.as_str().to_string())
+    }
+}
+
+impl FromLpValue for FixtureSamplingConfig {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
+        match value {
+            LpValue::String(value) => {
+                Self::parse(value).ok_or_else(|| ValueRootError::new("expected fixture sampling"))
+            }
+            other => Err(ValueRootError::new(format!(
+                "expected String, got {other:?}"
+            ))),
+        }
+    }
+}
+
+impl SlotValue for FixtureSamplingConfig {
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("FixtureSamplingConfig");
+
+    fn value_shape() -> SlotValueShape {
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Plain,
+        }
     }
 }
 

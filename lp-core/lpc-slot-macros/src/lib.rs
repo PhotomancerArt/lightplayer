@@ -1,4 +1,4 @@
-//! Derive macros for LightPlayer slot records.
+//! Derive macros for LightPlayer slot records and values.
 //!
 //! `lpc-slot-macros` is the proc-macro side of the slot data model. It keeps
 //! Rust-authored records ergonomic while still making them available through
@@ -22,8 +22,6 @@
 //! #[derive(SlotRecord)]
 //! pub struct TextureDef {
 //!     pub size: Dim2uSlot,
-//!     #[slot(skip)]
-//!     pub cached_debug_label: String,
 //! }
 //! ```
 //!
@@ -46,7 +44,6 @@
 //! Supported field attributes:
 //!
 //! - `#[slot(name = "...")]`: use a different slot field name.
-//! - `#[slot(skip)]`: omit the field from shape and data access.
 //! - `#[slot(value = expr)]`: use an explicit `LpType` value leaf shape.
 //! - `#[slot(leaf = expr)]`: use an explicit semantic slot-value shape.
 //! - `#[slot(record)]`: force nested record shape/access.
@@ -59,8 +56,14 @@ use proc_macro::TokenStream;
 
 mod attr;
 mod record;
+mod value;
 
 #[proc_macro_derive(SlotRecord, attributes(slot))]
 pub fn derive_slot_record(input: TokenStream) -> TokenStream {
     record::derive(input.into()).into()
+}
+
+#[proc_macro_derive(SlotValue, attributes(slot_value))]
+pub fn derive_slot_value(input: TokenStream) -> TokenStream {
+    value::derive(input.into()).into()
 }

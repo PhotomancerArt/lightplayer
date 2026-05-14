@@ -1,87 +1,36 @@
-use crate::{
-    FieldSlot, LpType, LpValue, Revision, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
-    SlotValueAccess, SlotValueShape, ValueEditorHint, WithRevision, current_revision,
-};
+use crate::{SlotValue, SlotValueShape, ValueSlot};
 use alloc::string::String;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
-/// Revision-tracked path to an authored source file.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SourcePathSlot {
-    inner: WithRevision<String>,
-}
+/// Path to an authored source file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
+#[slot_value(editor = path)]
+pub struct SourcePath(pub String);
 
-impl SourcePathSlot {
-    pub fn new(value: String) -> Self {
-        Self::with_version(current_revision(), value)
+impl SourcePath {
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 
-    pub fn with_version(revision: Revision, value: String) -> Self {
-        Self {
-            inner: WithRevision::new(revision, value),
-        }
-    }
-
-    pub fn set(&mut self, value: String) {
-        self.inner.set(current_revision(), value);
-    }
-
-    pub fn revision(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    pub fn value(&self) -> &String {
-        self.inner.value()
+    pub fn as_path_buf(&self) -> crate::LpPathBuf {
+        crate::AsLpPathBuf::as_path_buf(&self.0)
     }
 }
 
-impl SlotValueAccess for SourcePathSlot {
-    fn changed_at(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    fn value(&self) -> LpValue {
-        LpValue::String(self.inner.value().clone())
+impl From<String> for SourcePath {
+    fn from(value: String) -> Self {
+        Self(value)
     }
 }
 
-impl Serialize for SourcePathSlot {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.inner.value().serialize(serializer)
+impl From<&str> for SourcePath {
+    fn from(value: &str) -> Self {
+        Self(String::from(value))
     }
 }
 
-impl<'de> Deserialize<'de> for SourcePathSlot {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(Self::new(String::deserialize(deserializer)?))
-    }
-}
-
-impl FieldSlot for SourcePathSlot {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::leaf(source_path_shape())
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
-    }
-}
+pub type SourcePathSlot = ValueSlot<SourcePath>;
 
 pub fn source_path_shape() -> SlotValueShape {
-    path_shape("slot.leaf.source_path")
-}
-
-pub(crate) fn path_shape(name: &str) -> SlotValueShape {
-    SlotValueShape {
-        id: SlotShapeId::from_static_name(name),
-        ty: LpType::String,
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::Path,
-    }
+    SourcePath::value_shape()
 }

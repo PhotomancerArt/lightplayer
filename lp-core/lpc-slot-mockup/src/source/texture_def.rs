@@ -2,10 +2,8 @@ use lpc_model::{BindingDefs, Dim2u, Dim2uSlot, SlotRecord};
 
 #[derive(SlotRecord)]
 pub struct TextureDef {
-    #[slot(skip)]
-    pub kind: String,
-    size: Dim2uSlot,
-    bindings: BindingDefs,
+    pub size: Dim2uSlot,
+    pub bindings: BindingDefs,
 }
 
 impl TextureDef {
@@ -13,7 +11,6 @@ impl TextureDef {
 
     pub fn new() -> Self {
         Self {
-            kind: Self::KIND.to_string(),
             size: Dim2uSlot::new(Dim2u {
                 width: 64,
                 height: 32,
@@ -24,7 +21,6 @@ impl TextureDef {
 
     pub fn from_codec(size: Dim2u) -> Self {
         Self {
-            kind: Self::KIND.to_string(),
             size: Dim2uSlot::new(size),
             bindings: BindingDefs::default(),
         }

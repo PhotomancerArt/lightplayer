@@ -78,7 +78,7 @@ impl FromLpValue for BindingEndpoint {
 }
 
 impl SlotValue for BindingEndpoint {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.binding_endpoint");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("BindingEndpoint");
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

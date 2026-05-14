@@ -112,8 +112,9 @@ Metadata should describe the domain shape, not duplicate business logic.
 - Defaults should come from Rust defaults or generated default instances rather
   than duplicated portable blobs.
 - Prefer explicit discriminators over inferred or untagged formats.
-- Avoid `slot(skip)` for persisted fields. If a value exists at runtime but is
-  not persisted, model that honestly as transient or through a wrapper.
+- Derived slot records do not support `slot(skip)`. If a field is in a
+  `SlotRecord`, it participates in the slot model; runtime-only state should use
+  a wrapper or a future explicit transient projection.
 - Keep casing close to the domain model. Type and variant names are PascalCase;
   compact field-like enum forms may opt into lower-case keys such as `ref` and
   `value`.

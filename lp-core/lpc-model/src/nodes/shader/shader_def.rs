@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::shader::{GlslOpts, ShaderParamDef};
 use crate::{
-    AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SlotRecord, SourcePathSlot,
+    BindingDefs, LpPathBuf, MapSlot, RenderOrder, RenderOrderSlot, SlotRecord, SourcePath,
+    SourcePathSlot,
 };
 
 /// Authored shader node definition.
@@ -26,8 +27,8 @@ pub struct ShaderDef {
 impl Default for ShaderDef {
     fn default() -> Self {
         Self {
-            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
-            render_order: RenderOrderSlot::new(0),
+            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
@@ -43,7 +44,7 @@ impl ShaderDef {
     }
 
     pub fn render_order(&self) -> i32 {
-        *self.render_order.value()
+        self.render_order.value().0
     }
 
     pub fn kind(&self) -> crate::NodeKind {
@@ -60,8 +61,8 @@ mod tests {
     #[test]
     fn test_shader_def_kind() {
         let def = ShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
-            render_order: RenderOrderSlot::new(0),
+            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
@@ -72,7 +73,7 @@ mod tests {
     #[test]
     fn test_shader_def_default() {
         let def = ShaderDef::default();
-        assert_eq!(def.glsl_path.value(), "main.glsl");
+        assert_eq!(def.glsl_path.value().as_str(), "main.glsl");
         assert_eq!(def.render_order(), 0);
         assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Wrapping);
         assert_eq!(*def.glsl_opts.mul.value(), MulMode::Wrapping);

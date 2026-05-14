@@ -243,7 +243,6 @@ fn sample_bundle() -> GeneratedBundle {
 }
 
 fn assert_project_def_matches_default(project: &ProjectDef) {
-    assert_eq!(project.kind, ProjectDef::KIND);
     assert_eq!(
         project.name.data.as_ref().map(|name| name.value().as_str()),
         Some("basic")
@@ -262,7 +261,6 @@ fn assert_project_def_matches_default(project: &ProjectDef) {
 }
 
 fn assert_output_def_matches_default(output: &OutputDef) {
-    assert_eq!(output.kind, OutputDef::KIND);
     assert_eq!(output.pin(), 18);
     let options = output.options().unwrap();
     assert_eq!(options.lum_power(), 2.0);
@@ -274,14 +272,12 @@ fn assert_output_def_matches_default(output: &OutputDef) {
 }
 
 fn assert_texture_def_matches_default(texture: &TextureDef) {
-    assert_eq!(texture.kind, TextureDef::KIND);
     assert_eq!(texture.size().width, 64);
     assert_eq!(texture.size().height, 32);
     assert!(texture.bindings().is_empty());
 }
 
 fn assert_fixture_def_matches_default(fixture: &FixtureDef) {
-    assert_eq!(fixture.kind, FixtureDef::KIND);
     assert_eq!(fixture.render_size().width, 16);
     assert_eq!(fixture.render_size().height, 16);
     assert_eq!(fixture.color_order().as_str(), "grb");
@@ -304,7 +300,6 @@ fn assert_fixture_def_matches_default(fixture: &FixtureDef) {
 }
 
 fn assert_shader_def_matches_default(shader: &ShaderDef) {
-    assert_eq!(shader.kind, ShaderDef::KIND);
     assert_eq!(shader.glsl_path(), "main.glsl");
     assert_eq!(shader.render_order(), 0);
     assert!(shader.bindings().is_empty());

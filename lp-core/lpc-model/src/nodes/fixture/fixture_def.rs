@@ -17,9 +17,8 @@ pub struct FixtureDef {
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
     /// Visual sampling strategy.
-    #[slot(skip)]
     #[serde(default)]
-    pub sampling: FixtureSamplingConfig,
+    pub sampling: ValueSlot<FixtureSamplingConfig>,
     /// Fixture mapping definition.
     #[slot(enum)]
     pub mapping: MappingConfig,
@@ -81,7 +80,7 @@ impl FixtureDef {
 }
 
 fn default_brightness() -> OptionSlot<ValueSlot<u32>> {
-    OptionSlot::some(ValueSlot::new(64))
+    OptionSlot::some(ValueSlot::new(64_u32))
 }
 
 fn default_render_size() -> Dim2uSlot {
@@ -241,7 +240,7 @@ impl FromLpValue for ColorOrder {
 }
 
 impl SlotValue for ColorOrder {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrder");
 
     fn value_shape() -> SlotValueShape {
         crate::color_order_shape()
@@ -259,7 +258,7 @@ mod tests {
     #[test]
     fn test_fixture_def_kind() {
         let mut ring_lamp_counts = BTreeMap::new();
-        ring_lamp_counts.insert(0, ValueSlot::new(1));
+        ring_lamp_counts.insert(0, ValueSlot::new(1_u32));
         let mut paths = BTreeMap::new();
         paths.insert(
             0,
@@ -276,7 +275,7 @@ mod tests {
         let def = FixtureDef {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
-            sampling: FixtureSamplingConfig::TextureArea,
+            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),

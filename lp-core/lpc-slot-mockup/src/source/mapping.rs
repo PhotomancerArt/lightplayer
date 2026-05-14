@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    FieldSlot, MapSlot, PositiveF32Slot, Revision, SlotDataAccess, SlotEnumAccess, SlotEnumOption,
-    SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess, SlotShape,
-    SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
-    XySlot, current_revision,
+    FieldSlot, MapSlot, PositiveF32, PositiveF32Slot, Revision, SlotDataAccess, SlotEnumAccess,
+    SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess, SlotMeta, SlotRecordAccess,
+    SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
+    ValueSlot, Xy, XySlot, current_revision,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -64,8 +64,8 @@ impl MappingConfig {
     pub fn square_from_codec(origin: [f32; 2], size: [f32; 2]) -> Self {
         Self::Square {
             variant_revision: current_revision(),
-            origin: XySlot::new(origin),
-            size: XySlot::new(size),
+            origin: XySlot::new(Xy(origin)),
+            size: XySlot::new(Xy(size)),
         }
     }
 
@@ -90,7 +90,7 @@ impl MappingConfig {
         Self::PathPoints {
             variant_revision: current_revision(),
             paths,
-            sample_diameter: PositiveF32Slot::new(sample_diameter),
+            sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
         }
     }
 
@@ -108,7 +108,7 @@ impl MappingConfig {
         let Self::Square { origin, size, .. } = self else {
             return None;
         };
-        Some((*origin.value(), *size.value()))
+        Some((origin.value().0, size.value().0))
     }
 
     pub fn path_points_fields(&self) -> Option<(&MapSlot<u32, PathSpec>, f32)> {
@@ -120,7 +120,7 @@ impl MappingConfig {
         else {
             return None;
         };
-        Some((paths, *sample_diameter.value()))
+        Some((paths, sample_diameter.value().0))
     }
 }
 
@@ -209,8 +209,8 @@ impl PathSpec {
     ) -> Self {
         Self::RingArray {
             variant_revision: current_revision(),
-            center: XySlot::new(center),
-            diameter: PositiveF32Slot::new(diameter),
+            center: XySlot::new(Xy(center)),
+            diameter: PositiveF32Slot::new(PositiveF32(diameter)),
             start_ring_inclusive: ValueSlot::new(start_ring_inclusive),
             end_ring_exclusive: ValueSlot::new(end_ring_exclusive),
             ring_lamp_counts,
@@ -290,8 +290,8 @@ impl PathSpec {
             return None;
         };
         Some((
-            *center.value(),
-            *diameter.value(),
+            center.value().0,
+            diameter.value().0,
             *start_ring_inclusive.value(),
             *end_ring_exclusive.value(),
             ring_lamp_counts,
@@ -410,7 +410,7 @@ impl lpc_model::FromLpValue for RingOrder {
 }
 
 impl SlotValue for RingOrder {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("mock.slot.leaf.ring_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("RingOrder");
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

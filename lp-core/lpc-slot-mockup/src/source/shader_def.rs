@@ -1,33 +1,32 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    AddSubMode, BindingDefs, DivMode, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot,
-    PositiveF32Slot, RatioSlot, RenderOrderSlot, Revision, SlotRecord, SourcePathSlot, ValueSlot,
+    AddSubMode, BindingDefs, DivMode, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot, PositiveF32,
+    PositiveF32Slot, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, Revision, SlotRecord,
+    SourcePath, SourcePathSlot, ValueSlot,
 };
 
 #[derive(SlotRecord)]
 pub struct ShaderDef {
-    #[slot(skip)]
-    pub kind: String,
-    glsl_path: SourcePathSlot,
-    render_order: RenderOrderSlot,
-    bindings: BindingDefs,
-    glsl_opts: GlslOpts,
+    pub glsl_path: SourcePathSlot,
+    pub render_order: RenderOrderSlot,
+    pub bindings: BindingDefs,
+    pub glsl_opts: GlslOpts,
     pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
 #[derive(Clone, Debug, PartialEq, SlotRecord)]
 pub struct ShaderParamDef {
-    label: ValueSlot<String>,
-    description: ValueSlot<String>,
-    value_type: ValueSlot<String>,
-    default: RatioSlot,
-    min: OptionSlot<ScalarHint>,
+    pub label: ValueSlot<String>,
+    pub description: ValueSlot<String>,
+    pub value_type: ValueSlot<String>,
+    pub default: RatioSlot,
+    pub min: OptionSlot<ScalarHint>,
 }
 
 #[derive(Clone, Debug, PartialEq, SlotRecord)]
 pub struct ScalarHint {
-    value: PositiveF32Slot,
+    pub value: PositiveF32Slot,
 }
 
 impl ShaderDef {
@@ -45,9 +44,8 @@ impl ShaderDef {
         );
 
         Self {
-            kind: Self::KIND.to_string(),
-            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
-            render_order: RenderOrderSlot::new(0),
+            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts {
                 add_sub: ValueSlot::new(AddSubMode::Wrapping),
@@ -65,9 +63,8 @@ impl ShaderDef {
         param_defs: BTreeMap<String, ShaderParamDef>,
     ) -> Self {
         Self {
-            kind: Self::KIND.to_string(),
-            glsl_path: SourcePathSlot::new(glsl_path),
-            render_order: RenderOrderSlot::new(render_order),
+            glsl_path: SourcePathSlot::new(SourcePath(glsl_path)),
+            render_order: RenderOrderSlot::new(RenderOrder(render_order)),
             bindings: BindingDefs::default(),
             glsl_opts,
             param_defs: MapSlot::new(param_defs),
@@ -75,11 +72,11 @@ impl ShaderDef {
     }
 
     pub fn glsl_path(&self) -> &str {
-        self.glsl_path.value()
+        self.glsl_path.value().as_str()
     }
 
     pub fn render_order(&self) -> i32 {
-        *self.render_order.value()
+        self.render_order.value().0
     }
 
     pub fn glsl_opts(&self) -> &GlslOpts {
@@ -134,7 +131,7 @@ impl ShaderParamDef {
             label: ValueSlot::new(label.to_string()),
             description: ValueSlot::new(description.to_string()),
             value_type: ValueSlot::new(String::from("f32")),
-            default: RatioSlot::new(default),
+            default: RatioSlot::new(Ratio(default)),
             min: match min {
                 Some(value) => OptionSlot::some(ScalarHint::new(value)),
                 None => OptionSlot::none(),
@@ -143,7 +140,7 @@ impl ShaderParamDef {
     }
 
     pub fn default_value(&self) -> LpValue {
-        LpValue::F32(*self.default.value())
+        LpValue::F32(self.default.value().0)
     }
 
     pub fn label(&self) -> &str {
@@ -159,7 +156,7 @@ impl ShaderParamDef {
     }
 
     pub fn default_scalar(&self) -> f32 {
-        *self.default.value()
+        self.default.value().0
     }
 
     pub fn min(&self) -> Option<&ScalarHint> {
@@ -190,7 +187,7 @@ impl ShaderParamDef {
 impl ScalarHint {
     pub fn new(value: f32) -> Self {
         Self {
-            value: PositiveF32Slot::new(value),
+            value: PositiveF32Slot::new(PositiveF32(value)),
         }
     }
 
@@ -199,6 +196,6 @@ impl ScalarHint {
     }
 
     pub fn value(&self) -> f32 {
-        *self.value.value()
+        self.value.value().0
     }
 }

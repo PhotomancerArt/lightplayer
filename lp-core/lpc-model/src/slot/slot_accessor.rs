@@ -283,7 +283,7 @@ mod tests {
         .expect("item.some accessor");
 
         let root = OptionRoot {
-            item: OptionSlot::some(ValueSlot::new(64)),
+            item: OptionSlot::some(ValueSlot::new(64_u32)),
         };
         let data = accessor.access(&root, &registry).expect("access data");
         assert!(matches!(
@@ -301,6 +301,6 @@ mod tests {
 
     #[derive(crate::SlotRecord)]
     struct OptionRoot {
-        item: OptionSlot<ValueSlot<u32>>,
+        pub item: OptionSlot<ValueSlot<u32>>,
     }
 }

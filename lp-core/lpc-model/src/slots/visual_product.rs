@@ -24,7 +24,7 @@ impl FromLpValue for VisualProduct {
 }
 
 impl SlotValue for VisualProduct {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.visual_product");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("VisualProduct");
 
     fn value_shape() -> SlotValueShape {
         visual_product_shape()

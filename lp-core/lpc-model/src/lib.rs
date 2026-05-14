@@ -13,10 +13,11 @@ extern crate self as lpc_model;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub use lpc_slot_macros::SlotRecord;
+pub use lpc_slot_macros::{SlotRecord, SlotValue};
 
 #[doc(hidden)]
 pub mod __private {
+    pub use alloc::string::String;
     pub use alloc::vec::Vec;
 }
 
@@ -91,14 +92,15 @@ pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use server::server_config::ServerConfig;
 pub use slot::{
-    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, ControlProductSlot,
-    Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot,
-    RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot,
-    XySlot, affine2d_shape, artifact_path_shape, color_order_shape, control_product_shape,
-    dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape, render_order_shape,
-    resource_ref_shape, runtime_buffer_resource_shape, source_path_shape, u32_list_shape,
-    visual_product_shape, xy_shape,
+    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
+    ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot,
+    Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot,
+    SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourcePath, SourcePathSlot,
+    ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot, affine2d_shape,
+    artifact_path_shape, color_order_shape, control_product_shape, dim2u_shape, positive_f32_shape,
+    ratio_shape, relative_node_ref_shape, render_order_shape, resource_ref_shape,
+    runtime_buffer_resource_shape, source_path_shape, u32_list_shape, visual_product_shape,
+    xy_shape,
 };
 pub use slot::{
     FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotAccessor,

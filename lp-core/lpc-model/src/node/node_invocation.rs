@@ -5,7 +5,7 @@
 //! field merges are reserved for richer invocation forms.
 
 use crate::artifact::artifact_loc::ArtifactLocator;
-use crate::{ArtifactPathSlot, SlotRecord};
+use crate::{ArtifactPath, ArtifactPathSlot, SlotRecord};
 use alloc::string::ToString;
 
 /// Parent-owned child node invocation.
@@ -20,12 +20,12 @@ impl NodeInvocation {
     /// New artifact-only invocation with no overrides.
     pub fn new(artifact: ArtifactLocator) -> Self {
         Self {
-            artifact: ArtifactPathSlot::new(artifact.to_string()),
+            artifact: ArtifactPathSlot::new(ArtifactPath(artifact.to_string())),
         }
     }
 
     pub fn artifact_locator(&self) -> Result<ArtifactLocator, &'static str> {
-        ArtifactLocator::parse(self.artifact.value())
+        ArtifactLocator::parse(self.artifact.value().as_str())
     }
 }
 

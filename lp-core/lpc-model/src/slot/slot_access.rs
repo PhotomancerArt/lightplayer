@@ -56,8 +56,8 @@ pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
 ///
 /// A record field that implements this trait can be included in
 /// `#[derive(SlotRecord)]` without an explicit shape attribute. Fields that do
-/// not implement this trait must opt out with `#[slot(skip)]` or provide an
-/// explicit override supported by the derive.
+/// not implement this trait must provide an explicit override supported by the
+/// derive or use a custom slot-access implementation.
 pub trait FieldSlot {
     fn slot_field_shape() -> SlotShape;
     fn slot_field_data(&self) -> SlotDataAccess<'_>;

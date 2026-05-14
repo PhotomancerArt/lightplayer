@@ -11,8 +11,6 @@ use crate::{MapSlot, OptionSlot, SlotRecord, ValueSlot};
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, SlotRecord)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
-    #[slot(skip)]
-    pub kind: String,
     #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub name: OptionSlot<ValueSlot<String>>,
     #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
@@ -27,7 +25,7 @@ impl ProjectDef {
     }
 
     pub fn is_project_kind(&self) -> bool {
-        self.kind == Self::KIND
+        true
     }
 
     pub fn name(&self) -> Option<&str> {

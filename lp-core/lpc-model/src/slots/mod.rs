@@ -20,19 +20,19 @@ mod visual_product;
 mod xy;
 
 pub use affine2d::{Affine2d, Affine2dSlot, affine2d_shape};
-pub use artifact_path::{ArtifactPathSlot, artifact_path_shape};
+pub use artifact_path::{ArtifactPath, ArtifactPathSlot, artifact_path_shape};
 pub use color_order::{ColorOrderSlot, ColorOrderValue, color_order_shape};
 pub use control_product::{ControlProductSlot, control_product_shape};
 pub use dim2u::{Dim2u, Dim2uSlot, dim2u_shape};
-pub use positive_f32::{PositiveF32Slot, positive_f32_shape};
-pub use ratio::{RatioSlot, ratio_shape};
+pub use positive_f32::{PositiveF32, PositiveF32Slot, positive_f32_shape};
+pub use ratio::{Ratio, RatioSlot, ratio_shape};
 pub use relative_node_ref::{RelativeNodeRefSlot, relative_node_ref_shape};
-pub use render_order::{RenderOrderSlot, render_order_shape};
+pub use render_order::{RenderOrder, RenderOrderSlot, render_order_shape};
 pub use resource_ref::{ResourceRefSlot, resource_ref_shape, runtime_buffer_resource_shape};
-pub use source_path::{SourcePathSlot, source_path_shape};
+pub use source_path::{SourcePath, SourcePathSlot, source_path_shape};
 pub use u32_list::u32_list_shape;
 pub use visual_product::{VisualProductSlot, visual_product_shape};
-pub use xy::{XySlot, xy_shape};
+pub use xy::{Xy, XySlot, xy_shape};
 
 #[cfg(test)]
 mod tests {
@@ -59,12 +59,12 @@ mod tests {
     fn semantic_slots_serialize_as_authored_values_and_stamp_deserialize_version() {
         set_current_revision(Revision::new(10));
         let slots = SemanticSlots {
-            ratio: RatioSlot::new(0.75),
-            positive: PositiveF32Slot::new(2.0),
-            render_order: RenderOrderSlot::new(10),
-            xy: XySlot::new([1.0, 2.0]),
-            source_path: SourcePathSlot::new(String::from("shader.glsl")),
-            artifact_path: ArtifactPathSlot::new(String::from("./shader.toml")),
+            ratio: RatioSlot::new(Ratio(0.75)),
+            positive: PositiveF32Slot::new(PositiveF32(2.0)),
+            render_order: RenderOrderSlot::new(RenderOrder(10)),
+            xy: XySlot::new(Xy([1.0, 2.0])),
+            source_path: SourcePathSlot::new(SourcePath(String::from("shader.glsl"))),
+            artifact_path: ArtifactPathSlot::new(ArtifactPath(String::from("./shader.toml"))),
             dim: Dim2uSlot::new(Dim2u {
                 width: 64,
                 height: 32,

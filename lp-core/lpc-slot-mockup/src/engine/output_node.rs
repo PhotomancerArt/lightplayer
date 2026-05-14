@@ -2,7 +2,7 @@ use lpc_model::{SlotRecord, ValueSlot};
 
 #[derive(SlotRecord)]
 pub struct OutputNode {
-    frames_sent: ValueSlot<u32>,
+    pub frames_sent: ValueSlot<u32>,
 }
 
 impl OutputNode {

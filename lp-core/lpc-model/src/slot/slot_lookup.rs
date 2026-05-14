@@ -142,7 +142,7 @@ mod tests {
 
     #[derive(SlotRecord)]
     struct TestRoot {
-        output: ValueSlot<f32>,
+        pub output: ValueSlot<f32>,
     }
 
     #[test]

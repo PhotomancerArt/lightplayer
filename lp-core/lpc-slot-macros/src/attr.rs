@@ -20,7 +20,6 @@ pub(crate) enum FieldShapeAttr {
     Map { key: LitStr, value_ref: LitStr },
     OptionRef(LitStr),
     Enum,
-    Skip,
 }
 
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
@@ -65,9 +64,6 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                 Ok(())
             } else if meta.path.is_ident("enum") {
                 shape = Some(FieldShapeAttr::Enum);
-                Ok(())
-            } else if meta.path.is_ident("skip") {
-                shape = Some(FieldShapeAttr::Skip);
                 Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
@@ -126,7 +122,6 @@ pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> Token
         FieldShapeAttr::Enum => {
             quote::quote! { <#ty as ::lpc_model::SlotEnumShape>::slot_enum_shape() }
         }
-        FieldShapeAttr::Skip => quote::quote! {},
     }
 }
 
@@ -154,7 +149,6 @@ pub(crate) fn field_access_tokens(
         FieldShapeAttr::Enum => {
             Some(quote::quote! { ::lpc_model::SlotDataAccess::Enum(&self.#field_ident) })
         }
-        FieldShapeAttr::Skip => None,
     }
 }
 

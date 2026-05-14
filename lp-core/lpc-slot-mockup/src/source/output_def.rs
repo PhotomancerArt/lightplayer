@@ -1,22 +1,22 @@
-use lpc_model::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, SlotRecord, ValueSlot};
+use lpc_model::{
+    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, SlotRecord, ValueSlot,
+};
 
 #[derive(SlotRecord)]
 pub struct OutputDef {
-    #[slot(skip)]
-    pub kind: String,
-    pin: ValueSlot<u32>,
-    bindings: BindingDefs,
-    options: OptionSlot<OutputDriverOptionsConfig>,
+    pub pin: ValueSlot<u32>,
+    pub bindings: BindingDefs,
+    pub options: OptionSlot<OutputDriverOptionsConfig>,
 }
 
 #[derive(Clone, Debug, PartialEq, SlotRecord)]
 pub struct OutputDriverOptionsConfig {
-    lum_power: PositiveF32Slot,
-    white_point: ValueSlot<[f32; 3]>,
-    brightness: RatioSlot,
-    interpolation_enabled: ValueSlot<bool>,
-    dithering_enabled: ValueSlot<bool>,
-    lut_enabled: ValueSlot<bool>,
+    pub lum_power: PositiveF32Slot,
+    pub white_point: ValueSlot<[f32; 3]>,
+    pub brightness: RatioSlot,
+    pub interpolation_enabled: ValueSlot<bool>,
+    pub dithering_enabled: ValueSlot<bool>,
+    pub lut_enabled: ValueSlot<bool>,
 }
 
 impl OutputDef {
@@ -24,7 +24,6 @@ impl OutputDef {
 
     pub fn new() -> Self {
         Self {
-            kind: Self::KIND.to_string(),
             pin: ValueSlot::new(18),
             bindings: BindingDefs::default(),
             options: OptionSlot::some(OutputDriverOptionsConfig::default()),
@@ -33,7 +32,6 @@ impl OutputDef {
 
     pub fn from_codec(pin: u32, options: Option<OutputDriverOptionsConfig>) -> Self {
         Self {
-            kind: Self::KIND.to_string(),
             pin: ValueSlot::new(pin),
             bindings: BindingDefs::default(),
             options: match options {
@@ -81,9 +79,9 @@ impl OutputDriverOptionsConfig {
         lut_enabled: bool,
     ) -> Self {
         Self {
-            lum_power: PositiveF32Slot::new(lum_power),
+            lum_power: PositiveF32Slot::new(PositiveF32(lum_power)),
             white_point: ValueSlot::new(white_point),
-            brightness: RatioSlot::new(brightness),
+            brightness: RatioSlot::new(Ratio(brightness)),
             interpolation_enabled: ValueSlot::new(interpolation_enabled),
             dithering_enabled: ValueSlot::new(dithering_enabled),
             lut_enabled: ValueSlot::new(lut_enabled),
@@ -91,7 +89,7 @@ impl OutputDriverOptionsConfig {
     }
 
     pub fn lum_power(&self) -> f32 {
-        *self.lum_power.value()
+        self.lum_power.value().0
     }
 
     pub fn white_point(&self) -> [f32; 3] {
@@ -99,7 +97,7 @@ impl OutputDriverOptionsConfig {
     }
 
     pub fn brightness(&self) -> f32 {
-        *self.brightness.value()
+        self.brightness.value().0
     }
 
     pub fn interpolation_enabled(&self) -> bool {
@@ -116,7 +114,7 @@ impl OutputDriverOptionsConfig {
 }
 
 fn default_lum_power_slot() -> PositiveF32Slot {
-    PositiveF32Slot::new(2.0)
+    PositiveF32Slot::new(PositiveF32(2.0))
 }
 
 fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
@@ -124,7 +122,7 @@ fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
 }
 
 fn default_brightness_slot() -> RatioSlot {
-    RatioSlot::new(1.0)
+    RatioSlot::new(Ratio(1.0))
 }
 
 fn default_true_slot() -> ValueSlot<bool> {

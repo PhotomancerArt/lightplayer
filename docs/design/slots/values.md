@@ -65,9 +65,24 @@ storage primitive. Examples include:
 - path specs
 - scalar hints
 
-These should have explicit slot metadata and explicit SlotCodec helpers until a
-common pattern is obvious. A semantic leaf may store as a string, scalar, record,
-or enum, but the semantic type should remain visible in the slot model.
+The core pattern is:
+
+```rust
+pub struct Ratio(pub f32);
+pub type RatioSlot = ValueSlot<Ratio>;
+```
+
+`ValueSlot<T>` owns revision tracking and slot leaf access. `T: SlotValue` owns
+the semantic value contract: conversion to/from `LpValue`, static value shape,
+and editor metadata.
+
+Simple semantic leaves should derive `SlotValue`. The derive uses the Rust type
+name as the default shape id, so a `Ratio` value becomes the `Ratio` slot value
+shape without a handwritten id. Manual `SlotValue` impls are still valid for
+enums, references, products, and other leaves that need custom parsing.
+
+A semantic leaf may store as a string, scalar, record, or enum, but the semantic
+type should remain visible in the slot model.
 
 ## Dynamic Values
 
@@ -115,8 +130,8 @@ from a default container and replace only fields that appear in storage.
 ## Transient Values
 
 If a value exists at runtime but should not be written to disk, model that
-explicitly as transient. Avoid a generic `slot(skip)` for persisted shapes,
-because skipped persisted fields make the source of the value unclear.
+explicitly as transient. There is no generic `slot(skip)` path for derived slot
+records; if a field is in a `SlotRecord`, it is part of the slot model.
 
 A transient value may still be valid on a wire path if that path is explicitly
 runtime-state oriented. Disk persistence and wire transport do not have to use
@@ -126,8 +141,7 @@ the same projection.
 
 - Unknown fields are errors until schema versioning exists.
 - Primitive values serialize as scalars.
-- Semantic leaves keep semantic helper functions until metadata can express the
-  pattern cleanly.
+- Semantic leaves serialize through their `SlotValue` conversion.
 - Dynamic values should use explicit type context or explicit discriminators.
 - Compact single-value enum syntax is opt-in.
 - Strings that encode references should belong to a semantic reference type,

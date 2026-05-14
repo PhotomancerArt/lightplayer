@@ -1,7 +1,6 @@
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, Revision, SlotDataAccess, SlotEnumOption, SlotMeta,
-    SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, WithRevision, current_revision,
+    FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -65,72 +64,7 @@ impl<'de> Deserialize<'de> for ColorOrderValue {
 }
 
 /// Revision-tracked RGB channel order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ColorOrderSlot {
-    inner: WithRevision<ColorOrderValue>,
-}
-
-impl ColorOrderSlot {
-    pub fn new(value: ColorOrderValue) -> Self {
-        Self::with_version(current_revision(), value)
-    }
-
-    pub fn with_version(revision: Revision, value: ColorOrderValue) -> Self {
-        Self {
-            inner: WithRevision::new(revision, value),
-        }
-    }
-
-    pub fn set(&mut self, value: ColorOrderValue) {
-        self.inner.set(current_revision(), value);
-    }
-
-    pub fn revision(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    pub fn value(&self) -> &ColorOrderValue {
-        self.inner.value()
-    }
-}
-
-impl SlotValueAccess for ColorOrderSlot {
-    fn changed_at(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    fn value(&self) -> LpValue {
-        self.inner.value().to_lp_value()
-    }
-}
-
-impl Serialize for ColorOrderSlot {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.inner.value().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ColorOrderSlot {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(Self::new(ColorOrderValue::deserialize(deserializer)?))
-    }
-}
-
-impl FieldSlot for ColorOrderSlot {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::leaf(color_order_shape())
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
-    }
-}
+pub type ColorOrderSlot = ValueSlot<ColorOrderValue>;
 
 impl ToLpValue for ColorOrderValue {
     fn to_lp_value(&self) -> LpValue {
@@ -151,7 +85,7 @@ impl FromLpValue for ColorOrderValue {
 }
 
 impl SlotValue for ColorOrderValue {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrderValue");
 
     fn value_shape() -> SlotValueShape {
         color_order_shape()
@@ -160,7 +94,7 @@ impl SlotValue for ColorOrderValue {
 
 pub fn color_order_shape() -> SlotValueShape {
     SlotValueShape {
-        id: SlotShapeId::from_static_name("slot.leaf.color_order"),
+        id: ColorOrderValue::SHAPE_ID,
         ty: LpType::String,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Dropdown {

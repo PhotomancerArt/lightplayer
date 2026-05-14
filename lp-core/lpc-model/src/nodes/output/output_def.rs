@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, SlotRecord, ValueSlot};
+use crate::{
+    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, SlotRecord, ValueSlot,
+};
 
 /// Authored GPIO output node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
@@ -75,7 +77,7 @@ impl Default for OutputDriverOptionsConfig {
 }
 
 fn default_lum_power_slot() -> PositiveF32Slot {
-    PositiveF32Slot::new(2.0)
+    PositiveF32Slot::new(PositiveF32(2.0))
 }
 
 fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
@@ -83,7 +85,7 @@ fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
 }
 
 fn default_brightness_slot() -> RatioSlot {
-    RatioSlot::new(1.0)
+    RatioSlot::new(Ratio(1.0))
 }
 
 fn default_true_slot() -> ValueSlot<bool> {
@@ -116,7 +118,7 @@ dithering_enabled = false
         let def: OutputDef = toml::from_str(toml).unwrap();
         assert_eq!(def.pin(), 18);
         let opts = def.options().unwrap();
-        assert!((*opts.brightness.value() - 0.25).abs() < 0.001);
+        assert!((opts.brightness.value().0 - 0.25).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
         assert!(*opts.interpolation_enabled.value());
     }

@@ -131,7 +131,7 @@ impl FromLpValue for AddSubMode {
 }
 
 impl SlotValue for AddSubMode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_add_sub_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("AddSubMode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -154,7 +154,7 @@ impl FromLpValue for MulMode {
 }
 
 impl SlotValue for MulMode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_mul_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("MulMode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -177,7 +177,7 @@ impl FromLpValue for DivMode {
 }
 
 impl SlotValue for DivMode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_div_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("DivMode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(

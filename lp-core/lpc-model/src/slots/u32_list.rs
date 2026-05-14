@@ -29,7 +29,7 @@ impl FromLpValue for Vec<u32> {
 }
 
 impl SlotValue for Vec<u32> {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.raw_list_u32");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("VecU32");
 
     fn value_shape() -> SlotValueShape {
         u32_list_shape()

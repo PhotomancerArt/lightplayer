@@ -6,6 +6,7 @@
 //! shapes are intentionally outside this discovery pass.
 
 use std::{
+    collections::BTreeMap,
     error::Error as StdError,
     fmt, fs, io,
     path::{Path, PathBuf},
@@ -68,9 +69,17 @@ pub fn generate_mockup_slot_codec(
 #[derive(Debug)]
 pub enum SlotShapeCodegenError {
     Io(io::Error),
-    Parse { path: PathBuf, source: syn::Error },
+    Parse {
+        path: PathBuf,
+        source: syn::Error,
+    },
     MissingSrcDir(PathBuf),
     NonUtf8Path(PathBuf),
+    DuplicateShapeIdName {
+        name: String,
+        first: PathBuf,
+        second: PathBuf,
+    },
 }
 
 impl fmt::Display for SlotShapeCodegenError {
@@ -86,6 +95,16 @@ impl fmt::Display for SlotShapeCodegenError {
                 path.display()
             ),
             Self::NonUtf8Path(path) => write!(f, "source path is not UTF-8: {}", path.display()),
+            Self::DuplicateShapeIdName {
+                name,
+                first,
+                second,
+            } => write!(
+                f,
+                "duplicate slot shape id name {name:?}: {} and {}",
+                first.display(),
+                second.display()
+            ),
         }
     }
 }
@@ -95,7 +114,9 @@ impl StdError for SlotShapeCodegenError {
         match self {
             Self::Io(err) => Some(err),
             Self::Parse { source, .. } => Some(source),
-            Self::MissingSrcDir(_) | Self::NonUtf8Path(_) => None,
+            Self::MissingSrcDir(_) | Self::NonUtf8Path(_) | Self::DuplicateShapeIdName { .. } => {
+                None
+            }
         }
     }
 }
@@ -132,6 +153,7 @@ fn discover_static_registered_shapes(
     files.sort();
 
     let mut shapes = Vec::new();
+    let mut id_names = BTreeMap::new();
     for path in files {
         let source = fs::read_to_string(&path).map_err(SlotShapeCodegenError::Io)?;
         let syntax = syn::parse_file(&source).map_err(|source| SlotShapeCodegenError::Parse {
@@ -142,12 +164,24 @@ fn discover_static_registered_shapes(
             let syn::Item::Struct(item) = item else {
                 continue;
             };
-            if !has_slot_record_derive(&item.attrs) {
+            let has_record = has_derive(&item.attrs, "SlotRecord");
+            let has_value = has_derive(&item.attrs, "SlotValue");
+            if !has_record && !has_value {
                 continue;
             }
-            shapes.push(StaticRegisteredShape {
-                type_path: infer_type_path(src_dir, &path, &item.ident.to_string())?,
-            });
+            let id_name = item.ident.to_string();
+            if let Some(first) = id_names.insert(id_name.clone(), path.clone()) {
+                return Err(SlotShapeCodegenError::DuplicateShapeIdName {
+                    name: id_name,
+                    first,
+                    second: path,
+                });
+            }
+            if has_record {
+                shapes.push(StaticRegisteredShape {
+                    type_path: infer_type_path(src_dir, &path, &item.ident.to_string())?,
+                });
+            }
         }
     }
 
@@ -177,7 +211,7 @@ fn discover_static_slot_views(
             let syn::Item::Struct(item) = item else {
                 continue;
             };
-            if !has_slot_record_derive(&item.attrs) {
+            if !has_derive(&item.attrs, "SlotRecord") {
                 continue;
             }
             let type_name = item.ident.to_string();
@@ -205,7 +239,7 @@ fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), SlotSh
     Ok(())
 }
 
-fn has_slot_record_derive(attrs: &[syn::Attribute]) -> bool {
+fn has_derive(attrs: &[syn::Attribute], derive_name: &str) -> bool {
     attrs
         .iter()
         .filter(|attr| attr.path().is_ident("derive"))
@@ -214,7 +248,7 @@ fn has_slot_record_derive(attrs: &[syn::Attribute]) -> bool {
                 meta.tokens
                     .to_string()
                     .split(',')
-                    .any(|derive| derive.trim().ends_with("SlotRecord"))
+                    .any(|derive| derive.trim().ends_with(derive_name))
             })
         })
 }
@@ -226,7 +260,6 @@ fn slot_view_fields(item: &syn::ItemStruct) -> Vec<StaticSlotViewField> {
     fields
         .named
         .iter()
-        .filter(|field| !has_slot_skip_attr(&field.attrs))
         .filter_map(|field| {
             let ident = field.ident.as_ref()?;
             let method_name = ident.to_string();
@@ -250,18 +283,6 @@ fn type_is_option_slot(ty: &syn::Type) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == "OptionSlot")
-}
-
-fn has_slot_skip_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("slot")
-            && attr.meta.require_list().is_ok_and(|meta| {
-                meta.tokens
-                    .to_string()
-                    .split(',')
-                    .any(|token| token.trim() == "skip")
-            })
-    })
 }
 
 fn slot_field_name(field: &syn::Field) -> Option<String> {
@@ -453,7 +474,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                 kind_expr: "ProjectDef::KIND",
                 default_expr: None,
                 constructor: SlotCodecConstructor {
-                    expression: "ProjectDef {\n        kind: ProjectDef::KIND.to_string(),\n        name,\n        nodes: MapSlot::new(nodes),\n    }",
+                    expression: "ProjectDef {\n        name,\n        nodes: MapSlot::new(nodes),\n    }",
                 },
                 fields: vec![
                     SlotCodecField {
