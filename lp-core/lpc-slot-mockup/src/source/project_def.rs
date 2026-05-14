@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ArtifactPathSlot, MapSlot, OptionSlot, ValueSlot};
+use lpc_model::{ArtifactPathSlot, MapSlot, OptionSlot, SlotRecord, ValueSlot};
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(SlotRecord)]
 pub struct ProjectDef {
     #[slot(skip)]
     pub kind: String,
@@ -10,7 +10,7 @@ pub struct ProjectDef {
     pub nodes: MapSlot<String, NodeInvocationDef>,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(SlotRecord)]
 pub struct NodeInvocationDef {
     artifact: ArtifactPathSlot,
 }

@@ -40,7 +40,7 @@ pub fn generate_slot_shapes(config: SlotShapeCodegenConfig) -> Result<(), SlotSh
     fs::write(config.out_file, render_slot_shapes(&shapes)).map_err(SlotShapeCodegenError::Io)
 }
 
-/// Generate `slot_views.rs` for `#[slot(view)]` records in one crate.
+/// Generate `slot_views.rs` for every static `SlotRecord` in one crate.
 pub fn generate_slot_views(config: SlotViewCodegenConfig) -> Result<(), SlotShapeCodegenError> {
     let src_dir = config.crate_root.join("src");
     let mut views = discover_static_slot_views(&src_dir)?;
@@ -177,7 +177,7 @@ fn discover_static_slot_views(
             let syn::Item::Struct(item) = item else {
                 continue;
             };
-            if !has_slot_record_derive(&item.attrs) || !has_slot_view_attr(&item.attrs) {
+            if !has_slot_record_derive(&item.attrs) {
                 continue;
             }
             let type_name = item.ident.to_string();
@@ -217,28 +217,6 @@ fn has_slot_record_derive(attrs: &[syn::Attribute]) -> bool {
                     .any(|derive| derive.trim().ends_with("SlotRecord"))
             })
         })
-}
-
-fn has_slot_view_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs
-        .iter()
-        .any(|attr| attr.path().is_ident("slot") && slot_attr_has_flags(attr, &["view"]))
-}
-
-fn slot_attr_has_flags(attr: &syn::Attribute, required: &[&str]) -> bool {
-    if !attr.path().is_ident("slot") {
-        return false;
-    }
-    let mut found = vec![false; required.len()];
-    let _ = attr.parse_nested_meta(|meta| {
-        for (index, required) in required.iter().enumerate() {
-            if meta.path.is_ident(required) {
-                found[index] = true;
-            }
-        }
-        Ok(())
-    });
-    found.into_iter().all(|flag| flag)
 }
 
 fn slot_view_fields(item: &syn::ItemStruct) -> Vec<StaticSlotViewField> {
@@ -1936,12 +1914,14 @@ mod tests {
         fs::write(
             src.join("source").join("shader_def.rs"),
             r#"
-#[derive(lpc_model::SlotRecord)]
+use lpc_model::SlotRecord;
+
+#[derive(SlotRecord)]
 pub struct ShaderDef {
     value: ValueSlot<bool>,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(SlotRecord)]
 pub struct Nested {
     value: ValueSlot<bool>,
 }

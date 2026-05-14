@@ -1,8 +1,8 @@
 //! GLSL compilation options (per-shader-node)
 
 use crate::{
-    FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotRecord, SlotShapeId, SlotValue,
+    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ impl DivMode {
 }
 
 /// GLSL compilation options (per-shader-node)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SlotRecord)]
 pub struct GlslOpts {
     #[serde(default)]
     pub add_sub: ValueSlot<AddSubMode>,

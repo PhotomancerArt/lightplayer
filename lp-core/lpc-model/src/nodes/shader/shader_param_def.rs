@@ -1,11 +1,11 @@
 //! Authored shader parameter metadata.
 
-use crate::{LpValue, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+use crate::{LpValue, OptionSlot, PositiveF32Slot, RatioSlot, SlotRecord, ValueSlot};
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// Authored definition for one shader parameter.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct ShaderParamDef {
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
@@ -16,7 +16,7 @@ pub struct ShaderParamDef {
 }
 
 /// Simple numeric hint for scalar shader params.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct ScalarHint {
     pub value: PositiveF32Slot,
 }

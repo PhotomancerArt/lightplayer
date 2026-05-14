@@ -2,11 +2,12 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::shader::{GlslOpts, ShaderParamDef};
-use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SourcePathSlot};
+use crate::{
+    AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SlotRecord, SourcePathSlot,
+};
 
 /// Authored shader node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(view)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: SourcePathSlot,

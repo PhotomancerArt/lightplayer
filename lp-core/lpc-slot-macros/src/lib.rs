@@ -17,7 +17,9 @@
 //! A minimal slot record looks like:
 //!
 //! ```ignore
-//! #[derive(lpc_slot_macros::SlotRecord)]
+//! use lpc_model::SlotRecord;
+//!
+//! #[derive(SlotRecord)]
 //! pub struct TextureDef {
 //!     pub size: Dim2uSlot,
 //!     #[slot(skip)]
@@ -38,9 +40,8 @@
 //! - No container marker is required for a slot-modeled type; `SlotRecord`
 //!   derives static shape support for every record.
 //! - `#[slot(shape_id = "...")]`: override the generated static shape id.
-//! - `#[slot(view)]`: mark a record for build-time slot-view generation. The
-//!   proc macro only accepts this marker; `lpc-slot-codegen` discovers it from
-//!   source files during `build.rs` and emits the actual `*View` type.
+//! Build-time slot-view generation discovers every `SlotRecord` and emits the
+//! corresponding `*View` type.
 //!
 //! Supported field attributes:
 //!

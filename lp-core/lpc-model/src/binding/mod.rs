@@ -11,6 +11,7 @@ mod binding_endpoint;
 mod bus_slot_ref;
 mod node_slot_ref;
 
+pub use crate::slot_views::BindingDefView;
 pub use binding_def::{BindingDef, BindingDefError};
 pub use binding_defs::BindingDefs;
 pub use binding_endpoint::{BindingEndpoint, BindingEndpointError};

@@ -1,11 +1,11 @@
 use lpc_model::{
     Affine2d, Affine2dSlot, BindingDefs, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    OptionSlot, ValueSlot,
+    OptionSlot, SlotRecord, ValueSlot,
 };
 
 use super::{MappingConfig, shader_def::ScalarHint};
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(SlotRecord)]
 pub struct FixtureDef {
     #[slot(skip)]
     pub kind: String,

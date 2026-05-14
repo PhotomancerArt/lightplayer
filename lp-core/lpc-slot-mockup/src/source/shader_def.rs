@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 
 use lpc_model::{
     AddSubMode, BindingDefs, DivMode, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot,
-    PositiveF32Slot, RatioSlot, RenderOrderSlot, Revision, SourcePathSlot, ValueSlot,
+    PositiveF32Slot, RatioSlot, RenderOrderSlot, Revision, SlotRecord, SourcePathSlot, ValueSlot,
 };
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(SlotRecord)]
 pub struct ShaderDef {
     #[slot(skip)]
     pub kind: String,
@@ -16,7 +16,7 @@ pub struct ShaderDef {
     pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
-#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord)]
+#[derive(Clone, Debug, PartialEq, SlotRecord)]
 pub struct ShaderParamDef {
     label: ValueSlot<String>,
     description: ValueSlot<String>,
@@ -25,7 +25,7 @@ pub struct ShaderParamDef {
     min: OptionSlot<ScalarHint>,
 }
 
-#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord)]
+#[derive(Clone, Debug, PartialEq, SlotRecord)]
 pub struct ScalarHint {
     value: PositiveF32Slot,
 }

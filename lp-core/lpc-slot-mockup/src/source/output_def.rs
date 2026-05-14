@@ -1,6 +1,6 @@
-use lpc_model::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+use lpc_model::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, SlotRecord, ValueSlot};
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(SlotRecord)]
 pub struct OutputDef {
     #[slot(skip)]
     pub kind: String,
@@ -9,7 +9,7 @@ pub struct OutputDef {
     options: OptionSlot<OutputDriverOptionsConfig>,
 }
 
-#[derive(Clone, Debug, PartialEq, lpc_model::SlotRecord)]
+#[derive(Clone, Debug, PartialEq, SlotRecord)]
 pub struct OutputDriverOptionsConfig {
     lum_power: PositiveF32Slot,
     white_point: ValueSlot<[f32; 3]>,

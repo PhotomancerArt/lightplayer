@@ -3,7 +3,9 @@ pub mod shader_def;
 pub mod shader_param_def;
 pub mod shader_state;
 
-pub use crate::slot_views::ShaderDefView;
+pub use crate::slot_views::{
+    GlslOptsView, ScalarHintView, ShaderDefView, ShaderParamDefView, ShaderStateView,
+};
 pub use glsl_opts::{AddSubMode, DivMode, GlslOpts, MulMode};
 pub use shader_def::ShaderDef;
 pub use shader_param_def::{ScalarHint, ShaderParamDef};

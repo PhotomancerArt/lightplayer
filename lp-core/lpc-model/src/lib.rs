@@ -56,8 +56,8 @@ pub use value::kind;
 
 pub use artifact::{ArtifactLocator, SrcArtifactLibRef};
 pub use binding::{
-    BindingDef, BindingDefError, BindingDefs, BindingEndpoint, BindingEndpointError, BusSlotRef,
-    BusSlotRefError, NodeSlotRef, NodeSlotRefError,
+    BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingEndpoint,
+    BindingEndpointError, BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
@@ -74,15 +74,16 @@ pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeDef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError, RelativeNodeRef,
-    RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeDef, NodeId, NodeInvocation, NodeInvocationView, NodeKind, NodeName, NodeNameError,
+    RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, FixtureSamplingConfig,
-    FixtureState, GlslOpts, MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView,
-    OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder, ScalarHint, ShaderDef,
-    ShaderDefView, ShaderParamDef, ShaderState, TextureDef, TextureDefView, TextureFormat,
-    TextureState,
+    FixtureState, FixtureStateView, GlslOpts, GlslOptsView, MappingConfig, MulMode,
+    NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView, PathSpec, ProjectDef, ProjectDefView, RingOrder, ScalarHint,
+    ScalarHintView, ShaderDef, ShaderDefView, ShaderParamDef, ShaderParamDefView, ShaderState,
+    ShaderStateView, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};

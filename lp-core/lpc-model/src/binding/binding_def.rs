@@ -1,5 +1,5 @@
 use super::BindingEndpoint;
-use crate::{OptionSlot, ValueSlot};
+use crate::{OptionSlot, SlotRecord, ValueSlot};
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// A binding is attached to a slot name by [`crate::BindingDefs`]. Consumed
 /// slots use `source`; produced slots use `target`. Direction is validated
 /// against the node's slot contract when the engine composes the project.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SlotRecord)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BindingDef {

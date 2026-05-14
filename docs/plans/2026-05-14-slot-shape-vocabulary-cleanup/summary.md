@@ -13,6 +13,8 @@ The cleanup landed the "shape, not root" direction in code and docs.
   `StaticSlotAccess` for every named-field record.
 - Build-time shape discovery now registers every `SlotRecord`, rather than
   only records marked with `#[slot(root)]`.
+- Build-time view discovery now emits views for every `SlotRecord`, rather
+  than only records marked with `#[slot(view)]`.
 - `#[slot(root)]` was removed from the model and mockup. Rust derive helper
   attributes cannot be used as bare `#[slot]`, and the empty marker is no
   longer needed anyway.
