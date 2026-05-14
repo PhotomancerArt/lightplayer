@@ -3,6 +3,7 @@
 mod access_sync;
 mod authored_toml;
 mod mutation;
+pub mod native;
 mod slot_data_json;
 mod slot_shape_registry_json;
 mod sync;
@@ -18,6 +19,10 @@ pub use authored_toml::{
 pub use mutation::{
     WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,
+};
+pub use native::{
+    JsonSyntaxSource, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWriter, SlotReader,
+    SyntaxError, SyntaxEvent, SyntaxEventSource, SyntaxNode, TomlSyntaxSource,
 };
 pub use slot_data_json::write_slot_data_json;
 pub use slot_shape_registry_json::write_slot_shape_registry_snapshot_json;

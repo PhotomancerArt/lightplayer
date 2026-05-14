@@ -39,7 +39,9 @@ pub use server::{
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use slot::{
-    SlotTomlError, WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
+    JsonSyntaxSource, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWriter, SlotReader,
+    SlotTomlError, SyntaxError, SyntaxEvent, SyntaxEventSource, SyntaxNode, TomlSyntaxSource,
+    WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
     WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
     build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, decode_slot_data_toml,
