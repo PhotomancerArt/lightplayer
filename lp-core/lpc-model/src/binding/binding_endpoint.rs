@@ -1,5 +1,9 @@
 use super::{BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError};
-use crate::LpValue;
+use crate::{
+    FieldSlot, FromLpValue, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
+    SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
+};
+use alloc::format;
 use alloc::string::{String, ToString};
 use core::fmt;
 use serde::{
@@ -35,6 +39,54 @@ impl BindingEndpoint {
 
     pub fn is_literal(&self) -> bool {
         matches!(self, Self::Literal(_))
+    }
+}
+
+impl SlotValueAccess for BindingEndpoint {
+    fn changed_at(&self) -> crate::Revision {
+        crate::current_revision()
+    }
+
+    fn value(&self) -> LpValue {
+        self.to_lp_value()
+    }
+}
+
+impl FieldSlot for BindingEndpoint {
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::leaf(Self::value_shape())
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Value(self)
+    }
+}
+
+impl ToLpValue for BindingEndpoint {
+    fn to_lp_value(&self) -> LpValue {
+        LpValue::String(self.to_string())
+    }
+}
+
+impl FromLpValue for BindingEndpoint {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
+        let LpValue::String(value) = value else {
+            return Err(ValueRootError::new("expected binding endpoint string"));
+        };
+        Self::parse_ref(value).map_err(|error| ValueRootError::new(format!("{error}")))
+    }
+}
+
+impl SlotValue for BindingEndpoint {
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.binding_endpoint");
+
+    fn value_shape() -> SlotValueShape {
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Plain,
+        }
     }
 }
 

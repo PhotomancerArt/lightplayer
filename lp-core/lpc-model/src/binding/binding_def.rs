@@ -1,10 +1,5 @@
 use super::BindingEndpoint;
-use crate::{
-    FieldSlot, LpType, LpValue, ModelStructMember, Revision, SlotDataAccess, SlotShape,
-    SlotValueAccess,
-};
-use alloc::string::{String, ToString};
-use alloc::vec;
+use crate::{OptionSlot, ValueSlot};
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -13,100 +8,47 @@ use serde::{Deserialize, Serialize};
 /// A binding is attached to a slot name by [`crate::BindingDefs`]. Consumed
 /// slots use `source`; produced slots use `target`. Direction is validated
 /// against the node's slot contract when the engine composes the project.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[slot(root)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BindingDef {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<BindingEndpoint>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<BindingEndpoint>,
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub source: OptionSlot<ValueSlot<BindingEndpoint>>,
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub target: OptionSlot<ValueSlot<BindingEndpoint>>,
 }
 
 impl BindingDef {
     pub fn source(source: BindingEndpoint) -> Self {
         Self {
-            source: Some(source),
-            target: None,
+            source: OptionSlot::some(ValueSlot::new(source)),
+            target: OptionSlot::none(),
         }
     }
 
     pub fn target(target: BindingEndpoint) -> Self {
         Self {
-            source: None,
-            target: Some(target),
+            source: OptionSlot::none(),
+            target: OptionSlot::some(ValueSlot::new(target)),
         }
     }
 
+    pub fn source_endpoint(&self) -> Option<&BindingEndpoint> {
+        self.source.data.as_ref().map(ValueSlot::value)
+    }
+
+    pub fn target_endpoint(&self) -> Option<&BindingEndpoint> {
+        self.target.data.as_ref().map(ValueSlot::value)
+    }
+
     pub fn validate(&self) -> Result<(), BindingDefError> {
-        match (&self.source, &self.target) {
+        match (self.source_endpoint(), self.target_endpoint()) {
             (Some(_), Some(_)) => Err(BindingDefError::SourceAndTarget),
             (None, None) => Err(BindingDefError::MissingDirection),
             (_, Some(target)) if target.is_literal() => Err(BindingDefError::LiteralTarget),
             _ => Ok(()),
         }
-    }
-
-    fn direction_name(&self) -> &'static str {
-        if self.source.is_some() {
-            "source"
-        } else if self.target.is_some() {
-            "target"
-        } else {
-            "invalid"
-        }
-    }
-
-    fn endpoint(&self) -> Option<&BindingEndpoint> {
-        self.source.as_ref().or(self.target.as_ref())
-    }
-}
-
-impl SlotValueAccess for BindingDef {
-    fn changed_at(&self) -> Revision {
-        crate::current_revision()
-    }
-
-    fn value(&self) -> LpValue {
-        LpValue::Struct {
-            name: Some(String::from("BindingDef")),
-            fields: vec![
-                (
-                    String::from("direction"),
-                    LpValue::String(String::from(self.direction_name())),
-                ),
-                (
-                    String::from("endpoint"),
-                    LpValue::String(
-                        self.endpoint()
-                            .map(ToString::to_string)
-                            .unwrap_or_else(|| String::from("<invalid>")),
-                    ),
-                ),
-            ],
-        }
-    }
-}
-
-impl FieldSlot for BindingDef {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::value(LpType::Struct {
-            name: Some(String::from("BindingDef")),
-            fields: vec![
-                ModelStructMember {
-                    name: String::from("direction"),
-                    ty: LpType::String,
-                },
-                ModelStructMember {
-                    name: String::from("endpoint"),
-                    ty: LpType::String,
-                },
-            ],
-        })
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
     }
 }
 
@@ -133,7 +75,7 @@ impl core::error::Error for BindingDefError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BindingEndpoint;
+    use crate::{BindingEndpoint, LpValue};
 
     #[test]
     fn validates_exactly_one_direction() {
@@ -144,16 +86,16 @@ mod tests {
         assert!(BindingDef::target(target.clone()).validate().is_ok());
         assert_eq!(
             BindingDef {
-                source: Some(source),
-                target: Some(target),
+                source: OptionSlot::some(ValueSlot::new(source)),
+                target: OptionSlot::some(ValueSlot::new(target)),
             }
             .validate(),
             Err(BindingDefError::SourceAndTarget)
         );
         assert_eq!(
             BindingDef {
-                source: None,
-                target: None,
+                source: OptionSlot::none(),
+                target: OptionSlot::none(),
             }
             .validate(),
             Err(BindingDefError::MissingDirection)

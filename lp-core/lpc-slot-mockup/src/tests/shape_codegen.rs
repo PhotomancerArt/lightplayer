@@ -8,7 +8,7 @@ use lpc_model::{SlotShapeRegistry, StaticSlotShape};
 fn generated_registration_covers_static_roots() {
     let mut registry = SlotShapeRegistry::default();
 
-    crate::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
+    crate::model::register_shapes(&mut registry).unwrap();
 
     assert_static_root::<ProjectDef>(&registry);
     assert_static_root::<ShaderDef>(&registry);
@@ -23,6 +23,7 @@ fn generated_registration_covers_static_roots() {
 #[test]
 fn generated_ensure_is_idempotent() {
     let mut registry = SlotShapeRegistry::default();
+    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
 
     let first =
         crate::slot_shapes::ensure_static_slot_shape(&mut registry, ShaderDef::SHAPE_ID).unwrap();

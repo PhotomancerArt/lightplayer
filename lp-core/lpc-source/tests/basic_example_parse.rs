@@ -24,7 +24,7 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     let shader: ShaderDef = read_basic_toml("shader.toml");
     assert_eq!(shader.glsl_path.value(), "shader.glsl");
     assert!(matches!(
-        shader.bindings.entries()["output"].target,
+        shader.bindings.entries()["output"].target_endpoint(),
         Some(BindingEndpoint::Bus(_))
     ));
 
@@ -36,11 +36,11 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
     assert_eq!(fixture.render_width(), 16);
     assert_eq!(fixture.render_height(), 16);
     assert!(matches!(
-        fixture.bindings.entries()["input"].source,
+        fixture.bindings.entries()["input"].source_endpoint(),
         Some(BindingEndpoint::Bus(_))
     ));
     assert!(matches!(
-        fixture.bindings.entries()["output"].target,
+        fixture.bindings.entries()["output"].target_endpoint(),
         Some(BindingEndpoint::Bus(_))
     ));
 }

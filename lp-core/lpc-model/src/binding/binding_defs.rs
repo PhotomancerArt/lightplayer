@@ -1,6 +1,6 @@
 use super::{BindingDef, BindingDefError};
 use crate::{
-    FieldSlot, MapSlot, SlotDataAccess, SlotMapKeyShape, SlotMeta, SlotShape, SlotValueShape,
+    FieldSlot, MapSlot, SlotDataAccess, SlotMapKeyShape, SlotMeta, SlotShape, StaticSlotShape,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -47,21 +47,7 @@ impl FieldSlot for BindingDefs {
         SlotShape::Map {
             meta: SlotMeta::empty(),
             key: SlotMapKeyShape::String,
-            value: alloc::boxed::Box::new(SlotShape::Value {
-                shape: SlotValueShape::raw(crate::LpType::Struct {
-                    name: Some(String::from("BindingDef")),
-                    fields: alloc::vec![
-                        crate::ModelStructMember {
-                            name: String::from("direction"),
-                            ty: crate::LpType::String,
-                        },
-                        crate::ModelStructMember {
-                            name: String::from("endpoint"),
-                            ty: crate::LpType::String,
-                        },
-                    ],
-                }),
-            }),
+            value: alloc::boxed::Box::new(SlotShape::reference(BindingDef::SHAPE_ID)),
         }
     }
 
@@ -109,7 +95,7 @@ target = "bus#visual.out"
 "#;
         let decoded: Wrapper = toml::from_str(toml).unwrap();
         assert!(matches!(
-            decoded.bindings.entries()["output"].target,
+            decoded.bindings.entries()["output"].target_endpoint(),
             Some(BindingEndpoint::Bus(_))
         ));
 
@@ -136,8 +122,8 @@ target = "bus#visual.out"
         entries.insert(
             String::from("bad"),
             BindingDef {
-                source: None,
-                target: None,
+                source: crate::OptionSlot::none(),
+                target: crate::OptionSlot::none(),
             },
         );
         let defs = BindingDefs::new(entries);

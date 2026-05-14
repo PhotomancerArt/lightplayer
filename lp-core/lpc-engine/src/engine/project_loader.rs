@@ -462,11 +462,11 @@ fn demand_input_path() -> SlotPath {
 }
 
 fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
-    bindings.entries().get(slot)?.source.as_ref()
+    bindings.entries().get(slot)?.source_endpoint()
 }
 
 fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
-    bindings.entries().get(slot)?.target.as_ref()
+    bindings.entries().get(slot)?.target_endpoint()
 }
 
 fn register_source_binding(
