@@ -88,12 +88,10 @@ impl NativeJitInstance {
             }
         }
 
-        let info = self
-            .module
-            .inner
-            .entry_info
-            .get(fn_name)
-            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
+        let info =
+            self.module.inner.entry_info.get(fn_name).ok_or_else(|| {
+                NativeError::Call(CallError::MissingMetadata(String::from(fn_name)))
+            })?;
         if !info.supports_render_texture {
             return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
                 "render-texture sig invalid for `{fn_name}`"
@@ -121,12 +119,10 @@ impl NativeJitInstance {
             }
         }
 
-        let info = self
-            .module
-            .inner
-            .entry_info
-            .get(fn_name)
-            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
+        let info =
+            self.module.inner.entry_info.get(fn_name).ok_or_else(|| {
+                NativeError::Call(CallError::MissingMetadata(String::from(fn_name)))
+            })?;
         if !info.supports_render_samples {
             return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
                 "render-samples sig invalid for `{fn_name}`"
