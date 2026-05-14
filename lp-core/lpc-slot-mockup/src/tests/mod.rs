@@ -4,6 +4,7 @@ mod dynamic_param_shape;
 mod fixture;
 mod full_sync;
 mod incremental_change;
+mod manual_shape_codec;
 mod mutation;
 mod native_stream;
 mod server_tree_walk;

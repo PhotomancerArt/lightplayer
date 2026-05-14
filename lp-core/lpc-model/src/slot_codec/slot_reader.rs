@@ -101,6 +101,10 @@ where
         ))
     }
 
+    pub fn missing_required_field(&self, name: &str) -> SyntaxError {
+        self.error(format!("missing required field `{name}`"))
+    }
+
     fn next_event(&mut self) -> Result<Option<SyntaxEvent>, SyntaxError> {
         if let Some(event) = self.replay.take() {
             Ok(Some(event))
@@ -220,6 +224,20 @@ where
 
     pub fn finish(self) -> Result<(), SyntaxError> {
         Ok(())
+    }
+
+    pub fn missing_required_field(&self, name: &str) -> SyntaxError {
+        self.reader.missing_required_field(name)
+    }
+
+    pub fn invalid_discriminator_value(
+        &self,
+        name: &str,
+        actual: &str,
+        expected: &[&str],
+    ) -> SyntaxError {
+        self.reader
+            .invalid_discriminator_value(name, actual, expected)
     }
 }
 
