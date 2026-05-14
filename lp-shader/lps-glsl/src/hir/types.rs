@@ -285,6 +285,7 @@ pub enum BuiltinKind {
     Min,
     Mix,
     Mod,
+    Modf,
     Not,
     Normalize,
     NotEqual,

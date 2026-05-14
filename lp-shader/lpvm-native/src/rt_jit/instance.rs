@@ -9,11 +9,10 @@ use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF3
 use lpvm::{
     CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
     encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
-    q32_to_lps_value_f32, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
+    q32_to_lps_value_f32,
 };
 
 use crate::error::NativeError;
-use crate::isa::IsaTarget;
 
 use super::call::rv32_jalr_a0_a7;
 use super::module::{NativeJitDirectCall, NativeJitModule};
@@ -89,19 +88,17 @@ impl NativeJitInstance {
             }
         }
 
-        let ir_fn = self
+        let info = self
             .module
             .inner
-            .ir
-            .functions
-            .values()
-            .find(|f| f.name == fn_name)
+            .entry_info
+            .get(fn_name)
             .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
-        validate_render_texture_sig_ir(ir_fn).map_err(|e| {
-            NativeError::Call(CallError::Unsupported(alloc::format!(
-                "render-texture sig invalid: {e}"
-            )))
-        })?;
+        if !info.supports_render_texture {
+            return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
+                "render-texture sig invalid for `{fn_name}`"
+            ))));
+        }
 
         let entry_off = self.module.entry_offset(fn_name).ok_or_else(|| {
             NativeError::Call(CallError::Unsupported(alloc::format!(
@@ -124,19 +121,17 @@ impl NativeJitInstance {
             }
         }
 
-        let ir_fn = self
+        let info = self
             .module
             .inner
-            .ir
-            .functions
-            .values()
-            .find(|f| f.name == fn_name)
+            .entry_info
+            .get(fn_name)
             .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(String::from(fn_name))))?;
-        validate_render_samples_sig_ir(ir_fn).map_err(|e| {
-            NativeError::Call(CallError::Unsupported(alloc::format!(
-                "render-samples sig invalid: {e}"
-            )))
-        })?;
+        if !info.supports_render_samples {
+            return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
+                "render-samples sig invalid for `{fn_name}`"
+            ))));
+        }
 
         let entry_off = self.module.entry_offset(fn_name).ok_or_else(|| {
             NativeError::Call(CallError::Unsupported(alloc::format!(
@@ -233,30 +228,14 @@ impl NativeJitInstance {
     }
 
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
-        let ir_func = self
+        let entry_info = self
             .module
             .inner
-            .ir
-            .functions
-            .values()
-            .find(|f| f.name == name)
+            .entry_info
+            .get(name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-
-        let gfn = self
-            .module
-            .inner
-            .meta
-            .functions
-            .iter()
-            .find(|f| f.name == name)
-            .cloned()
-            .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-
-        let func_abi = match self.module.inner.isa {
-            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(&gfn, Some(ir_func)),
-        };
-        let is_sret = func_abi.is_sret();
-        let n_ret = ir_func.return_types.len();
+        let is_sret = entry_info.is_sret;
+        let n_ret = entry_info.ret_count;
 
         let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
         full.push(self.vmctx_guest as i32);
@@ -274,8 +253,7 @@ impl NativeJitInstance {
                     "NativeJitInstance: sret + more than 7 argument words need stack args (not implemented)",
                 ))));
             }
-            let n_words = func_abi.sret_word_count().unwrap_or(0) as usize;
-            let n_buf = n_words.max(n_ret).max(1);
+            let n_buf = n_ret.max(1);
             let mut sret_buf = alloc::vec![0i32; n_buf];
             let sret_ptr = sret_buf.as_mut_ptr() as usize;
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_sret(sret_ptr as i32, &full);
@@ -409,15 +387,13 @@ impl LpvmInstance for NativeJitInstance {
         }
 
         let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
-        let ir_func = self
+        let entry_info = self
             .module
             .inner
-            .ir
-            .functions
-            .values()
-            .find(|f| f.name == name)
+            .entry_info
+            .get(name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let param_count = ir_func.param_count as usize;
+        let param_count = entry_info.arg_count;
         if flat.len() != param_count {
             return Err(NativeError::Call(CallError::Unsupported(format!(
                 "flattened argument count {} does not match IR param_count {}",
@@ -460,15 +436,13 @@ impl LpvmInstance for NativeJitInstance {
             }
         }
 
-        let ir_func = self
+        let entry_info = self
             .module
             .inner
-            .ir
-            .functions
-            .values()
-            .find(|f| f.name == name)
+            .entry_info
+            .get(name)
             .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
-        let param_count = ir_func.param_count as usize;
+        let param_count = entry_info.arg_count;
 
         let expected_words: usize = gfn
             .parameters

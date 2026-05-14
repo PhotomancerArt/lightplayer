@@ -2,6 +2,8 @@
 
 use alloc::sync::Arc;
 
+use alloc::collections::BTreeMap;
+use alloc::string::String;
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{AllocError, LpvmMemory, LpvmModule};
@@ -16,12 +18,20 @@ use super::host_memory::NativeHostMemory;
 use super::instance::NativeJitInstance;
 
 pub(crate) struct NativeJitModuleInner {
-    pub ir: LpirModule,
     pub meta: LpsModuleSig,
     pub buffer: JitBuffer,
-    pub entry_offsets: alloc::collections::BTreeMap<alloc::string::String, usize>,
+    pub entry_offsets: BTreeMap<alloc::string::String, usize>,
+    pub entry_info: BTreeMap<alloc::string::String, NativeJitEntryInfo>,
     pub options: NativeCompileOptions,
-    pub isa: IsaTarget,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NativeJitEntryInfo {
+    pub arg_count: usize,
+    pub ret_count: usize,
+    pub is_sret: bool,
+    pub supports_render_texture: bool,
+    pub supports_render_samples: bool,
 }
 
 /// Cached function handle for fast calls (like cranelift's `DirectCall`).
@@ -57,20 +67,13 @@ impl NativeJitModule {
     /// eliminating per-call string lookups and metadata searches.
     pub fn direct_call(&self, name: &str) -> Option<NativeJitDirectCall> {
         let entry_offset = self.inner.entry_offsets.get(name).copied()?;
-
-        let ir_func = self.inner.ir.functions.values().find(|f| f.name == name)?;
-
-        let gfn = self.inner.meta.functions.iter().find(|f| f.name == name)?;
-
-        let func_abi = match self.inner.isa {
-            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, Some(ir_func)),
-        };
+        let info = self.inner.entry_info.get(name)?;
 
         Some(NativeJitDirectCall {
             entry_offset,
-            arg_count: ir_func.param_count as usize,
-            ret_count: ir_func.return_types.len(),
-            is_sret: func_abi.is_sret(),
+            arg_count: info.arg_count,
+            ret_count: info.ret_count,
+            is_sret: info.is_sret,
         })
     }
 }
@@ -118,6 +121,40 @@ impl LpvmModule for NativeJitModule {
 
         Ok(instance)
     }
+}
+
+pub(crate) fn build_entry_info(
+    ir: &LpirModule,
+    meta: &LpsModuleSig,
+    isa: IsaTarget,
+) -> Result<BTreeMap<String, NativeJitEntryInfo>, NativeError> {
+    let mut entries = BTreeMap::new();
+    for ir_func in ir.functions.values() {
+        let gfn = meta
+            .functions
+            .iter()
+            .find(|f| f.name == ir_func.name)
+            .ok_or_else(|| {
+                NativeError::Internal(alloc::format!(
+                    "missing module signature for function {}",
+                    ir_func.name
+                ))
+            })?;
+        let func_abi = match isa {
+            IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, Some(ir_func)),
+        };
+        entries.insert(
+            ir_func.name.clone(),
+            NativeJitEntryInfo {
+                arg_count: ir_func.param_count as usize,
+                ret_count: ir_func.return_types.len(),
+                is_sret: func_abi.is_sret(),
+                supports_render_texture: lpvm::validate_render_texture_sig_ir(ir_func).is_ok(),
+                supports_render_samples: lpvm::validate_render_samples_sig_ir(ir_func).is_ok(),
+            },
+        );
+    }
+    Ok(entries)
 }
 
 fn write_vmctx_header(out: &mut [u8]) {

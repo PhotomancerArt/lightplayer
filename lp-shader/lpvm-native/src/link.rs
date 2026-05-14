@@ -206,8 +206,8 @@ mod tests {
                 name: String::from("test"),
                 code: vec![0x13, 0x00, 0x00, 0x00], // nop
                 relocs: vec![],
-                debug_lines: vec![],
-                debug_info: lpvm::FunctionDebugInfo::new("test"),
+                debug_lines: None,
+                debug_info: None,
             }],
             symbols: crate::vinst::ModuleSymbols::default(),
         }
@@ -259,15 +259,15 @@ mod tests {
                         symbol: String::from("callee"),
                         r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
                     }],
-                    debug_lines: vec![],
-                    debug_info: lpvm::FunctionDebugInfo::new("caller"),
+                    debug_lines: None,
+                    debug_info: None,
                 },
                 crate::compile::CompiledFunction {
                     name: String::from("callee"),
                     code: vec![0x67, 0x80, 0x00, 0x00], // ret
                     relocs: vec![],
-                    debug_lines: vec![],
-                    debug_info: lpvm::FunctionDebugInfo::new("callee"),
+                    debug_lines: None,
+                    debug_info: None,
                 },
             ],
             symbols: crate::vinst::ModuleSymbols::default(),

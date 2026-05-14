@@ -20,6 +20,7 @@ use super::numeric::{
     lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
     lower_unary_float_lane,
 };
+use super::place_write::assign_target;
 use super::scalar::lower_binary;
 
 pub(in crate::lower) fn lower_builtin(
@@ -38,6 +39,9 @@ pub(in crate::lower) fn lower_builtin(
         lower_integer_writeback_builtin(ctx, span, kind, &values, writebacks, result_ty)?
     {
         return Ok(value);
+    }
+    if kind == BuiltinKind::Modf {
+        return lower_modf_builtin(ctx, span, &values, writebacks, result_ty);
     }
     if kind == BuiltinKind::Distance {
         let delta = lower_binary(
@@ -180,6 +184,7 @@ pub(in crate::lower) fn lower_builtin(
             BuiltinKind::MatrixCompMult => {
                 unreachable!("matrixCompMult returns before lane-wise builtin lowering")
             }
+            BuiltinKind::Modf => unreachable!("modf returns before lane-wise builtin lowering"),
             BuiltinKind::NotEqual => {
                 return lower_binary(
                     ctx,
@@ -294,6 +299,59 @@ pub(in crate::lower) fn lower_builtin(
     Ok(LowerValue {
         ty: result_ty.clone(),
         lanes,
+    })
+}
+
+fn lower_modf_builtin(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    values: &[LowerValue],
+    writebacks: &[HirUserCallWriteback],
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let [value] = values else {
+        return Err(Diagnostic::error(
+            span,
+            "internal modf lowering expected a single argument",
+        ));
+    };
+    let [integer_writeback] = writebacks else {
+        return Err(Diagnostic::error(
+            span,
+            "internal modf lowering expected a single writeback",
+        ));
+    };
+    let width = scalar_lane_count(result_ty);
+    let mut integer_lanes = Vec::with_capacity(width);
+    let mut fractional_lanes = Vec::with_capacity(width);
+    for i in 0..width {
+        let x = lane_at(value, i);
+        let integer_lane = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Ftrunc {
+            dst: integer_lane,
+            src: x,
+        });
+        let fractional_lane = ctx.fb.alloc_vreg(IrType::F32);
+        ctx.fb.push(LpirOp::Fsub {
+            dst: fractional_lane,
+            lhs: x,
+            rhs: integer_lane,
+        });
+        integer_lanes.push(integer_lane);
+        fractional_lanes.push(fractional_lane);
+    }
+    assign_target(
+        ctx,
+        span,
+        &integer_writeback.target,
+        LowerValue {
+            ty: integer_writeback.ty.clone(),
+            lanes: integer_lanes,
+        },
+    )?;
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes: fractional_lanes,
     })
 }
 

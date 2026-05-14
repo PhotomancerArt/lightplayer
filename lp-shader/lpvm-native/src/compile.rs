@@ -1,17 +1,25 @@
 //! Compilation orchestration: LPIR → VInst → machine code.
 
+mod function_job;
+mod module_job;
+mod stages;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{FloatMode, IrFunction, LpirModule};
-use lps_shared::{LpsFnKind, LpsFnSig};
+use lps_shared::LpsFnSig;
 use lpvm::FunctionDebugInfo;
 
 use crate::LowerOpts;
+use crate::abi::FuncAbi;
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
 use crate::vinst::ModuleSymbols;
+
+pub use module_job::NativeCompileJob;
+pub use stages::{NativeCompileBudget, NativeCompileStage, NativeCompileStepResult};
 
 /// Relocation entry for a call site.
 #[derive(Clone, Debug)]
@@ -34,9 +42,9 @@ pub struct CompiledFunction {
     /// Relocations for this function.
     pub relocs: Vec<NativeReloc>,
     /// Debug info: (code_offset, optional_src_op).
-    pub debug_lines: Vec<(u32, Option<u32>)>,
+    pub debug_lines: Option<Vec<(u32, Option<u32>)>>,
     /// Structured debug info with sections.
-    pub debug_info: FunctionDebugInfo,
+    pub debug_info: Option<FunctionDebugInfo>,
 }
 
 /// Output of a full module compilation.
@@ -80,6 +88,182 @@ impl CompileSession {
     }
 }
 
+pub(crate) fn compile_function_func_abi(
+    session: &CompileSession,
+    func: &IrFunction,
+    fn_sig: &LpsFnSig,
+) -> FuncAbi {
+    match session.isa {
+        IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(fn_sig, Some(func)),
+    }
+}
+
+pub(crate) fn compile_function_fold_constants(
+    state: &mut function_job::FunctionCompileState,
+    _session: &CompileSession,
+) {
+    let mut func_opt = state
+        .original
+        .as_ref()
+        .expect("const fold stage missing original function")
+        .clone();
+    let n_folded = lpir::const_fold::fold_constants(&mut func_opt);
+    if n_folded > 0 {
+        log::debug!(
+            "[native-fa] compile_function: folded {n_folded} LPIR constants for {}",
+            state.name
+        );
+    }
+    state.optimized = Some(func_opt);
+}
+
+pub(crate) fn compile_function_lower_stage(
+    state: &mut function_job::FunctionCompileState,
+    ir: &LpirModule,
+    session: &CompileSession,
+) -> Result<(), NativeError> {
+    let Some(func_opt) = state.optimized.as_ref() else {
+        return Err(NativeError::Internal(format!(
+            "lower stage missing optimized function for {}",
+            state.name
+        )));
+    };
+    let lower_opts = LowerOpts {
+        float_mode: session.float_mode,
+        q32: &session.options.config.q32,
+    };
+    let lowered = crate::lower::lower_ops(func_opt, ir, &session.abi, &lower_opts)
+        .map_err(NativeError::Lower)?;
+    log::debug!(
+        "[native-fa] compile_function: lowered {} to {} vinsts",
+        state.name,
+        lowered.vinsts.len()
+    );
+    state.lowered = Some(lowered);
+    Ok(())
+}
+
+pub(crate) fn compile_function_peephole(
+    state: &mut function_job::FunctionCompileState,
+) -> Result<(), NativeError> {
+    let Some(lowered) = state.lowered.as_mut() else {
+        return Err(NativeError::Internal(format!(
+            "peephole stage missing lowered function for {}",
+            state.name
+        )));
+    };
+    crate::opt::fold_immediates(lowered);
+    Ok(())
+}
+
+pub(crate) fn compile_function_regalloc_stage(
+    state: &mut function_job::FunctionCompileState,
+    _session: &CompileSession,
+) -> Result<(), NativeError> {
+    let Some(lowered) = state.lowered.as_ref() else {
+        return Err(NativeError::Internal(format!(
+            "regalloc stage missing lowered function for {}",
+            state.name
+        )));
+    };
+    let alloc_result =
+        crate::regalloc::allocate(lowered, &state.func_abi).map_err(NativeError::RegAlloc)?;
+    state.alloc_result = Some(alloc_result);
+    Ok(())
+}
+
+pub(crate) fn compile_function_emit_stage(
+    state: &mut function_job::FunctionCompileState,
+    session: &CompileSession,
+) -> Result<(), NativeError> {
+    let Some(lowered) = state.lowered.as_ref() else {
+        return Err(NativeError::Internal(format!(
+            "emit stage missing lowered function for {}",
+            state.name
+        )));
+    };
+    let Some(alloc_result) = state.alloc_result.take() else {
+        return Err(NativeError::Internal(format!(
+            "emit stage missing allocation result for {}",
+            state.name
+        )));
+    };
+    let emitted = crate::emit::emit_lowered_with_alloc(
+        lowered,
+        &state.func_abi,
+        alloc_result,
+        session.abi.max_callee_sret_bytes(),
+    )?;
+    log::debug!(
+        "[native-fa] compile_function: emitted {} bytes for {}",
+        emitted.code.len(),
+        state.name
+    );
+    state.emitted = Some(emitted);
+    Ok(())
+}
+
+pub(crate) fn compile_function_debug_sections(
+    state: &mut function_job::FunctionCompileState,
+    ir: &LpirModule,
+    session: &CompileSession,
+) -> Result<(), NativeError> {
+    let Some(emitted) = state.emitted.as_ref() else {
+        return Err(NativeError::Internal(format!(
+            "debug stage missing emitted code for {}",
+            state.name
+        )));
+    };
+    let (debug_lines, debug_info) = if session.options.debug_info {
+        let Some(func_opt) = state.optimized.as_ref() else {
+            return Err(NativeError::Internal(format!(
+                "debug stage missing optimized function for {}",
+                state.name
+            )));
+        };
+        let Some(lowered) = state.lowered.as_ref() else {
+            return Err(NativeError::Internal(format!(
+                "debug stage missing lowered function for {}",
+                state.name
+            )));
+        };
+        let sections = crate::debug::sections::build_debug_sections(
+            func_opt,
+            ir,
+            lowered,
+            &emitted.code,
+            &emitted.alloc_output,
+            &state.func_abi,
+            &lowered.symbols,
+        );
+        let debug_info = FunctionDebugInfo::new(&state.name)
+            .with_inst_count(emitted.code.len() / 4)
+            .with_sections(sections);
+        (Some(emitted.debug_lines.clone()), Some(debug_info))
+    } else {
+        (None, None)
+    };
+    state.compiled = Some(CompiledFunction {
+        name: state.name.clone(),
+        code: emitted.code.clone(),
+        relocs: emitted.relocs.clone(),
+        debug_lines,
+        debug_info,
+    });
+    Ok(())
+}
+
+pub(crate) fn compile_function_finalize(
+    state: &mut function_job::FunctionCompileState,
+) -> Result<CompiledFunction, NativeError> {
+    state.compiled.take().ok_or_else(|| {
+        NativeError::Internal(format!(
+            "finalize stage missing compiled output for {}",
+            state.name
+        ))
+    })
+}
+
 /// Compile one function: LPIR → (const fold) → VInst → (imm fold) → AllocOutput → bytes.
 pub fn compile_function(
     session: &mut CompileSession,
@@ -93,68 +277,15 @@ pub fn compile_function(
         ops = func.body.len(),
     );
 
-    // Build function ABI (needed for both debug and non-debug paths)
-    let func_abi = match session.isa {
-        IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(fn_sig, Some(func)),
-    };
-
-    // 1-4. Const-fold, lower, optimize, allocate, emit
-    let (code, relocs, debug_lines, sections) = {
-        let mut func_opt = func.clone();
-        let n_folded = lpir::const_fold::fold_constants(&mut func_opt);
-        if n_folded > 0 {
-            log::debug!("[native-fa] compile_function: folded {n_folded} LPIR constants");
-        }
-
-        let lower_opts = LowerOpts {
-            float_mode: session.float_mode,
-            q32: &session.options.config.q32,
-        };
-        let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, &lower_opts)
-            .map_err(NativeError::Lower)?;
-        log::debug!(
-            "[native-fa] compile_function: lowered to {n} vinsts",
-            n = lowered.vinsts.len(),
-        );
-
-        crate::opt::fold_immediates(&mut lowered);
-
-        log::debug!("[native-fa] compile_function: emitting code...");
-        let emitted =
-            crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
-        log::debug!(
-            "[native-fa] compile_function: emitted {n} bytes",
-            n = emitted.code.len(),
-        );
-
-        let code = emitted.code;
-        let relocs = emitted.relocs;
-        let debug_lines = emitted.debug_lines;
-
-        let sections = crate::debug::sections::build_debug_sections(
-            &func_opt,
-            ir,
-            &lowered,
-            &code,
-            &emitted.alloc_output,
-            &func_abi,
-            &lowered.symbols,
-        );
-
-        (code, relocs, debug_lines, sections)
-    };
-
-    let debug_info = FunctionDebugInfo::new(&func.name)
-        .with_inst_count(code.len() / 4)
-        .with_sections(sections);
-
-    Ok(CompiledFunction {
-        name: func.name.clone(),
-        code,
-        relocs,
-        debug_lines,
-        debug_info,
-    })
+    let func_abi = compile_function_func_abi(session, func, fn_sig);
+    let mut state = function_job::FunctionCompileState::new(0, func.clone(), func_abi);
+    compile_function_fold_constants(&mut state, session);
+    compile_function_lower_stage(&mut state, ir, session)?;
+    compile_function_peephole(&mut state)?;
+    compile_function_regalloc_stage(&mut state, session)?;
+    compile_function_emit_stage(&mut state, session)?;
+    compile_function_debug_sections(&mut state, ir, session)?;
+    compile_function_finalize(&mut state)
 }
 
 /// Compile all functions in a module.
@@ -165,50 +296,14 @@ pub fn compile_module(
     options: crate::native_options::NativeCompileOptions,
     isa: IsaTarget,
 ) -> Result<CompiledModule, NativeError> {
-    log::debug!(
-        "[native-fa] compile_module: building ABI for {n} functions",
-        n = ir.functions.len(),
-    );
-    let module_abi = ModuleAbi::from_ir_and_sig(isa, ir, sig);
-    let mut session = CompileSession::new(module_abi, isa, float_mode, options);
-
-    let sig_map: alloc::collections::BTreeMap<&str, &LpsFnSig> =
-        sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
-
-    let mut functions = Vec::with_capacity(ir.functions.len());
-    for (idx, func) in ir.functions.values().enumerate() {
-        log::debug!(
-            "[native-fa] compile_module: compiling function {cur}/{total}: {name}",
-            cur = idx + 1,
-            total = ir.functions.len(),
-            name = func.name,
-        );
-        let default_sig = LpsFnSig {
-            name: func.name.clone(),
-            return_type: lps_shared::LpsType::Void,
-            parameters: Vec::new(),
-            kind: LpsFnKind::UserDefined,
-        };
-        let fn_sig = sig_map
-            .get(func.name.as_str())
-            .copied()
-            .unwrap_or(&default_sig);
-        let compiled = compile_function(&mut session, func, ir, fn_sig)?;
-        functions.push(compiled);
-        log::debug!(
-            "[native-fa] compile_module: function {name} complete",
-            name = func.name,
-        );
+    let mut job = NativeCompileJob::new(ir.clone(), sig.clone(), float_mode, options, isa);
+    loop {
+        match job.step(NativeCompileBudget::default()) {
+            NativeCompileStepResult::Pending => {}
+            NativeCompileStepResult::Finished(module) => return Ok(module),
+            NativeCompileStepResult::Failed(err) => return Err(err),
+        }
     }
-
-    log::debug!(
-        "[native-fa] compile_module: all {n} functions compiled",
-        n = functions.len(),
-    );
-    Ok(CompiledModule {
-        functions,
-        symbols: session.symbols,
-    })
 }
 
 #[cfg(test)]
@@ -397,5 +492,128 @@ mod tests {
             sat.functions[0].code, wrap.functions[0].code,
             "saturating fmul lowers to a builtin call; wrapping uses inline mul/mulh — code must differ"
         );
+    }
+
+    fn simple_iconst_module() -> (LpirModule, LpsModuleSig) {
+        let ir = LpirModule {
+            imports: vec![],
+            functions: BTreeMap::from([(
+                FuncId(0),
+                IrFunction {
+                    name: String::from("test"),
+                    is_entry: true,
+                    vmctx_vreg: VReg(0),
+                    param_count: 0,
+                    return_types: vec![IrType::I32],
+                    sret_arg: None,
+                    vreg_types: vec![IrType::I32],
+                    slots: vec![],
+                    body: vec![
+                        LpirOp::IconstI32 {
+                            dst: VReg(0),
+                            value: 42,
+                        },
+                        LpirOp::Return {
+                            values: VRegRange { start: 0, count: 1 },
+                        },
+                    ],
+                    vreg_pool: vec![VReg(0)],
+                },
+            )]),
+        };
+        let sig = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("test"),
+                return_type: LpsType::Int,
+                parameters: vec![],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        };
+        (ir, sig)
+    }
+
+    #[test]
+    fn native_compile_job_single_step_reaches_finished_module() {
+        let (ir, sig) = simple_iconst_module();
+        let mut job = NativeCompileJob::new(
+            ir.clone(),
+            sig.clone(),
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
+        let mut seen = Vec::new();
+        loop {
+            seen.push(job.stage());
+            match job.step(NativeCompileBudget::single_step()) {
+                NativeCompileStepResult::Pending => {}
+                NativeCompileStepResult::Finished(module) => {
+                    assert_eq!(module.functions.len(), 1);
+                    break;
+                }
+                NativeCompileStepResult::Failed(err) => {
+                    panic!("compile job failed unexpectedly: {err}");
+                }
+            }
+        }
+        assert_eq!(
+            seen,
+            vec![
+                NativeCompileStage::SetupModule,
+                NativeCompileStage::CompileFunctionConstFold,
+                NativeCompileStage::CompileFunctionLower,
+                NativeCompileStage::CompileFunctionPeephole,
+                NativeCompileStage::CompileFunctionRegalloc,
+                NativeCompileStage::CompileFunctionEmit,
+                NativeCompileStage::CompileFunctionDebug,
+                NativeCompileStage::AssembleModule,
+            ]
+        );
+    }
+
+    #[test]
+    fn native_compile_job_matches_direct_compile_function_output() {
+        let (ir, sig) = simple_iconst_module();
+        let func = ir.functions.values().next().expect("one function");
+        let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, &ir, &sig);
+        let mut session = CompileSession::new(
+            module_abi,
+            IsaTarget::Rv32imac,
+            lpir::FloatMode::Q32,
+            Default::default(),
+        );
+        let direct = compile_function(&mut session, func, &ir, &sig.functions[0])
+            .expect("direct compile_function");
+
+        let mut job = NativeCompileJob::new(
+            ir.clone(),
+            sig.clone(),
+            lpir::FloatMode::Q32,
+            Default::default(),
+            IsaTarget::Rv32imac,
+        );
+        let stepped = loop {
+            match job.step(NativeCompileBudget::single_step()) {
+                NativeCompileStepResult::Pending => {}
+                NativeCompileStepResult::Finished(module) => break module,
+                NativeCompileStepResult::Failed(err) => {
+                    panic!("compile job failed unexpectedly: {err}");
+                }
+            }
+        };
+        let stepped_fn = &stepped.functions[0];
+        assert_eq!(stepped_fn.name, direct.name);
+        assert_eq!(stepped_fn.code, direct.code);
+        assert_eq!(stepped_fn.relocs.len(), direct.relocs.len());
+        assert_eq!(stepped_fn.debug_lines, direct.debug_lines);
+        match (&stepped_fn.debug_info, &direct.debug_info) {
+            (Some(stepped), Some(direct)) => {
+                assert_eq!(stepped.inst_count, direct.inst_count);
+                assert_eq!(stepped.sections, direct.sections);
+            }
+            (None, None) => {}
+            (lhs, rhs) => panic!("debug_info mismatch: left={lhs:?} right={rhs:?}"),
+        }
     }
 }

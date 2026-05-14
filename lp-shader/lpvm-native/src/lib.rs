@@ -43,7 +43,8 @@ pub mod rt_jit;
 
 pub use abi::ModuleAbi;
 pub use compile::{
-    CompileSession, CompiledFunction, CompiledModule, NativeReloc, compile_function, compile_module,
+    CompileSession, CompiledFunction, CompiledModule, NativeCompileBudget, NativeCompileJob,
+    NativeCompileStage, NativeCompileStepResult, NativeReloc, compile_function, compile_module,
 };
 pub use debug_asm::compile_module_asm_text;
 pub use emit::{EmittedCode, emit_lowered_with_alloc};

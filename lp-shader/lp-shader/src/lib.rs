@@ -13,6 +13,7 @@
 
 extern crate alloc;
 
+mod compile_job;
 mod compile_px_desc;
 mod engine;
 mod error;
@@ -23,6 +24,9 @@ pub mod synth;
 mod texture_buf;
 mod texture_interface;
 
+pub use compile_job::{
+    ShaderCompileBudget, ShaderCompileJob, ShaderCompileStage, ShaderCompileStepResult,
+};
 pub use compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs, texture_binding};
 pub use engine::LpsEngine;
 pub use error::LpsError;

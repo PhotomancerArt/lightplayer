@@ -52,7 +52,7 @@ pub fn compile_module_asm_text(
             })?;
 
         // Build line table from debug_lines
-        let table = LineTable::from_debug_lines(&compiled_func.debug_lines);
+        let table = LineTable::from_debug_lines(compiled_func.debug_lines.as_deref().unwrap_or(&[]));
 
         // Disassemble function
         let asm = disassemble_function(&compiled_func.code, &table, func, opts);

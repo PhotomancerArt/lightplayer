@@ -16,6 +16,10 @@ pub struct NativeCompileOptions {
     /// Off by default for production and normal test runs.
     pub alloc_trace: bool,
 
+    /// When true, log backend compile stage transitions and function indices.
+    /// Intended for targeted profiling and stress harnesses.
+    pub stage_trace: bool,
+
     /// Middle-end LPIR pass settings (inline, etc.).
     pub config: lpir::CompilerConfig,
 }
@@ -27,6 +31,7 @@ impl Default for NativeCompileOptions {
             debug_info: false,
             emu_trace_instructions: false,
             alloc_trace: false,
+            stage_trace: false,
             config: lpir::CompilerConfig::default(),
         }
     }
