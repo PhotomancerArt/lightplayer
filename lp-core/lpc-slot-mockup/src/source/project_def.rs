@@ -60,4 +60,8 @@ impl NodeInvocationDef {
             artifact: ArtifactPathSlot::new(artifact.to_string()),
         }
     }
+
+    pub fn artifact(&self) -> &str {
+        self.artifact.value()
+    }
 }

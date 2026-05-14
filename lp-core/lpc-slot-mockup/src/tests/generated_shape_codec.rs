@@ -4,8 +4,9 @@ use crate::generated_slot_codec::{
     GeneratedBindingDef, GeneratedBundle, GeneratedEndpoint, GeneratedFixtureDef,
     GeneratedInvocation, GeneratedMapping, GeneratedNodeDef, GeneratedOutputDef,
     GeneratedOutputOptions, GeneratedProject, read_bundle_json, read_bundle_toml,
-    write_bundle_json,
+    read_project_def_json, read_project_def_toml, write_bundle_json, write_project_def_json,
 };
+use crate::source::ProjectDef;
 
 #[test]
 fn generated_shape_codec_json_round_trips_bundle() {
@@ -70,6 +71,28 @@ fn generated_shape_codec_unknown_field_reports_valid_fields() {
     assert!(error.message().contains("nodes"));
 }
 
+#[test]
+fn generated_shape_codec_reads_real_project_def_authored_toml() {
+    let authored_toml = toml::to_string_pretty(&ProjectDef::new()).unwrap();
+    let toml: toml::Value = toml::from_str(&authored_toml).unwrap();
+
+    let decoded = read_project_def_toml(&toml).unwrap();
+
+    assert_project_def_matches_default(&decoded);
+    assert!(authored_toml.contains("kind = \"project\""));
+    assert!(authored_toml.contains("[nodes.output]"));
+}
+
+#[test]
+fn generated_shape_codec_json_round_trips_real_project_def() {
+    let project = ProjectDef::new();
+    let json = write_project_def_json(&project);
+
+    let decoded = read_project_def_json(std::str::from_utf8(&json).unwrap()).unwrap();
+
+    assert_project_def_matches_default(&decoded);
+}
+
 fn sample_bundle() -> GeneratedBundle {
     let mut nodes = BTreeMap::new();
     nodes.insert(
@@ -119,6 +142,25 @@ fn sample_bundle() -> GeneratedBundle {
             }),
         ],
     }
+}
+
+fn assert_project_def_matches_default(project: &ProjectDef) {
+    assert_eq!(project.kind, ProjectDef::KIND);
+    assert_eq!(
+        project.name.data.as_ref().map(|name| name.value().as_str()),
+        Some("basic")
+    );
+    assert_eq!(project.nodes.entries.len(), 4);
+    assert_eq!(project.nodes.entries["output"].artifact(), "./output.toml");
+    assert_eq!(
+        project.nodes.entries["texture"].artifact(),
+        "./texture.toml"
+    );
+    assert_eq!(
+        project.nodes.entries["fixture"].artifact(),
+        "./fixture.toml"
+    );
+    assert_eq!(project.nodes.entries["shader"].artifact(), "./shader.toml");
 }
 
 const SAMPLE_BUNDLE_TOML: &str = r#"

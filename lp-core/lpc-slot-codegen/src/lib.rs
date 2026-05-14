@@ -436,6 +436,8 @@ fn render_mockup_slot_codec() -> String {
 
 use std::collections::BTreeMap;
 
+use crate::source::{NodeInvocationDef, ProjectDef};
+use lpc_model::{MapSlot, OptionSlot, ValueSlot};
 use lpc_model::SlotShapeRegistry;
 use lpc_model::slot_codec::{
     JsonSyntaxSource, ObjectReader, SlotJsonValue, SlotJsonWrite, SlotJsonWriter, SlotReader,
@@ -750,6 +752,80 @@ pub fn write_bundle_json(bundle: &GeneratedBundle) -> Vec<u8> {
         write_node(nodes.item().unwrap(), node);
     }
     nodes.finish().unwrap();
+    object.finish().unwrap();
+    out
+}
+
+pub fn read_project_def_json(json: &str) -> Result<ProjectDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(JsonSyntaxSource::new(json)?, &registry);
+    read_project_def(&mut reader)
+}
+
+pub fn read_project_def_toml(value: &toml::Value) -> Result<ProjectDef, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(TomlSyntaxSource::new(value)?, &registry);
+    read_project_def(&mut reader)
+}
+
+pub fn read_project_def<S>(reader: &mut SlotReader<'_, S>) -> Result<ProjectDef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["kind", "name", "nodes"];
+    let mut name = OptionSlot::none();
+    let mut nodes = BTreeMap::new();
+    let mut object = reader.object()?;
+    let _kind = object.expect_discriminator("kind", &[ProjectDef::KIND])?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "name" => name = OptionSlot::some(ValueSlot::new(prop.value().string()?)),
+            "nodes" => nodes = prop.value().string_key_map(read_project_invocation)?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(ProjectDef {
+        kind: ProjectDef::KIND.to_string(),
+        name,
+        nodes: MapSlot::new(nodes),
+    })
+}
+
+fn read_project_invocation<S>(
+    value: ValueReader<'_, '_, S>,
+) -> Result<NodeInvocationDef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["artifact"];
+    let mut artifact = None;
+    let mut object = value.object()?;
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "artifact" => artifact = Some(prop.value().string()?),
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+    Ok(NodeInvocationDef::new(
+        &artifact.ok_or_else(|| object.missing_required_field("artifact"))?,
+    ))
+}
+
+pub fn write_project_def_json(project: &ProjectDef) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut writer = SlotJsonWriter::new(&mut out);
+    let mut object = writer.object().unwrap();
+    object.prop("kind").unwrap().string(ProjectDef::KIND).unwrap();
+    if let Some(name) = &project.name.data {
+        object.prop("name").unwrap().string(name.value()).unwrap();
+    }
+    if !project.nodes.is_empty() {
+        write_string_map(object.prop("nodes").unwrap(), &project.nodes.entries, |value, invocation| {
+            let mut object = value.object().unwrap();
+            object.prop("artifact").unwrap().string(invocation.artifact()).unwrap();
+            object.finish().unwrap();
+        });
+    }
     object.finish().unwrap();
     out
 }
