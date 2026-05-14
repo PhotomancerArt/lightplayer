@@ -22,7 +22,7 @@ pub use mutation::{
 };
 pub use native::{
     JsonSyntaxSource, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWriter, SlotReader,
-    SyntaxError, SyntaxEvent, SyntaxEventSource, SyntaxNode, TomlSyntaxSource,
+    SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource, TomlSyntaxSource,
 };
 pub use slot_data_json::write_slot_data_json;
 pub use slot_shape_registry_json::write_slot_shape_registry_snapshot_json;

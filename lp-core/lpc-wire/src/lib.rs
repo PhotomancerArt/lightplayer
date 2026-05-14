@@ -40,7 +40,7 @@ pub use server::{
 };
 pub use slot::{
     JsonSyntaxSource, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWriter, SlotReader,
-    SlotTomlError, SyntaxError, SyntaxEvent, SyntaxEventSource, SyntaxNode, TomlSyntaxSource,
+    SlotTomlError, SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource, TomlSyntaxSource,
     WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
     WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,

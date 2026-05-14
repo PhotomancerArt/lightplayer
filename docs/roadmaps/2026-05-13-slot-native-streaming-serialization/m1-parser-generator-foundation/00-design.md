@@ -8,23 +8,29 @@ M1 introduces a small `lpc_wire::slot::native` module:
 - `SyntaxEventSource`: pull-based event source trait.
 - `JsonSyntaxSource`: direct JSON text parser that emits syntax events.
 - `TomlSyntaxSource`: adapter from `toml::Value` to syntax events.
-- `SyntaxNode`: temporary reference/tree representation built from events.
-- `SlotReader`: typed helper API over a `SyntaxNode` plus `SlotShapeRegistry`.
+- `SlotReader`: streaming typed helper API over a `SyntaxEventSource` plus
+  `SlotShapeRegistry`.
 - `SlotJsonWriter`: output helper over the existing `JsonWriter`.
 
-The temporary tree is deliberately not the long-term embedded ideal. It lets us
-stabilize the event vocabulary and reader ergonomics first. Later phases can
-make generated code consume events directly when needed.
+The reader must not require a temporary syntax tree. JSON events should be
+parsed on demand, and manual/generated typed construction should consume the
+stream directly.
 
 ## Reader Example
 
 ```rust
-ManualConfig {
-    brightness: reader.prop("brightness")?.f32()?,
-    pin: reader.prop("pin")?.u32()?,
-    mapping: reader.prop("mapping")?.string()?,
+let mut object = reader.object()?;
+while let Some(prop) = object.next_prop()? {
+    match prop.name() {
+        "brightness" => brightness = Some(prop.value().f32()?),
+        "pin" => pin = Some(prop.value().u32()?),
+        other => return Err(prop.unknown_field(other, &["brightness", "pin"])),
+    }
 }
 ```
+
+Discriminator-first enums use `reader.expect_discriminator("kind")?` after the
+object start has been consumed.
 
 ## Writer Example
 
@@ -40,4 +46,3 @@ object.finish()?;
 
 - `cargo test -p lpc-wire slot::native`
 - `cargo test -p lpc-slot-mockup native_stream`
-
