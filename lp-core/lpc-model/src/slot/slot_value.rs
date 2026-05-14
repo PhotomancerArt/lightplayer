@@ -331,28 +331,33 @@ mod tests {
     use super::*;
     use crate::{
         Affine2d, ColorOrderValue, Dim2u, FromLpValue, ResourceRef, RuntimeBufferId, ToLpValue,
-        affine2d_shape, color_order_shape, control_product_shape, dim2u_shape,
-        relative_node_ref_shape, runtime_buffer_resource_shape,
+        runtime_buffer_resource_shape,
     };
 
     #[test]
     fn semantic_leaf_shapes_carry_editor_hints() {
         assert!(matches!(
-            relative_node_ref_shape().editor,
+            crate::RelativeNodeRef::value_shape().editor,
             ValueEditorHint::NodeRef
         ));
-        assert!(matches!(dim2u_shape().editor, ValueEditorHint::Dimensions));
-        assert!(matches!(affine2d_shape().editor, ValueEditorHint::Affine2d));
+        assert!(matches!(
+            Dim2u::value_shape().editor,
+            ValueEditorHint::Dimensions
+        ));
+        assert!(matches!(
+            Affine2d::value_shape().editor,
+            ValueEditorHint::Affine2d
+        ));
         assert!(matches!(
             runtime_buffer_resource_shape().editor,
             ValueEditorHint::RuntimeBufferResource
         ));
         assert!(matches!(
-            control_product_shape().editor,
+            crate::ControlProduct::value_shape().editor,
             ValueEditorHint::ControlProduct
         ));
         assert!(matches!(
-            color_order_shape().editor,
+            ColorOrderValue::value_shape().editor,
             ValueEditorHint::Dropdown { .. }
         ));
     }

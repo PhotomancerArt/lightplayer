@@ -88,24 +88,20 @@ impl SlotValue for ColorOrderValue {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrderValue");
 
     fn value_shape() -> SlotValueShape {
-        color_order_shape()
-    }
-}
-
-pub fn color_order_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: ColorOrderValue::SHAPE_ID,
-        ty: LpType::String,
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::Dropdown {
-            options: vec![
-                SlotEnumOption::new("rgb", "RGB"),
-                SlotEnumOption::new("grb", "GRB"),
-                SlotEnumOption::new("rbg", "RBG"),
-                SlotEnumOption::new("gbr", "GBR"),
-                SlotEnumOption::new("brg", "BRG"),
-                SlotEnumOption::new("bgr", "BGR"),
-            ],
-        },
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Dropdown {
+                options: vec![
+                    SlotEnumOption::new("rgb", "RGB"),
+                    SlotEnumOption::new("grb", "GRB"),
+                    SlotEnumOption::new("rbg", "RBG"),
+                    SlotEnumOption::new("gbr", "GBR"),
+                    SlotEnumOption::new("brg", "BRG"),
+                    SlotEnumOption::new("bgr", "BGR"),
+                ],
+            },
+        }
     }
 }

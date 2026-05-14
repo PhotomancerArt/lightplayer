@@ -309,7 +309,7 @@ fn mapping_shape() -> SlotShape {
                         <PathSpec as SlotEnumShape>::slot_enum_shape()
                     ),
                 ),
-                field("sample_diameter", leaf(crate::positive_f32_shape())),
+                field("sample_diameter", leaf(PositiveF32::value_shape())),
             ]),
         )],
     }
@@ -323,8 +323,8 @@ fn path_spec_shape() -> SlotShape {
         variants: alloc::vec![variant(
             "ring_array",
             record(alloc::vec![
-                field("center", leaf(crate::xy_shape())),
-                field("diameter", leaf(crate::positive_f32_shape())),
+                field("center", leaf(Xy::value_shape())),
+                field("diameter", leaf(PositiveF32::value_shape())),
                 field("start_ring_inclusive", value(LpType::U32)),
                 field("end_ring_exclusive", value(LpType::U32)),
                 field(

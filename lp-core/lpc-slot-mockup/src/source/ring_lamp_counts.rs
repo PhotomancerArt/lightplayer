@@ -33,16 +33,12 @@ impl SlotValue for RingLampCounts {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("mock.source.ring_lamp_counts");
 
     fn value_shape() -> SlotValueShape {
-        ring_lamp_counts_shape()
-    }
-}
-
-pub fn ring_lamp_counts_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: RingLampCounts::SHAPE_ID,
-        ty: LpType::List(Box::new(LpType::U32)),
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::Plain,
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::List(Box::new(LpType::U32)),
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Plain,
+        }
     }
 }
 

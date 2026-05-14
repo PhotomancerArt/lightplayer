@@ -19,20 +19,19 @@ mod u32_list;
 mod visual_product;
 mod xy;
 
-pub use affine2d::{Affine2d, Affine2dSlot, affine2d_shape};
-pub use artifact_path::{ArtifactPath, ArtifactPathSlot, artifact_path_shape};
-pub use color_order::{ColorOrderSlot, ColorOrderValue, color_order_shape};
-pub use control_product::{ControlProductSlot, control_product_shape};
-pub use dim2u::{Dim2u, Dim2uSlot, dim2u_shape};
-pub use positive_f32::{PositiveF32, PositiveF32Slot, positive_f32_shape};
-pub use ratio::{Ratio, RatioSlot, ratio_shape};
-pub use relative_node_ref::{RelativeNodeRefSlot, relative_node_ref_shape};
-pub use render_order::{RenderOrder, RenderOrderSlot, render_order_shape};
-pub use resource_ref::{ResourceRefSlot, resource_ref_shape, runtime_buffer_resource_shape};
-pub use source_path::{SourcePath, SourcePathSlot, source_path_shape};
-pub use u32_list::u32_list_shape;
-pub use visual_product::{VisualProductSlot, visual_product_shape};
-pub use xy::{Xy, XySlot, xy_shape};
+pub use affine2d::{Affine2d, Affine2dSlot};
+pub use artifact_path::{ArtifactPath, ArtifactPathSlot};
+pub use color_order::{ColorOrderSlot, ColorOrderValue};
+pub use control_product::ControlProductSlot;
+pub use dim2u::{Dim2u, Dim2uSlot};
+pub use positive_f32::{PositiveF32, PositiveF32Slot};
+pub use ratio::{Ratio, RatioSlot};
+pub use relative_node_ref::RelativeNodeRefSlot;
+pub use render_order::{RenderOrder, RenderOrderSlot};
+pub use resource_ref::ResourceRefSlot;
+pub use source_path::{SourcePath, SourcePathSlot};
+pub use visual_product::VisualProductSlot;
+pub use xy::{Xy, XySlot};
 
 #[cfg(test)]
 mod tests {

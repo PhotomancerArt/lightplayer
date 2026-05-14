@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Width/height dimensions in unsigned integer pixels or cells.
@@ -10,7 +10,3 @@ pub struct Dim2u {
 }
 
 pub type Dim2uSlot = ValueSlot<Dim2u>;
-
-pub fn dim2u_shape() -> SlotValueShape {
-    Dim2u::value_shape()
-}

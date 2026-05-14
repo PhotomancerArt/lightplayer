@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,3 @@ impl From<&str> for ArtifactPath {
 }
 
 pub type ArtifactPathSlot = ValueSlot<ArtifactPath>;
-
-pub fn artifact_path_shape() -> SlotValueShape {
-    ArtifactPath::value_shape()
-}

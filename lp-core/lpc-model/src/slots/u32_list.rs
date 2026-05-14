@@ -32,16 +32,12 @@ impl SlotValue for Vec<u32> {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("VecU32");
 
     fn value_shape() -> SlotValueShape {
-        u32_list_shape()
-    }
-}
-
-pub fn u32_list_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: Vec::<u32>::SHAPE_ID,
-        ty: LpType::List(Box::new(LpType::U32)),
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::Plain,
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::List(Box::new(LpType::U32)),
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Plain,
+        }
     }
 }
 

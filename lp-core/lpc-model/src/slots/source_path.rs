@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,3 @@ impl From<&str> for SourcePath {
 }
 
 pub type SourcePathSlot = ValueSlot<SourcePath>;
-
-pub fn source_path_shape() -> SlotValueShape {
-    SourcePath::value_shape()
-}

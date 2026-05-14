@@ -29,15 +29,11 @@ impl SlotValue for RelativeNodeRef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("RelativeNodeRef");
 
     fn value_shape() -> SlotValueShape {
-        relative_node_ref_shape()
-    }
-}
-
-pub fn relative_node_ref_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: RelativeNodeRef::SHAPE_ID,
-        ty: LpType::String,
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::NodeRef,
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::NodeRef,
+        }
     }
 }

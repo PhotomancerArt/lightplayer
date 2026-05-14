@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 use crate::{
-    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, SlotRecord,
-    SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueRootError, ValueSlot,
+    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpType, LpValue, OptionSlot,
+    SlotEnumOption, SlotMeta, SlotRecord, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
+    ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Authored fixture node definition.
@@ -243,7 +244,21 @@ impl SlotValue for ColorOrder {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrder");
 
     fn value_shape() -> SlotValueShape {
-        crate::color_order_shape()
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Dropdown {
+                options: alloc::vec![
+                    SlotEnumOption::new("rgb", "RGB"),
+                    SlotEnumOption::new("grb", "GRB"),
+                    SlotEnumOption::new("rbg", "RBG"),
+                    SlotEnumOption::new("gbr", "GBR"),
+                    SlotEnumOption::new("brg", "BRG"),
+                    SlotEnumOption::new("bgr", "BGR"),
+                ],
+            },
+        }
     }
 }
 

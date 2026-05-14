@@ -89,18 +89,14 @@ pub use nodes::{
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};
-pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId};
+pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
 pub use server::server_config::ServerConfig;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
     ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot,
     Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot,
     SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourcePath, SourcePathSlot,
-    ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot, affine2d_shape,
-    artifact_path_shape, color_order_shape, control_product_shape, dim2u_shape, positive_f32_shape,
-    ratio_shape, relative_node_ref_shape, render_order_shape, resource_ref_shape,
-    runtime_buffer_resource_shape, source_path_shape, u32_list_shape, visual_product_shape,
-    xy_shape,
+    ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotAccessor,

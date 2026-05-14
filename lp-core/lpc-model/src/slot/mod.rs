@@ -57,10 +57,7 @@ pub use crate::slots::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
     ControlProductSlot, Dim2u, Dim2uSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot,
     RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot, SourcePath, SourcePathSlot,
-    VisualProductSlot, Xy, XySlot, affine2d_shape, artifact_path_shape, color_order_shape,
-    control_product_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
-    render_order_shape, resource_ref_shape, runtime_buffer_resource_shape, source_path_shape,
-    u32_list_shape, visual_product_shape, xy_shape,
+    VisualProductSlot, Xy, XySlot,
 };
 pub use value_ref::ValueRef;
 pub use value_slot::{MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, ValueSlot};

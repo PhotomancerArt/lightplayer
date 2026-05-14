@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// 2D affine transform with translation.
@@ -27,7 +27,3 @@ impl Affine2d {
 }
 
 pub type Affine2dSlot = ValueSlot<Affine2d>;
-
-pub fn affine2d_shape() -> SlotValueShape {
-    Affine2d::value_shape()
-}

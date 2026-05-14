@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// 2D XY coordinate.
@@ -13,7 +13,3 @@ impl From<[f32; 2]> for Xy {
 }
 
 pub type XySlot = ValueSlot<Xy>;
-
-pub fn xy_shape() -> SlotValueShape {
-    Xy::value_shape()
-}

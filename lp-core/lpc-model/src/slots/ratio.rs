@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Floating point ratio in the inclusive `0.0..=1.0` domain.
@@ -13,7 +13,3 @@ impl From<f32> for Ratio {
 }
 
 pub type RatioSlot = ValueSlot<Ratio>;
-
-pub fn ratio_shape() -> SlotValueShape {
-    Ratio::value_shape()
-}

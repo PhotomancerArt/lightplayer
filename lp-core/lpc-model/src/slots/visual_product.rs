@@ -27,16 +27,12 @@ impl SlotValue for VisualProduct {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("VisualProduct");
 
     fn value_shape() -> SlotValueShape {
-        visual_product_shape()
-    }
-}
-
-pub fn visual_product_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: VisualProduct::SHAPE_ID,
-        ty: LpType::Product(ProductKind::Visual),
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::VisualProduct,
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::Product(ProductKind::Visual),
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::VisualProduct,
+        }
     }
 }
 
@@ -54,7 +50,7 @@ mod tests {
             product
         );
         assert_eq!(
-            visual_product_shape().ty,
+            VisualProduct::value_shape().ty,
             LpType::Product(ProductKind::Visual)
         );
     }

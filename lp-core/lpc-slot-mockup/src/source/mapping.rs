@@ -437,8 +437,8 @@ fn mapping_shape() -> SlotShape {
             variant(
                 "square",
                 record(vec![
-                    field("origin", leaf(lpc_model::xy_shape())),
-                    field("size", leaf(lpc_model::xy_shape())),
+                    field("origin", leaf(Xy::value_shape())),
+                    field("size", leaf(Xy::value_shape())),
                 ]),
             ),
             variant(
@@ -451,7 +451,7 @@ fn mapping_shape() -> SlotShape {
                             <PathSpec as SlotEnumShape>::slot_enum_shape(),
                         ),
                     ),
-                    field("sample_diameter", leaf(lpc_model::positive_f32_shape())),
+                    field("sample_diameter", leaf(PositiveF32::value_shape())),
                 ]),
             ),
         ],
@@ -467,8 +467,8 @@ fn path_spec_shape() -> SlotShape {
             variant(
                 "ring_array",
                 record(vec![
-                    field("center", leaf(lpc_model::xy_shape())),
-                    field("diameter", leaf(lpc_model::positive_f32_shape())),
+                    field("center", leaf(Xy::value_shape())),
+                    field("diameter", leaf(PositiveF32::value_shape())),
                     field("start_ring_inclusive", value(lpc_model::LpType::U32)),
                     field("end_ring_exclusive", value(lpc_model::LpType::U32)),
                     field(

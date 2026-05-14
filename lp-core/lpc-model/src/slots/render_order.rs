@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Render ordering value.
@@ -13,7 +13,3 @@ impl From<i32> for RenderOrder {
 }
 
 pub type RenderOrderSlot = ValueSlot<RenderOrder>;
-
-pub fn render_order_shape() -> SlotValueShape {
-    RenderOrder::value_shape()
-}

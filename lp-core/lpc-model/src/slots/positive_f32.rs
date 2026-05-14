@@ -1,4 +1,4 @@
-use crate::{SlotValue, SlotValueShape, ValueSlot};
+use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Non-negative floating point value.
@@ -13,7 +13,3 @@ impl From<f32> for PositiveF32 {
 }
 
 pub type PositiveF32Slot = ValueSlot<PositiveF32>;
-
-pub fn positive_f32_shape() -> SlotValueShape {
-    PositiveF32::value_shape()
-}
