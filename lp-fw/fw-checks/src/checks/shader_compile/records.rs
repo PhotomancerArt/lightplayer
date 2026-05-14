@@ -16,6 +16,8 @@ pub struct ShaderCompileCaseSummary {
     pub build_us: u64,
     pub ticks: u32,
     pub max_slice_us: u64,
+    #[serde(default)]
+    pub max_slice_stage: String,
     pub peak_used: usize,
     pub resident_used: usize,
     pub after_drop_used: usize,

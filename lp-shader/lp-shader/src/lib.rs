@@ -25,7 +25,8 @@ mod texture_buf;
 mod texture_interface;
 
 pub use compile_job::{
-    ShaderCompileBudget, ShaderCompileJob, ShaderCompileStage, ShaderCompileStepResult,
+    ShaderCompileBudget, ShaderCompileJob, ShaderCompileStage, ShaderCompileStageDetail,
+    ShaderCompileStepResult,
 };
 pub use compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs, texture_binding};
 pub use engine::LpsEngine;

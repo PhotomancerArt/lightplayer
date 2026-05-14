@@ -41,6 +41,15 @@ pub enum ShaderCompileStage {
     Done,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShaderCompileStageDetail {
+    Frontend(lps_glsl::CompileStage),
+    FrontendNaga,
+    Prepare,
+    Backend,
+    Done,
+}
+
 pub enum ShaderCompileStepResult {
     Pending,
     Finished(LpsPxShader),
@@ -110,6 +119,20 @@ where
             ShaderCompileState::Prepare { .. } => ShaderCompileStage::Prepare,
             ShaderCompileState::Backend { .. } => ShaderCompileStage::Backend,
             ShaderCompileState::Done => ShaderCompileStage::Done,
+        }
+    }
+
+    pub fn stage_detail(&self) -> ShaderCompileStageDetail {
+        match &self.state {
+            ShaderCompileState::Frontend(FrontendState::LpsGlsl(job)) => {
+                ShaderCompileStageDetail::Frontend(job.stage())
+            }
+            ShaderCompileState::Frontend(FrontendState::Naga) => {
+                ShaderCompileStageDetail::FrontendNaga
+            }
+            ShaderCompileState::Prepare { .. } => ShaderCompileStageDetail::Prepare,
+            ShaderCompileState::Backend { .. } => ShaderCompileStageDetail::Backend,
+            ShaderCompileState::Done => ShaderCompileStageDetail::Done,
         }
     }
 

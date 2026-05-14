@@ -1,7 +1,9 @@
 //! Runs the incremental shader compile corpus and logs per-tick timing/memory.
 
 use log::{info, warn};
-use lp_shader::{LpsEngine, ShaderCompileBudget, ShaderCompileStepResult};
+use lp_shader::{
+    LpsEngine, ShaderCompileBudget, ShaderCompileStageDetail, ShaderCompileStepResult,
+};
 use lpvm_native::NativeJitEngine;
 
 use super::cycle_counter;
@@ -18,6 +20,7 @@ struct CaseSummary {
     tick_count: u32,
     total_us: u64,
     max_slice_us: u64,
+    max_slice_stage: ShaderCompileStageDetail,
     peak_used: usize,
     resident_used: usize,
     after_drop_used: usize,
@@ -37,21 +40,23 @@ pub fn run_all(engine: &LpsEngine<NativeJitEngine>) {
         worst_slice_us = worst_slice_us.max(summary.max_slice_us);
         worst_peak_used = worst_peak_used.max(summary.peak_used);
         info!(
-            "[inc-shader-compile] summary case={} build={} ticks={} max_slice={} peak={} resident={} after_drop={}",
+            "[inc-shader-compile] summary case={} build={} ticks={} max_slice={} max_slice_stage={:?} peak={} resident={} after_drop={}",
             summary.name,
             fmt_ms_1(summary.total_us),
             summary.tick_count,
             fmt_ms_1(summary.max_slice_us),
+            summary.max_slice_stage,
             fmt_kib_1(summary.peak_used),
             fmt_kib_1(summary.resident_used),
             fmt_kib_1(summary.after_drop_used),
         );
         fw_checks::emit_record_json(format_args!(
-            "{{\"kind\":\"case-summary\",\"check\":\"shader-compile-stress\",\"case\":\"{}\",\"build_us\":{},\"ticks\":{},\"max_slice_us\":{},\"peak_used\":{},\"resident_used\":{},\"after_drop_used\":{}}}",
+            "{{\"kind\":\"case-summary\",\"check\":\"shader-compile-stress\",\"case\":\"{}\",\"build_us\":{},\"ticks\":{},\"max_slice_us\":{},\"max_slice_stage\":\"{:?}\",\"peak_used\":{},\"resident_used\":{},\"after_drop_used\":{}}}",
             summary.name,
             summary.total_us,
             summary.tick_count,
             summary.max_slice_us,
+            summary.max_slice_stage,
             summary.peak_used,
             summary.resident_used,
             summary.after_drop_used,
@@ -111,12 +116,13 @@ fn run_case(engine: &LpsEngine<NativeJitEngine>, case: &ShaderCompileCase) -> Ca
     let start_used = esp_alloc::HEAP.used();
     let mut peak_used = start_used;
     let mut max_slice_cycles = 0u64;
+    let mut max_slice_stage = ShaderCompileStageDetail::Done;
     let mut total_cycles = 0u64;
     let mut tick_count = 0u32;
 
     loop {
         tick_count = tick_count.saturating_add(1);
-        let stage = job.stage();
+        let stage = job.stage_detail();
         let before_free = esp_alloc::HEAP.free();
         let before_used = esp_alloc::HEAP.used();
         let cycle_start = cycle_counter::read();
@@ -127,7 +133,10 @@ fn run_case(engine: &LpsEngine<NativeJitEngine>, case: &ShaderCompileCase) -> Ca
         let after_used = esp_alloc::HEAP.used();
 
         peak_used = peak_used.max(after_used);
-        max_slice_cycles = max_slice_cycles.max(slice_cycles);
+        if slice_cycles > max_slice_cycles {
+            max_slice_cycles = slice_cycles;
+            max_slice_stage = stage;
+        }
         total_cycles = total_cycles.saturating_add(slice_cycles);
 
         info!(
@@ -152,7 +161,7 @@ fn run_case(engine: &LpsEngine<NativeJitEngine>, case: &ShaderCompileCase) -> Ca
                 let resident_used = esp_alloc::HEAP.used();
                 info!(
                     "[inc-shader-compile] case={} finished ticks={} total_cycles={} total_us={} \
-                     max_slice_cycles={} max_slice_us={} heap_start={} free/{} used \
+                     max_slice_cycles={} max_slice_us={} max_slice_stage={:?} heap_start={} free/{} used \
                      heap_peak_used={} heap_resident={} free/{} used",
                     case.name,
                     tick_count,
@@ -160,6 +169,7 @@ fn run_case(engine: &LpsEngine<NativeJitEngine>, case: &ShaderCompileCase) -> Ca
                     total_us,
                     max_slice_cycles,
                     max_slice_us,
+                    max_slice_stage,
                     start_free,
                     start_used,
                     peak_used,
@@ -185,6 +195,7 @@ fn run_case(engine: &LpsEngine<NativeJitEngine>, case: &ShaderCompileCase) -> Ca
                     tick_count,
                     total_us,
                     max_slice_us,
+                    max_slice_stage,
                     peak_used,
                     resident_used,
                     after_drop_used,

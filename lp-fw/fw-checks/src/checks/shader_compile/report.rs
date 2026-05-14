@@ -28,11 +28,12 @@ pub fn report_from_jsonl(records_jsonl: &str) -> Result<Option<String>, serde_js
     }
     for case in cases {
         out.push_str(&format!(
-            "- `{}`: build={}, ticks={}, max_slice={}, peak={}, resident={}, after_drop={}\n",
+            "- `{}`: build={}, ticks={}, max_slice={} [{}], peak={}, resident={}, after_drop={}\n",
             case.case,
             fmt_ms_1(case.build_us),
             case.ticks,
             fmt_ms_1(case.max_slice_us),
+            fmt_stage(&case.max_slice_stage),
             fmt_kib_1(case.peak_used),
             fmt_kib_1(case.resident_used),
             fmt_kib_1(case.after_drop_used),
@@ -51,6 +52,10 @@ fn fmt_kib_1(bytes: usize) -> String {
     format!("{}.{}KiB", tenths_kib / 10, tenths_kib % 10)
 }
 
+fn fmt_stage(stage: &str) -> &str {
+    if stage.is_empty() { "unknown" } else { stage }
+}
+
 #[cfg(test)]
 mod tests {
     use super::report_from_jsonl;
@@ -58,7 +63,7 @@ mod tests {
     #[test]
     fn summarizes_shader_compile_records() {
         let report = report_from_jsonl(
-            r#"{"kind":"case-summary","check":"shader-compile-stress","case":"examples-basic","build_us":256200,"ticks":79,"max_slice_us":55400,"peak_used":81088,"resident_used":22800,"after_drop_used":6324}
+            r#"{"kind":"case-summary","check":"shader-compile-stress","case":"examples-basic","build_us":256200,"ticks":79,"max_slice_us":55400,"max_slice_stage":"Frontend::LowerLpir","peak_used":81088,"resident_used":22800,"after_drop_used":6324}
 {"kind":"total-summary","check":"shader-compile-stress","build_us":256200,"cases":1,"worst_slice_us":55400,"worst_peak_used":81088}
 "#,
         )
@@ -69,5 +74,6 @@ mod tests {
         assert!(report.contains("Worst slice: 55.4ms"));
         assert!(report.contains("Worst peak: 79.2KiB"));
         assert!(report.contains("`examples-basic`"));
+        assert!(report.contains("[Frontend::LowerLpir]"));
     }
 }

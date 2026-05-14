@@ -16,7 +16,7 @@ use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 use crate::{
     CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor, ShaderCompileBudget,
-    ShaderCompileStage, ShaderCompileStepResult, ShaderFrontend,
+    ShaderCompileStage, ShaderCompileStageDetail, ShaderCompileStepResult, ShaderFrontend,
     px_shader::{RecordingUniformBackend, px_shader_from_parts_for_test},
     texture_binding,
 };
@@ -244,9 +244,20 @@ fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
 
     let mut job = engine.start_compile_px_job(desc);
     let mut saw_frontend = false;
+    let mut saw_build_hir = false;
+    let mut saw_lower_lpir = false;
     let mut saw_prepare = false;
 
     for _ in 0..128 {
+        match job.stage_detail() {
+            ShaderCompileStageDetail::Frontend(lps_glsl::CompileStage::BuildHir) => {
+                saw_build_hir = true;
+            }
+            ShaderCompileStageDetail::Frontend(lps_glsl::CompileStage::LowerLpir) => {
+                saw_lower_lpir = true;
+            }
+            _ => {}
+        }
         match job.stage() {
             ShaderCompileStage::Frontend => saw_frontend = true,
             ShaderCompileStage::Prepare => saw_prepare = true,
@@ -257,6 +268,8 @@ fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
             ShaderCompileStepResult::Pending => {}
             ShaderCompileStepResult::Finished(shader) => {
                 assert!(saw_frontend);
+                assert!(saw_build_hir);
+                assert!(saw_lower_lpir);
                 assert!(saw_prepare);
                 assert_eq!(shader.render_sig().name, "render");
                 return;
