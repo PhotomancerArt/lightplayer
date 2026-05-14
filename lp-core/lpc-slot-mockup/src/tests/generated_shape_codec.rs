@@ -4,9 +4,10 @@ use crate::generated_slot_codec::{
     GeneratedBindingDef, GeneratedBundle, GeneratedEndpoint, GeneratedFixtureDef,
     GeneratedInvocation, GeneratedMapping, GeneratedNodeDef, GeneratedOutputDef,
     GeneratedOutputOptions, GeneratedProject, read_bundle_json, read_bundle_toml,
-    read_project_def_json, read_project_def_toml, write_bundle_json, write_project_def_json,
+    read_output_def_json, read_output_def_toml, read_project_def_json, read_project_def_toml,
+    write_bundle_json, write_output_def_json, write_project_def_json,
 };
-use crate::source::ProjectDef;
+use crate::source::{OutputDef, ProjectDef};
 
 #[test]
 fn generated_shape_codec_json_round_trips_bundle() {
@@ -93,6 +94,50 @@ fn generated_shape_codec_json_round_trips_real_project_def() {
     assert_project_def_matches_default(&decoded);
 }
 
+#[test]
+fn generated_shape_codec_reads_real_output_def_authored_toml() {
+    let authored_toml = toml::to_string_pretty(&OutputDef::new()).unwrap();
+    let toml: toml::Value = toml::from_str(&authored_toml).unwrap();
+
+    let decoded = read_output_def_toml(&toml).unwrap();
+
+    assert_output_def_matches_default(&decoded);
+    assert!(authored_toml.contains("kind = \"output\""));
+    assert!(authored_toml.contains("[options]"));
+}
+
+#[test]
+fn generated_shape_codec_json_round_trips_real_output_def() {
+    let output = OutputDef::new();
+    let json = write_output_def_json(&output);
+
+    let decoded = read_output_def_json(std::str::from_utf8(&json).unwrap()).unwrap();
+
+    assert_output_def_matches_default(&decoded);
+}
+
+#[test]
+fn generated_shape_codec_output_def_uses_default_option_leaves() {
+    let json = r#"{
+        "kind": "output",
+        "pin": 21,
+        "options": {
+            "brightness": 0.5
+        }
+    }"#;
+
+    let decoded = read_output_def_json(json).unwrap();
+    let options = decoded.options().unwrap();
+
+    assert_eq!(decoded.pin(), 21);
+    assert_eq!(options.brightness(), 0.5);
+    assert_eq!(options.lum_power(), 2.0);
+    assert_eq!(options.white_point(), [0.9, 1.0, 1.0]);
+    assert!(options.interpolation_enabled());
+    assert!(options.dithering_enabled());
+    assert!(options.lut_enabled());
+}
+
 fn sample_bundle() -> GeneratedBundle {
     let mut nodes = BTreeMap::new();
     nodes.insert(
@@ -161,6 +206,18 @@ fn assert_project_def_matches_default(project: &ProjectDef) {
         "./fixture.toml"
     );
     assert_eq!(project.nodes.entries["shader"].artifact(), "./shader.toml");
+}
+
+fn assert_output_def_matches_default(output: &OutputDef) {
+    assert_eq!(output.kind, OutputDef::KIND);
+    assert_eq!(output.pin(), 18);
+    let options = output.options().unwrap();
+    assert_eq!(options.lum_power(), 2.0);
+    assert_eq!(options.white_point(), [0.9, 1.0, 1.0]);
+    assert_eq!(options.brightness(), 1.0);
+    assert!(options.interpolation_enabled());
+    assert!(options.dithering_enabled());
+    assert!(options.lut_enabled());
 }
 
 const SAMPLE_BUNDLE_TOML: &str = r#"
