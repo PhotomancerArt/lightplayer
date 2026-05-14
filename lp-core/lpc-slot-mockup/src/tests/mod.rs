@@ -3,6 +3,7 @@ mod client_tree_walk;
 mod dynamic_param_shape;
 mod fixture;
 mod full_sync;
+mod generated_shape_codec;
 mod incremental_change;
 mod manual_shape_codec;
 mod mutation;
