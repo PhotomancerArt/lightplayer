@@ -29,6 +29,10 @@ cargo run -p lp-cli -- fwcheck list
 cargo run -p lp-cli -- fwcheck run esp32c6 shader-compile-stress --note baseline
 ```
 
+By default, `fwcheck run` shows a compact build/flash/run progress view and an
+inline summary report. Pass `--verbose` to stream raw build, flash, and firmware
+serial output while the check runs.
+
 Hardware runs write a timestamped directory under `traces/` containing:
 
 - `trace.txt`: the full normalized serial log

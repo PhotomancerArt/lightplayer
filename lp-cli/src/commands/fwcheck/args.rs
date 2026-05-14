@@ -38,4 +38,7 @@ pub struct FwcheckRunArgs {
     /// Timeout in seconds while waiting for the done marker.
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
+    /// Stream raw build, flash, and firmware output while the check runs.
+    #[arg(short, long)]
+    pub verbose: bool,
 }
