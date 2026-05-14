@@ -820,11 +820,15 @@ pub fn write_project_def_json(project: &ProjectDef) -> Vec<u8> {
         object.prop("name").unwrap().string(name.value()).unwrap();
     }
     if !project.nodes.is_empty() {
-        write_string_map(object.prop("nodes").unwrap(), &project.nodes.entries, |value, invocation| {
-            let mut object = value.object().unwrap();
-            object.prop("artifact").unwrap().string(invocation.artifact()).unwrap();
-            object.finish().unwrap();
-        });
+        object
+            .prop("nodes")
+            .unwrap()
+            .string_key_map(&project.nodes.entries, |value, invocation| {
+                let mut object = value.object()?;
+                object.prop("artifact")?.string(invocation.artifact())?;
+                object.finish()
+            })
+            .unwrap();
     }
     object.finish().unwrap();
     out
@@ -840,11 +844,15 @@ where
     if let Some(name) = &project.name {
         object.prop("name").unwrap().string(name).unwrap();
     }
-    write_string_map(object.prop("nodes").unwrap(), &project.nodes, |value, invocation| {
-        let mut object = value.object().unwrap();
-        object.prop("artifact").unwrap().string(&invocation.artifact).unwrap();
-        object.finish().unwrap();
-    });
+    object
+        .prop("nodes")
+        .unwrap()
+        .string_key_map(&project.nodes, |value, invocation| {
+            let mut object = value.object()?;
+            object.prop("artifact")?.string(&invocation.artifact)?;
+            object.finish()
+        })
+        .unwrap();
     object.finish().unwrap();
 }
 
@@ -867,12 +875,21 @@ where
     let mut object = value.object().unwrap();
     object.prop("kind").unwrap().string("OutputDef").unwrap();
     object.prop("pin").unwrap().u32(output.pin).unwrap();
-    write_string_map(object.prop("bindings").unwrap(), &output.bindings, |value, binding| {
-        write_binding(value, binding);
-    });
+    object
+        .prop("bindings")
+        .unwrap()
+        .string_key_map(&output.bindings, |value, binding| {
+            write_binding(value, binding);
+            Ok(())
+        })
+        .unwrap();
     if let Some(options) = &output.options {
         let mut options_object = object.prop("options").unwrap().object().unwrap();
-        write_f32_array(options_object.prop("white_point").unwrap(), &options.white_point);
+        options_object
+            .prop("white_point")
+            .unwrap()
+            .f32_array(&options.white_point)
+            .unwrap();
         options_object.prop("brightness").unwrap().f32(options.brightness).unwrap();
         options_object.finish().unwrap();
     }
@@ -902,8 +919,8 @@ where
         }
         GeneratedMapping::Square { origin, size } => {
             object.prop("kind").unwrap().string("Square").unwrap();
-            write_f32_array(object.prop("origin").unwrap(), origin);
-            write_f32_array(object.prop("size").unwrap(), size);
+            object.prop("origin").unwrap().f32_array(origin).unwrap();
+            object.prop("size").unwrap().f32_array(size).unwrap();
         }
     }
     object.finish().unwrap();
@@ -935,33 +952,6 @@ where
         GeneratedEndpoint::Value(value) => object.prop("value").unwrap().f32(*value).unwrap(),
     }
     object.finish().unwrap();
-}
-
-fn write_string_map<W, T>(
-    value: SlotJsonValue<'_, W>,
-    map: &BTreeMap<String, T>,
-    mut write_value: impl FnMut(SlotJsonValue<'_, W>, &T),
-) where
-    W: SlotJsonWrite,
-    W::Error: core::fmt::Debug,
-{
-    let mut object = value.object().unwrap();
-    for (key, entry) in map {
-        write_value(object.prop(key).unwrap(), entry);
-    }
-    object.finish().unwrap();
-}
-
-fn write_f32_array<W, const N: usize>(value: SlotJsonValue<'_, W>, values: &[f32; N])
-where
-    W: SlotJsonWrite,
-    W::Error: core::fmt::Debug,
-{
-    let mut array = value.array().unwrap();
-    for value in values {
-        array.item().unwrap().f32(*value).unwrap();
-    }
-    array.finish().unwrap();
 }
 "#
     .to_string()

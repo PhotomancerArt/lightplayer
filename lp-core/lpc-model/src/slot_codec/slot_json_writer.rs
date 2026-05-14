@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::convert::Infallible;
 use core::fmt;
 
@@ -256,6 +256,32 @@ where
         let mut array = self.array()?;
         array.item()?.u32(bytes.len() as u32)?;
         array.item()?.base64_string(bytes)?;
+        array.finish()
+    }
+
+    pub fn string_key_map<T>(
+        self,
+        map: &BTreeMap<String, T>,
+        mut write_value: impl FnMut(
+            SlotJsonValue<'_, W>,
+            &T,
+        ) -> Result<(), SlotJsonWriterError<W::Error>>,
+    ) -> Result<(), SlotJsonWriterError<W::Error>> {
+        let mut object = self.object()?;
+        for (key, entry) in map {
+            write_value(object.prop(key)?, entry)?;
+        }
+        object.finish()
+    }
+
+    pub fn f32_array<const N: usize>(
+        self,
+        values: &[f32; N],
+    ) -> Result<(), SlotJsonWriterError<W::Error>> {
+        let mut array = self.array()?;
+        for value in values {
+            array.item()?.f32(*value)?;
+        }
         array.finish()
     }
 

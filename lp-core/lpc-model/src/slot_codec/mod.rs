@@ -251,6 +251,27 @@ name = "aux"
     }
 
     #[test]
+    fn json_writer_writes_string_maps_and_fixed_f32_arrays() {
+        let mut values = alloc::collections::BTreeMap::new();
+        values.insert("white_point".to_string(), [0.9, 1.0, 1.0]);
+
+        let mut out = Vec::new();
+        let mut writer = SlotJsonWriter::new(&mut out);
+        let mut object = writer.object().unwrap();
+        object
+            .prop("values")
+            .unwrap()
+            .string_key_map(&values, |value, item| value.f32_array(item))
+            .unwrap();
+        object.finish().unwrap();
+
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            r#"{"values":{"white_point":[0.9,1,1]}}"#
+        );
+    }
+
+    #[test]
     fn discriminator_reports_expected_values() {
         let registry = SlotShapeRegistry::default();
         let mut reader = SlotReader::new(
