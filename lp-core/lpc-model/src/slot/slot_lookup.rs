@@ -7,7 +7,7 @@ use crate::{
 use alloc::format;
 use alloc::string::String;
 
-/// Error returned while resolving a [`SlotPath`] against a slot root.
+/// Error returned while resolving a [`SlotPath`] against a slot object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlotLookupError {
     pub message: String,
@@ -29,14 +29,14 @@ impl core::fmt::Display for SlotLookupError {
 
 impl core::error::Error for SlotLookupError {}
 
-/// Resolve `path` inside a slot root using registry shape metadata.
+/// Resolve `path` inside a slot object using registry shape metadata.
 pub fn lookup_slot_data<'a>(
     root: &'a dyn SlotAccess,
     registry: &SlotShapeRegistry,
     path: &SlotPath,
 ) -> Result<SlotDataAccess<'a>, SlotLookupError> {
     let shape = registry.get(&root.shape_id()).ok_or_else(|| {
-        SlotLookupError::new(format!("missing slot root shape {}", root.shape_id()))
+        SlotLookupError::new(format!("missing slot path root shape {}", root.shape_id()))
     })?;
     lookup_in_shape(root.data(), shape, registry, path.segments())
 }
@@ -141,7 +141,6 @@ mod tests {
     use crate::{SlotShapeRegistry, StaticSlotShape, ValueSlot};
 
     #[derive(lpc_slot_macros::SlotRecord)]
-    #[slot(root)]
     struct TestRoot {
         output: ValueSlot<f32>,
     }

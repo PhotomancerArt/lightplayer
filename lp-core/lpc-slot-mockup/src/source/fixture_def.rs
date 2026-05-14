@@ -6,7 +6,6 @@ use lpc_model::{
 use super::{MappingConfig, shader_def::ScalarHint};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct FixtureDef {
     #[slot(skip)]
     pub kind: String,

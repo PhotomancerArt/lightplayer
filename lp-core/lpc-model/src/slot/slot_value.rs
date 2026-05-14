@@ -28,7 +28,7 @@ pub trait SlotValue: ToLpValue + FromLpValue {
 /// Shape of one complete value payload at a slot leaf.
 ///
 /// The `id` is a [`SlotShapeId`] so value shapes participate in the same shape
-/// identity space as slot roots. The `ty` validates the portable [`LpValue`]
+/// identity space as registered slot shapes. The `ty` validates the portable [`LpValue`]
 /// storage form. Metadata and editor hints attach to this semantic value
 /// contract, not to arbitrary storage types.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

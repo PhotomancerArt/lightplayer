@@ -6,7 +6,6 @@ use lpc_model::{
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 struct AccessorRoot {
     output: ValueSlot<f32>,
 }
@@ -62,7 +61,7 @@ fn registry_revision_mismatch_rejects_stale_accessor() {
     )
     .unwrap();
 
-    registry.unregister_root_with_version(Revision::new(100), &AccessorRoot::SHAPE_ID);
+    registry.unregister_shape_with_version(Revision::new(100), &AccessorRoot::SHAPE_ID);
 
     let err = match accessor.access(&root, &registry) {
         Ok(_) => panic!("expected stale accessor error"),

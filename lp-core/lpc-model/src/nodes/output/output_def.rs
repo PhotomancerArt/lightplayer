@@ -4,7 +4,7 @@ use crate::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 /// Authored GPIO output node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[slot(view)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     /// Authored slot bindings for output inputs.

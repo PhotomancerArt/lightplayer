@@ -4,7 +4,6 @@ use crate::source::MappingConfig;
 use lpc_model::{MapSlot, PositiveF32Slot, XySlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct FixtureNode {
     touches: MapSlot<u32, TouchState>,
     mapping_preview: MappingConfig,

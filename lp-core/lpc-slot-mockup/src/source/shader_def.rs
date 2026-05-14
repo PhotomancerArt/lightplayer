@@ -6,7 +6,6 @@ use lpc_model::{
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct ShaderDef {
     #[slot(skip)]
     pub kind: String,

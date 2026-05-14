@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use lpc_model::{ArtifactPathSlot, MapSlot, OptionSlot, ValueSlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct ProjectDef {
     #[slot(skip)]
     pub kind: String,

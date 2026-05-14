@@ -6,7 +6,7 @@ use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, Sourc
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[slot(view)]
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: SourcePathSlot,

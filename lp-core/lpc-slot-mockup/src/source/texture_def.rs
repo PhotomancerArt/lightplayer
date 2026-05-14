@@ -1,7 +1,6 @@
 use lpc_model::{BindingDefs, Dim2u, Dim2uSlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct TextureDef {
     #[slot(skip)]
     pub kind: String,

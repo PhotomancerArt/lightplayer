@@ -1,7 +1,6 @@
 use lpc_model::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct OutputDef {
     #[slot(skip)]
     pub kind: String,

@@ -1,7 +1,6 @@
 use lpc_model::ValueSlot;
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub struct OutputNode {
     frames_sent: ValueSlot<u32>,
 }

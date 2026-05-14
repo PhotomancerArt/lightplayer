@@ -5,7 +5,6 @@ use syn::{
 
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
-    pub(crate) root: bool,
 }
 
 pub(crate) struct FieldAttrs {
@@ -25,10 +24,7 @@ pub(crate) enum FieldShapeAttr {
 }
 
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
-    let mut parsed = ContainerAttrs {
-        shape_id: None,
-        root: false,
-    };
+    let mut parsed = ContainerAttrs { shape_id: None };
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("shape_id") {
@@ -36,7 +32,6 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
                 parsed.shape_id = Some(value.parse()?);
                 Ok(())
             } else if meta.path.is_ident("root") {
-                parsed.root = true;
                 Ok(())
             } else if meta.path.is_ident("view") {
                 Ok(())

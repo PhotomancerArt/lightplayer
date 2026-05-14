@@ -122,7 +122,7 @@ const fn fnv1a32(input: &str) -> u32 {
 }
 
 impl SlotShape {
-    /// Reference another registered root shape.
+    /// Reference another registered shape.
     pub fn reference(id: SlotShapeId) -> Self {
         Self::Ref { id }
     }
@@ -146,7 +146,7 @@ impl SlotShape {
         Self::Value { shape }
     }
 
-    /// Collect root shape ids referenced by this shape tree.
+    /// Collect registered shape ids referenced by this shape tree.
     ///
     /// The returned ids are not de-duplicated. Callers that care about unique
     /// ids can collect into a set; preserving traversal order keeps this helper

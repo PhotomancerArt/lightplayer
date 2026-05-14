@@ -11,7 +11,6 @@ use crate::{MapSlot, OptionSlot, ValueSlot};
 #[derive(
     Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord,
 )]
-#[slot(root)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
     #[slot(skip)]

@@ -8,7 +8,7 @@ The design is intentionally opinionated. This is not a general-purpose Rust
 serialization framework. It only needs to serve the shapes LightPlayer actually
 persists and sends:
 
-- slot roots
+- slot-modeled types
 - slot records
 - slot enums
 - slot maps
@@ -66,7 +66,7 @@ shape-agnostic syntax events
 slot-aware reader/writer helpers
         |
         v
-generated SlotCodec adapters for slot roots
+generated SlotCodec adapters for slot-modeled types
 ```
 
 Syntax sources do not know target slot shapes. They emit objects, properties,
@@ -75,7 +75,7 @@ streaming path because wire messages can be large. TOML may be tree-backed
 initially because authored TOML is usually small and TOML's table model is
 awkward to stream.
 
-Generated adapters know the target slot root. They should be thin and mostly
+Generated adapters know the target slot-modeled type. They should be thin and mostly
 delegate to shared helpers:
 
 ```rust
@@ -102,10 +102,10 @@ Rust:
 
 ```rust
 struct SlotCodecModule {
-    roots: Vec<SlotCodecRoot>,
+    types: Vec<SlotCodecType>,
 }
 
-struct SlotCodecRoot {
+struct SlotCodecType {
     rust_type: &'static str,
     kind: &'static str,
     fields: Vec<SlotCodecField>,
@@ -129,7 +129,7 @@ specialized bodies.
 Guidelines:
 
 - Generate field tables and small match loops, not full bespoke parsers for
-  every root.
+  every type.
 - Keep common leaf/map/array behavior in shared non-generic helpers where
   possible.
 - Avoid adding type parameters to generated functions unless they buy real
@@ -150,7 +150,7 @@ focused size pass:
 2. Record host binary/test size where useful.
 3. Record embedded firmware size for a representative build once production
    adoption begins.
-4. Identify generic helper functions that monomorphize across many roots or
+4. Identify generic helper functions that monomorphize across many types or
    value types.
 5. Convert high-fanout helpers to shared concrete helpers where that reduces
    binary size without making the API clumsy.
@@ -168,7 +168,7 @@ enough to debug.
 - direct JSON writing from typed objects
 - TOML loading through the same semantic reader API
 - `SlotData` as a reference/tooling path
-- generated adapters for slot roots and slot enums
+- generated adapters for slot-modeled types and slot enums
 - explicit errors for unknown fields, invalid discriminators, and unsupported
   syntax
 
@@ -183,8 +183,8 @@ enough to debug.
 
 ## Things To Revisit Before Production Adoption
 
-- Whether `kind = "TextureDef"` is enough for all root discriminators, or
-  whether some contexts need full slot-root ids such as `lp::TextureDef`.
+- Whether `kind = "TextureDef"` is enough for all top-level discriminators, or
+  whether some contexts need full slot shape ids such as `lp::TextureDef`.
 - How wrapper enums such as future `NodeDef` variants should appear in slot
   metadata.
 - Whether compact single-value enum syntax such as `{ ref = "..." }` and

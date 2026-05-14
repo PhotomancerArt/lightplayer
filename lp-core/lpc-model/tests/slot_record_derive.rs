@@ -6,7 +6,6 @@ use lpc_model::{
 };
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 struct DerivedRecord {
     enabled: ValueSlot<bool>,
     nested: NestedRecord,

@@ -53,45 +53,41 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         }
     }
 
-    let root_impls = if container_attrs.root || container_attrs.shape_id.is_some() {
-        let shape_id = if let Some(shape_id) = container_attrs.shape_id {
-            quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
-        } else {
-            quote! {
-                ::lpc_model::SlotShapeId::from_static_name(
-                    concat!(module_path!(), "::", stringify!(#ident)),
-                )
-            }
-        };
-
-        quote! {
-            impl ::lpc_model::SlotAccess for #ident {
-                fn shape_id(&self) -> ::lpc_model::SlotShapeId {
-                    <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID
-                }
-
-                fn data(&self) -> ::lpc_model::SlotDataAccess<'_> {
-                    ::lpc_model::SlotDataAccess::Record(self)
-                }
-            }
-
-            impl ::lpc_model::StaticSlotShape for #ident {
-                const SHAPE_ID: ::lpc_model::SlotShapeId =
-                    #shape_id;
-
-                fn shape_name() -> Option<&'static str> {
-                    Some(concat!(module_path!(), "::", stringify!(#ident)))
-                }
-
-                fn slot_shape() -> ::lpc_model::SlotShape {
-                    <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
-                }
-            }
-
-            impl ::lpc_model::StaticSlotAccess for #ident {}
-        }
+    let shape_id = if let Some(shape_id) = container_attrs.shape_id {
+        quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
     } else {
-        quote! {}
+        quote! {
+            ::lpc_model::SlotShapeId::from_static_name(
+                concat!(module_path!(), "::", stringify!(#ident)),
+            )
+        }
+    };
+
+    let static_impls = quote! {
+        impl ::lpc_model::SlotAccess for #ident {
+            fn shape_id(&self) -> ::lpc_model::SlotShapeId {
+                <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID
+            }
+
+            fn data(&self) -> ::lpc_model::SlotDataAccess<'_> {
+                ::lpc_model::SlotDataAccess::Record(self)
+            }
+        }
+
+        impl ::lpc_model::StaticSlotShape for #ident {
+            const SHAPE_ID: ::lpc_model::SlotShapeId =
+                #shape_id;
+
+            fn shape_name() -> Option<&'static str> {
+                Some(concat!(module_path!(), "::", stringify!(#ident)))
+            }
+
+            fn slot_shape() -> ::lpc_model::SlotShape {
+                <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
+            }
+        }
+
+        impl ::lpc_model::StaticSlotAccess for #ident {}
     };
 
     Ok(quote! {
@@ -128,7 +124,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
         }
 
-        #root_impls
+        #static_impls
     })
 }
 

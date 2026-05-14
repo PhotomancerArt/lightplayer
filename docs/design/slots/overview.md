@@ -20,15 +20,24 @@ how those values participate in the system.
 
 ## Main Concepts
 
-### Slot Roots
+### Registered Shapes
 
-A slot root is a top-level persisted or synchronized domain object. Project
-definitions, output definitions, texture definitions, fixture definitions, and
-shader definitions are examples.
+`SlotShape` is the schema node for the slot system. Any slot-modeled Rust type
+can have a stable `SlotShapeId` and be registered in a `SlotShapeRegistry`.
 
-Persisted domain objects should generally be slot roots. If something is loaded
-from disk or sent as a meaningful wire object, it should have a slot identity
-rather than living as custom serialization glue outside the slot model.
+The registry is a catalog of shapes. It does not own runtime objects and does
+not decide what is top-level in the app.
+
+### Path Roots
+
+A registered shape can be used as the root of a `SlotPath` traversal. In this
+context, root means "start of this path," not "top-level synced object."
+
+### Runtime Slot Objects
+
+`SlotAccess` is the runtime trait for an object that exposes slot data for a
+shape id. Engine, storage, and wire code can choose which objects are
+addressable in a given context.
 
 ### Slot Records
 
@@ -78,7 +87,7 @@ ref/value endpoint syntax.
 Slot metadata is the information needed to interpret a Rust domain type as a
 LightPlayer data shape:
 
-- root ids and discriminators
+- shape ids and discriminators
 - field names
 - field types
 - default behavior
@@ -90,7 +99,7 @@ Metadata should describe the domain shape, not duplicate business logic.
 
 ## Design Rules
 
-- Persisted domain concepts should be slot roots, slot records, slot enums,
+- Persisted domain concepts should be slot-modeled as records, enums,
   slot maps, slot options, or semantic slot leaves.
 - Unknown serialized fields are errors until schema versioning exists.
 - Defaults should come from Rust defaults or generated default instances rather

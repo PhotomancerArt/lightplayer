@@ -35,7 +35,7 @@ impl MockRuntime {
         // Shader runtime params are dynamic: the shape is owned by this loaded
         // node/artifact instance, not by the Rust `ShaderNode` type.
         registry
-            .register_root(shader_node.shape_id(), shader_node.shape())
+            .register_shape(shader_node.shape_id(), shader_node.shape())
             .unwrap();
 
         Self {
@@ -142,7 +142,7 @@ impl MockRuntime {
 
     fn refresh_shader_node_shape(&mut self) {
         self.registry
-            .replace_root(self.shader_node.shape_id(), self.shader_node.shape());
+            .replace_shape(self.shader_node.shape_id(), self.shader_node.shape());
     }
 
     fn apply_slot_mutation_result(

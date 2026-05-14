@@ -9,7 +9,7 @@ use crate::{
 
 /// Authored fixture node definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[slot(view)]
 pub struct FixtureDef {
     /// Full-frame render size used when materializing the fixture input.
     #[serde(default = "default_render_size")]

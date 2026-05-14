@@ -106,7 +106,7 @@ object rather than as type or variant names.
 ## Defaults
 
 Default values should come from Rust `Default` or generated default instances
-for the containing slot root/record. SlotCodec should not require a second
+for the containing slot-modeled type/record. SlotCodec should not require a second
 portable default blob for values.
 
 Leaf defaults are still conceptually leaf-level: the generated reader can start

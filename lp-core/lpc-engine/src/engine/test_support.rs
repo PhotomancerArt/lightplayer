@@ -366,7 +366,6 @@ pub(crate) struct DummyShaderNode {
 }
 
 #[derive(lpc_model::SlotRecord)]
-#[slot(root)]
 pub(crate) struct DummyShaderState {
     outputs: MapSlot<u32, ValueSlot<f32>>,
 }

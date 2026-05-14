@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 /// slots use `source`; produced slots use `target`. Direction is validated
 /// against the node's slot contract when the engine composes the project.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BindingDef {
