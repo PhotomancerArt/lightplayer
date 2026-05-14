@@ -33,14 +33,14 @@ Self {
   require a generic `SyntaxNode`.
 - JSON must prove the streaming shape early.
 
-## Current Code State
+## Previous Code State
 
 Relevant files:
 
-- `lp-core/lpc-wire/src/slot/native.rs`
+- `lp-core/lpc-wire/src/slot/native.rs` before the move to `lpc-model/src/slot_codec/`
 - `lp-core/lpc-slot-mockup/src/tests/native_stream.rs`
 
-Current `native.rs` includes:
+The old `native.rs` included:
 
 - `SyntaxEvent`
 - `SyntaxEventSource`

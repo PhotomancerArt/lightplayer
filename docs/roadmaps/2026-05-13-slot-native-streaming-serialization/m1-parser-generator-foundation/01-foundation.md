@@ -13,7 +13,7 @@ facade.
 
 ## Implementation Details
 
-- Keep the API in `lpc-wire` under `slot/native.rs` or a small submodule.
+- Keep the API in `lpc-model` under `slot_codec/`, split by concept.
 - Reuse `JsonWriter` instead of creating another low-level byte writer.
 - Keep errors path-aware enough for tests and future diagnostics.
 - Keep the code `no_std + alloc` compatible.
@@ -21,6 +21,6 @@ facade.
 ## Validation
 
 ```bash
-cargo test -p lpc-wire slot::native
+cargo test -p lpc-model slot_codec
+cargo test -p lpc-wire slot
 ```
-

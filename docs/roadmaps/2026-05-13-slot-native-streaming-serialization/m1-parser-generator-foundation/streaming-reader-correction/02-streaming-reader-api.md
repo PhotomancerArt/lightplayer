@@ -42,7 +42,9 @@ Out of scope:
 
 Relevant files:
 
-- `lp-core/lpc-wire/src/slot/native.rs`
+- `lp-core/lpc-model/src/slot_codec/`
+- `lp-core/lpc-wire/src/slot/mod.rs`
+- `lp-core/lpc-wire/src/lib.rs`
 - `lp-core/lpc-wire/src/slot/mod.rs`
 - `lp-core/lpc-wire/src/lib.rs`
 
@@ -83,7 +85,7 @@ Diagnostics:
 ## Validate
 
 ```bash
-cargo test -p lpc-wire slot::native
+cargo test -p lpc-model slot_codec
+cargo test -p lpc-wire slot
 cargo check -p lpc-wire --no-default-features
 ```
-

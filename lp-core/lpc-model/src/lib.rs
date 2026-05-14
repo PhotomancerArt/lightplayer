@@ -25,6 +25,7 @@ pub mod __private {
 pub mod binding;
 pub mod node;
 pub mod slot;
+pub mod slot_codec;
 pub mod value;
 
 // --- Shared surface (non-wire) ---------------------------------------------------------------

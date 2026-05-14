@@ -2,7 +2,7 @@
 
 ## Shape
 
-M1 introduces a small `lpc_wire::slot::native` module:
+M1 introduces a small `lpc_model::slot_codec` module:
 
 - `SyntaxEvent`: shape-agnostic syntax tokens.
 - `SyntaxEventSource`: pull-based event source trait.
@@ -44,5 +44,6 @@ object.finish()?;
 
 ## Validation
 
-- `cargo test -p lpc-wire slot::native`
+- `cargo test -p lpc-model slot_codec`
+- `cargo test -p lpc-wire slot`
 - `cargo test -p lpc-slot-mockup native_stream`

@@ -21,7 +21,7 @@ Out of scope:
 
 ## Code Organization Reminders
 
-- Prefer granular files with one main concept per file if `native.rs` is split.
+- Prefer granular files with one main concept per file under `lpc-model/src/slot_codec/`.
 - Keep parser helper functions lower in the file.
 - Avoid commented-out experiments.
 
@@ -37,8 +37,7 @@ Out of scope:
 
 Relevant files:
 
-- `lp-core/lpc-wire/src/slot/native.rs`
-- possible split under `lp-core/lpc-wire/src/slot/native/`
+- `lp-core/lpc-model/src/slot_codec/`
 
 Expected changes:
 
@@ -62,7 +61,7 @@ Constraints:
 ## Validate
 
 ```bash
-cargo test -p lpc-wire slot::native
+cargo test -p lpc-model slot_codec
+cargo test -p lpc-wire slot
 cargo check -p lpc-wire --no-default-features
 ```
-

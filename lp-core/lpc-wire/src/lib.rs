@@ -39,8 +39,9 @@ pub use server::{
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use slot::{
-    JsonSyntaxSource, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWriter, SlotReader,
-    SlotTomlError, SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource, TomlSyntaxSource,
+    ArrayReader, JsonSyntaxSource, ObjectReader, PropReader, SlotJsonArray, SlotJsonObject,
+    SlotJsonValue, SlotJsonWrite, SlotJsonWriter, SlotJsonWriterError, SlotReader, SlotTomlError,
+    SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource, TomlSyntaxSource, ValueReader,
     WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
     WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,

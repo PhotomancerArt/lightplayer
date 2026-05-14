@@ -49,8 +49,8 @@ Expected final state:
 
 ```bash
 cargo fmt
-cargo test -p lpc-wire slot::native
+cargo test -p lpc-model slot_codec
+cargo test -p lpc-wire slot
 cargo test -p lpc-slot-mockup native_stream
 cargo check -p lpc-wire --no-default-features
 ```
-

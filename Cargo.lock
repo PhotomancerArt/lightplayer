@@ -4145,6 +4145,7 @@ dependencies = [
 name = "lpc-model"
 version = "40.0.0"
 dependencies = [
+ "base64",
  "hashbrown 0.15.5",
  "lpc-slot-codegen",
  "lpc-slot-macros",

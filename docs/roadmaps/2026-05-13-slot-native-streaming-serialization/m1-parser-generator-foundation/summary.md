@@ -2,11 +2,11 @@
 
 ## What was built
 
-- Added `lpc_wire::slot::native` with syntax events, event sources, a JSON
+- Added `lpc_model::slot_codec` with syntax events, event sources, a JSON
   syntax parser, and a TOML value adapter.
 - Added a streaming `SlotReader` as the first manual construction target for
   future generated code.
-- Added `SlotJsonWriter` as a slot-native facade over the existing JSON writer,
+- Added `SlotJsonWriter` in `lpc-model` as a slot-native JSON writer,
   including length-prefixed base64 tuple output.
 - Added wire-level tests for JSON events, TOML adapter semantics, chunked
   strings, typed reads, and binary tuple decoding.
