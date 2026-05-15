@@ -401,6 +401,12 @@ kind = "fixture"
 color_order = "grb"
 gamma_correction = true
 
+transform = [
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.0],
+]
+
 [render_size]
 width = 16
 height = 16
@@ -421,14 +427,6 @@ order = "inner_first"
 [mapping.paths.0.ring_lamp_counts]
 0 = 1
 1 = 96
-
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 0.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
 
 [brightness]
 value = 0.8

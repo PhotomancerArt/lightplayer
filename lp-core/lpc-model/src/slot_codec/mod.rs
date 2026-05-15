@@ -1,20 +1,24 @@
-//! Slot-native streaming reader foundation.
+//! Slot-native streaming codec foundation.
 //!
 //! Syntax sources emit shape-agnostic events. [`SlotReader`] layers domain
 //! construction helpers on top without materializing a generic syntax tree.
 
 mod json_syntax_source;
-mod slot_json_writer;
+mod slot_codec;
 mod slot_reader;
+mod slot_value_codec;
+mod slot_writer;
 mod syntax;
 mod toml_syntax_source;
 
 pub use json_syntax_source::JsonSyntaxSource;
-pub use slot_json_writer::{
-    SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWrite, SlotJsonWriter,
-    SlotJsonWriterError,
-};
+pub use slot_codec::SlotCodec;
 pub use slot_reader::{ArrayReader, ObjectReader, PropReader, SlotReader, ValueReader};
+pub use slot_value_codec::{read_lp_value, write_lp_value};
+pub use slot_writer::{
+    SlotArrayWriter, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWrite, SlotJsonWriter,
+    SlotJsonWriterError, SlotObjectWriter, SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter,
+};
 pub use syntax::{SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource};
 pub use toml_syntax_source::TomlSyntaxSource;
 
@@ -272,6 +276,169 @@ name = "aux"
         assert_eq!(
             core::str::from_utf8(&out).unwrap(),
             r#"{"values":{"white_point":[0.9,1,1]}}"#
+        );
+    }
+
+    #[test]
+    fn slot_codec_reads_and_writes_one_cursor_value() {
+        #[derive(Debug, PartialEq, Eq)]
+        struct PinRecord {
+            pin: u32,
+        }
+
+        impl SlotCodec for PinRecord {
+            fn read_slot<S>(value: ValueReader<'_, '_, S>) -> Result<Self, SyntaxError>
+            where
+                S: SyntaxEventSource,
+            {
+                const FIELDS: &[&str] = &["pin"];
+                let mut pin = None;
+                let mut object = value.object()?;
+                while let Some(mut prop) = object.next_prop()? {
+                    match prop.name() {
+                        "pin" => pin = Some(prop.value().u32()?),
+                        other => return Err(prop.unknown_field(other, FIELDS)),
+                    }
+                }
+                Ok(Self {
+                    pin: pin.ok_or_else(|| object.missing_required_field("pin"))?,
+                })
+            }
+
+            fn write_slot<W>(
+                &self,
+                value: SlotValueWriter<'_, W>,
+            ) -> Result<(), SlotWriteError<W::Error>>
+            where
+                W: SlotWrite,
+            {
+                let mut object = value.object()?;
+                object.prop("pin")?.u32(self.pin)?;
+                object.finish()
+            }
+        }
+
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"record":{"pin":18}}"#).unwrap(),
+            &registry,
+        );
+        let mut root = reader.object().unwrap();
+        let mut prop = root.next_prop().unwrap().unwrap();
+        let record = PinRecord::read_slot(prop.value()).unwrap();
+        assert_eq!(record, PinRecord { pin: 18 });
+
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        let mut object = writer.object().unwrap();
+        record.write_slot(object.prop("record").unwrap()).unwrap();
+        object.finish().unwrap();
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            r#"{"record":{"pin":18}}"#
+        );
+    }
+
+    #[test]
+    fn slot_codec_round_trips_value_slots_through_lp_value_shapes() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(
+                r#"{"size":{"width":64,"height":32},"transform":[[1,0,2],[0,1,3],[0,0,1]]}"#,
+            )
+            .unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+
+        let size = {
+            let mut prop = object.next_prop().unwrap().unwrap();
+            crate::Dim2uSlot::read_slot(prop.value()).unwrap()
+        };
+        assert_eq!(
+            *size.value(),
+            crate::Dim2u {
+                width: 64,
+                height: 32
+            }
+        );
+
+        let transform = {
+            let mut prop = object.next_prop().unwrap().unwrap();
+            crate::Affine2dSlot::read_slot(prop.value()).unwrap()
+        };
+        assert_eq!(
+            *transform.value(),
+            crate::Affine2d {
+                m00: 1.0,
+                m01: 0.0,
+                m10: 0.0,
+                m11: 1.0,
+                tx: 2.0,
+                ty: 3.0,
+            }
+        );
+
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        let mut object = writer.object().unwrap();
+        size.write_slot(object.prop("size").unwrap()).unwrap();
+        transform
+            .write_slot(object.prop("transform").unwrap())
+            .unwrap();
+        object.finish().unwrap();
+
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            r#"{"size":{"width":64,"height":32},"transform":[[1,0,2],[0,1,3],[0,0,1]]}"#
+        );
+    }
+
+    #[test]
+    fn slot_codec_round_trips_map_and_option_slots() {
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"counts":{"0":12,"1":24},"enabled":true}"#).unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+
+        let counts = {
+            let mut prop = object.next_prop().unwrap().unwrap();
+            crate::MapSlot::<u32, crate::ValueSlot<u32>>::read_slot(prop.value()).unwrap()
+        };
+        assert_eq!(
+            counts.entries.get(&0).map(crate::ValueSlot::value),
+            Some(&12)
+        );
+        assert_eq!(
+            counts.entries.get(&1).map(crate::ValueSlot::value),
+            Some(&24)
+        );
+
+        let enabled = {
+            let mut prop = object.next_prop().unwrap().unwrap();
+            crate::OptionSlot::<crate::ValueSlot<bool>>::read_slot(prop.value()).unwrap()
+        };
+        assert!(enabled.should_write_slot());
+        assert_eq!(
+            enabled.data.as_ref().map(crate::ValueSlot::value),
+            Some(&true)
+        );
+
+        let empty = crate::OptionSlot::<crate::ValueSlot<bool>>::none();
+        assert!(!empty.should_write_slot());
+
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        let mut object = writer.object().unwrap();
+        counts.write_slot(object.prop("counts").unwrap()).unwrap();
+        enabled.write_slot(object.prop("enabled").unwrap()).unwrap();
+        object.finish().unwrap();
+
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            r#"{"counts":{"0":12,"1":24},"enabled":true}"#
         );
     }
 

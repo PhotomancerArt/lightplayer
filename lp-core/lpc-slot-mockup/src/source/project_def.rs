@@ -59,3 +59,9 @@ impl NodeInvocationDef {
         self.artifact.value().as_str()
     }
 }
+
+impl Default for NodeInvocationDef {
+    fn default() -> Self {
+        Self::new("")
+    }
+}

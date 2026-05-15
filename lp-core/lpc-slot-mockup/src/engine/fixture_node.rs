@@ -53,3 +53,9 @@ impl TouchState {
         }
     }
 }
+
+impl Default for TouchState {
+    fn default() -> Self {
+        Self::new([0.0, 0.0], 1.0)
+    }
+}

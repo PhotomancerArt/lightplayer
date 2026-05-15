@@ -169,6 +169,12 @@ impl ShaderParamDef {
     }
 }
 
+impl Default for ShaderParamDef {
+    fn default() -> Self {
+        Self::new("", "", 1.0, None)
+    }
+}
+
 impl ScalarHint {
     pub fn new(value: f32) -> Self {
         Self {
@@ -182,5 +188,11 @@ impl ScalarHint {
 
     pub fn value(&self) -> f32 {
         self.value.value().0
+    }
+}
+
+impl Default for ScalarHint {
+    fn default() -> Self {
+        Self::new(1.0)
     }
 }

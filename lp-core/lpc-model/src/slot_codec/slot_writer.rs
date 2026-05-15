@@ -8,19 +8,30 @@ use core::fmt;
 
 use base64::Engine;
 
+pub type SlotJsonArray<'a, W> = SlotArrayWriter<'a, W>;
+pub type SlotJsonObject<'a, W> = SlotObjectWriter<'a, W>;
+pub type SlotJsonValue<'a, W> = SlotValueWriter<'a, W>;
+pub type SlotJsonWriter<W> = SlotWriter<W>;
+pub type SlotJsonWriterError<E> = SlotWriteError<E>;
+
 /// Byte sink used by the slot JSON writer.
 ///
 /// This mirrors only the operation the slot codec needs, so embedded callers
 /// can adapt bounded/chunked sinks without depending on `std::io::Write`.
-pub trait SlotJsonWrite {
+pub trait SlotWrite {
     type Error;
 
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
-impl<T> SlotJsonWrite for &mut T
+/// Compatibility alias for the first JSON-only writer prototype.
+pub trait SlotJsonWrite: SlotWrite {}
+
+impl<T> SlotJsonWrite for T where T: SlotWrite + ?Sized {}
+
+impl<T> SlotWrite for &mut T
 where
-    T: SlotJsonWrite + ?Sized,
+    T: SlotWrite + ?Sized,
 {
     type Error = T::Error;
 
@@ -29,7 +40,7 @@ where
     }
 }
 
-impl SlotJsonWrite for Vec<u8> {
+impl SlotWrite for Vec<u8> {
     type Error = Infallible;
 
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
@@ -39,12 +50,12 @@ impl SlotJsonWrite for Vec<u8> {
 }
 
 #[derive(Debug)]
-pub enum SlotJsonWriterError<E> {
+pub enum SlotWriteError<E> {
     Write(E),
     Serialize,
 }
 
-impl<E: fmt::Display> fmt::Display for SlotJsonWriterError<E> {
+impl<E: fmt::Display> fmt::Display for SlotWriteError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Write(error) => write!(f, "{error}"),
@@ -54,16 +65,16 @@ impl<E: fmt::Display> fmt::Display for SlotJsonWriterError<E> {
 }
 
 /// Slot-native JSON writer facade.
-pub struct SlotJsonWriter<W>
+pub struct SlotWriter<W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
     out: W,
 }
 
-impl<W> SlotJsonWriter<W>
+impl<W> SlotWriter<W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
     pub fn new(out: W) -> Self {
         Self { out }
@@ -73,29 +84,27 @@ where
         self.out
     }
 
-    pub fn object(&mut self) -> Result<SlotJsonObject<'_, W>, SlotJsonWriterError<W::Error>> {
+    pub fn object(&mut self) -> Result<SlotObjectWriter<'_, W>, SlotWriteError<W::Error>> {
         self.write_raw(b"{")?;
-        Ok(SlotJsonObject {
+        Ok(SlotObjectWriter {
             writer: self,
             first: true,
         })
     }
 
-    fn array(&mut self) -> Result<SlotJsonArray<'_, W>, SlotJsonWriterError<W::Error>> {
+    fn array(&mut self) -> Result<SlotArrayWriter<'_, W>, SlotWriteError<W::Error>> {
         self.write_raw(b"[")?;
-        Ok(SlotJsonArray {
+        Ok(SlotArrayWriter {
             writer: self,
             first: true,
         })
     }
 
-    fn write_raw(&mut self, bytes: &[u8]) -> Result<(), SlotJsonWriterError<W::Error>> {
-        self.out
-            .write_all(bytes)
-            .map_err(SlotJsonWriterError::Write)
+    fn write_raw(&mut self, bytes: &[u8]) -> Result<(), SlotWriteError<W::Error>> {
+        self.out.write_all(bytes).map_err(SlotWriteError::Write)
     }
 
-    fn write_json_string(&mut self, value: &str) -> Result<(), SlotJsonWriterError<W::Error>> {
+    fn write_json_string(&mut self, value: &str) -> Result<(), SlotWriteError<W::Error>> {
         self.write_raw(b"\"")?;
         for ch in value.chars() {
             match ch {
@@ -121,23 +130,23 @@ where
         self.write_raw(b"\"")
     }
 
-    fn write_display<T>(&mut self, value: T) -> Result<(), SlotJsonWriterError<W::Error>>
+    fn write_display<T>(&mut self, value: T) -> Result<(), SlotWriteError<W::Error>>
     where
         T: fmt::Display,
     {
-        struct Adapter<'a, W: SlotJsonWrite>(&'a mut SlotJsonWriter<W>);
+        struct Adapter<'a, W: SlotWrite>(&'a mut SlotWriter<W>);
 
-        impl<W: SlotJsonWrite> fmt::Write for Adapter<'_, W> {
+        impl<W: SlotWrite> fmt::Write for Adapter<'_, W> {
             fn write_str(&mut self, s: &str) -> fmt::Result {
                 self.0.write_raw(s.as_bytes()).map_err(|_| fmt::Error)
             }
         }
 
         fmt::write(&mut Adapter(self), format_args!("{value}"))
-            .map_err(|_| SlotJsonWriterError::Serialize)
+            .map_err(|_| SlotWriteError::Serialize)
     }
 
-    fn write_hex_nibble(&mut self, nibble: u8) -> Result<(), SlotJsonWriterError<W::Error>> {
+    fn write_hex_nibble(&mut self, nibble: u8) -> Result<(), SlotWriteError<W::Error>> {
         let byte = match nibble {
             0..=9 => b'0' + nibble,
             _ => b'a' + (nibble - 10),
@@ -146,35 +155,32 @@ where
     }
 }
 
-pub struct SlotJsonObject<'a, W>
+pub struct SlotObjectWriter<'a, W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
-    writer: &'a mut SlotJsonWriter<W>,
+    writer: &'a mut SlotWriter<W>,
     first: bool,
 }
 
-impl<'a, W> SlotJsonObject<'a, W>
+impl<'a, W> SlotObjectWriter<'a, W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
-    pub fn prop(
-        &mut self,
-        name: &str,
-    ) -> Result<SlotJsonValue<'_, W>, SlotJsonWriterError<W::Error>> {
+    pub fn prop(&mut self, name: &str) -> Result<SlotValueWriter<'_, W>, SlotWriteError<W::Error>> {
         self.before_entry()?;
         self.writer.write_json_string(name)?;
         self.writer.write_raw(b":")?;
-        Ok(SlotJsonValue {
+        Ok(SlotValueWriter {
             writer: self.writer,
         })
     }
 
-    pub fn finish(self) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn finish(self) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_raw(b"}")
     }
 
-    fn before_entry(&mut self) -> Result<(), SlotJsonWriterError<W::Error>> {
+    fn before_entry(&mut self) -> Result<(), SlotWriteError<W::Error>> {
         if self.first {
             self.first = false;
         } else {
@@ -184,30 +190,30 @@ where
     }
 }
 
-pub struct SlotJsonArray<'a, W>
+pub struct SlotArrayWriter<'a, W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
-    writer: &'a mut SlotJsonWriter<W>,
+    writer: &'a mut SlotWriter<W>,
     first: bool,
 }
 
-impl<'a, W> SlotJsonArray<'a, W>
+impl<'a, W> SlotArrayWriter<'a, W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
-    pub fn item(&mut self) -> Result<SlotJsonValue<'_, W>, SlotJsonWriterError<W::Error>> {
+    pub fn item(&mut self) -> Result<SlotValueWriter<'_, W>, SlotWriteError<W::Error>> {
         self.before_entry()?;
-        Ok(SlotJsonValue {
+        Ok(SlotValueWriter {
             writer: self.writer,
         })
     }
 
-    pub fn finish(self) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn finish(self) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_raw(b"]")
     }
 
-    fn before_entry(&mut self) -> Result<(), SlotJsonWriterError<W::Error>> {
+    fn before_entry(&mut self) -> Result<(), SlotWriteError<W::Error>> {
         if self.first {
             self.first = false;
         } else {
@@ -217,50 +223,50 @@ where
     }
 }
 
-pub struct SlotJsonValue<'a, W>
+pub struct SlotValueWriter<'a, W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
-    writer: &'a mut SlotJsonWriter<W>,
+    writer: &'a mut SlotWriter<W>,
 }
 
-impl<'a, W> SlotJsonValue<'a, W>
+impl<'a, W> SlotValueWriter<'a, W>
 where
-    W: SlotJsonWrite,
+    W: SlotWrite,
 {
-    pub fn object(self) -> Result<SlotJsonObject<'a, W>, SlotJsonWriterError<W::Error>> {
+    pub fn object(self) -> Result<SlotObjectWriter<'a, W>, SlotWriteError<W::Error>> {
         self.writer.object()
     }
 
-    pub fn array(self) -> Result<SlotJsonArray<'a, W>, SlotJsonWriterError<W::Error>> {
+    pub fn array(self) -> Result<SlotArrayWriter<'a, W>, SlotWriteError<W::Error>> {
         self.writer.array()
     }
 
-    pub fn f32(self, value: f32) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn f32(self, value: f32) -> Result<(), SlotWriteError<W::Error>> {
         if !value.is_finite() {
-            return Err(SlotJsonWriterError::Serialize);
+            return Err(SlotWriteError::Serialize);
         }
         self.writer.write_display(value)
     }
 
-    pub fn u32(self, value: u32) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn u32(self, value: u32) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_display(value)
     }
 
-    pub fn i32(self, value: i32) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn i32(self, value: i32) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_display(value)
     }
 
-    pub fn bool(self, value: bool) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn bool(self, value: bool) -> Result<(), SlotWriteError<W::Error>> {
         self.writer
             .write_raw(if value { b"true" } else { b"false" })
     }
 
-    pub fn string(self, value: &str) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn string(self, value: &str) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_json_string(value)
     }
 
-    pub fn binary_base64_tuple(self, bytes: &[u8]) -> Result<(), SlotJsonWriterError<W::Error>> {
+    pub fn binary_base64_tuple(self, bytes: &[u8]) -> Result<(), SlotWriteError<W::Error>> {
         let mut array = self.array()?;
         array.item()?.u32(bytes.len() as u32)?;
         array.item()?.base64_string(bytes)?;
@@ -270,11 +276,8 @@ where
     pub fn string_key_map<T>(
         self,
         map: &BTreeMap<String, T>,
-        mut write_value: impl FnMut(
-            SlotJsonValue<'_, W>,
-            &T,
-        ) -> Result<(), SlotJsonWriterError<W::Error>>,
-    ) -> Result<(), SlotJsonWriterError<W::Error>> {
+        mut write_value: impl FnMut(SlotValueWriter<'_, W>, &T) -> Result<(), SlotWriteError<W::Error>>,
+    ) -> Result<(), SlotWriteError<W::Error>> {
         let mut object = self.object()?;
         for (key, entry) in map {
             write_value(object.prop(key)?, entry)?;
@@ -285,11 +288,8 @@ where
     pub fn u32_key_map<T>(
         self,
         map: &BTreeMap<u32, T>,
-        mut write_value: impl FnMut(
-            SlotJsonValue<'_, W>,
-            &T,
-        ) -> Result<(), SlotJsonWriterError<W::Error>>,
-    ) -> Result<(), SlotJsonWriterError<W::Error>> {
+        mut write_value: impl FnMut(SlotValueWriter<'_, W>, &T) -> Result<(), SlotWriteError<W::Error>>,
+    ) -> Result<(), SlotWriteError<W::Error>> {
         let mut object = self.object()?;
         for (key, entry) in map {
             write_value(object.prop(&key.to_string())?, entry)?;
@@ -300,7 +300,7 @@ where
     pub fn f32_array<const N: usize>(
         self,
         values: &[f32; N],
-    ) -> Result<(), SlotJsonWriterError<W::Error>> {
+    ) -> Result<(), SlotWriteError<W::Error>> {
         let mut array = self.array()?;
         for value in values {
             array.item()?.f32(*value)?;
@@ -308,7 +308,7 @@ where
         array.finish()
     }
 
-    fn base64_string(self, bytes: &[u8]) -> Result<(), SlotJsonWriterError<W::Error>> {
+    fn base64_string(self, bytes: &[u8]) -> Result<(), SlotWriteError<W::Error>> {
         self.writer.write_raw(b"\"")?;
         let engine = base64::engine::general_purpose::STANDARD;
         let mut encoded = [0u8; 4];
@@ -316,7 +316,7 @@ where
         for chunk in bytes.chunks(3) {
             let len = engine
                 .encode_slice(chunk, &mut encoded)
-                .map_err(|_| SlotJsonWriterError::Serialize)?;
+                .map_err(|_| SlotWriteError::Serialize)?;
             self.writer.write_raw(&encoded[..len])?;
         }
 
