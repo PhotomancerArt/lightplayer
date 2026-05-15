@@ -35,32 +35,6 @@ impl FixtureDef {
         }
     }
 
-    pub fn from_codec(
-        render_size: Dim2u,
-        mapping: MappingConfig,
-        color_order: ColorOrderValue,
-        transform: Affine2d,
-        brightness: Option<ScalarHint>,
-        gamma_correction: Option<bool>,
-    ) -> Self {
-        Self {
-            render_size: Dim2uSlot::new(render_size),
-            bindings: BindingDefs::default(),
-            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
-            mapping,
-            color_order: ColorOrderSlot::new(color_order),
-            transform: Affine2dSlot::new(transform),
-            brightness: match brightness {
-                Some(brightness) => OptionSlot::some(brightness),
-                None => OptionSlot::none(),
-            },
-            gamma_correction: match gamma_correction {
-                Some(value) => OptionSlot::some(ValueSlot::new(value)),
-                None => OptionSlot::none(),
-            },
-        }
-    }
-
     pub fn switch_mapping_to_square(&mut self) {
         self.mapping = MappingConfig::square();
     }

@@ -330,6 +330,9 @@ fn decode_lp_value(ty: &LpType, value: &Value, path: &Path) -> Result<LpValue, S
         }
         LpType::Vec3 => fixed_f32_array(value, 3, path)
             .map(|values| LpValue::Vec3([values[0], values[1], values[2]])),
+        LpType::Mat2x2 => fixed_f32_matrix(value, path).map(LpValue::Mat2x2),
+        LpType::Mat3x3 => fixed_f32_matrix(value, path).map(LpValue::Mat3x3),
+        LpType::Mat4x4 => fixed_f32_matrix(value, path).map(LpValue::Mat4x4),
         LpType::Struct { name, fields } => {
             let table = value
                 .as_table()
@@ -396,6 +399,9 @@ fn encode_lp_value(ty: &LpType, value: &LpValue, path: &Path) -> Result<Value, S
                 .map(|value| Value::Float(f64::from(*value)))
                 .collect(),
         )),
+        (LpType::Mat2x2, LpValue::Mat2x2(values)) => Ok(encode_f32_matrix(values)),
+        (LpType::Mat3x3, LpValue::Mat3x3(values)) => Ok(encode_f32_matrix(values)),
+        (LpType::Mat4x4, LpValue::Mat4x4(values)) => Ok(encode_f32_matrix(values)),
         (LpType::Struct { fields, .. }, LpValue::Struct { fields: values, .. }) => {
             let mut table = toml::Table::new();
             for field in fields {
@@ -481,6 +487,41 @@ fn fixed_f32_array(value: &Value, len: usize, path: &Path) -> Result<Vec<f32>, S
     values.iter().map(|value| float(value, path)).collect()
 }
 
+fn fixed_f32_matrix<const N: usize>(
+    value: &Value,
+    path: &Path,
+) -> Result<[[f32; N]; N], SlotTomlError> {
+    let rows = array(value, path)?;
+    if rows.len() != N {
+        return Err(SlotTomlError::new(
+            path,
+            format!("expected matrix row count {N}"),
+        ));
+    }
+
+    let mut matrix = [[0.0; N]; N];
+    for (row_index, row_value) in rows.iter().enumerate() {
+        let row = fixed_f32_array(row_value, N, path)?;
+        matrix[row_index].copy_from_slice(&row);
+    }
+    Ok(matrix)
+}
+
+fn encode_f32_matrix<const N: usize>(matrix: &[[f32; N]; N]) -> Value {
+    Value::Array(
+        matrix
+            .iter()
+            .map(|row| {
+                Value::Array(
+                    row.iter()
+                        .map(|value| Value::Float(f64::from(*value)))
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
+}
+
 #[derive(Default)]
 struct Path {
     segments: Vec<String>,
@@ -513,5 +554,43 @@ impl fmt::Display for Path {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn mat3x3_lp_value_round_trips_toml_arrays() {
+        let value = LpValue::Mat3x3([[1.0, 0.25, 12.0], [-0.5, 2.0, -8.0], [0.0, 0.0, 1.0]]);
+
+        let encoded =
+            encode_lp_value(&LpType::Mat3x3, &value, &Path::default()).expect("encode matrix");
+        assert_eq!(
+            encoded,
+            Value::Array(vec![
+                Value::Array(vec![
+                    Value::Float(1.0),
+                    Value::Float(0.25),
+                    Value::Float(12.0)
+                ]),
+                Value::Array(vec![
+                    Value::Float(-0.5),
+                    Value::Float(2.0),
+                    Value::Float(-8.0)
+                ]),
+                Value::Array(vec![
+                    Value::Float(0.0),
+                    Value::Float(0.0),
+                    Value::Float(1.0)
+                ]),
+            ])
+        );
+        assert_eq!(
+            decode_lp_value(&LpType::Mat3x3, &encoded, &Path::default()).expect("decode matrix"),
+            value
+        );
     }
 }

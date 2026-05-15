@@ -56,21 +56,6 @@ impl ShaderDef {
         }
     }
 
-    pub fn from_codec(
-        glsl_path: String,
-        render_order: i32,
-        glsl_opts: GlslOpts,
-        param_defs: BTreeMap<String, ShaderParamDef>,
-    ) -> Self {
-        Self {
-            glsl_path: SourcePathSlot::new(SourcePath(glsl_path)),
-            render_order: RenderOrderSlot::new(RenderOrder(render_order)),
-            bindings: BindingDefs::default(),
-            glsl_opts,
-            param_defs: MapSlot::new(param_defs),
-        }
-    }
-
     pub fn glsl_path(&self) -> &str {
         self.glsl_path.value().as_str()
     }

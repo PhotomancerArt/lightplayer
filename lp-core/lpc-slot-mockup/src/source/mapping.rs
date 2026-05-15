@@ -58,14 +58,10 @@ impl MappingConfig {
     }
 
     pub fn square() -> Self {
-        Self::square_from_codec([0.1, 0.2], [0.8, 0.7])
-    }
-
-    pub fn square_from_codec(origin: [f32; 2], size: [f32; 2]) -> Self {
         Self::Square {
             variant_revision: current_revision(),
-            origin: XySlot::new(Xy(origin)),
-            size: XySlot::new(Xy(size)),
+            origin: XySlot::new(Xy([0.1, 0.2])),
+            size: XySlot::new(Xy([0.8, 0.7])),
         }
     }
 

@@ -53,10 +53,11 @@ pub fn generate_slot_views(config: SlotViewCodegenConfig) -> Result<(), SlotShap
     fs::write(config.out_file, render_slot_views(&views)).map_err(SlotShapeCodegenError::Io)
 }
 
-/// Generate the first compact slot-codec mockup module.
+/// Generate the mockup slot-codec module.
 ///
-/// This is intentionally narrow: M2 uses it to validate the generated-code
-/// shape and build-script plumbing before broadening to discovered model types.
+/// This remains mockup-specific while the codec model is being proven, but it
+/// now constructs the slotted source records directly instead of depending on
+/// codec-only constructors in the domain model.
 pub fn generate_mockup_slot_codec(
     config: MockupSlotCodecCodegenConfig,
 ) -> Result<(), SlotShapeCodegenError> {
@@ -127,6 +128,21 @@ struct StaticRegisteredShape {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct StaticSlotRecord {
+    type_path: String,
+    type_name: String,
+    fields: Vec<StaticSlotRecordField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StaticSlotRecordField {
+    rust_name: String,
+    slot_name: String,
+    type_name: String,
+    is_enum: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct StaticSlotView {
     type_path: String,
     view_name: String,
@@ -189,9 +205,9 @@ fn discover_static_registered_shapes(
     Ok(shapes)
 }
 
-fn discover_static_slot_views(
+fn discover_static_slot_records(
     src_dir: &Path,
-) -> Result<Vec<StaticSlotView>, SlotShapeCodegenError> {
+) -> Result<Vec<StaticSlotRecord>, SlotShapeCodegenError> {
     if !src_dir.is_dir() {
         return Err(SlotShapeCodegenError::MissingSrcDir(src_dir.to_path_buf()));
     }
@@ -200,7 +216,7 @@ fn discover_static_slot_views(
     collect_rust_files(src_dir, &mut files)?;
     files.sort();
 
-    let mut views = Vec::new();
+    let mut records = Vec::new();
     for path in files {
         let source = fs::read_to_string(&path).map_err(SlotShapeCodegenError::Io)?;
         let syntax = syn::parse_file(&source).map_err(|source| SlotShapeCodegenError::Parse {
@@ -215,15 +231,39 @@ fn discover_static_slot_views(
                 continue;
             }
             let type_name = item.ident.to_string();
-            views.push(StaticSlotView {
+            records.push(StaticSlotRecord {
                 type_path: infer_type_path(src_dir, &path, &type_name)?,
-                view_name: format!("{type_name}View"),
-                fields: slot_view_fields(&item),
+                fields: static_slot_record_fields(&item),
+                type_name,
             });
         }
     }
 
-    Ok(views)
+    records.sort_by(|a, b| a.type_path.cmp(&b.type_path));
+    Ok(records)
+}
+
+fn discover_static_slot_views(
+    src_dir: &Path,
+) -> Result<Vec<StaticSlotView>, SlotShapeCodegenError> {
+    Ok(discover_static_slot_records(src_dir)?
+        .into_iter()
+        .map(|record| StaticSlotView {
+            view_name: format!("{}View", record.type_name),
+            type_path: record.type_path,
+            fields: record
+                .fields
+                .into_iter()
+                .map(|field| StaticSlotViewField {
+                    accessor_name: format!("{}_accessor", field.rust_name),
+                    some_accessor_name: (field.type_name == "OptionSlot")
+                        .then(|| format!("{}_some_accessor", field.rust_name)),
+                    method_name: field.rust_name,
+                    slot_name: field.slot_name,
+                })
+                .collect(),
+        })
+        .collect())
 }
 
 fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), SlotShapeCodegenError> {
@@ -253,7 +293,7 @@ fn has_derive(attrs: &[syn::Attribute], derive_name: &str) -> bool {
         })
 }
 
-fn slot_view_fields(item: &syn::ItemStruct) -> Vec<StaticSlotViewField> {
+fn static_slot_record_fields(item: &syn::ItemStruct) -> Vec<StaticSlotRecordField> {
     let syn::Fields::Named(fields) = &item.fields else {
         return Vec::new();
     };
@@ -262,27 +302,16 @@ fn slot_view_fields(item: &syn::ItemStruct) -> Vec<StaticSlotViewField> {
         .iter()
         .filter_map(|field| {
             let ident = field.ident.as_ref()?;
-            let method_name = ident.to_string();
-            let slot_name = slot_field_name(field).unwrap_or_else(|| method_name.clone());
-            Some(StaticSlotViewField {
-                accessor_name: format!("{ident}_accessor"),
-                some_accessor_name: type_is_option_slot(&field.ty)
-                    .then(|| format!("{ident}_some_accessor")),
-                method_name,
+            let rust_name = ident.to_string();
+            let slot_name = slot_field_name(field).unwrap_or_else(|| rust_name.clone());
+            Some(StaticSlotRecordField {
+                rust_name,
                 slot_name,
+                type_name: field_type_name(&field.ty),
+                is_enum: slot_field_is_enum(field),
             })
         })
         .collect()
-}
-
-fn type_is_option_slot(ty: &syn::Type) -> bool {
-    let syn::Type::Path(path) = ty else {
-        return false;
-    };
-    path.path
-        .segments
-        .last()
-        .is_some_and(|segment| segment.ident == "OptionSlot")
 }
 
 fn slot_field_name(field: &syn::Field) -> Option<String> {
@@ -304,6 +333,32 @@ fn slot_field_name(field: &syn::Field) -> Option<String> {
         }
     }
     None
+}
+
+fn slot_field_is_enum(field: &syn::Field) -> bool {
+    field.attrs.iter().any(|attr| {
+        attr.path().is_ident("slot") && {
+            let mut is_enum = false;
+            let _ = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("enum") {
+                    is_enum = true;
+                }
+                Ok(())
+            });
+            is_enum
+        }
+    })
+}
+
+fn field_type_name(ty: &syn::Type) -> String {
+    let syn::Type::Path(path) = ty else {
+        return String::from("<unsupported>");
+    };
+    path.path
+        .segments
+        .last()
+        .map(|segment| segment.ident.to_string())
+        .unwrap_or_else(|| String::from("<unknown>"))
 }
 
 fn infer_type_path(
@@ -429,34 +484,34 @@ fn render_mockup_slot_codec() -> String {
     let mut out = String::from("// @generated by lpc-slot-codegen. Do not edit.\n\n");
     out.push_str(MOCKUP_SLOT_CODEC_IMPORTS_AND_TYPES);
     out.push_str(MOCKUP_SLOT_CODEC_BUNDLE_READERS);
-    out.push_str(&render_mockup_source_types(&mockup_source_codec_module()));
+    out.push_str(&render_mockup_source_records(&mockup_codec_policy()));
     out.push_str(MOCKUP_SLOT_CODEC_REAL_HELPERS);
     out.push_str(MOCKUP_SLOT_CODEC_WRITERS);
     out
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SlotCodecModule {
-    types: Vec<SlotCodecType>,
+struct MockupCodecPolicy {
+    records: Vec<MockupCodecRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SlotCodecType {
+struct MockupCodecRecord {
     rust_type: &'static str,
     fn_stem: &'static str,
     kind_expr: &'static str,
     default_expr: Option<&'static str>,
-    constructor: SlotCodecConstructor,
-    fields: Vec<SlotCodecField>,
+    constructor: MockupCodecConstructor,
+    fields: Vec<MockupCodecField>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SlotCodecConstructor {
+struct MockupCodecConstructor {
     expression: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SlotCodecField {
+struct MockupCodecField {
     wire_name: &'static str,
     local_name: &'static str,
     init_expr: &'static str,
@@ -465,19 +520,19 @@ struct SlotCodecField {
     skip_read: bool,
 }
 
-fn mockup_source_codec_module() -> SlotCodecModule {
-    SlotCodecModule {
-        types: vec![
-            SlotCodecType {
+fn mockup_codec_policy() -> MockupCodecPolicy {
+    MockupCodecPolicy {
+        records: vec![
+            MockupCodecRecord {
                 rust_type: "ProjectDef",
                 fn_stem: "project_def",
                 kind_expr: "ProjectDef::KIND",
                 default_expr: None,
-                constructor: SlotCodecConstructor {
+                constructor: MockupCodecConstructor {
                     expression: "ProjectDef {\n        name,\n        nodes: MapSlot::new(nodes),\n    }",
                 },
                 fields: vec![
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "name",
                         local_name: "name",
                         init_expr: "OptionSlot::none()",
@@ -487,7 +542,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "nodes",
                         local_name: "nodes",
                         init_expr: "BTreeMap::new()",
@@ -499,16 +554,16 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                     },
                 ],
             },
-            SlotCodecType {
+            MockupCodecRecord {
                 rust_type: "OutputDef",
                 fn_stem: "output_def",
                 kind_expr: "OutputDef::KIND",
                 default_expr: Some("OutputDef::default()"),
-                constructor: SlotCodecConstructor {
-                    expression: "OutputDef::from_codec(pin, options)",
+                constructor: MockupCodecConstructor {
+                    expression: "OutputDef {\n        pin: ValueSlot::new(pin),\n        bindings: BindingDefs::default(),\n        options: match options {\n            Some(options) => OptionSlot::some(options),\n            None => OptionSlot::none(),\n        },\n    }",
                 },
                 fields: vec![
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "pin",
                         local_name: "pin",
                         init_expr: "defaults.pin()",
@@ -518,7 +573,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "bindings",
                         local_name: "bindings",
                         init_expr: "",
@@ -526,7 +581,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         write_expr: None,
                         skip_read: true,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "options",
                         local_name: "options",
                         init_expr: "defaults.options().cloned()",
@@ -538,16 +593,16 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                     },
                 ],
             },
-            SlotCodecType {
+            MockupCodecRecord {
                 rust_type: "TextureDef",
                 fn_stem: "texture_def",
                 kind_expr: "TextureDef::KIND",
                 default_expr: Some("TextureDef::default()"),
-                constructor: SlotCodecConstructor {
-                    expression: "TextureDef::from_codec(size)",
+                constructor: MockupCodecConstructor {
+                    expression: "TextureDef {\n        size: Dim2uSlot::new(size),\n        bindings: BindingDefs::default(),\n    }",
                 },
                 fields: vec![
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "size",
                         local_name: "size",
                         init_expr: "defaults.size()",
@@ -557,7 +612,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "bindings",
                         local_name: "bindings",
                         init_expr: "",
@@ -567,16 +622,16 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                     },
                 ],
             },
-            SlotCodecType {
+            MockupCodecRecord {
                 rust_type: "FixtureDef",
                 fn_stem: "fixture_def",
                 kind_expr: "FixtureDef::KIND",
                 default_expr: Some("FixtureDef::default()"),
-                constructor: SlotCodecConstructor {
-                    expression: "FixtureDef::from_codec(\n        render_size,\n        mapping,\n        color_order,\n        transform,\n        brightness,\n        gamma_correction,\n    )",
+                constructor: MockupCodecConstructor {
+                    expression: "FixtureDef {\n        render_size: Dim2uSlot::new(render_size),\n        bindings: BindingDefs::default(),\n        sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),\n        mapping,\n        color_order: ColorOrderSlot::new(color_order),\n        transform: Affine2dSlot::new(transform),\n        brightness: match brightness {\n            Some(brightness) => OptionSlot::some(brightness),\n            None => OptionSlot::none(),\n        },\n        gamma_correction: match gamma_correction {\n            Some(value) => OptionSlot::some(ValueSlot::new(value)),\n            None => OptionSlot::none(),\n        },\n    }",
                 },
                 fields: vec![
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "render_size",
                         local_name: "render_size",
                         init_expr: "defaults.render_size()",
@@ -586,7 +641,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "bindings",
                         local_name: "bindings",
                         init_expr: "",
@@ -594,7 +649,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         write_expr: None,
                         skip_read: true,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "sampling",
                         local_name: "sampling",
                         init_expr: "",
@@ -602,7 +657,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         write_expr: None,
                         skip_read: true,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "mapping",
                         local_name: "mapping",
                         init_expr: "defaults.mapping().clone()",
@@ -612,7 +667,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "color_order",
                         local_name: "color_order",
                         init_expr: "defaults.color_order()",
@@ -622,7 +677,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "transform",
                         local_name: "transform",
                         init_expr: "defaults.transform()",
@@ -632,7 +687,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "brightness",
                         local_name: "brightness",
                         init_expr: "defaults.brightness().cloned()",
@@ -642,7 +697,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "gamma_correction",
                         local_name: "gamma_correction",
                         init_expr: "defaults.gamma_correction()",
@@ -654,16 +709,16 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                     },
                 ],
             },
-            SlotCodecType {
+            MockupCodecRecord {
                 rust_type: "ShaderDef",
                 fn_stem: "shader_def",
                 kind_expr: "ShaderDef::KIND",
                 default_expr: Some("ShaderDef::default()"),
-                constructor: SlotCodecConstructor {
-                    expression: "ShaderDef::from_codec(\n        glsl_path,\n        render_order,\n        glsl_opts,\n        param_defs,\n    )",
+                constructor: MockupCodecConstructor {
+                    expression: "ShaderDef {\n        glsl_path: SourcePathSlot::new(SourcePath(glsl_path)),\n        render_order: RenderOrderSlot::new(RenderOrder(render_order)),\n        bindings: BindingDefs::default(),\n        glsl_opts,\n        param_defs: MapSlot::new(param_defs),\n    }",
                 },
                 fields: vec![
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "glsl_path",
                         local_name: "glsl_path",
                         init_expr: "defaults.glsl_path().to_string()",
@@ -673,7 +728,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "render_order",
                         local_name: "render_order",
                         init_expr: "defaults.render_order()",
@@ -683,7 +738,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "bindings",
                         local_name: "bindings",
                         init_expr: "",
@@ -691,7 +746,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         write_expr: None,
                         skip_read: true,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "glsl_opts",
                         local_name: "glsl_opts",
                         init_expr: "defaults.glsl_opts().clone()",
@@ -701,7 +756,7 @@ fn mockup_source_codec_module() -> SlotCodecModule {
                         ),
                         skip_read: false,
                     },
-                    SlotCodecField {
+                    MockupCodecField {
                         wire_name: "param_defs",
                         local_name: "param_defs",
                         init_expr: "defaults.param_defs.entries.clone()",
@@ -717,21 +772,21 @@ fn mockup_source_codec_module() -> SlotCodecModule {
     }
 }
 
-fn render_mockup_source_types(module: &SlotCodecModule) -> String {
+fn render_mockup_source_records(policy: &MockupCodecPolicy) -> String {
     let mut out = String::new();
-    for codec_type in &module.types {
+    for codec_type in &policy.records {
         render_slot_codec_type(&mut out, codec_type);
     }
     out
 }
 
-fn render_slot_codec_type(out: &mut String, codec_type: &SlotCodecType) {
+fn render_slot_codec_type(out: &mut String, codec_type: &MockupCodecRecord) {
     render_slot_codec_type_read_wrappers(out, codec_type);
     render_slot_codec_type_reader(out, codec_type);
     render_slot_codec_type_writer(out, codec_type);
 }
 
-fn render_slot_codec_type_read_wrappers(out: &mut String, codec_type: &SlotCodecType) {
+fn render_slot_codec_type_read_wrappers(out: &mut String, codec_type: &MockupCodecRecord) {
     out.push_str("pub fn read_");
     out.push_str(codec_type.fn_stem);
     out.push_str("_json(json: &str) -> Result<");
@@ -761,7 +816,7 @@ fn render_slot_codec_type_read_wrappers(out: &mut String, codec_type: &SlotCodec
     out.push_str("}\n\n");
 }
 
-fn render_slot_codec_type_reader(out: &mut String, codec_type: &SlotCodecType) {
+fn render_slot_codec_type_reader(out: &mut String, codec_type: &MockupCodecRecord) {
     out.push_str("pub fn read_");
     out.push_str(codec_type.fn_stem);
     out.push_str("<S>(reader: &mut SlotReader<'_, S>) -> Result<");
@@ -808,7 +863,7 @@ fn render_slot_codec_type_reader(out: &mut String, codec_type: &SlotCodecType) {
     out.push_str("}\n\n");
 }
 
-fn render_slot_codec_type_writer(out: &mut String, codec_type: &SlotCodecType) {
+fn render_slot_codec_type_writer(out: &mut String, codec_type: &MockupCodecRecord) {
     let arg_name = codec_type
         .fn_stem
         .strip_suffix("_def")
@@ -838,7 +893,7 @@ fn render_slot_codec_type_writer(out: &mut String, codec_type: &SlotCodecType) {
     out.push_str("}\n\n");
 }
 
-fn render_slot_codec_type_fields_const(out: &mut String, codec_type: &SlotCodecType) {
+fn render_slot_codec_type_fields_const(out: &mut String, codec_type: &MockupCodecRecord) {
     out.push_str("    const FIELDS: &[&str] = &[\"kind\"");
     for field in &codec_type.fields {
         out.push_str(", \"");
@@ -860,12 +915,15 @@ const MOCKUP_SLOT_CODEC_IMPORTS_AND_TYPES: &str = r#"
 use std::collections::BTreeMap;
 
 use crate::source::{
-    FixtureDef, MappingConfig, NodeInvocationDef, OutputDef, OutputDriverOptionsConfig, PathSpec,
-    ProjectDef, RingOrder, ScalarHint, ShaderDef, ShaderParamDef, TextureDef,
+    FixtureDef, FixtureSamplingConfig, MappingConfig, NodeInvocationDef, OutputDef,
+    OutputDriverOptionsConfig, PathSpec, ProjectDef, RingOrder, ScalarHint, ShaderDef,
+    ShaderParamDef, TextureDef,
 };
 use lpc_model::{
-    AddSubMode, Affine2d, ColorOrderValue, Dim2u, DivMode, GlslOpts, MapSlot, MulMode,
-    OptionSlot, SlotEnumAccess, ValueSlot,
+    current_revision, AddSubMode, Affine2d, Affine2dSlot, BindingDefs, ColorOrderSlot,
+    ColorOrderValue, Dim2u, Dim2uSlot, DivMode, GlslOpts, MapSlot, MulMode, OptionSlot,
+    PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotEnumAccess,
+    SourcePath, SourcePathSlot, ValueSlot, Xy, XySlot,
 };
 use lpc_model::SlotShapeRegistry;
 use lpc_model::slot_codec::{
@@ -1227,14 +1285,14 @@ where
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
-    Ok(OutputDriverOptionsConfig::from_codec(
-        lum_power,
-        white_point,
-        brightness,
-        interpolation_enabled,
-        dithering_enabled,
-        lut_enabled,
-    ))
+    Ok(OutputDriverOptionsConfig {
+        lum_power: PositiveF32Slot::new(PositiveF32(lum_power)),
+        white_point: ValueSlot::new(white_point),
+        brightness: RatioSlot::new(Ratio(brightness)),
+        interpolation_enabled: ValueSlot::new(interpolation_enabled),
+        dithering_enabled: ValueSlot::new(dithering_enabled),
+        lut_enabled: ValueSlot::new(lut_enabled),
+    })
 }
 
 fn write_output_driver_options<W>(
@@ -1375,10 +1433,15 @@ where
             other => return Err(prop.unknown_field(other, FIELDS)),
         }
     }
-    Ok(MappingConfig::square_from_codec(
-        origin.ok_or_else(|| object.missing_required_field("origin"))?,
-        size.ok_or_else(|| object.missing_required_field("size"))?,
-    ))
+    Ok(MappingConfig::Square {
+        variant_revision: current_revision(),
+        origin: XySlot::new(Xy(
+            origin.ok_or_else(|| object.missing_required_field("origin"))?,
+        )),
+        size: XySlot::new(Xy(
+            size.ok_or_else(|| object.missing_required_field("size"))?,
+        )),
+    })
 }
 
 fn read_mapping_path_points_body<S>(
@@ -1990,6 +2053,58 @@ pub struct ProjectDef {}
     }
 
     #[test]
+    fn discovers_static_slot_record_fields_and_enum_markers() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(src.join("source")).unwrap();
+        fs::write(
+            src.join("source").join("fixture_def.rs"),
+            r#"
+use lpc_model::{SlotRecord, ValueSlot};
+
+#[derive(SlotRecord)]
+pub struct FixtureDef {
+    pub render_size: Dim2uSlot,
+    #[slot(enum)]
+    pub mapping: MappingConfig,
+    #[slot(name = "gamma")]
+    pub gamma_correction: ValueSlot<bool>,
+}
+"#,
+        )
+        .unwrap();
+
+        let records = discover_static_slot_records(&src).unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].type_path, "crate::source::FixtureDef");
+        assert_eq!(records[0].type_name, "FixtureDef");
+        assert_eq!(
+            records[0].fields,
+            vec![
+                StaticSlotRecordField {
+                    rust_name: String::from("render_size"),
+                    slot_name: String::from("render_size"),
+                    type_name: String::from("Dim2uSlot"),
+                    is_enum: false,
+                },
+                StaticSlotRecordField {
+                    rust_name: String::from("mapping"),
+                    slot_name: String::from("mapping"),
+                    type_name: String::from("MappingConfig"),
+                    is_enum: true,
+                },
+                StaticSlotRecordField {
+                    rust_name: String::from("gamma_correction"),
+                    slot_name: String::from("gamma"),
+                    type_name: String::from("ValueSlot"),
+                    is_enum: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn generated_code_contains_bootstrap_functions_and_type_paths() {
         let shapes = vec![StaticRegisteredShape {
             type_path: String::from("crate::source::ShaderDef"),
@@ -2052,10 +2167,10 @@ pub struct ProjectDef {}
     }
 
     #[test]
-    fn mockup_source_codec_module_contains_expected_types() {
-        let module = mockup_source_codec_module();
-        let type_names = module
-            .types
+    fn mockup_codec_policy_contains_expected_records() {
+        let policy = mockup_codec_policy();
+        let type_names = policy
+            .records
             .iter()
             .map(|codec_type| codec_type.rust_type)
             .collect::<Vec<_>>();
@@ -2073,18 +2188,29 @@ pub struct ProjectDef {}
     }
 
     #[test]
-    fn mockup_source_codec_module_contains_representative_fields() {
-        let module = mockup_source_codec_module();
+    fn mockup_codec_policy_contains_representative_fields() {
+        let policy = mockup_codec_policy();
 
-        assert_codec_type_has_fields(&module, "ProjectDef", &["name", "nodes"]);
-        assert_codec_type_has_fields(&module, "OutputDef", &["pin", "options"]);
-        assert_codec_type_has_fields(&module, "FixtureDef", &["mapping"]);
-        assert_codec_type_has_fields(&module, "ShaderDef", &["param_defs"]);
+        assert_codec_record_has_fields(&policy, "ProjectDef", &["name", "nodes"]);
+        assert_codec_record_has_fields(&policy, "OutputDef", &["pin", "options"]);
+        assert_codec_record_has_fields(&policy, "FixtureDef", &["mapping"]);
+        assert_codec_record_has_fields(&policy, "ShaderDef", &["param_defs"]);
     }
 
-    fn assert_codec_type_has_fields(module: &SlotCodecModule, rust_type: &str, expected: &[&str]) {
-        let codec_type = module
-            .types
+    #[test]
+    fn generated_mockup_codec_does_not_use_domain_codec_constructors() {
+        let code = render_mockup_slot_codec();
+
+        assert!(!code.contains(&format!("from_{}", "codec")));
+    }
+
+    fn assert_codec_record_has_fields(
+        policy: &MockupCodecPolicy,
+        rust_type: &str,
+        expected: &[&str],
+    ) {
+        let codec_type = policy
+            .records
             .iter()
             .find(|codec_type| codec_type.rust_type == rust_type)
             .unwrap_or_else(|| panic!("missing codec type {rust_type}"));

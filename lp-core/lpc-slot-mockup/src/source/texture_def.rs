@@ -19,13 +19,6 @@ impl TextureDef {
         }
     }
 
-    pub fn from_codec(size: Dim2u) -> Self {
-        Self {
-            size: Dim2uSlot::new(size),
-            bindings: BindingDefs::default(),
-        }
-    }
-
     pub fn size(&self) -> Dim2u {
         *self.size.value()
     }

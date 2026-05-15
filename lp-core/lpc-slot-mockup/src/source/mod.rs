@@ -6,7 +6,7 @@ mod ring_lamp_counts;
 mod shader_def;
 mod texture_def;
 
-pub use fixture_def::FixtureDef;
+pub use fixture_def::{FixtureDef, FixtureSamplingConfig};
 pub use mapping::{MappingConfig, PathSpec, RingOrder};
 pub use output_def::{OutputDef, OutputDriverOptionsConfig};
 pub use project_def::{NodeInvocationDef, ProjectDef};

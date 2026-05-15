@@ -30,17 +30,6 @@ impl OutputDef {
         }
     }
 
-    pub fn from_codec(pin: u32, options: Option<OutputDriverOptionsConfig>) -> Self {
-        Self {
-            pin: ValueSlot::new(pin),
-            bindings: BindingDefs::default(),
-            options: match options {
-                Some(options) => OptionSlot::some(options),
-                None => OptionSlot::none(),
-            },
-        }
-    }
-
     pub fn pin(&self) -> u32 {
         *self.pin.value()
     }
@@ -70,24 +59,6 @@ impl Default for OutputDriverOptionsConfig {
 }
 
 impl OutputDriverOptionsConfig {
-    pub fn from_codec(
-        lum_power: f32,
-        white_point: [f32; 3],
-        brightness: f32,
-        interpolation_enabled: bool,
-        dithering_enabled: bool,
-        lut_enabled: bool,
-    ) -> Self {
-        Self {
-            lum_power: PositiveF32Slot::new(PositiveF32(lum_power)),
-            white_point: ValueSlot::new(white_point),
-            brightness: RatioSlot::new(Ratio(brightness)),
-            interpolation_enabled: ValueSlot::new(interpolation_enabled),
-            dithering_enabled: ValueSlot::new(dithering_enabled),
-            lut_enabled: ValueSlot::new(lut_enabled),
-        }
-    }
-
     pub fn lum_power(&self) -> f32 {
         self.lum_power.value().0
     }
