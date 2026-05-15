@@ -19,6 +19,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
     let mut shape_fields = Vec::new();
     let mut access_arms = Vec::new();
+    let mut mut_access_arms = Vec::new();
     let mut access_index = 0usize;
 
     for field in fields.named {
@@ -47,6 +48,13 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             access_arms.push(quote! {
                 #index => Some(#access),
             });
+            if let Some(mut_access) =
+                attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
+            {
+                mut_access_arms.push(quote! {
+                    #index => Some(#mut_access),
+                });
+            }
             access_index += 1;
         }
     }
@@ -106,9 +114,24 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
         }
 
+        impl ::lpc_model::SlotRecordMutAccess for #ident {
+            fn field_mut(&mut self, index: usize) -> Option<::lpc_model::SlotDataMutAccess<'_>> {
+                match index {
+                    #(#mut_access_arms)*
+                    _ => None,
+                }
+            }
+        }
+
         impl ::lpc_model::SlotMapValueAccess for #ident {
             fn slot_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
                 ::lpc_model::SlotDataAccess::Record(self)
+            }
+        }
+
+        impl ::lpc_model::SlotMapValueMutAccess for #ident {
+            fn slot_data_mut(&mut self) -> ::lpc_model::SlotDataMutAccess<'_> {
+                ::lpc_model::SlotDataMutAccess::Record(self)
             }
         }
 
@@ -119,6 +142,18 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
             fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
                 ::lpc_model::SlotDataAccess::Record(self)
+            }
+        }
+
+        impl ::lpc_model::FieldSlotMut for #ident {
+            fn slot_field_data_mut(&mut self) -> ::lpc_model::SlotDataMutAccess<'_> {
+                ::lpc_model::SlotDataMutAccess::Record(self)
+            }
+        }
+
+        impl ::lpc_model::SlotMutAccess for #ident {
+            fn data_mut(&mut self) -> ::lpc_model::SlotDataMutAccess<'_> {
+                ::lpc_model::SlotDataMutAccess::Record(self)
             }
         }
 

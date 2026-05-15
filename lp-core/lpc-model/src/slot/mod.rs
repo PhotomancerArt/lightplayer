@@ -9,6 +9,8 @@ mod slot_data;
 mod slot_enum_shape;
 mod slot_lookup;
 mod slot_meta;
+mod slot_mut_access;
+mod slot_mutation;
 mod slot_name;
 mod slot_owner;
 mod slot_path;
@@ -31,6 +33,12 @@ pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, S
 pub use slot_enum_shape::SlotEnumShape;
 pub use slot_lookup::{SlotLookupError, lookup_slot_data};
 pub use slot_meta::SlotMeta;
+pub use slot_mut_access::{
+    FieldSlotMut, MapSlotMutAccess, SlotDataMutAccess, SlotEnumDefaultVariant, SlotEnumMutAccess,
+    SlotMapValueMutAccess, SlotMutAccess, SlotMutationError, SlotOptionMutAccess,
+    SlotRecordMutAccess, SlotValueMutAccess,
+};
+pub use slot_mutation::{set_slot_value, set_slot_variant_default, slot_data_revision};
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};

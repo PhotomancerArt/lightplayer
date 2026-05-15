@@ -95,6 +95,32 @@ until schema versioning exists. Discriminators are explicit. Field casing should
 match the slot/domain model unless a specific compact syntax is explicitly
 enabled.
 
+## Default-And-Mutate Construction
+
+Slot-modeled data should be default-constructible at the model layer. Required
+fields are a logic-layer concern: a model can be loaded, synced, edited, and
+serialized even when application logic later decides it is not renderable or
+otherwise invalid.
+
+The preferred construction path is:
+
+1. Construct `T::default()`.
+2. Use generated mutable slot access as the Rust reflection bridge.
+3. Apply parsed fields through generic slot mutation helpers.
+
+This keeps generated deserializers small. Codegen should provide field and enum
+variant access, not format-specific parsing bodies.
+
+Enums use the same rule. Deserializing an enum is two-phase:
+
+1. Read the explicit discriminator.
+2. Switch to that variant with default payload.
+3. Mutate the now-active variant payload from the remaining fields.
+
+Runtime field mutation should not silently switch enum variants. Variant
+switching is an explicit operation; the `set_variant_from_slot_data` shape is a
+convenience that can be built on top of default-switch plus field mutation later.
+
 ## Metadata Shape
 
 The code generator should build a compact `SlotCodec` model before rendering

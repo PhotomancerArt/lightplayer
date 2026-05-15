@@ -1,7 +1,7 @@
 use super::{BindingDef, BindingDefError};
 use crate::{
-    FieldSlot, MapSlot, SlotCodec, SlotDataAccess, SlotMapKeyShape, SlotMeta, SlotShape,
-    StaticSlotShape,
+    FieldSlot, FieldSlotMut, MapSlot, SlotCodec, SlotDataAccess, SlotDataMutAccess,
+    SlotMapKeyShape, SlotMeta, SlotShape, StaticSlotShape,
     slot_codec::{
         SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource, ValueReader,
     },
@@ -57,6 +57,12 @@ impl FieldSlot for BindingDefs {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Map(&self.0)
+    }
+}
+
+impl FieldSlotMut for BindingDefs {
+    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        SlotDataMutAccess::Map(&mut self.0)
     }
 }
 

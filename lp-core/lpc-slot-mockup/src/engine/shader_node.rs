@@ -1,8 +1,8 @@
 use crate::source::ShaderDef;
 use lpc_model::{
-    LpType, LpValue, ModelStructMember, Revision, SlotAccess, SlotData, SlotDataAccess, SlotName,
-    SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, WithRevision,
-    current_revision,
+    LpType, LpValue, ModelStructMember, Revision, SlotAccess, SlotData, SlotDataAccess,
+    SlotDataMutAccess, SlotMutAccess, SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess,
+    SlotRecordMutAccess, SlotShape, SlotShapeId, WithRevision, current_revision,
     slot::shape::{field, option, record, value},
 };
 
@@ -138,6 +138,22 @@ impl SlotRecordAccess for ShaderNode {
         match index {
             0 => Some(SlotDataAccess::Record(&self.params)),
             1 => Some(SlotDataAccess::Option(&self.compile_error)),
+            _ => None,
+        }
+    }
+}
+
+impl SlotMutAccess for ShaderNode {
+    fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        SlotDataMutAccess::Record(self)
+    }
+}
+
+impl SlotRecordMutAccess for ShaderNode {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataMutAccess<'_>> {
+        match index {
+            0 => Some(SlotDataMutAccess::Record(&mut self.params)),
+            1 => Some(SlotDataMutAccess::Option(&mut self.compile_error)),
             _ => None,
         }
     }

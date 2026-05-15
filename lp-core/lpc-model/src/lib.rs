@@ -100,14 +100,17 @@ pub use slot::{
     ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
-    FieldSlot, MapSlot, MapSlotAccess, MapSlotKeyLike, OptionSlot, SlotAccess, SlotAccessor,
-    SlotAccessorError, SlotAccessorStep, SlotData, SlotDataAccess, SlotEnum, SlotEnumAccess,
+    FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotKeyLike, MapSlotMutAccess, OptionSlot,
+    SlotAccess, SlotAccessor, SlotAccessorError, SlotAccessorStep, SlotData, SlotDataAccess,
+    SlotDataMutAccess, SlotEnum, SlotEnumAccess, SlotEnumDefaultVariant, SlotEnumMutAccess,
     SlotEnumShape, SlotFieldReader, SlotFieldShape, SlotLookupError, SlotMapDyn, SlotMapKey,
-    SlotMapKeyShape, SlotMeta, SlotName, SlotNameError, SlotOptionAccess, SlotOptionDyn,
-    SlotOptionReader, SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotReadContext,
-    SlotRecord, SlotRecordAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeEntry, SlotShapeId,
-    SlotShapeIdError, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
-    SlotValueAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot,
-    lookup_slot_data,
+    SlotMapKeyShape, SlotMapValueMutAccess, SlotMeta, SlotMutAccess, SlotMutationError, SlotName,
+    SlotNameError, SlotOptionAccess, SlotOptionDyn, SlotOptionMutAccess, SlotOptionReader,
+    SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotReadContext, SlotRecord,
+    SlotRecordAccess, SlotRecordMutAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeEntry,
+    SlotShapeId, SlotShapeIdError, SlotShapeRegistry, SlotShapeRegistryError,
+    SlotShapeRegistrySnapshot, SlotValueAccess, SlotValueMutAccess, SlotVariantShape,
+    StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data, set_slot_value,
+    set_slot_variant_default, slot_data_revision,
 };
 pub use value::value_path::ValuePath;

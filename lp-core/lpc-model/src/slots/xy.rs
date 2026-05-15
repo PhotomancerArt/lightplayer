@@ -2,7 +2,7 @@ use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// 2D XY coordinate.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, SlotValue)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, SlotValue)]
 #[slot_value(editor = xy)]
 pub struct Xy(pub [f32; 2]);
 

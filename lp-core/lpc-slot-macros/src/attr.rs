@@ -152,6 +152,33 @@ pub(crate) fn field_access_tokens(
     }
 }
 
+pub(crate) fn field_mut_access_tokens(
+    attr: &FieldShapeAttr,
+    ty: &syn::Type,
+    field_ident: &syn::Ident,
+) -> Option<TokenStream> {
+    match attr {
+        FieldShapeAttr::Infer => Some(
+            quote::quote! { <#ty as ::lpc_model::FieldSlotMut>::slot_field_data_mut(&mut self.#field_ident) },
+        ),
+        FieldShapeAttr::Value(_) | FieldShapeAttr::Leaf(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Value(&mut self.#field_ident) })
+        }
+        FieldShapeAttr::Record => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Record(&mut self.#field_ident) })
+        }
+        FieldShapeAttr::Map { .. } => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Map(&mut self.#field_ident) })
+        }
+        FieldShapeAttr::OptionRef(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Option(&mut self.#field_ident) })
+        }
+        FieldShapeAttr::Enum => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Enum(&mut self.#field_ident) })
+        }
+    }
+}
+
 fn slot_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
     attrs.iter().filter(|attr| attr.path().is_ident("slot"))
 }

@@ -2,7 +2,7 @@ use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Non-negative floating point value.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, SlotValue)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, SlotValue)]
 #[slot_value(editor = number(min = 0.0))]
 pub struct PositiveF32(pub f32);
 
