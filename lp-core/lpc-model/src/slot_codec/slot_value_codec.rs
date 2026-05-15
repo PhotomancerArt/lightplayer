@@ -3,7 +3,10 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::{LpType, LpValue, ModelStructMember};
+use crate::{
+    ControlExtent, ControlProduct, LpType, LpValue, ModelStructMember, NodeId, ProductKind,
+    ProductRef, ResourceDomain, ResourceRef, VisualProduct,
+};
 
 use super::{
     SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource, ValueReader,
@@ -37,11 +40,8 @@ where
         LpType::Array(item_ty, len) => read_lp_array(value, item_ty, Some(*len)),
         LpType::List(item_ty) => read_lp_array(value, item_ty, None),
         LpType::Struct { name, fields } => read_lp_struct(value, name.clone(), fields),
-        LpType::Resource | LpType::Product(_) => Err(SyntaxError::new(
-            "",
-            None,
-            "resource/product slot values need a dedicated codec",
-        )),
+        LpType::Resource => read_resource_ref(value).map(LpValue::Resource),
+        LpType::Product(kind) => read_product_ref(value, *kind).map(LpValue::Product),
     }
 }
 
@@ -81,6 +81,13 @@ where
         (LpType::Struct { fields, .. }, LpValue::Struct { fields: values, .. }) => {
             write_lp_struct(value, fields, values)
         }
+        (LpType::Resource, LpValue::Resource(resource)) => write_resource_ref(value, resource),
+        (LpType::Product(ProductKind::Visual), LpValue::Product(ProductRef::Visual(product))) => {
+            write_visual_product(value, product)
+        }
+        (LpType::Product(ProductKind::Control), LpValue::Product(ProductRef::Control(product))) => {
+            write_control_product(value, product)
+        }
         _ => Err(SlotWriteError::Serialize),
     }
 }
@@ -108,6 +115,9 @@ where
             }
             array.finish()
         }
+        LpValue::Resource(resource) => write_resource_ref(value, resource),
+        LpValue::Product(ProductRef::Visual(product)) => write_visual_product(value, product),
+        LpValue::Product(ProductRef::Control(product)) => write_control_product(value, product),
         LpValue::IVec2(_)
         | LpValue::IVec3(_)
         | LpValue::IVec4(_)
@@ -120,9 +130,196 @@ where
         | LpValue::Mat2x2(_)
         | LpValue::Mat3x3(_)
         | LpValue::Mat4x4(_)
-        | LpValue::Struct { .. }
-        | LpValue::Resource(_)
-        | LpValue::Product(_) => Err(SlotWriteError::Serialize),
+        | LpValue::Struct { .. } => Err(SlotWriteError::Serialize),
+    }
+}
+
+fn read_resource_ref<S>(value: ValueReader<'_, '_, S>) -> Result<ResourceRef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["domain", "id"];
+    let mut resource = ResourceRef::default();
+    let mut object = value.object()?;
+
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "domain" => resource.domain = read_resource_domain(prop.value())?,
+            "id" => resource.id = prop.value().u32()?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+
+    Ok(resource)
+}
+
+fn read_resource_domain<S>(value: ValueReader<'_, '_, S>) -> Result<ResourceDomain, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let text = value.string()?;
+    match text.as_str() {
+        "unset" => Ok(ResourceDomain::Unset),
+        "runtime_buffer" => Ok(ResourceDomain::RuntimeBuffer),
+        _ => Err(SyntaxError::new(
+            "",
+            None,
+            alloc::format!(
+                "invalid resource domain {text:?}. Expected one of: unset, runtime_buffer."
+            ),
+        )),
+    }
+}
+
+fn read_product_ref<S>(
+    value: ValueReader<'_, '_, S>,
+    expected_kind: ProductKind,
+) -> Result<ProductRef, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["kind", "node", "output", "preferred_extent"];
+    let mut kind = None;
+    let mut node = NodeId::default();
+    let mut output = 0;
+    let mut preferred_extent = ControlExtent::default();
+    let mut object = value.object()?;
+
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "kind" => kind = Some(read_product_kind(prop.value())?),
+            "node" => node = NodeId::new(prop.value().u32()?),
+            "output" => output = prop.value().u32()?,
+            "preferred_extent" => preferred_extent = read_control_extent(prop.value())?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+
+    let kind = kind.unwrap_or(expected_kind);
+    if kind != expected_kind {
+        return Err(object.invalid_discriminator_value(
+            "kind",
+            product_kind_name(kind),
+            &[product_kind_name(expected_kind)],
+        ));
+    }
+
+    match kind {
+        ProductKind::Visual => Ok(ProductRef::Visual(VisualProduct::new(node, output))),
+        ProductKind::Control => Ok(ProductRef::Control(ControlProduct::new(
+            node,
+            output,
+            preferred_extent,
+        ))),
+    }
+}
+
+fn read_product_kind<S>(value: ValueReader<'_, '_, S>) -> Result<ProductKind, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let text = value.string()?;
+    match text.as_str() {
+        "visual" => Ok(ProductKind::Visual),
+        "control" => Ok(ProductKind::Control),
+        _ => Err(SyntaxError::new(
+            "",
+            None,
+            alloc::format!("invalid product kind {text:?}. Expected one of: visual, control."),
+        )),
+    }
+}
+
+fn read_control_extent<S>(value: ValueReader<'_, '_, S>) -> Result<ControlExtent, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["rows", "samples_per_row"];
+    let mut rows = 0;
+    let mut samples_per_row = 0;
+    let mut object = value.object()?;
+
+    while let Some(mut prop) = object.next_prop()? {
+        match prop.name() {
+            "rows" => rows = prop.value().u32()?,
+            "samples_per_row" => samples_per_row = prop.value().u32()?,
+            other => return Err(prop.unknown_field(other, FIELDS)),
+        }
+    }
+
+    Ok(ControlExtent::new(rows, samples_per_row))
+}
+
+fn write_resource_ref<W>(
+    value: SlotValueWriter<'_, W>,
+    resource: &ResourceRef,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut object = value.object()?;
+    object
+        .prop("domain")?
+        .string(resource_domain_name(resource.domain))?;
+    object.prop("id")?.u32(resource.id)?;
+    object.finish()
+}
+
+fn write_visual_product<W>(
+    value: SlotValueWriter<'_, W>,
+    product: &VisualProduct,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut object = value.object()?;
+    object.prop("kind")?.string("visual")?;
+    object.prop("node")?.u32(product.node().as_u32())?;
+    object.prop("output")?.u32(product.output())?;
+    object.finish()
+}
+
+fn write_control_product<W>(
+    value: SlotValueWriter<'_, W>,
+    product: &ControlProduct,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut object = value.object()?;
+    object.prop("kind")?.string("control")?;
+    object.prop("node")?.u32(product.node().as_u32())?;
+    object.prop("output")?.u32(product.output())?;
+    write_control_extent(object.prop("preferred_extent")?, product.preferred_extent())?;
+    object.finish()
+}
+
+fn write_control_extent<W>(
+    value: SlotValueWriter<'_, W>,
+    extent: ControlExtent,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut object = value.object()?;
+    object.prop("rows")?.u32(extent.rows)?;
+    object
+        .prop("samples_per_row")?
+        .u32(extent.samples_per_row)?;
+    object.finish()
+}
+
+fn resource_domain_name(domain: ResourceDomain) -> &'static str {
+    match domain {
+        ResourceDomain::Unset => "unset",
+        ResourceDomain::RuntimeBuffer => "runtime_buffer",
+    }
+}
+
+fn product_kind_name(kind: ProductKind) -> &'static str {
+    match kind {
+        ProductKind::Visual => "visual",
+        ProductKind::Control => "control",
     }
 }
 
@@ -380,4 +577,122 @@ where
         array.item()?.f32_array(row)?;
     }
     array.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        RuntimeBufferId, VisualProduct,
+        slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter, TomlSyntaxSource},
+    };
+    use alloc::vec::Vec;
+
+    #[test]
+    fn slot_value_codec_reads_and_writes_resource_refs() {
+        let value = read_json_value(LpType::Resource, r#"{"domain":"runtime_buffer","id":7}"#);
+
+        assert_eq!(
+            value,
+            LpValue::Resource(ResourceRef::runtime_buffer(RuntimeBufferId::new(7)))
+        );
+        assert_eq!(
+            read_json_value(LpType::Resource, r#"{"domain":"unset","id":0}"#),
+            LpValue::Resource(ResourceRef::default())
+        );
+        assert_eq!(
+            write_json_value(&LpType::Resource, &value),
+            r#"{"domain":"runtime_buffer","id":7}"#
+        );
+    }
+
+    #[test]
+    fn slot_value_codec_reads_and_writes_visual_products() {
+        let ty = LpType::Product(ProductKind::Visual);
+        let value = read_json_value(ty.clone(), r#"{"kind":"visual","node":2,"output":1}"#);
+
+        assert_eq!(
+            value,
+            LpValue::Product(ProductRef::visual(VisualProduct::new(NodeId::new(2), 1)))
+        );
+        assert_eq!(
+            write_json_value(&ty, &value),
+            r#"{"kind":"visual","node":2,"output":1}"#
+        );
+    }
+
+    #[test]
+    fn slot_value_codec_reads_and_writes_control_products() {
+        let ty = LpType::Product(ProductKind::Control);
+        let value = read_json_value(
+            ty.clone(),
+            r#"{"kind":"control","node":3,"output":2,"preferred_extent":{"rows":4,"samples_per_row":12}}"#,
+        );
+
+        assert_eq!(
+            value,
+            LpValue::Product(ProductRef::control(ControlProduct::new(
+                NodeId::new(3),
+                2,
+                ControlExtent::new(4, 12)
+            )))
+        );
+        assert_eq!(
+            write_json_value(&ty, &value),
+            r#"{"kind":"control","node":3,"output":2,"preferred_extent":{"rows":4,"samples_per_row":12}}"#
+        );
+    }
+
+    #[test]
+    fn slot_value_codec_rejects_wrong_product_kind() {
+        let registry = crate::SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"kind":"control","node":3,"output":2}"#).unwrap(),
+            &registry,
+        );
+
+        let error =
+            read_lp_value(&LpType::Product(ProductKind::Visual), reader.value()).unwrap_err();
+
+        assert!(error.message().contains("control"));
+        assert!(error.message().contains("visual"));
+    }
+
+    #[test]
+    fn slot_value_codec_reads_product_from_toml_source() {
+        let toml = toml::toml! {
+            kind = "control"
+            node = 3
+            output = 2
+
+            [preferred_extent]
+            rows = 4
+            samples_per_row = 12
+        };
+        let toml = toml::Value::Table(toml);
+        let registry = crate::SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(TomlSyntaxSource::new(&toml).unwrap(), &registry);
+
+        assert_eq!(
+            read_lp_value(&LpType::Product(ProductKind::Control), reader.value()).unwrap(),
+            LpValue::Product(ProductRef::control(ControlProduct::new(
+                NodeId::new(3),
+                2,
+                ControlExtent::new(4, 12)
+            )))
+        );
+    }
+
+    fn read_json_value(ty: LpType, json: &str) -> LpValue {
+        let registry = crate::SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(JsonSyntaxSource::new(json).unwrap(), &registry);
+        read_lp_value(&ty, reader.value()).unwrap()
+    }
+
+    fn write_json_value(ty: &LpType, value: &LpValue) -> String {
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        write_lp_value(writer.value(), ty, value).unwrap();
+        String::from_utf8(out).unwrap()
+    }
 }

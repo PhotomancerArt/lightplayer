@@ -483,6 +483,34 @@ impl SlotShapeRegistry {
             .unwrap_or_else(SlotFactory::unsupported)
             .create_default(self, id)
     }
+
+    pub fn read_slot_json(
+        &self,
+        id: SlotShapeId,
+        json: &str,
+    ) -> Result<Box<dyn SlotMutAccess>, crate::slot_codec::SyntaxError> {
+        self.read_slot_from(id, crate::slot_codec::JsonSyntaxSource::new(json)?)
+    }
+
+    pub fn read_slot_toml(
+        &self,
+        id: SlotShapeId,
+        value: &toml::Value,
+    ) -> Result<Box<dyn SlotMutAccess>, crate::slot_codec::SyntaxError> {
+        self.read_slot_from(id, crate::slot_codec::TomlSyntaxSource::new(value)?)
+    }
+
+    pub fn read_slot_from<S>(
+        &self,
+        id: SlotShapeId,
+        source: S,
+    ) -> Result<Box<dyn SlotMutAccess>, crate::slot_codec::SyntaxError>
+    where
+        S: crate::slot_codec::SyntaxEventSource,
+    {
+        let mut reader = crate::slot_codec::SlotReader::new(source, self);
+        crate::slot_codec::read_dynamic_slot(self, id, reader.value())
+    }
 }
 
 impl PartialEq for SlotShapeRegistry {

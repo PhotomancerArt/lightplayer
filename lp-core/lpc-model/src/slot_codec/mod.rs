@@ -3,6 +3,7 @@
 //! Syntax sources emit shape-agnostic events. [`SlotReader`] layers domain
 //! construction helpers on top without materializing a generic syntax tree.
 
+mod dynamic_slot_reader;
 mod json_syntax_source;
 mod slot_codec;
 mod slot_reader;
@@ -468,3 +469,4 @@ name = "aux"
         }
     }
 }
+pub use dynamic_slot_reader::{apply_reader_to_slot, read_dynamic_slot};

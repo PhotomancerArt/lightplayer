@@ -1,5 +1,6 @@
 mod client_tree_walk;
 mod dynamic_param_shape;
+mod dynamic_slot_codec;
 mod fixture;
 mod full_sync;
 mod generated_shape_codec;
