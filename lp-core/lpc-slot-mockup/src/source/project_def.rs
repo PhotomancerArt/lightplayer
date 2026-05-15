@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 
 use lpc_model::{ArtifactPath, ArtifactPathSlot, MapSlot, OptionSlot, SlotRecord, ValueSlot};
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct ProjectDef {
     pub name: OptionSlot<ValueSlot<String>>,
     pub nodes: MapSlot<String, NodeInvocationDef>,
 }
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct NodeInvocationDef {
     pub artifact: ArtifactPathSlot,
 }
@@ -42,12 +42,6 @@ impl ProjectDef {
     }
 }
 
-impl Default for ProjectDef {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl NodeInvocationDef {
     pub fn new(artifact: &str) -> Self {
         Self {
@@ -57,11 +51,5 @@ impl NodeInvocationDef {
 
     pub fn artifact(&self) -> &str {
         self.artifact.value().as_str()
-    }
-}
-
-impl Default for NodeInvocationDef {
-    fn default() -> Self {
-        Self::new("")
     }
 }

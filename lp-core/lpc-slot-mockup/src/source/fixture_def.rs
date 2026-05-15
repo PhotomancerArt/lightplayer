@@ -6,7 +6,7 @@ use lpc_model::{
 
 use super::{MappingConfig, shader_def::ScalarHint};
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct FixtureDef {
     pub render_size: Dim2uSlot,
     pub bindings: BindingDefs,
@@ -80,12 +80,6 @@ impl FixtureDef {
 
     pub fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
         self.mapping.set_ring_lamp_counts(counts)
-    }
-}
-
-impl Default for FixtureDef {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

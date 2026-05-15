@@ -9,7 +9,17 @@ use crate::{
 ///
 /// Ids are not reused within a loaded project runtime; removed ids stay invalid.
 #[derive(
-    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ResourceRef {
@@ -79,6 +89,17 @@ mod tests {
         let rbuf = ResourceRef::runtime_buffer(buf);
         assert_eq!(rbuf.domain, ResourceDomain::RuntimeBuffer);
         assert_eq!(rbuf.id, 7);
+    }
+
+    #[test]
+    fn resource_ref_default_is_unset_sentinel() {
+        assert_eq!(
+            ResourceRef::default(),
+            ResourceRef {
+                domain: ResourceDomain::Unset,
+                id: 0,
+            }
+        );
     }
 
     #[test]

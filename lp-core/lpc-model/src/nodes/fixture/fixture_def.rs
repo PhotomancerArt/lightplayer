@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Authored fixture node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct FixtureDef {
     /// Full-frame render size used when materializing the fixture input.
     #[serde(default = "default_render_size")]
@@ -96,12 +96,13 @@ fn default_gamma_correction() -> OptionSlot<ValueSlot<bool>> {
 }
 
 /// Color order for RGB channels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorOrder {
     /// Red, Green, Blue.
     Rgb,
     /// Green, Red, Blue.
+    #[default]
     Grb,
     /// Red, Blue, Green.
     Rbg,

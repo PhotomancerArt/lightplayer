@@ -7,9 +7,10 @@ use alloc::vec;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// RGB channel order for fixture/output color packing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorOrderValue {
     Rgb,
+    #[default]
     Grb,
     Rbg,
     Gbr,

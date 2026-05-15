@@ -3,7 +3,7 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// Path to an authored source file.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
 #[slot_value(editor = path)]
 pub struct SourcePath(pub String);
 

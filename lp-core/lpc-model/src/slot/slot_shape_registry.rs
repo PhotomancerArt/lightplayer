@@ -4,16 +4,23 @@
 //! register here. The registry is versioned so clients can sync shape
 //! additions, removals, and replacements before applying slot data patches.
 
-use crate::{Revision, SlotShape, SlotShapeId, current_revision};
+use crate::{
+    Revision, SlotFactory, SlotFactoryError, SlotMutAccess, SlotShape, SlotShapeId,
+    current_revision,
+};
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 /// Registry of id-addressed slot shapes.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistry {
     pub ids_revision: Revision,
     shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema-gen", schemars(skip))]
+    factories: BTreeMap<SlotShapeId, SlotFactory>,
 }
 
 /// Versioned registry entry for one slot shape.
@@ -71,7 +78,7 @@ impl SlotShapeRegistry {
         id: SlotShapeId,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
-        self.register_shape_with_version(current_revision(), id, shape)
+        self.register_dynamic_shape(id, shape)
     }
 
     pub fn register_shape_named(
@@ -80,7 +87,57 @@ impl SlotShapeRegistry {
         name: impl Into<String>,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
-        self.register_shape_named_with_version(current_revision(), id, name, shape)
+        self.register_dynamic_shape_named(id, name, shape)
+    }
+
+    pub fn register_dynamic_shape(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_with_factory(id, shape, SlotFactory::dynamic())
+    }
+
+    pub fn register_dynamic_shape_named(
+        &mut self,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_named_with_factory(id, name, shape, SlotFactory::dynamic())
+    }
+
+    pub fn register_uncreatable_shape(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_with_factory(id, shape, SlotFactory::unsupported())
+    }
+
+    pub fn register_shape_with_factory(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_with_version_and_factory(current_revision(), id, shape, factory)
+    }
+
+    pub fn register_shape_named_with_factory(
+        &mut self,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_named_with_version_and_factory(
+            current_revision(),
+            id,
+            name,
+            shape,
+            factory,
+        )
     }
 
     pub fn register_shape_with_version(
@@ -89,10 +146,21 @@ impl SlotShapeRegistry {
         id: SlotShapeId,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_with_version_and_factory(revision, id, shape, SlotFactory::dynamic())
+    }
+
+    pub fn register_shape_with_version_and_factory(
+        &mut self,
+        revision: Revision,
+        id: SlotShapeId,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<(), SlotShapeRegistryError> {
         if self.shapes.contains_key(&id) {
             return Err(SlotShapeRegistryError::DuplicateShapeId(id));
         }
         self.shapes.insert(id, SlotShapeEntry::new(revision, shape));
+        self.factories.insert(id, factory);
         self.ids_revision = revision;
         Ok(())
     }
@@ -104,11 +172,29 @@ impl SlotShapeRegistry {
         name: impl Into<String>,
         shape: SlotShape,
     ) -> Result<(), SlotShapeRegistryError> {
+        self.register_shape_named_with_version_and_factory(
+            revision,
+            id,
+            name,
+            shape,
+            SlotFactory::dynamic(),
+        )
+    }
+
+    pub fn register_shape_named_with_version_and_factory(
+        &mut self,
+        revision: Revision,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<(), SlotShapeRegistryError> {
         if self.shapes.contains_key(&id) {
             return Err(SlotShapeRegistryError::DuplicateShapeId(id));
         }
         self.shapes
             .insert(id, SlotShapeEntry::named(revision, name, shape));
+        self.factories.insert(id, factory);
         self.ids_revision = revision;
         Ok(())
     }
@@ -124,7 +210,7 @@ impl SlotShapeRegistry {
         id: SlotShapeId,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
-        self.ensure_shape_with_version(current_revision(), id, shape)
+        self.ensure_dynamic_shape(id, shape)
     }
 
     pub fn ensure_shape_named(
@@ -133,7 +219,49 @@ impl SlotShapeRegistry {
         name: impl Into<String>,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
-        self.ensure_shape_named_with_version(current_revision(), id, name, shape)
+        self.ensure_dynamic_shape_named(id, name, shape)
+    }
+
+    pub fn ensure_dynamic_shape(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_with_factory(id, shape, SlotFactory::dynamic())
+    }
+
+    pub fn ensure_dynamic_shape_named(
+        &mut self,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_named_with_factory(id, name, shape, SlotFactory::dynamic())
+    }
+
+    pub fn ensure_shape_with_factory(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_with_version_and_factory(current_revision(), id, shape, factory)
+    }
+
+    pub fn ensure_shape_named_with_factory(
+        &mut self,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_named_with_version_and_factory(
+            current_revision(),
+            id,
+            name,
+            shape,
+            factory,
+        )
     }
 
     pub fn ensure_shape_with_version(
@@ -142,8 +270,19 @@ impl SlotShapeRegistry {
         id: SlotShapeId,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_with_version_and_factory(revision, id, shape, SlotFactory::dynamic())
+    }
+
+    pub fn ensure_shape_with_version_and_factory(
+        &mut self,
+        revision: Revision,
+        id: SlotShapeId,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<bool, SlotShapeRegistryError> {
         if let Some(existing) = self.shapes.get(&id) {
             return if existing.value() == &shape {
+                self.factories.insert(id, factory);
                 Ok(false)
             } else {
                 Err(SlotShapeRegistryError::ShapeIdConflict(id))
@@ -151,6 +290,7 @@ impl SlotShapeRegistry {
         }
 
         self.shapes.insert(id, SlotShapeEntry::new(revision, shape));
+        self.factories.insert(id, factory);
         self.ids_revision = revision;
         Ok(true)
     }
@@ -162,9 +302,27 @@ impl SlotShapeRegistry {
         name: impl Into<String>,
         shape: SlotShape,
     ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_named_with_version_and_factory(
+            revision,
+            id,
+            name,
+            shape,
+            SlotFactory::dynamic(),
+        )
+    }
+
+    pub fn ensure_shape_named_with_version_and_factory(
+        &mut self,
+        revision: Revision,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) -> Result<bool, SlotShapeRegistryError> {
         let name = name.into();
         if let Some(existing) = self.shapes.get(&id) {
             return if existing.value() == &shape {
+                self.factories.insert(id, factory);
                 Ok(false)
             } else {
                 Err(SlotShapeRegistryError::ShapeIdConflict(id))
@@ -173,6 +331,7 @@ impl SlotShapeRegistry {
 
         self.shapes
             .insert(id, SlotShapeEntry::named(revision, name, shape));
+        self.factories.insert(id, factory);
         self.ids_revision = revision;
         Ok(true)
     }
@@ -182,7 +341,7 @@ impl SlotShapeRegistry {
     /// Runtime-owned shapes whose structure varies by artifact or instance use
     /// this path when their shape changes.
     pub fn replace_shape(&mut self, id: SlotShapeId, shape: SlotShape) {
-        self.replace_shape_with_version(current_revision(), id, shape);
+        self.replace_dynamic_shape(id, shape);
     }
 
     pub fn replace_shape_with_version(
@@ -191,7 +350,31 @@ impl SlotShapeRegistry {
         id: SlotShapeId,
         shape: SlotShape,
     ) {
+        self.replace_shape_with_version_and_factory(revision, id, shape, SlotFactory::dynamic());
+    }
+
+    pub fn replace_dynamic_shape(&mut self, id: SlotShapeId, shape: SlotShape) {
+        self.replace_shape_with_factory(id, shape, SlotFactory::dynamic());
+    }
+
+    pub fn replace_shape_with_factory(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) {
+        self.replace_shape_with_version_and_factory(current_revision(), id, shape, factory);
+    }
+
+    pub fn replace_shape_with_version_and_factory(
+        &mut self,
+        revision: Revision,
+        id: SlotShapeId,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) {
         self.shapes.insert(id, SlotShapeEntry::new(revision, shape));
+        self.factories.insert(id, factory);
         self.ids_revision = revision;
     }
 
@@ -211,8 +394,26 @@ impl SlotShapeRegistry {
         name: impl Into<String>,
         shape: SlotShape,
     ) {
+        self.replace_shape_named_with_version_and_factory(
+            revision,
+            id,
+            name,
+            shape,
+            SlotFactory::dynamic(),
+        );
+    }
+
+    pub fn replace_shape_named_with_version_and_factory(
+        &mut self,
+        revision: Revision,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+        factory: SlotFactory,
+    ) {
         self.shapes
             .insert(id, SlotShapeEntry::named(revision, name, shape));
+        self.factories.insert(id, factory);
         self.ids_revision = revision;
     }
 
@@ -222,6 +423,7 @@ impl SlotShapeRegistry {
 
     pub fn unregister_shape_with_version(&mut self, revision: Revision, id: &SlotShapeId) {
         if self.shapes.remove(id).is_some() {
+            self.factories.remove(id);
             self.ids_revision = revision;
         }
     }
@@ -261,6 +463,31 @@ impl SlotShapeRegistry {
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.ids_revision = snapshot.ids_revision;
         self.shapes = snapshot.shapes;
+        self.factories = self
+            .shapes
+            .keys()
+            .map(|id| (*id, SlotFactory::unsupported()))
+            .collect();
+    }
+
+    pub fn create_default(
+        &self,
+        id: SlotShapeId,
+    ) -> Result<Box<dyn SlotMutAccess>, SlotFactoryError> {
+        if !self.shapes.contains_key(&id) {
+            return Err(SlotFactoryError::MissingShape(id));
+        }
+        self.factories
+            .get(&id)
+            .copied()
+            .unwrap_or_else(SlotFactory::unsupported)
+            .create_default(self, id)
+    }
+}
+
+impl PartialEq for SlotShapeRegistry {
+    fn eq(&self, other: &Self) -> bool {
+        self.ids_revision == other.ids_revision && self.shapes == other.shapes
     }
 }
 
@@ -276,6 +503,7 @@ pub enum SlotShapeRegistryError {
     DuplicateShapeId(SlotShapeId),
     ShapeIdConflict(SlotShapeId),
     MissingReferencedShape(SlotShapeId),
+    FactoryError(String),
 }
 
 impl core::fmt::Display for SlotShapeRegistryError {
@@ -286,6 +514,7 @@ impl core::fmt::Display for SlotShapeRegistryError {
             Self::MissingReferencedShape(id) => {
                 write!(f, "missing referenced slot shape id: {id}")
             }
+            Self::FactoryError(message) => f.write_str(message),
         }
     }
 }
@@ -355,6 +584,24 @@ mod tests {
             snapshot.shapes.get(&id).and_then(SlotShapeEntry::name),
             Some("crate::test::NamedShape")
         );
+    }
+
+    #[test]
+    fn apply_snapshot_restores_shapes_as_explicitly_uncreatable() {
+        let mut registry = SlotShapeRegistry::default();
+        let id = SlotShapeId::from_static_name("test.snapshot_shape");
+        registry
+            .register_dynamic_shape(id, SlotShape::value(LpType::Bool))
+            .unwrap();
+        let snapshot = registry.snapshot();
+
+        let mut restored = SlotShapeRegistry::default();
+        restored.apply_snapshot(snapshot);
+
+        let Err(error) = restored.create_default(id) else {
+            panic!("expected unsupported factory");
+        };
+        assert_eq!(error, SlotFactoryError::UnsupportedFactory(id));
     }
 
     #[test]

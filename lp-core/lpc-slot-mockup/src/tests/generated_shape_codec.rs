@@ -5,7 +5,7 @@ use lpc_model::{
 };
 
 #[test]
-fn generated_shape_codec_missing_field_uses_type_default_for_now() {
+fn generated_shape_codec_missing_field_uses_empty_slot_default() {
     let json = r#"{"kind": "output", "bindings": {}}"#;
 
     let decoded = read_node_def_json(json).unwrap();
@@ -13,7 +13,7 @@ fn generated_shape_codec_missing_field_uses_type_default_for_now() {
         panic!("expected output node def");
     };
 
-    assert_eq!(output.pin(), 18);
+    assert_eq!(output.pin(), 0);
 }
 
 #[test]

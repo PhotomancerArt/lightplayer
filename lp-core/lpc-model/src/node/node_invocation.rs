@@ -9,7 +9,7 @@ use crate::{ArtifactPath, ArtifactPathSlot, SlotRecord};
 use alloc::string::ToString;
 
 /// Parent-owned child node invocation.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, SlotRecord)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, SlotRecord)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodeInvocation {
     /// Artifact to load for this child node definition.

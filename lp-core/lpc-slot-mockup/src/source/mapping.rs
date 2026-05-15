@@ -147,6 +147,13 @@ impl MappingConfig {
     }
 }
 
+impl Default for MappingConfig {
+    fn default() -> Self {
+        Self::default_variant(current_revision(), "disabled")
+            .expect("default MappingConfig variant is valid")
+    }
+}
+
 impl SlotEnumShape for MappingConfig {
     fn slot_enum_shape() -> SlotShape {
         mapping_shape()
@@ -404,6 +411,13 @@ impl PathSpec {
             *offset_angle.value(),
             *order.value(),
         ))
+    }
+}
+
+impl Default for PathSpec {
+    fn default() -> Self {
+        Self::default_variant(current_revision(), "ring_array")
+            .expect("default PathSpec variant is valid")
     }
 }
 

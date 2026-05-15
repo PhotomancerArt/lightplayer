@@ -1,6 +1,6 @@
 use lpc_model::{BindingDefs, Dim2u, Dim2uSlot, SlotRecord};
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct TextureDef {
     pub size: Dim2uSlot,
     pub bindings: BindingDefs,
@@ -25,11 +25,5 @@ impl TextureDef {
 
     pub fn bindings(&self) -> &BindingDefs {
         &self.bindings
-    }
-}
-
-impl Default for TextureDef {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -5,7 +5,7 @@ use crate::{
 };
 
 /// Authored GPIO output node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     /// Authored slot bindings for output inputs.

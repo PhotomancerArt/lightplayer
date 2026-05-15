@@ -21,9 +21,11 @@ use serde::{
 /// TOML usually uses compact strings such as `bus#visual.out` and
 /// `..shader#output`. Literal endpoints use an explicit `{ literal = ... }`
 /// form because they are values, not address references.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum BindingEndpoint {
+    #[default]
+    Unset,
     Bus(BusSlotRef),
     Node(NodeSlotRef),
     Literal(LpValue),
@@ -31,6 +33,9 @@ pub enum BindingEndpoint {
 
 impl BindingEndpoint {
     pub fn parse_ref(input: &str) -> Result<Self, BindingEndpointError> {
+        if input.is_empty() {
+            return Ok(Self::Unset);
+        }
         if input.starts_with(BusSlotRef::PREFIX) {
             return BusSlotRef::parse(input)
                 .map(Self::Bus)
@@ -43,6 +48,10 @@ impl BindingEndpoint {
 
     pub fn is_literal(&self) -> bool {
         matches!(self, Self::Literal(_))
+    }
+
+    pub fn is_unset(&self) -> bool {
+        matches!(self, Self::Unset)
     }
 }
 
@@ -121,6 +130,7 @@ impl crate::SlotCodec for BindingEndpoint {
         match (reference, literal) {
             (Some(reference), None) => Ok(reference),
             (None, Some(literal)) => Ok(Self::Literal(literal)),
+            (None, None) => Ok(Self::Unset),
             _ => Err(object.missing_required_field("ref or value")),
         }
     }
@@ -131,6 +141,7 @@ impl crate::SlotCodec for BindingEndpoint {
     {
         let mut object = value.object()?;
         match self {
+            Self::Unset => {}
             Self::Bus(reference) => object.prop("ref")?.string(&reference.to_string())?,
             Self::Node(reference) => object.prop("ref")?.string(&reference.to_string())?,
             Self::Literal(value) => write_untyped_lp_value(object.prop("value")?, value)?,
@@ -142,6 +153,7 @@ impl crate::SlotCodec for BindingEndpoint {
 impl fmt::Display for BindingEndpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Unset => Ok(()),
             Self::Bus(value) => write!(f, "{value}"),
             Self::Node(value) => write!(f, "{value}"),
             Self::Literal(value) => write!(f, "{value:?}"),
@@ -155,6 +167,7 @@ impl Serialize for BindingEndpoint {
         S: Serializer,
     {
         match self {
+            Self::Unset => serializer.serialize_str(""),
             Self::Bus(value) => serializer.serialize_str(&value.to_string()),
             Self::Node(value) => serializer.serialize_str(&value.to_string()),
             Self::Literal(value) => {
@@ -210,9 +223,7 @@ impl<'de> Deserialize<'de> for BindingEndpoint {
                         other => return Err(serde::de::Error::unknown_field(other, &["literal"])),
                     }
                 }
-                literal
-                    .map(BindingEndpoint::Literal)
-                    .ok_or_else(|| serde::de::Error::missing_field("literal"))
+                Ok(literal.map(BindingEndpoint::Literal).unwrap_or_default())
             }
         }
 
@@ -252,6 +263,19 @@ mod tests {
             BindingEndpoint::parse_ref("..shader#output").unwrap(),
             BindingEndpoint::Node(_)
         ));
+    }
+
+    #[test]
+    fn empty_ref_is_unset_sentinel() {
+        assert_eq!(BindingEndpoint::default(), BindingEndpoint::Unset);
+        assert_eq!(
+            BindingEndpoint::parse_ref("").unwrap(),
+            BindingEndpoint::Unset
+        );
+        assert_eq!(
+            BindingEndpoint::from_lp_value(&LpValue::String(String::new())).unwrap(),
+            BindingEndpoint::Unset
+        );
     }
 
     #[test]

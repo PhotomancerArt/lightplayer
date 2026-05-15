@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// A binding is attached to a slot name by [`crate::BindingDefs`]. Consumed
 /// slots use `source`; produced slots use `target`. Direction is validated
 /// against the node's slot contract when the engine composes the project.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BindingDef {
@@ -48,7 +48,14 @@ impl BindingDef {
     }
 
     pub fn validate(&self) -> Result<(), BindingDefError> {
-        match (self.source_endpoint(), self.target_endpoint()) {
+        let source = self
+            .source_endpoint()
+            .filter(|endpoint| !endpoint.is_unset());
+        let target = self
+            .target_endpoint()
+            .filter(|endpoint| !endpoint.is_unset());
+
+        match (source, target) {
             (Some(_), Some(_)) => Err(BindingDefError::SourceAndTarget),
             (None, None) => Err(BindingDefError::MissingDirection),
             (_, Some(target)) if target.is_literal() => Err(BindingDefError::LiteralTarget),
@@ -155,6 +162,10 @@ mod tests {
                 target: OptionSlot::none(),
             }
             .validate(),
+            Err(BindingDefError::MissingDirection)
+        );
+        assert_eq!(
+            BindingDef::source(BindingEndpoint::Unset).validate(),
             Err(BindingDefError::MissingDirection)
         );
     }

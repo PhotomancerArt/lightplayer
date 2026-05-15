@@ -2,7 +2,7 @@ use crate::{SlotValue, ValueSlot};
 use serde::{Deserialize, Serialize};
 
 /// Render ordering value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
 #[slot_value(editor = number(step = 1.0))]
 pub struct RenderOrder(pub i32);
 

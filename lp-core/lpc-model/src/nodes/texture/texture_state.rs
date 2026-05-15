@@ -3,7 +3,7 @@
 use crate::{Revision, SlotRecord, ValueSlot};
 
 /// Runtime metadata exposed by a texture node.
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct TextureState {
     pub width: ValueSlot<i32>,
     pub height: ValueSlot<i32>,

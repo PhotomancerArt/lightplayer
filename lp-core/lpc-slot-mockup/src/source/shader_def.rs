@@ -6,7 +6,7 @@ use lpc_model::{
     SourcePath, SourcePathSlot, ValueSlot,
 };
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct ShaderDef {
     pub glsl_path: SourcePathSlot,
     pub render_order: RenderOrderSlot,
@@ -15,7 +15,7 @@ pub struct ShaderDef {
     pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
-#[derive(Clone, Debug, PartialEq, SlotRecord)]
+#[derive(Clone, Debug, Default, PartialEq, SlotRecord)]
 pub struct ShaderParamDef {
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
@@ -24,7 +24,7 @@ pub struct ShaderParamDef {
     pub min: OptionSlot<ScalarHint>,
 }
 
-#[derive(Clone, Debug, PartialEq, SlotRecord)]
+#[derive(Clone, Debug, Default, PartialEq, SlotRecord)]
 pub struct ScalarHint {
     pub value: PositiveF32Slot,
 }
@@ -104,12 +104,6 @@ impl ShaderDef {
     }
 }
 
-impl Default for ShaderDef {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ShaderParamDef {
     pub fn new(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
@@ -169,12 +163,6 @@ impl ShaderParamDef {
     }
 }
 
-impl Default for ShaderParamDef {
-    fn default() -> Self {
-        Self::new("", "", 1.0, None)
-    }
-}
-
 impl ScalarHint {
     pub fn new(value: f32) -> Self {
         Self {
@@ -188,11 +176,5 @@ impl ScalarHint {
 
     pub fn value(&self) -> f32 {
         self.value.value().0
-    }
-}
-
-impl Default for ScalarHint {
-    fn default() -> Self {
-        Self::new(1.0)
     }
 }

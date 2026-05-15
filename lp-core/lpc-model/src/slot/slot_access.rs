@@ -1,6 +1,6 @@
 use crate::{
-    LpValue, Revision, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    WithRevision,
+    LpValue, Revision, SlotFactory, SlotMutAccess, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, WithRevision,
 };
 use alloc::vec::Vec;
 
@@ -37,6 +37,30 @@ pub trait StaticSlotShape {
             Some(name) => registry.ensure_shape_named(Self::SHAPE_ID, name, Self::slot_shape()),
             None => registry.ensure_shape(Self::SHAPE_ID, Self::slot_shape()),
         }
+    }
+
+    fn ensure_registered_with_factory(
+        registry: &mut SlotShapeRegistry,
+        factory: SlotFactory,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        match Self::shape_name() {
+            Some(name) => registry.ensure_shape_named_with_factory(
+                Self::SHAPE_ID,
+                name,
+                Self::slot_shape(),
+                factory,
+            ),
+            None => registry.ensure_shape_with_factory(Self::SHAPE_ID, Self::slot_shape(), factory),
+        }
+    }
+
+    fn ensure_default_registered<T>(
+        registry: &mut SlotShapeRegistry,
+    ) -> Result<bool, SlotShapeRegistryError>
+    where
+        T: StaticSlotShape + SlotMutAccess + Default + 'static,
+    {
+        T::ensure_registered_with_factory(registry, SlotFactory::for_default::<T>())
     }
 }
 

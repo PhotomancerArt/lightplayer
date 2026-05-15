@@ -7,7 +7,7 @@
 use crate::NodeId;
 
 /// Renderable visual product produced by a node output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct VisualProduct {
     node: NodeId,

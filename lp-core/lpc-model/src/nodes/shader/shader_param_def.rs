@@ -7,7 +7,7 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// Authored definition for one shader parameter.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct ShaderParamDef {
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
@@ -18,7 +18,7 @@ pub struct ShaderParamDef {
 }
 
 /// Simple numeric hint for scalar shader params.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct ScalarHint {
     pub value: PositiveF32Slot,
 }

@@ -3,7 +3,7 @@
 use crate::{SlotRecord, VisualProduct, VisualProductSlot};
 
 /// Runtime state exposed by a shader node.
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct ShaderState {
     /// Renderable visual output produced by this shader node.
     pub output: VisualProductSlot,

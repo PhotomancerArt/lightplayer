@@ -2,7 +2,7 @@ use lpc_model::{
     BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, SlotRecord, ValueSlot,
 };
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     pub bindings: BindingDefs,
@@ -36,12 +36,6 @@ impl OutputDef {
 
     pub fn options(&self) -> Option<&OutputDriverOptionsConfig> {
         self.options.data.as_ref()
-    }
-}
-
-impl Default for OutputDef {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -1,7 +1,9 @@
 use crate::{
     LpValue, Revision, SlotAccess, SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn,
-    SlotRecord, SlotValue, ValueRootError, WithRevision,
+    SlotRecord, SlotShape, SlotShapeRegistry, SlotValue, SlotVariantShape, ValueRootError,
+    WithRevision, create_dynamic_slot_data,
 };
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 
@@ -46,6 +48,13 @@ pub trait SlotRecordMutAccess {
 pub trait MapSlotMutAccess {
     fn keys_revision(&self) -> Revision;
     fn get_mut(&mut self, key: &SlotMapKey) -> Option<SlotDataMutAccess<'_>>;
+    fn insert_default(
+        &mut self,
+        revision: Revision,
+        key: &SlotMapKey,
+        registry: &SlotShapeRegistry,
+        value_shape: &SlotShape,
+    ) -> Result<(), SlotMutationError>;
 }
 
 /// Mutable access to an enum slot with one active variant.
@@ -62,12 +71,29 @@ pub trait SlotEnumDefaultVariant: SlotEnumMutAccess {
         revision: Revision,
         variant: &str,
     ) -> Result<(), SlotMutationError>;
+
+    fn set_variant_default_with_shape(
+        &mut self,
+        revision: Revision,
+        variant: &str,
+        registry: &SlotShapeRegistry,
+        variants: &[SlotVariantShape],
+    ) -> Result<(), SlotMutationError> {
+        let _ = (registry, variants);
+        self.set_variant_default(revision, variant)
+    }
 }
 
 /// Mutable access to an optional slot.
 pub trait SlotOptionMutAccess {
     fn presence_revision(&self) -> Revision;
     fn data_mut(&mut self) -> Option<SlotDataMutAccess<'_>>;
+    fn set_some_default(
+        &mut self,
+        revision: Revision,
+        registry: &SlotShapeRegistry,
+        some_shape: &SlotShape,
+    ) -> Result<(), SlotMutationError>;
 }
 
 /// A map value that can be exposed through mutable slot traversal.
@@ -202,6 +228,20 @@ impl MapSlotMutAccess for SlotMapDyn {
     fn get_mut(&mut self, key: &SlotMapKey) -> Option<SlotDataMutAccess<'_>> {
         self.entries.get_mut(key).map(SlotData::access_mut)
     }
+
+    fn insert_default(
+        &mut self,
+        revision: Revision,
+        key: &SlotMapKey,
+        registry: &SlotShapeRegistry,
+        value_shape: &SlotShape,
+    ) -> Result<(), SlotMutationError> {
+        let data = create_dynamic_slot_data(registry, value_shape)
+            .map_err(|error| SlotMutationError::unsupported_target(error.to_string()))?;
+        self.entries.insert(key.clone(), data);
+        self.keys_revision = revision;
+        Ok(())
+    }
 }
 
 impl SlotEnumMutAccess for SlotEnum {
@@ -221,12 +261,34 @@ impl SlotEnumMutAccess for SlotEnum {
 impl SlotEnumDefaultVariant for SlotEnum {
     fn set_variant_default(
         &mut self,
-        _revision: Revision,
+        revision: Revision,
         variant: &str,
     ) -> Result<(), SlotMutationError> {
+        let _ = revision;
         Err(SlotMutationError::unsupported_target(format!(
-            "dynamic SlotEnum cannot construct default variant {variant:?} without payload data"
+            "dynamic SlotEnum requires shape metadata to construct default variant {variant:?}"
         )))
+    }
+
+    fn set_variant_default_with_shape(
+        &mut self,
+        revision: Revision,
+        variant: &str,
+        registry: &SlotShapeRegistry,
+        variants: &[SlotVariantShape],
+    ) -> Result<(), SlotMutationError> {
+        let variant_shape = variants
+            .iter()
+            .find(|variant_shape| variant_shape.name.as_str() == variant)
+            .ok_or_else(|| {
+                SlotMutationError::unknown_variant(format!("enum has no variant {variant:?}"))
+            })?;
+        let data = create_dynamic_slot_data(registry, &variant_shape.shape)
+            .map_err(|error| SlotMutationError::unsupported_target(error.to_string()))?;
+        self.variant = variant_shape.name.clone();
+        self.variant_revision = revision;
+        self.data = Box::new(data);
+        Ok(())
     }
 }
 
@@ -237,6 +299,19 @@ impl SlotOptionMutAccess for SlotOptionDyn {
 
     fn data_mut(&mut self) -> Option<SlotDataMutAccess<'_>> {
         self.data.as_mut().map(|data| data.access_mut())
+    }
+
+    fn set_some_default(
+        &mut self,
+        revision: Revision,
+        registry: &SlotShapeRegistry,
+        some_shape: &SlotShape,
+    ) -> Result<(), SlotMutationError> {
+        let data = create_dynamic_slot_data(registry, some_shape)
+            .map_err(|error| SlotMutationError::unsupported_target(error.to_string()))?;
+        self.presence_revision = revision;
+        self.data = Some(Box::new(data));
+        Ok(())
     }
 }
 
@@ -252,7 +327,7 @@ where
 impl<K, V> MapSlotMutAccess for super::MapSlot<K, V>
 where
     K: super::MapSlotKeyLike,
-    V: SlotMapValueMutAccess,
+    V: Default + SlotMapValueMutAccess,
 {
     fn keys_revision(&self) -> Revision {
         self.keys_revision
@@ -264,12 +339,28 @@ where
             .get_mut(&typed_key)
             .map(SlotMapValueMutAccess::slot_data_mut)
     }
+
+    fn insert_default(
+        &mut self,
+        revision: Revision,
+        key: &SlotMapKey,
+        registry: &SlotShapeRegistry,
+        value_shape: &SlotShape,
+    ) -> Result<(), SlotMutationError> {
+        let _ = (registry, value_shape);
+        let typed_key = K::from_slot_map_key(key).ok_or_else(|| {
+            SlotMutationError::wrong_type(format!("invalid map key for typed map: {key:?}"))
+        })?;
+        self.entries.insert(typed_key, V::default());
+        self.keys_revision = revision;
+        Ok(())
+    }
 }
 
 impl<K, V> FieldSlotMut for super::MapSlot<K, V>
 where
     K: super::MapSlotKeyLike,
-    V: super::FieldSlot + super::SlotMapValueAccess + SlotMapValueMutAccess,
+    V: Default + super::FieldSlot + super::SlotMapValueAccess + SlotMapValueMutAccess,
 {
     fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
         SlotDataMutAccess::Map(self)
@@ -278,7 +369,7 @@ where
 
 impl<T> SlotOptionMutAccess for super::OptionSlot<T>
 where
-    T: SlotMapValueMutAccess,
+    T: Default + SlotMapValueMutAccess,
 {
     fn presence_revision(&self) -> Revision {
         self.presence_revision
@@ -287,11 +378,23 @@ where
     fn data_mut(&mut self) -> Option<SlotDataMutAccess<'_>> {
         self.data.as_mut().map(SlotMapValueMutAccess::slot_data_mut)
     }
+
+    fn set_some_default(
+        &mut self,
+        revision: Revision,
+        registry: &SlotShapeRegistry,
+        some_shape: &SlotShape,
+    ) -> Result<(), SlotMutationError> {
+        let _ = (registry, some_shape);
+        self.presence_revision = revision;
+        self.data = Some(T::default());
+        Ok(())
+    }
 }
 
 impl<T> FieldSlotMut for super::OptionSlot<T>
 where
-    T: super::FieldSlot + super::SlotMapValueAccess + SlotMapValueMutAccess,
+    T: Default + super::FieldSlot + super::SlotMapValueAccess + SlotMapValueMutAccess,
 {
     fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
         SlotDataMutAccess::Option(self)

@@ -9,4 +9,5 @@ mod mutation;
 mod native_stream;
 mod server_tree_walk;
 mod shape_codegen;
+mod shape_factory;
 mod storage_codec;

@@ -98,7 +98,7 @@ impl DivMode {
 }
 
 /// GLSL compilation options (per-shader-node)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SlotRecord)]
 pub struct GlslOpts {
     #[serde(default)]
     pub add_sub: ValueSlot<AddSubMode>,
@@ -106,16 +106,6 @@ pub struct GlslOpts {
     pub mul: ValueSlot<MulMode>,
     #[serde(default)]
     pub div: ValueSlot<DivMode>,
-}
-
-impl Default for GlslOpts {
-    fn default() -> Self {
-        Self {
-            add_sub: ValueSlot::new(AddSubMode::Wrapping),
-            mul: ValueSlot::new(MulMode::Wrapping),
-            div: ValueSlot::new(DivMode::Reciprocal),
-        }
-    }
 }
 
 impl ToLpValue for AddSubMode {

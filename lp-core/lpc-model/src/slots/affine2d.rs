@@ -30,6 +30,12 @@ impl Affine2d {
     }
 }
 
+impl Default for Affine2d {
+    fn default() -> Self {
+        Self::identity()
+    }
+}
+
 impl ToLpValue for Affine2d {
     fn to_lp_value(&self) -> LpValue {
         LpValue::Mat3x3([

@@ -102,6 +102,18 @@ fields are a logic-layer concern: a model can be loaded, synced, edited, and
 serialized even when application logic later decides it is not renderable or
 otherwise invalid.
 
+Defaults are intentionally empty sentinel data, not domain validity. Empty
+strings, empty maps, absent options, zero numeric ids, and zero scalar values
+are all acceptable model-layer defaults. A default object should have the right
+slot shape and be safe to mutate, but it does not need to be meaningful to the
+engine. Recursive validation is the layer that should reject empty references,
+missing artifacts, invalid ids, or incomplete runtime objects.
+
+Enums that do not have an honest semantic default should use an explicit
+`Unset` variant. This keeps the sentinel visible in Rust and serialized data
+instead of pretending that a real domain variant, such as a resource family or
+binding endpoint, was authored.
+
 The preferred construction path is:
 
 1. Construct `T::default()`.
@@ -185,6 +197,25 @@ focused size pass:
 The goal is not to make generated Rust source tiny for its own sake. The goal is
 to reduce final firmware size while keeping the generated code understandable
 enough to debug.
+
+## Default Object Factories
+
+Generic deserialization needs a way to turn a shape id into a mutable slot
+object. The registry owns that creation behavior:
+
+```rust
+registry.create_default(shape_id) -> Box<dyn SlotMutAccess>
+```
+
+Static shapes register factories that call their Rust `Default`
+implementation. Dynamic shapes can opt into a factory that builds a
+`DynamicSlotObject` from `SlotData`. Shapes that are not meaningful standalone
+objects register an explicit unsupported factory.
+
+This is also the opt-in boundary for generic loading. A reader may mutate a
+caller-provided object, or it may ask the registry to create one. If creation is
+unsupported, deserialization fails at that shape boundary instead of inventing a
+partial object.
 
 ## Conceptual Boundaries
 

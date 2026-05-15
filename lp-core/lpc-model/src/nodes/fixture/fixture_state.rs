@@ -3,7 +3,7 @@
 use crate::{ControlExtent, ControlProduct, ControlProductSlot, NodeId, SlotRecord};
 
 /// Runtime state exposed by a fixture node.
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub struct FixtureState {
     /// Renderable control output produced by this fixture node.
     pub output: ControlProductSlot,

@@ -4,7 +4,9 @@
 //! for backwards compatibility with legacy project state.
 
 /// Texture pixel format
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "UPPERCASE")] // Serializes as "RGB8", "RGBA8", "R8", "RGBA16"
 pub enum TextureFormat {
     /// RGB 8-bit per channel (3 bytes per pixel)
@@ -14,6 +16,7 @@ pub enum TextureFormat {
     /// Single channel 8-bit (1 byte per pixel)
     R8,
     /// RGBA 16-bit per channel (8 bytes per pixel), unsigned normalized
+    #[default]
     Rgba16,
 }
 
@@ -47,12 +50,6 @@ impl TextureFormat {
             "RGBA16" => Some(TextureFormat::Rgba16),
             _ => None,
         }
-    }
-}
-
-impl Default for TextureFormat {
-    fn default() -> Self {
-        TextureFormat::Rgba16
     }
 }
 

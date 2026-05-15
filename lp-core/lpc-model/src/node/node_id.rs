@@ -13,7 +13,17 @@ use core::fmt;
 /// graphs use string paths (e.g. [`NodePath`](crate::TreePath)), not embedding Uid in TOML, per
 /// the same M2 “runtime-only / addressing split” story.
 #[derive(
-    Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodeId(pub u32);

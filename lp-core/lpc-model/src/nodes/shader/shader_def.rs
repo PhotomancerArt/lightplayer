@@ -2,13 +2,10 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::shader::{GlslOpts, ShaderParamDef};
-use crate::{
-    BindingDefs, LpPathBuf, MapSlot, RenderOrder, RenderOrderSlot, SlotRecord, SourcePath,
-    SourcePathSlot,
-};
+use crate::{BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, SlotRecord, SourcePathSlot};
 
 /// Authored shader node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
 pub struct ShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: SourcePathSlot,
@@ -22,18 +19,6 @@ pub struct ShaderDef {
     pub glsl_opts: GlslOpts,
     #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub param_defs: MapSlot<String, ShaderParamDef>,
-}
-
-impl Default for ShaderDef {
-    fn default() -> Self {
-        Self {
-            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
-            render_order: RenderOrderSlot::new(RenderOrder(0)),
-            bindings: BindingDefs::default(),
-            glsl_opts: GlslOpts::default(),
-            param_defs: MapSlot::default(),
-        }
-    }
 }
 
 impl ShaderDef {
@@ -56,7 +41,11 @@ impl ShaderDef {
 mod tests {
     use super::*;
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
-    use crate::{NodeKind, ShaderDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{
+        NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotShapeRegistry, SourcePath,
+        StaticSlotShape,
+    };
+    use alloc::string::String;
 
     #[test]
     fn test_shader_def_kind() {
@@ -73,7 +62,7 @@ mod tests {
     #[test]
     fn test_shader_def_default() {
         let def = ShaderDef::default();
-        assert_eq!(def.glsl_path.value().as_str(), "main.glsl");
+        assert_eq!(def.glsl_path.value().as_str(), "");
         assert_eq!(def.render_order(), 0);
         assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Wrapping);
         assert_eq!(*def.glsl_opts.mul.value(), MulMode::Wrapping);
