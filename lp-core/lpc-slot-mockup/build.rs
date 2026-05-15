@@ -13,9 +13,9 @@ fn main() {
     })
     .expect("generate slot shape bootstrap");
 
-    lpc_slot_codegen::generate_mockup_slot_codec(lpc_slot_codegen::MockupSlotCodecCodegenConfig {
+    lpc_slot_codegen::generate_slot_codecs(lpc_slot_codegen::SlotCodecCodegenConfig {
         crate_root,
         out_file: out_dir.join("generated_slot_codec.rs"),
     })
-    .expect("generate mockup slot codec");
+    .expect("generate slot codecs");
 }

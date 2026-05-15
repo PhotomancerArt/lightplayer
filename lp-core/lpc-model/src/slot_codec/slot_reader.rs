@@ -73,6 +73,13 @@ where
         })
     }
 
+    pub fn value(&mut self) -> ValueReader<'_, 'a, S> {
+        ValueReader {
+            reader: self,
+            span: None,
+        }
+    }
+
     pub fn expect_discriminator(
         &mut self,
         name: &str,

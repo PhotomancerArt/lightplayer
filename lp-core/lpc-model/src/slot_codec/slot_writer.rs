@@ -84,6 +84,10 @@ where
         self.out
     }
 
+    pub fn value(&mut self) -> SlotValueWriter<'_, W> {
+        SlotValueWriter { writer: self }
+    }
+
     pub fn object(&mut self) -> Result<SlotObjectWriter<'_, W>, SlotWriteError<W::Error>> {
         self.write_raw(b"{")?;
         Ok(SlotObjectWriter {

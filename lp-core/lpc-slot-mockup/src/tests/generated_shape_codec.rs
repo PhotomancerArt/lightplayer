@@ -1,77 +1,67 @@
-use std::collections::BTreeMap;
-
-use crate::generated_slot_codec::{
-    GeneratedBindingDef, GeneratedBundle, GeneratedEndpoint, GeneratedFixtureDef,
-    GeneratedInvocation, GeneratedMapping, GeneratedNodeDef, GeneratedOutputDef,
-    GeneratedOutputOptions, GeneratedProject, read_bundle_json, read_bundle_toml,
-    read_fixture_def_json, read_fixture_def_toml, read_output_def_json, read_output_def_toml,
-    read_project_def_json, read_project_def_toml, read_shader_def_json, read_shader_def_toml,
-    read_texture_def_json, read_texture_def_toml, write_bundle_json, write_fixture_def_json,
-    write_output_def_json, write_project_def_json, write_shader_def_json, write_texture_def_json,
+use crate::source::{FixtureDef, NodeDef, OutputDef, ProjectDef, ShaderDef, TextureDef};
+use lpc_model::{
+    SlotCodec, SlotShapeRegistry,
+    slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter, SyntaxError, TomlSyntaxSource},
 };
-use crate::source::{FixtureDef, OutputDef, ProjectDef, ShaderDef, TextureDef};
 
 #[test]
-fn generated_shape_codec_json_round_trips_bundle() {
-    let bundle = sample_bundle();
-    let json = write_bundle_json(&bundle);
+fn generated_shape_codec_missing_field_uses_type_default_for_now() {
+    let json = r#"{"kind": "output", "bindings": {}}"#;
 
-    let decoded = read_bundle_json(std::str::from_utf8(&json).unwrap()).unwrap();
+    let decoded = read_node_def_json(json).unwrap();
+    let Some(output) = decoded.as_output() else {
+        panic!("expected output node def");
+    };
 
-    assert_eq!(decoded, bundle);
-}
-
-#[test]
-fn generated_shape_codec_toml_reads_with_same_reader() {
-    let toml: toml::Value = toml::from_str(SAMPLE_BUNDLE_TOML).unwrap();
-
-    let decoded = read_bundle_toml(&toml).unwrap();
-
-    assert_eq!(decoded, sample_bundle());
-}
-
-#[test]
-fn generated_shape_codec_invalid_discriminator_reports_valid_values() {
-    let json = r#"{
-        "project": {"kind": "ProjectDef", "nodes": {}},
-        "node_defs": [{"kind": "Blark12"}]
-    }"#;
-
-    let error = read_bundle_json(json).unwrap_err();
-
-    assert!(error.message().contains("Blark12"));
-    assert!(error.message().contains("OutputDef"));
-    assert!(error.message().contains("FixtureDef"));
-}
-
-#[test]
-fn generated_shape_codec_missing_required_field_is_explicit() {
-    let json = r#"{
-        "project": {"kind": "ProjectDef", "nodes": {}},
-        "node_defs": [{"kind": "OutputDef", "bindings": {}}]
-    }"#;
-
-    let error = read_bundle_json(json).unwrap_err();
-
-    assert!(error.message().contains("missing required field `pin`"));
+    assert_eq!(output.pin(), 18);
 }
 
 #[test]
 fn generated_shape_codec_unknown_field_reports_valid_fields() {
-    let json = r#"{
-        "project": {
-            "kind": "ProjectDef",
-            "name": "basic",
-            "surprise": true,
-            "nodes": {}
-        },
-        "node_defs": []
-    }"#;
+    let json = r#"{"kind": "project", "name": "basic", "surprise": true, "nodes": {}}"#;
 
-    let error = read_bundle_json(json).unwrap_err();
+    let error = expect_error(read_node_def_json(json));
 
     assert!(error.message().contains("surprise"));
     assert!(error.message().contains("nodes"));
+}
+
+#[test]
+fn generated_shape_codec_reads_real_node_def_enum_toml() {
+    let toml: toml::Value = toml::from_str(OUTPUT_DEF_TOML).unwrap();
+
+    let decoded = read_node_def_toml(&toml).unwrap();
+
+    let Some(output) = decoded.as_output() else {
+        panic!("expected output node def");
+    };
+    assert_output_def_matches_default(output);
+}
+
+#[test]
+fn generated_shape_codec_json_round_trips_real_node_def_enum() {
+    let node = NodeDef::Fixture(FixtureDef::new());
+    let json = write_node_def_json(&node);
+
+    let decoded = read_node_def_json(std::str::from_utf8(&json).unwrap()).unwrap();
+
+    let Some(fixture) = decoded.as_fixture() else {
+        panic!("expected fixture node def");
+    };
+    assert_fixture_def_matches_default(fixture);
+}
+
+#[test]
+fn generated_shape_codec_node_def_invalid_kind_reports_valid_values() {
+    let error = match read_node_def_json(r#"{"kind":"Blark12"}"#) {
+        Ok(_) => panic!("expected invalid kind error"),
+        Err(error) => error,
+    };
+
+    assert!(error.message().contains("Blark12"));
+    assert!(error.message().contains("output"));
+    assert!(error.message().contains("fixture"));
+    assert!(error.message().contains("shader"));
 }
 
 #[test]
@@ -191,54 +181,136 @@ fn generated_shape_codec_json_round_trips_real_shader_def() {
     assert_shader_def_matches_default(&decoded);
 }
 
-fn sample_bundle() -> GeneratedBundle {
-    let mut nodes = BTreeMap::new();
-    nodes.insert(
-        "output".to_string(),
-        GeneratedInvocation {
-            artifact: "./output.toml".to_string(),
-        },
-    );
-    nodes.insert(
-        "fixture".to_string(),
-        GeneratedInvocation {
-            artifact: "./fixture.toml".to_string(),
-        },
-    );
+fn read_json<T: SlotCodec>(json: &str) -> Result<T, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(JsonSyntaxSource::new(json)?, &registry);
+    T::read_slot(reader.value())
+}
 
-    let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "pixels".to_string(),
-        GeneratedBindingDef {
-            source: Some(GeneratedEndpoint::Value(0.75)),
-            target: Some(GeneratedEndpoint::Ref("bus#visual.out".to_string())),
-        },
-    );
+fn read_toml<T: SlotCodec>(value: &toml::Value) -> Result<T, SyntaxError> {
+    let registry = SlotShapeRegistry::default();
+    let mut reader = SlotReader::new(TomlSyntaxSource::new(value)?, &registry);
+    T::read_slot(reader.value())
+}
 
-    GeneratedBundle {
-        project: GeneratedProject {
-            name: Some("basic".to_string()),
-            nodes,
-        },
-        nodes: vec![
-            GeneratedNodeDef::Output(GeneratedOutputDef {
-                pin: 18,
-                bindings,
-                options: Some(GeneratedOutputOptions {
-                    white_point: [0.9, 1.0, 1.0],
-                    brightness: 0.85,
-                }),
-            }),
-            GeneratedNodeDef::Fixture(GeneratedFixtureDef {
-                mapping: GeneratedMapping::Square {
-                    origin: [0.1, 0.2],
-                    size: [0.8, 0.7],
-                },
-            }),
-            GeneratedNodeDef::Fixture(GeneratedFixtureDef {
-                mapping: GeneratedMapping::Disabled,
-            }),
-        ],
+fn write_json<T: SlotCodec>(value: &T) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut writer = SlotWriter::new(&mut out);
+    value.write_slot(writer.value()).unwrap();
+    out
+}
+
+fn read_node_def_json(json: &str) -> Result<NodeDef, SyntaxError> {
+    read_json(json)
+}
+
+fn read_node_def_toml(value: &toml::Value) -> Result<NodeDef, SyntaxError> {
+    read_toml(value)
+}
+
+fn write_node_def_json(node: &NodeDef) -> Vec<u8> {
+    write_json(node)
+}
+
+fn read_project_def_json(json: &str) -> Result<ProjectDef, SyntaxError> {
+    read_json(json)
+}
+
+fn read_project_def_toml(value: &toml::Value) -> Result<ProjectDef, SyntaxError> {
+    Ok(expect_project(read_node_def_toml(value)?))
+}
+
+fn write_project_def_json(project: &ProjectDef) -> Vec<u8> {
+    write_json(project)
+}
+
+fn read_output_def_json(json: &str) -> Result<OutputDef, SyntaxError> {
+    read_json(json).or_else(|_| Ok(expect_output(read_node_def_json(json)?)))
+}
+
+fn read_output_def_toml(value: &toml::Value) -> Result<OutputDef, SyntaxError> {
+    Ok(expect_output(read_node_def_toml(value)?))
+}
+
+fn write_output_def_json(output: &OutputDef) -> Vec<u8> {
+    write_json(output)
+}
+
+fn read_texture_def_json(json: &str) -> Result<TextureDef, SyntaxError> {
+    read_json(json).or_else(|_| Ok(expect_texture(read_node_def_json(json)?)))
+}
+
+fn read_texture_def_toml(value: &toml::Value) -> Result<TextureDef, SyntaxError> {
+    Ok(expect_texture(read_node_def_toml(value)?))
+}
+
+fn write_texture_def_json(texture: &TextureDef) -> Vec<u8> {
+    write_json(texture)
+}
+
+fn read_fixture_def_json(json: &str) -> Result<FixtureDef, SyntaxError> {
+    read_json(json).or_else(|_| Ok(expect_fixture(read_node_def_json(json)?)))
+}
+
+fn read_fixture_def_toml(value: &toml::Value) -> Result<FixtureDef, SyntaxError> {
+    Ok(expect_fixture(read_node_def_toml(value)?))
+}
+
+fn write_fixture_def_json(fixture: &FixtureDef) -> Vec<u8> {
+    write_json(fixture)
+}
+
+fn read_shader_def_json(json: &str) -> Result<ShaderDef, SyntaxError> {
+    read_json(json).or_else(|_| Ok(expect_shader(read_node_def_json(json)?)))
+}
+
+fn read_shader_def_toml(value: &toml::Value) -> Result<ShaderDef, SyntaxError> {
+    Ok(expect_shader(read_node_def_toml(value)?))
+}
+
+fn write_shader_def_json(shader: &ShaderDef) -> Vec<u8> {
+    write_json(shader)
+}
+
+fn expect_project(node: NodeDef) -> ProjectDef {
+    match node {
+        NodeDef::Project(def) => def,
+        _ => panic!("expected project node definition"),
+    }
+}
+
+fn expect_output(node: NodeDef) -> OutputDef {
+    match node {
+        NodeDef::Output(def) => def,
+        _ => panic!("expected output node definition"),
+    }
+}
+
+fn expect_texture(node: NodeDef) -> TextureDef {
+    match node {
+        NodeDef::Texture(def) => def,
+        _ => panic!("expected texture node definition"),
+    }
+}
+
+fn expect_fixture(node: NodeDef) -> FixtureDef {
+    match node {
+        NodeDef::Fixture(def) => def,
+        _ => panic!("expected fixture node definition"),
+    }
+}
+
+fn expect_shader(node: NodeDef) -> ShaderDef {
+    match node {
+        NodeDef::Shader(def) => def,
+        _ => panic!("expected shader node definition"),
+    }
+}
+
+fn expect_error<T>(result: Result<T, SyntaxError>) -> SyntaxError {
+    match result {
+        Ok(_) => panic!("expected syntax error"),
+        Err(error) => error,
     }
 }
 
@@ -317,46 +389,6 @@ fn assert_shader_def_matches_default(shader: &ShaderDef) {
     assert_eq!(speed.label(), "Speed");
     assert_eq!(speed.default_scalar(), 0.25);
 }
-
-const SAMPLE_BUNDLE_TOML: &str = r#"
-[project]
-kind = "ProjectDef"
-name = "basic"
-
-[project.nodes.output]
-artifact = "./output.toml"
-
-[project.nodes.fixture]
-artifact = "./fixture.toml"
-
-[[node_defs]]
-kind = "OutputDef"
-pin = 18
-
-[node_defs.bindings.pixels.source]
-value = 0.75
-
-[node_defs.bindings.pixels.target]
-ref = "bus#visual.out"
-
-[node_defs.options]
-white_point = [0.9, 1.0, 1.0]
-brightness = 0.85
-
-[[node_defs]]
-kind = "FixtureDef"
-
-[node_defs.mapping]
-kind = "Square"
-origin = [0.1, 0.2]
-size = [0.8, 0.7]
-
-[[node_defs]]
-kind = "FixtureDef"
-
-[node_defs.mapping]
-kind = "Disabled"
-"#;
 
 const PROJECT_DEF_TOML: &str = r#"
 kind = "project"
