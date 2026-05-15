@@ -4,6 +4,7 @@
 //! LightPlayer model. Adding a core node kind should start here, then add the
 //! concrete definition type and loader/runtime handling that variant requires.
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 
@@ -125,6 +126,14 @@ impl SlotAccess for NodeDef {
             Self::Output(def) => def.data(),
             Self::Fixture(def) => def.data(),
         }
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn core::any::Any> {
+        self
     }
 }
 

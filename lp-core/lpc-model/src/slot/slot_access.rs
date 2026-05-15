@@ -2,7 +2,9 @@ use crate::{
     LpValue, Revision, SlotFactory, SlotMutAccess, SlotShape, SlotShapeId, SlotShapeRegistry,
     SlotShapeRegistryError, WithRevision,
 };
+use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::any::Any;
 
 use super::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 
@@ -11,9 +13,11 @@ use super::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecor
 /// Artifacts, node definitions, runtime nodes, state structs, and dynamic
 /// records can all expose slot data. The object carries the shape id; walking
 /// below it pairs data access with shape information from the shape registry.
-pub trait SlotAccess {
+pub trait SlotAccess: Any {
     fn shape_id(&self) -> SlotShapeId;
     fn data(&self) -> SlotDataAccess<'_>;
+    fn as_any(&self) -> &dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
 /// Static slot shape authored by a Rust type.

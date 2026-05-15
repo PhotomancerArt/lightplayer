@@ -78,6 +78,16 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             fn data(&self) -> ::lpc_model::SlotDataAccess<'_> {
                 ::lpc_model::SlotDataAccess::Record(self)
             }
+
+            fn as_any(&self) -> &dyn ::core::any::Any {
+                self
+            }
+
+            fn into_any(
+                self: ::lpc_model::__private::Box<Self>,
+            ) -> ::lpc_model::__private::Box<dyn ::core::any::Any> {
+                self
+            }
         }
 
         impl ::lpc_model::StaticSlotShape for #ident {

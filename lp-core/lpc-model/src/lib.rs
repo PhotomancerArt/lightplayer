@@ -17,6 +17,7 @@ pub use lpc_slot_macros::{SlotRecord, SlotValue};
 
 #[doc(hidden)]
 pub mod __private {
+    pub use alloc::boxed::Box;
     pub use alloc::string::String;
     pub use alloc::vec::Vec;
 }

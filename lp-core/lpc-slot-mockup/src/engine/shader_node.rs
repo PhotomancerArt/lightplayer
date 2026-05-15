@@ -1,5 +1,6 @@
 use crate::source::ShaderDef;
 use lpc_model::{
+    __private::Box,
     LpType, LpValue, ModelStructMember, Revision, SlotAccess, SlotData, SlotDataAccess,
     SlotDataMutAccess, SlotMutAccess, SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess,
     SlotRecordMutAccess, SlotShape, SlotShapeId, WithRevision, current_revision,
@@ -130,6 +131,14 @@ impl SlotAccess for ShaderNode {
 
     fn data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Record(self)
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn core::any::Any> {
+        self
     }
 }
 

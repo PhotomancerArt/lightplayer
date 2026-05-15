@@ -1,5 +1,5 @@
 use lpc_model::{
-    LpValue, SlotAccess, SlotDataAccess, SlotMapKey, StaticSlotShape, slot_codec::JsonSyntaxSource,
+    LpValue, SlotAccess, SlotDataAccess, StaticSlotShape, slot_codec::JsonSyntaxSource,
 };
 
 use crate::{
@@ -17,27 +17,14 @@ fn dynamic_slot_codec_reads_project_json_through_registry() {
             r#"{"name":"basic","nodes":{"shader":{"artifact":"./shader.toml"}}}"#,
         )
         .unwrap();
+    let Ok(project) = object.into_any().downcast::<ProjectDef>() else {
+        panic!("expected ProjectDef");
+    };
 
-    let SlotDataAccess::Record(project) = object.data() else {
-        panic!("expected project record");
-    };
+    assert_eq!(project.name.data.as_ref().unwrap().value(), "basic");
     assert_eq!(
-        option_value(project.field(0).unwrap()),
-        Some(LpValue::String("basic".into()))
-    );
-
-    let SlotDataAccess::Map(nodes) = project.field(1).unwrap() else {
-        panic!("expected nodes map");
-    };
-    let SlotDataAccess::Record(shader) = nodes
-        .get(&SlotMapKey::String("shader".into()))
-        .expect("shader node")
-    else {
-        panic!("expected node invocation record");
-    };
-    assert_eq!(
-        record_value(shader, 0),
-        LpValue::String("./shader.toml".into())
+        project.nodes.entries.get("shader").unwrap().artifact(),
+        "./shader.toml"
     );
 }
 
@@ -57,13 +44,14 @@ artifact = "./shader.toml"
     let object = registry
         .read_slot_toml(ProjectDef::SHAPE_ID, &toml)
         .unwrap();
-
-    let SlotDataAccess::Record(project) = object.data() else {
-        panic!("expected project record");
+    let Ok(project) = object.into_any().downcast::<ProjectDef>() else {
+        panic!("expected ProjectDef");
     };
+
+    assert_eq!(project.name.data.as_ref().unwrap().value(), "basic");
     assert_eq!(
-        option_value(project.field(0).unwrap()),
-        Some(LpValue::String("basic".into()))
+        project.nodes.entries.get("shader").unwrap().artifact(),
+        "./shader.toml"
     );
 }
 
@@ -76,14 +64,14 @@ fn dynamic_slot_codec_reads_json_event_sources() {
             JsonSyntaxSource::new(r#"{"nodes":{"shader":{"artifact":"./shader.toml"}}}"#).unwrap(),
         )
         .unwrap();
+    let Ok(project) = object.into_any().downcast::<ProjectDef>() else {
+        panic!("expected ProjectDef");
+    };
 
-    let SlotDataAccess::Record(project) = object.data() else {
-        panic!("expected project record");
-    };
-    let SlotDataAccess::Map(nodes) = project.field(1).unwrap() else {
-        panic!("expected nodes map");
-    };
-    assert!(nodes.get(&SlotMapKey::String("shader".into())).is_some());
+    assert_eq!(
+        project.nodes.entries.get("shader").unwrap().artifact(),
+        "./shader.toml"
+    );
 }
 
 #[test]
@@ -96,19 +84,14 @@ fn dynamic_slot_codec_reads_fixture_enum_payloads() {
             r#"{"mapping":{"kind":"square","origin":[0.25,0.75],"size":[0.5,0.25]}}"#,
         )
         .unwrap();
+    let Ok(fixture) = object.into_any().downcast::<FixtureDef>() else {
+        panic!("expected FixtureDef");
+    };
 
-    let SlotDataAccess::Record(fixture) = object.data() else {
-        panic!("expected fixture record");
-    };
-    let SlotDataAccess::Enum(mapping) = fixture.field(3).unwrap() else {
-        panic!("expected mapping enum");
-    };
-    assert_eq!(mapping.variant(), "square");
-    let SlotDataAccess::Record(square) = mapping.data() else {
-        panic!("expected square payload");
-    };
-    assert_eq!(record_value(square, 0), LpValue::Vec2([0.25, 0.75]));
-    assert_eq!(record_value(square, 1), LpValue::Vec2([0.5, 0.25]));
+    assert_eq!(
+        fixture.mapping().square_fields(),
+        Some(([0.25, 0.75], [0.5, 0.25]))
+    );
 }
 
 #[test]

@@ -125,6 +125,14 @@ impl SlotAccess for DynamicSlotObject {
     fn data(&self) -> crate::SlotDataAccess<'_> {
         self.data.access()
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn core::any::Any> {
+        self
+    }
 }
 
 impl SlotMutAccess for DynamicSlotObject {

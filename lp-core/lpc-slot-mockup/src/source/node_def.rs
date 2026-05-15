@@ -1,4 +1,5 @@
 use lpc_model::{
+    __private::Box,
     SlotAccess, SlotDataAccess, SlotShapeId,
     slot_codec::{
         SlotCodec, SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource,
@@ -92,6 +93,14 @@ impl SlotAccess for NodeDef {
             Self::Fixture(def) => def.data(),
             Self::Shader(def) => def.data(),
         }
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn core::any::Any> {
+        self
     }
 }
 
