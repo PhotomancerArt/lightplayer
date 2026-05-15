@@ -511,6 +511,44 @@ impl SlotShapeRegistry {
         let mut reader = crate::slot_codec::SlotReader::new(source, self);
         crate::slot_codec::read_dynamic_slot(self, id, reader.value())
     }
+
+    pub fn write_slot_json<W>(
+        &self,
+        root: &dyn crate::SlotAccess,
+        out: W,
+    ) -> Result<W, crate::slot_codec::SlotWriteError<W::Error>>
+    where
+        W: crate::slot_codec::SlotWrite,
+    {
+        crate::slot_codec::write_dynamic_slot_json(self, root, out)
+    }
+
+    pub fn write_slot_json_value<W>(
+        &self,
+        id: SlotShapeId,
+        data: crate::SlotDataAccess<'_>,
+        value: crate::slot_codec::SlotValueWriter<'_, W>,
+    ) -> Result<(), crate::slot_codec::SlotWriteError<W::Error>>
+    where
+        W: crate::slot_codec::SlotWrite,
+    {
+        crate::slot_codec::write_slot_data_json_value(self, id, data, value)
+    }
+
+    pub fn write_slot_toml(
+        &self,
+        root: &dyn crate::SlotAccess,
+    ) -> Result<toml::Value, crate::slot_codec::SlotDataWriteError> {
+        crate::slot_codec::write_dynamic_slot_toml(self, root)
+    }
+
+    pub fn write_slot_toml_data(
+        &self,
+        id: SlotShapeId,
+        data: crate::SlotDataAccess<'_>,
+    ) -> Result<toml::Value, crate::slot_codec::SlotDataWriteError> {
+        crate::slot_codec::write_slot_data_toml_value(self, id, data)
+    }
 }
 
 impl PartialEq for SlotShapeRegistry {

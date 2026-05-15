@@ -52,6 +52,7 @@ impl SlotWrite for Vec<u8> {
 #[derive(Debug)]
 pub enum SlotWriteError<E> {
     Write(E),
+    InvalidSlotData(String),
     Serialize,
 }
 
@@ -59,6 +60,7 @@ impl<E: fmt::Display> fmt::Display for SlotWriteError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Write(error) => write!(f, "{error}"),
+            Self::InvalidSlotData(error) => f.write_str(error),
             Self::Serialize => f.write_str("slot JSON serialization failed"),
         }
     }
@@ -264,6 +266,10 @@ where
     pub fn bool(self, value: bool) -> Result<(), SlotWriteError<W::Error>> {
         self.writer
             .write_raw(if value { b"true" } else { b"false" })
+    }
+
+    pub fn null(self) -> Result<(), SlotWriteError<W::Error>> {
+        self.writer.write_raw(b"null")
     }
 
     pub fn string(self, value: &str) -> Result<(), SlotWriteError<W::Error>> {

@@ -4,6 +4,7 @@
 //! construction helpers on top without materializing a generic syntax tree.
 
 mod dynamic_slot_reader;
+mod dynamic_slot_writer;
 mod json_syntax_source;
 mod slot_codec;
 mod slot_reader;
@@ -470,3 +471,7 @@ name = "aux"
     }
 }
 pub use dynamic_slot_reader::{apply_reader_to_slot, read_dynamic_slot};
+pub use dynamic_slot_writer::{
+    SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_toml,
+    write_slot_data_json_value, write_slot_data_toml_value,
+};
