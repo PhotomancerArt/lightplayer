@@ -13,7 +13,7 @@ mod error;
 mod model;
 mod render;
 
-pub use config::{SlotCodecCodegenConfig, SlotShapeCodegenConfig, SlotViewCodegenConfig};
+pub use config::{SlotShapeCodegenConfig, SlotViewCodegenConfig};
 pub use error::SlotShapeCodegenError;
 
 /// Generate `slot_shapes.rs` for one crate.
@@ -41,25 +41,11 @@ pub fn generate_slot_views(config: SlotViewCodegenConfig) -> Result<(), SlotShap
     fs::write(config.out_file, render::render_slot_views(&views)).map_err(SlotShapeCodegenError::Io)
 }
 
-/// Generate `SlotCodec` impls for every static `SlotRecord` in one crate.
-pub fn generate_slot_codecs(config: SlotCodecCodegenConfig) -> Result<(), SlotShapeCodegenError> {
-    let src_dir = config.crate_root.join("src");
-    let records = discover::discover_static_slot_records(&src_dir)?;
-    if let Some(parent) = config.out_file.parent() {
-        fs::create_dir_all(parent).map_err(SlotShapeCodegenError::Io)?;
-    }
-    fs::write(config.out_file, render::render_slot_codecs(&records))
-        .map_err(SlotShapeCodegenError::Io)
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::discover::{discover_static_registered_shapes, discover_static_slot_records};
-    use crate::model::{
-        StaticRegisteredShape, StaticSlotRecord, StaticSlotRecordField, StaticSlotView,
-        StaticSlotViewField,
-    };
-    use crate::render::{render_slot_codecs, render_slot_shapes, render_slot_views};
+    use crate::discover::{discover_static_registered_shapes, discover_static_slot_views};
+    use crate::model::{StaticRegisteredShape, StaticSlotView, StaticSlotViewField};
+    use crate::render::{render_slot_shapes, render_slot_views};
     use std::fs;
     use tempfile::TempDir;
 
@@ -126,7 +112,7 @@ pub struct ProjectDef {}
     }
 
     #[test]
-    fn discovers_static_slot_record_fields_and_enum_markers() {
+    fn discovers_static_slot_view_fields() {
         let dir = TempDir::new().unwrap();
         let src = dir.path().join("src");
         fs::create_dir_all(src.join("source")).unwrap();
@@ -147,31 +133,31 @@ pub struct FixtureDef {
         )
         .unwrap();
 
-        let records = discover_static_slot_records(&src).unwrap();
+        let views = discover_static_slot_views(&src).unwrap();
 
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].type_path, "crate::source::FixtureDef");
-        assert_eq!(records[0].type_name, "FixtureDef");
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].type_path, "crate::source::FixtureDef");
+        assert_eq!(views[0].view_name, "FixtureDefView");
         assert_eq!(
-            records[0].fields,
+            views[0].fields,
             vec![
-                StaticSlotRecordField {
-                    rust_name: String::from("render_size"),
+                StaticSlotViewField {
+                    method_name: String::from("render_size"),
                     slot_name: String::from("render_size"),
-                    type_name: String::from("Dim2uSlot"),
-                    is_enum: false,
+                    accessor_name: String::from("render_size_accessor"),
+                    some_accessor_name: None,
                 },
-                StaticSlotRecordField {
-                    rust_name: String::from("mode"),
+                StaticSlotViewField {
+                    method_name: String::from("mode"),
                     slot_name: String::from("mode"),
-                    type_name: String::from("SomeEnum"),
-                    is_enum: true,
+                    accessor_name: String::from("mode_accessor"),
+                    some_accessor_name: None,
                 },
-                StaticSlotRecordField {
-                    rust_name: String::from("gamma_correction"),
+                StaticSlotViewField {
+                    method_name: String::from("gamma_correction"),
                     slot_name: String::from("gamma"),
-                    type_name: String::from("ValueSlot"),
-                    is_enum: false,
+                    accessor_name: String::from("gamma_correction_accessor"),
+                    some_accessor_name: None,
                 },
             ]
         );
@@ -237,26 +223,5 @@ pub struct FixtureDef {
         assert!(code.contains("_registry"));
         assert!(code.contains("_id"));
         assert!(!code.contains("ensure_referenced_static_slot_shapes"));
-    }
-
-    #[test]
-    fn generated_slot_codec_contains_record_impls() {
-        let records = vec![StaticSlotRecord {
-            type_path: String::from("crate::source::OutputDriverOptionsConfig"),
-            type_name: String::from("OutputDriverOptionsConfig"),
-            fields: vec![StaticSlotRecordField {
-                rust_name: String::from("brightness"),
-                slot_name: String::from("brightness"),
-                type_name: String::from("RatioSlot"),
-                is_enum: false,
-            }],
-        }];
-
-        let code = render_slot_codecs(&records);
-
-        assert!(code.contains("impl SlotCodec for crate::source::OutputDriverOptionsConfig"));
-        assert!(code.contains("pub(crate) fn read_output_driver_options_config_slot_body"));
-        assert!(code.contains("out.brightness = SlotCodec::read_slot(prop.value())?"));
-        assert!(code.contains("value.brightness.write_slot(object.prop(\"brightness\")?)?"));
     }
 }

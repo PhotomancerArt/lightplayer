@@ -39,15 +39,12 @@ pub use server::{
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use slot::{
-    ArrayReader, JsonSyntaxSource, ObjectReader, PropReader, SlotJsonArray, SlotJsonObject,
-    SlotJsonValue, SlotJsonWrite, SlotJsonWriter, SlotJsonWriterError, SlotReader, SlotTomlError,
-    SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource, TomlSyntaxSource, ValueReader,
-    WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
-    WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
-    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, decode_slot_data_toml,
-    decode_slot_data_toml_with_ignored_fields, encode_slot_data_access_toml, encode_slot_data_toml,
-    snapshot_slot_root, snapshot_slot_shape, write_slot_data_json,
+    ArrayReader, JsonSyntaxSource, ObjectReader, PropReader, SlotReader, SourceSpan, SyntaxError,
+    SyntaxEvent, SyntaxEventSource, TomlSyntaxSource, ValueReader, WireSlotChange,
+    WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection,
+    WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult, WireSlotPatch,
+    WireSlotRootSnapshot, WireSlotRootsSnapshot, build_slot_full_sync, build_slot_roots_snapshot,
+    collect_slot_diff, snapshot_slot_root, snapshot_slot_shape,
     write_slot_shape_registry_snapshot_json,
 };
 pub use transport_error::TransportError;

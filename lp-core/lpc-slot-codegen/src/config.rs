@@ -11,9 +11,3 @@ pub struct SlotViewCodegenConfig {
     pub crate_root: PathBuf,
     pub out_file: PathBuf,
 }
-
-/// Configuration for generating `SlotCodec` impls for static slot records.
-pub struct SlotCodecCodegenConfig {
-    pub crate_root: PathBuf,
-    pub out_file: PathBuf,
-}

@@ -33,11 +33,16 @@ the real app yet.
 
 - `lpc-model/src/slot/slot_shape_registry.rs`
   - has `read_slot_json`, `read_slot_toml`, and `read_slot_from`
+  - has `write_slot_json`, `write_slot_json_value`, `write_slot_toml`, and
+    `write_slot_toml_data`
   - returns `Box<dyn SlotMutAccess>`
   - creates through `SlotFactory` and applies shape-driven reader data
 - `lpc-model/src/slot_codec/dynamic_slot_reader.rs`
   - shape-driven dynamic read implementation
   - supports records, maps, enums, options, refs, unit, and value leaves
+- `lpc-model/src/slot_codec/dynamic_slot_writer.rs`
+  - shape-driven dynamic write implementation
+  - writes streaming JSON and `toml::Value`
 - `lpc-model/src/slot_codec/slot_value_codec.rs`
   - typed leaf read/write helpers for `LpValue`
   - now includes resources and products
@@ -124,9 +129,9 @@ replace these tests and call sites.
 - `lpc-engine/src/engine/project_read_stream.rs`
   - still uses `write_slot_data_json` for project-read response streaming
 
-These are vestigial relative to the new object-loading direction, but cannot
-all be deleted immediately unless we first provide a registry/shape-driven
-writer replacement for wire JSON output.
+These are vestigial relative to the new object-loading direction. The writer
+replacement now exists in `lpc-model`, so the remaining work is moving callers
+and deleting the old exports/files.
 
 ## What Can Be Removed Directly
 
@@ -144,12 +149,9 @@ writer replacement for wire JSON output.
 
 ## What Needs Prep Before Removal
 
-- Add a generic registry/shape-driven write API before deleting all writer
-  coverage:
-  - likely `SlotShapeRegistry::write_slot_json(...)`
-  - likely an internal `write_slot_access(...)` that walks `SlotAccess` plus
-    `SlotShape`
-  - can reuse `SlotWriter` and `write_lp_value`
+- Move old `lpc-wire` writer callers to the new registry writer APIs:
+  - `write_slot_json_value`
+  - `write_slot_toml_data`
 - Move any useful low-level reader/writer primitive tests out of mockup and
   into `lpc-model::slot_codec` tests.
 - Replace `SlotCodec` uses in `BindingDef`, `BindingDefs`, `BindingEndpoint`,
@@ -191,10 +193,9 @@ Context: `authored_toml.rs` and `slot_data_json.rs` are old shape-to-`SlotData`
 serializers. They are not the desired "registry creates object and applies
 reader" path. But `slot_data_json.rs` is still used by project read streaming.
 
-Suggested answer: plan the removal, but execute in two steps:
-
-1. add replacement generic writer APIs in `lpc-model`
-2. delete or quarantine the old `lpc-wire` serializers once callers are moved
+Suggested answer: yes. The replacement generic writer APIs now exist in
+`lpc-model`, so the cleanup can move remaining callers and delete the old
+`lpc-wire` serializers.
 
 ### Q4. What is the target name for the cleaned module?
 

@@ -8,12 +8,6 @@ use core::fmt;
 
 use base64::Engine;
 
-pub type SlotJsonArray<'a, W> = SlotArrayWriter<'a, W>;
-pub type SlotJsonObject<'a, W> = SlotObjectWriter<'a, W>;
-pub type SlotJsonValue<'a, W> = SlotValueWriter<'a, W>;
-pub type SlotJsonWriter<W> = SlotWriter<W>;
-pub type SlotJsonWriterError<E> = SlotWriteError<E>;
-
 /// Byte sink used by the slot JSON writer.
 ///
 /// This mirrors only the operation the slot codec needs, so embedded callers
@@ -23,11 +17,6 @@ pub trait SlotWrite {
 
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
-
-/// Compatibility alias for the first JSON-only writer prototype.
-pub trait SlotJsonWrite: SlotWrite {}
-
-impl<T> SlotJsonWrite for T where T: SlotWrite + ?Sized {}
 
 impl<T> SlotWrite for &mut T
 where

@@ -1,10 +1,8 @@
 use lpc_model::{
     Revision, SlotAccess, SlotData, SlotEnum, SlotMapDyn, SlotOptionDyn, SlotRecord, WithRevision,
+    slot_codec::SlotWriter,
 };
-use lpc_wire::{
-    decode_slot_data_toml_with_ignored_fields, encode_slot_data_access_toml, snapshot_slot_root,
-    write_slot_data_json,
-};
+use lpc_wire::snapshot_slot_root;
 
 use crate::engine::MockRuntime;
 
@@ -12,26 +10,21 @@ use crate::engine::MockRuntime;
 fn mock_disk_toml_roots_decode_through_slot_shapes() {
     let runtime = MockRuntime::new();
 
-    for (name, kind, root) in persisted_roots(&runtime) {
-        let shape = runtime.registry.get(&root.shape_id()).expect("root shape");
-        let mut encoded =
-            encode_slot_data_access_toml(shape, root.data(), &runtime.registry).unwrap();
-        encoded
-            .as_table_mut()
-            .expect("root table")
-            .insert("kind".to_string(), toml::Value::String(kind.to_string()));
+    for (name, root) in persisted_roots(&runtime) {
+        let encoded = runtime
+            .registry
+            .write_slot_toml_data(root.shape_id(), root.data())
+            .unwrap();
 
-        let decoded = decode_slot_data_toml_with_ignored_fields(
-            shape,
-            &encoded,
-            &runtime.registry,
-            &["kind"],
-        )
-        .unwrap();
+        let decoded = runtime
+            .registry
+            .read_slot_toml(root.shape_id(), &encoded)
+            .unwrap();
         let expected = snapshot_slot_root(&root.shape_id(), root.data(), &runtime.registry);
+        let actual = snapshot_slot_root(&decoded.shape_id(), decoded.data(), &runtime.registry);
 
         assert_eq!(
-            normalize_revisions(decoded),
+            normalize_revisions(actual),
             normalize_revisions(expected),
             "decoded TOML root {name}"
         );
@@ -42,7 +35,7 @@ fn mock_disk_toml_roots_decode_through_slot_shapes() {
 fn mock_wire_json_roots_use_direct_slot_writer_shape() {
     let runtime = MockRuntime::new();
 
-    for (name, _, root) in persisted_roots(&runtime) {
+    for (name, root) in persisted_roots(&runtime) {
         let json = wrap_direct_json_data(&runtime, root);
         let json = std::str::from_utf8(&json).unwrap();
         assert!(json.contains(r#""data""#), "direct JSON root {name}");
@@ -53,54 +46,52 @@ fn mock_wire_json_roots_use_direct_slot_writer_shape() {
 fn mock_toml_rejects_unknown_domain_fields() {
     let runtime = MockRuntime::new();
     let root = &runtime.shader_def as &dyn SlotAccess;
-    let shape = runtime
+    let mut encoded = runtime
         .registry
-        .get(&root.shape_id())
-        .expect("shader shape");
-    let mut encoded = encode_slot_data_access_toml(shape, root.data(), &runtime.registry).unwrap();
+        .write_slot_toml_data(root.shape_id(), root.data())
+        .unwrap();
     encoded.as_table_mut().expect("root table").insert(
         "surprise".to_string(),
         toml::Value::String("nope".to_string()),
     );
 
-    let error =
-        decode_slot_data_toml_with_ignored_fields(shape, &encoded, &runtime.registry, &["kind"])
-            .unwrap_err();
+    let error = runtime
+        .registry
+        .read_slot_toml(root.shape_id(), &encoded)
+        .expect_err_without_debug();
 
-    assert!(error.message().contains("unknown authored field"));
+    assert!(error.message().contains("surprise"));
 }
 
 #[test]
 fn mock_toml_requires_enum_discriminators() {
     let runtime = MockRuntime::new();
     let root = &runtime.fixture_def as &dyn SlotAccess;
-    let shape = runtime
+    let mut encoded = runtime
         .registry
-        .get(&root.shape_id())
-        .expect("fixture shape");
-    let mut encoded = encode_slot_data_access_toml(shape, root.data(), &runtime.registry).unwrap();
+        .write_slot_toml_data(root.shape_id(), root.data())
+        .unwrap();
     encoded["mapping"]
         .as_table_mut()
         .expect("mapping table")
         .remove("kind");
 
-    let error =
-        decode_slot_data_toml_with_ignored_fields(shape, &encoded, &runtime.registry, &["kind"])
-            .unwrap_err();
+    let error = runtime
+        .registry
+        .read_slot_toml(root.shape_id(), &encoded)
+        .expect_err_without_debug();
 
-    assert_eq!(error.path(), "mapping");
-    assert!(error.message().contains("expected enum discriminator"));
+    assert!(error.message().contains("kind"));
 }
 
 #[test]
 fn mock_toml_rejects_unknown_enum_discriminators() {
     let runtime = MockRuntime::new();
     let root = &runtime.fixture_def as &dyn SlotAccess;
-    let shape = runtime
+    let mut encoded = runtime
         .registry
-        .get(&root.shape_id())
-        .expect("fixture shape");
-    let mut encoded = encode_slot_data_access_toml(shape, root.data(), &runtime.registry).unwrap();
+        .write_slot_toml_data(root.shape_id(), root.data())
+        .unwrap();
     encoded["mapping"]
         .as_table_mut()
         .expect("mapping table")
@@ -109,37 +100,32 @@ fn mock_toml_rejects_unknown_enum_discriminators() {
             toml::Value::String("hex_grid".to_string()),
         );
 
-    let error =
-        decode_slot_data_toml_with_ignored_fields(shape, &encoded, &runtime.registry, &["kind"])
-            .unwrap_err();
+    let error = runtime
+        .registry
+        .read_slot_toml(root.shape_id(), &encoded)
+        .expect_err_without_debug();
 
-    assert_eq!(error.path(), "mapping");
-    assert!(error.message().contains("unknown enum variant"));
+    assert!(error.message().contains("hex_grid"));
 }
 
-fn persisted_roots<'a>(
-    runtime: &'a MockRuntime,
-) -> Vec<(&'static str, &'static str, &'a dyn SlotAccess)> {
+fn persisted_roots<'a>(runtime: &'a MockRuntime) -> Vec<(&'static str, &'a dyn SlotAccess)> {
     vec![
-        ("project", "project", &runtime.project),
-        ("shader", "shader", &runtime.shader_def),
-        ("texture", "texture", &runtime.texture_def),
-        ("output", "output", &runtime.output_def),
-        ("fixture", "fixture", &runtime.fixture_def),
+        ("project", &runtime.project),
+        ("shader", &runtime.shader_def),
+        ("texture", &runtime.texture_def),
+        ("output", &runtime.output_def),
+        ("fixture", &runtime.fixture_def),
     ]
 }
 
 fn wrap_direct_json_data(runtime: &MockRuntime, root: &dyn SlotAccess) -> Vec<u8> {
     let mut out = Vec::new();
-    let mut writer = lpc_wire::json::json_writer::JsonWriter::new(&mut out);
+    let mut writer = SlotWriter::new(&mut out);
     let mut object = writer.object().unwrap();
-    write_slot_data_json(
-        object.prop("data").unwrap(),
-        &root.shape_id(),
-        root.data(),
-        &runtime.registry,
-    )
-    .unwrap();
+    runtime
+        .registry
+        .write_slot_json_value(root.shape_id(), root.data(), object.prop("data").unwrap())
+        .unwrap();
     object.finish().unwrap();
     out
 }
@@ -173,5 +159,18 @@ fn normalize_revisions(data: SlotData) -> SlotData {
             presence_revision: Revision::default(),
             data: option.data.map(|data| Box::new(normalize_revisions(*data))),
         }),
+    }
+}
+
+trait ExpectErrWithoutDebug<T, E> {
+    fn expect_err_without_debug(self) -> E;
+}
+
+impl<T, E> ExpectErrWithoutDebug<T, E> for Result<T, E> {
+    fn expect_err_without_debug(self) -> E {
+        match self {
+            Ok(_) => panic!("expected error"),
+            Err(error) => error,
+        }
     }
 }

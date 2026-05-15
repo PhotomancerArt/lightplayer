@@ -1,11 +1,13 @@
 //! Streaming project-read response writer for [`Engine`].
 
-use lpc_model::SlotAccess;
+use alloc::vec::Vec;
+
+use lpc_model::{SlotAccess, slot_codec::SlotWriter};
 use lpc_wire::json::json_write::JsonWrite;
-use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
+use lpc_wire::json::json_writer::{JsonValue, JsonWriter, JsonWriterError};
 use lpc_wire::{
     NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, ShapeReadQuery, write_project_read_result_json, write_slot_data_json,
+    ProjectReadResult, ShapeReadQuery, write_project_read_result_json,
     write_slot_shape_registry_snapshot_json,
 };
 
@@ -140,12 +142,7 @@ impl Engine {
                     let mut root = roots.item()?.object()?;
                     root.prop("name")?.string(&node_def_root_name(entry.id))?;
                     root.prop("shape")?.serde(&def.shape_id())?;
-                    write_slot_data_json(
-                        root.prop("data")?,
-                        &def.shape_id(),
-                        def.data(),
-                        self.slot_shapes(),
-                    )?;
+                    self.write_slot_data_json_value(root.prop("data")?, def)?;
                     root.finish()?;
                 }
 
@@ -155,12 +152,7 @@ impl Engine {
                     let mut root = roots.item()?.object()?;
                     root.prop("name")?.string(&node_state_root_name(entry.id))?;
                     root.prop("shape")?.serde(&state.shape_id())?;
-                    write_slot_data_json(
-                        root.prop("data")?,
-                        &state.shape_id(),
-                        state.data(),
-                        self.slot_shapes(),
-                    )?;
+                    self.write_slot_data_json_value(root.prop("data")?, state)?;
                     root.finish()?;
                 }
             }
@@ -173,6 +165,22 @@ impl Engine {
         nodes.finish()?;
         result.finish()?;
         Ok(writer.into_inner())
+    }
+
+    fn write_slot_data_json_value<W>(
+        &self,
+        value: JsonValue<'_, W>,
+        root: &dyn SlotAccess,
+    ) -> Result<(), JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        self.slot_shapes()
+            .write_slot_json_value(root.shape_id(), root.data(), writer.value())
+            .map_err(|_| JsonWriterError::Serialize)?;
+        value.raw_json(&out)
     }
 }
 

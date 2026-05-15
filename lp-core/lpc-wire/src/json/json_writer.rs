@@ -277,6 +277,10 @@ where
     {
         self.writer.serde(value)
     }
+
+    pub fn raw_json(self, bytes: &[u8]) -> Result<(), JsonWriterError<W::Error>> {
+        self.writer.write_raw(bytes)
+    }
 }
 
 #[cfg(feature = "ser-write-json")]

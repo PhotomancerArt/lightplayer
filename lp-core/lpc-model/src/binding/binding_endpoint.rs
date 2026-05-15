@@ -2,10 +2,6 @@ use super::{BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError};
 use crate::{
     FieldSlot, FromLpValue, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
     SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
-    slot_codec::{
-        SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource, ValueReader,
-        write_untyped_lp_value,
-    },
 };
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -100,53 +96,6 @@ impl SlotValue for BindingEndpoint {
             meta: SlotMeta::empty(),
             editor: ValueEditorHint::Plain,
         }
-    }
-}
-
-impl crate::SlotCodec for BindingEndpoint {
-    fn read_slot<S>(value: ValueReader<'_, '_, S>) -> Result<Self, SyntaxError>
-    where
-        S: SyntaxEventSource,
-    {
-        const FIELDS: &[&str] = &["ref", "value"];
-        let mut reference = None;
-        let mut literal = None;
-        let mut object = value.object()?;
-
-        while let Some(mut prop) = object.next_prop()? {
-            match prop.name() {
-                "ref" => {
-                    let value = prop.value().string()?;
-                    reference = Some(
-                        Self::parse_ref(&value)
-                            .map_err(|err| SyntaxError::new("", None, alloc::format!("{err}")))?,
-                    );
-                }
-                "value" => literal = Some(LpValue::read_slot(prop.value())?),
-                other => return Err(prop.unknown_field(other, FIELDS)),
-            }
-        }
-
-        match (reference, literal) {
-            (Some(reference), None) => Ok(reference),
-            (None, Some(literal)) => Ok(Self::Literal(literal)),
-            (None, None) => Ok(Self::Unset),
-            _ => Err(object.missing_required_field("ref or value")),
-        }
-    }
-
-    fn write_slot<W>(&self, value: SlotValueWriter<'_, W>) -> Result<(), SlotWriteError<W::Error>>
-    where
-        W: SlotWrite,
-    {
-        let mut object = value.object()?;
-        match self {
-            Self::Unset => {}
-            Self::Bus(reference) => object.prop("ref")?.string(&reference.to_string())?,
-            Self::Node(reference) => object.prop("ref")?.string(&reference.to_string())?,
-            Self::Literal(value) => write_untyped_lp_value(object.prop("value")?, value)?,
-        }
-        object.finish()
     }
 }
 

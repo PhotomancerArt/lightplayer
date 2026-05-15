@@ -1,11 +1,5 @@
 use super::BindingEndpoint;
-use crate::{
-    OptionSlot, SlotCodec, SlotRecord, ValueSlot,
-    slot_codec::{
-        SlotObjectWriter, SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError,
-        SyntaxEventSource, ValueReader,
-    },
-};
+use crate::{OptionSlot, SlotRecord, ValueSlot};
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -62,58 +56,6 @@ impl BindingDef {
             _ => Ok(()),
         }
     }
-}
-
-impl SlotCodec for BindingDef {
-    fn read_slot<S>(value: ValueReader<'_, '_, S>) -> Result<Self, SyntaxError>
-    where
-        S: SyntaxEventSource,
-    {
-        const FIELDS: &[&str] = &["source", "target"];
-        let mut source = OptionSlot::none();
-        let mut target = OptionSlot::none();
-        let mut object = value.object()?;
-
-        while let Some(mut prop) = object.next_prop()? {
-            match prop.name() {
-                "source" => {
-                    source =
-                        OptionSlot::some(ValueSlot::new(BindingEndpoint::read_slot(prop.value())?));
-                }
-                "target" => {
-                    target =
-                        OptionSlot::some(ValueSlot::new(BindingEndpoint::read_slot(prop.value())?));
-                }
-                other => return Err(prop.unknown_field(other, FIELDS)),
-            }
-        }
-
-        Ok(Self { source, target })
-    }
-
-    fn write_slot<W>(&self, value: SlotValueWriter<'_, W>) -> Result<(), SlotWriteError<W::Error>>
-    where
-        W: SlotWrite,
-    {
-        let mut object = value.object()?;
-        write_endpoint_slot(&mut object, "source", &self.source)?;
-        write_endpoint_slot(&mut object, "target", &self.target)?;
-        object.finish()
-    }
-}
-
-fn write_endpoint_slot<W>(
-    object: &mut SlotObjectWriter<'_, W>,
-    name: &str,
-    endpoint: &OptionSlot<ValueSlot<BindingEndpoint>>,
-) -> Result<(), SlotWriteError<W::Error>>
-where
-    W: SlotWrite,
-{
-    if let Some(endpoint) = &endpoint.data {
-        endpoint.value().write_slot(object.prop(name)?)?;
-    }
-    Ok(())
 }
 
 /// Error returned by [`BindingDef::validate`].

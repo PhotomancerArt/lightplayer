@@ -8,14 +8,8 @@ fn main() {
     let out_file = out_dir.join("slot_shapes.rs");
 
     lpc_slot_codegen::generate_slot_shapes(lpc_slot_codegen::SlotShapeCodegenConfig {
-        crate_root: crate_root.clone(),
+        crate_root,
         out_file,
     })
     .expect("generate slot shape bootstrap");
-
-    lpc_slot_codegen::generate_slot_codecs(lpc_slot_codegen::SlotCodecCodegenConfig {
-        crate_root,
-        out_file: out_dir.join("generated_slot_codec.rs"),
-    })
-    .expect("generate slot codecs");
 }

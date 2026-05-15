@@ -53,7 +53,6 @@ pub mod slots;
 pub mod sync;
 // --- Foundation re-exports ------------------------------------------------------------------
 
-pub use slot_codec::SlotCodec;
 pub use value::constraint;
 pub use value::kind;
 
