@@ -47,6 +47,27 @@ pub enum LpValue {
     Product(ProductRef),
 }
 
+impl crate::SlotCodec for LpValue {
+    fn read_slot<S>(
+        value: crate::slot_codec::ValueReader<'_, '_, S>,
+    ) -> Result<Self, crate::slot_codec::SyntaxError>
+    where
+        S: crate::slot_codec::SyntaxEventSource,
+    {
+        value.lp_value()
+    }
+
+    fn write_slot<W>(
+        &self,
+        value: crate::slot_codec::SlotValueWriter<'_, W>,
+    ) -> Result<(), crate::slot_codec::SlotWriteError<W::Error>>
+    where
+        W: crate::slot_codec::SlotWrite,
+    {
+        crate::slot_codec::write_untyped_lp_value(value, self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::LpValue;

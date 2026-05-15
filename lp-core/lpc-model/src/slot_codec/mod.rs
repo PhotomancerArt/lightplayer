@@ -14,7 +14,7 @@ mod toml_syntax_source;
 pub use json_syntax_source::JsonSyntaxSource;
 pub use slot_codec::SlotCodec;
 pub use slot_reader::{ArrayReader, ObjectReader, PropReader, SlotReader, ValueReader};
-pub use slot_value_codec::{read_lp_value, write_lp_value};
+pub use slot_value_codec::{read_lp_value, write_lp_value, write_untyped_lp_value};
 pub use slot_writer::{
     SlotArrayWriter, SlotJsonArray, SlotJsonObject, SlotJsonValue, SlotJsonWrite, SlotJsonWriter,
     SlotJsonWriterError, SlotObjectWriter, SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter,

@@ -1,6 +1,10 @@
 use super::{BindingDef, BindingDefError};
 use crate::{
-    FieldSlot, MapSlot, SlotDataAccess, SlotMapKeyShape, SlotMeta, SlotShape, StaticSlotShape,
+    FieldSlot, MapSlot, SlotCodec, SlotDataAccess, SlotMapKeyShape, SlotMeta, SlotShape,
+    StaticSlotShape,
+    slot_codec::{
+        SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource, ValueReader,
+    },
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -56,6 +60,26 @@ impl FieldSlot for BindingDefs {
     }
 }
 
+impl SlotCodec for BindingDefs {
+    fn read_slot<S>(value: ValueReader<'_, '_, S>) -> Result<Self, SyntaxError>
+    where
+        S: SyntaxEventSource,
+    {
+        MapSlot::<String, BindingDef>::read_slot(value).map(Self)
+    }
+
+    fn write_slot<W>(&self, value: SlotValueWriter<'_, W>) -> Result<(), SlotWriteError<W::Error>>
+    where
+        W: SlotWrite,
+    {
+        self.0.write_slot(value)
+    }
+
+    fn should_write_slot(&self) -> bool {
+        !self.is_empty()
+    }
+}
+
 /// Error returned by [`BindingDefs::validate`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingDefsError {
@@ -80,7 +104,11 @@ impl core::error::Error for BindingDefsError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BindingEndpoint, SlotDataAccess};
+    use crate::{
+        BindingEndpoint, LpValue, SlotDataAccess,
+        slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter},
+    };
+    use alloc::vec::Vec;
 
     #[derive(Deserialize, Serialize)]
     struct Wrapper {
@@ -132,5 +160,42 @@ target = "bus#visual.out"
             defs.validate(),
             Err(BindingDefsError::InvalidBinding { slot, .. }) if slot == "bad"
         ));
+    }
+
+    #[test]
+    fn slot_codec_round_trips_ref_and_value_endpoints() {
+        let registry = crate::SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(
+                r#"{"bindings":{"pixels":{"source":{"value":0.75},"target":{"ref":"bus#visual.out"}}}}"#,
+            )
+            .unwrap(),
+            &registry,
+        );
+        let mut object = reader.object().unwrap();
+        let mut prop = object.next_prop().unwrap().unwrap();
+
+        let decoded = BindingDefs::read_slot(prop.value()).unwrap();
+        let binding = &decoded.entries()["pixels"];
+        assert_eq!(
+            binding.source_endpoint(),
+            Some(&BindingEndpoint::Literal(LpValue::F32(0.75)))
+        );
+        assert!(matches!(
+            binding.target_endpoint(),
+            Some(BindingEndpoint::Bus(_))
+        ));
+
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        let mut object = writer.object().unwrap();
+        decoded
+            .write_slot(object.prop("bindings").unwrap())
+            .unwrap();
+        object.finish().unwrap();
+
+        let json = String::from_utf8(out).unwrap();
+        assert!(json.contains(r#""value":0.75"#));
+        assert!(json.contains(r#""ref":"bus#visual.out""#));
     }
 }

@@ -668,13 +668,9 @@ fn render_mockup_slot_codec_record_read_body(
         out.push_str("            \"");
         out.push_str(&field.slot_name);
         out.push_str("\" => ");
-        if mockup_slot_codec_skip_field(record, field) {
-            out.push_str("prop.value().skip_value()?,\n");
-        } else {
-            out.push_str("out.");
-            out.push_str(&field.rust_name);
-            out.push_str(" = SlotCodec::read_slot(prop.value())?,\n");
-        }
+        out.push_str("out.");
+        out.push_str(&field.rust_name);
+        out.push_str(" = SlotCodec::read_slot(prop.value())?,\n");
     }
     out.push_str("            other => return Err(prop.unknown_field(other, FIELDS)),\n");
     out.push_str("        }\n");
@@ -693,11 +689,7 @@ fn render_mockup_slot_codec_record_write_body(
     out.push_str("_slot_body<W>(object: &mut SlotObjectWriter<'_, W>, value: &");
     out.push_str(&record.type_path);
     out.push_str(") -> Result<(), SlotWriteError<W::Error>>\nwhere\n    W: SlotWrite,\n{\n");
-    for field in record
-        .fields
-        .iter()
-        .filter(|field| !mockup_slot_codec_skip_field(record, field))
-    {
+    for field in record.fields.iter() {
         out.push_str("    if value.");
         out.push_str(&field.rust_name);
         out.push_str(".should_write_slot() {\n");
@@ -739,14 +731,6 @@ fn render_mockup_record_fields_const(out: &mut String, record: &StaticSlotRecord
         out.push('"');
     }
     out.push_str("];\n");
-}
-
-fn mockup_slot_codec_skip_field(record: &StaticSlotRecord, field: &StaticSlotRecordField) -> bool {
-    matches!(field.rust_name.as_str(), "bindings")
-        || matches!(
-            (record.type_name.as_str(), field.rust_name.as_str()),
-            ("FixtureDef", "sampling")
-        )
 }
 
 const MOCKUP_SLOT_CODEC_IMPORTS_AND_TYPES: &str = r#"

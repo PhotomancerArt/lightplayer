@@ -85,6 +85,47 @@ where
     }
 }
 
+pub fn write_untyped_lp_value<W>(
+    value: SlotValueWriter<'_, W>,
+    lp_value: &LpValue,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    match lp_value {
+        LpValue::String(text) => value.string(text),
+        LpValue::I32(number) => value.i32(*number),
+        LpValue::U32(number) => value.u32(*number),
+        LpValue::F32(number) => value.f32(*number),
+        LpValue::Bool(flag) => value.bool(*flag),
+        LpValue::Vec2(items) => value.f32_array(items),
+        LpValue::Vec3(items) => value.f32_array(items),
+        LpValue::Vec4(items) => value.f32_array(items),
+        LpValue::Array(items) => {
+            let mut array = value.array()?;
+            for item in items {
+                write_untyped_lp_value(array.item()?, item)?;
+            }
+            array.finish()
+        }
+        LpValue::IVec2(_)
+        | LpValue::IVec3(_)
+        | LpValue::IVec4(_)
+        | LpValue::UVec2(_)
+        | LpValue::UVec3(_)
+        | LpValue::UVec4(_)
+        | LpValue::BVec2(_)
+        | LpValue::BVec3(_)
+        | LpValue::BVec4(_)
+        | LpValue::Mat2x2(_)
+        | LpValue::Mat3x3(_)
+        | LpValue::Mat4x4(_)
+        | LpValue::Struct { .. }
+        | LpValue::Resource(_)
+        | LpValue::Product(_) => Err(SlotWriteError::Serialize),
+    }
+}
+
 fn read_lp_array<S>(
     value: ValueReader<'_, '_, S>,
     item_ty: &LpType,

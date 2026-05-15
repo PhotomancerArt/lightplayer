@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use base64::Engine;
 
-use crate::SlotShapeRegistry;
+use crate::{LpValue, SlotShapeRegistry};
 
 use super::syntax::{SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource};
 
@@ -519,9 +519,65 @@ where
         Ok(bytes)
     }
 
+    pub fn lp_value(self) -> Result<LpValue, SyntaxError> {
+        let Some(event) = self.reader.next_event()? else {
+            return Err(self.reader.error("expected lp value, found end of input"));
+        };
+        self.read_lp_value_from_event(event)
+    }
+
     pub fn skip_value(self) -> Result<(), SyntaxError> {
         self.reader.skip_value()
     }
+
+    fn read_lp_value_from_event(self, event: SyntaxEvent) -> Result<LpValue, SyntaxError> {
+        match event {
+            SyntaxEvent::StringChunk { text, is_last, .. } => {
+                if is_last {
+                    return Ok(LpValue::String(text));
+                }
+                let mut value = text;
+                value.push_str(&self.reader.finish_string_chunks()?);
+                Ok(LpValue::String(value))
+            }
+            SyntaxEvent::Number { text, span } => infer_number_lp_value(&text, span),
+            SyntaxEvent::Bool { value, .. } => Ok(LpValue::Bool(value)),
+            SyntaxEvent::StartArray { .. } => self.read_lp_value_array(),
+            event => Err(self.reader.error_at(event.span(), "expected lp value")),
+        }
+    }
+
+    fn read_lp_value_array(self) -> Result<LpValue, SyntaxError> {
+        let mut values = Vec::new();
+        loop {
+            match self.reader.next_event()? {
+                Some(SyntaxEvent::EndArray { .. }) => return Ok(LpValue::Array(values)),
+                Some(event) => values.push(
+                    ValueReader {
+                        reader: self.reader,
+                        span: event.span(),
+                    }
+                    .read_lp_value_from_event(event)?,
+                ),
+                None => return Err(self.reader.error("unterminated lp value array")),
+            }
+        }
+    }
+}
+
+fn infer_number_lp_value(text: &str, span: Option<SourceSpan>) -> Result<LpValue, SyntaxError> {
+    if text.contains(['.', 'e', 'E']) {
+        return text
+            .parse()
+            .map(LpValue::F32)
+            .map_err(|_| SyntaxError::new("", span, "expected f32"));
+    }
+    if let Ok(value) = text.parse::<i32>() {
+        return Ok(LpValue::I32(value));
+    }
+    text.parse()
+        .map(LpValue::U32)
+        .map_err(|_| SyntaxError::new("", span, "expected numeric lp value"))
 }
 
 fn read_number_text<S>(
