@@ -6,7 +6,7 @@
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 use crate::node::kind::NodeKind;
 use crate::nodes::fixture::FixtureDef;
@@ -14,7 +14,9 @@ use crate::nodes::output::OutputDef;
 use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::ShaderDef;
 use crate::nodes::texture::TextureDef;
-use crate::{SlotAccess, SlotDataAccess, SlotShapeId};
+use crate::{
+    SlotAccess, SlotDataAccess, SlotMutAccess, SlotShapeId, SlotShapeRegistry, StaticSlotShape,
+};
 
 /// Authored body of a node artifact.
 ///
@@ -90,16 +92,36 @@ impl NodeDef {
 
     /// Parse a TOML node artifact into the canonical node-definition enum.
     pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
-        let probe: NodeDefKindProbe =
-            toml::from_str(text).map_err(|error| NodeDefParseError::Toml {
-                error: format!("{error}"),
-            })?;
-        match probe.kind.as_str() {
-            ProjectDef::KIND => parse_variant(text).map(Self::Project),
-            TextureDef::KIND => parse_variant(text).map(Self::Texture),
-            ShaderDef::KIND => parse_variant(text).map(Self::Shader),
-            OutputDef::KIND => parse_variant(text).map(Self::Output),
-            FixtureDef::KIND => parse_variant(text).map(Self::Fixture),
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).map_err(|error| {
+            NodeDefParseError::Toml {
+                error: format!("register slot shapes: {error}"),
+            }
+        })?;
+        Self::from_toml_str_with_registry(&registry, text)
+    }
+
+    /// Parse a TOML node artifact through a caller-provided slot registry.
+    pub fn from_toml_str_with_registry(
+        registry: &SlotShapeRegistry,
+        text: &str,
+    ) -> Result<Self, NodeDefParseError> {
+        let mut payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
+        let kind = take_kind(&mut payload)?;
+
+        match kind.as_str() {
+            ProjectDef::KIND => read_variant::<ProjectDef>(registry, ProjectDef::SHAPE_ID, payload)
+                .map(Self::Project),
+            TextureDef::KIND => read_variant::<TextureDef>(registry, TextureDef::SHAPE_ID, payload)
+                .map(Self::Texture),
+            ShaderDef::KIND => {
+                read_variant::<ShaderDef>(registry, ShaderDef::SHAPE_ID, payload).map(Self::Shader)
+            }
+            OutputDef::KIND => {
+                read_variant::<OutputDef>(registry, OutputDef::SHAPE_ID, payload).map(Self::Output)
+            }
+            FixtureDef::KIND => read_variant::<FixtureDef>(registry, FixtureDef::SHAPE_ID, payload)
+                .map(Self::Fixture),
             other => Err(NodeDefParseError::UnknownKind {
                 kind: String::from(other),
             }),
@@ -153,24 +175,58 @@ impl core::fmt::Display for NodeDefParseError {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct NodeDefKindProbe {
-    kind: String,
+fn take_kind(payload: &mut toml::Value) -> Result<String, NodeDefParseError> {
+    let Some(table) = payload.as_table_mut() else {
+        return Err(NodeDefParseError::Toml {
+            error: String::from("node definition TOML root must be a table"),
+        });
+    };
+    let Some(kind) = table.remove("kind") else {
+        return Err(NodeDefParseError::Toml {
+            error: String::from("missing required field `kind`"),
+        });
+    };
+    kind.as_str()
+        .map(String::from)
+        .ok_or_else(|| NodeDefParseError::Toml {
+            error: String::from("field `kind` must be a string"),
+        })
 }
 
-fn parse_variant<T>(text: &str) -> Result<T, NodeDefParseError>
+fn read_variant<T>(
+    registry: &SlotShapeRegistry,
+    shape_id: SlotShapeId,
+    payload: toml::Value,
+) -> Result<T, NodeDefParseError>
 where
-    T: serde::de::DeserializeOwned,
+    T: SlotMutAccess + 'static,
 {
-    toml::from_str(text).map_err(|error| NodeDefParseError::Toml {
+    let object = registry
+        .read_slot_toml(shape_id, &payload)
+        .map_err(|error| NodeDefParseError::Toml {
+            error: error.to_string(),
+        })?;
+    object
+        .into_any()
+        .downcast::<T>()
+        .map(|def| *def)
+        .map_err(|_| NodeDefParseError::Toml {
+            error: format!("slot reader returned unexpected type for shape {shape_id}"),
+        })
+}
+
+fn toml_parse_error(error: toml::de::Error) -> NodeDefParseError {
+    NodeDefParseError::Toml {
         error: format!("{error}"),
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StaticSlotShape, TextureDef};
+    use alloc::string::ToString;
+
+    use crate::{BindingEndpoint, MappingConfig, SlotShapeRegistry, TextureDef};
 
     #[test]
     fn node_def_delegates_kind_and_slots() {
@@ -183,7 +239,9 @@ mod tests {
 
     #[test]
     fn node_def_parses_project_and_texture_toml() {
-        let project = NodeDef::from_toml_str(
+        let registry = registry();
+        let project = NodeDef::from_toml_str_with_registry(
+            &registry,
             r#"
 kind = "project"
 
@@ -194,7 +252,8 @@ artifact = "./texture.toml"
         .expect("project");
         assert!(matches!(project, NodeDef::Project(_)));
 
-        let texture = NodeDef::from_toml_str(
+        let texture = NodeDef::from_toml_str_with_registry(
+            &registry,
             r#"
 kind = "texture"
 size = { width = 64, height = 48 }
@@ -202,5 +261,130 @@ size = { width = 64, height = 48 }
         )
         .expect("texture");
         assert!(matches!(texture, NodeDef::Texture(_)));
+    }
+
+    #[test]
+    fn node_def_parses_shader_output_and_fixture_toml() {
+        let registry = registry();
+
+        let shader = NodeDef::from_toml_str_with_registry(
+            &registry,
+            r#"
+kind = "shader"
+glsl_path = "shader.glsl"
+render_order = 2
+
+[bindings.visual]
+source = { kind = "Literal", payload = 1.0 }
+target = { kind = "Bus", payload = "bus#visual.out" }
+"#,
+        )
+        .expect("shader");
+        assert!(matches!(shader, NodeDef::Shader(_)));
+
+        let output = NodeDef::from_toml_str_with_registry(
+            &registry,
+            r#"
+kind = "output"
+pin = 18
+
+[options]
+brightness = 0.5
+"#,
+        )
+        .expect("output");
+        assert!(matches!(output, NodeDef::Output(_)));
+
+        let fixture = NodeDef::from_toml_str_with_registry(
+            &registry,
+            r#"
+kind = "fixture"
+render_size = { width = 8, height = 8 }
+mapping = { kind = "path_points" }
+"#,
+        )
+        .expect("fixture");
+        let NodeDef::Fixture(fixture) = fixture else {
+            panic!("expected fixture");
+        };
+        assert!(matches!(
+            fixture.mapping.value(),
+            MappingConfig::PathPoints { .. }
+        ));
+    }
+
+    #[test]
+    fn node_def_rejects_missing_invalid_and_unknown_kind() {
+        let registry = registry();
+
+        let missing = NodeDef::from_toml_str_with_registry(&registry, "name = \"missing\"")
+            .expect_err("missing kind");
+        assert!(missing.to_string().contains("kind"));
+
+        let invalid =
+            NodeDef::from_toml_str_with_registry(&registry, "kind = 7").expect_err("invalid kind");
+        assert!(invalid.to_string().contains("string"));
+
+        let unknown = NodeDef::from_toml_str_with_registry(&registry, "kind = \"bogus\"")
+            .expect_err("unknown kind");
+        assert_eq!(
+            unknown,
+            NodeDefParseError::UnknownKind {
+                kind: String::from("bogus")
+            }
+        );
+    }
+
+    #[test]
+    fn node_def_consumes_kind_before_slotcodec_record_read() {
+        let registry = registry();
+
+        let def = NodeDef::from_toml_str_with_registry(
+            &registry,
+            r#"
+kind = "texture"
+size = { width = 1, height = 2 }
+"#,
+        )
+        .expect("texture");
+
+        let NodeDef::Texture(def) = def else {
+            panic!("expected texture");
+        };
+        assert_eq!(def.size.value().width, 1);
+        assert_eq!(def.size.value().height, 2);
+    }
+
+    #[test]
+    fn node_def_reads_binding_endpoint_values_through_lpvalue_enum() {
+        let registry = registry();
+
+        let def = NodeDef::from_toml_str_with_registry(
+            &registry,
+            r##"
+kind = "output"
+pin = 18
+
+[bindings.main]
+source = { kind = "Literal", payload = 0.25 }
+target = { kind = "Bus", payload = "bus#control.out" }
+"##,
+        )
+        .expect("output");
+        let NodeDef::Output(def) = def else {
+            panic!("expected output");
+        };
+        let binding = def.bindings.0.entries.get("main").expect("binding");
+        assert!(matches!(
+            binding.source.value(),
+            BindingEndpoint::Literal(crate::LpValue::F32(0.25))
+        ));
+        assert!(matches!(binding.target.value(), BindingEndpoint::Bus(_)));
+    }
+
+    fn registry() -> SlotShapeRegistry {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        registry
     }
 }

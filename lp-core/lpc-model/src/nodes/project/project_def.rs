@@ -35,7 +35,7 @@ impl ProjectDef {
 
 #[cfg(test)]
 mod tests {
-    use crate::nodes::project::project_def::ProjectDef;
+    use crate::{NodeDef, SlotShapeRegistry};
 
     #[test]
     fn project_def_deserializes_named_nodes() {
@@ -49,11 +49,20 @@ mod tests {
             [nodes.shader]
             artifact = "./shader.toml"
         "#;
-        let def: ProjectDef = toml::from_str(toml).unwrap();
+        let def = NodeDef::from_toml_str_with_registry(&registry(), toml).unwrap();
+        let NodeDef::Project(def) = def else {
+            panic!("expected project def");
+        };
         assert!(def.is_project_kind());
         assert_eq!(def.name(), Some("basic"));
         assert_eq!(def.nodes.entries.len(), 2);
         assert!(def.nodes.entries.contains_key("texture"));
         assert!(def.nodes.entries.contains_key("shader"));
+    }
+
+    fn registry() -> SlotShapeRegistry {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        registry
     }
 }

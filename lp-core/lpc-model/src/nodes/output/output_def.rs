@@ -96,7 +96,7 @@ fn default_true_slot() -> ValueSlot<bool> {
 mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
-    use crate::{OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{NodeDef, OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
 
     #[test]
     fn test_output_def_kind() {
@@ -115,7 +115,10 @@ pin = 18
 brightness = 0.25
 dithering_enabled = false
 "#;
-        let def: OutputDef = toml::from_str(toml).unwrap();
+        let def = NodeDef::from_toml_str_with_registry(&registry(), toml).unwrap();
+        let NodeDef::Output(def) = def else {
+            panic!("expected output def");
+        };
         assert_eq!(def.pin(), 18);
         let opts = def.options().unwrap();
         assert!((opts.brightness.value().0 - 0.25).abs() < 0.001);
@@ -134,5 +137,11 @@ dithering_enabled = false
         assert!(view.is_valid_for(&registry));
         assert_eq!(view.pin().path(), &SlotPath::parse("pin").unwrap());
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
+    }
+
+    fn registry() -> SlotShapeRegistry {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        registry
     }
 }

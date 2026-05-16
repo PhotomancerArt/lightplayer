@@ -9,7 +9,7 @@ use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingEndpoint, ChannelName, Kind, LpValue, NodeDef, NodeId, NodeName, Revision,
-    SlotPath,
+    SlotPath, SlotShapeRegistry,
 };
 use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -81,10 +81,9 @@ impl ProjectLoader {
         R::Err: core::fmt::Debug,
     {
         let project_path = resolve_project_locator(&project_locator)?;
-        let project_def = load_project_def(root, &project_path)?;
-
         let project_root = services.project_root().clone();
         let mut runtime = Engine::with_services(project_root.clone(), services);
+        let project_def = load_project_def(root, &project_path, runtime.slot_shapes())?;
         let frame = Revision::new(1);
         let root_id = runtime.tree().root();
         let project_artifact = runtime
@@ -138,7 +137,7 @@ impl ProjectLoader {
                         ),
                     })?;
             let artifact_path = resolve_child_artifact_locator(&project_path, &artifact_locator)?;
-            let config = load_node_def(root, artifact_path.as_path())?;
+            let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
             let artifact_id = runtime
                 .artifacts_mut()
                 .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
@@ -311,13 +310,17 @@ impl ProjectLoader {
     }
 }
 
-fn load_project_def<R>(root: &R, path: &LpPathBuf) -> Result<ProjectDef, ProjectLoadError>
+fn load_project_def<R>(
+    root: &R,
+    path: &LpPathBuf,
+    registry: &SlotShapeRegistry,
+) -> Result<ProjectDef, ProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path.as_path())?;
-    match NodeDef::from_toml_str(&text) {
+    match NodeDef::from_toml_str_with_registry(registry, &text) {
         Ok(NodeDef::Project(def)) => Ok(def),
         Ok(other) => Err(ProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
@@ -336,13 +339,17 @@ where
     }
 }
 
-fn load_node_def<R>(root: &R, path: &LpPath) -> Result<NodeDef, ProjectLoadError>
+fn load_node_def<R>(
+    root: &R,
+    path: &LpPath,
+    registry: &SlotShapeRegistry,
+) -> Result<NodeDef, ProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path)?;
-    match NodeDef::from_toml_str(&text) {
+    match NodeDef::from_toml_str_with_registry(registry, &text) {
         Ok(NodeDef::Project(_)) => Err(ProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
             suffix: "project".to_string(),
@@ -775,20 +782,13 @@ kind = "fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
-source = "..missing#output"
+source = { kind = "Node", payload = "..missing#output" }
 
 [bindings.output]
-target = "bus#control.out"
-
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 1.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
+target = { kind = "Bus", payload = "bus#control.out" }
 
 [mapping]
 kind = "path_points"
@@ -835,20 +835,13 @@ kind = "fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
-source = "/texture#output"
+source = { kind = "Node", payload = "/texture#output" }
 
 [bindings.output]
-target = "bus#control.out"
-
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 1.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
+target = { kind = "Bus", payload = "bus#control.out" }
 
 [mapping]
 kind = "path_points"
@@ -915,7 +908,7 @@ width = 16
 height = 16
 
 [bindings.input]
-source = "bus#visual.out"
+source = { kind = "Bus", payload = "bus#visual.out" }
 "#,
         )
         .expect("texture.toml");
@@ -927,7 +920,7 @@ glsl_path = "shader.glsl"
 render_order = 0
 
 [bindings.output]
-target = "bus#visual.out"
+target = { kind = "Bus", payload = "bus#visual.out" }
 "#,
         )
         .expect("shader.toml");
@@ -943,7 +936,7 @@ kind = "output"
 pin = 4
 
 [bindings.input]
-source = "bus#control.out"
+source = { kind = "Bus", payload = "bus#control.out" }
 "#,
         )
         .expect("output.toml");
@@ -954,20 +947,13 @@ kind = "fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
-source = "bus#visual.out"
+source = { kind = "Bus", payload = "bus#visual.out" }
 
 [bindings.output]
-target = "bus#control.out"
-
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 0.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
+target = { kind = "Bus", payload = "bus#control.out" }
 
 [mapping]
 kind = "path_points"

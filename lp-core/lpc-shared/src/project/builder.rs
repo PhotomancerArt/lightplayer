@@ -8,9 +8,10 @@ use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
-    Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeSlotRef, OptionSlot, PositiveF32,
-    PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath,
+    Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingEndpoint,
+    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeInvocation,
+    NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio, RatioSlot,
+    RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotAccess, SlotPath, SlotShapeRegistry,
     SourcePath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
@@ -176,13 +177,20 @@ impl ProjectBuilder {
 
     /// Build completes - writes project.toml and all node artifact files.
     pub fn build(self) {
-        let mut project_toml = format!("kind = \"project\"\nname = \"{}\"\n", self.name);
+        let registry = slot_shape_registry();
+        let mut nodes = BTreeMap::new();
         for (name, path) in &self.nodes {
             let relative_path = path.as_str().trim_start_matches('/');
-            project_toml.push_str(&format!(
-                "\n[nodes.{name}]\nartifact = \"./{relative_path}\"\n"
-            ));
+            nodes.insert(
+                name.clone(),
+                NodeInvocation::new(ArtifactLocator::path(format!("./{relative_path}"))),
+            );
         }
+        let project = ProjectDef {
+            name: OptionSlot::some(ValueSlot::new(self.name.clone())),
+            nodes: MapSlot::new(nodes),
+        };
+        let project_toml = authored_slot_toml(&registry, ProjectDef::KIND, &project);
         self.write_file_helper("/project.toml", project_toml.as_bytes())
             .expect("Failed to write project.toml");
     }
@@ -223,8 +231,29 @@ fn numbered_node_name(kind: &str, id: u32) -> String {
     }
 }
 
-fn prepend_kind(kind: &str, body: String) -> String {
-    format!("kind = \"{kind}\"\n{body}")
+fn authored_slot_toml(registry: &SlotShapeRegistry, kind: &str, root: &dyn SlotAccess) -> String {
+    let value = registry
+        .write_slot_toml(root)
+        .expect("Failed to serialize slot payload to TOML value");
+    let table = value
+        .as_table()
+        .expect("authored node definitions are TOML tables");
+    let mut authored = toml::Table::new();
+    authored.insert(
+        String::from("kind"),
+        toml::Value::String(String::from(kind)),
+    );
+    for (name, value) in table {
+        authored.insert(name.clone(), value.clone());
+    }
+    toml::to_string(&authored).expect("Failed to serialize authored TOML table")
+}
+
+fn slot_shape_registry() -> SlotShapeRegistry {
+    let mut registry = SlotShapeRegistry::default();
+    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry)
+        .expect("static slot shapes register without conflicts");
+    registry
 }
 
 impl TextureBuilder {
@@ -244,10 +273,7 @@ impl TextureBuilder {
             bindings: bus_input_binding_defs("visual.out"),
         };
 
-        let toml = prepend_kind(
-            "texture",
-            toml::to_string(&config).expect("Failed to serialize texture def to TOML"),
-        );
+        let toml = authored_slot_toml(&slot_shape_registry(), TextureDef::KIND, &config);
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -289,10 +315,7 @@ impl ShaderBuilder {
             param_defs: MapSlot::default(),
         };
 
-        let toml = prepend_kind(
-            "shader",
-            toml::to_string(&config).expect("Failed to serialize shader def to TOML"),
-        );
+        let toml = authored_slot_toml(&slot_shape_registry(), ShaderDef::KIND, &config);
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -328,10 +351,7 @@ impl OutputBuilder {
             options: OptionSlot::some(self.options),
         };
 
-        let toml = prepend_kind(
-            "output",
-            toml::to_string(&config).expect("Failed to serialize output def to TOML"),
-        );
+        let toml = authored_slot_toml(&slot_shape_registry(), OutputDef::KIND, &config);
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -402,10 +422,7 @@ impl FixtureBuilder {
                 }),
         };
 
-        let toml = prepend_kind(
-            "fixture",
-            toml::to_string(&config).expect("Failed to serialize fixture def to TOML"),
-        );
+        let toml = authored_slot_toml(&slot_shape_registry(), FixtureDef::KIND, &config);
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -490,7 +507,7 @@ fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::nodes::project::project_def::ProjectDef;
+    use lpc_model::NodeDef;
     use lpfs::LpFsMemory;
 
     #[test]
@@ -503,8 +520,11 @@ mod tests {
         let project_toml_bytes = fs.borrow().read_file("/project.toml".as_path()).unwrap();
         let project_toml_str = core::str::from_utf8(&project_toml_bytes).unwrap();
 
-        let def: ProjectDef = toml::from_str(project_toml_str).unwrap();
-        assert!(def.is_project_kind());
+        let def =
+            NodeDef::from_toml_str_with_registry(&slot_shape_registry(), project_toml_str).unwrap();
+        let NodeDef::Project(def) = def else {
+            panic!("expected project def");
+        };
         assert_eq!(def.name(), Some("Test Project"));
         assert!(def.nodes.entries.contains_key("texture"));
     }
