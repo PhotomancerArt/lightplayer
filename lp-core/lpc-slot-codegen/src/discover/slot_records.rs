@@ -28,6 +28,9 @@ pub(crate) fn discover_static_slot_records(
             if !super::derive::has_derive(&item.attrs, "Slotted") {
                 continue;
             }
+            if !matches!(item.fields, syn::Fields::Named(_)) {
+                continue;
+            }
             let type_name = item.ident.to_string();
             records.push(StaticSlotRecord {
                 type_path: super::type_path::infer_type_path(src_dir, &path, &type_name)?,

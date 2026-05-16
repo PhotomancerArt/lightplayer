@@ -76,8 +76,8 @@ pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeDef, NodeId, NodeInvocation, NodeInvocationView, NodeKind, NodeName, NodeNameError,
-    RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeArtifact, NodeDef, NodeId, NodeInvocation, NodeInvocationView, NodeKind, NodeName,
+    NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ColorOrder, DivMode, FixtureDef, FixtureDefView, FixtureSamplingConfig,

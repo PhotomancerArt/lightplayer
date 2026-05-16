@@ -78,6 +78,18 @@ Every static slot record should also get a generated `*View`. Views are the
 compiled path-access projection over the shape, so they are part of the core
 slot surface rather than an opt-in root feature.
 
+### Slot Wrappers
+
+A slot wrapper is a single-field tuple struct derived with `Slotted`, such as
+`struct Artifact(EnumSlot<NodeDef>);`. The wrapper has its own static shape id
+and can be used as an ownership or loading boundary, but it exposes the wrapped
+slot shape directly. Paths start at the wrapped shape, so a wrapper does not
+introduce a synthetic `.0` field.
+
+Wrappers are registered as static shapes. They do not currently generate their
+own `*View`; view generation remains tied to named-field records until wrapper
+view delegation has a real use case.
+
 ### Slot Enums
 
 A slot enum is a closed set of variants. It usually maps to a Rust enum.

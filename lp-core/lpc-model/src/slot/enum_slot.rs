@@ -39,6 +39,10 @@ impl<T> EnumSlot<T> {
         self.inner.get_mut()
     }
 
+    pub fn into_inner(self) -> T {
+        self.inner.into_value()
+    }
+
     pub fn set_with_version(&mut self, revision: Revision, value: T) {
         self.inner.set(revision, value);
     }

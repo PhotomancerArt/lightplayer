@@ -13,7 +13,7 @@ pub mod node_prop_spec;
 pub mod relative_node_ref;
 pub mod tree_path;
 
-pub use crate::nodes::node_def::NodeDef;
+pub use crate::nodes::node_def::{NodeArtifact, NodeDef};
 pub use crate::slot_views::NodeInvocationView;
 pub use kind::NodeKind;
 pub use node_id::NodeId;

@@ -7,8 +7,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use lpc_model::{
     ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
-    SlotPathSegment, SlotRecord, SlotShapeRegistry, SlotShapeRegistryError, Slotted,
-    StaticSlotShape, TreePath, ValueSlot,
+    SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, StaticSlotShape, TreePath,
+    ValueSlot,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;

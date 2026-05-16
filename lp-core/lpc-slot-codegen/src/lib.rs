@@ -68,6 +68,9 @@ pub struct ShaderDef {
 pub struct Nested {
     value: ValueSlot<bool>,
 }
+
+#[derive(Slotted)]
+pub struct Wrapped(Nested);
 "#,
         )
         .unwrap();
@@ -82,6 +85,9 @@ pub struct Nested {
                 },
                 StaticRegisteredShape {
                     type_path: String::from("crate::source::ShaderDef"),
+                },
+                StaticRegisteredShape {
+                    type_path: String::from("crate::source::Wrapped"),
                 }
             ]
         );
@@ -109,6 +115,45 @@ pub struct ProjectDef {}
                 type_path: String::from("crate::node::project::ProjectDef"),
             }]
         );
+    }
+
+    #[test]
+    fn discovers_slot_wrappers_as_shapes_but_not_record_views() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(src.join("source")).unwrap();
+        fs::write(
+            src.join("source").join("artifact.rs"),
+            r#"
+use lpc_model::Slotted;
+
+#[derive(Slotted)]
+pub struct NodeDef {
+    pub name: ValueSlot<String>,
+}
+
+#[derive(Slotted)]
+pub struct Artifact(NodeDef);
+"#,
+        )
+        .unwrap();
+
+        let shapes = discover_static_registered_shapes(&src).unwrap();
+        assert_eq!(
+            shapes,
+            vec![
+                StaticRegisteredShape {
+                    type_path: String::from("crate::source::Artifact"),
+                },
+                StaticRegisteredShape {
+                    type_path: String::from("crate::source::NodeDef"),
+                },
+            ]
+        );
+
+        let views = discover_static_slot_views(&src).unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].type_path, "crate::source::NodeDef");
     }
 
     #[test]

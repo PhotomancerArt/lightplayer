@@ -15,7 +15,9 @@ use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::ShaderDef;
 use crate::nodes::texture::TextureDef;
 use crate::{
-    SlotAccess, SlotDataAccess, SlotMutAccess, SlotShapeId, SlotShapeRegistry, StaticSlotShape,
+    EnumSlot, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotEnumShape, SlotMeta,
+    SlotMutAccess, SlotMutationError, SlotShape, SlotShapeId, SlotShapeRegistry, Slotted,
+    SlottedEnum, SlottedEnumMut, StaticSlotShape,
 };
 
 /// Authored body of a node artifact.
@@ -30,6 +32,38 @@ pub enum NodeDef {
     Shader(ShaderDef),
     Output(OutputDef),
     Fixture(FixtureDef),
+}
+
+/// Slot-owned authored node artifact root.
+///
+/// The wrapper gives an artifact its own shape id and factory while exposing
+/// the active [`NodeDef`] shape directly. Paths start at the node definition
+/// payload; there is no synthetic wrapper field.
+#[derive(Clone, Debug, Default, PartialEq, Slotted)]
+pub struct NodeArtifact(pub EnumSlot<NodeDef>);
+
+impl NodeArtifact {
+    pub fn new(def: NodeDef) -> Self {
+        Self(EnumSlot::new(def))
+    }
+
+    pub fn node_def(&self) -> &NodeDef {
+        self.0.value()
+    }
+
+    pub fn into_node_def(self) -> NodeDef {
+        self.0.into_inner()
+    }
+
+    /// Parse a TOML node artifact through the slot registry.
+    pub fn from_toml_str_with_registry(
+        registry: &SlotShapeRegistry,
+        text: &str,
+    ) -> Result<Self, NodeDefParseError> {
+        let payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
+        reject_unknown_kind(&payload)?;
+        read_node_artifact(registry, payload)
+    }
 }
 
 impl NodeDef {
@@ -95,26 +129,75 @@ impl NodeDef {
         registry: &SlotShapeRegistry,
         text: &str,
     ) -> Result<Self, NodeDefParseError> {
-        let mut payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
-        let kind = take_kind(&mut payload)?;
+        NodeArtifact::from_toml_str_with_registry(registry, text).map(NodeArtifact::into_node_def)
+    }
+}
 
-        match kind.as_str() {
-            ProjectDef::KIND => read_variant::<ProjectDef>(registry, ProjectDef::SHAPE_ID, payload)
-                .map(Self::Project),
-            TextureDef::KIND => read_variant::<TextureDef>(registry, TextureDef::SHAPE_ID, payload)
-                .map(Self::Texture),
-            ShaderDef::KIND => {
-                read_variant::<ShaderDef>(registry, ShaderDef::SHAPE_ID, payload).map(Self::Shader)
-            }
-            OutputDef::KIND => {
-                read_variant::<OutputDef>(registry, OutputDef::SHAPE_ID, payload).map(Self::Output)
-            }
-            FixtureDef::KIND => read_variant::<FixtureDef>(registry, FixtureDef::SHAPE_ID, payload)
-                .map(Self::Fixture),
-            other => Err(NodeDefParseError::UnknownKind {
-                kind: String::from(other),
-            }),
+impl Default for NodeDef {
+    fn default() -> Self {
+        Self::Project(ProjectDef::default())
+    }
+}
+
+impl SlotEnumShape for NodeDef {
+    fn slot_enum_shape() -> SlotShape {
+        use crate::slot::shape::{reference, variant};
+
+        SlotShape::Enum {
+            meta: SlotMeta::empty(),
+            variants: alloc::vec![
+                variant(ProjectDef::KIND, reference(ProjectDef::SHAPE_ID)),
+                variant(TextureDef::KIND, reference(TextureDef::SHAPE_ID)),
+                variant(ShaderDef::KIND, reference(ShaderDef::SHAPE_ID)),
+                variant(OutputDef::KIND, reference(OutputDef::SHAPE_ID)),
+                variant(FixtureDef::KIND, reference(FixtureDef::SHAPE_ID)),
+            ],
         }
+    }
+}
+
+impl SlottedEnum for NodeDef {
+    fn variant(&self) -> &str {
+        self.kind_name()
+    }
+
+    fn data(&self) -> SlotDataAccess<'_> {
+        match self {
+            Self::Project(def) => def.data(),
+            Self::Texture(def) => def.data(),
+            Self::Shader(def) => def.data(),
+            Self::Output(def) => def.data(),
+            Self::Fixture(def) => def.data(),
+        }
+    }
+}
+
+impl SlottedEnumMut for NodeDef {
+    fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        match self {
+            Self::Project(def) => def.data_mut(),
+            Self::Texture(def) => def.data_mut(),
+            Self::Shader(def) => def.data_mut(),
+            Self::Output(def) => def.data_mut(),
+            Self::Fixture(def) => def.data_mut(),
+        }
+    }
+
+    fn set_variant_default(&mut self, variant: &str) -> Result<(), SlotMutationError> {
+        *self = match variant {
+            ProjectDef::KIND => Self::Project(ProjectDef::default()),
+            TextureDef::KIND => Self::Texture(TextureDef::default()),
+            ShaderDef::KIND => Self::Shader(ShaderDef::default()),
+            OutputDef::KIND => Self::Output(OutputDef::default()),
+            FixtureDef::KIND => Self::Fixture(FixtureDef::default()),
+            other => {
+                return Err(SlotMutationError::unknown_variant(format!(
+                    "unknown NodeDef variant {other:?}; expected one of: {}",
+                    NODE_DEF_KIND_NAMES.join(", ")
+                )));
+            }
+        };
+        Ok(())
     }
 }
 
@@ -164,13 +247,30 @@ impl core::fmt::Display for NodeDefParseError {
     }
 }
 
-fn take_kind(payload: &mut toml::Value) -> Result<String, NodeDefParseError> {
-    let Some(table) = payload.as_table_mut() else {
+const NODE_DEF_KIND_NAMES: &[&str] = &[
+    ProjectDef::KIND,
+    TextureDef::KIND,
+    ShaderDef::KIND,
+    OutputDef::KIND,
+    FixtureDef::KIND,
+];
+
+fn reject_unknown_kind(payload: &toml::Value) -> Result<(), NodeDefParseError> {
+    let kind = read_kind(payload)?;
+    if NODE_DEF_KIND_NAMES.contains(&kind.as_str()) {
+        Ok(())
+    } else {
+        Err(NodeDefParseError::UnknownKind { kind })
+    }
+}
+
+fn read_kind(payload: &toml::Value) -> Result<String, NodeDefParseError> {
+    let Some(table) = payload.as_table() else {
         return Err(NodeDefParseError::Toml {
             error: String::from("node definition TOML root must be a table"),
         });
     };
-    let Some(kind) = table.remove("kind") else {
+    let Some(kind) = table.get("kind") else {
         return Err(NodeDefParseError::Toml {
             error: String::from("missing required field `kind`"),
         });
@@ -182,25 +282,24 @@ fn take_kind(payload: &mut toml::Value) -> Result<String, NodeDefParseError> {
         })
 }
 
-fn read_variant<T>(
+fn read_node_artifact(
     registry: &SlotShapeRegistry,
-    shape_id: SlotShapeId,
     payload: toml::Value,
-) -> Result<T, NodeDefParseError>
-where
-    T: SlotMutAccess + 'static,
-{
+) -> Result<NodeArtifact, NodeDefParseError> {
     let object = registry
-        .read_slot_toml(shape_id, &payload)
+        .read_slot_toml(NodeArtifact::SHAPE_ID, &payload)
         .map_err(|error| NodeDefParseError::Toml {
             error: error.to_string(),
         })?;
     object
         .into_any()
-        .downcast::<T>()
-        .map(|def| *def)
+        .downcast::<NodeArtifact>()
+        .map(|artifact| *artifact)
         .map_err(|_| NodeDefParseError::Toml {
-            error: format!("slot reader returned unexpected type for shape {shape_id}"),
+            error: format!(
+                "slot reader returned unexpected type for shape {}",
+                NodeArtifact::SHAPE_ID
+            ),
         })
 }
 
@@ -324,7 +423,37 @@ mapping = { kind = "path_points" }
     }
 
     #[test]
-    fn node_def_consumes_kind_before_slotcodec_record_read() {
+    fn node_artifact_root_loads_through_wrapper_shape() {
+        let registry = registry();
+        let payload = toml::from_str::<toml::Value>(
+            r#"
+kind = "texture"
+size = { width = 1, height = 2 }
+"#,
+        )
+        .unwrap();
+
+        let artifact = registry
+            .read_slot_toml(NodeArtifact::SHAPE_ID, &payload)
+            .expect("artifact slot load")
+            .into_any()
+            .downcast::<NodeArtifact>()
+            .expect("node artifact");
+
+        assert_eq!(artifact.shape_id(), NodeArtifact::SHAPE_ID);
+        let SlotDataAccess::Enum(en) = artifact.data() else {
+            panic!("artifact wrapper should expose node enum data");
+        };
+        assert_eq!(en.variant(), "texture");
+        let NodeDef::Texture(def) = artifact.node_def() else {
+            panic!("expected texture");
+        };
+        assert_eq!(def.size.value().width, 1);
+        assert_eq!(def.size.value().height, 2);
+    }
+
+    #[test]
+    fn node_def_from_toml_uses_artifact_wrapper_loader() {
         let registry = registry();
 
         let def = NodeDef::from_toml_str_with_registry(

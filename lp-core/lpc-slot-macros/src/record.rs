@@ -15,8 +15,37 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
     let input = parse2::<DeriveInput>(input)?;
     let ident = input.ident;
     let container_attrs = attr::parse_container(&input.attrs)?;
-    let fields = named_fields(input.data)?;
+    let shape_id = if let Some(shape_id) = container_attrs.shape_id {
+        quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
+    } else {
+        quote! {
+            ::lpc_model::SlotShapeId::from_static_name(
+                concat!(module_path!(), "::", stringify!(#ident)),
+            )
+        }
+    };
 
+    match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Named(fields) => derive_record(ident, shape_id, fields),
+            Fields::Unnamed(fields) => derive_wrapper(ident, shape_id, fields),
+            Fields::Unit => Err(syn::Error::new_spanned(
+                ident,
+                "Slotted derive requires named fields or a single-field tuple wrapper",
+            )),
+        },
+        _ => Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "Slotted derive only supports structs",
+        )),
+    }
+}
+
+fn derive_record(
+    ident: syn::Ident,
+    shape_id: TokenStream,
+    fields: syn::FieldsNamed,
+) -> Result<TokenStream> {
     let mut shape_fields = Vec::new();
     let mut access_arms = Vec::new();
     let mut mut_access_arms = Vec::new();
@@ -58,16 +87,6 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             access_index += 1;
         }
     }
-
-    let shape_id = if let Some(shape_id) = container_attrs.shape_id {
-        quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
-    } else {
-        quote! {
-            ::lpc_model::SlotShapeId::from_static_name(
-                concat!(module_path!(), "::", stringify!(#ident)),
-            )
-        }
-    };
 
     let static_impls = quote! {
         impl ::lpc_model::SlotAccess for #ident {
@@ -171,20 +190,89 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
     })
 }
 
-fn named_fields(data: Data) -> Result<syn::FieldsNamed> {
-    match data {
-        Data::Struct(data) => match data.fields {
-            Fields::Named(fields) => Ok(fields),
-            other => Err(syn::Error::new_spanned(
-                other,
-                "Slotted derive requires named struct fields",
-            )),
-        },
-        _ => Err(syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "Slotted derive only supports structs",
-        )),
+fn derive_wrapper(
+    ident: syn::Ident,
+    shape_id: TokenStream,
+    fields: syn::FieldsUnnamed,
+) -> Result<TokenStream> {
+    if fields.unnamed.len() != 1 {
+        return Err(syn::Error::new_spanned(
+            fields,
+            "Slotted tuple wrappers must contain exactly one field",
+        ));
     }
+
+    let field_ty = &fields.unnamed[0].ty;
+
+    Ok(quote! {
+        impl ::lpc_model::SlotAccess for #ident {
+            fn shape_id(&self) -> ::lpc_model::SlotShapeId {
+                <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID
+            }
+
+            fn data(&self) -> ::lpc_model::SlotDataAccess<'_> {
+                <#field_ty as ::lpc_model::FieldSlot>::slot_field_data(&self.0)
+            }
+
+            fn as_any(&self) -> &dyn ::core::any::Any {
+                self
+            }
+
+            fn into_any(
+                self: ::lpc_model::__private::Box<Self>,
+            ) -> ::lpc_model::__private::Box<dyn ::core::any::Any> {
+                self
+            }
+        }
+
+        impl ::lpc_model::StaticSlotShape for #ident {
+            const SHAPE_ID: ::lpc_model::SlotShapeId = #shape_id;
+
+            fn shape_name() -> Option<&'static str> {
+                Some(concat!(module_path!(), "::", stringify!(#ident)))
+            }
+
+            fn slot_shape() -> ::lpc_model::SlotShape {
+                <#field_ty as ::lpc_model::FieldSlot>::slot_field_shape()
+            }
+        }
+
+        impl ::lpc_model::StaticSlotAccess for #ident {}
+
+        impl ::lpc_model::SlotMapValueAccess for #ident {
+            fn slot_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
+                <#field_ty as ::lpc_model::FieldSlot>::slot_field_data(&self.0)
+            }
+        }
+
+        impl ::lpc_model::SlotMapValueMutAccess for #ident {
+            fn slot_data_mut(&mut self) -> ::lpc_model::SlotDataMutAccess<'_> {
+                <#field_ty as ::lpc_model::FieldSlotMut>::slot_field_data_mut(&mut self.0)
+            }
+        }
+
+        impl ::lpc_model::FieldSlot for #ident {
+            fn slot_field_shape() -> ::lpc_model::SlotShape {
+                <#field_ty as ::lpc_model::FieldSlot>::slot_field_shape()
+            }
+
+            fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
+                <#field_ty as ::lpc_model::FieldSlot>::slot_field_data(&self.0)
+            }
+        }
+
+        impl ::lpc_model::FieldSlotMut for #ident {
+            fn slot_field_data_mut(&mut self) -> ::lpc_model::SlotDataMutAccess<'_> {
+                <#field_ty as ::lpc_model::FieldSlotMut>::slot_field_data_mut(&mut self.0)
+            }
+        }
+
+        impl ::lpc_model::SlotMutAccess for #ident {
+            fn data_mut(&mut self) -> ::lpc_model::SlotDataMutAccess<'_> {
+                <#field_ty as ::lpc_model::FieldSlotMut>::slot_field_data_mut(&mut self.0)
+            }
+        }
+    })
 }
 
 fn validate_slot_name(name: &str, span: proc_macro2::Span) -> Result<()> {
