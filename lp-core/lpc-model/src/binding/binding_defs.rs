@@ -126,13 +126,7 @@ target = "bus#visual.out"
     #[test]
     fn validate_reports_slot_name_for_invalid_binding() {
         let mut entries = BTreeMap::new();
-        entries.insert(
-            String::from("bad"),
-            BindingDef {
-                source: crate::OptionSlot::none(),
-                target: crate::OptionSlot::none(),
-            },
-        );
+        entries.insert(String::from("bad"), BindingDef::default());
         let defs = BindingDefs::new(entries);
 
         assert!(matches!(

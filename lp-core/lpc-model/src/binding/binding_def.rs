@@ -1,5 +1,5 @@
 use super::BindingEndpoint;
-use crate::{OptionSlot, SlotRecord, ValueSlot};
+use crate::{SlotRecord, ValueSlot};
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -12,33 +12,33 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BindingDef {
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
-    pub source: OptionSlot<ValueSlot<BindingEndpoint>>,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
-    pub target: OptionSlot<ValueSlot<BindingEndpoint>>,
+    #[serde(default, skip_serializing_if = "binding_endpoint_slot_is_unset")]
+    pub source: ValueSlot<BindingEndpoint>,
+    #[serde(default, skip_serializing_if = "binding_endpoint_slot_is_unset")]
+    pub target: ValueSlot<BindingEndpoint>,
 }
 
 impl BindingDef {
     pub fn source(source: BindingEndpoint) -> Self {
         Self {
-            source: OptionSlot::some(ValueSlot::new(source)),
-            target: OptionSlot::none(),
+            source: ValueSlot::new(source),
+            target: ValueSlot::default(),
         }
     }
 
     pub fn target(target: BindingEndpoint) -> Self {
         Self {
-            source: OptionSlot::none(),
-            target: OptionSlot::some(ValueSlot::new(target)),
+            source: ValueSlot::default(),
+            target: ValueSlot::new(target),
         }
     }
 
     pub fn source_endpoint(&self) -> Option<&BindingEndpoint> {
-        self.source.data.as_ref().map(ValueSlot::value)
+        endpoint_if_set(&self.source)
     }
 
     pub fn target_endpoint(&self) -> Option<&BindingEndpoint> {
-        self.target.data.as_ref().map(ValueSlot::value)
+        endpoint_if_set(&self.target)
     }
 
     pub fn validate(&self) -> Result<(), BindingDefError> {
@@ -56,6 +56,15 @@ impl BindingDef {
             _ => Ok(()),
         }
     }
+}
+
+fn endpoint_if_set(slot: &ValueSlot<BindingEndpoint>) -> Option<&BindingEndpoint> {
+    let endpoint = slot.value();
+    (!endpoint.is_unset()).then_some(endpoint)
+}
+
+fn binding_endpoint_slot_is_unset(slot: &ValueSlot<BindingEndpoint>) -> bool {
+    slot.value().is_unset()
 }
 
 /// Error returned by [`BindingDef::validate`].
@@ -92,18 +101,14 @@ mod tests {
         assert!(BindingDef::target(target.clone()).validate().is_ok());
         assert_eq!(
             BindingDef {
-                source: OptionSlot::some(ValueSlot::new(source)),
-                target: OptionSlot::some(ValueSlot::new(target)),
+                source: ValueSlot::new(source),
+                target: ValueSlot::new(target),
             }
             .validate(),
             Err(BindingDefError::SourceAndTarget)
         );
         assert_eq!(
-            BindingDef {
-                source: OptionSlot::none(),
-                target: OptionSlot::none(),
-            }
-            .validate(),
+            BindingDef::default().validate(),
             Err(BindingDefError::MissingDirection)
         );
         assert_eq!(
@@ -116,5 +121,15 @@ mod tests {
     fn rejects_literal_targets() {
         let binding = BindingDef::target(BindingEndpoint::Literal(LpValue::F32(1.0)));
         assert_eq!(binding.validate(), Err(BindingDefError::LiteralTarget));
+    }
+
+    #[test]
+    fn serde_omits_unset_direction_slots() {
+        let binding = BindingDef::target(BindingEndpoint::parse_ref("bus#visual.out").unwrap());
+
+        let toml = toml::to_string(&binding).unwrap();
+
+        assert!(!toml.contains("source"));
+        assert!(toml.contains("target = \"bus#visual.out\""));
     }
 }

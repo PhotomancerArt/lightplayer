@@ -214,7 +214,7 @@ Follow-up realization:
 - `BindingEndpoint` already has an `Unset` variant, but a bare
   `BindingEndpoint` field cannot carry a real slot revision because it is just
   an enum value. It needs a wrapper.
-- A simpler model is likely:
+- Adopted simpler model:
 
   ```rust
   #[derive(Clone, Debug, Default, PartialEq, SlotRecord)]
@@ -226,9 +226,11 @@ Follow-up realization:
 
 - This keeps `BindingEndpoint` as the semantic leaf that belongs to the slot
   system, while `ValueSlot` owns revision tracking.
-- `OptionSlot<ValueSlot<BindingEndpoint>>` may still be useful only if "missing"
-  and `BindingEndpoint::Unset` need distinct meanings. Current instinct: avoid
-  that distinction unless the model proves it is needed.
+- `OptionSlot<ValueSlot<BindingEndpoint>>` was removed to avoid two empty
+  states. `BindingEndpoint::Unset` is the single empty/default state.
+- Current serde compatibility omits unset direction fields so authored TOML
+  stays compact; the slot codec should preserve that as a general omit-empty
+  policy during the switchover.
 
 Approved value/slot enum boundary:
 

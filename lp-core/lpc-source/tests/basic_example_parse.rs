@@ -1,4 +1,5 @@
 use lpc_model::BindingEndpoint;
+use lpc_model::NodeKind;
 use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
@@ -7,7 +8,7 @@ use lpc_model::nodes::shader::ShaderDef;
 #[test]
 fn flat_basic_example_artifacts_parse_as_source_defs() {
     let project: ProjectDef = read_basic_toml("project.toml");
-    assert_eq!(project.kind, ProjectDef::KIND);
+    assert_eq!(project.kind(), NodeKind::Project);
     assert_eq!(project.name(), Some("basic"));
     assert_eq!(project.nodes.entries.len(), 3);
     assert_eq!(
@@ -17,12 +18,13 @@ fn flat_basic_example_artifacts_parse_as_source_defs() {
             .get("shader")
             .unwrap()
             .artifact
-            .value(),
+            .value()
+            .as_str(),
         "./shader.toml"
     );
 
     let shader: ShaderDef = read_basic_toml("shader.toml");
-    assert_eq!(shader.glsl_path.value(), "shader.glsl");
+    assert_eq!(shader.glsl_path.value().as_str(), "shader.glsl");
     assert!(matches!(
         shader.bindings.entries()["output"].target_endpoint(),
         Some(BindingEndpoint::Bus(_))
