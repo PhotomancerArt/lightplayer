@@ -9,7 +9,7 @@ pub use fixture::{
     ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, FixtureStateView,
     MappingConfig, PathSpec, RingOrder,
 };
-pub use node_def::{NodeArtifact, NodeDef, NodeDefParseError};
+pub use node_def::{NodeArtifact, NodeDef, NodeDefParseError, NodeDefWriteError};
 pub use output::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
 };

@@ -49,7 +49,7 @@ mod tests {
             [nodes.shader]
             artifact = "./shader.toml"
         "#;
-        let def = NodeDef::from_toml_str_with_registry(&registry(), toml).unwrap();
+        let def = NodeDef::read_toml(&registry(), toml).unwrap();
         let NodeDef::Project(def) = def else {
             panic!("expected project def");
         };

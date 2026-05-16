@@ -18,6 +18,19 @@ use crate::{
     EnumSlot, SlotAccess, SlotDataAccess, SlotShapeId, SlotShapeRegistry, Slotted, StaticSlotShape,
 };
 
+const PROJECT_VARIANT: &str = "Project";
+const TEXTURE_VARIANT: &str = "Texture";
+const SHADER_VARIANT: &str = "Shader";
+const OUTPUT_VARIANT: &str = "Output";
+const FIXTURE_VARIANT: &str = "Fixture";
+const NODE_DEF_VARIANT_NAMES: &[&str] = &[
+    PROJECT_VARIANT,
+    TEXTURE_VARIANT,
+    SHADER_VARIANT,
+    OUTPUT_VARIANT,
+    FIXTURE_VARIANT,
+];
+
 /// Authored body of a node artifact.
 ///
 /// A `NodeDef` is source data: it is what a TOML artifact defines before the
@@ -54,14 +67,16 @@ impl NodeArtifact {
         self.0.into_inner()
     }
 
-    /// Parse a TOML node artifact through the slot registry.
-    pub fn from_toml_str_with_registry(
-        registry: &SlotShapeRegistry,
-        text: &str,
-    ) -> Result<Self, NodeDefParseError> {
+    /// Read an authored TOML node artifact through the slot registry.
+    pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
         let payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
         reject_unknown_kind(&payload)?;
         read_node_artifact(registry, payload)
+    }
+
+    /// Write an authored TOML node artifact through the slot registry.
+    pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
+        write_node_artifact(registry, self)
     }
 }
 
@@ -85,6 +100,17 @@ impl NodeDef {
             Self::Shader(_) => ShaderDef::KIND,
             Self::Output(_) => OutputDef::KIND,
             Self::Fixture(_) => FixtureDef::KIND,
+        }
+    }
+
+    /// Slot enum discriminator used by authored TOML.
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Project(_) => PROJECT_VARIANT,
+            Self::Texture(_) => TEXTURE_VARIANT,
+            Self::Shader(_) => SHADER_VARIANT,
+            Self::Output(_) => OUTPUT_VARIANT,
+            Self::Fixture(_) => FIXTURE_VARIANT,
         }
     }
 
@@ -123,12 +149,14 @@ impl NodeDef {
         }
     }
 
-    /// Parse a TOML node artifact through a caller-provided slot registry.
-    pub fn from_toml_str_with_registry(
-        registry: &SlotShapeRegistry,
-        text: &str,
-    ) -> Result<Self, NodeDefParseError> {
-        NodeArtifact::from_toml_str_with_registry(registry, text).map(NodeArtifact::into_node_def)
+    /// Read an authored TOML node artifact through the slot registry.
+    pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
+        NodeArtifact::read_toml(registry, text).map(NodeArtifact::into_node_def)
+    }
+
+    /// Write this node definition as authored TOML through the slot registry.
+    pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
+        NodeArtifact::new(self.clone()).write_toml(registry)
     }
 }
 
@@ -178,11 +206,23 @@ impl core::fmt::Display for NodeDefParseError {
     }
 }
 
-const NODE_DEF_KIND_NAMES: &[&str] = &["Project", "Texture", "Shader", "Output", "Fixture"];
+/// Failure writing an authored node definition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeDefWriteError {
+    error: String,
+}
+
+impl core::fmt::Display for NodeDefWriteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&self.error)
+    }
+}
+
+impl core::error::Error for NodeDefWriteError {}
 
 fn reject_unknown_kind(payload: &toml::Value) -> Result<(), NodeDefParseError> {
     let kind = read_kind(payload)?;
-    if NODE_DEF_KIND_NAMES.contains(&kind.as_str()) {
+    if NODE_DEF_VARIANT_NAMES.contains(&kind.as_str()) {
         Ok(())
     } else {
         Err(NodeDefParseError::UnknownKind { kind })
@@ -228,6 +268,20 @@ fn read_node_artifact(
         })
 }
 
+fn write_node_artifact(
+    registry: &SlotShapeRegistry,
+    artifact: &NodeArtifact,
+) -> Result<String, NodeDefWriteError> {
+    let value = registry
+        .write_slot_toml(artifact)
+        .map_err(|error| NodeDefWriteError {
+            error: error.to_string(),
+        })?;
+    toml::to_string(&value).map_err(|error| NodeDefWriteError {
+        error: error.to_string(),
+    })
+}
+
 fn toml_parse_error(error: toml::de::Error) -> NodeDefParseError {
     NodeDefParseError::Toml {
         error: format!("{error}"),
@@ -247,13 +301,14 @@ mod tests {
 
         assert_eq!(def.kind(), NodeKind::Texture);
         assert_eq!(def.kind_name(), "texture");
+        assert_eq!(def.variant_name(), "Texture");
         assert_eq!(def.shape_id(), TextureDef::SHAPE_ID);
     }
 
     #[test]
     fn node_def_parses_project_and_texture_toml() {
         let registry = registry();
-        let project = NodeDef::from_toml_str_with_registry(
+        let project = NodeDef::read_toml(
             &registry,
             r#"
 kind = "Project"
@@ -265,7 +320,7 @@ artifact = "./texture.toml"
         .expect("project");
         assert!(matches!(project, NodeDef::Project(_)));
 
-        let texture = NodeDef::from_toml_str_with_registry(
+        let texture = NodeDef::read_toml(
             &registry,
             r#"
 kind = "Texture"
@@ -280,7 +335,7 @@ size = { width = 64, height = 48 }
     fn node_def_parses_shader_output_and_fixture_toml() {
         let registry = registry();
 
-        let shader = NodeDef::from_toml_str_with_registry(
+        let shader = NodeDef::read_toml(
             &registry,
             r#"
 kind = "Shader"
@@ -294,7 +349,7 @@ target = "bus#visual.out"
         .expect("shader");
         assert!(matches!(shader, NodeDef::Shader(_)));
 
-        let output = NodeDef::from_toml_str_with_registry(
+        let output = NodeDef::read_toml(
             &registry,
             r#"
 kind = "Output"
@@ -307,7 +362,7 @@ brightness = 0.5
         .expect("output");
         assert!(matches!(output, NodeDef::Output(_)));
 
-        let fixture = NodeDef::from_toml_str_with_registry(
+        let fixture = NodeDef::read_toml(
             &registry,
             r#"
 kind = "Fixture"
@@ -329,16 +384,14 @@ mapping = { kind = "PathPoints" }
     fn node_def_rejects_missing_invalid_and_unknown_kind() {
         let registry = registry();
 
-        let missing = NodeDef::from_toml_str_with_registry(&registry, "name = \"missing\"")
-            .expect_err("missing kind");
+        let missing =
+            NodeDef::read_toml(&registry, "name = \"missing\"").expect_err("missing kind");
         assert!(missing.to_string().contains("kind"));
 
-        let invalid =
-            NodeDef::from_toml_str_with_registry(&registry, "kind = 7").expect_err("invalid kind");
+        let invalid = NodeDef::read_toml(&registry, "kind = 7").expect_err("invalid kind");
         assert!(invalid.to_string().contains("string"));
 
-        let unknown = NodeDef::from_toml_str_with_registry(&registry, "kind = \"bogus\"")
-            .expect_err("unknown kind");
+        let unknown = NodeDef::read_toml(&registry, "kind = \"bogus\"").expect_err("unknown kind");
         assert_eq!(
             unknown,
             NodeDefParseError::UnknownKind {
@@ -381,7 +434,7 @@ size = { width = 1, height = 2 }
     fn node_def_from_toml_uses_artifact_wrapper_loader() {
         let registry = registry();
 
-        let def = NodeDef::from_toml_str_with_registry(
+        let def = NodeDef::read_toml(
             &registry,
             r#"
 kind = "Texture"
@@ -398,10 +451,29 @@ size = { width = 1, height = 2 }
     }
 
     #[test]
+    fn node_def_writes_authored_toml_through_artifact_wrapper() {
+        let registry = registry();
+        let text = NodeDef::Texture(TextureDef::new(3, 4))
+            .write_toml(&registry)
+            .expect("write texture");
+
+        assert!(text.contains("kind = \"Texture\""));
+        assert!(text.contains("width = 3"));
+        assert!(text.contains("height = 4"));
+
+        let read = NodeDef::read_toml(&registry, &text).expect("read texture");
+        let NodeDef::Texture(def) = read else {
+            panic!("expected texture");
+        };
+        assert_eq!(def.size.value().width, 3);
+        assert_eq!(def.size.value().height, 4);
+    }
+
+    #[test]
     fn node_def_reads_binding_values_and_refs() {
         let registry = registry();
 
-        let def = NodeDef::from_toml_str_with_registry(
+        let def = NodeDef::read_toml(
             &registry,
             r##"
 kind = "Output"
@@ -418,7 +490,7 @@ value = 0.25
         let binding = def.bindings.0.entries.get("main").expect("binding");
         assert_eq!(binding.value_literal(), Some(&LpValue::F32(0.25)));
 
-        let def = NodeDef::from_toml_str_with_registry(
+        let def = NodeDef::read_toml(
             &registry,
             r##"
 kind = "Output"

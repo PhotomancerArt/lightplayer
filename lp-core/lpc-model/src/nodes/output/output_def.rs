@@ -115,7 +115,7 @@ pin = 18
 brightness = 0.25
 dithering_enabled = false
 "#;
-        let def = NodeDef::from_toml_str_with_registry(&registry(), toml).unwrap();
+        let def = NodeDef::read_toml(&registry(), toml).unwrap();
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };

@@ -18,6 +18,11 @@ In scope:
 - provide non-serde codecs or debug/snapshot paths for slot infrastructure
   where still needed
 - remove `serde` and `serde_json` from `lpc-model/Cargo.toml`
+- remove stale serde-only helper APIs and annotations once slot paths own
+  read/write behavior
+- update or delete old serde-era authored syntax tests and fixtures inside
+  `lpc-model`
+- update docs to remove transitional language about serde-backed model paths
 - update docs after the migration is complete
 
 Out of scope:
@@ -25,6 +30,9 @@ Out of scope:
 - removing serde from `lpc-wire` or other crates unless required by compile
   boundaries
 - changing schema versioning policy
+- project-builder/authored project writing migration; that should land as its
+  own step before the final serde deletion
+- broad `NodeDef` API reshaping; keep only final naming polish if needed
 
 ## Key Decisions
 

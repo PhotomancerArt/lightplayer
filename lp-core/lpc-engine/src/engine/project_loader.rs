@@ -320,7 +320,7 @@ where
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path.as_path())?;
-    match NodeDef::from_toml_str_with_registry(registry, &text) {
+    match NodeDef::read_toml(registry, &text) {
         Ok(NodeDef::Project(def)) => Ok(def),
         Ok(other) => Err(ProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
@@ -349,7 +349,7 @@ where
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path)?;
-    match NodeDef::from_toml_str_with_registry(registry, &text) {
+    match NodeDef::read_toml(registry, &text) {
         Ok(NodeDef::Project(_)) => Err(ProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
             suffix: "project".to_string(),

@@ -9,6 +9,15 @@
 - **Useful context:** `ProjectBuilder` can start with a local helper; if other
   callers need authored writes, promote that helper.
 
+## Project Builder SlotCodec Writes
+
+- **Idea:** migrate `lpc-shared::ProjectBuilder` to write complete `NodeDef`
+  artifacts through the slot-native authored TOML writer.
+- **Why not now:** keep this separate from final serde cleanup so generated
+  projects pressure the public read/write API before dependencies are removed.
+- **Useful context:** builder output should round-trip through
+  `NodeDef::read_toml` without manually stitching `kind` onto concrete records.
+
 ## Better TOML Error Spans
 
 - **Idea:** preserve TOML parser spans through `TomlSyntaxSource` so authored

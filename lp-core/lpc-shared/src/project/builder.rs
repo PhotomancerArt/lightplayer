@@ -9,9 +9,9 @@ use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
-    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeInvocation,
-    NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio, RatioSlot,
-    RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotAccess, SlotPath, SlotShapeRegistry,
+    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeDef,
+    NodeInvocation, NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio,
+    RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
     SourcePath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
@@ -190,7 +190,7 @@ impl ProjectBuilder {
             name: OptionSlot::some(ValueSlot::new(self.name.clone())),
             nodes: MapSlot::new(nodes),
         };
-        let project_toml = authored_slot_toml(&registry, ProjectDef::KIND, &project);
+        let project_toml = authored_node_toml(&registry, &NodeDef::Project(project));
         self.write_file_helper("/project.toml", project_toml.as_bytes())
             .expect("Failed to write project.toml");
     }
@@ -231,22 +231,9 @@ fn numbered_node_name(kind: &str, id: u32) -> String {
     }
 }
 
-fn authored_slot_toml(registry: &SlotShapeRegistry, kind: &str, root: &dyn SlotAccess) -> String {
-    let value = registry
-        .write_slot_toml(root)
-        .expect("Failed to serialize slot payload to TOML value");
-    let table = value
-        .as_table()
-        .expect("authored node definitions are TOML tables");
-    let mut authored = toml::Table::new();
-    authored.insert(
-        String::from("kind"),
-        toml::Value::String(String::from(kind)),
-    );
-    for (name, value) in table {
-        authored.insert(name.clone(), value.clone());
-    }
-    toml::to_string(&authored).expect("Failed to serialize authored TOML table")
+fn authored_node_toml(registry: &SlotShapeRegistry, node: &NodeDef) -> String {
+    node.write_toml(registry)
+        .expect("Failed to serialize authored node TOML")
 }
 
 fn slot_shape_registry() -> SlotShapeRegistry {
@@ -273,7 +260,7 @@ impl TextureBuilder {
             bindings: bus_input_binding_defs("visual.out"),
         };
 
-        let toml = authored_slot_toml(&slot_shape_registry(), TextureDef::KIND, &config);
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Texture(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -315,7 +302,7 @@ impl ShaderBuilder {
             param_defs: MapSlot::default(),
         };
 
-        let toml = authored_slot_toml(&slot_shape_registry(), ShaderDef::KIND, &config);
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Shader(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -351,7 +338,7 @@ impl OutputBuilder {
             options: OptionSlot::some(self.options),
         };
 
-        let toml = authored_slot_toml(&slot_shape_registry(), OutputDef::KIND, &config);
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Output(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -422,7 +409,7 @@ impl FixtureBuilder {
                 }),
         };
 
-        let toml = authored_slot_toml(&slot_shape_registry(), FixtureDef::KIND, &config);
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Fixture(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -520,8 +507,7 @@ mod tests {
         let project_toml_bytes = fs.borrow().read_file("/project.toml".as_path()).unwrap();
         let project_toml_str = core::str::from_utf8(&project_toml_bytes).unwrap();
 
-        let def =
-            NodeDef::from_toml_str_with_registry(&slot_shape_registry(), project_toml_str).unwrap();
+        let def = NodeDef::read_toml(&slot_shape_registry(), project_toml_str).unwrap();
         let NodeDef::Project(def) = def else {
             panic!("expected project def");
         };
