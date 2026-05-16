@@ -278,7 +278,7 @@ impl ProjectLoader {
                         node.id,
                         Box::new(FixtureNode::new(
                             node.id,
-                            config.mapping.clone(),
+                            config.mapping.value().clone(),
                             *config.sampling.value(),
                             frame,
                         )),

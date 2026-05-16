@@ -100,7 +100,7 @@ pub use slot::{
     ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
-    DynamicSlotObject, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotKeyLike,
+    DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotKeyLike,
     MapSlotMutAccess, OptionSlot, SlotAccess, SlotAccessor, SlotAccessorError, SlotAccessorStep,
     SlotData, SlotDataAccess, SlotDataMutAccess, SlotEnum, SlotEnumAccess, SlotEnumDefaultVariant,
     SlotEnumMutAccess, SlotEnumShape, SlotFactory, SlotFactoryError, SlotFactoryFn,
@@ -110,8 +110,9 @@ pub use slot::{
     SlotPathError, SlotPathSegment, SlotReadContext, SlotRecord, SlotRecordAccess,
     SlotRecordMutAccess, SlotRecordShape, SlotRef, SlotShape, SlotShapeEntry, SlotShapeId,
     SlotShapeIdError, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
-    SlotValueAccess, SlotValueMutAccess, SlotVariantShape, StaticSlotAccess, StaticSlotShape,
-    ValueRef, ValueSlot, create_dynamic_slot_data, insert_slot_map_entry_default, lookup_slot_data,
-    set_slot_option_some_default, set_slot_value, set_slot_variant_default, slot_data_revision,
+    SlotValueAccess, SlotValueMutAccess, SlotVariantShape, SlottedEnum, SlottedEnumMut,
+    StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot, create_dynamic_slot_data,
+    insert_slot_map_entry_default, lookup_slot_data, set_slot_option_some_default, set_slot_value,
+    set_slot_variant_default, slot_data_revision,
 };
 pub use value::value_path::ValuePath;

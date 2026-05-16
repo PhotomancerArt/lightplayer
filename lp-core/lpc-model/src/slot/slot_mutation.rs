@@ -643,10 +643,9 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        BindingEndpoint, FieldSlot, FieldSlotMut, MapSlot, OptionSlot, SlotDataAccess,
-        SlotEnumAccess, SlotEnumDefaultVariant, SlotEnumMutAccess, SlotEnumShape,
+        BindingEndpoint, EnumSlot, MapSlot, OptionSlot, SlotDataAccess, SlotEnumShape,
         SlotMapValueAccess, SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess,
-        SlotShapeId, SlotShapeRegistry, StaticSlotShape, ValueSlot,
+        SlotShapeId, SlotShapeRegistry, SlottedEnum, SlottedEnumMut, StaticSlotShape, ValueSlot,
     };
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
@@ -658,25 +657,17 @@ mod tests {
         pub params: MapSlot<String, ValueSlot<f32>>,
         pub enabled: OptionSlot<ValueSlot<bool>>,
         pub endpoint: ValueSlot<BindingEndpoint>,
-        #[slot(enum)]
-        pub mode: TestEnum,
+        pub mode: EnumSlot<TestEnum>,
     }
 
     enum TestEnum {
-        A {
-            variant_revision: Revision,
-            value: ValueSlot<f32>,
-        },
-        B {
-            variant_revision: Revision,
-            other: ValueSlot<f32>,
-        },
+        A { value: ValueSlot<f32> },
+        B { other: ValueSlot<f32> },
     }
 
     impl TestEnum {
         fn a() -> Self {
             Self::A {
-                variant_revision: Revision::new(1),
                 value: ValueSlot::new(1.0),
             }
         }
@@ -696,18 +687,7 @@ mod tests {
         }
     }
 
-    impl SlotEnumAccess for TestEnum {
-        fn variant_revision(&self) -> Revision {
-            match self {
-                Self::A {
-                    variant_revision, ..
-                }
-                | Self::B {
-                    variant_revision, ..
-                } => *variant_revision,
-            }
-        }
-
+    impl SlottedEnum for TestEnum {
         fn variant(&self) -> &str {
             match self {
                 Self::A { .. } => "a",
@@ -720,37 +700,21 @@ mod tests {
         }
     }
 
-    impl SlotEnumMutAccess for TestEnum {
-        fn variant_revision(&self) -> Revision {
-            SlotEnumAccess::variant_revision(self)
-        }
-
-        fn variant(&self) -> &str {
-            SlotEnumAccess::variant(self)
-        }
-
+    impl SlottedEnumMut for TestEnum {
         fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
             SlotDataMutAccess::Record(self)
         }
-    }
 
-    impl SlotEnumDefaultVariant for TestEnum {
-        fn set_variant_default(
-            &mut self,
-            revision: Revision,
-            variant: &str,
-        ) -> Result<(), SlotMutationError> {
+        fn set_variant_default(&mut self, variant: &str) -> Result<(), SlotMutationError> {
             match variant {
                 "a" => {
                     *self = Self::A {
-                        variant_revision: revision,
                         value: ValueSlot::default(),
                     };
                     Ok(())
                 }
                 "b" => {
                     *self = Self::B {
-                        variant_revision: revision,
                         other: ValueSlot::default(),
                     };
                     Ok(())
@@ -794,29 +758,13 @@ mod tests {
 
     impl SlotMapValueAccess for TestEnum {
         fn slot_data(&self) -> SlotDataAccess<'_> {
-            SlotDataAccess::Enum(self)
+            SlotDataAccess::Record(self)
         }
     }
 
     impl SlotMapValueMutAccess for TestEnum {
         fn slot_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-            SlotDataMutAccess::Enum(self)
-        }
-    }
-
-    impl FieldSlot for TestEnum {
-        fn slot_field_shape() -> SlotShape {
-            Self::slot_enum_shape()
-        }
-
-        fn slot_field_data(&self) -> SlotDataAccess<'_> {
-            SlotDataAccess::Enum(self)
-        }
-    }
-
-    impl FieldSlotMut for TestEnum {
-        fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-            SlotDataMutAccess::Enum(self)
+            SlotDataMutAccess::Record(self)
         }
     }
 
@@ -987,7 +935,7 @@ mod tests {
         )
         .unwrap();
 
-        let TestEnum::A { value, .. } = &root.mode else {
+        let TestEnum::A { value } = root.mode.value() else {
             panic!("expected a");
         };
         assert_eq!(value.value(), &4.0);
@@ -1015,14 +963,10 @@ mod tests {
         )
         .unwrap();
 
-        let TestEnum::B {
-            variant_revision,
-            other,
-        } = &root.mode
-        else {
+        let TestEnum::B { other } = root.mode.value() else {
             panic!("expected b");
         };
-        assert_eq!(*variant_revision, Revision::new(9));
+        assert_eq!(root.mode.variant_revision(), Revision::new(9));
         assert_eq!(other.value(), &5.0);
     }
 
@@ -1087,7 +1031,7 @@ mod tests {
             )])),
             enabled: OptionSlot::some(ValueSlot::new(true)),
             endpoint: ValueSlot::new(BindingEndpoint::Unset),
-            mode: TestEnum::a(),
+            mode: EnumSlot::new(TestEnum::a()),
         }
     }
 

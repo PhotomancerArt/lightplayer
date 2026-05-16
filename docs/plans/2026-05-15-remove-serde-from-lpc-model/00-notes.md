@@ -245,6 +245,9 @@ Approved value/slot enum boundary:
 - Use `SlotShape::Enum` when the active variant exposes addressable slot
   structure, has variant/payload revision behavior, and supports partial
   mutation/sync inside the active variant.
+- Store structured slot enums through `EnumSlot<T>`, not raw enum fields. The
+  enum implements `SlottedEnum` / `SlottedEnumMut`; the wrapper owns the active
+  variant revision and delegates payload access to the active variant data.
 - This decision is documented in `docs/design/slots/overview.md`,
   `docs/design/slots/values.md`, and `docs/design/slots/serialization.md`.
 

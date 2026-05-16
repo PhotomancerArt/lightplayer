@@ -141,7 +141,7 @@ Examples that fit `LpValue::Enum`:
 - compact semantic choices such as color order, texture format, and shader
   option modes
 
-Examples that should stay `SlotShape::Enum`:
+Examples that should stay `SlotShape::Enum` through `EnumSlot<T>`:
 
 - fixture mapping configs with editable variant fields
 - path specs with nested payloads

@@ -73,6 +73,12 @@ be able to address, mutate, sync, or validate fields inside the active variant
 through slot paths. Variant selection is then part of the slot tree, with its
 own revision boundary and a default payload for each variant.
 
+Static structured enums should be stored through `EnumSlot<T>`. The raw Rust
+enum implements `SlottedEnum` / `SlottedEnumMut` and exposes the active variant
+data; `EnumSlot<T>` owns the active-variant revision. This keeps variant
+selection first class without pretending a plain Rust enum field can carry its
+own slot revision.
+
 ### Slot Values
 
 Slot values are the leaf values that can be authored, displayed, transported, or

@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 use crate::{
-    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpType, LpValue, OptionSlot,
-    SlotEnumOption, SlotMeta, SlotRecord, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError, ValueSlot,
+    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
+    OptionSlot, SlotEnumOption, SlotMeta, SlotRecord, SlotShapeId, SlotValue, SlotValueShape,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Authored fixture node definition.
@@ -21,8 +21,7 @@ pub struct FixtureDef {
     #[serde(default)]
     pub sampling: ValueSlot<FixtureSamplingConfig>,
     /// Fixture mapping definition.
-    #[slot(enum)]
-    pub mapping: MappingConfig,
+    pub mapping: EnumSlot<MappingConfig>,
     /// Color order for RGB channels.
     pub color_order: ValueSlot<ColorOrder>,
     /// Texture-space 2D affine transform.
@@ -278,7 +277,7 @@ mod tests {
         let mut paths = BTreeMap::new();
         paths.insert(
             0,
-            PathSpec::ring_array(
+            EnumSlot::new(PathSpec::ring_array(
                 [0.5, 0.5],
                 1.0,
                 0,
@@ -286,13 +285,13 @@ mod tests {
                 MapSlot::new(ring_lamp_counts),
                 0.0,
                 RingOrder::InnerFirst,
-            ),
+            )),
         );
         let def = FixtureDef {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
-            mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
+            mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::none(),

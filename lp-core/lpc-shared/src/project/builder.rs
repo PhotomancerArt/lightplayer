@@ -1,6 +1,6 @@
 //! Project builder for creating artifact-authored test projects with a fluent API.
 
-use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
@@ -9,7 +9,7 @@ use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
-    Dim2uSlot, FixtureSamplingConfig, MapSlot, NodeSlotRef, OptionSlot, PositiveF32,
+    Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeSlotRef, OptionSlot, PositiveF32,
     PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath,
     SourcePath, SourcePathSlot, ValueSlot,
 };
@@ -389,7 +389,7 @@ impl FixtureBuilder {
             }),
             bindings: fixture_binding_defs(texture_loc),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
-            mapping: self.mapping,
+            mapping: EnumSlot::new(self.mapping),
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
             brightness: self.brightness.map_or_else(OptionSlot::none, |brightness| {
@@ -462,10 +462,8 @@ fn default_mapping() -> MappingConfig {
     let mut ring_lamp_counts = BTreeMap::new();
     ring_lamp_counts.insert(0, ValueSlot::new(1));
 
-    let mut paths = BTreeMap::new();
-    paths.insert(
-        0,
-        PathSpec::ring_array(
+    MappingConfig::path_points_vec(
+        vec![PathSpec::ring_array(
             [0.5, 0.5],
             1.0,
             0,
@@ -473,10 +471,9 @@ fn default_mapping() -> MappingConfig {
             MapSlot::new(ring_lamp_counts),
             0.0,
             RingOrder::InnerFirst,
-        ),
-    );
-
-    MappingConfig::path_points(MapSlot::new(paths), 2.0)
+        )],
+        2.0,
+    )
 }
 
 fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {

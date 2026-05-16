@@ -3,6 +3,7 @@
 //! A slot is a named location owned by a node or bus. A [`ValuePath`] navigates
 //! inside the value exposed at that slot; it is not part of the slot identity.
 
+mod enum_slot;
 mod slot_access;
 mod slot_accessor;
 mod slot_data;
@@ -25,6 +26,7 @@ mod slot_value;
 mod value_ref;
 mod value_slot;
 
+pub use enum_slot::{EnumSlot, SlottedEnum, SlottedEnumMut};
 pub use slot_access::{
     FieldSlot, MapSlotAccess, SlotAccess, SlotDataAccess, SlotEnumAccess, SlotOptionAccess,
     SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,

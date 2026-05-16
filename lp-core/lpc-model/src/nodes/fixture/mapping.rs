@@ -3,12 +3,10 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot,
-    Revision, SlotDataAccess, SlotDataMutAccess, SlotEnumAccess, SlotEnumDefaultVariant,
-    SlotEnumMutAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMapValueAccess,
-    SlotMapValueMutAccess, SlotMeta, SlotMutationError, SlotRecordAccess, SlotRecordMutAccess,
-    SlotShape, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
-    ValueSlot, Xy, XySlot, current_revision,
+    EnumSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, SlotDataAccess,
+    SlotDataMutAccess, SlotEnumOption, SlotEnumShape, SlotMapKeyShape, SlotMeta, SlotMutationError,
+    SlotRecordAccess, SlotRecordMutAccess, SlotShape, SlotShapeId, SlotValue, SlotValueShape,
+    SlottedEnum, SlottedEnumMut, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -17,9 +15,7 @@ use crate::{
 pub enum MappingConfig {
     /// A mapping defined by fixture paths sampled from the target texture.
     PathPoints {
-        #[serde(skip, default = "current_revision")]
-        variant_revision: Revision,
-        paths: MapSlot<u32, PathSpec>,
+        paths: MapSlot<u32, EnumSlot<PathSpec>>,
         sample_diameter: PositiveF32Slot,
     },
 }
@@ -30,8 +26,6 @@ pub enum MappingConfig {
 pub enum PathSpec {
     /// A display made of concentric rings of lamps, usually LEDs on a PCB.
     RingArray {
-        #[serde(skip, default = "current_revision")]
-        variant_revision: Revision,
         center: XySlot,
         diameter: PositiveF32Slot,
         start_ring_inclusive: ValueSlot<u32>,
@@ -51,9 +45,8 @@ pub enum RingOrder {
 }
 
 impl MappingConfig {
-    pub fn path_points(paths: MapSlot<u32, PathSpec>, sample_diameter: f32) -> Self {
+    pub fn path_points(paths: MapSlot<u32, EnumSlot<PathSpec>>, sample_diameter: f32) -> Self {
         Self::PathPoints {
-            variant_revision: current_revision(),
             paths,
             sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
         }
@@ -62,15 +55,14 @@ impl MappingConfig {
     pub fn path_points_vec(paths: Vec<PathSpec>, sample_diameter: f32) -> Self {
         let mut entries = BTreeMap::new();
         for (index, path) in paths.into_iter().enumerate() {
-            entries.insert(index as u32, path);
+            entries.insert(index as u32, EnumSlot::new(path));
         }
         Self::path_points(MapSlot::new(entries), sample_diameter)
     }
 
-    pub fn default_variant(revision: Revision, variant: &str) -> Result<Self, SlotMutationError> {
+    pub fn default_variant(variant: &str) -> Result<Self, SlotMutationError> {
         match variant {
             "path_points" => Ok(Self::PathPoints {
-                variant_revision: revision,
                 paths: MapSlot::default(),
                 sample_diameter: PositiveF32Slot::default(),
             }),
@@ -83,8 +75,7 @@ impl MappingConfig {
 
 impl Default for MappingConfig {
     fn default() -> Self {
-        Self::default_variant(current_revision(), "path_points")
-            .expect("default MappingConfig variant is valid")
+        Self::default_variant("path_points").expect("default MappingConfig variant is valid")
     }
 }
 
@@ -94,15 +85,7 @@ impl SlotEnumShape for MappingConfig {
     }
 }
 
-impl SlotEnumAccess for MappingConfig {
-    fn variant_revision(&self) -> Revision {
-        match self {
-            Self::PathPoints {
-                variant_revision, ..
-            } => *variant_revision,
-        }
-    }
-
+impl SlottedEnum for MappingConfig {
     fn variant(&self) -> &str {
         match self {
             Self::PathPoints { .. } => "path_points",
@@ -114,27 +97,13 @@ impl SlotEnumAccess for MappingConfig {
     }
 }
 
-impl SlotEnumMutAccess for MappingConfig {
-    fn variant_revision(&self) -> Revision {
-        SlotEnumAccess::variant_revision(self)
-    }
-
-    fn variant(&self) -> &str {
-        SlotEnumAccess::variant(self)
-    }
-
+impl SlottedEnumMut for MappingConfig {
     fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
         SlotDataMutAccess::Record(self)
     }
-}
 
-impl SlotEnumDefaultVariant for MappingConfig {
-    fn set_variant_default(
-        &mut self,
-        revision: Revision,
-        variant: &str,
-    ) -> Result<(), SlotMutationError> {
-        *self = Self::default_variant(revision, variant)?;
+    fn set_variant_default(&mut self, variant: &str) -> Result<(), SlotMutationError> {
+        *self = Self::default_variant(variant)?;
         Ok(())
     }
 }
@@ -171,34 +140,6 @@ impl SlotRecordMutAccess for MappingConfig {
     }
 }
 
-impl SlotMapValueAccess for MappingConfig {
-    fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Enum(self)
-    }
-}
-
-impl SlotMapValueMutAccess for MappingConfig {
-    fn slot_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        SlotDataMutAccess::Enum(self)
-    }
-}
-
-impl FieldSlot for MappingConfig {
-    fn slot_field_shape() -> SlotShape {
-        mapping_shape()
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Enum(self)
-    }
-}
-
-impl FieldSlotMut for MappingConfig {
-    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        SlotDataMutAccess::Enum(self)
-    }
-}
-
 impl PathSpec {
     pub fn ring_array(
         center: [f32; 2],
@@ -210,7 +151,6 @@ impl PathSpec {
         order: RingOrder,
     ) -> Self {
         Self::RingArray {
-            variant_revision: current_revision(),
             center: XySlot::new(Xy(center)),
             diameter: PositiveF32Slot::new(PositiveF32(diameter)),
             start_ring_inclusive: ValueSlot::new(start_ring_inclusive),
@@ -245,10 +185,9 @@ impl PathSpec {
         )
     }
 
-    pub fn default_variant(revision: Revision, variant: &str) -> Result<Self, SlotMutationError> {
+    pub fn default_variant(variant: &str) -> Result<Self, SlotMutationError> {
         match variant {
             "ring_array" => Ok(Self::RingArray {
-                variant_revision: revision,
                 center: XySlot::default(),
                 diameter: PositiveF32Slot::default(),
                 start_ring_inclusive: ValueSlot::default(),
@@ -266,8 +205,7 @@ impl PathSpec {
 
 impl Default for PathSpec {
     fn default() -> Self {
-        Self::default_variant(current_revision(), "ring_array")
-            .expect("default PathSpec variant is valid")
+        Self::default_variant("ring_array").expect("default PathSpec variant is valid")
     }
 }
 
@@ -277,15 +215,7 @@ impl SlotEnumShape for PathSpec {
     }
 }
 
-impl SlotEnumAccess for PathSpec {
-    fn variant_revision(&self) -> Revision {
-        match self {
-            Self::RingArray {
-                variant_revision, ..
-            } => *variant_revision,
-        }
-    }
-
+impl SlottedEnum for PathSpec {
     fn variant(&self) -> &str {
         match self {
             Self::RingArray { .. } => "ring_array",
@@ -297,27 +227,13 @@ impl SlotEnumAccess for PathSpec {
     }
 }
 
-impl SlotEnumMutAccess for PathSpec {
-    fn variant_revision(&self) -> Revision {
-        SlotEnumAccess::variant_revision(self)
-    }
-
-    fn variant(&self) -> &str {
-        SlotEnumAccess::variant(self)
-    }
-
+impl SlottedEnumMut for PathSpec {
     fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
         SlotDataMutAccess::Record(self)
     }
-}
 
-impl SlotEnumDefaultVariant for PathSpec {
-    fn set_variant_default(
-        &mut self,
-        revision: Revision,
-        variant: &str,
-    ) -> Result<(), SlotMutationError> {
-        *self = Self::default_variant(revision, variant)?;
+    fn set_variant_default(&mut self, variant: &str) -> Result<(), SlotMutationError> {
+        *self = Self::default_variant(variant)?;
         Ok(())
     }
 }
@@ -371,34 +287,6 @@ impl SlotRecordMutAccess for PathSpec {
                 _ => None,
             },
         }
-    }
-}
-
-impl SlotMapValueAccess for PathSpec {
-    fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Enum(self)
-    }
-}
-
-impl SlotMapValueMutAccess for PathSpec {
-    fn slot_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        SlotDataMutAccess::Enum(self)
-    }
-}
-
-impl FieldSlot for PathSpec {
-    fn slot_field_shape() -> SlotShape {
-        path_spec_shape()
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Enum(self)
-    }
-}
-
-impl FieldSlotMut for PathSpec {
-    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        SlotDataMutAccess::Enum(self)
     }
 }
 

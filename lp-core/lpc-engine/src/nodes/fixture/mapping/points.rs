@@ -28,7 +28,7 @@ pub fn generate_mapping_points(
             let mut channel_offset = 0u32;
 
             for path_spec in paths.entries.values() {
-                let points = match path_spec {
+                let points = match path_spec.value() {
                     PathSpec::RingArray {
                         center,
                         diameter,
