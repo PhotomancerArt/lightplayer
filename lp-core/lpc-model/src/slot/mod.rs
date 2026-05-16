@@ -23,6 +23,7 @@ mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
 mod slot_value;
+mod stable_hash;
 mod value_ref;
 mod value_slot;
 
