@@ -124,8 +124,7 @@ use lpc_model::{SlotRecord, ValueSlot};
 #[derive(SlotRecord)]
 pub struct FixtureDef {
     pub render_size: Dim2uSlot,
-    #[slot(enum)]
-    pub mode: SomeEnum,
+    pub mode: EnumSlot<SomeEnum>,
     #[slot(name = "gamma")]
     pub gamma_correction: ValueSlot<bool>,
 }

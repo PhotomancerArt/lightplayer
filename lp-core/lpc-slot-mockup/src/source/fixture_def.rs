@@ -1,7 +1,7 @@
 use lpc_model::{
     Affine2d, Affine2dSlot, BindingDefs, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotRecord, SlotShapeId, SlotValue,
-    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    EnumSlot, FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotRecord, SlotShapeId,
+    SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 use super::{MappingConfig, shader_def::ScalarHint};
@@ -11,8 +11,7 @@ pub struct FixtureDef {
     pub render_size: Dim2uSlot,
     pub bindings: BindingDefs,
     pub sampling: ValueSlot<FixtureSamplingConfig>,
-    #[slot(enum)]
-    pub mapping: MappingConfig,
+    pub mapping: EnumSlot<MappingConfig>,
     pub color_order: ColorOrderSlot,
     pub transform: Affine2dSlot,
     pub brightness: OptionSlot<ScalarHint>,
@@ -27,7 +26,7 @@ impl FixtureDef {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
-            mapping: MappingConfig::path_points_default(),
+            mapping: EnumSlot::new(MappingConfig::path_points_default()),
             color_order: ColorOrderSlot::new(ColorOrderValue::Grb),
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::some(ScalarHint::mock(0.8)),
@@ -36,11 +35,11 @@ impl FixtureDef {
     }
 
     pub fn switch_mapping_to_square(&mut self) {
-        self.mapping = MappingConfig::square();
+        self.mapping = EnumSlot::new(MappingConfig::square());
     }
 
     pub fn disable_mapping(&mut self) {
-        self.mapping = MappingConfig::disabled();
+        self.mapping = EnumSlot::new(MappingConfig::disabled());
     }
 
     pub fn clear_brightness(&mut self) {
@@ -56,7 +55,7 @@ impl FixtureDef {
     }
 
     pub fn mapping(&self) -> &MappingConfig {
-        &self.mapping
+        self.mapping.value()
     }
 
     pub fn color_order(&self) -> ColorOrderValue {
@@ -79,7 +78,7 @@ impl FixtureDef {
     }
 
     pub fn set_ring_lamp_counts(&mut self, counts: Vec<u32>) -> bool {
-        self.mapping.set_ring_lamp_counts(counts)
+        self.mapping.value_mut().set_ring_lamp_counts(counts)
     }
 }
 

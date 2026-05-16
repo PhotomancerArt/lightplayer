@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use crate::source::MappingConfig;
-use lpc_model::{MapSlot, PositiveF32, PositiveF32Slot, SlotRecord, Xy, XySlot};
+use lpc_model::{EnumSlot, MapSlot, PositiveF32, PositiveF32Slot, SlotRecord, Xy, XySlot};
 
 #[derive(SlotRecord)]
 pub struct FixtureNode {
     pub touches: MapSlot<u32, TouchState>,
-    pub mapping_preview: MappingConfig,
+    pub mapping_preview: EnumSlot<MappingConfig>,
 }
 
 #[derive(SlotRecord)]
@@ -23,15 +23,15 @@ impl FixtureNode {
 
         Self {
             touches: MapSlot::new(touches),
-            mapping_preview: MappingConfig::path_points_default(),
+            mapping_preview: EnumSlot::new(MappingConfig::path_points_default()),
         }
     }
     pub fn switch_mapping_preview(&mut self) {
-        self.mapping_preview = MappingConfig::square();
+        self.mapping_preview = EnumSlot::new(MappingConfig::square());
     }
 
     pub fn disable_mapping_preview(&mut self) {
-        self.mapping_preview = MappingConfig::disabled();
+        self.mapping_preview = EnumSlot::new(MappingConfig::disabled());
     }
 
     pub fn remove_touch(&mut self, id: u32) {

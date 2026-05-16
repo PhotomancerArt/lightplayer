@@ -128,7 +128,10 @@ where
     }
 
     fn data(&self) -> SlotDataAccess<'_> {
-        self.inner.value().data()
+        match self.inner.value().data() {
+            SlotDataAccess::Unit(_) => SlotDataAccess::Unit(self.variant_revision()),
+            data => data,
+        }
     }
 }
 
@@ -145,7 +148,11 @@ where
     }
 
     fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        self.inner.get_mut().data_mut()
+        if matches!(self.inner.get().data(), SlotDataAccess::Unit(_)) {
+            SlotDataMutAccess::Unit(self.inner.changed_at_mut())
+        } else {
+            self.inner.get_mut().data_mut()
+        }
     }
 }
 

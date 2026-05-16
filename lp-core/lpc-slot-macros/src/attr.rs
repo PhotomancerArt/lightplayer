@@ -19,7 +19,6 @@ pub(crate) enum FieldShapeAttr {
     Record,
     Map { key: LitStr, value_ref: LitStr },
     OptionRef(LitStr),
-    Enum,
 }
 
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
@@ -61,9 +60,6 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                 Ok(())
             } else if meta.path.is_ident("record") {
                 shape = Some(FieldShapeAttr::Record);
-                Ok(())
-            } else if meta.path.is_ident("enum") {
-                shape = Some(FieldShapeAttr::Enum);
                 Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
@@ -119,9 +115,6 @@ pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> Token
                 )
             }
         }
-        FieldShapeAttr::Enum => {
-            quote::quote! { <#ty as ::lpc_model::SlotEnumShape>::slot_enum_shape() }
-        }
     }
 }
 
@@ -146,9 +139,6 @@ pub(crate) fn field_access_tokens(
         FieldShapeAttr::OptionRef(_) => {
             Some(quote::quote! { ::lpc_model::SlotDataAccess::Option(&self.#field_ident) })
         }
-        FieldShapeAttr::Enum => {
-            Some(quote::quote! { ::lpc_model::SlotDataAccess::Enum(&self.#field_ident) })
-        }
     }
 }
 
@@ -172,9 +162,6 @@ pub(crate) fn field_mut_access_tokens(
         }
         FieldShapeAttr::OptionRef(_) => {
             Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Option(&mut self.#field_ident) })
-        }
-        FieldShapeAttr::Enum => {
-            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Enum(&mut self.#field_ident) })
         }
     }
 }

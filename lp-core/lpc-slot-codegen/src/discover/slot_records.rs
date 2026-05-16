@@ -56,7 +56,6 @@ fn static_slot_record_fields(item: &syn::ItemStruct) -> Vec<StaticSlotRecordFiel
                 rust_name,
                 slot_name,
                 type_name: field_type_name(&field.ty),
-                is_enum: slot_field_is_enum(field),
             })
         })
         .collect()
@@ -81,21 +80,6 @@ fn slot_field_name(field: &syn::Field) -> Option<String> {
         }
     }
     None
-}
-
-fn slot_field_is_enum(field: &syn::Field) -> bool {
-    field.attrs.iter().any(|attr| {
-        attr.path().is_ident("slot") && {
-            let mut is_enum = false;
-            let _ = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("enum") {
-                    is_enum = true;
-                }
-                Ok(())
-            });
-            is_enum
-        }
-    })
 }
 
 fn field_type_name(ty: &syn::Type) -> String {

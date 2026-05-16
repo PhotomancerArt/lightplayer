@@ -47,9 +47,6 @@
 //! - `#[slot(value = expr)]`: use an explicit `LpType` value leaf shape.
 //! - `#[slot(leaf = expr)]`: use an explicit semantic slot-value shape.
 //! - `#[slot(record)]`: force nested record shape/access.
-//! - `#[slot(enum)]`: use `SlotEnumShape` for enum-like slot data. Prefer
-//!   `EnumSlot<T>` for structured slot enums so the wrapper owns the active
-//!   variant revision.
 //! - `#[slot(option_ref = "...")]`: shape an option around another registered shape.
 //! - `#[slot(map(key = "...", value_ref = "..."))]`: shape a map whose values
 //!   reference another registered shape.
