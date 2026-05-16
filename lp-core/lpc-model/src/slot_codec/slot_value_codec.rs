@@ -107,6 +107,11 @@ where
     W: SlotWrite,
 {
     match lp_value {
+        LpValue::Unset => {
+            let mut object = value.object()?;
+            object.prop("kind")?.string("unset")?;
+            object.finish()
+        }
         LpValue::String(text) => value.string(text),
         LpValue::I32(number) => value.i32(*number),
         LpValue::U32(number) => value.u32(*number),

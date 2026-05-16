@@ -643,9 +643,9 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        BindingEndpoint, EnumSlot, MapSlot, OptionSlot, SlotDataAccess, SlotEnumShape,
-        SlotMapValueAccess, SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess,
-        SlotShapeId, SlotShapeRegistry, SlottedEnum, SlottedEnumMut, StaticSlotShape, ValueSlot,
+        EnumSlot, MapSlot, OptionSlot, SlotDataAccess, SlotEnumShape, SlotMapValueAccess,
+        SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess, SlotShapeId,
+        SlotShapeRegistry, SlottedEnum, SlottedEnumMut, StaticSlotShape, ValueSlot,
     };
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
@@ -656,7 +656,7 @@ mod tests {
         pub gain: ValueSlot<f32>,
         pub params: MapSlot<String, ValueSlot<f32>>,
         pub enabled: OptionSlot<ValueSlot<bool>>,
-        pub endpoint: ValueSlot<BindingEndpoint>,
+        pub payload: ValueSlot<LpValue>,
         pub mode: EnumSlot<TestEnum>,
     }
 
@@ -787,26 +787,24 @@ mod tests {
     }
 
     #[test]
-    fn slot_mutation_accepts_enum_value_leaf() {
+    fn slot_mutation_accepts_raw_enum_value_leaf() {
         let mut root = test_root();
         let registry = registry();
+        let value = LpValue::Enum {
+            variant: 3,
+            payload: Some(Box::new(LpValue::F32(0.5))),
+        };
 
         set_slot_value(
             &mut root,
             &registry,
-            &SlotPath::parse("endpoint").unwrap(),
+            &SlotPath::parse("payload").unwrap(),
             Revision::new(9),
-            LpValue::Enum {
-                variant: 3,
-                payload: Some(Box::new(LpValue::F32(0.5))),
-            },
+            value.clone(),
         )
         .unwrap();
 
-        assert_eq!(
-            root.endpoint.value(),
-            &BindingEndpoint::Literal(LpValue::F32(0.5))
-        );
+        assert_eq!(root.payload.value(), &value);
     }
 
     #[test]
@@ -1030,7 +1028,7 @@ mod tests {
                 ValueSlot::new(1.0),
             )])),
             enabled: OptionSlot::some(ValueSlot::new(true)),
-            endpoint: ValueSlot::new(BindingEndpoint::Unset),
+            payload: ValueSlot::new(LpValue::Bool(false)),
             mode: EnumSlot::new(TestEnum::a()),
         }
     }

@@ -15,6 +15,7 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum LpValue {
+    Unset,
     String(String),
     I32(i32),
     U32(u32),
@@ -53,6 +54,12 @@ pub enum LpValue {
     Product(ProductRef),
 }
 
+impl Default for LpValue {
+    fn default() -> Self {
+        Self::Unset
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::LpValue;
@@ -63,6 +70,7 @@ mod tests {
     #[test]
     fn lp_value_serde_roundtrip_scalar_and_vectors() {
         for v in [
+            LpValue::Unset,
             LpValue::I32(-1),
             LpValue::F32(1.5),
             LpValue::Bool(true),

@@ -159,6 +159,12 @@ impl ToLpValue for LpValue {
     }
 }
 
+impl FromLpValue for LpValue {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
+        Ok(value.clone())
+    }
+}
+
 impl ToLpValue for String {
     fn to_lp_value(&self) -> LpValue {
         LpValue::String(self.clone())
@@ -277,6 +283,11 @@ impl_slot_leaf!(
     String,
     "slot.leaf.raw_string",
     SlotValueShape::raw(LpType::String)
+);
+impl_slot_leaf!(
+    LpValue,
+    "slot.leaf.raw_any",
+    SlotValueShape::raw(LpType::Any)
 );
 impl_slot_leaf!(i32, "slot.leaf.raw_i32", SlotValueShape::raw(LpType::I32));
 impl_slot_leaf!(u32, "slot.leaf.raw_u32", SlotValueShape::raw(LpType::U32));

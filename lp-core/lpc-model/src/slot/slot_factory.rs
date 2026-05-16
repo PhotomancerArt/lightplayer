@@ -226,7 +226,7 @@ fn create_dynamic_slot_data_for_root(
 
 fn default_lp_value(ty: &LpType) -> LpValue {
     match ty {
-        LpType::Any => LpValue::Bool(false),
+        LpType::Any => LpValue::Unset,
         LpType::String => LpValue::String(String::new()),
         LpType::I32 => LpValue::I32(0),
         LpType::U32 => LpValue::U32(0),

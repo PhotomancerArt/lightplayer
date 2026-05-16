@@ -8,7 +8,7 @@ use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingEndpoint,
+    Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeInvocation,
     NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio, RatioSlot,
     RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotAccess, SlotPath, SlotShapeRegistry,
@@ -436,7 +436,7 @@ impl FixtureBuilder {
 fn bus_input_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "input",
-        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
@@ -445,7 +445,7 @@ fn bus_input_binding_defs(slot: &str) -> BindingDefs {
 fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "output",
-        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
@@ -455,14 +455,14 @@ fn fixture_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
     let mut entries = BTreeMap::new();
     entries.insert(
         String::from("input"),
-        BindingDef::source(BindingEndpoint::Node(NodeSlotRef::new(
+        BindingDef::source(BindingRef::Node(NodeSlotRef::new(
             texture_loc,
             SlotPath::parse("output").expect("valid texture output slot"),
         ))),
     );
     entries.insert(
         String::from("output"),
-        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse("control.out").expect("valid bus slot path"),
         ))),
     );

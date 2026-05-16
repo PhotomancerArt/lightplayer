@@ -215,7 +215,7 @@ mod tests {
     use super::*;
     use alloc::string::ToString;
 
-    use crate::{BindingEndpoint, MappingConfig, SlotShapeRegistry, TextureDef};
+    use crate::{BindingRef, LpValue, MappingConfig, SlotShapeRegistry, TextureDef};
 
     #[test]
     fn node_def_delegates_kind_and_slots() {
@@ -264,8 +264,7 @@ glsl_path = "shader.glsl"
 render_order = 2
 
 [bindings.visual]
-source = { kind = "Literal", payload = 1.0 }
-target = { kind = "Bus", payload = "bus#visual.out" }
+target = "bus#visual.out"
 "#,
         )
         .expect("shader");
@@ -345,7 +344,7 @@ size = { width = 1, height = 2 }
     }
 
     #[test]
-    fn node_def_reads_binding_endpoint_values_through_lpvalue_enum() {
+    fn node_def_reads_binding_values_and_refs() {
         let registry = registry();
 
         let def = NodeDef::from_toml_str_with_registry(
@@ -355,8 +354,7 @@ kind = "output"
 pin = 18
 
 [bindings.main]
-source = { kind = "Literal", payload = 0.25 }
-target = { kind = "Bus", payload = "bus#control.out" }
+value = 0.25
 "##,
         )
         .expect("output");
@@ -364,11 +362,24 @@ target = { kind = "Bus", payload = "bus#control.out" }
             panic!("expected output");
         };
         let binding = def.bindings.0.entries.get("main").expect("binding");
-        assert!(matches!(
-            binding.source.value(),
-            BindingEndpoint::Literal(crate::LpValue::F32(0.25))
-        ));
-        assert!(matches!(binding.target.value(), BindingEndpoint::Bus(_)));
+        assert_eq!(binding.value_literal(), Some(&LpValue::F32(0.25)));
+
+        let def = NodeDef::from_toml_str_with_registry(
+            &registry,
+            r##"
+kind = "output"
+pin = 18
+
+[bindings.main]
+target = "bus#control.out"
+"##,
+        )
+        .expect("output target");
+        let NodeDef::Output(def) = def else {
+            panic!("expected output");
+        };
+        let binding = def.bindings.0.entries.get("main").expect("binding");
+        assert!(matches!(binding.target_ref(), Some(BindingRef::Bus(_))));
     }
 
     fn registry() -> SlotShapeRegistry {

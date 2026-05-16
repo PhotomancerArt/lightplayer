@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
 use lpc_model::{
-    BindingDefs, BindingEndpoint, ChannelName, Kind, LpValue, NodeDef, NodeId, NodeName, Revision,
-    SlotPath, SlotShapeRegistry,
+    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
+    NodeName, Revision, SlotPath, SlotShapeRegistry,
 };
 use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -468,12 +468,21 @@ fn demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("valid demand input path")
 }
 
-fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
-    bindings.entries().get(slot)?.source_endpoint()
+enum AuthoredBindingSource<'a> {
+    Value(&'a LpValue),
+    Ref(&'a AuthoredBindingRef),
 }
 
-fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
-    bindings.entries().get(slot)?.target_endpoint()
+fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<AuthoredBindingSource<'a>> {
+    let binding = bindings.entries().get(slot)?;
+    if let Some(value) = binding.value_literal() {
+        return Some(AuthoredBindingSource::Value(value));
+    }
+    binding.source_ref().map(AuthoredBindingSource::Ref)
+}
+
+fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a AuthoredBindingRef> {
+    bindings.entries().get(slot)?.target_ref()
 }
 
 fn register_source_binding(
@@ -557,18 +566,30 @@ fn register_target_binding(
 fn binding_source_endpoint(
     loaded_nodes: &[LoadedNode],
     current: &LoadedNode,
-    endpoint: &BindingEndpoint,
+    endpoint: AuthoredBindingSource<'_>,
 ) -> Result<BindingSource, ProjectLoadError> {
     match endpoint {
-        BindingEndpoint::Unset => Err(ProjectLoadError::InvalidSourcePath {
+        AuthoredBindingSource::Value(value) => Ok(BindingSource::Literal(value.clone())),
+        AuthoredBindingSource::Ref(binding_ref) => {
+            binding_ref_source(loaded_nodes, current, binding_ref)
+        }
+    }
+}
+
+fn binding_ref_source(
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    binding_ref: &AuthoredBindingRef,
+) -> Result<BindingSource, ProjectLoadError> {
+    match binding_ref {
+        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
             reason: String::from("binding source cannot be unset"),
         }),
-        BindingEndpoint::Literal(value) => Ok(BindingSource::Literal(value.clone())),
-        BindingEndpoint::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
+        AuthoredBindingRef::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
             bus.slot().to_string(),
         ))),
-        BindingEndpoint::Node(node_slot) => {
+        AuthoredBindingRef::Node(node_slot) => {
             let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding source")?;
             Ok(BindingSource::ProducedSlot {
                 node: node.id,
@@ -581,21 +602,17 @@ fn binding_source_endpoint(
 fn binding_target_endpoint(
     loaded_nodes: &[LoadedNode],
     current: &LoadedNode,
-    endpoint: &BindingEndpoint,
+    endpoint: &AuthoredBindingRef,
 ) -> Result<BindingTarget, ProjectLoadError> {
     match endpoint {
-        BindingEndpoint::Unset => Err(ProjectLoadError::InvalidSourcePath {
+        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
             reason: String::from("binding target cannot be unset"),
         }),
-        BindingEndpoint::Literal(_) => Err(ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
-            reason: String::from("binding target cannot be a literal"),
-        }),
-        BindingEndpoint::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
+        AuthoredBindingRef::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
             bus.slot().to_string(),
         ))),
-        BindingEndpoint::Node(node_slot) => {
+        AuthoredBindingRef::Node(node_slot) => {
             let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding target")?;
             Ok(BindingTarget::ConsumedSlot {
                 node: node.id,
@@ -785,10 +802,10 @@ gamma_correction = false
 transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
-source = { kind = "Node", payload = "..missing#output" }
+source = "..missing#output"
 
 [bindings.output]
-target = { kind = "Bus", payload = "bus#control.out" }
+target = "bus#control.out"
 
 [mapping]
 kind = "path_points"
@@ -838,10 +855,10 @@ gamma_correction = false
 transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
-source = { kind = "Node", payload = "/texture#output" }
+source = "/texture#output"
 
 [bindings.output]
-target = { kind = "Bus", payload = "bus#control.out" }
+target = "bus#control.out"
 
 [mapping]
 kind = "path_points"
@@ -908,7 +925,7 @@ width = 16
 height = 16
 
 [bindings.input]
-source = { kind = "Bus", payload = "bus#visual.out" }
+source = "bus#visual.out"
 "#,
         )
         .expect("texture.toml");
@@ -920,7 +937,7 @@ glsl_path = "shader.glsl"
 render_order = 0
 
 [bindings.output]
-target = { kind = "Bus", payload = "bus#visual.out" }
+target = "bus#visual.out"
 "#,
         )
         .expect("shader.toml");
@@ -936,7 +953,7 @@ kind = "output"
 pin = 4
 
 [bindings.input]
-source = { kind = "Bus", payload = "bus#control.out" }
+source = "bus#control.out"
 "#,
         )
         .expect("output.toml");
@@ -950,10 +967,10 @@ gamma_correction = false
 transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
-source = { kind = "Bus", payload = "bus#visual.out" }
+source = "bus#visual.out"
 
 [bindings.output]
-target = { kind = "Bus", payload = "bus#control.out" }
+target = "bus#control.out"
 
 [mapping]
 kind = "path_points"

@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn lp_type_enum_round_trips() {
         let ty = LpType::Enum {
-            name: Some(alloc::string::String::from("BindingEndpoint")),
+            name: Some(alloc::string::String::from("ExampleValue")),
             variants: alloc::vec![
                 ModelEnumVariant {
                     name: alloc::string::String::from("Unset"),

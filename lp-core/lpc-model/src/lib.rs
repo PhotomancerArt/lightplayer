@@ -58,8 +58,8 @@ pub use value::kind;
 
 pub use artifact::{ArtifactLocator, SrcArtifactLibRef};
 pub use binding::{
-    BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingEndpoint,
-    BindingEndpointError, BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
+    BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
+    BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};

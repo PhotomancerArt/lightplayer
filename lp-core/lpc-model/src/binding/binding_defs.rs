@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 /// Authored bindings attached to a node definition.
 ///
 /// The map key is the node-owned slot name. Each value declares whether that
-/// slot consumes from a `source` or produces to a `target`.
+/// slot consumes from a literal `value`, consumes from a `source`, or produces
+/// to a `target`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
@@ -87,7 +88,7 @@ impl core::error::Error for BindingDefsError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BindingEndpoint, SlotDataAccess};
+    use crate::{BindingRef, SlotDataAccess};
 
     #[derive(Deserialize, Serialize)]
     struct Wrapper {
@@ -102,8 +103,8 @@ target = "bus#visual.out"
 "#;
         let decoded: Wrapper = toml::from_str(toml).unwrap();
         assert!(matches!(
-            decoded.bindings.entries()["output"].target_endpoint(),
-            Some(BindingEndpoint::Bus(_))
+            decoded.bindings.entries()["output"].target_ref(),
+            Some(BindingRef::Bus(_))
         ));
 
         let encoded = toml::to_string(&decoded).unwrap();
@@ -116,7 +117,7 @@ target = "bus#visual.out"
         let mut entries = BTreeMap::new();
         entries.insert(
             String::from("output"),
-            BindingDef::target(BindingEndpoint::parse_ref("bus#visual.out").unwrap()),
+            BindingDef::target(BindingRef::parse("bus#visual.out").unwrap()),
         );
         let defs = BindingDefs::new(entries);
 

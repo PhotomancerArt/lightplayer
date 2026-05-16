@@ -485,6 +485,11 @@ fn write_lp_value_toml(ty: &LpType, value: &LpValue) -> Result<toml::Value, Slot
 
 fn write_untyped_lp_value_toml(value: &LpValue) -> Result<toml::Value, SlotDataWriteError> {
     match value {
+        LpValue::Unset => {
+            let mut table = toml::Table::new();
+            table.insert("kind".to_string(), toml::Value::String("unset".to_string()));
+            Ok(toml_table(table))
+        }
         LpValue::String(value) => Ok(toml::Value::String(value.clone())),
         LpValue::I32(value) => Ok(toml::Value::Integer(i64::from(*value))),
         LpValue::U32(value) => Ok(toml::Value::Integer(i64::from(*value))),
