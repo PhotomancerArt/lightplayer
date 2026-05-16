@@ -15,8 +15,24 @@ how those values participate in the system.
   shape.
 - Keep embedded code size and RAM pressure under control.
 - Preserve Rust-native modeling where it is useful: records, enums, defaults,
-  constructors, and private fields.
+  constructors, and type-safe semantic leaves.
 - Avoid duplicating the domain in unrelated metadata languages.
+
+## Why "Slot"?
+
+The word "slot" is intentional. The system is not only a document model, a
+schema model, or a dynamic object model. It is about addressable places where
+domain values can be inserted, edited, connected, synchronized, and observed.
+
+That matters for LightPlayer because the same model is used across authored
+project definitions, runtime state, wire messages, and dataflow bindings. A
+slot is a place in the machine: it has a shape, it may hold a value or
+container, it can be reached by a path, and tools can reason about what belongs
+there.
+
+Names like "document," "dynamic object," or "domain object" describe narrower
+views of the same machinery. "Slot" is shorter, distinct in the codebase, and
+keeps the dynamic/runtime nature of the system visible.
 
 ## Main Concepts
 
@@ -54,7 +70,7 @@ Records are the common shape for authored configuration and runtime state:
 - defaults
 - optional values
 - maps
-- transient fields
+- future transient projections
 
 Every static slot record should also get a generated `*View`. Views are the
 compiled path-access projection over the shape, so they are part of the core
@@ -115,7 +131,7 @@ LightPlayer data shape:
 - field names
 - field types
 - default behavior
-- transient fields
+- future transient storage/wire projections
 - compact storage policies
 - specialized semantic leaf handling
 

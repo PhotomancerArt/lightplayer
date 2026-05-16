@@ -44,8 +44,8 @@ convenience during migration.
 `SlotCodec` should copy Serde's durable ideas where they fit:
 
 - separate format parsing/writing from type construction
-- generate per-type adapters from derive-time metadata
-- make defaults, tags, skipped/transient fields, and field lists explicit
+- generate shape, access, and factory code from derive-time metadata
+- make defaults, tags, field lists, and future transient projections explicit
 - keep format frontends small and reusable
 - provide friendly errors with path/span context where possible
 
@@ -67,7 +67,7 @@ shape-agnostic syntax events
 slot-aware reader/writer helpers
         |
         v
-generated SlotCodec adapters for slot-modeled types
+SlotShapeRegistry + SlotAccess / SlotMutAccess
 ```
 
 Syntax sources do not know target slot shapes. They emit objects, properties,
@@ -76,25 +76,25 @@ streaming path because wire messages can be large. TOML may be tree-backed
 initially because authored TOML is usually small and TOML's table model is
 awkward to stream.
 
-Generated adapters know the target slot-modeled type. They should be thin and mostly
-delegate to shared helpers:
+The slot-aware layer knows the target shape. It can either mutate a
+caller-provided object or ask the registry to create a default object for a
+shape id. The preferred generic load path is:
 
 ```rust
-let mut object = reader.object()?;
-let kind = object.expect_discriminator("kind", &["TextureDef"])?;
-while let Some(mut prop) = object.next_prop()? {
-    match prop.name() {
-        "Path" => path = prop.value().string()?,
-        "Size" => size = read_dim2u(prop.value())?,
-        other => return Err(prop.unknown_field(other, FIELDS)),
-    }
-}
+let mut object = registry.create_default(shape_id)?;
+apply_reader_to_slot(object.data_mut(), shape, &registry, reader.value())?;
+let project = object.downcast::<ProjectDef>()?;
 ```
 
-That generated code is allowed to be opinionated. Unknown fields are errors
-until schema versioning exists. Discriminators are explicit. Field casing should
-match the slot/domain model unless a specific compact syntax is explicitly
-enabled.
+Codegen should support that path by generating shape and access machinery, not
+format-specific parse bodies. In other words, generated code should answer
+questions like "what fields does this record have?", "which variant is active?",
+and "how do I mutate this field?", while shared SlotCodec helpers handle JSON,
+TOML, maps, options, values, discriminators, and error reporting.
+
+That code is allowed to be opinionated. Unknown fields are errors until schema
+versioning exists. Discriminators are explicit. Field casing should match the
+slot/domain model unless a specific compact syntax is explicitly enabled.
 
 ## Default-And-Mutate Construction
 
@@ -130,9 +130,18 @@ Enums use the same rule. Deserializing an enum is two-phase:
 2. Switch to that variant with default payload.
 3. Mutate the now-active variant payload from the remaining fields.
 
+Static structured slot enums are stored through `EnumSlot<T>`. The raw Rust
+enum `T` exposes revision-free variant data through `SlottedEnum` and
+`SlottedEnumMut`; `EnumSlot<T>` owns the active-variant revision. This keeps the
+same field pattern as other slotted record fields: records contain slot
+containers such as `ValueSlot<T>`, `MapSlot<K, V>`, `OptionSlot<T>`, and
+`EnumSlot<T>`, while the wrapped semantic/domain value stays focused on domain
+data.
+
 Runtime field mutation should not silently switch enum variants. Variant
-switching is an explicit operation; the `set_variant_from_slot_data` shape is a
-convenience that can be built on top of default-switch plus field mutation later.
+switching is an explicit operation. A convenience helper may later switch a
+variant and then apply payload data in one call, but it should still be built
+from the same default-switch plus field-mutation steps.
 
 Slot-level enums are not the only enum-like concept in the system. `LpValue`
 also supports atomic enum values for semantic leaves whose whole choice changes
@@ -153,7 +162,7 @@ values.
 
 ## Metadata Shape
 
-The code generator should build a compact `SlotCodec` model before rendering
+The code generator may build a compact intermediate model before rendering
 Rust:
 
 ```rust
@@ -170,11 +179,11 @@ struct SlotCodecType {
 ```
 
 This model is build-time metadata, not a runtime value tree. It exists to keep
-the generator simple and to make the generated code uniform.
+the generator simple and to make generated shape/access code uniform.
 
 The long-term source of this metadata should be slot declarations and slot
-attributes. Temporary explicit hook tables are acceptable while the mockup is
-proving private field access, constructors, and specialized leaves.
+attributes. Temporary explicit hook tables should be removed as the generic
+shape/access path matures.
 
 ## Code Size Discipline
 
@@ -184,8 +193,8 @@ specialized bodies.
 
 Guidelines:
 
-- Generate field tables and small match loops, not full bespoke parsers for
-  every type.
+- Generate field/variant access and small match loops, not full bespoke parsers
+  for every type.
 - Keep common leaf/map/array behavior in shared non-generic helpers where
   possible.
 - Avoid adding type parameters to generated functions unless they buy real
@@ -239,20 +248,25 @@ partial object.
 
 `SlotCodec` should support:
 
-- direct object construction from syntax streams
+- default object construction from shape ids through the registry
+- direct mutation of caller-provided slot objects from syntax streams
 - direct JSON writing from typed objects
 - TOML loading through the same semantic reader API
 - `SlotData` as a reference/tooling path
-- generated adapters for slot-modeled types and slot enums
+- generated shape/access/factory machinery for slot-modeled types and slot
+  enums
 - explicit errors for unknown fields, invalid discriminators, and unsupported
   syntax
 
 `SlotCodec` should not become:
 
 - a second fully generic Serde
-- a runtime reflection interpreter for every decode path
+- a runtime reflection interpreter for arbitrary Rust data outside the slot
+  model
 - a mandatory `JSON -> SlotData -> object` pipeline
 - a format parser that knows concrete domain types
+- generated per-type format parsers unless a specific compact leaf syntax needs
+  a small custom handler
 - a reason to weaken the slot model with values that are skipped but not
   modeled
 
