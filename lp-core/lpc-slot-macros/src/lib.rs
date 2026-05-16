@@ -4,7 +4,7 @@
 //! Rust-authored records ergonomic while still making them available through
 //! the dynamic slot interfaces used by the engine, wire sync, and UI.
 //!
-//! The main derive is [`SlotRecord`](derive@SlotRecord). It turns a named-field
+//! The main derive is [`Slotted`](derive@Slotted). It turns a named-field
 //! struct into a slot record by generating:
 //!
 //! - `SlotRecordShape`, so the type can describe its slot shape.
@@ -17,9 +17,9 @@
 //! A minimal slot record looks like:
 //!
 //! ```ignore
-//! use lpc_model::SlotRecord;
+//! use lpc_model::Slotted;
 //!
-//! #[derive(SlotRecord)]
+//! #[derive(Slotted)]
 //! pub struct TextureDef {
 //!     pub size: Dim2uSlot,
 //! }
@@ -35,10 +35,10 @@
 //!
 //! Supported container attributes:
 //!
-//! - No container marker is required for a slot-modeled type; `SlotRecord`
+//! - No container marker is required for a slot-modeled type; `Slotted`
 //!   derives static shape support for every record.
 //! - `#[slot(shape_id = "...")]`: override the generated static shape id.
-//! Build-time slot-view generation discovers every `SlotRecord` and emits the
+//! Build-time slot-view generation discovers every `Slotted` and emits the
 //! corresponding `*View` type.
 //!
 //! Supported field attributes:
@@ -57,8 +57,8 @@ mod attr;
 mod record;
 mod value;
 
-#[proc_macro_derive(SlotRecord, attributes(slot))]
-pub fn derive_slot_record(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Slotted, attributes(slot))]
+pub fn derive_slotted(input: TokenStream) -> TokenStream {
     record::derive(input.into()).into()
 }
 

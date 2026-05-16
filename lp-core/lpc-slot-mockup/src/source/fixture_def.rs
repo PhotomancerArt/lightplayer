@@ -1,12 +1,12 @@
 use lpc_model::{
     Affine2d, Affine2dSlot, BindingDefs, ColorOrderSlot, ColorOrderValue, Dim2u, Dim2uSlot,
-    EnumSlot, FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotRecord, SlotShapeId,
-    SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    EnumSlot, FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue,
+    SlotValueShape, Slotted, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 use super::{MappingConfig, shader_def::ScalarHint};
 
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct FixtureDef {
     pub render_size: Dim2uSlot,
     pub bindings: BindingDefs,

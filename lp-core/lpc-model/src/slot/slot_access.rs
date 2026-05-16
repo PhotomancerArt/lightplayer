@@ -83,7 +83,7 @@ pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
 /// Field-level slot access used by derive inference.
 ///
 /// A record field that implements this trait can be included in
-/// `#[derive(SlotRecord)]` without an explicit shape attribute. Fields that do
+/// `#[derive(Slotted)]` without an explicit shape attribute. Fields that do
 /// not implement this trait must provide an explicit override supported by the
 /// derive or use a custom slot-access implementation.
 pub trait FieldSlot {

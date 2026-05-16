@@ -138,9 +138,9 @@ fn display_key(key: &SlotMapKey) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SlotRecord, SlotShapeRegistry, StaticSlotShape, ValueSlot};
+    use crate::{SlotShapeRegistry, Slotted, StaticSlotShape, ValueSlot};
 
-    #[derive(SlotRecord)]
+    #[derive(Slotted)]
     struct TestRoot {
         pub output: ValueSlot<f32>,
     }

@@ -177,6 +177,7 @@ fn lp_type_for_data(data: &SlotData) -> LpType {
 
 fn lp_type_for_value(value: &LpValue) -> LpType {
     match value {
+        LpValue::Unset => panic!("unset shader param values need an explicit type"),
         LpValue::String(_) => LpType::String,
         LpValue::I32(_) => LpType::I32,
         LpValue::U32(_) => LpType::U32,

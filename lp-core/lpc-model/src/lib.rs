@@ -13,7 +13,7 @@ extern crate self as lpc_model;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub use lpc_slot_macros::{SlotRecord, SlotValue};
+pub use lpc_slot_macros::{SlotValue, Slotted};
 
 #[doc(hidden)]
 pub mod __private {

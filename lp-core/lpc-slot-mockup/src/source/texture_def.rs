@@ -1,6 +1,6 @@
-use lpc_model::{BindingDefs, Dim2u, Dim2uSlot, SlotRecord};
+use lpc_model::{BindingDefs, Dim2u, Dim2uSlot, Slotted};
 
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct TextureDef {
     pub size: Dim2uSlot,
     pub bindings: BindingDefs,

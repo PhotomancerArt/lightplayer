@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
-    OptionSlot, SlotEnumOption, SlotMeta, SlotRecord, SlotShapeId, SlotValue, SlotValueShape,
+    OptionSlot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
     ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Authored fixture node definition.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct FixtureDef {
     /// Full-frame render size used when materializing the fixture input.
     #[serde(default = "default_render_size")]

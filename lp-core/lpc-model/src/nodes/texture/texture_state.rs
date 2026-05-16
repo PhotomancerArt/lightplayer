@@ -1,9 +1,9 @@
 //! Public runtime state shape for texture nodes.
 
-use crate::{Revision, SlotRecord, ValueSlot};
+use crate::{Revision, Slotted, ValueSlot};
 
 /// Runtime metadata exposed by a texture node.
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct TextureState {
     pub width: ValueSlot<i32>,
     pub height: ValueSlot<i32>,

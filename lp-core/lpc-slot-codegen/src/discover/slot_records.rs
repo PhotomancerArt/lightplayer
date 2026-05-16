@@ -25,7 +25,7 @@ pub(crate) fn discover_static_slot_records(
             let syn::Item::Struct(item) = item else {
                 continue;
             };
-            if !super::derive::has_derive(&item.attrs, "SlotRecord") {
+            if !super::derive::has_derive(&item.attrs, "Slotted") {
                 continue;
             }
             let type_name = item.ident.to_string();

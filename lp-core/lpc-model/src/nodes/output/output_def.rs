@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, SlotRecord, ValueSlot,
+    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, Slotted, ValueSlot,
 };
 
 /// Authored GPIO output node definition.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     /// Authored slot bindings for output inputs.
@@ -41,7 +41,7 @@ impl OutputDef {
 }
 
 /// Authored output driver options for the display pipeline.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct OutputDriverOptionsConfig {
     /// Gamma exponent for luminance curve.
     #[serde(default = "default_lum_power_slot")]

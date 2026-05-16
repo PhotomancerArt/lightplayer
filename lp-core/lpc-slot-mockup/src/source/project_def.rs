@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ArtifactPath, ArtifactPathSlot, MapSlot, OptionSlot, SlotRecord, ValueSlot};
+use lpc_model::{ArtifactPath, ArtifactPathSlot, MapSlot, OptionSlot, Slotted, ValueSlot};
 
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct ProjectDef {
     pub name: OptionSlot<ValueSlot<String>>,
     pub nodes: MapSlot<String, NodeInvocationDef>,
 }
 
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct NodeInvocationDef {
     pub artifact: ArtifactPathSlot,
 }

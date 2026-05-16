@@ -1,15 +1,15 @@
 use lpc_model::{
-    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, SlotRecord, ValueSlot,
+    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, Slotted, ValueSlot,
 };
 
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     pub bindings: BindingDefs,
     pub options: OptionSlot<OutputDriverOptionsConfig>,
 }
 
-#[derive(Clone, Debug, PartialEq, SlotRecord)]
+#[derive(Clone, Debug, PartialEq, Slotted)]
 pub struct OutputDriverOptionsConfig {
     pub lum_power: PositiveF32Slot,
     pub white_point: ValueSlot<[f32; 3]>,

@@ -651,7 +651,7 @@ mod tests {
     use alloc::collections::BTreeMap;
     use alloc::vec;
 
-    #[derive(crate::SlotRecord)]
+    #[derive(crate::Slotted)]
     struct MutRoot {
         pub gain: ValueSlot<f32>,
         pub params: MapSlot<String, ValueSlot<f32>>,

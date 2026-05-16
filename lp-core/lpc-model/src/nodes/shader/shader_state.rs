@@ -1,9 +1,9 @@
 //! Public runtime state shape for shader nodes.
 
-use crate::{SlotRecord, VisualProduct, VisualProductSlot};
+use crate::{Slotted, VisualProduct, VisualProductSlot};
 
 /// Runtime state exposed by a shader node.
-#[derive(Default, SlotRecord)]
+#[derive(Default, Slotted)]
 pub struct ShaderState {
     /// Renderable visual output produced by this shader node.
     pub output: VisualProductSlot,

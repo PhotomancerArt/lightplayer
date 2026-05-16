@@ -1,14 +1,14 @@
 use alloc::string::String;
 
 use crate::node::node_invocation::NodeInvocation;
-use crate::{MapSlot, OptionSlot, SlotRecord, ValueSlot};
+use crate::{MapSlot, OptionSlot, Slotted, ValueSlot};
 
 /// Authored root project node definition.
 ///
 /// A project is a node artifact with `kind = "project"`. Its `nodes` table is
 /// the explicit source of child node invocations; the runtime no longer
 /// discovers children from filesystem directories.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, SlotRecord)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
     #[serde(default, skip_serializing_if = "OptionSlot::is_none")]

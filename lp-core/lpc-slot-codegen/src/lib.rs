@@ -2,7 +2,7 @@
 //!
 //! This crate is host-only. A crate build script points it at that crate's
 //! source tree, and it writes an `OUT_DIR` Rust module that can register every
-//! static `SlotRecord` shape discovered in that crate. Runtime-owned dynamic
+//! static `Slotted` shape discovered in that crate. Runtime-owned dynamic
 //! shapes are intentionally outside this discovery pass.
 
 use std::fs;
@@ -29,7 +29,7 @@ pub fn generate_slot_shapes(config: SlotShapeCodegenConfig) -> Result<(), SlotSh
         .map_err(SlotShapeCodegenError::Io)
 }
 
-/// Generate `slot_views.rs` for every static `SlotRecord` in one crate.
+/// Generate `slot_views.rs` for every static `Slotted` in one crate.
 pub fn generate_slot_views(config: SlotViewCodegenConfig) -> Result<(), SlotShapeCodegenError> {
     let src_dir = config.crate_root.join("src");
     let mut views = discover::discover_static_slot_views(&src_dir)?;
@@ -57,14 +57,14 @@ mod tests {
         fs::write(
             src.join("source").join("shader_def.rs"),
             r#"
-use lpc_model::SlotRecord;
+use lpc_model::Slotted;
 
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct ShaderDef {
     value: ValueSlot<bool>,
 }
 
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct Nested {
     value: ValueSlot<bool>,
 }
@@ -95,7 +95,7 @@ pub struct Nested {
         fs::write(
             src.join("node").join("project").join("mod.rs"),
             r#"
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct ProjectDef {}
 "#,
         )
@@ -119,9 +119,9 @@ pub struct ProjectDef {}
         fs::write(
             src.join("source").join("fixture_def.rs"),
             r#"
-use lpc_model::{SlotRecord, ValueSlot};
+use lpc_model::{Slotted, ValueSlot};
 
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct FixtureDef {
     pub render_size: Dim2uSlot,
     pub mode: EnumSlot<SomeEnum>,

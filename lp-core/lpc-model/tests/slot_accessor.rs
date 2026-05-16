@@ -5,7 +5,7 @@ use lpc_model::{
     SlotShapeRegistry, StaticSlotShape, ValueSlot,
 };
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::Slotted)]
 struct AccessorRoot {
     output: ValueSlot<f32>,
 }

@@ -60,8 +60,10 @@ addressable in a given context.
 A slot record is a structured object with named fields. It usually maps to a
 Rust struct.
 
-In Rust, a normal slot record is written as `#[derive(SlotRecord)]` with the
-derive macro in scope. No type-level `#[slot]` marker is required.
+In Rust, a normal slot record is written as `#[derive(Slotted)]` with the
+derive macro in scope. `Slotted` is the author-facing derive for structured
+slot objects; internal record traits still use record terminology where they
+describe the concrete shape. No type-level `#[slot]` marker is required.
 
 Records are the common shape for authored configuration and runtime state:
 

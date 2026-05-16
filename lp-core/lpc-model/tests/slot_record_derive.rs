@@ -6,13 +6,13 @@ use lpc_model::{
     StaticSlotAccess, StaticSlotShape, ValueSlot,
 };
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::Slotted)]
 struct DerivedRecord {
     pub enabled: ValueSlot<bool>,
     pub nested: NestedRecord,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::Slotted)]
 struct NestedRecord {
     pub count: ValueSlot<u32>,
 }

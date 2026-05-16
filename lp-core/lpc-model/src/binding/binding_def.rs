@@ -1,5 +1,5 @@
 use super::BindingRef;
-use crate::{LpValue, OptionSlot, SlotRecord, ValueSlot};
+use crate::{LpValue, OptionSlot, Slotted, ValueSlot};
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// - `value`: feed the local slot a literal value.
 /// - `source`: feed the local slot from another slot or bus channel.
 /// - `target`: publish the local slot to another slot or bus channel.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, SlotRecord)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BindingDef {

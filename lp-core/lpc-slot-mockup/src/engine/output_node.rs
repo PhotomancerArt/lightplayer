@@ -1,6 +1,6 @@
-use lpc_model::{SlotRecord, ValueSlot};
+use lpc_model::{Slotted, ValueSlot};
 
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct OutputNode {
     pub frames_sent: ValueSlot<u32>,
 }

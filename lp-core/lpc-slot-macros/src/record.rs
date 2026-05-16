@@ -177,12 +177,12 @@ fn named_fields(data: Data) -> Result<syn::FieldsNamed> {
             Fields::Named(fields) => Ok(fields),
             other => Err(syn::Error::new_spanned(
                 other,
-                "SlotRecord derive requires named struct fields",
+                "Slotted derive requires named struct fields",
             )),
         },
         _ => Err(syn::Error::new(
             proc_macro2::Span::call_site(),
-            "SlotRecord derive only supports structs",
+            "Slotted derive only supports structs",
         )),
     }
 }
@@ -218,7 +218,7 @@ fn require_public(vis: &Visibility, ident: &syn::Ident) -> Result<()> {
     } else {
         Err(syn::Error::new_spanned(
             ident,
-            "SlotRecord derive requires public fields; use a separate slot data struct or a custom impl for private runtime state",
+            "Slotted derive requires public fields; use a separate slot data struct or a custom impl for private runtime state",
         ))
     }
 }

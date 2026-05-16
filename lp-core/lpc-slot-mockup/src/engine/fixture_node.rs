@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
 use crate::source::MappingConfig;
-use lpc_model::{EnumSlot, MapSlot, PositiveF32, PositiveF32Slot, SlotRecord, Xy, XySlot};
+use lpc_model::{EnumSlot, MapSlot, PositiveF32, PositiveF32Slot, Slotted, Xy, XySlot};
 
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct FixtureNode {
     pub touches: MapSlot<u32, TouchState>,
     pub mapping_preview: EnumSlot<MappingConfig>,
 }
 
-#[derive(SlotRecord)]
+#[derive(Slotted)]
 pub struct TouchState {
     pub position: XySlot,
     pub pressure: PositiveF32Slot,

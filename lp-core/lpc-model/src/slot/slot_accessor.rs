@@ -299,7 +299,7 @@ mod tests {
         ));
     }
 
-    #[derive(crate::SlotRecord)]
+    #[derive(crate::Slotted)]
     struct OptionRoot {
         pub item: OptionSlot<ValueSlot<u32>>,
     }

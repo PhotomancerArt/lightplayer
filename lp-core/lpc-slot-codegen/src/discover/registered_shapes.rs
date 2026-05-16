@@ -27,7 +27,7 @@ pub(crate) fn discover_static_registered_shapes(
             let syn::Item::Struct(item) = item else {
                 continue;
             };
-            let has_record = super::derive::has_derive(&item.attrs, "SlotRecord");
+            let has_record = super::derive::has_derive(&item.attrs, "Slotted");
             let has_value = super::derive::has_derive(&item.attrs, "SlotValue");
             if !has_record && !has_value {
                 continue;
