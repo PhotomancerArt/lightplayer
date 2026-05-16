@@ -58,6 +58,26 @@ The ESP32 transport has a streaming override:
 
 That override is closer to the intended embedded path.
 
+## Streaming And Buffering Constraint
+
+M2 must preserve the manual serialization work that exists to avoid large
+intermediate buffers. In particular:
+
+- runtime/resource payload bytes must stay on the manual streaming path
+- SlotCodec should write structured slot data directly from `SlotAccess`
+- do not introduce `JSON -> SlotData -> object` or `object -> SlotData -> JSON`
+  as a production path
+- small scalar envelope fields may continue using serde bridges during this
+  migration
+
+There is one known rough edge: `project_read_stream.rs` currently writes each
+slot root `data` into a temporary `Vec<u8>` and injects it into the surrounding
+response with `raw_json`. This is acceptable for M2 because it avoids the
+`SlotData` tree and keeps the response writer simple, but it is not the final
+zero-extra-buffer shape. If it is easy, Phase 2 can adapt the writers so
+`SlotShapeRegistry::write_slot_json_value` writes directly into the enclosing
+project-read writer.
+
 ## Why Project Read Slots First
 
 Mutation requests are smaller, but `WireSlotMutationOp::SetValue(LpValue)` is
@@ -130,3 +150,6 @@ about model slot data payloads, not schema snapshot metadata.
 - Leave serde annotations and helpers in place for now.
 - Switch core behavior one path at a time, fix tests, then repeat.
 - Start with messages; definitions follow in M3.
+- Preserve manual streaming serialization for large payloads; SlotCodec should
+  replace serde/`SlotData` for structured slot data, not replace the special
+  large-buffer writers.

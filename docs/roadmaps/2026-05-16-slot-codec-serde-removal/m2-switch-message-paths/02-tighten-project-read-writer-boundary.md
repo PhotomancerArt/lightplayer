@@ -8,6 +8,9 @@ In scope:
   node slot writer path, if any is still present
 - make helper names/comments explicit that node slot `data` is SlotCodec JSON
 - ensure shape ids and slot payloads are written without serde-owned model data
+- preserve manual streaming writers for large runtime/resource payloads
+- if straightforward, remove the temporary per-root `Vec<u8>` by adapting the
+  outer JSON writer to the model-side `SlotWrite` interface
 
 Out of scope:
 
@@ -15,6 +18,7 @@ Out of scope:
   registry snapshots
 - changing `Engine::read_project`
 - changing client API return types
+- genericizing large binary/resource payload serialization through SlotCodec
 
 ## Code Organization Reminders
 
@@ -54,6 +58,13 @@ detailed node slot root data = SlotShapeRegistry::write_slot_json_value(...)
 If the writer allocates a temporary `Vec<u8>` for the slot JSON because
 `lpc_wire::JsonValue` cannot directly implement `SlotWrite`, that is acceptable
 for this phase. Avoid introducing `SlotData` as an intermediate.
+
+If direct writer adaptation is attempted, keep the boundary narrow:
+
+- structured slot data can stream through SlotCodec
+- large resource payload bytes should continue using their manual base64
+  streaming writer
+- do not build a JSON tree or `SlotData` tree to connect the two writer APIs
 
 Add comments or helper names only where they clarify this boundary.
 

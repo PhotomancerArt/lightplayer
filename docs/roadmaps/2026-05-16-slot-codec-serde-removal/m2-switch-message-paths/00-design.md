@@ -54,6 +54,11 @@ longer prove slot payload compatibility by deserializing `data` into
 This preserves the current envelope while proving that model slot payloads are
 not dependent on Serde.
 
+The embedded memory constraint remains central. Structured slot data should use
+the generic SlotCodec writer, but large binary/resource payloads should stay on
+their existing manual streaming writers. SlotCodec is not a reason to buffer a
+resource payload as JSON, `SlotData`, or `LpValue` before writing it.
+
 ## Main Components
 
 ### Direct Project Read Writer
@@ -64,6 +69,13 @@ through `SlotShapeRegistry::write_slot_json_value`.
 
 Any helper introduced for slot root writing should live close to the current
 writer unless it becomes clearly reusable from `lpc-wire`.
+
+The current implementation uses a temporary `Vec<u8>` per slot root so the
+SlotCodec writer can produce a complete JSON value before the outer project-read
+writer injects it with `raw_json`. M2 may keep that bridge, but the preferred
+direction is a direct adapter from the project-read JSON writer to the
+model-side `SlotWrite` API so structured slot payloads can stream into the
+envelope without the extra per-root buffer.
 
 ### Slot Root JSON Test Reader
 
@@ -90,6 +102,7 @@ the roadmap.
 - Those root payloads can be read back through `SlotShapeRegistry`.
 - Tests do not rely on `SlotData` serde to validate the detailed slot payload.
 - Non-slot fields may continue using serde bridges during M2.
+- Runtime/resource payloads remain on manual streaming writers.
 
 ## Non-Goals
 
