@@ -3,9 +3,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::{
-    ControlProduct, LpType, LpValue, ModelStructMember, ProductKind, ProductRef, ResourceDomain,
-    ResourceRef, SlotAccess, SlotDataAccess, SlotFieldShape, SlotMapKey, SlotShape, SlotShapeId,
-    SlotShapeRegistry, VisualProduct,
+    ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, ProductKind, ProductRef,
+    ResourceDomain, ResourceRef, SlotAccess, SlotDataAccess, SlotFieldShape, SlotMapKey, SlotShape,
+    SlotShapeId, SlotShapeRegistry, VisualProduct,
 };
 
 use super::{SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter, write_lp_value};
@@ -437,6 +437,7 @@ fn write_enum_payload_toml(
 
 fn write_lp_value_toml(ty: &LpType, value: &LpValue) -> Result<toml::Value, SlotDataWriteError> {
     match (ty, value) {
+        (LpType::Any, value) => write_untyped_lp_value_toml(value),
         (LpType::String, LpValue::String(value)) => Ok(toml::Value::String(value.clone())),
         (LpType::I32, LpValue::I32(value)) => Ok(toml::Value::Integer(i64::from(*value))),
         (LpType::U32, LpValue::U32(value)) => Ok(toml::Value::Integer(i64::from(*value))),
@@ -466,6 +467,9 @@ fn write_lp_value_toml(ty: &LpType, value: &LpValue) -> Result<toml::Value, Slot
         (LpType::Struct { fields, .. }, LpValue::Struct { fields: values, .. }) => {
             write_lp_struct_toml(fields, values)
         }
+        (LpType::Enum { variants, .. }, LpValue::Enum { variant, payload }) => {
+            write_lp_enum_toml(variants, *variant, payload.as_deref())
+        }
         (LpType::Resource, LpValue::Resource(resource)) => write_resource_ref_toml(resource),
         (LpType::Product(ProductKind::Visual), LpValue::Product(ProductRef::Visual(product))) => {
             write_visual_product_toml(product)
@@ -476,6 +480,58 @@ fn write_lp_value_toml(ty: &LpType, value: &LpValue) -> Result<toml::Value, Slot
         _ => Err(SlotDataWriteError::mismatch(format!(
             "value {value:?} does not match type {ty:?}"
         ))),
+    }
+}
+
+fn write_untyped_lp_value_toml(value: &LpValue) -> Result<toml::Value, SlotDataWriteError> {
+    match value {
+        LpValue::String(value) => Ok(toml::Value::String(value.clone())),
+        LpValue::I32(value) => Ok(toml::Value::Integer(i64::from(*value))),
+        LpValue::U32(value) => Ok(toml::Value::Integer(i64::from(*value))),
+        LpValue::F32(value) if value.is_finite() => Ok(toml::Value::Float(f64::from(*value))),
+        LpValue::Bool(value) => Ok(toml::Value::Boolean(*value)),
+        LpValue::Vec2(values) => write_f32_array_toml(values),
+        LpValue::Vec3(values) => write_f32_array_toml(values),
+        LpValue::Vec4(values) => write_f32_array_toml(values),
+        LpValue::IVec2(values) => write_i32_array_toml(values),
+        LpValue::IVec3(values) => write_i32_array_toml(values),
+        LpValue::IVec4(values) => write_i32_array_toml(values),
+        LpValue::UVec2(values) => write_u32_array_toml(values),
+        LpValue::UVec3(values) => write_u32_array_toml(values),
+        LpValue::UVec4(values) => write_u32_array_toml(values),
+        LpValue::BVec2(values) => write_bool_array_toml(values),
+        LpValue::BVec3(values) => write_bool_array_toml(values),
+        LpValue::BVec4(values) => write_bool_array_toml(values),
+        LpValue::Mat2x2(values) => write_f32_matrix_toml(values),
+        LpValue::Mat3x3(values) => write_f32_matrix_toml(values),
+        LpValue::Mat4x4(values) => write_f32_matrix_toml(values),
+        LpValue::Array(values) => values
+            .iter()
+            .map(write_untyped_lp_value_toml)
+            .collect::<Result<Vec<_>, _>>()
+            .map(toml::Value::Array),
+        LpValue::Struct { fields, .. } => {
+            let mut table = toml::Table::new();
+            for (name, value) in fields {
+                table.insert(name.clone(), write_untyped_lp_value_toml(value)?);
+            }
+            Ok(toml_table(table))
+        }
+        LpValue::Enum { variant, payload } => {
+            let mut table = toml::Table::new();
+            table.insert(
+                "variant".to_string(),
+                toml::Value::Integer(i64::from(*variant)),
+            );
+            if let Some(payload) = payload {
+                table.insert("payload".to_string(), write_untyped_lp_value_toml(payload)?);
+            }
+            Ok(toml_table(table))
+        }
+        LpValue::Resource(resource) => write_resource_ref_toml(resource),
+        LpValue::Product(ProductRef::Visual(product)) => write_visual_product_toml(product),
+        LpValue::Product(ProductRef::Control(product)) => write_control_product_toml(product),
+        LpValue::F32(_) => Err(SlotDataWriteError::mismatch("non-finite f32 value")),
     }
 }
 
@@ -503,6 +559,45 @@ fn write_lp_struct_toml(
             )));
         };
         table.insert(field.name.clone(), write_lp_value_toml(&field.ty, value)?);
+    }
+    Ok(toml_table(table))
+}
+
+fn write_lp_enum_toml(
+    variants: &[ModelEnumVariant],
+    variant_index: u32,
+    payload: Option<&LpValue>,
+) -> Result<toml::Value, SlotDataWriteError> {
+    let variant = variants.get(variant_index as usize).ok_or_else(|| {
+        SlotDataWriteError::mismatch(format!(
+            "enum variant index {variant_index} is out of range"
+        ))
+    })?;
+    let mut table = toml::Table::new();
+    table.insert(
+        "kind".to_string(),
+        toml::Value::String(variant.name.clone()),
+    );
+    match (&variant.payload, payload) {
+        (Some(payload_ty), Some(payload)) => {
+            table.insert(
+                "payload".to_string(),
+                write_lp_value_toml(payload_ty, payload)?,
+            );
+        }
+        (Some(_), None) => {
+            return Err(SlotDataWriteError::mismatch(format!(
+                "enum variant {:?} requires a payload",
+                variant.name
+            )));
+        }
+        (None, Some(_)) => {
+            return Err(SlotDataWriteError::mismatch(format!(
+                "enum variant {:?} does not accept a payload",
+                variant.name
+            )));
+        }
+        (None, None) => {}
     }
     Ok(toml_table(table))
 }
@@ -666,10 +761,11 @@ fn data_kind(data: SlotDataAccess<'_>) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        LpType, LpValue, ProductKind, ProductRef, Revision, SlotData, SlotMapDyn, SlotName,
-        SlotOptionDyn, SlotRecord, SlotVariantShape, WithRevision,
+        LpType, LpValue, ModelEnumVariant, ProductKind, ProductRef, Revision, SlotData, SlotMapDyn,
+        SlotName, SlotOptionDyn, SlotRecord, SlotVariantShape, WithRevision,
         slot::shape::{field, map, option, record, unit, value},
     };
+    use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
     use alloc::vec;
 
@@ -856,6 +952,32 @@ mod tests {
         assert_eq!(toml["kind"].as_str(), Some("visual"));
         assert_eq!(toml["node"].as_integer(), Some(3));
         assert_eq!(toml["output"].as_integer(), Some(2));
+    }
+
+    #[test]
+    fn dynamic_slot_writer_writes_enum_toml_leaves() {
+        let ty = LpType::Enum {
+            name: Some("Endpoint".to_string()),
+            variants: vec![
+                ModelEnumVariant {
+                    name: "Unset".to_string(),
+                    payload: None,
+                },
+                ModelEnumVariant {
+                    name: "Value".to_string(),
+                    payload: Some(LpType::F32),
+                },
+            ],
+        };
+        let value = LpValue::Enum {
+            variant: 1,
+            payload: Some(Box::new(LpValue::F32(0.75))),
+        };
+
+        let toml = write_lp_value_toml(&ty, &value).unwrap();
+
+        assert_eq!(toml["kind"].as_str(), Some("Value"));
+        assert_eq!(toml["payload"].as_float(), Some(0.75));
     }
 
     #[test]

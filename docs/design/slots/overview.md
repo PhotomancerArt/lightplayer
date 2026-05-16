@@ -68,6 +68,11 @@ Normal serialized enums should use explicit discriminators. Variant names should
 remain close to the Rust/domain names unless a specific compact syntax is
 enabled for that enum.
 
+Use slot enums when the variant payload is slot-structured data: callers should
+be able to address, mutate, sync, or validate fields inside the active variant
+through slot paths. Variant selection is then part of the slot tree, with its
+own revision boundary and a default payload for each variant.
+
 ### Slot Values
 
 Slot values are the leaf values that can be authored, displayed, transported, or
@@ -79,11 +84,17 @@ bound:
 - colors
 - vectors and matrices
 - resource references
+- atomic enum values
 - `LpValue`-like dynamic values
 
 Semantic leaves should stay semantic. A color, path, resource reference, or
 binding endpoint should not be flattened into unrelated ad hoc strings unless
 that string syntax is itself part of the slot value's design.
+
+Use `LpValue::Enum` for atomic enum-like values inside a `ValueSlot`: the whole
+choice changes as one leaf, and its payload is value-language data rather than
+an addressable slot subtree. Authored syntax can use variant names, but the
+in-memory value should store the active variant as an index into `LpType::Enum`.
 
 See `values.md` for the detailed value model, including primitive values,
 semantic leaves, dynamic `LpValue`, defaults, transient values, and compact

@@ -16,6 +16,10 @@ use crate::ProductKind;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum LpType {
+    /// Dynamically typed payload. This is mainly for definition-time values such
+    /// as literal binding endpoints where the surrounding context supplies
+    /// semantic constraints later.
+    Any,
     String,
     I32,
     U32,
@@ -44,6 +48,10 @@ pub enum LpType {
         name: Option<String>,
         fields: Vec<ModelStructMember>,
     },
+    Enum {
+        name: Option<String>,
+        variants: Vec<ModelEnumVariant>,
+    },
     Resource,
     Product(ProductKind),
 }
@@ -56,9 +64,17 @@ pub struct ModelStructMember {
     pub ty: LpType,
 }
 
+/// One variant in an [`LpType::Enum`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct ModelEnumVariant {
+    pub name: String,
+    pub payload: Option<LpType>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::LpType;
+    use super::{LpType, ModelEnumVariant};
     use alloc::boxed::Box;
 
     #[test]
@@ -72,6 +88,26 @@ mod tests {
     #[test]
     fn lp_type_list_round_trips() {
         let ty = LpType::List(Box::new(LpType::U32));
+        let json = serde_json::to_string(&ty).unwrap();
+        let back: LpType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ty);
+    }
+
+    #[test]
+    fn lp_type_enum_round_trips() {
+        let ty = LpType::Enum {
+            name: Some(alloc::string::String::from("BindingEndpoint")),
+            variants: alloc::vec![
+                ModelEnumVariant {
+                    name: alloc::string::String::from("Unset"),
+                    payload: None,
+                },
+                ModelEnumVariant {
+                    name: alloc::string::String::from("Literal"),
+                    payload: Some(LpType::Any),
+                },
+            ],
+        };
         let json = serde_json::to_string(&ty).unwrap();
         let back: LpType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ty);

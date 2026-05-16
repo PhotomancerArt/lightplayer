@@ -69,7 +69,7 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// meaning owns its storage shape.
 pub use kind::Kind;
 pub use value::WithRevision;
-pub use value::{LpType, LpValue, ModelStructMember};
+pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};

@@ -39,14 +39,14 @@ pub fn generate_mapping_points(
                         order,
                         ..
                     } => generate_ring_array_points(
-                        *center.value(),
-                        *diameter.value(),
+                        center.value().0,
+                        diameter.value().0,
                         *start_ring_inclusive.value(),
                         *end_ring_exclusive.value(),
                         ring_lamp_counts,
                         *offset_angle.value(),
                         *order.value(),
-                        *sample_diameter.value(),
+                        sample_diameter.value().0,
                         texture_width,
                         texture_height,
                         channel_offset,

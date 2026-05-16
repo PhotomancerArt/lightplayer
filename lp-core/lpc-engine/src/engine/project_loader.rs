@@ -133,7 +133,7 @@ impl ProjectLoader {
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
                         path: project_path.as_str().to_string(),
                         reason: format!(
-                            "invalid artifact locator `{}`: {e}",
+                            "invalid artifact locator `{:?}`: {e}",
                             invocation.artifact.value()
                         ),
                     })?;
@@ -279,7 +279,7 @@ impl ProjectLoader {
                         Box::new(FixtureNode::new(
                             node.id,
                             config.mapping.clone(),
-                            config.sampling,
+                            *config.sampling.value(),
                             frame,
                         )),
                         frame,
@@ -553,6 +553,10 @@ fn binding_source_endpoint(
     endpoint: &BindingEndpoint,
 ) -> Result<BindingSource, ProjectLoadError> {
     match endpoint {
+        BindingEndpoint::Unset => Err(ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("binding source cannot be unset"),
+        }),
         BindingEndpoint::Literal(value) => Ok(BindingSource::Literal(value.clone())),
         BindingEndpoint::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
             bus.slot().to_string(),
@@ -573,6 +577,10 @@ fn binding_target_endpoint(
     endpoint: &BindingEndpoint,
 ) -> Result<BindingTarget, ProjectLoadError> {
     match endpoint {
+        BindingEndpoint::Unset => Err(ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("binding target cannot be unset"),
+        }),
         BindingEndpoint::Literal(_) => Err(ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
             reason: String::from("binding target cannot be a literal"),

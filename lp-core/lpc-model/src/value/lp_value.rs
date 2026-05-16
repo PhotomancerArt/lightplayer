@@ -6,6 +6,7 @@
 //! one logical value.
 
 use crate::{ProductRef, ResourceRef};
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -41,6 +42,11 @@ pub enum LpValue {
         name: Option<String>,
         fields: Vec<(String, LpValue)>,
     },
+    /// Atomic enum value interpreted through an [`LpType::Enum`](crate::LpType::Enum).
+    Enum {
+        variant: u32,
+        payload: Option<Box<LpValue>>,
+    },
     /// Store-backed materialized payload.
     Resource(ResourceRef),
     /// Lazy node-owned graph product.
@@ -50,6 +56,7 @@ pub enum LpValue {
 #[cfg(test)]
 mod tests {
     use super::LpValue;
+    use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec;
 
@@ -61,6 +68,14 @@ mod tests {
             LpValue::Bool(true),
             LpValue::Vec2([0.0, 1.0]),
             LpValue::Vec3([1.0, 2.0, 3.0]),
+            LpValue::Enum {
+                variant: 0,
+                payload: None,
+            },
+            LpValue::Enum {
+                variant: 1,
+                payload: Some(Box::new(LpValue::F32(0.5))),
+            },
             LpValue::Resource(crate::ResourceRef::runtime_buffer(
                 crate::RuntimeBufferId::new(9),
             )),

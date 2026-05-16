@@ -14,6 +14,7 @@ persists and sends:
 - slot maps
 - slot options
 - slot values and known semantic leaves
+- atomic enum values in `LpValue`
 - explicit storage metadata such as discriminators, defaults, and transient
   fields
 
@@ -132,6 +133,23 @@ Enums use the same rule. Deserializing an enum is two-phase:
 Runtime field mutation should not silently switch enum variants. Variant
 switching is an explicit operation; the `set_variant_from_slot_data` shape is a
 convenience that can be built on top of default-switch plus field mutation later.
+
+Slot-level enums are not the only enum-like concept in the system. `LpValue`
+also supports atomic enum values for semantic leaves whose whole choice changes
+as one value. SlotCodec should use the slot shape to decide the boundary:
+
+- `LpValue::Enum` is a leaf payload inside `ValueSlot<T>`.
+- `SlotShape::Enum` is an addressable slot subtree with a variant revision and
+  mutable payload fields.
+
+SlotCodec should preserve readable authored syntax while keeping the in-memory
+value compact. Names live in `LpType` and slot metadata; `LpValue` carries
+payloads. For enum values, authored TOML/JSON can say `kind = "Value"`, but the
+stored `LpValue::Enum` should use the variant index from `LpType::Enum`.
+
+This distinction keeps small definition-time choices compact without turning
+editable structured variants, such as fixture mapping configs, into opaque
+values.
 
 ## Metadata Shape
 

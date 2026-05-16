@@ -1,11 +1,12 @@
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::{
-    ControlExtent, ControlProduct, LpType, LpValue, ModelStructMember, NodeId, ProductKind,
-    ProductRef, ResourceDomain, ResourceRef, VisualProduct,
+    ControlExtent, ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, NodeId,
+    ProductKind, ProductRef, ResourceDomain, ResourceRef, VisualProduct,
 };
 
 use super::{
@@ -17,6 +18,7 @@ where
     S: SyntaxEventSource,
 {
     match ty {
+        LpType::Any => value.lp_value(),
         LpType::String => value.string().map(LpValue::String),
         LpType::I32 => value.i32().map(LpValue::I32),
         LpType::U32 => value.u32().map(LpValue::U32),
@@ -40,6 +42,7 @@ where
         LpType::Array(item_ty, len) => read_lp_array(value, item_ty, Some(*len)),
         LpType::List(item_ty) => read_lp_array(value, item_ty, None),
         LpType::Struct { name, fields } => read_lp_struct(value, name.clone(), fields),
+        LpType::Enum { variants, .. } => read_lp_enum(value, variants),
         LpType::Resource => read_resource_ref(value).map(LpValue::Resource),
         LpType::Product(kind) => read_product_ref(value, *kind).map(LpValue::Product),
     }
@@ -54,6 +57,7 @@ where
     W: SlotWrite,
 {
     match (ty, lp_value) {
+        (LpType::Any, value_to_write) => write_untyped_lp_value(value, value_to_write),
         (LpType::String, LpValue::String(text)) => value.string(text),
         (LpType::I32, LpValue::I32(number)) => value.i32(*number),
         (LpType::U32, LpValue::U32(number)) => value.u32(*number),
@@ -80,6 +84,9 @@ where
         (LpType::List(item_ty), LpValue::Array(items)) => write_lp_array(value, item_ty, items),
         (LpType::Struct { fields, .. }, LpValue::Struct { fields: values, .. }) => {
             write_lp_struct(value, fields, values)
+        }
+        (LpType::Enum { variants, .. }, LpValue::Enum { variant, payload }) => {
+            write_lp_enum(value, variants, *variant, payload.as_deref())
         }
         (LpType::Resource, LpValue::Resource(resource)) => write_resource_ref(value, resource),
         (LpType::Product(ProductKind::Visual), LpValue::Product(ProductRef::Visual(product))) => {
@@ -115,6 +122,21 @@ where
             }
             array.finish()
         }
+        LpValue::Struct { fields, .. } => {
+            let mut object = value.object()?;
+            for (name, field_value) in fields {
+                write_untyped_lp_value(object.prop(name)?, field_value)?;
+            }
+            object.finish()
+        }
+        LpValue::Enum { variant, payload } => {
+            let mut object = value.object()?;
+            object.prop("variant")?.u32(*variant)?;
+            if let Some(payload) = payload {
+                write_untyped_lp_value(object.prop("payload")?, payload)?;
+            }
+            object.finish()
+        }
         LpValue::Resource(resource) => write_resource_ref(value, resource),
         LpValue::Product(ProductRef::Visual(product)) => write_visual_product(value, product),
         LpValue::Product(ProductRef::Control(product)) => write_control_product(value, product),
@@ -129,8 +151,7 @@ where
         | LpValue::BVec4(_)
         | LpValue::Mat2x2(_)
         | LpValue::Mat3x3(_)
-        | LpValue::Mat4x4(_)
-        | LpValue::Struct { .. } => Err(SlotWriteError::Serialize),
+        | LpValue::Mat4x4(_) => Err(SlotWriteError::Serialize),
     }
 }
 
@@ -386,6 +407,56 @@ where
     })
 }
 
+fn read_lp_enum<S>(
+    value: ValueReader<'_, '_, S>,
+    variants: &[ModelEnumVariant],
+) -> Result<LpValue, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    const FIELDS: &[&str] = &["kind", "payload"];
+    let expected = enum_variant_names(variants);
+    let mut object = value.object()?;
+    let kind = object.expect_discriminator("kind", &expected)?;
+    let variant_index = variants
+        .iter()
+        .position(|variant| variant.name == kind)
+        .ok_or_else(|| SyntaxError::new("", None, "validated enum variant was not found"))?;
+    let variant = &variants[variant_index];
+    let payload = match &variant.payload {
+        Some(payload_ty) => {
+            let Some(mut prop) = object.next_prop()? else {
+                return Err(object.missing_required_field("payload"));
+            };
+            match prop.name() {
+                "payload" => Some(Box::new(read_lp_value(payload_ty, prop.value())?)),
+                other => return Err(prop.unknown_field(other, FIELDS)),
+            }
+        }
+        None => {
+            if let Some(mut prop) = object.next_prop()? {
+                let name = prop.name().to_string();
+                if name == "payload" {
+                    prop.value().skip_value()?;
+                    return Err(SyntaxError::new(
+                        "",
+                        None,
+                        alloc::format!("enum variant {:?} does not accept a payload", variant.name),
+                    ));
+                }
+                return Err(prop.unknown_field(&name, FIELDS));
+            }
+            None
+        }
+    };
+    object.finish()?;
+
+    Ok(LpValue::Enum {
+        variant: variant_index as u32,
+        payload,
+    })
+}
+
 fn read_f32_array<S, const N: usize>(value: ValueReader<'_, '_, S>) -> Result<[f32; N], SyntaxError>
 where
     S: SyntaxEventSource,
@@ -523,6 +594,37 @@ where
     object.finish()
 }
 
+fn write_lp_enum<W>(
+    value: SlotValueWriter<'_, W>,
+    variants: &[ModelEnumVariant],
+    variant_index: u32,
+    payload: Option<&LpValue>,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let Some(variant) = variants.get(variant_index as usize) else {
+        return Err(SlotWriteError::Serialize);
+    };
+    let mut object = value.object()?;
+    object.prop("kind")?.string(&variant.name)?;
+    match (&variant.payload, payload) {
+        (Some(payload_ty), Some(payload)) => {
+            write_lp_value(object.prop("payload")?, payload_ty, payload)?
+        }
+        (Some(_), None) | (None, Some(_)) => return Err(SlotWriteError::Serialize),
+        (None, None) => {}
+    }
+    object.finish()
+}
+
+fn enum_variant_names(variants: &[ModelEnumVariant]) -> Vec<&str> {
+    variants
+        .iter()
+        .map(|variant| variant.name.as_str())
+        .collect()
+}
+
 fn write_i32_array<W, const N: usize>(
     value: SlotValueWriter<'_, W>,
     items: &[i32; N],
@@ -583,9 +685,12 @@ where
 mod tests {
     use super::*;
     use crate::{
-        RuntimeBufferId, VisualProduct,
+        ModelEnumVariant, RuntimeBufferId, VisualProduct,
         slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter, TomlSyntaxSource},
     };
+    use alloc::boxed::Box;
+    use alloc::string::String;
+    use alloc::vec;
     use alloc::vec::Vec;
 
     #[test]
@@ -683,6 +788,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn slot_value_codec_reads_and_writes_enum_values() {
+        let ty = endpoint_ty();
+
+        assert_eq!(
+            read_json_value(ty.clone(), r#"{"kind":"Unset"}"#),
+            LpValue::Enum {
+                variant: 0,
+                payload: None,
+            }
+        );
+
+        let value = read_json_value(ty.clone(), r#"{"kind":"Value","payload":0.75}"#);
+        assert_eq!(
+            value,
+            LpValue::Enum {
+                variant: 1,
+                payload: Some(Box::new(LpValue::F32(0.75))),
+            }
+        );
+        assert_eq!(
+            write_json_value(&ty, &value),
+            r#"{"kind":"Value","payload":0.75}"#
+        );
+    }
+
+    #[test]
+    fn slot_value_codec_reports_enum_discriminator_errors() {
+        let registry = crate::SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"kind":"Blark12"}"#).unwrap(),
+            &registry,
+        );
+
+        let error = read_lp_value(&endpoint_ty(), reader.value()).unwrap_err();
+
+        assert!(error.message().contains("Blark12"));
+        assert!(error.message().contains("Unset"));
+        assert!(error.message().contains("Value"));
+    }
+
+    #[test]
+    fn slot_value_codec_reports_enum_payload_errors() {
+        let registry = crate::SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"kind":"Value"}"#).unwrap(),
+            &registry,
+        );
+
+        let error = read_lp_value(&endpoint_ty(), reader.value()).unwrap_err();
+
+        assert!(error.message().contains("payload"));
+    }
+
     fn read_json_value(ty: LpType, json: &str) -> LpValue {
         let registry = crate::SlotShapeRegistry::default();
         let mut reader = SlotReader::new(JsonSyntaxSource::new(json).unwrap(), &registry);
@@ -694,5 +853,21 @@ mod tests {
         let mut writer = SlotWriter::new(&mut out);
         write_lp_value(writer.value(), ty, value).unwrap();
         String::from_utf8(out).unwrap()
+    }
+
+    fn endpoint_ty() -> LpType {
+        LpType::Enum {
+            name: Some(String::from("Endpoint")),
+            variants: vec![
+                ModelEnumVariant {
+                    name: String::from("Unset"),
+                    payload: None,
+                },
+                ModelEnumVariant {
+                    name: String::from("Value"),
+                    payload: Some(LpType::F32),
+                },
+            ],
+        }
     }
 }

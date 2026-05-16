@@ -213,6 +213,7 @@ fn lp_type_for_value(value: &LpValue) -> LpType {
                 })
                 .collect(),
         },
+        LpValue::Enum { .. } => panic!("shader param enum values need an explicit type"),
         LpValue::Resource(_) => LpType::Resource,
         LpValue::Product(product) => match product {
             lpc_model::ProductRef::Visual(_) => LpType::Product(lpc_model::ProductKind::Visual),

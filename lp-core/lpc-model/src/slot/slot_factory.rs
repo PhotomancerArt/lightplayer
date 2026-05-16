@@ -226,6 +226,7 @@ fn create_dynamic_slot_data_for_root(
 
 fn default_lp_value(ty: &LpType) -> LpValue {
     match ty {
+        LpType::Any => LpValue::Bool(false),
         LpType::String => LpValue::String(String::new()),
         LpType::I32 => LpValue::I32(0),
         LpType::U32 => LpValue::U32(0),
@@ -254,6 +255,16 @@ fn default_lp_value(ty: &LpType) -> LpValue {
             name: name.clone(),
             fields: fields.iter().map(default_struct_field).collect(),
         },
+        LpType::Enum { variants, .. } => {
+            let payload = variants
+                .first()
+                .and_then(|variant| variant.payload.as_ref())
+                .map(|ty| Box::new(default_lp_value(ty)));
+            LpValue::Enum {
+                variant: 0,
+                payload,
+            }
+        }
         LpType::Resource => LpValue::Resource(ResourceRef::default()),
         LpType::Product(ProductKind::Visual) => {
             LpValue::Product(ProductRef::visual(VisualProduct::default()))

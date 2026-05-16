@@ -583,6 +583,7 @@ fn display_key(key: &SlotMapKey) -> String {
 
 fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
     match (value, ty) {
+        (_, LpType::Any) => true,
         (LpValue::String(_), LpType::String)
         | (LpValue::I32(_), LpType::I32)
         | (LpValue::U32(_), LpType::U32)
@@ -627,6 +628,13 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
                         .is_some_and(|(_, value)| lp_value_matches_type(value, &field.ty))
                 })
         }
+        (LpValue::Enum { variant, payload }, LpType::Enum { variants, .. }) => variants
+            .get(*variant as usize)
+            .is_some_and(|variant| match (&variant.payload, payload.as_deref()) {
+                (Some(payload_ty), Some(payload)) => lp_value_matches_type(payload, payload_ty),
+                (None, None) => true,
+                _ => false,
+            }),
         _ => false,
     }
 }
@@ -635,11 +643,12 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        FieldSlot, FieldSlotMut, MapSlot, OptionSlot, SlotDataAccess, SlotEnumAccess,
-        SlotEnumDefaultVariant, SlotEnumMutAccess, SlotEnumShape, SlotMapValueAccess,
-        SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess, SlotShapeId,
-        SlotShapeRegistry, StaticSlotShape, ValueSlot,
+        BindingEndpoint, FieldSlot, FieldSlotMut, MapSlot, OptionSlot, SlotDataAccess,
+        SlotEnumAccess, SlotEnumDefaultVariant, SlotEnumMutAccess, SlotEnumShape,
+        SlotMapValueAccess, SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess,
+        SlotShapeId, SlotShapeRegistry, StaticSlotShape, ValueSlot,
     };
+    use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
     use alloc::vec;
 
@@ -648,6 +657,7 @@ mod tests {
         pub gain: ValueSlot<f32>,
         pub params: MapSlot<String, ValueSlot<f32>>,
         pub enabled: OptionSlot<ValueSlot<bool>>,
+        pub endpoint: ValueSlot<BindingEndpoint>,
         #[slot(enum)]
         pub mode: TestEnum,
     }
@@ -826,6 +836,29 @@ mod tests {
 
         assert_eq!(root.gain.value(), &2.0);
         assert_eq!(root.gain.revision(), Revision::new(5));
+    }
+
+    #[test]
+    fn slot_mutation_accepts_enum_value_leaf() {
+        let mut root = test_root();
+        let registry = registry();
+
+        set_slot_value(
+            &mut root,
+            &registry,
+            &SlotPath::parse("endpoint").unwrap(),
+            Revision::new(9),
+            LpValue::Enum {
+                variant: 3,
+                payload: Some(Box::new(LpValue::F32(0.5))),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            root.endpoint.value(),
+            &BindingEndpoint::Literal(LpValue::F32(0.5))
+        );
     }
 
     #[test]
@@ -1053,6 +1086,7 @@ mod tests {
                 ValueSlot::new(1.0),
             )])),
             enabled: OptionSlot::some(ValueSlot::new(true)),
+            endpoint: ValueSlot::new(BindingEndpoint::Unset),
             mode: TestEnum::a(),
         }
     }

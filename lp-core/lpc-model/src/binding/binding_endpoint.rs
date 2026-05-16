@@ -1,10 +1,13 @@
 use super::{BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError};
 use crate::{
-    FieldSlot, FromLpValue, LpType, LpValue, SlotDataAccess, SlotMeta, SlotShape, SlotShapeId,
-    SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
+    FieldSlot, FromLpValue, LpType, LpValue, ModelEnumVariant, SlotDataAccess, SlotMeta, SlotShape,
+    SlotShapeId, SlotValue, SlotValueAccess, SlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError,
 };
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use core::fmt;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -73,16 +76,54 @@ impl FieldSlot for BindingEndpoint {
 
 impl ToLpValue for BindingEndpoint {
     fn to_lp_value(&self) -> LpValue {
-        LpValue::String(self.to_string())
+        match self {
+            Self::Unset => LpValue::Enum {
+                variant: ENDPOINT_UNSET,
+                payload: None,
+            },
+            Self::Bus(value) => LpValue::Enum {
+                variant: ENDPOINT_BUS,
+                payload: Some(Box::new(LpValue::String(value.to_string()))),
+            },
+            Self::Node(value) => LpValue::Enum {
+                variant: ENDPOINT_NODE,
+                payload: Some(Box::new(LpValue::String(value.to_string()))),
+            },
+            Self::Literal(value) => LpValue::Enum {
+                variant: ENDPOINT_LITERAL,
+                payload: Some(Box::new(value.clone())),
+            },
+        }
     }
 }
 
 impl FromLpValue for BindingEndpoint {
     fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
-        let LpValue::String(value) = value else {
-            return Err(ValueRootError::new("expected binding endpoint string"));
+        let LpValue::Enum { variant, payload } = value else {
+            return Err(ValueRootError::new("expected binding endpoint enum"));
         };
-        Self::parse_ref(value).map_err(|error| ValueRootError::new(format!("{error}")))
+        match (*variant, payload.as_deref()) {
+            (ENDPOINT_UNSET, None) => Ok(Self::Unset),
+            (ENDPOINT_BUS, Some(LpValue::String(value))) => BusSlotRef::parse(value)
+                .map(Self::Bus)
+                .map_err(|error| ValueRootError::new(format!("{error}"))),
+            (ENDPOINT_NODE, Some(LpValue::String(value))) => NodeSlotRef::parse(value)
+                .map(Self::Node)
+                .map_err(|error| ValueRootError::new(format!("{error}"))),
+            (ENDPOINT_LITERAL, Some(value)) => Ok(Self::Literal(value.clone())),
+            (ENDPOINT_UNSET, Some(_)) => Err(ValueRootError::new(
+                "binding endpoint Unset variant does not accept a payload",
+            )),
+            (ENDPOINT_BUS | ENDPOINT_NODE, _) => Err(ValueRootError::new(
+                "binding endpoint ref variants require a string payload",
+            )),
+            (ENDPOINT_LITERAL, None) => Err(ValueRootError::new(
+                "binding endpoint Literal variant requires a payload",
+            )),
+            _ => Err(ValueRootError::new(format!(
+                "unknown binding endpoint variant {variant}"
+            ))),
+        }
     }
 }
 
@@ -92,12 +133,37 @@ impl SlotValue for BindingEndpoint {
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
             id: Self::SHAPE_ID,
-            ty: LpType::String,
+            ty: LpType::Enum {
+                name: Some(String::from("BindingEndpoint")),
+                variants: vec![
+                    ModelEnumVariant {
+                        name: String::from("Unset"),
+                        payload: None,
+                    },
+                    ModelEnumVariant {
+                        name: String::from("Bus"),
+                        payload: Some(LpType::String),
+                    },
+                    ModelEnumVariant {
+                        name: String::from("Node"),
+                        payload: Some(LpType::String),
+                    },
+                    ModelEnumVariant {
+                        name: String::from("Literal"),
+                        payload: Some(LpType::Any),
+                    },
+                ],
+            },
             meta: SlotMeta::empty(),
             editor: ValueEditorHint::Plain,
         }
     }
 }
+
+const ENDPOINT_UNSET: u32 = 0;
+const ENDPOINT_BUS: u32 = 1;
+const ENDPOINT_NODE: u32 = 2;
+const ENDPOINT_LITERAL: u32 = 3;
 
 impl fmt::Display for BindingEndpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -222,9 +288,22 @@ mod tests {
             BindingEndpoint::Unset
         );
         assert_eq!(
-            BindingEndpoint::from_lp_value(&LpValue::String(String::new())).unwrap(),
+            BindingEndpoint::from_lp_value(&BindingEndpoint::Unset.to_lp_value()).unwrap(),
             BindingEndpoint::Unset
         );
+    }
+
+    #[test]
+    fn endpoint_round_trips_through_enum_lp_value() {
+        for endpoint in [
+            BindingEndpoint::Unset,
+            BindingEndpoint::parse_ref("bus#visual.out").unwrap(),
+            BindingEndpoint::parse_ref("..shader#output").unwrap(),
+            BindingEndpoint::Literal(LpValue::F32(0.5)),
+        ] {
+            let value = endpoint.to_lp_value();
+            assert_eq!(BindingEndpoint::from_lp_value(&value).unwrap(), endpoint);
+        }
     }
 
     #[test]

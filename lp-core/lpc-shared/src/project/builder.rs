@@ -9,8 +9,9 @@ use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
-    Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
-    RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
+    Dim2uSlot, FixtureSamplingConfig, MapSlot, NodeSlotRef, OptionSlot, PositiveF32,
+    PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath,
+    SourcePath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -118,9 +119,9 @@ impl ProjectBuilder {
         OutputBuilder {
             pin: 0,
             options: OutputDriverOptionsConfig {
-                lum_power: PositiveF32Slot::new(2.0),
+                lum_power: PositiveF32Slot::new(PositiveF32(2.0)),
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
-                brightness: RatioSlot::new(1.0),
+                brightness: RatioSlot::new(Ratio(1.0)),
                 interpolation_enabled: ValueSlot::new(false),
                 dithering_enabled: ValueSlot::new(false),
                 lut_enabled: ValueSlot::new(false),
@@ -281,8 +282,8 @@ impl ShaderBuilder {
         let glsl_file = format!("{node_name}.glsl");
 
         let config = ShaderDef {
-            glsl_path: SourcePathSlot::new(glsl_file),
-            render_order: RenderOrderSlot::new(self.render_order),
+            glsl_path: SourcePathSlot::new(SourcePath(glsl_file)),
+            render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
@@ -387,7 +388,7 @@ impl FixtureBuilder {
                 height: 16,
             }),
             bindings: fixture_binding_defs(texture_loc),
-            sampling: lpc_model::FixtureSamplingConfig::TextureArea,
+            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             mapping: self.mapping,
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),

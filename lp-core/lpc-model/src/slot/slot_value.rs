@@ -318,9 +318,11 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
         LpType::Mat2x2 => "slot.leaf.raw_mat2x2",
         LpType::Mat3x3 => "slot.leaf.raw_mat3x3",
         LpType::Mat4x4 => "slot.leaf.raw_mat4x4",
+        LpType::Any => "slot.leaf.raw_any",
         LpType::Array(_, _) => "slot.leaf.raw_array",
         LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
+        LpType::Enum { .. } => "slot.leaf.raw_enum",
         LpType::Resource => "slot.leaf.raw_resource",
         LpType::Product(_) => "slot.leaf.raw_product",
     })
