@@ -4136,6 +4136,7 @@ dependencies = [
  "lpvm-native",
  "lpvm-wasm",
  "serde",
+ "serde_json",
  "spin",
  "toml",
  "unwinding",

@@ -365,9 +365,9 @@ pub(crate) struct DummyShaderNode {
     tick_count: Arc<AtomicU32>,
 }
 
-#[derive(SlotRecord)]
+#[derive(Default, SlotRecord)]
 pub(crate) struct DummyShaderState {
-    outputs: MapSlot<u32, ValueSlot<f32>>,
+    pub outputs: MapSlot<u32, ValueSlot<f32>>,
 }
 
 impl DummyShaderNode {
@@ -412,7 +412,7 @@ impl NodeRuntime for DummyShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        DummyShaderState::ensure_registered(registry).map(|_| ())
+        DummyShaderState::ensure_default_registered::<DummyShaderState>(registry).map(|_| ())
     }
 }
 

@@ -283,6 +283,17 @@ where
     }
 }
 
+impl<W> lpc_model::slot_codec::SlotWrite for JsonValue<'_, W>
+where
+    W: JsonWrite,
+{
+    type Error = W::Error;
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.writer.out.write_all(bytes)
+    }
+}
+
 #[cfg(feature = "ser-write-json")]
 fn write_serde<W, T>(writer: &mut JsonWriter<W>, value: &T) -> Result<(), JsonWriterError<W::Error>>
 where

@@ -57,3 +57,4 @@ lpc-shared = { path = "../lpc-shared", default-features = false, features = ["st
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
 lpc-view = { path = "../lpc-view", default-features = false, features = ["std"] }
 env_logger = { workspace = true }
+serde_json = { workspace = true }
