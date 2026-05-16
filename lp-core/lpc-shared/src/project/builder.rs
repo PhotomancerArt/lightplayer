@@ -504,7 +504,7 @@ mod tests {
         let project_toml_str = core::str::from_utf8(&project_toml_bytes).unwrap();
 
         let def: ProjectDef = toml::from_str(project_toml_str).unwrap();
-        assert_eq!(def.kind, ProjectDef::KIND);
+        assert!(def.is_project_kind());
         assert_eq!(def.name(), Some("Test Project"));
         assert!(def.nodes.entries.contains_key("texture"));
     }
