@@ -90,17 +90,6 @@ impl NodeDef {
         }
     }
 
-    /// Parse a TOML node artifact into the canonical node-definition enum.
-    pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).map_err(|error| {
-            NodeDefParseError::Toml {
-                error: format!("register slot shapes: {error}"),
-            }
-        })?;
-        Self::from_toml_str_with_registry(&registry, text)
-    }
-
     /// Parse a TOML node artifact through a caller-provided slot registry.
     pub fn from_toml_str_with_registry(
         registry: &SlotShapeRegistry,
