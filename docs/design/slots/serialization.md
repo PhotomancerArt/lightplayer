@@ -92,6 +92,13 @@ questions like "what fields does this record have?", "which variant is active?",
 and "how do I mutate this field?", while shared SlotCodec helpers handle JSON,
 TOML, maps, options, values, discriminators, and error reporting.
 
+`#[derive(Slotted)]` is the primary source of this machinery for structured
+types. It covers named-field records, one-field tuple wrappers, and structured
+enums. For enums, derived slot metadata uses Rust variant names as authored
+discriminators by default and Rust-style `#[default]` to choose the default
+variant. This keeps discriminator lists attached to the model instead of
+duplicated in hand-written serializer code.
+
 That code is allowed to be opinionated. Unknown fields are errors until schema
 versioning exists. Discriminators are explicit. Field casing should match the
 slot/domain model unless a specific compact syntax is explicitly enabled.

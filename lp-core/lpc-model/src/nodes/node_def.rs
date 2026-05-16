@@ -15,9 +15,7 @@ use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::ShaderDef;
 use crate::nodes::texture::TextureDef;
 use crate::{
-    EnumSlot, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotEnumShape, SlotMeta,
-    SlotMutAccess, SlotMutationError, SlotShape, SlotShapeId, SlotShapeRegistry, Slotted,
-    SlottedEnum, SlottedEnumMut, StaticSlotShape,
+    EnumSlot, SlotAccess, SlotDataAccess, SlotShapeId, SlotShapeRegistry, Slotted, StaticSlotShape,
 };
 
 /// Authored body of a node artifact.
@@ -25,8 +23,9 @@ use crate::{
 /// A `NodeDef` is source data: it is what a TOML artifact defines before the
 /// engine instantiates a runtime node. Project artifacts are included because
 /// a project defines the root project node and its child node invocations.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Slotted)]
 pub enum NodeDef {
+    #[default]
     Project(ProjectDef),
     Texture(TextureDef),
     Shader(ShaderDef),
@@ -133,74 +132,6 @@ impl NodeDef {
     }
 }
 
-impl Default for NodeDef {
-    fn default() -> Self {
-        Self::Project(ProjectDef::default())
-    }
-}
-
-impl SlotEnumShape for NodeDef {
-    fn slot_enum_shape() -> SlotShape {
-        use crate::slot::shape::{reference, variant};
-
-        SlotShape::Enum {
-            meta: SlotMeta::empty(),
-            variants: alloc::vec![
-                variant(ProjectDef::KIND, reference(ProjectDef::SHAPE_ID)),
-                variant(TextureDef::KIND, reference(TextureDef::SHAPE_ID)),
-                variant(ShaderDef::KIND, reference(ShaderDef::SHAPE_ID)),
-                variant(OutputDef::KIND, reference(OutputDef::SHAPE_ID)),
-                variant(FixtureDef::KIND, reference(FixtureDef::SHAPE_ID)),
-            ],
-        }
-    }
-}
-
-impl SlottedEnum for NodeDef {
-    fn variant(&self) -> &str {
-        self.kind_name()
-    }
-
-    fn data(&self) -> SlotDataAccess<'_> {
-        match self {
-            Self::Project(def) => def.data(),
-            Self::Texture(def) => def.data(),
-            Self::Shader(def) => def.data(),
-            Self::Output(def) => def.data(),
-            Self::Fixture(def) => def.data(),
-        }
-    }
-}
-
-impl SlottedEnumMut for NodeDef {
-    fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        match self {
-            Self::Project(def) => def.data_mut(),
-            Self::Texture(def) => def.data_mut(),
-            Self::Shader(def) => def.data_mut(),
-            Self::Output(def) => def.data_mut(),
-            Self::Fixture(def) => def.data_mut(),
-        }
-    }
-
-    fn set_variant_default(&mut self, variant: &str) -> Result<(), SlotMutationError> {
-        *self = match variant {
-            ProjectDef::KIND => Self::Project(ProjectDef::default()),
-            TextureDef::KIND => Self::Texture(TextureDef::default()),
-            ShaderDef::KIND => Self::Shader(ShaderDef::default()),
-            OutputDef::KIND => Self::Output(OutputDef::default()),
-            FixtureDef::KIND => Self::Fixture(FixtureDef::default()),
-            other => {
-                return Err(SlotMutationError::unknown_variant(format!(
-                    "unknown NodeDef variant {other:?}; expected one of: {}",
-                    NODE_DEF_KIND_NAMES.join(", ")
-                )));
-            }
-        };
-        Ok(())
-    }
-}
-
 impl SlotAccess for NodeDef {
     fn shape_id(&self) -> SlotShapeId {
         match self {
@@ -247,13 +178,7 @@ impl core::fmt::Display for NodeDefParseError {
     }
 }
 
-const NODE_DEF_KIND_NAMES: &[&str] = &[
-    ProjectDef::KIND,
-    TextureDef::KIND,
-    ShaderDef::KIND,
-    OutputDef::KIND,
-    FixtureDef::KIND,
-];
+const NODE_DEF_KIND_NAMES: &[&str] = &["Project", "Texture", "Shader", "Output", "Fixture"];
 
 fn reject_unknown_kind(payload: &toml::Value) -> Result<(), NodeDefParseError> {
     let kind = read_kind(payload)?;
@@ -331,7 +256,7 @@ mod tests {
         let project = NodeDef::from_toml_str_with_registry(
             &registry,
             r#"
-kind = "project"
+kind = "Project"
 
 [nodes.texture]
 artifact = "./texture.toml"
@@ -343,7 +268,7 @@ artifact = "./texture.toml"
         let texture = NodeDef::from_toml_str_with_registry(
             &registry,
             r#"
-kind = "texture"
+kind = "Texture"
 size = { width = 64, height = 48 }
 "#,
         )
@@ -358,7 +283,7 @@ size = { width = 64, height = 48 }
         let shader = NodeDef::from_toml_str_with_registry(
             &registry,
             r#"
-kind = "shader"
+kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 2
 
@@ -372,7 +297,7 @@ target = "bus#visual.out"
         let output = NodeDef::from_toml_str_with_registry(
             &registry,
             r#"
-kind = "output"
+kind = "Output"
 pin = 18
 
 [options]
@@ -385,9 +310,9 @@ brightness = 0.5
         let fixture = NodeDef::from_toml_str_with_registry(
             &registry,
             r#"
-kind = "fixture"
+kind = "Fixture"
 render_size = { width = 8, height = 8 }
-mapping = { kind = "path_points" }
+mapping = { kind = "PathPoints" }
 "#,
         )
         .expect("fixture");
@@ -427,7 +352,7 @@ mapping = { kind = "path_points" }
         let registry = registry();
         let payload = toml::from_str::<toml::Value>(
             r#"
-kind = "texture"
+kind = "Texture"
 size = { width = 1, height = 2 }
 "#,
         )
@@ -444,7 +369,7 @@ size = { width = 1, height = 2 }
         let SlotDataAccess::Enum(en) = artifact.data() else {
             panic!("artifact wrapper should expose node enum data");
         };
-        assert_eq!(en.variant(), "texture");
+        assert_eq!(en.variant(), "Texture");
         let NodeDef::Texture(def) = artifact.node_def() else {
             panic!("expected texture");
         };
@@ -459,7 +384,7 @@ size = { width = 1, height = 2 }
         let def = NodeDef::from_toml_str_with_registry(
             &registry,
             r#"
-kind = "texture"
+kind = "Texture"
 size = { width = 1, height = 2 }
 "#,
         )
@@ -479,7 +404,7 @@ size = { width = 1, height = 2 }
         let def = NodeDef::from_toml_str_with_registry(
             &registry,
             r##"
-kind = "output"
+kind = "Output"
 pin = 18
 
 [bindings.main]
@@ -496,7 +421,7 @@ value = 0.25
         let def = NodeDef::from_toml_str_with_registry(
             &registry,
             r##"
-kind = "output"
+kind = "Output"
 pin = 18
 
 [bindings.main]

@@ -7,7 +7,7 @@ use lpc_model::{
 
 #[derive(lpc_model::Slotted)]
 struct AccessorRoot {
-    output: ValueSlot<f32>,
+    pub output: ValueSlot<f32>,
 }
 
 #[test]

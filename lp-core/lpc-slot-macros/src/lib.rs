@@ -54,12 +54,15 @@
 use proc_macro::TokenStream;
 
 mod attr;
-mod record;
+mod slotted;
+mod slotted_enum;
+mod slotted_record;
+mod slotted_wrapper;
 mod value;
 
-#[proc_macro_derive(Slotted, attributes(slot))]
+#[proc_macro_derive(Slotted, attributes(slot, default))]
 pub fn derive_slotted(input: TokenStream) -> TokenStream {
-    record::derive(input.into()).into()
+    slotted::derive(input.into()).into()
 }
 
 #[proc_macro_derive(SlotValue, attributes(slot_value))]

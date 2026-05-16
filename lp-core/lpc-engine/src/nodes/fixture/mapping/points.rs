@@ -19,6 +19,7 @@ pub fn generate_mapping_points(
     texture_height: u32,
 ) -> Vec<MappingPoint> {
     match config {
+        MappingConfig::Unset => Vec::new(),
         MappingConfig::PathPoints {
             paths,
             sample_diameter,

@@ -710,6 +710,7 @@ fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
 
 fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
     match config {
+        MappingConfig::Unset => 0,
         MappingConfig::PathPoints { paths, .. } => {
             let mut total = 0u32;
             for path in paths.entries.values() {

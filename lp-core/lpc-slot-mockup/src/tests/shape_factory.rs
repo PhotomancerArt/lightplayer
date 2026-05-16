@@ -102,7 +102,7 @@ fn shape_factory_created_object_can_switch_enum_then_mutate_payload() {
         &registry,
         &SlotPath::parse("mapping").unwrap(),
         lpc_model::Revision::new(30),
-        "square",
+        "Square",
     )
     .unwrap();
     set_slot_value(

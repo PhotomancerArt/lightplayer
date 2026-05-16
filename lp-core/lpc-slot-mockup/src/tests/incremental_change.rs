@@ -11,7 +11,7 @@ fn incremental_changes_patch_client_state() {
     harness.print_client_tree("engine.shader_node");
 
     println!(
-        "server updating source.fixture#mapping.path_points.paths[0].ring_array.ring_lamp_counts"
+        "server updating source.fixture#mapping.PathPoints.paths[0].RingArray.ring_lamp_counts"
     );
     harness
         .runtime
@@ -21,7 +21,7 @@ fn incremental_changes_patch_client_state() {
     harness.print_client_tree("source.fixture");
     let ring_lamp_counts = select(
         harness.client.roots.get("source.fixture").unwrap(),
-        "mapping.path_points.paths[0].ring_array.ring_lamp_counts",
+        "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts",
     );
     assert_map_has_key(ring_lamp_counts, "", SlotMapKey::U32(3));
     assert_eq!(
@@ -86,7 +86,7 @@ fn incremental_changes_patch_client_state() {
     assert_eq!(
         select(
             harness.client.roots.get("source.fixture").unwrap(),
-            "mapping.disabled",
+            "mapping.Disabled",
         ),
         &lpc_model::SlotData::Unit {
             revision: Revision::new(8),

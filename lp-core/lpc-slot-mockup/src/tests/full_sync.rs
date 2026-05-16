@@ -27,7 +27,7 @@ fn full_sync_copies_server_roots_to_client() {
     let fixture = harness.client.roots.get("source.fixture").unwrap();
     let ring_lamp_counts = select(
         fixture,
-        "mapping.path_points.paths[0].ring_array.ring_lamp_counts",
+        "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts",
     );
     assert_map_has_key(ring_lamp_counts, "", SlotMapKey::U32(0));
     assert_map_has_key(ring_lamp_counts, "", SlotMapKey::U32(1));

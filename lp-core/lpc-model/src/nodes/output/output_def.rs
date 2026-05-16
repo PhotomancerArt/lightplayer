@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn test_output_def_flat_toml_deserialize() {
         let toml = r#"
-kind = "output"
+kind = "Output"
 pin = 18
 
 [options]

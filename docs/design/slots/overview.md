@@ -94,9 +94,10 @@ view delegation has a real use case.
 
 A slot enum is a closed set of variants. It usually maps to a Rust enum.
 
-Normal serialized enums should use explicit discriminators. Variant names should
-remain close to the Rust/domain names unless a specific compact syntax is
-enabled for that enum.
+Normal serialized enums should use explicit discriminators. `#[derive(Slotted)]`
+uses the Rust variant name as the slot discriminator by default, such as
+`PathPoints`, `RingArray`, or `Texture`. `#[slot(name = "...")]` is an escape
+hatch, not the normal style.
 
 Use slot enums when the variant payload is slot-structured data: callers should
 be able to address, mutate, sync, or validate fields inside the active variant
@@ -108,6 +109,12 @@ enum implements `SlottedEnum` / `SlottedEnumMut` and exposes the active variant
 data; `EnumSlot<T>` owns the active-variant revision. This keeps variant
 selection first class without pretending a plain Rust enum field can carry its
 own slot revision.
+
+For structured enums, `Slotted` supports unit variants, one-field tuple wrapper
+variants, and named-field record variants. Multi-field tuple variants should be
+written as named variants so slot paths have field names. Enums with multiple
+variants use Rust-style `#[default]` on the neutral/default variant; if no real
+domain variant is an honest default, add an explicit sentinel such as `Unset`.
 
 ### Slot Values
 

@@ -724,7 +724,7 @@ mod tests {
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.broken]
 artifact = "./broken.toml"
@@ -767,7 +767,7 @@ artifact = "./broken.toml"
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.weird]
 artifact = "./weird.toml"
@@ -795,7 +795,7 @@ artifact = "./weird.toml"
         fs.write_file(
             "/fixture.toml".as_path(),
             br#"
-kind = "fixture"
+kind = "Fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
@@ -808,11 +808,11 @@ source = "..missing#output"
 target = "bus#control.out"
 
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 sample_diameter = 2.0
 
 [mapping.paths.0]
-kind = "ring_array"
+kind = "RingArray"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0
@@ -848,7 +848,7 @@ order = "inner_first"
         fs.write_file(
             "/fixture.toml".as_path(),
             br#"
-kind = "fixture"
+kind = "Fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
@@ -861,11 +861,11 @@ source = "/texture#output"
 target = "bus#control.out"
 
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 sample_diameter = 2.0
 
 [mapping.paths.0]
-kind = "ring_array"
+kind = "RingArray"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0
@@ -899,7 +899,7 @@ order = "inner_first"
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 name = "basic"
 
 [nodes.output]
@@ -919,7 +919,7 @@ artifact = "./fixture.toml"
         fs.write_file(
             "/texture.toml".as_path(),
             br#"
-kind = "texture"
+kind = "Texture"
 [size]
 width = 16
 height = 16
@@ -932,7 +932,7 @@ source = "bus#visual.out"
         fs.write_file(
             "/shader.toml".as_path(),
             br#"
-kind = "shader"
+kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 
@@ -949,7 +949,7 @@ target = "bus#visual.out"
         fs.write_file(
             "/output.toml".as_path(),
             br#"
-kind = "output"
+kind = "Output"
 pin = 4
 
 [bindings.input]
@@ -960,7 +960,7 @@ source = "bus#control.out"
         fs.write_file(
             "/fixture.toml".as_path(),
             br#"
-kind = "fixture"
+kind = "Fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
@@ -973,11 +973,11 @@ source = "bus#visual.out"
 target = "bus#control.out"
 
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 sample_diameter = 2.0
 
 [mapping.paths.0]
-kind = "ring_array"
+kind = "RingArray"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0

@@ -5,7 +5,7 @@ use crate::{MapSlot, OptionSlot, Slotted, ValueSlot};
 
 /// Authored root project node definition.
 ///
-/// A project is a node artifact with `kind = "project"`. Its `nodes` table is
+/// A project is a node artifact with `kind = "Project"`. Its `nodes` table is
 /// the explicit source of child node invocations; the runtime no longer
 /// discovers children from filesystem directories.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, Slotted)]
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn project_def_deserializes_named_nodes() {
         let toml = r#"
-            kind = "project"
+            kind = "Project"
             name = "basic"
 
             [nodes.texture]

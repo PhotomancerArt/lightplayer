@@ -139,7 +139,7 @@ fn dynamic_slot_codec_reads_fixture_enum_payloads() {
     let object = registry
         .read_slot_json(
             FixtureDef::SHAPE_ID,
-            r#"{"mapping":{"kind":"square","origin":[0.25,0.75],"size":[0.5,0.25]}}"#,
+            r#"{"mapping":{"kind":"Square","origin":[0.25,0.75],"size":[0.5,0.25]}}"#,
         )
         .unwrap();
     let Ok(fixture) = object.into_any().downcast::<FixtureDef>() else {
@@ -266,9 +266,9 @@ fn dynamic_slot_codec_rejects_invalid_discriminators() {
     };
 
     assert!(error.message().contains("hex_grid"));
-    assert!(error.message().contains("disabled"));
-    assert!(error.message().contains("square"));
-    assert!(error.message().contains("path_points"));
+    assert!(error.message().contains("Disabled"));
+    assert!(error.message().contains("Square"));
+    assert!(error.message().contains("PathPoints"));
 }
 
 fn registry() -> lpc_model::SlotShapeRegistry {
