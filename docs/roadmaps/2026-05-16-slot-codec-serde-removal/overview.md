@@ -1,15 +1,19 @@
-# Slot Codec Serde Removal Roadmap
+# SlotCodec Domain Serialization Roadmap
 
 ## Motivation
 
-Serde-generated code is a major contributor to embedded firmware size, and
-LightPlayer needs that flash and RAM budget for the on-device GLSL JIT. The
-slot system already models the domain: records, values, maps, options, enums,
-defaults, revisions, editor hints, and paths. Serialization should become a
+Serde-generated code for large domain models can become a major contributor to
+embedded firmware size, and LightPlayer needs that flash and RAM budget for the
+on-device GLSL JIT. The slot system already models the domain: records, values,
+maps, options, enums, defaults, revisions, editor hints, and paths.
+Serialization for slot-authored project/node definitions should therefore be a
 projection of that slot model instead of a parallel Serde model.
 
-The migration should be practical, not ceremonial. The goal is not to delete
-derives first; it is to stop depending on Serde for real behavior first.
+The migration is practical, not ceremonial. The goal is not to delete Serde
+everywhere; it is to keep per-domain-model firmware cost low by moving authored
+slot data onto generic SlotCodec paths. Serde remains acceptable for protocol
+shells, tests, host tooling, and small non-slot surfaces when measurement shows
+the cost is flat.
 
 ## Architecture
 
@@ -46,6 +50,16 @@ Structured enum fields use `EnumSlot<T>`. Atomic enum values use
 `ValueSlot<T>` backed by `LpValue::Enum`. Raw Rust enums do not carry slot
 revision state.
 
+## Serialization Policy
+
+- Slot-authored domain data loads and writes through SlotCodec on firmware.
+- Serde is allowed for wire envelopes, small protocol wrappers, tests, and host
+  tooling.
+- Avoid adding serde-derived firmware parse paths for full slot/domain trees.
+- Keep large payloads on manual streaming writers where buffering would hurt
+  RAM.
+- Treat firmware size as a measurement gate, not a theory.
+
 ## Migration Strategy
 
 Use "switch it and fix it":
@@ -55,13 +69,16 @@ Use "switch it and fix it":
 3. Switch that path from serde to slot codec.
 4. Fix tests and behavior until the path works.
 5. Repeat for the next path.
-6. Remove serde derives, helpers, tests, and dependencies only after the slot
-   paths own behavior.
+6. Remove serde-derived behavior only when a concrete path no longer needs it
+   and measurement supports the cleanup.
 
 ## Alternatives Considered
 
 - Remove serde derives first: rejected because it creates too much breakage
   before proving the replacement paths.
+- Remove Serde wholesale from `lpc-model`: deferred/rejected for now. Firmware
+  measurement after M3 showed `serde_core` is a modest flat cost while
+  SlotCodec already reduced `lpc_model` code size substantially.
 - Generate Serde-like per-type parsers: rejected because binary size is a core
   motivation and generic slot mutation now exists.
 - Keep `#[slot(enum)]` for raw enum fields: rejected because raw enum fields
@@ -74,8 +91,11 @@ Use "switch it and fix it":
 - Semantic leaf codecs may need more custom syntax than expected.
 - Message envelopes may live partly outside `lpc-model`, so M2 may uncover
   cross-crate boundaries.
-- Removing serde from slot infrastructure may be harder than removing it from
-  domain records because schema snapshots currently derive serde.
+- Keeping Serde available can accidentally reintroduce per-type firmware bloat
+  if new authored domain paths use serde-derived parsing instead of SlotCodec.
+- Slot infrastructure and wire snapshots still derive serde in places; this is
+  acceptable while bloat remains flat, but should be revisited if measurements
+  regress.
 
 ## Scope Estimate
 
@@ -84,4 +104,5 @@ This is a four-milestone migration:
 - M1 removes confusing enum transitional code.
 - M2 switches one real JSON/message path.
 - M3 switches authored definition/artifact loading.
-- M4 removes serde from `lpc-model` and validates the dependency cleanup.
+- M4 stabilizes the policy, removes obsolete source crates, validates firmware
+  size, and records the decision not to remove Serde wholesale yet.

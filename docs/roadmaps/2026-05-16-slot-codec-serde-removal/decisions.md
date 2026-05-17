@@ -1,11 +1,12 @@
-# Slot Codec Serde Removal Decisions
+# SlotCodec Domain Serialization Decisions
 
-#### Switch Behavior Before Removing Serde
+#### Switch Behavior Before Removing Serde-Derived Domain Paths
 
 - **Decision:** Keep serde derives and helpers while switching real call paths
   to SlotCodec.
-- **Why:** This lowers migration risk and makes serde removal a final proof
-  instead of the first breaking change.
+- **Why:** This lowers migration risk and makes removal of expensive
+  serde-derived domain behavior a final proof instead of the first breaking
+  change.
 - **Rejected alternatives:** Delete serde derives first; rewrite all types in
   one pass.
 
@@ -25,10 +26,32 @@
 - **Rejected alternatives:** Start with definitions first; wait until all serde
   derives are removed.
 
-#### Remove Serde Last
+#### Keep Serde Unless Measurement Says Otherwise
 
-- **Decision:** Drop `serde` / `serde_json` from `lpc-model` only after message
-  and definition paths use SlotCodec.
-- **Why:** Remaining derives are harmless during migration, and keeping them
-  avoids mixing behavior changes with dependency cleanup.
+- **Decision:** Do not drop `serde` / `serde_json` from `lpc-model` as a goal
+  by itself. Keep Serde available where it is convenient and cheap, while
+  ensuring firmware-facing slot-authored domain data uses SlotCodec.
+- **Why:** Firmware measurement after merging `main` showed the SlotCodec path
+  reduced `lpc_model` size while `serde_core` stayed a modest flat cost.
+  Removing Serde wholesale would force us to reimplement useful non-slot
+  protocol/tooling behavior without a measured payoff.
 - **Rejected alternatives:** Treat dependency removal as the first milestone.
+
+#### Measure Bloat At Firmware Boundaries
+
+- **Decision:** Use `fw-esp32` release builds and `cargo bloat` as the primary
+  acceptance check for serialization-size decisions.
+- **Why:** Source-level codegen size is only a proxy. The firmware link result
+  is what matters for embedded flash pressure.
+- **Commands:** See
+  `docs/reports/2026-05-17-slotcodec-bloat-check.md`.
+
+#### Retire Source Crate, Keep Wire Crate
+
+- **Decision:** Retire `lpc-source`; keep `lpc-wire` for protocol envelopes and
+  slot sync/mutation payloads.
+- **Why:** Authored source definitions now live in `lpc-model` as slot-native
+  domain data. `lpc-wire` still owns client/server protocol vocabulary and can
+  use Serde for small shells while slot payloads remain slot-shaped.
+- **Rejected alternatives:** Keep `lpc-source` as a compatibility layer; delete
+  `lpc-wire` before replacing active client/server protocol paths.

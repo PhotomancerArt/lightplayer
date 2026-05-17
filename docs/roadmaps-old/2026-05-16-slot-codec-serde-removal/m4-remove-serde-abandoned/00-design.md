@@ -1,5 +1,11 @@
 # M4 Remove Serde From `lpc-model` Design
 
+> Superseded: M4 no longer removes Serde wholesale from `lpc-model`.
+> The current policy is documented in `../m4-remove-serde.md` and
+> `status.md`: keep SlotCodec as the firmware path for slot-authored domain
+> data, keep Serde where it is useful and cheap, and revisit specific Serde
+> paths only with firmware bloat evidence.
+
 ## Scope
 
 M4 removes Serde, Serde JSON, Schemars, and serde-shaped model behavior from

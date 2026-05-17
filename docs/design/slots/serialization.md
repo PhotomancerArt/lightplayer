@@ -1,8 +1,9 @@
 # SlotCodec Serialization
 
 `SlotCodec` is LightPlayer's slot-native serialization system. It exists so the
-slot model can be the source of truth for persisted and wire data, instead of
-requiring every domain concept to be expressed in both slots and Serde.
+slot model can be the source of truth for slot-authored persisted data and
+slot-shaped wire payloads, instead of requiring every domain concept to be
+expressed in both slots and Serde.
 
 The design is intentionally opinionated. This is not a general-purpose Rust
 serialization framework. It only needs to serve the shapes LightPlayer actually
@@ -28,16 +29,41 @@ that can flow through the system, the shapes tools can inspect, and the values
 that can be authored or synchronized. Serialization should be another projection
 of that model.
 
-The immediate production pressure is embedded size. Generated Serde code is a
-large part of firmware code size, and the ESP32-C6 target must keep enough flash
-and RAM available for the on-device GLSL JIT compiler. Serialization is
-supporting infrastructure; it must not crowd out the compiler, shader runtime,
-or resource buffers.
+The immediate production pressure is embedded size. Generated per-domain-model
+Serde code can become a large part of firmware code size, and the ESP32-C6
+target must keep enough flash and RAM available for the on-device GLSL JIT
+compiler. Serialization is supporting infrastructure; it must not crowd out the
+compiler, shader runtime, or resource buffers.
 
 The secondary pressure is conceptual simplicity. In LightPlayer's domain, data
 modeling should mean "define the slot shape." It should not also require a
-parallel Serde language unless we are deliberately using Serde as a host-only
-convenience during migration.
+parallel Serde language for firmware-authored domain loading.
+
+Serde is still useful infrastructure. It may remain in `lpc-model`, `lpc-wire`,
+tests, host tooling, and small protocol envelopes when measurement shows the
+cost is flat. The design target is not "no Serde anywhere"; the target is "no
+large duplicated per-domain-model serialization path on firmware."
+
+## Serde Boundary
+
+Use SlotCodec for:
+
+- authored project/node definition loading on firmware
+- slot-shaped data payloads
+- `SlotData`/`SlotShape` paths when bloat measurements show Serde is too costly
+- future binary or compact slot-native formats
+
+Serde is acceptable for:
+
+- small client/server message envelopes
+- protocol shells whose fields are not full slot-authored domain trees
+- tests and host-side tooling
+- schema/debugging helpers when they do not affect firmware size materially
+
+The current measured posture is documented in
+`docs/reports/2026-05-17-slotcodec-bloat-check.md`: after switching authored
+domain loading to SlotCodec, `lpc_model` and `lpc_wire` firmware text size
+dropped while `serde_core` remained roughly flat around 22 KiB.
 
 ## Serde Influence
 
@@ -212,6 +238,8 @@ Guidelines:
   generated surface.
 - Track generated Rust size and firmware binary size before and after major
   SlotCodec changes.
+- Re-run the firmware bloat check before removing useful Serde surfaces or
+  before adding new serde-derived domain loading paths.
 
 ## Minimize The Monomorphs Pass
 
@@ -286,5 +314,5 @@ partial object.
 - Whether compact single-value enum syntax such as `{ ref = "..." }` and
   `{ value = 123 }` is worth supporting in generated code.
 - How much path/span tracking is required for authored TOML errors.
-- What the first production size metric should be, and which command should be
-  treated as the pre/post comparison gate.
+- Whether any remaining Serde serialization of `SlotData`, `SlotShape`, or
+  `LpValue` is large enough to justify targeted custom codecs.

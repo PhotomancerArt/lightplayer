@@ -1,9 +1,12 @@
-# Slot Codec Serde Removal Notes
+# SlotCodec Domain Serialization Notes
 
 ## Scope
 
-Move `lpc-model` away from Serde-backed persistence and wire payload handling
-until the model crate can drop its direct `serde` and `serde_json` dependencies.
+Move slot-authored domain persistence and slot-shaped wire payload handling onto
+SlotCodec. Do not treat direct `serde` and `serde_json` dependencies as a
+problem by themselves; they are acceptable for protocol shells, tests, host
+tooling, and other small non-slot surfaces when firmware measurements stay
+flat.
 
 The migration strategy is "switch it and fix it":
 
@@ -11,7 +14,8 @@ The migration strategy is "switch it and fix it":
   phases
 - switch one real application path at a time to the slot registry and slot codec
 - fix behavior and tests after each switch
-- remove serde only after the slot paths own the behavior
+- remove specific serde-derived behavior only after slot paths own the behavior
+  and measurement supports the cleanup
 
 ## Current State
 
@@ -25,9 +29,9 @@ The slot-native infrastructure is now credible enough to drive production paths:
 - `ValueSlot<T>` owns revision for atomic semantic leaves
 - `EnumSlot<T>` owns active-variant revision for structured slot enums
 
-The old plan lives at:
+The old plan is archived at:
 
-- `docs/plans/2026-05-15-remove-serde-from-lpc-model/00-notes.md`
+- `docs/plans-old/2026-05-15-remove-serde-from-lpc-model/00-notes.md`
 
 Treat it as historical notes. This roadmap supersedes its execution order.
 
@@ -50,7 +54,8 @@ This leaves one rule:
 
 - This is roadmap-level work.
 - Milestone 1 is cleanup and can probably be executed directly.
-- The main migration should switch real call sites first and remove serde last.
+- The main migration should switch real call sites first and only remove
+  expensive serde-derived behavior when measurements justify it.
 - Existing serde annotations and helpers can stay during the switch.
 - Starting with messages is acceptable and probably a good first real path.
 - Defs/artifact loading can follow after message paths.
@@ -80,6 +85,7 @@ Context: `SlotShape`, `SlotData`, `SlotMeta`, `Revision`, `LpType`, and
 `LpValue` still derive serde and keep the dependency alive even after domain
 paths switch.
 
-Suggested direction: defer until Milestone 4. First stop using serde in real
-message/definition paths; then remove derives and replace snapshot/debug tests
-with slot-codec or purpose-built codecs.
+Decision update: defer indefinitely unless firmware bloat measurements point at
+these exact paths. The current post-merge bloat check shows `serde_core` is a
+modest flat cost and `lpc_model` shrank after moving authored loading to
+SlotCodec.

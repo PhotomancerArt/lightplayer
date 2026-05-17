@@ -1,5 +1,8 @@
 # Phase 5: Cleanup And Validation
 
+> Superseded by the measured M4 policy. Validation now includes firmware bloat
+> checks and no longer requires `lpc-model` to be Serde-free.
+
 ## Scope Of Phase
 
 Finish dependency removal, update docs, and run final validation.

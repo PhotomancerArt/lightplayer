@@ -1,5 +1,9 @@
 # Phase 3: Remove Domain Serde
 
+> Superseded by the measured M4 policy. The active rule is to avoid
+> serde-derived firmware parsing for full slot-authored domain trees, not to
+> delete every Serde derive from model types.
+
 ## Scope Of Phase
 
 Remove Serde derives, imports, attributes, and manual impls from domain model

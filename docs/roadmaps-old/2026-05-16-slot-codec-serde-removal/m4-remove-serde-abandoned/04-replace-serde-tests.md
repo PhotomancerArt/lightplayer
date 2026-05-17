@@ -1,5 +1,9 @@
 # Phase 4: Replace Serde Tests
 
+> Superseded by the measured M4 policy. Keep Serde tests when they cover
+> supported protocol/tooling behavior; replace only tests for paths that have
+> intentionally moved to SlotCodec.
+
 ## Scope Of Phase
 
 Replace or delete `lpc-model` tests that only exercise Serde behavior.

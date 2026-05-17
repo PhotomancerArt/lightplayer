@@ -1,5 +1,9 @@
 # Phase 2: Add Slot Metadata Codecs
 
+> Superseded by the measured M4 policy. Keep metadata Serde derives for now;
+> add explicit metadata codecs only if firmware bloat or protocol needs point
+> at this exact surface.
+
 ## Scope Of Phase
 
 Add explicit codecs for slot metadata that currently relies on Serde. These

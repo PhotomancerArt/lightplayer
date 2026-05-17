@@ -1,5 +1,9 @@
 # Phase 1: Remove Schema-Gen Surface
 
+> Superseded by the measured M4 policy. Do not remove `schema-gen` or
+> `schemars` as part of automatic SlotCodec stabilization unless a fresh
+> decision calls for it.
+
 ## Scope Of Phase
 
 Remove `schema-gen` from `lpc-model` and downstream feature references that

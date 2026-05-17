@@ -1,5 +1,10 @@
 # M4 Remove Serde From `lpc-model` Notes
 
+> Superseded: these notes record the attempted wholesale Serde removal plan.
+> M4 changed after firmware bloat measurement. Keep Serde available for
+> protocol/tooling surfaces, and only replace specific Serde paths when
+> measurements justify it.
+
 ## Scope
 
 Remove Serde as a direct dependency and behavioral surface from `lpc-model`.
