@@ -56,7 +56,7 @@ pub mod sync;
 pub use value::constraint;
 pub use value::kind;
 
-pub use artifact::{ArtifactLocator, SrcArtifactLibRef};
+pub use artifact::{ArtifactLocator, ArtifactReadRoot, SrcArtifactLibRef};
 pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,

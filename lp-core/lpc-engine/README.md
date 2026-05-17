@@ -27,9 +27,9 @@ from `engine::test_support` to validate demand roots, bus binding selection,
 same-frame caching, recursive resolution, cycle detection, and revised values
 without depending on concrete node implementations.
 
-Unlike `lpc-model`, `lpc-source`, and `lpc-wire`, this crate may depend on
-`lps-shared` because it is responsible for converting between `LpsValue` /
-`LpsType` and `LpValue` / `LpType`.
+Unlike `lpc-model` and `lpc-wire`, this crate may depend on `lps-shared`
+because it is responsible for converting between `LpsValue` / `LpsType` and
+`LpValue` / `LpType`.
 
 **Produced values:** demand-driven resolution caches
 [`resolver::production::Production`]: an `LpValue` plus revision provenance.

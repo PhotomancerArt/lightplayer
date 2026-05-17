@@ -6,12 +6,11 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
     NodeName, Revision, SlotPath, SlotShapeRegistry,
 };
-use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
 

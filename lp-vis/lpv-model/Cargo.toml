@@ -10,7 +10,7 @@ rust-version.workspace = true
 [features]
 default = []
 std = ["dep:lpfs", "lpc-model/std", "lpc-source/std", "lpfs/std", "toml/std"]
-schema-gen = ["std", "lps-shared/schemars", "dep:schemars", "lpc-model/schema-gen", "lpc-source/schema-gen"]
+schema-gen = ["std", "lps-shared/schemars", "dep:schemars", "lpc-source/schema-gen"]
 
 [dependencies]
 lps-shared = { path = "../../lp-shader/lps-shared" }

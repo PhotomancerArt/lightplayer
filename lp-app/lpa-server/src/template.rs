@@ -2,9 +2,9 @@
 //!
 //! Provides functions to create default project templates that work with any LpFs implementation.
 //!
-//! Node definitions are authored as static TOML matching [`lpc_source::node`] serde
-//! shape (same bytes as `toml::to_string` on the host). `toml` is not used here so `lpa-server`
-//! stays compatible with `no_std` firmware builds where unified `toml` features can pull `std`.
+//! Node definitions are authored as static SlotCodec TOML. `toml` is not used
+//! here so `lpa-server` stays compatible with `no_std` firmware builds where
+//! unified `toml` features can pull `std`.
 
 extern crate alloc;
 

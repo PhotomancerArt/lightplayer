@@ -3,7 +3,6 @@ members = [
     # lp-base workspace members
     "lp-base/lp-perf",
     "lp-base/lpfs",
-    "lp-vis/lpv-model",
     # lp-app workspace members
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
@@ -19,7 +18,6 @@ members = [
     "lp-core/lpc-slot-codegen",
     "lp-core/lpc-slot-macros",
     "lp-core/lpc-slot-mockup",
-    "lp-core/lpc-source",
     "lp-core/lpc-wire",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
@@ -59,7 +57,6 @@ resolver = "2"
 default-members = [
     # lp-base workspace members
     "lp-base/lpfs",
-    "lp-vis/lpv-model",
     # lp-app workspace members
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
@@ -70,7 +67,6 @@ default-members = [
     "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lpc-model",
-    "lp-core/lpc-source",
     "lp-core/lpc-wire",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",

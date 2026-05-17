@@ -7,9 +7,9 @@ This crate owns stable shared vocabulary such as node identity, tree paths,
 value paths, slot references, frame ids, semantic kinds, and portable
 value/type shapes.
 
-It should not contain authored source-file formats, engine-client wire messages,
-or engine runtime behavior. Those live in `lpc-source`, `lpc-wire`, and
-`lpc-engine` respectively.
+It owns the slot-native authored project/node definition model and SlotCodec,
+but not engine-client wire messages or engine runtime behavior. Those live in
+`lpc-wire` and `lpc-engine` respectively.
 
 **Naming:** Keep foundational shared vocabulary unprefixed (`NodeId`,
 `TreePath`, `ValuePath`, `SlotRef`, `FrameId`, `Kind`, …). Use `Model*` for

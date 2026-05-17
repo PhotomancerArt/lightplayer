@@ -2,8 +2,7 @@
 
 use core::cmp::Ordering;
 
-use lpc_model::LpPathBuf;
-use lpc_source::ArtifactLocator;
+use lpc_model::{ArtifactLocator, LpPathBuf};
 
 /// Resolved load location used as the artifact manager cache key.
 ///

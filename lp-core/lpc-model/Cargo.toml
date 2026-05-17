@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["toml/std", "toml/preserve_order"]
+std = ["lpfs/std", "toml/std", "toml/preserve_order"]
 derive = []
 # JSON Schema for model types (host-side tooling)
 schema-gen = ["std", "dep:schemars"]
