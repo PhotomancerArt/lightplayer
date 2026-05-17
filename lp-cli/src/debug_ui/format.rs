@@ -8,6 +8,7 @@ use lpc_wire::{
 
 pub(crate) fn format_lp_value(value: &LpValue) -> String {
     match value {
+        LpValue::Unset => String::from("unset"),
         LpValue::String(value) => format!("{value:?}"),
         LpValue::I32(value) => value.to_string(),
         LpValue::U32(value) => value.to_string(),
@@ -39,6 +40,10 @@ pub(crate) fn format_lp_value(value: &LpValue) -> String {
                 fields.len()
             )
         }
+        LpValue::Enum { variant, payload } => match payload {
+            Some(payload) => format!("enum::{variant}({})", format_lp_value(payload)),
+            None => format!("enum::{variant}"),
+        },
         LpValue::Resource(value) => format_resource_ref(*value),
         LpValue::Product(value) => format_product_ref(*value),
     }
@@ -46,6 +51,7 @@ pub(crate) fn format_lp_value(value: &LpValue) -> String {
 
 pub(crate) fn format_lp_type(ty: &LpType) -> String {
     match ty {
+        LpType::Any => String::from("any"),
         LpType::String => String::from("string"),
         LpType::I32 => String::from("i32"),
         LpType::U32 => String::from("u32"),
@@ -72,6 +78,11 @@ pub(crate) fn format_lp_type(ty: &LpType) -> String {
             "{} struct[{}]",
             name.as_deref().unwrap_or("anonymous"),
             fields.len()
+        ),
+        LpType::Enum { name, variants } => format!(
+            "{} enum[{}]",
+            name.as_deref().unwrap_or("anonymous"),
+            variants.len()
         ),
         LpType::Resource => String::from("resource"),
         LpType::Product(kind) => format!("product::{kind:?}"),

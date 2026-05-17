@@ -1,4 +1,4 @@
-kind = "project"
+kind = "Project"
 name = "basic"
 
 [nodes.output]

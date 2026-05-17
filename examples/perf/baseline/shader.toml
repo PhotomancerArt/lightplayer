@@ -1,4 +1,4 @@
-kind = "shader"
+kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 

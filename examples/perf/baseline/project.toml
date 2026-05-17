@@ -1,5 +1,4 @@
-kind = "project"
-uid = "perf-baseline"
+kind = "Project"
 name = "perf-baseline"
 
 [nodes.output]
