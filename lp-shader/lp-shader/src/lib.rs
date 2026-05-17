@@ -1,6 +1,6 @@
 //! High-level shader compilation and texture API.
 //!
-//! Wraps `lps-frontend` + `lpvm` so consumers do not duplicate the
+//! Wraps GLSL frontends + `lpvm` so consumers do not duplicate the
 //! compile → lower → `LpvmEngine::compile` pipeline.
 //!
 //! Helpers [`texture_binding`], [`CompilePxDesc::with_texture_spec`], and
@@ -23,7 +23,7 @@ pub mod synth;
 mod texture_buf;
 mod texture_interface;
 
-pub use compile_px_desc::{CompilePxDesc, TextureBindingSpecs, texture_binding};
+pub use compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs, texture_binding};
 pub use engine::LpsEngine;
 pub use error::LpsError;
 pub use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue};

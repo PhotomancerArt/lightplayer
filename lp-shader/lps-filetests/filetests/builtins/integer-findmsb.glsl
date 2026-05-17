@@ -44,6 +44,7 @@ int test_findmsb_int_negative() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_findmsb_int_negative() == 30
 
 int test_findmsb_int_large() {
@@ -54,6 +55,7 @@ int test_findmsb_int_large() {
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(rv32lpn.q32)
 // run: test_findmsb_int_large() == 31
 
 uint test_findmsb_uint_zero() {
@@ -83,7 +85,6 @@ ivec2 test_findmsb_ivec2() {
 }
 
 // run: test_findmsb_ivec2() == ivec2(-1, 1)
-
 
 
 

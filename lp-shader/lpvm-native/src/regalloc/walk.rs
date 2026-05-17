@@ -869,11 +869,13 @@ fn process_call(
     let mut after_ret_moves: Vec<(EditPoint, Edit)> = Vec::new();
     let mut after_restores: Vec<(EditPoint, Edit)> = Vec::new();
 
-    // Track pool registers that receive ret_move targets.  After(call)
+    // Track pool registers that receive call return values.  After(call)
     // eviction restores must NOT target these, or they overwrite the return
     // value (regalloc2 avoids this by removing clobbers from available_pregs
-    // before operand allocation; we filter at restore-emit time).
-    let mut ret_move_pool_regs: Vec<u8> = Vec::new();
+    // before operand allocation; we filter at restore-emit time). Direct
+    // returns get explicit ret moves; sret returns are loaded by the emitter
+    // from the caller-side sret buffer into these same pool registers.
+    let mut ret_value_pool_regs: Vec<u8> = Vec::new();
 
     // ── Step 1: Defs (return values) ──
     let mut operand_idx: usize = 0;
@@ -883,6 +885,7 @@ fn process_call(
 
         if callee_uses_sret || i >= isa.direct_ret_reg_count() {
             let alloc = if let Some(preg) = pool.home(ret_vreg) {
+                ret_value_pool_regs.push(preg);
                 Alloc::Reg(preg)
             } else if let Some(slot) = spill.has_slot(ret_vreg) {
                 Alloc::Stack(slot)
@@ -903,7 +906,7 @@ fn process_call(
         allocs[alloc_idx] = Alloc::Reg(target);
 
         if let Some(pool_reg) = pool.home(ret_vreg) {
-            ret_move_pool_regs.push(pool_reg);
+            ret_value_pool_regs.push(pool_reg);
             after_ret_moves.push((
                 EditPoint::After(inst_idx_u16),
                 Edit::Move {
@@ -1003,6 +1006,11 @@ fn process_call(
 
     // (vreg, target_arg_reg) for register-pass args — Before moves deferred.
     let mut reg_pass_args: Vec<(VReg, u8)> = Vec::new();
+    // (operand_alloc_index, vreg) for stack-pass args. Stack-pass operands
+    // must be assigned after all argument allocation is done: duplicate args
+    // can be evicted while preparing later operands, and the emitter needs
+    // the final location when it stores to the outgoing stack area.
+    let mut stack_pass_args: Vec<(usize, VReg)> = Vec::new();
 
     // ── Phase A: allocate every arg vreg into the pool ──
     for (i, &arg_vreg) in args.iter().enumerate() {
@@ -1045,14 +1053,11 @@ fn process_call(
 
         if let Some(pool_reg) = pool.home(arg_vreg) {
             pool.touch(pool_reg);
-            if !is_reg_pass {
-                allocs[alloc_idx] = Alloc::Reg(pool_reg);
-            }
         } else if let Some(slot) = spill.has_slot(arg_vreg) {
             let (new_preg, evicted) = pool.alloc(arg_vreg);
             if let Some(ev) = evicted {
                 let ev_slot = spill.get_or_assign(ev);
-                if !ret_move_pool_regs.contains(&new_preg) {
+                if !ret_value_pool_regs.contains(&new_preg) {
                     after_restores.push((
                         EditPoint::After(inst_idx_u16),
                         Edit::Move {
@@ -1087,14 +1092,11 @@ fn process_call(
                     register_state: String::new(),
                 },
             );
-            if !is_reg_pass {
-                allocs[alloc_idx] = Alloc::Reg(new_preg);
-            }
         } else {
             let (new_preg, evicted) = pool.alloc(arg_vreg);
             if let Some(ev) = evicted {
                 let ev_slot = spill.get_or_assign(ev);
-                if !ret_move_pool_regs.contains(&new_preg) {
+                if !ret_value_pool_regs.contains(&new_preg) {
                     after_restores.push((
                         EditPoint::After(inst_idx_u16),
                         Edit::Move {
@@ -1113,9 +1115,10 @@ fn process_call(
                     },
                 );
             }
-            if !is_reg_pass {
-                allocs[alloc_idx] = Alloc::Reg(new_preg);
-            }
+        }
+
+        if !is_reg_pass {
+            stack_pass_args.push((alloc_idx, arg_vreg));
         }
 
         TracePush::push(
@@ -1135,6 +1138,17 @@ fn process_call(
                 register_state: String::new(),
             },
         );
+    }
+
+    // ── Phase B1: record final locations for stack-pass args ──
+    for &(alloc_idx, arg_vreg) in &stack_pass_args {
+        allocs[alloc_idx] = if let Some(pool_reg) = pool.home(arg_vreg) {
+            Alloc::Reg(pool_reg)
+        } else if let Some(slot) = spill.has_slot(arg_vreg) {
+            Alloc::Stack(slot)
+        } else {
+            Alloc::None
+        };
     }
 
     // ── Phase B: emit Before(call) moves for register-pass args ──

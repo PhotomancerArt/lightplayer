@@ -1,6 +1,6 @@
 //! Target name formatting and CLI parsing.
 
-use super::{ALL_TARGETS, Backend, FloatMode, Target};
+use super::{ALL_TARGETS, Backend, FloatMode, Frontend, Target};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -27,7 +27,17 @@ impl fmt::Display for FloatMode {
 impl Target {
     /// Canonical name (e.g. "jit.q32").
     pub fn name(&self) -> String {
-        format!("{}.{}", self.backend, self.float_mode)
+        format!("{}.{}", self.backend_name(), self.float_mode)
+    }
+
+    fn backend_name(&self) -> &'static str {
+        match (self.frontend, self.backend) {
+            (Frontend::Lp, Backend::Rv32fa) => "rv32lpn",
+            (_, Backend::Jit) => "jit",
+            (_, Backend::Rv32) => "rv32c",
+            (_, Backend::Rv32fa) => "rv32n",
+            (_, Backend::Wasm) => "wasm",
+        }
     }
 
     /// Look up target by name from [`super::ALL_TARGETS`].
@@ -46,7 +56,7 @@ fn target_matches_spec_token(token: &str, t: &Target) -> bool {
     if name == token {
         return true;
     }
-    if !token.contains('.') && format!("{}", t.backend) == token {
+    if !token.contains('.') && t.backend_name() == token {
         return true;
     }
     false
@@ -77,7 +87,8 @@ pub fn parse_target_filters(spec: &str) -> Result<Vec<&'static Target>, String> 
         }
         if !any {
             let valid: Vec<String> = ALL_TARGETS.iter().map(|t| t.name()).collect();
-            let backends = "jit, wasm, rv32c, rv32n (shorthand) or full names like jit.q32";
+            let backends =
+                "jit, wasm, rv32c, rv32n, rv32lpn (shorthand) or full names like jit.q32";
             return Err(format!(
                 "unknown target '{token}'. Try {backends}. Known targets: {}",
                 valid.join(", ")
@@ -121,6 +132,12 @@ mod tests {
     }
 
     #[test]
+    fn test_target_name_rv32lpn_q32() {
+        let target = &ALL_TARGETS[4];
+        assert_eq!(target.name(), "rv32lpn.q32");
+    }
+
+    #[test]
     fn test_target_from_name_valid() {
         let t = Target::from_name("jit.q32").unwrap();
         assert_eq!(t.name(), "jit.q32");
@@ -130,6 +147,8 @@ mod tests {
         assert_eq!(t.name(), "rv32c.q32");
         let t = Target::from_name("rv32n.q32").unwrap();
         assert_eq!(t.name(), "rv32n.q32");
+        let t = Target::from_name("rv32lpn.q32").unwrap();
+        assert_eq!(t.name(), "rv32lpn.q32");
     }
 
     #[test]
@@ -140,6 +159,7 @@ mod tests {
         assert!(err.contains("wasm.q32"));
         assert!(err.contains("rv32c.q32"));
         assert!(err.contains("rv32n.q32"));
+        assert!(err.contains("rv32lpn.q32"));
     }
 
     #[test]
@@ -162,6 +182,13 @@ mod tests {
         let v = parse_target_filters("rv32n").expect("parse");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].name(), "rv32n.q32");
+    }
+
+    #[test]
+    fn test_parse_target_filters_rv32lpn_shorthand() {
+        let v = parse_target_filters("rv32lpn").expect("parse");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].name(), "rv32lpn.q32");
     }
 
     #[test]

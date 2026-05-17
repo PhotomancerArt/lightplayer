@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::sync::Arc;
 
-use lp_shader::{LpsEngine, LpsPxShader, LpsTextureBuf};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, LpsTextureBuf};
 use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};
 
 use super::lp_gfx::LpGraphics;
@@ -48,7 +48,10 @@ impl LpGraphics for Graphics {
         let cfg = options.to_compiler_config();
         let px = self
             .engine
-            .compile_px(source, lps_shared::TextureStorageFormat::Rgba16Unorm, &cfg)
+            .compile_px_desc(
+                CompilePxDesc::new(source, lps_shared::TextureStorageFormat::Rgba16Unorm, cfg)
+                    .with_frontend(options.frontend),
+            )
             .map_err(|e| Error::Other {
                 message: format!("{e}"),
             })?;
@@ -117,9 +120,11 @@ impl LpShader for NativeJitShader {
         &mut self,
         points: &mut lp_shader::LpsSamplePointBuf,
         out: &mut lp_shader::LpsSampleRgba16Buf,
+        output_width: u32,
+        output_height: u32,
         time: f32,
     ) -> Result<(), Error> {
-        let uniforms = build_uniforms(1, points.count(), time);
+        let uniforms = build_uniforms(output_width, output_height, time);
         self.px
             .sample_points_rgba16(&uniforms, points, out)
             .map_err(|e| Error::Other {

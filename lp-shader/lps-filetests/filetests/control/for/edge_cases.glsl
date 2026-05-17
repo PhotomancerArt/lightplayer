@@ -107,3 +107,87 @@ int test_multiple_continues() {
 }
 
 // run: test_multiple_continues() == 13
+
+int test_for_no_init_clause() {
+    int sum = 0;
+    int i = 0;
+    for (; i < 4; i++) {
+        sum = sum + i;
+    }
+    return sum;
+}
+
+// run: test_for_no_init_clause() == 6
+
+int test_for_no_condition_clause() {
+    int sum = 0;
+    for (int i = 0; ; i++) {
+        if (i >= 4) {
+            break;
+        }
+        sum = sum + i;
+    }
+    return sum;
+}
+
+// run: test_for_no_condition_clause() == 6
+
+int test_for_no_continuing_clause() {
+    int sum = 0;
+    for (int i = 0; i < 4;) {
+        sum = sum + i;
+        i++;
+    }
+    return sum;
+}
+
+// run: test_for_no_continuing_clause() == 6
+
+int test_for_no_clauses() {
+    int sum = 0;
+    int i = 0;
+    for (;;) {
+        if (i >= 4) {
+            break;
+        }
+        sum = sum + i;
+        i++;
+    }
+    return sum;
+}
+
+// run: test_for_no_clauses() == 6
+
+int test_for_multiple_variables_in_continuing() {
+    int sum = 0;
+    int i = 0;
+    int j = 4;
+    for (; i < 4; i++, j--) {
+        sum = sum + i * j;
+    }
+    return sum;
+}
+
+// run: test_for_multiple_variables_in_continuing() == 10
+
+int test_for_multiple_variables_in_init_and_continuing() {
+    int sum = 0;
+    int i;
+    int j;
+    for (i = 0, j = 4; i < 4; i++, j--) {
+        sum = sum + i * j;
+    }
+    return sum;
+}
+
+// run: test_for_multiple_variables_in_init_and_continuing() == 10
+
+int test_for_multiple_variable_declarations_in_init() {
+    int sum = 0;
+    for (int i = 0, j = 4; i < 4; i++, j--) {
+        sum = sum + i * j;
+    }
+    return sum;
+}
+
+// run: test_for_multiple_variable_declarations_in_init() == 10

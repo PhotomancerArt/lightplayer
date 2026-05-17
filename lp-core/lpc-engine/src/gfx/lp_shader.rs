@@ -7,6 +7,8 @@ pub struct ShaderCompileOptions {
     pub q32_options: lps_q32::q32_options::Q32Options,
     /// Maximum semantic errors from the GLSL → LPIR front-end.
     pub max_errors: Option<usize>,
+    /// GLSL frontend used before LPIR lowering.
+    pub frontend: lp_shader::ShaderFrontend,
 }
 
 impl Default for ShaderCompileOptions {
@@ -14,6 +16,7 @@ impl Default for ShaderCompileOptions {
         Self {
             q32_options: lps_q32::q32_options::Q32Options::default(),
             max_errors: Some(20),
+            frontend: default_shader_frontend(),
         }
     }
 }
@@ -27,16 +30,22 @@ impl ShaderCompileOptions {
     }
 }
 
+fn default_shader_frontend() -> lp_shader::ShaderFrontend {
+    lp_shader::ShaderFrontend::default()
+}
+
 /// A compiled, runnable shader (pixel loop lives in `lp_shader::LpsPxShader::render_frame`).
 pub trait LpShader: Send + Sync {
     /// Run the shader into an RGBA16 texture buffer allocated from the same graphics engine.
     fn render(&mut self, texture: &mut lp_shader::LpsTextureBuf, time: f32) -> Result<(), Error>;
 
-    /// Run the shader at caller-provided Q16.16 normalized points.
+    /// Run the shader at caller-provided Q16.16 pixel-space points.
     fn sample_rgba16(
         &mut self,
         _points: &mut lp_shader::LpsSamplePointBuf,
         _out: &mut lp_shader::LpsSampleRgba16Buf,
+        _output_width: u32,
+        _output_height: u32,
         _time: f32,
     ) -> Result<(), Error> {
         Err(Error::Other {

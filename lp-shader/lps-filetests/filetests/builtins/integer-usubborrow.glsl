@@ -66,6 +66,17 @@ uvec4 test_usubborrow_uvec2() {
 // @broken(rv32n.q32)
 // run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u)
 
+uvec2 test_usubborrow_array_out() {
+    // usubBorrow writes through an indexed out place.
+    uint borrow[2];
+    uint diff = usubBorrow(3u, 5u, borrow[1]);
+    return uvec2(diff, borrow[1]);
+}
+
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
+// run: test_usubborrow_array_out() == uvec2(4294967294u, 1u)
 
 
 

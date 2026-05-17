@@ -1,2 +1,5 @@
 kind = "output"
 pin = 0
+
+[bindings.input]
+source = "bus#control.out"

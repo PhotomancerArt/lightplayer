@@ -70,12 +70,13 @@ pub fn compile_for_target(
 #[cfg(test)]
 mod texture_spec_compile_tests {
     use super::*;
-    use crate::targets::{Backend, ExecMode, FloatMode, Isa, Target};
+    use crate::targets::{Backend, ExecMode, FloatMode, Frontend, Isa, Target};
     use lp_riscv_emu::LogLevel;
     use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
 
     fn jit_q32_target() -> Target {
         Target {
+            frontend: Frontend::Naga,
             backend: Backend::Jit,
             float_mode: FloatMode::Q32,
             isa: Isa::Native,

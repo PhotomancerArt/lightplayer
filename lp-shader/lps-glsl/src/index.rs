@@ -1,0 +1,678 @@
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use lps_shared::ParamQualifier;
+
+use crate::{Diagnostic, Keyword, Span, Token, TokenKind, lex};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeRef {
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UniformDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    pub binding: Option<u32>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    pub init_span: Option<Span>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    pub init_span: Option<Span>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructMemberDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructDecl {
+    pub name: String,
+    pub members: Vec<StructMemberDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionParam {
+    pub name: Option<String>,
+    pub ty: TypeRef,
+    pub qualifier: ParamQualifier,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionDecl {
+    pub name: String,
+    pub return_ty: TypeRef,
+    pub params: Vec<FunctionParam>,
+    pub signature_span: Span,
+    pub body_span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TopLevelIndex {
+    pub structs: Vec<StructDecl>,
+    pub uniforms: Vec<UniformDecl>,
+    pub consts: Vec<ConstDecl>,
+    pub globals: Vec<GlobalDecl>,
+    pub functions: Vec<FunctionDecl>,
+}
+
+pub fn index_source(source: &str) -> Result<TopLevelIndex, Diagnostic> {
+    let tokens = lex(source)?;
+    index_tokens(source, &tokens)
+}
+
+pub(crate) fn index_tokens(source: &str, tokens: &[Token]) -> Result<TopLevelIndex, Diagnostic> {
+    Parser::new(source, tokens).parse()
+}
+
+struct Parser<'src, 'tok> {
+    source: &'src str,
+    tokens: &'tok [Token],
+    pos: usize,
+    struct_names: Vec<String>,
+}
+
+enum FunctionParse {
+    NotFunction,
+    Prototype,
+    Definition(FunctionDecl),
+}
+
+impl<'src, 'tok> Parser<'src, 'tok> {
+    fn new(source: &'src str, tokens: &'tok [Token]) -> Self {
+        Self {
+            source,
+            tokens,
+            pos: 0,
+            struct_names: Vec::new(),
+        }
+    }
+
+    fn parse(mut self) -> Result<TopLevelIndex, Diagnostic> {
+        let mut index = TopLevelIndex::default();
+        while !self.at_eof() {
+            let binding = if self.at_keyword(Keyword::Layout) {
+                self.parse_layout_binding()?
+            } else {
+                None
+            };
+            if self.current().lexeme(self.source) == "struct" {
+                index.structs.push(self.parse_struct()?);
+            } else if self.at_keyword(Keyword::Uniform) {
+                self.parse_uniform(binding, &mut index)?;
+            } else if self.at_keyword(Keyword::Const) {
+                index.consts.push(self.parse_const()?);
+            } else if self.starts_type_name() {
+                match self.try_parse_function()? {
+                    FunctionParse::Definition(function) => index.functions.push(function),
+                    FunctionParse::Prototype => {}
+                    FunctionParse::NotFunction => index.globals.extend(self.parse_global_decl()?),
+                }
+            } else {
+                return Err(Diagnostic::error(
+                    self.current().span,
+                    "expected top-level declaration",
+                ));
+            }
+        }
+        Ok(index)
+    }
+
+    fn parse_layout_binding(&mut self) -> Result<Option<u32>, Diagnostic> {
+        self.expect_keyword(Keyword::Layout)?;
+        self.expect_punct("(")?;
+        let mut binding = None;
+        while !self.at_punct(")") {
+            let key = self.expect_identifier_like()?;
+            if self.at_punct("=") {
+                self.bump();
+                let value = self.expect_number_text()?;
+                if key == "binding" {
+                    binding = parse_u32_text(value);
+                }
+            }
+            if self.at_punct(",") {
+                self.bump();
+            } else if !self.at_punct(")") {
+                return Err(Diagnostic::expected(
+                    self.current().span,
+                    "',' or ')'",
+                    self.describe_current(),
+                ));
+            }
+        }
+        self.expect_punct(")")?;
+        Ok(binding)
+    }
+
+    fn parse_uniform(
+        &mut self,
+        binding: Option<u32>,
+        index: &mut TopLevelIndex,
+    ) -> Result<(), Diagnostic> {
+        let start = self.expect_keyword(Keyword::Uniform)?.span.start;
+        let ty = self.expect_type_ref()?;
+        if self.at_punct("{") {
+            let block_name = ty.name.clone();
+            self.struct_names.push(block_name.clone());
+            let members = self.parse_struct_members()?;
+            self.expect_punct("}")?;
+            if self.at_punct(";") {
+                let end = self.expect_punct(";")?.span.end;
+                index.structs.push(StructDecl {
+                    name: block_name,
+                    members: members.clone(),
+                    span: Span::new(start, end),
+                });
+                for member in members {
+                    index.uniforms.push(UniformDecl {
+                        name: member.name,
+                        ty: member.ty,
+                        binding,
+                        span: member.span,
+                    });
+                }
+                return Ok(());
+            }
+            let name = self.expect_identifier_like()?.to_string();
+            let mut uniform_ty = TypeRef {
+                name: block_name.clone(),
+                span: ty.span,
+            };
+            self.append_array_suffixes(&mut uniform_ty)?;
+            let end = self.expect_punct(";")?.span.end;
+            index.structs.push(StructDecl {
+                name: block_name,
+                members,
+                span: Span::new(start, end),
+            });
+            index.uniforms.push(UniformDecl {
+                name,
+                ty: uniform_ty,
+                binding,
+                span: Span::new(start, end),
+            });
+            return Ok(());
+        }
+        let name = self.expect_identifier_like()?.to_string();
+        let mut ty = ty;
+        self.append_array_suffixes(&mut ty)?;
+        let end = self.expect_punct(";")?.span.end;
+        index.uniforms.push(UniformDecl {
+            name,
+            ty,
+            binding,
+            span: Span::new(start, end),
+        });
+        Ok(())
+    }
+
+    fn parse_const(&mut self) -> Result<ConstDecl, Diagnostic> {
+        let start = self.expect_keyword(Keyword::Const)?.span.start;
+        let ty = self.expect_type_ref()?;
+        let name = self.expect_identifier_like()?.to_string();
+        let init_span = if self.at_punct("=") {
+            self.bump();
+            Some(self.span_until_semicolon()?)
+        } else {
+            None
+        };
+        let end = self.expect_punct(";")?.span.end;
+        Ok(ConstDecl {
+            name,
+            ty,
+            init_span,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_global_decl(&mut self) -> Result<Vec<GlobalDecl>, Diagnostic> {
+        let start = self.current().span.start;
+        let mut base_ty = self.expect_type_ref()?;
+        self.append_array_suffixes(&mut base_ty)?;
+        let mut declarations = Vec::new();
+        loop {
+            let decl_start = self.current().span.start;
+            let name = self.expect_identifier_like()?.to_string();
+            let mut ty = base_ty.clone();
+            self.append_array_suffixes(&mut ty)?;
+            let init_span = if self.at_punct("=") {
+                self.bump();
+                Some(self.span_until_decl_separator()?)
+            } else {
+                None
+            };
+            declarations.push(GlobalDecl {
+                name,
+                ty,
+                init_span,
+                span: Span::new(decl_start, self.previous().span.end),
+            });
+            if self.at_punct(",") {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        let end = self.expect_punct(";")?.span.end;
+        if let Some(first) = declarations.first_mut() {
+            first.span = Span::new(start, first.span.end);
+        }
+        if let Some(last) = declarations.last_mut() {
+            last.span = Span::new(last.span.start, end);
+        }
+        Ok(declarations)
+    }
+
+    fn parse_struct(&mut self) -> Result<StructDecl, Diagnostic> {
+        let start = self.current().span.start;
+        self.expect_identifier_text("struct")?;
+        let name_tok = self.current();
+        let name = self.expect_identifier_like()?.to_string();
+        self.struct_names.push(name.clone());
+        let members = self.parse_struct_members()?;
+        self.expect_punct("}")?;
+        let end = self.expect_punct(";")?.span.end;
+        Ok(StructDecl {
+            name,
+            members,
+            span: Span::new(start, end.max(name_tok.span.end)),
+        })
+    }
+
+    fn parse_struct_members(&mut self) -> Result<Vec<StructMemberDecl>, Diagnostic> {
+        self.expect_punct("{")?;
+        let mut members = Vec::new();
+        while !self.at_punct("}") {
+            let ty = self.expect_type_ref()?;
+            loop {
+                let member_start = self.current().span.start;
+                let member_name = self.expect_identifier_like()?.to_string();
+                let mut member_ty = ty.clone();
+                self.append_array_suffixes(&mut member_ty)?;
+                members.push(StructMemberDecl {
+                    name: member_name,
+                    ty: member_ty,
+                    span: Span::new(member_start, self.previous().span.end),
+                });
+                if self.at_punct(",") {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+            self.expect_punct(";")?;
+        }
+        Ok(members)
+    }
+
+    fn try_parse_function(&mut self) -> Result<FunctionParse, Diagnostic> {
+        let checkpoint = self.pos;
+        let return_ty = self.expect_type_ref()?;
+        let name = self.expect_identifier_like()?.to_string();
+        if !self.at_punct("(") {
+            self.pos = checkpoint;
+            return Ok(FunctionParse::NotFunction);
+        }
+        self.expect_punct("(")?;
+        let params = self.parse_params()?;
+        self.expect_punct(")")?;
+        let signature_end = self.previous().span.end;
+        if self.at_punct(";") {
+            self.bump();
+            return Ok(FunctionParse::Prototype);
+        }
+        let body_start = self.expect_punct("{")?.span.start;
+        let body_end = self.skip_balanced_brace_body()?;
+        let signature_span = Span::new(return_ty.span.start, signature_end);
+        Ok(FunctionParse::Definition(FunctionDecl {
+            name,
+            return_ty,
+            params,
+            signature_span,
+            body_span: Span::new(body_start, body_end),
+        }))
+    }
+
+    fn parse_params(&mut self) -> Result<Vec<FunctionParam>, Diagnostic> {
+        let mut params = Vec::new();
+        if self.at_punct(")") {
+            return Ok(params);
+        }
+        loop {
+            let qualifier = self.parse_param_qualifier();
+            let ty = self.expect_type_ref()?;
+            let name = if self.at_identifier_like() {
+                Some(self.expect_identifier_like()?.to_string())
+            } else {
+                None
+            };
+            let mut ty = ty;
+            self.append_array_suffixes(&mut ty)?;
+            let span_end = self.previous().span.end;
+            let span_start = ty.span.start;
+            params.push(FunctionParam {
+                name,
+                ty,
+                qualifier,
+                span: Span::new(span_start, span_end),
+            });
+            if self.at_punct(",") {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        Ok(params)
+    }
+
+    fn parse_param_qualifier(&mut self) -> ParamQualifier {
+        if self.current().lexeme(self.source) == "const" {
+            self.bump();
+        }
+        let tok = self.current();
+        if tok.kind != TokenKind::Identifier {
+            return ParamQualifier::In;
+        }
+        match tok.lexeme(self.source) {
+            "in" => {
+                self.bump();
+                ParamQualifier::In
+            }
+            "out" => {
+                self.bump();
+                ParamQualifier::Out
+            }
+            "inout" => {
+                self.bump();
+                ParamQualifier::InOut
+            }
+            _ => ParamQualifier::In,
+        }
+    }
+
+    fn skip_balanced_brace_body(&mut self) -> Result<usize, Diagnostic> {
+        let mut depth = 1usize;
+        while !self.at_eof() {
+            let tok = self.bump();
+            if tok.lexeme(self.source) == "{" {
+                depth += 1;
+            } else if tok.lexeme(self.source) == "}" {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(tok.span.end);
+                }
+            }
+        }
+        Err(Diagnostic::error(
+            self.previous().span,
+            "unterminated function body",
+        ))
+    }
+
+    fn span_until_semicolon(&mut self) -> Result<Span, Diagnostic> {
+        let start = self.current().span.start;
+        let mut end = start;
+        let mut paren_depth = 0usize;
+        while !self.at_eof() {
+            if paren_depth == 0 && self.at_punct(";") {
+                return Ok(Span::new(start, end));
+            }
+            let tok = self.bump();
+            match tok.lexeme(self.source) {
+                "(" => paren_depth += 1,
+                ")" => paren_depth = paren_depth.saturating_sub(1),
+                _ => {}
+            }
+            end = tok.span.end;
+        }
+        Err(Diagnostic::error(
+            self.previous().span,
+            "expected ';' before end of file",
+        ))
+    }
+
+    fn span_until_decl_separator(&mut self) -> Result<Span, Diagnostic> {
+        let start = self.current().span.start;
+        let mut end = start;
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        while !self.at_eof() {
+            if paren_depth == 0
+                && brace_depth == 0
+                && bracket_depth == 0
+                && (self.at_punct(",") || self.at_punct(";"))
+            {
+                return Ok(Span::new(start, end));
+            }
+            let tok = self.bump();
+            match tok.lexeme(self.source) {
+                "(" => paren_depth += 1,
+                ")" => paren_depth = paren_depth.saturating_sub(1),
+                "{" => brace_depth += 1,
+                "}" => brace_depth = brace_depth.saturating_sub(1),
+                "[" => bracket_depth += 1,
+                "]" => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
+            end = tok.span.end;
+        }
+        Err(Diagnostic::error(
+            self.previous().span,
+            "expected global declaration separator before end of file",
+        ))
+    }
+
+    fn expect_type_ref(&mut self) -> Result<TypeRef, Diagnostic> {
+        let tok = self.current();
+        if self.is_type_name(tok) {
+            self.bump();
+            let mut name = tok.lexeme(self.source).to_string();
+            self.append_array_suffix_text(&mut name)?;
+            Ok(TypeRef {
+                name,
+                span: Span::new(tok.span.start, self.previous().span.end),
+            })
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                "type name",
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn append_array_suffixes(&mut self, ty: &mut TypeRef) -> Result<(), Diagnostic> {
+        let mut suffix = String::new();
+        self.append_array_suffix_text(&mut suffix)?;
+        if !suffix.is_empty() {
+            ty.name.push_str(&suffix);
+            ty.span = Span::new(ty.span.start, self.previous().span.end);
+        }
+        Ok(())
+    }
+
+    fn append_array_suffix_text(&mut self, name: &mut String) -> Result<(), Diagnostic> {
+        while self.at_punct("[") {
+            name.push_str(self.parse_array_suffix()?);
+        }
+        Ok(())
+    }
+
+    fn parse_array_suffix(&mut self) -> Result<&'src str, Diagnostic> {
+        let start = self.expect_punct("[")?.span.start;
+        if self.at_punct("]") {
+            let end = self.expect_punct("]")?.span.end;
+            return Ok(&self.source[start..end]);
+        }
+        let mut paren_depth = 0usize;
+        while !self.at_eof() {
+            if paren_depth == 0 && self.at_punct("]") {
+                break;
+            }
+            if self.at_punct("(") {
+                paren_depth += 1;
+            } else if self.at_punct(")") {
+                paren_depth = paren_depth.saturating_sub(1);
+            }
+            self.bump();
+        }
+        let end = self.expect_punct("]")?.span.end;
+        Ok(&self.source[start..end])
+    }
+
+    fn starts_type_name(&self) -> bool {
+        self.is_type_name(self.current())
+    }
+
+    fn is_type_name(&self, tok: Token) -> bool {
+        matches!(
+            tok.kind,
+            TokenKind::Identifier
+                | TokenKind::Keyword(
+                    Keyword::Bool
+                        | Keyword::Float
+                        | Keyword::Int
+                        | Keyword::Uint
+                        | Keyword::Vec2
+                        | Keyword::Vec3
+                        | Keyword::Vec4
+                        | Keyword::Void
+                )
+        )
+    }
+
+    fn at_identifier_like(&self) -> bool {
+        matches!(self.current().kind, TokenKind::Identifier)
+    }
+
+    fn expect_identifier_like(&mut self) -> Result<&'src str, Diagnostic> {
+        let tok = self.current();
+        if matches!(tok.kind, TokenKind::Identifier) {
+            self.bump();
+            Ok(tok.lexeme(self.source))
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                "identifier",
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn expect_identifier_text(&mut self, text: &str) -> Result<Token, Diagnostic> {
+        let tok = self.current();
+        if matches!(tok.kind, TokenKind::Identifier) && tok.lexeme(self.source) == text {
+            self.bump();
+            Ok(tok)
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                text,
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn expect_number_text(&mut self) -> Result<&'src str, Diagnostic> {
+        let tok = self.current();
+        if matches!(
+            tok.kind,
+            TokenKind::IntLiteral | TokenKind::UintLiteral | TokenKind::FloatLiteral
+        ) {
+            self.bump();
+            Ok(tok.lexeme(self.source).trim_end_matches(['u', 'U']))
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                "number",
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn expect_keyword(&mut self, kw: Keyword) -> Result<Token, Diagnostic> {
+        let tok = self.current();
+        if tok.kind == TokenKind::Keyword(kw) {
+            self.bump();
+            Ok(tok)
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                "keyword",
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn at_keyword(&self, kw: Keyword) -> bool {
+        self.current().kind == TokenKind::Keyword(kw)
+    }
+
+    fn expect_punct(&mut self, punct: &str) -> Result<Token, Diagnostic> {
+        let tok = self.current();
+        if tok.kind == TokenKind::Punct && tok.lexeme(self.source) == punct {
+            self.bump();
+            Ok(tok)
+        } else {
+            Err(Diagnostic::expected(
+                tok.span,
+                punct,
+                self.describe_current(),
+            ))
+        }
+    }
+
+    fn at_punct(&self, punct: &str) -> bool {
+        let tok = self.current();
+        tok.kind == TokenKind::Punct && tok.lexeme(self.source) == punct
+    }
+
+    fn at_eof(&self) -> bool {
+        matches!(self.current().kind, TokenKind::Eof)
+    }
+
+    fn current(&self) -> Token {
+        self.tokens[self.pos]
+    }
+
+    fn previous(&self) -> Token {
+        self.tokens[self.pos.saturating_sub(1)]
+    }
+
+    fn bump(&mut self) -> Token {
+        let tok = self.current();
+        if !matches!(tok.kind, TokenKind::Eof) {
+            self.pos += 1;
+        }
+        tok
+    }
+
+    fn describe_current(&self) -> &'src str {
+        self.current().lexeme(self.source)
+    }
+}
+
+fn parse_u32_text(text: &str) -> Option<u32> {
+    text.parse().ok()
+}

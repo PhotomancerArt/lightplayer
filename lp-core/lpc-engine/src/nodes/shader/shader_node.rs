@@ -75,6 +75,7 @@ impl ShaderNode {
         let compile_opts = ShaderCompileOptions {
             q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
+            ..ShaderCompileOptions::default()
         };
 
         let compile_start_ms = ctx.now_ms();
@@ -341,7 +342,13 @@ impl RenderNode for ShaderNode {
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
         shader
-            .sample_rgba16(request.points, target.samples, request.time_seconds)
+            .sample_rgba16(
+                request.points,
+                target.samples,
+                request.output_width,
+                request.output_height,
+                request.time_seconds,
+            )
             .map_err(|e| NodeError::msg(format!("shader sample: {e}")))
     }
 }

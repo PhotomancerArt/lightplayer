@@ -99,10 +99,7 @@ uvec3 test_uvec3_from_uvec2_uint() {
     return uvec3(source, third);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// run: test_uvec3_from_uvec3_from_uvec2_uint() == uvec3(5u, 3u, 7u)
+// run: test_uvec3_from_uvec2_uint() == uvec3(5u, 3u, 7u)
 
 uvec3 test_uvec3_from_uint_uvec2() {
     // Constructor uvec3(uint, uvec2) combines uint and uvec2

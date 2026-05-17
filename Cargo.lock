@@ -3709,6 +3709,7 @@ dependencies = [
  "lp-shader",
  "lpa-client",
  "lpa-server",
+ "lpc-engine",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -3824,6 +3825,7 @@ version = "40.0.0"
 dependencies = [
  "lpir",
  "lps-frontend",
+ "lps-glsl",
  "lps-shared",
  "lpvm",
  "lpvm-wasm",
@@ -3884,7 +3886,6 @@ dependencies = [
  "lpfs",
  "lpir",
  "lps-builtins",
- "lps-frontend",
  "lps-q32",
  "lps-shared",
  "lpvm",
@@ -4079,6 +4080,7 @@ dependencies = [
  "lpir",
  "lps-diagnostics",
  "lps-frontend",
+ "lps-glsl",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",
@@ -4122,6 +4124,14 @@ dependencies = [
  "lps-shared",
  "naga 29.0.0",
  "smallvec",
+]
+
+[[package]]
+name = "lps-glsl"
+version = "40.0.0"
+dependencies = [
+ "lpir",
+ "lps-shared",
 ]
 
 [[package]]

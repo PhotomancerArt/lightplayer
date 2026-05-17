@@ -54,6 +54,17 @@ uvec4 test_uaddcarry_uvec2() {
 // @broken(rv32n.q32)
 // run: test_uaddcarry_uvec2() == uvec4(3u, 0u, 0u, 1u)
 
+uvec4 test_uaddcarry_swizzle_out() {
+    // uaddCarry writes through a swizzled out place.
+    uvec4 carry = uvec4(9u, 9u, 9u, 9u);
+    uvec2 sum = uaddCarry(uvec2(1u, 4294967295u), uvec2(2u, 1u), carry.yw);
+    return uvec4(sum.x, sum.y, carry.y, carry.w);
+}
+
+// @broken(wasm.q32)
+// @broken(rv32c.q32)
+// @broken(rv32n.q32)
+// run: test_uaddcarry_swizzle_out() == uvec4(3u, 0u, 0u, 1u)
 
 
 

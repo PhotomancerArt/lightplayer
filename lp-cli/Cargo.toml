@@ -48,6 +48,7 @@ rustc-demangle = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+lpc-engine = { path = "../lp-core/lpc-engine" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }

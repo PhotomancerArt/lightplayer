@@ -132,4 +132,5 @@ vec4 test_rainbow_main_corner_t5() {
 }
 
 // @unsupported(rv32c.q32)
+// @broken(rv32lpn.q32)
 // run: test_rainbow_main_corner_t5() ~= vec4(0.64064026, 0.0, 0.64637756, 1.0) (tolerance: 0.002)

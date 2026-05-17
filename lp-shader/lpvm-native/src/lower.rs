@@ -71,7 +71,10 @@ use crate::vinst::{
     AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, TempVRegs, VInst, VReg,
     VRegSlice, pack_src_op,
 };
-use lps_q32::q32_options::{AddSubMode, DivMode, MulMode};
+use lps_q32::{
+    q32_encode,
+    q32_options::{AddSubMode, DivMode, MulMode},
+};
 
 #[inline]
 fn fa_vreg(v: lpir::VReg) -> VReg {
@@ -1015,12 +1018,11 @@ pub fn lower_lpir_op(
             Ok(())
         }
 
-        // Q32 float constants: convert f32 to Q32 fixed-point (multiply by 65536.0)
+        // Q32 float constants are emitted as raw saturated Q16.16 words.
         LpirOp::FconstF32 { dst, value } if opts.float_mode == FloatMode::Q32 => {
-            let q32_val = q32_const_from_f32(*value);
             out.push(VInst::IConst32 {
                 dst: fa_vreg(*dst),
-                val: q32_val,
+                val: q32_encode(*value),
                 src_op: po,
             });
             Ok(())
@@ -3336,6 +3338,26 @@ mod tests {
         assert!(matches!(
             call_lower_op(&div, FloatMode::F32, None, &f, &ir, &abi),
             Err(LowerError::UnsupportedOp { .. })
+        ));
+    }
+
+    #[test]
+    fn lower_q32_float_constant_saturates() {
+        let op = LpirOp::FconstF32 {
+            dst: v(1),
+            value: 50_000.0,
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        let vinsts = call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
+        assert_eq!(vinsts.len(), 1);
+        assert!(matches!(
+            vinsts[0],
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 0x7FFF_FFFF,
+                ..
+            }
         ));
     }
 

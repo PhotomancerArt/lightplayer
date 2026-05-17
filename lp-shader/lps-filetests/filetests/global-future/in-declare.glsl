@@ -19,6 +19,7 @@ float test_declare_in_float() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_float() ~= 1.0
 
 int test_declare_in_int() {
@@ -27,6 +28,7 @@ int test_declare_in_int() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_int() == 0
 
 uint test_declare_in_uint() {
@@ -38,6 +40,7 @@ uint test_declare_in_uint() {
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_uint() == 1
 
 bool test_declare_in_bool() {
@@ -46,6 +49,7 @@ bool test_declare_in_bool() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_bool() == false
 
 vec2 test_declare_in_vec2() {
@@ -54,6 +58,7 @@ vec2 test_declare_in_vec2() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_vec2() ~= vec2(0.5, 0.5)
 
 vec3 test_declare_in_vec3() {
@@ -62,6 +67,7 @@ vec3 test_declare_in_vec3() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_declare_in_vec4() {
@@ -70,6 +76,7 @@ vec4 test_declare_in_vec4() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_declare_in_calculate() {
@@ -80,4 +87,5 @@ float test_declare_in_calculate() {
 }
 
 // @unimplemented(jit.q32)
+// @unsupported(rv32lpn.q32)
 // run: test_declare_in_calculate() ~= 0.2
