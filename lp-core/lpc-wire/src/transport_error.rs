@@ -1,7 +1,8 @@
 //! Transport error type
 //!
-//! Moved from lpc-shared to lp-model to break circular dependency.
-//! Transport errors are related to message protocol, so they belong in lp-model.
+//! Transport errors are protocol-adjacent: shared transports use this type to
+//! report framing, serialization, and connection failures without depending on
+//! app or firmware-specific error stacks.
 
 use alloc::string::String;
 use core::fmt;

@@ -9,10 +9,6 @@ pub use access_sync::{
     build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, snapshot_slot_root,
     snapshot_slot_shape,
 };
-pub use lpc_model::slot_codec::{
-    ArrayReader, JsonSyntaxSource, ObjectReader, PropReader, SlotReader, SourceSpan, SyntaxError,
-    SyntaxEvent, SyntaxEventSource, TomlSyntaxSource, ValueReader,
-};
 pub use mutation::{
     WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,
