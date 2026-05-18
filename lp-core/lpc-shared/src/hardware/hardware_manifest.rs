@@ -1,12 +1,15 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::{HardwareAddress, HardwareCapability, HardwareResource};
+use super::{HardwareAddress, HardwareCapability, HardwareResource, HardwareTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardwareManifest {
     board_id: String,
     board_name: String,
+    target: Option<HardwareTarget>,
+    vendor: Option<String>,
+    product: Option<String>,
     description: Option<String>,
     url: Option<String>,
     resources: Vec<HardwareResource>,
@@ -21,6 +24,9 @@ impl HardwareManifest {
         Self {
             board_id: board_id.into(),
             board_name: board_name.into(),
+            target: None,
+            vendor: None,
+            product: None,
             description: None,
             url: None,
             resources: resources.into(),
@@ -45,6 +51,7 @@ impl HardwareManifest {
             "RMT WS281x 0",
         ));
         Self::new("virtual-single-rmt", "Virtual Single-RMT Board", resources)
+            .with_target(HardwareTarget::Rv32imacEmu)
             .with_description("Virtual board profile for tests and emulation with GPIO resources and one shared WS281x/RMT resource.")
     }
 
@@ -54,6 +61,18 @@ impl HardwareManifest {
 
     pub fn board_name(&self) -> &str {
         &self.board_name
+    }
+
+    pub fn target(&self) -> Option<HardwareTarget> {
+        self.target
+    }
+
+    pub fn vendor(&self) -> Option<&str> {
+        self.vendor.as_deref()
+    }
+
+    pub fn product(&self) -> Option<&str> {
+        self.product.as_deref()
     }
 
     pub fn description(&self) -> Option<&str> {
@@ -66,6 +85,21 @@ impl HardwareManifest {
 
     pub fn resources(&self) -> &[HardwareResource] {
         &self.resources
+    }
+
+    pub fn with_target(mut self, target: HardwareTarget) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    pub fn with_vendor(mut self, vendor: impl Into<String>) -> Self {
+        self.vendor = Some(vendor.into());
+        self
+    }
+
+    pub fn with_product(mut self, product: impl Into<String>) -> Self {
+        self.product = Some(product.into());
+        self
     }
 
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
@@ -120,9 +154,15 @@ mod tests {
     #[test]
     fn stores_optional_board_metadata() {
         let manifest = HardwareManifest::new("board", "Board", [])
+            .with_target(HardwareTarget::Esp32c6)
+            .with_vendor("vendor")
+            .with_product("product")
             .with_description("A board profile")
             .with_url("https://example.com/board");
 
+        assert_eq!(manifest.target(), Some(HardwareTarget::Esp32c6));
+        assert_eq!(manifest.vendor(), Some("vendor"));
+        assert_eq!(manifest.product(), Some("product"));
         assert_eq!(manifest.description(), Some("A board profile"));
         assert_eq!(manifest.url(), Some("https://example.com/board"));
     }

@@ -10,6 +10,20 @@ This is separate from M1. M1 should implement the `HardwareManifest` data model,
 profiles, and resource ownership. M1.1 can then use that model to generate or refine board-profile
 metadata.
 
+Before the physical calibration loop, M1.1 needs a developer-facing manifest management tool. The
+tool should discover checked-in board manifests, support CRUD/validation, and create the first real
+board profile from the codebase. `lp-cli` is the right place for this now because it has become a
+developer tool that runs from the repository; a later split can move user-facing commands elsewhere.
+
+First real board target:
+
+```toml
+target = "esp32c6"
+vendor = "seeed"
+product = "XIAO ESP32-C6"
+url = "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html"
+```
+
 ## User Workflow
 
 The target workflow is interactive and physical:
@@ -51,11 +65,21 @@ excludes GPIO12 because it has been observed to crash the device.
 Add an `lp-cli` command, tentatively:
 
 ```bash
-lp hardware calibrate esp32c6 --board <profile-id> --port serial:auto
+lp-cli hardware manifest list
+lp-cli hardware manifest show seeed/xiao-esp32-c6
+lp-cli hardware manifest new --target esp32c6 --vendor seeed --product "XIAO ESP32-C6" --url https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html
+lp-cli hardware calibrate esp32c6 --board seeed/xiao-esp32-c6 --port serial:auto
 ```
 
 Responsibilities:
 
+- For `manifest`: discover, list, show, create, update, delete, and validate checked-in board
+  profile files.
+- Running `lp-cli hardware manifest` with no subcommand or flags should start a human-interactive
+  picker: show existing manifests, let the user choose one, and offer actions such as show, edit,
+  validate, delete, or add a new manifest.
+- Flags/subcommands should remain available for tests and automation, but should not be required for
+  the normal human workflow.
 - Build and flash the calibration firmware.
 - Detect/select serial port using existing serial-port logic.
 - Drive the firmware pin pulse loop.
@@ -83,8 +107,12 @@ manifest code without review.
 Possible output:
 
 ```toml
-board_id = "esp32c6-devkit-example"
-board_name = "ESP32-C6 DevKit Example"
+id = "seeed/xiao-esp32-c6"
+target = "esp32c6"
+vendor = "seeed"
+product = "XIAO ESP32-C6"
+description = "Seeed Studio XIAO ESP32-C6 board profile."
+url = "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html"
 
 [[gpio]]
 address = "/gpio/18"
@@ -105,12 +133,46 @@ Later implementation can decide whether this becomes:
 - generated Rust manifest code,
 - or both.
 
+Suggested first-pass answer: checked-in TOML under a stable codebase directory, with generated Rust
+left for a later firmware consumption step.
+
 ## Open Questions
 
 ### Should calibration profiles be source artifacts or generated Rust?
 
 Suggested answer: start with a reviewable data file and generate Rust only if firmware needs static
 compiled manifests. The calibration output should be easy to diff and correct by hand.
+
+### Where should checked-in board manifests live?
+
+Suggested answer: put source manifests under `lp-core/lpc-shared/boards/<vendor>/<product-id>.toml`.
+They are shared hardware data, not firmware-only policy. `lp-cli` should find the repository root and
+operate on that directory by default.
+
+### Should `lp-cli` be treated as user-facing?
+
+Suggested answer: no, not for this work. Update README/architecture docs to say `lp-cli` is a
+developer-facing repo tool for server/dev/debug/profiling/hardware workflows. It is designed to run
+from the codebase; a future split can separate deployable/user-facing tooling.
+
+### Should manifest management require CLI flags?
+
+Suggested answer: no. The default command should be interactive. `lp-cli hardware manifest` should
+list existing manifests and include an "add new manifest" option. Explicit subcommands and flags are
+still useful for repeatable validation and tests, but the intended workflow is human-guided.
+
+### What manifest identity fields are required now?
+
+Suggested answer: add target, vendor, and product to the manifest schema. Keep `id` stable and
+path-like, such as `seeed/xiao-esp32-c6`, but preserve target/vendor/product as first-class
+display/search/validation metadata.
+
+### Should manifests declare the chip or execution target?
+
+Suggested answer: yes. Add a small enum-like target field so firmware/tooling can reject manifests
+that cannot apply to the current hardware. Start with `esp32c6` and `rv32imac_emu`. Name it
+`target` unless implementation finds a clearer existing vocabulary; it represents the hardware/API
+target that interprets resources like `"/gpio/18"`, not just the marketing product name.
 
 ### How should the host infer crash-causing pins?
 

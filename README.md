@@ -73,8 +73,16 @@ See `just --list` for all available commands.
 
 ## CLI (`lp-cli/`)
 
-Command-line interface for creating projects, running dev server, and managing LightPlayer
-projects. Includes debug UI and file watching capabilities.
+Developer-facing command-line tools for creating projects, running the dev server, inspecting
+compiler/runtime behavior, and managing checked-in hardware manifests. `lp-cli` is intended to run
+from a LightPlayer source checkout and may assume repository paths such as
+`lp-core/lpc-shared/boards`; it is not currently a deployable end-user command-line product.
+
+Hardware manifests can be browsed and edited with:
+
+```bash
+cargo run -p lp-cli -- hardware manifest
+```
 
 ## Firmware (`lp-fw/`)
 

@@ -9,7 +9,9 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, fwcheck, profile, serve, shader_debug, shader_lpir, upload};
+use commands::{
+    create, dev, fwcheck, hardware, profile, serve, shader_debug, shader_lpir, upload,
+};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -57,6 +59,8 @@ enum Cli {
     Profile(profile::ProfileCli),
     /// Run firmware checks on hardware or firmware targets.
     Fwcheck(fwcheck::FwcheckCli),
+    /// Developer hardware manifest and calibration tools.
+    Hardware(hardware::HardwareCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {
         /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
@@ -95,6 +99,7 @@ fn main() -> Result<()> {
         }),
         Cli::Upload { dir, host } => upload::handle_upload(upload::UploadArgs { dir, host }),
         Cli::Create { dir, name } => create::handle_create(create::CreateArgs { dir, name }),
+        Cli::Hardware(cli) => hardware::handle_hardware(cli),
         Cli::Profile(cli) => match cli.subcommand {
             Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),
             Some(profile::ProfileSubcommand::Function(args)) => {

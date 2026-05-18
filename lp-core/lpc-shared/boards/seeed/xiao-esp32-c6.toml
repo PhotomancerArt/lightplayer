@@ -1,0 +1,145 @@
+id = "seeed/xiao-esp32-c6"
+target = "esp32c6"
+vendor = "seeed"
+product = "XIAO ESP32-C6"
+description = "Seeed Studio XIAO ESP32-C6 board profile."
+url = "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html"
+
+[[gpio]]
+address = "/gpio/0"
+display_label = "GPIO0"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO0"]
+
+[[gpio]]
+address = "/gpio/1"
+display_label = "GPIO1"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO1"]
+
+[[gpio]]
+address = "/gpio/2"
+display_label = "GPIO2"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO2"]
+
+[[gpio]]
+address = "/gpio/3"
+display_label = "GPIO3"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO3"]
+
+[[gpio]]
+address = "/gpio/4"
+display_label = "GPIO4"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO4"]
+
+[[gpio]]
+address = "/gpio/5"
+display_label = "GPIO5"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO5"]
+
+[[gpio]]
+address = "/gpio/6"
+display_label = "GPIO6"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO6"]
+
+[[gpio]]
+address = "/gpio/7"
+display_label = "GPIO7"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO7"]
+
+[[gpio]]
+address = "/gpio/8"
+display_label = "GPIO8"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO8"]
+
+[[gpio]]
+address = "/gpio/9"
+display_label = "GPIO9"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO9"]
+
+[[gpio]]
+address = "/gpio/10"
+display_label = "GPIO10"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO10"]
+
+[[gpio]]
+address = "/gpio/11"
+display_label = "GPIO11"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO11"]
+
+[[gpio]]
+address = "/gpio/12"
+display_label = "GPIO12"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO12"]
+reserved_reason = "crashed during manual GPIO scan; keep skipped until recalibrated"
+
+[[gpio]]
+address = "/gpio/13"
+display_label = "GPIO13"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO13"]
+
+[[gpio]]
+address = "/gpio/14"
+display_label = "GPIO14"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO14"]
+
+[[gpio]]
+address = "/gpio/15"
+display_label = "GPIO15"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO15"]
+
+[[gpio]]
+address = "/gpio/16"
+display_label = "GPIO16"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO16"]
+
+[[gpio]]
+address = "/gpio/17"
+display_label = "GPIO17"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO17"]
+
+[[gpio]]
+address = "/gpio/18"
+display_label = "GPIO18"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO18"]
+location = "known WS281x output header"
+
+[[gpio]]
+address = "/gpio/19"
+display_label = "GPIO19"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO19"]
+
+[[gpio]]
+address = "/gpio/20"
+display_label = "GPIO20"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO20"]
+
+[[gpio]]
+address = "/gpio/21"
+display_label = "GPIO21"
+capabilities = ["gpio-output", "gpio-input"]
+aliases = ["IO21"]
+
+[[resource]]
+address = "/rmt/ws281x0"
+display_label = "RMT WS281x 0"
+capabilities = ["rmt", "ws281x-output"]

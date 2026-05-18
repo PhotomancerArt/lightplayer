@@ -60,12 +60,16 @@ The core application (`lp-core/`) provides the foundation for all LightPlayer im
 
 ### CLI (`lp-cli/`)
 
-The command-line interface provides development tools and a local server:
+The command-line interface provides developer tools and a local server. It is designed to run from
+the source checkout and may assume repository-relative assets such as checked-in board manifests;
+it is not currently packaged as a user-facing deployable CLI:
 
 - **Dev Server** - Runs `lp-server` with a local filesystem, WebSocket transport, and debug UI
 - **File Watching** - Monitors project files and syncs changes to the server
 - **Project Management** - Creates, initializes, and manages LightPlayer projects
 - **Debug UI** - Visual interface for inspecting node states, outputs, and project structure
+- **Hardware Manifests** - Interactive CRUD and validation for board profiles under
+  `lp-core/lpc-shared/boards`
 
 The CLI uses `lp-client` with WebSocket transport for local development, and can also connect to
 remote servers.

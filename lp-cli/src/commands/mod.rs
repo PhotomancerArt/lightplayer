@@ -1,6 +1,7 @@
 pub mod create;
 pub mod dev;
 pub mod fwcheck;
+pub mod hardware;
 pub mod profile;
 pub mod serve;
 pub mod shader_debug;
