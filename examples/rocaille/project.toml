@@ -1,5 +1,4 @@
-kind = "project"
-uid = "rocaille"
+kind = "Project"
 name = "rocaille"
 
 [nodes.output]

@@ -19,6 +19,7 @@ pub fn generate_mapping_points(
     texture_height: u32,
 ) -> Vec<MappingPoint> {
     match config {
+        MappingConfig::Unset => Vec::new(),
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -28,7 +29,7 @@ pub fn generate_mapping_points(
             let mut channel_offset = 0u32;
 
             for path_spec in paths.entries.values() {
-                let points = match path_spec {
+                let points = match path_spec.value() {
                     PathSpec::RingArray {
                         center,
                         diameter,
@@ -39,14 +40,14 @@ pub fn generate_mapping_points(
                         order,
                         ..
                     } => generate_ring_array_points(
-                        *center.value(),
-                        *diameter.value(),
+                        center.value().0,
+                        diameter.value().0,
                         *start_ring_inclusive.value(),
                         *end_ring_exclusive.value(),
                         ring_lamp_counts,
                         *offset_angle.value(),
                         *order.value(),
-                        *sample_diameter.value(),
+                        sample_diameter.value().0,
                         texture_width,
                         texture_height,
                         channel_offset,

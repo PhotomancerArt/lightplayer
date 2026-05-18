@@ -1,5 +1,4 @@
-kind = "project"
-uid = "perf-fastmath"
+kind = "Project"
 name = "perf-fastmath"
 
 [nodes.output]

@@ -62,6 +62,11 @@ impl<T> WithRevision<T> {
         self.changed_at
     }
 
+    /// Get a mutable reference to the revision marker.
+    pub fn changed_at_mut(&mut self) -> &mut Revision {
+        &mut self.changed_at
+    }
+
     /// Get a reference to the value (alias for [`Self::get`]).
     pub fn value(&self) -> &T {
         &self.value
@@ -104,6 +109,13 @@ mod tests {
         *field.get_mut() = 20;
         field.mark_updated(Revision::new(15));
         assert_eq!(field.get(), &20);
+        assert_eq!(field.changed_at(), Revision::new(15));
+    }
+
+    #[test]
+    fn changed_at_mut_updates_revision_marker() {
+        let mut field = WithRevision::new(Revision::new(5), 10);
+        *field.changed_at_mut() = Revision::new(15);
         assert_eq!(field.changed_at(), Revision::new(15));
     }
 

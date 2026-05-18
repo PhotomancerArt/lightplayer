@@ -12,7 +12,6 @@ std = []
 [dependencies]
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
-lpc-source = { path = "../lpc-source", default-features = false }
 hashbrown = { workspace = true }
 
 [lints]

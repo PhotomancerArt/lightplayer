@@ -32,7 +32,7 @@ fn test_fs_changes_not_repeated() {
         .base_fs_mut()
         .write_file(
             project_path.join("project.toml").as_path(),
-            b"kind = \"project\"\nname = \"test\"\nuid = \"test\"\n",
+            b"kind = \"Project\"\nname = \"test\"\n",
         )
         .unwrap();
 

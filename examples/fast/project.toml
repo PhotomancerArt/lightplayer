@@ -1,5 +1,4 @@
-kind = "project"
-uid = "fast"
+kind = "Project"
 name = "fast"
 
 [nodes.output]

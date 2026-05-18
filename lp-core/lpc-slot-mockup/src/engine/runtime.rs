@@ -1,6 +1,6 @@
 use lpc_model::{
-    LpType, LpValue, Revision, SlotAccess, SlotPath, SlotShapeId, SlotShapeRegistry,
-    StaticSlotShape, set_current_revision,
+    Revision, SlotAccess, SlotMutAccess, SlotMutationError, SlotPath, SlotShapeId,
+    SlotShapeRegistry, current_revision, set_current_revision, set_slot_value, slot_data_revision,
 };
 use lpc_wire::{
     WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
@@ -35,7 +35,7 @@ impl MockRuntime {
         // Shader runtime params are dynamic: the shape is owned by this loaded
         // node/artifact instance, not by the Rust `ShaderNode` type.
         registry
-            .register_root(shader_node.shape_id(), shader_node.shape())
+            .register_shape(shader_node.shape_id(), shader_node.shape())
             .unwrap();
 
         Self {
@@ -142,7 +142,7 @@ impl MockRuntime {
 
     fn refresh_shader_node_shape(&mut self) {
         self.registry
-            .replace_root(self.shader_node.shape_id(), self.shader_node.shape());
+            .replace_shape(self.shader_node.shape_id(), self.shader_node.shape());
     }
 
     fn apply_slot_mutation_result(
@@ -165,24 +165,26 @@ impl MockRuntime {
             });
         }
 
-        let WireSlotMutationOp::SetValue(value) = &request.op;
-        if !lp_value_matches_type(value, &info.ty) {
-            return WireSlotMutationResult::Rejected(WireSlotMutationRejection::WrongType);
-        }
-
-        match (&info.target, value) {
-            (MutationTarget::ShaderExposureParam, LpValue::F32(value)) => {
-                self.shader_node.set_param("exposure", *value);
-                WireSlotMutationResult::Accepted
+        match &request.op {
+            WireSlotMutationOp::SetValue(value) => {
+                let registry = self.registry.clone();
+                let root = match self.root_mut(&request.root) {
+                    Ok(root) => root,
+                    Err(rejection) => return WireSlotMutationResult::Rejected(rejection),
+                };
+                match set_slot_value(
+                    root,
+                    &registry,
+                    &request.path,
+                    current_revision(),
+                    value.clone(),
+                ) {
+                    Ok(()) => WireSlotMutationResult::Accepted,
+                    Err(error) => {
+                        WireSlotMutationResult::Rejected(mutation_error_to_rejection(error))
+                    }
+                }
             }
-            (MutationTarget::ShaderExposureLabel, LpValue::String(value)) => {
-                self.shader_def.set_param_label("exposure", value);
-                WireSlotMutationResult::Accepted
-            }
-            (MutationTarget::Unsupported, _) => {
-                WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
-            }
-            _ => WireSlotMutationResult::Rejected(WireSlotMutationRejection::WrongType),
         }
     }
 
@@ -191,62 +193,12 @@ impl MockRuntime {
         root: &str,
         path: &SlotPath,
     ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
-        let path = path.to_string();
-        match root {
-            "engine.shader_node" => self.shader_node_mutation_target_info(&path),
-            "source.shader" => self.shader_source_mutation_target_info(&path),
-            _ => Err(WireSlotMutationRejection::UnknownRoot),
-        }
-    }
-
-    fn shader_node_mutation_target_info(
-        &self,
-        path: &str,
-    ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
-        let (name, target) = match path {
-            "params.exposure" => ("exposure", MutationTarget::ShaderExposureParam),
-            "params.speed" => ("speed", MutationTarget::Unsupported),
-            _ => return Err(WireSlotMutationRejection::UnknownPath),
-        };
+        let root = self.root(root)?;
         Ok(MutationTargetInfo {
-            target,
-            shape_version: self.root_shape_version(self.shader_node.shape_id())?,
-            data_version: self
-                .shader_node
-                .param_revision(name)
-                .ok_or(WireSlotMutationRejection::UnknownPath)?,
-            ty: self
-                .shader_node
-                .param_lp_type(name)
-                .ok_or(WireSlotMutationRejection::UnknownPath)?,
+            shape_version: self.root_shape_version(root.shape_id())?,
+            data_version: slot_data_revision(root, &self.registry, path)
+                .map_err(mutation_error_to_rejection)?,
         })
-    }
-
-    fn shader_source_mutation_target_info(
-        &self,
-        path: &str,
-    ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
-        match path {
-            "param_defs[exposure].label" => Ok(MutationTargetInfo {
-                target: MutationTarget::ShaderExposureLabel,
-                shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
-                data_version: self
-                    .shader_def
-                    .param_label_revision("exposure")
-                    .ok_or(WireSlotMutationRejection::UnknownPath)?,
-                ty: LpType::String,
-            }),
-            "param_defs[exposure].default" => Ok(MutationTargetInfo {
-                target: MutationTarget::Unsupported,
-                shape_version: self.root_shape_version(<ShaderDef as StaticSlotShape>::SHAPE_ID)?,
-                data_version: self
-                    .shader_def
-                    .param_default_revision("exposure")
-                    .ok_or(WireSlotMutationRejection::UnknownPath)?,
-                ty: LpType::F32,
-            }),
-            _ => Err(WireSlotMutationRejection::UnknownPath),
-        }
     }
 
     fn root_shape_version(
@@ -258,6 +210,35 @@ impl MockRuntime {
             .map(|entry| entry.changed_at())
             .ok_or(WireSlotMutationRejection::UnknownRoot)
     }
+
+    fn root(&self, root: &str) -> Result<&dyn SlotAccess, WireSlotMutationRejection> {
+        match root {
+            "source.project" => Ok(&self.project),
+            "source.shader" => Ok(&self.shader_def),
+            "source.fixture" => Ok(&self.fixture_def),
+            "source.output" => Ok(&self.output_def),
+            "source.texture" => Ok(&self.texture_def),
+            "engine.shader_node" => Ok(&self.shader_node),
+            "engine.fixture_node" => Ok(&self.fixture_node),
+            "engine.output_node" => Ok(&self.output_node),
+            _ => Err(WireSlotMutationRejection::UnknownRoot),
+        }
+    }
+
+    fn root_mut(
+        &mut self,
+        root: &str,
+    ) -> Result<&mut dyn SlotMutAccess, WireSlotMutationRejection> {
+        match root {
+            "source.project" => Ok(&mut self.project),
+            "source.shader" => Ok(&mut self.shader_def),
+            "source.fixture" => Ok(&mut self.fixture_def),
+            "source.output" => Ok(&mut self.output_def),
+            "source.texture" => Ok(&mut self.texture_def),
+            "engine.shader_node" => Ok(&mut self.shader_node),
+            _ => Err(WireSlotMutationRejection::UnknownRoot),
+        }
+    }
 }
 
 impl Default for MockRuntime {
@@ -267,50 +248,16 @@ impl Default for MockRuntime {
 }
 
 struct MutationTargetInfo {
-    target: MutationTarget,
     shape_version: Revision,
     data_version: Revision,
-    ty: LpType,
 }
 
-enum MutationTarget {
-    ShaderExposureParam,
-    ShaderExposureLabel,
-    Unsupported,
-}
-
-fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
-    match (value, ty) {
-        (LpValue::String(_), LpType::String)
-        | (LpValue::I32(_), LpType::I32)
-        | (LpValue::U32(_), LpType::U32)
-        | (LpValue::F32(_), LpType::F32)
-        | (LpValue::Bool(_), LpType::Bool)
-        | (LpValue::Vec2(_), LpType::Vec2)
-        | (LpValue::Vec3(_), LpType::Vec3)
-        | (LpValue::Vec4(_), LpType::Vec4)
-        | (LpValue::IVec2(_), LpType::IVec2)
-        | (LpValue::IVec3(_), LpType::IVec3)
-        | (LpValue::IVec4(_), LpType::IVec4)
-        | (LpValue::UVec2(_), LpType::UVec2)
-        | (LpValue::UVec3(_), LpType::UVec3)
-        | (LpValue::UVec4(_), LpType::UVec4)
-        | (LpValue::BVec2(_), LpType::BVec2)
-        | (LpValue::BVec3(_), LpType::BVec3)
-        | (LpValue::BVec4(_), LpType::BVec4)
-        | (LpValue::Mat2x2(_), LpType::Mat2x2)
-        | (LpValue::Mat3x3(_), LpType::Mat3x3)
-        | (LpValue::Mat4x4(_), LpType::Mat4x4)
-        | (LpValue::Resource(_), LpType::Resource) => true,
-        (LpValue::Array(values), LpType::Array(item_ty, len)) => {
-            values.len() == *len
-                && values
-                    .iter()
-                    .all(|value| lp_value_matches_type(value, item_ty))
+fn mutation_error_to_rejection(error: SlotMutationError) -> WireSlotMutationRejection {
+    match error {
+        SlotMutationError::WrongType { .. } => WireSlotMutationRejection::WrongType,
+        SlotMutationError::UnknownVariant { .. } | SlotMutationError::UnknownPath { .. } => {
+            WireSlotMutationRejection::UnknownPath
         }
-        (LpValue::Array(values), LpType::List(item_ty)) => values
-            .iter()
-            .all(|value| lp_value_matches_type(value, item_ty)),
-        _ => false,
+        SlotMutationError::UnsupportedTarget { .. } => WireSlotMutationRejection::UnsupportedTarget,
     }
 }

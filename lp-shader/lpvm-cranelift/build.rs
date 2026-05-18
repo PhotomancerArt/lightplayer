@@ -25,6 +25,8 @@ fn main() {
         .join(target)
         .join(&profile)
         .join("lps-builtins-emu-app");
+    println!("cargo:rerun-if-changed={}", exe_path_release.display());
+    println!("cargo:rerun-if-changed={}", exe_path_profile.display());
 
     let exe_path = if exe_path_release.exists() {
         exe_path_release
@@ -44,7 +46,6 @@ fn main() {
         return;
     }
 
-    println!("cargo:rerun-if-changed={}", exe_path.display());
     let copied = std::path::Path::new(&out_dir).join("lps-builtins-emu-app");
     std::fs::copy(&exe_path, &copied).expect("copy builtins exe");
     let rel = copied

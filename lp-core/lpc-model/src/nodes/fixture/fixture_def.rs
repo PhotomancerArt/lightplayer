@@ -3,13 +3,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 use crate::{
-    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, FromLpValue, LpValue, OptionSlot, SlotShapeId,
-    SlotValue, SlotValueShape, ToLpValue, ValueRootError, ValueSlot,
+    Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
+    OptionSlot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Authored fixture node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct FixtureDef {
     /// Full-frame render size used when materializing the fixture input.
     #[serde(default = "default_render_size")]
@@ -18,12 +18,10 @@ pub struct FixtureDef {
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
     /// Visual sampling strategy.
-    #[slot(skip)]
     #[serde(default)]
-    pub sampling: FixtureSamplingConfig,
+    pub sampling: ValueSlot<FixtureSamplingConfig>,
     /// Fixture mapping definition.
-    #[slot(enum)]
-    pub mapping: MappingConfig,
+    pub mapping: EnumSlot<MappingConfig>,
     /// Color order for RGB channels.
     pub color_order: ValueSlot<ColorOrder>,
     /// Texture-space 2D affine transform.
@@ -82,7 +80,7 @@ impl FixtureDef {
 }
 
 fn default_brightness() -> OptionSlot<ValueSlot<u32>> {
-    OptionSlot::some(ValueSlot::new(64))
+    OptionSlot::some(ValueSlot::new(64_u32))
 }
 
 fn default_render_size() -> Dim2uSlot {
@@ -97,12 +95,13 @@ fn default_gamma_correction() -> OptionSlot<ValueSlot<bool>> {
 }
 
 /// Color order for RGB channels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorOrder {
     /// Red, Green, Blue.
     Rgb,
     /// Green, Red, Blue.
+    #[default]
     Grb,
     /// Red, Blue, Green.
     Rbg,
@@ -242,10 +241,24 @@ impl FromLpValue for ColorOrder {
 }
 
 impl SlotValue for ColorOrder {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrder");
 
     fn value_shape() -> SlotValueShape {
-        crate::color_order_shape()
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Dropdown {
+                options: alloc::vec![
+                    SlotEnumOption::new("rgb", "RGB"),
+                    SlotEnumOption::new("grb", "GRB"),
+                    SlotEnumOption::new("rbg", "RBG"),
+                    SlotEnumOption::new("gbr", "GBR"),
+                    SlotEnumOption::new("brg", "BRG"),
+                    SlotEnumOption::new("bgr", "BGR"),
+                ],
+            },
+        }
     }
 }
 
@@ -260,11 +273,11 @@ mod tests {
     #[test]
     fn test_fixture_def_kind() {
         let mut ring_lamp_counts = BTreeMap::new();
-        ring_lamp_counts.insert(0, ValueSlot::new(1));
+        ring_lamp_counts.insert(0, ValueSlot::new(1_u32));
         let mut paths = BTreeMap::new();
         paths.insert(
             0,
-            PathSpec::ring_array(
+            EnumSlot::new(PathSpec::ring_array(
                 [0.5, 0.5],
                 1.0,
                 0,
@@ -272,13 +285,13 @@ mod tests {
                 MapSlot::new(ring_lamp_counts),
                 0.0,
                 RingOrder::InnerFirst,
-            ),
+            )),
         );
         let def = FixtureDef {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
-            sampling: FixtureSamplingConfig::TextureArea,
-            mapping: MappingConfig::path_points(MapSlot::new(paths), 2.0),
+            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
+            mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::none(),

@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
-use super::SlotMeta;
+use super::{SlotMeta, stable_hash::fnv1a_32};
 
 /// Static shape of a slot tree.
 ///
@@ -53,6 +53,11 @@ pub enum SlotShape {
 /// usually with [`SlotShapeId::from_static_name`]. The registry rejects duplicate
 /// ids at registration time, so static hash collisions fail during startup
 /// shape registration instead of becoming ambiguous runtime lookups.
+///
+/// Name-based ids are 32-bit FNV-1a hashes. This is a small, stable,
+/// non-cryptographic hash suitable for compact ids over trusted static shape
+/// names. It is not collision-proof; the registry remains responsible for
+/// detecting duplicate ids when shapes are registered.
 #[derive(
     Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
@@ -65,7 +70,7 @@ impl SlotShapeId {
     }
 
     pub const fn from_static_name(input: &str) -> Self {
-        Self(fnv1a32(input))
+        Self(fnv1a_32(input))
     }
 
     pub fn from_name(input: &str) -> Result<Self, SlotShapeIdError> {
@@ -106,23 +111,8 @@ impl fmt::Display for SlotShapeIdError {
 
 impl core::error::Error for SlotShapeIdError {}
 
-const fn fnv1a32(input: &str) -> u32 {
-    const OFFSET: u32 = 0x811c_9dc5;
-    const PRIME: u32 = 0x0100_0193;
-
-    let bytes = input.as_bytes();
-    let mut hash = OFFSET;
-    let mut index = 0;
-    while index < bytes.len() {
-        hash ^= bytes[index] as u32;
-        hash = hash.wrapping_mul(PRIME);
-        index += 1;
-    }
-    hash
-}
-
 impl SlotShape {
-    /// Reference another registered root shape.
+    /// Reference another registered shape.
     pub fn reference(id: SlotShapeId) -> Self {
         Self::Ref { id }
     }
@@ -146,7 +136,7 @@ impl SlotShape {
         Self::Value { shape }
     }
 
-    /// Collect root shape ids referenced by this shape tree.
+    /// Collect registered shape ids referenced by this shape tree.
     ///
     /// The returned ids are not de-duplicated. Callers that care about unique
     /// ids can collect into a set; preserving traversal order keeps this helper

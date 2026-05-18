@@ -1,5 +1,8 @@
 //! lpv-model: visual types (Pattern, Effect, Stack, Playlist, etc.).
-//! Foundation types live in [`lpc_model`]; authored source types in [`lpc_source`].
+//!
+//! This disabled reference crate predates the slot-native `lpc-model` authored
+//! project model. The old `lpc_source` crate has been retired; remaining source
+//! files are archival sketches rather than an active compile target.
 
 #![no_std]
 extern crate alloc;
@@ -18,16 +21,9 @@ pub use visual::{
 };
 
 pub use lpc_model::{constraint, kind, node};
-pub use lpc_source::{artifact, presentation, schema};
-
 pub use lpc_model::node::tree_path::TreePath;
 pub use lpc_model::{
     ChannelName, Constraint, ConstraintChoice, ConstraintFree, ConstraintRange, Kind, NodeId,
     NodeInvocation, NodeName, NodePropSpec, ValuePath,
-};
-pub use lpc_source::prop::{binding, shape};
-pub use lpc_source::{
-    ArtifactLocator, LoadError, Presentation, SrcBinding, SrcShape, SrcSlot, SrcTextureSpec,
-    SrcValueSpec, load_artifact,
 };
 pub use lps_shared::{LpsType, LpsValueF32, TextureBuffer, TextureStorageFormat};

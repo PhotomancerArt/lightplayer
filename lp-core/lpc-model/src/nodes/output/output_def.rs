@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BindingDefs, OptionSlot, PositiveF32Slot, RatioSlot, ValueSlot};
+use crate::{
+    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, Slotted, ValueSlot,
+};
 
 /// Authored GPIO output node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct OutputDef {
     pub pin: ValueSlot<u32>,
     /// Authored slot bindings for output inputs.
@@ -40,7 +41,7 @@ impl OutputDef {
 }
 
 /// Authored output driver options for the display pipeline.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct OutputDriverOptionsConfig {
     /// Gamma exponent for luminance curve.
     #[serde(default = "default_lum_power_slot")]
@@ -76,7 +77,7 @@ impl Default for OutputDriverOptionsConfig {
 }
 
 fn default_lum_power_slot() -> PositiveF32Slot {
-    PositiveF32Slot::new(2.0)
+    PositiveF32Slot::new(PositiveF32(2.0))
 }
 
 fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
@@ -84,7 +85,7 @@ fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
 }
 
 fn default_brightness_slot() -> RatioSlot {
-    RatioSlot::new(1.0)
+    RatioSlot::new(Ratio(1.0))
 }
 
 fn default_true_slot() -> ValueSlot<bool> {
@@ -95,7 +96,7 @@ fn default_true_slot() -> ValueSlot<bool> {
 mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
-    use crate::{OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{NodeDef, OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
 
     #[test]
     fn test_output_def_kind() {
@@ -107,17 +108,20 @@ mod tests {
     #[test]
     fn test_output_def_flat_toml_deserialize() {
         let toml = r#"
-kind = "output"
+kind = "Output"
 pin = 18
 
 [options]
 brightness = 0.25
 dithering_enabled = false
 "#;
-        let def: OutputDef = toml::from_str(toml).unwrap();
+        let def = NodeDef::read_toml(&registry(), toml).unwrap();
+        let NodeDef::Output(def) = def else {
+            panic!("expected output def");
+        };
         assert_eq!(def.pin(), 18);
         let opts = def.options().unwrap();
-        assert!((*opts.brightness.value() - 0.25).abs() < 0.001);
+        assert!((opts.brightness.value().0 - 0.25).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
         assert!(*opts.interpolation_enabled.value());
     }
@@ -133,5 +137,11 @@ dithering_enabled = false
         assert!(view.is_valid_for(&registry));
         assert_eq!(view.pin().path(), &SlotPath::parse("pin").unwrap());
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
+    }
+
+    fn registry() -> SlotShapeRegistry {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        registry
     }
 }

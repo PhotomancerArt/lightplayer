@@ -277,6 +277,21 @@ where
     {
         self.writer.serde(value)
     }
+
+    pub fn raw_json(self, bytes: &[u8]) -> Result<(), JsonWriterError<W::Error>> {
+        self.writer.write_raw(bytes)
+    }
+}
+
+impl<W> lpc_model::slot_codec::SlotWrite for JsonValue<'_, W>
+where
+    W: JsonWrite,
+{
+    type Error = W::Error;
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.writer.out.write_all(bytes)
+    }
 }
 
 #[cfg(feature = "ser-write-json")]

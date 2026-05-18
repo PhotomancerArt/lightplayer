@@ -179,15 +179,14 @@ fn client_mutation_rejects_wrong_type_unknown_path_and_unsupported_target() {
         .apply_slot_mutation(Revision::new(2), unknown_path);
     assert_rejected(&response, WireSlotMutationRejection::UnknownPath);
 
-    let unsupported = harness
-        .client
-        .prepare_set_value(
-            WireSlotMutationId::new(7),
-            "engine.shader_node",
-            SlotPath::parse("params.speed").unwrap(),
-            LpValue::F32(1.0),
-        )
-        .unwrap();
+    let unsupported = WireSlotMutationRequest {
+        id: WireSlotMutationId::new(7),
+        root: "engine.shader_node".to_string(),
+        path: SlotPath::parse("params").unwrap(),
+        expected_shape_version: Revision::new(1),
+        expected_data_version: Revision::new(1),
+        op: WireSlotMutationOp::SetValue(LpValue::F32(1.0)),
+    };
     let response = harness
         .runtime
         .apply_slot_mutation(Revision::new(2), unsupported);

@@ -4,14 +4,12 @@
 //! [`ArtifactLocator`] here". Inline node definitions and artifact-plus-local
 //! field merges are reserved for richer invocation forms.
 
-use crate::ArtifactPathSlot;
 use crate::artifact::artifact_loc::ArtifactLocator;
+use crate::{ArtifactPath, ArtifactPathSlot, Slotted};
 use alloc::string::ToString;
 
 /// Parent-owned child node invocation.
-#[derive(
-    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord,
-)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct NodeInvocation {
     /// Artifact to load for this child node definition.
@@ -22,12 +20,12 @@ impl NodeInvocation {
     /// New artifact-only invocation with no overrides.
     pub fn new(artifact: ArtifactLocator) -> Self {
         Self {
-            artifact: ArtifactPathSlot::new(artifact.to_string()),
+            artifact: ArtifactPathSlot::new(ArtifactPath(artifact.to_string())),
         }
     }
 
     pub fn artifact_locator(&self) -> Result<ArtifactLocator, &'static str> {
-        ArtifactLocator::parse(self.artifact.value())
+        ArtifactLocator::parse(self.artifact.value().as_str())
     }
 }
 

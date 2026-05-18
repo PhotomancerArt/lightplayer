@@ -6,14 +6,16 @@ pub mod shader;
 pub mod texture;
 
 pub use fixture::{
-    ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, MappingConfig,
-    PathSpec, RingOrder,
+    ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, FixtureStateView,
+    MappingConfig, PathSpec, RingOrder,
 };
-pub use node_def::{NodeDef, NodeDefParseError};
-pub use output::{OutputDef, OutputDefView, OutputDriverOptionsConfig};
-pub use project::ProjectDef;
+pub use node_def::{NodeArtifact, NodeDef, NodeDefParseError, NodeDefWriteError};
+pub use output::{
+    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
+};
+pub use project::{ProjectDef, ProjectDefView};
 pub use shader::{
-    AddSubMode, DivMode, GlslOpts, MulMode, ScalarHint, ShaderDef, ShaderDefView, ShaderParamDef,
-    ShaderState,
+    AddSubMode, DivMode, GlslOpts, GlslOptsView, MulMode, ScalarHint, ScalarHintView, ShaderDef,
+    ShaderDefView, ShaderParamDef, ShaderParamDefView, ShaderState, ShaderStateView,
 };
-pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState};
+pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

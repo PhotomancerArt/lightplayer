@@ -720,6 +720,7 @@ fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
 
 fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
     match config {
+        MappingConfig::Unset => 0,
         MappingConfig::PathPoints { paths, .. } => {
             let mut total = 0u32;
             for path in paths.entries.values() {
@@ -729,7 +730,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
                     ring_lamp_counts,
                     order,
                     ..
-                } = path;
+                } = path.value();
 
                 let start_ring = *start_ring_inclusive.value();
                 let end_ring = *end_ring_exclusive.value();

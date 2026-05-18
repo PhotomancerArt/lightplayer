@@ -4,10 +4,8 @@ use crate::SlotShape;
 
 /// Static shape for a Rust-authored indexed record.
 ///
-/// This is the non-root counterpart to [`crate::StaticSlotAccess`]. Inline
-/// records can provide a shape without being independently registered in a
-/// [`crate::SlotShapeRegistry`]. Root records can combine this trait with
-/// `StaticSlotAccess` and register the returned shape under their root id.
+/// `SlotRecord` derives this together with [`crate::StaticSlotShape`] so
+/// Rust-authored records can be registered by shape id and also nested inline.
 pub trait SlotRecordShape {
     fn slot_record_shape() -> SlotShape;
 }

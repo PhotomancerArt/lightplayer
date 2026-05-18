@@ -30,6 +30,7 @@ pub fn compute_mapping(
     let mut mapping = PrecomputedMapping::new(texture_width, texture_height, mapping_data_ver);
 
     match config {
+        MappingConfig::Unset => {}
         MappingConfig::PathPoints {
             paths: _,
             sample_diameter: _,

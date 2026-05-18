@@ -70,15 +70,14 @@ fn process_messages(
 
 /// Create a test project on a filesystem
 ///
-/// Creates a minimal project with project.toml and returns the project UID.
+/// Creates a minimal project with project.toml.
 #[allow(
     dead_code,
     reason = "async client integration tests are being rewritten"
 )]
-fn create_test_project(fs: &mut LpFsMemory, name: &str, uid: &str) -> Result<(), ClientError> {
+fn create_test_project(fs: &mut LpFsMemory, name: &str) -> Result<(), ClientError> {
     let project_toml = format!(
-        r#"kind = "project"
-uid = "{uid}"
+        r#"kind = "Project"
 name = "{name}"
 "#
     );
@@ -128,11 +127,9 @@ fn test_create_command_structure() {
     // Simulate create command by creating a project structure
     let mut fs = LpFsMemory::new();
     let project_name = "my-project";
-    let project_uid = "2025.01.15-12.00.00-my-project";
 
     let project_toml = format!(
-        r#"kind = "project"
-uid = "{project_uid}"
+        r#"kind = "Project"
 name = "{project_name}"
 "#
     );
@@ -142,10 +139,6 @@ name = "{project_name}"
     // Verify project.toml exists and is valid
     let content = fs.read_file("/project.toml".as_path()).unwrap();
     let config: toml::Value = toml::from_slice(&content).unwrap();
-    assert_eq!(
-        config.get("uid").and_then(toml::Value::as_str),
-        Some(project_uid)
-    );
     assert_eq!(
         config.get("name").and_then(toml::Value::as_str),
         Some(project_name)

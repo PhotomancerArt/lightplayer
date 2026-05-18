@@ -1,4 +1,5 @@
 use lpc_model::nodes::fixture::FixtureDef;
+use lpc_model::nodes::node_def::NodeDef;
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
@@ -9,10 +10,10 @@ use lpc_wire::build_slot_full_sync;
 
 #[test]
 fn real_source_defs_sync_as_slot_roots() {
-    let project: ProjectDef = read_basic_toml("project.toml");
-    let shader: ShaderDef = read_basic_toml("shader.toml");
-    let output: OutputDef = read_basic_toml("output.toml");
-    let fixture: FixtureDef = read_basic_toml("fixture.toml");
+    let project = read_basic_project("project.toml");
+    let shader = read_basic_shader("shader.toml");
+    let output = read_basic_output("output.toml");
+    let fixture = read_basic_fixture("fixture.toml");
 
     let mut registry = SlotShapeRegistry::default();
     lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
@@ -75,9 +76,9 @@ fn real_source_defs_sync_as_slot_roots() {
             shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "bindings[output]",
+            "bindings[output].target.some",
         ),
-        binding_value("target", "bus#visual.out"),
+        LpValue::String(String::from("bus#visual.out")),
     );
     assert_value(
         select(
@@ -91,7 +92,7 @@ fn real_source_defs_sync_as_slot_roots() {
 
     let shader_with_params: ShaderDef = toml::from_str(
         r#"
-kind = "shader"
+kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 
@@ -149,21 +150,48 @@ value = 0.0
             fixture_data,
             FixtureDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "mapping.path_points.paths[0].ring_array.ring_lamp_counts[8]"
+            "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts[8]"
         ),
         SlotData::Value(_)
     ));
 }
 
-fn read_basic_toml<T>(name: &str) -> T
-where
-    T: serde::de::DeserializeOwned,
-{
+fn read_basic_node_def(name: &str) -> NodeDef {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/basic")
         .join(name);
     let text = std::fs::read_to_string(path).unwrap();
-    toml::from_str(&text).unwrap()
+    let mut registry = SlotShapeRegistry::default();
+    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
+    NodeDef::read_toml(&registry, &text).unwrap()
+}
+
+fn read_basic_project(name: &str) -> ProjectDef {
+    match read_basic_node_def(name) {
+        NodeDef::Project(def) => def,
+        other => panic!("expected project, got {:?}", other.kind()),
+    }
+}
+
+fn read_basic_shader(name: &str) -> ShaderDef {
+    match read_basic_node_def(name) {
+        NodeDef::Shader(def) => def,
+        other => panic!("expected shader, got {:?}", other.kind()),
+    }
+}
+
+fn read_basic_output(name: &str) -> OutputDef {
+    match read_basic_node_def(name) {
+        NodeDef::Output(def) => def,
+        other => panic!("expected output, got {:?}", other.kind()),
+    }
+}
+
+fn read_basic_fixture(name: &str) -> FixtureDef {
+    match read_basic_node_def(name) {
+        NodeDef::Fixture(def) => def,
+        other => panic!("expected fixture, got {:?}", other.kind()),
+    }
 }
 
 fn root_data<'a>(sync: &'a lpc_wire::WireSlotFullSync, name: &str) -> &'a SlotData {
@@ -180,22 +208,6 @@ fn assert_value(data: &SlotData, expected: LpValue) {
         panic!("expected value, got {data:?}");
     };
     assert_eq!(value.value(), &expected);
-}
-
-fn binding_value(direction: &str, endpoint: &str) -> LpValue {
-    LpValue::Struct {
-        name: Some(String::from("BindingDef")),
-        fields: vec![
-            (
-                String::from("direction"),
-                LpValue::String(String::from(direction)),
-            ),
-            (
-                String::from("endpoint"),
-                LpValue::String(String::from(endpoint)),
-            ),
-        ],
-    }
 }
 
 fn select<'a>(

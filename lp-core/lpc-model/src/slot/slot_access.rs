@@ -1,22 +1,26 @@
 use crate::{
-    LpValue, Revision, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    WithRevision,
+    LpValue, Revision, SlotFactory, SlotMutAccess, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotShapeRegistryError, WithRevision,
 };
+use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::any::Any;
 
 use super::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 
-/// Root object that exposes slot-addressable data.
+/// Runtime object that exposes slot-addressable data.
 ///
 /// Artifacts, node definitions, runtime nodes, state structs, and dynamic
-/// records can all expose a slot root. The root carries the shape id; walking
+/// records can all expose slot data. The object carries the shape id; walking
 /// below it pairs data access with shape information from the shape registry.
-pub trait SlotAccess {
+pub trait SlotAccess: Any {
     fn shape_id(&self) -> SlotShapeId;
     fn data(&self) -> SlotDataAccess<'_>;
+    fn as_any(&self) -> &dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
-/// Static slot shape root authored by a Rust type.
+/// Static slot shape authored by a Rust type.
 ///
 /// Static shapes are type-owned descriptions, not per-instance data. They are
 /// appropriate for Rust-authored defs, configs, and fixed runtime state whose
@@ -34,16 +38,40 @@ pub trait StaticSlotShape {
 
     fn ensure_registered(registry: &mut SlotShapeRegistry) -> Result<bool, SlotShapeRegistryError> {
         match Self::shape_name() {
-            Some(name) => registry.ensure_root_named(Self::SHAPE_ID, name, Self::slot_shape()),
-            None => registry.ensure_root(Self::SHAPE_ID, Self::slot_shape()),
+            Some(name) => registry.ensure_shape_named(Self::SHAPE_ID, name, Self::slot_shape()),
+            None => registry.ensure_shape(Self::SHAPE_ID, Self::slot_shape()),
         }
+    }
+
+    fn ensure_registered_with_factory(
+        registry: &mut SlotShapeRegistry,
+        factory: SlotFactory,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        match Self::shape_name() {
+            Some(name) => registry.ensure_shape_named_with_factory(
+                Self::SHAPE_ID,
+                name,
+                Self::slot_shape(),
+                factory,
+            ),
+            None => registry.ensure_shape_with_factory(Self::SHAPE_ID, Self::slot_shape(), factory),
+        }
+    }
+
+    fn ensure_default_registered<T>(
+        registry: &mut SlotShapeRegistry,
+    ) -> Result<bool, SlotShapeRegistryError>
+    where
+        T: StaticSlotShape + SlotMutAccess + Default + 'static,
+    {
+        T::ensure_registered_with_factory(registry, SlotFactory::for_default::<T>())
     }
 }
 
-/// Slot root whose data and shape are both authored statically by Rust.
+/// Slot-accessible object whose data and shape are both authored statically by Rust.
 ///
 /// This is the data-access counterpart to [`StaticSlotShape`]. It remains as
-/// the ergonomic trait for code that needs both a root value and its static
+/// the ergonomic trait for code that needs both a runtime value and its static
 /// shape identity. `register_shape` is kept as a compatibility shim for older
 /// call sites; new static bootstrap code should prefer `ensure_registered`.
 pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
@@ -55,9 +83,9 @@ pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
 /// Field-level slot access used by derive inference.
 ///
 /// A record field that implements this trait can be included in
-/// `#[derive(SlotRecord)]` without an explicit shape attribute. Fields that do
-/// not implement this trait must opt out with `#[slot(skip)]` or provide an
-/// explicit override supported by the derive.
+/// `#[derive(Slotted)]` without an explicit shape attribute. Fields that do
+/// not implement this trait must provide an explicit override supported by the
+/// derive or use a custom slot-access implementation.
 pub trait FieldSlot {
     fn slot_field_shape() -> SlotShape;
     fn slot_field_data(&self) -> SlotDataAccess<'_>;

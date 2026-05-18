@@ -1,6 +1,6 @@
 //! Project builder for creating artifact-authored test projects with a fluent API.
 
-use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
@@ -8,9 +8,11 @@ use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
-    Dim2uSlot, MapSlot, NodeSlotRef, OptionSlot, PositiveF32Slot, RatioSlot, RelativeNodeRef,
-    RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
+    Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
+    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeDef,
+    NodeInvocation, NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio,
+    RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
+    SourcePath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -118,9 +120,9 @@ impl ProjectBuilder {
         OutputBuilder {
             pin: 0,
             options: OutputDriverOptionsConfig {
-                lum_power: PositiveF32Slot::new(2.0),
+                lum_power: PositiveF32Slot::new(PositiveF32(2.0)),
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
-                brightness: RatioSlot::new(1.0),
+                brightness: RatioSlot::new(Ratio(1.0)),
                 interpolation_enabled: ValueSlot::new(false),
                 dithering_enabled: ValueSlot::new(false),
                 lut_enabled: ValueSlot::new(false),
@@ -175,13 +177,20 @@ impl ProjectBuilder {
 
     /// Build completes - writes project.toml and all node artifact files.
     pub fn build(self) {
-        let mut project_toml = format!("kind = \"project\"\nname = \"{}\"\n", self.name);
+        let registry = slot_shape_registry();
+        let mut nodes = BTreeMap::new();
         for (name, path) in &self.nodes {
             let relative_path = path.as_str().trim_start_matches('/');
-            project_toml.push_str(&format!(
-                "\n[nodes.{name}]\nartifact = \"./{relative_path}\"\n"
-            ));
+            nodes.insert(
+                name.clone(),
+                NodeInvocation::new(ArtifactLocator::path(format!("./{relative_path}"))),
+            );
         }
+        let project = ProjectDef {
+            name: OptionSlot::some(ValueSlot::new(self.name.clone())),
+            nodes: MapSlot::new(nodes),
+        };
+        let project_toml = authored_node_toml(&registry, &NodeDef::Project(project));
         self.write_file_helper("/project.toml", project_toml.as_bytes())
             .expect("Failed to write project.toml");
     }
@@ -222,8 +231,16 @@ fn numbered_node_name(kind: &str, id: u32) -> String {
     }
 }
 
-fn prepend_kind(kind: &str, body: String) -> String {
-    format!("kind = \"{kind}\"\n{body}")
+fn authored_node_toml(registry: &SlotShapeRegistry, node: &NodeDef) -> String {
+    node.write_toml(registry)
+        .expect("Failed to serialize authored node TOML")
+}
+
+fn slot_shape_registry() -> SlotShapeRegistry {
+    let mut registry = SlotShapeRegistry::default();
+    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry)
+        .expect("static slot shapes register without conflicts");
+    registry
 }
 
 impl TextureBuilder {
@@ -243,10 +260,7 @@ impl TextureBuilder {
             bindings: bus_input_binding_defs("visual.out"),
         };
 
-        let toml = prepend_kind(
-            "texture",
-            toml::to_string(&config).expect("Failed to serialize texture def to TOML"),
-        );
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Texture(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -281,17 +295,14 @@ impl ShaderBuilder {
         let glsl_file = format!("{node_name}.glsl");
 
         let config = ShaderDef {
-            glsl_path: SourcePathSlot::new(glsl_file),
-            render_order: RenderOrderSlot::new(self.render_order),
+            glsl_path: SourcePathSlot::new(SourcePath(glsl_file)),
+            render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
         };
 
-        let toml = prepend_kind(
-            "shader",
-            toml::to_string(&config).expect("Failed to serialize shader def to TOML"),
-        );
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Shader(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -327,10 +338,7 @@ impl OutputBuilder {
             options: OptionSlot::some(self.options),
         };
 
-        let toml = prepend_kind(
-            "output",
-            toml::to_string(&config).expect("Failed to serialize output def to TOML"),
-        );
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Output(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -387,8 +395,8 @@ impl FixtureBuilder {
                 height: 16,
             }),
             bindings: fixture_binding_defs(texture_loc),
-            sampling: lpc_model::FixtureSamplingConfig::TextureArea,
-            mapping: self.mapping,
+            sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
+            mapping: EnumSlot::new(self.mapping),
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
             brightness: self.brightness.map_or_else(OptionSlot::none, |brightness| {
@@ -401,10 +409,7 @@ impl FixtureBuilder {
                 }),
         };
 
-        let toml = prepend_kind(
-            "fixture",
-            toml::to_string(&config).expect("Failed to serialize fixture def to TOML"),
-        );
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Fixture(config));
 
         builder
             .write_file_helper(path.as_str(), toml.as_bytes())
@@ -418,7 +423,7 @@ impl FixtureBuilder {
 fn bus_input_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "input",
-        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
@@ -427,7 +432,7 @@ fn bus_input_binding_defs(slot: &str) -> BindingDefs {
 fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "output",
-        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
@@ -437,14 +442,14 @@ fn fixture_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
     let mut entries = BTreeMap::new();
     entries.insert(
         String::from("input"),
-        BindingDef::source(BindingEndpoint::Node(NodeSlotRef::new(
+        BindingDef::source(BindingRef::Node(NodeSlotRef::new(
             texture_loc,
             SlotPath::parse("output").expect("valid texture output slot"),
         ))),
     );
     entries.insert(
         String::from("output"),
-        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse("control.out").expect("valid bus slot path"),
         ))),
     );
@@ -461,10 +466,8 @@ fn default_mapping() -> MappingConfig {
     let mut ring_lamp_counts = BTreeMap::new();
     ring_lamp_counts.insert(0, ValueSlot::new(1));
 
-    let mut paths = BTreeMap::new();
-    paths.insert(
-        0,
-        PathSpec::ring_array(
+    MappingConfig::path_points_vec(
+        vec![PathSpec::ring_array(
             [0.5, 0.5],
             1.0,
             0,
@@ -472,10 +475,9 @@ fn default_mapping() -> MappingConfig {
             MapSlot::new(ring_lamp_counts),
             0.0,
             RingOrder::InnerFirst,
-        ),
-    );
-
-    MappingConfig::path_points(MapSlot::new(paths), 2.0)
+        )],
+        2.0,
+    )
 }
 
 fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
@@ -492,7 +494,7 @@ fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::nodes::project::project_def::ProjectDef;
+    use lpc_model::NodeDef;
     use lpfs::LpFsMemory;
 
     #[test]
@@ -505,8 +507,10 @@ mod tests {
         let project_toml_bytes = fs.borrow().read_file("/project.toml".as_path()).unwrap();
         let project_toml_str = core::str::from_utf8(&project_toml_bytes).unwrap();
 
-        let def: ProjectDef = toml::from_str(project_toml_str).unwrap();
-        assert_eq!(def.kind, ProjectDef::KIND);
+        let def = NodeDef::read_toml(&slot_shape_registry(), project_toml_str).unwrap();
+        let NodeDef::Project(def) = def else {
+            panic!("expected project def");
+        };
         assert_eq!(def.name(), Some("Test Project"));
         assert!(def.nodes.entries.contains_key("texture"));
     }

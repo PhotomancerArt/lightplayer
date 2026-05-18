@@ -5,12 +5,16 @@ use syn::{
 
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
-    pub(crate) root: bool,
 }
 
 pub(crate) struct FieldAttrs {
     pub(crate) name: Option<LitStr>,
     pub(crate) shape: FieldShapeAttr,
+}
+
+pub(crate) struct VariantAttrs {
+    pub(crate) name: Option<LitStr>,
+    pub(crate) is_default: bool,
 }
 
 pub(crate) enum FieldShapeAttr {
@@ -20,15 +24,10 @@ pub(crate) enum FieldShapeAttr {
     Record,
     Map { key: LitStr, value_ref: LitStr },
     OptionRef(LitStr),
-    Enum,
-    Skip,
 }
 
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
-    let mut parsed = ContainerAttrs {
-        shape_id: None,
-        root: false,
-    };
+    let mut parsed = ContainerAttrs { shape_id: None };
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("shape_id") {
@@ -36,7 +35,6 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
                 parsed.shape_id = Some(value.parse()?);
                 Ok(())
             } else if meta.path.is_ident("root") {
-                parsed.root = true;
                 Ok(())
             } else if meta.path.is_ident("view") {
                 Ok(())
@@ -68,12 +66,6 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
             } else if meta.path.is_ident("record") {
                 shape = Some(FieldShapeAttr::Record);
                 Ok(())
-            } else if meta.path.is_ident("enum") {
-                shape = Some(FieldShapeAttr::Enum);
-                Ok(())
-            } else if meta.path.is_ident("skip") {
-                shape = Some(FieldShapeAttr::Skip);
-                Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
                 shape = Some(FieldShapeAttr::OptionRef(value.parse()?));
@@ -96,6 +88,30 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
         name,
         shape: shape.unwrap_or(FieldShapeAttr::Infer),
     })
+}
+
+pub(crate) fn parse_variant(attrs: &[Attribute]) -> Result<VariantAttrs> {
+    let mut name = None;
+    let mut is_default = false;
+    for attr in attrs {
+        if attr.path().is_ident("default") {
+            is_default = true;
+            continue;
+        }
+        if !attr.path().is_ident("slot") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                let value = meta.value()?;
+                name = Some(value.parse()?);
+                Ok(())
+            } else {
+                Err(meta.error("unsupported slot variant attribute"))
+            }
+        })?;
+    }
+    Ok(VariantAttrs { name, is_default })
 }
 
 pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> TokenStream {
@@ -128,10 +144,6 @@ pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> Token
                 )
             }
         }
-        FieldShapeAttr::Enum => {
-            quote::quote! { <#ty as ::lpc_model::SlotEnumShape>::slot_enum_shape() }
-        }
-        FieldShapeAttr::Skip => quote::quote! {},
     }
 }
 
@@ -156,10 +168,78 @@ pub(crate) fn field_access_tokens(
         FieldShapeAttr::OptionRef(_) => {
             Some(quote::quote! { ::lpc_model::SlotDataAccess::Option(&self.#field_ident) })
         }
-        FieldShapeAttr::Enum => {
-            Some(quote::quote! { ::lpc_model::SlotDataAccess::Enum(&self.#field_ident) })
+    }
+}
+
+pub(crate) fn field_mut_access_tokens(
+    attr: &FieldShapeAttr,
+    ty: &syn::Type,
+    field_ident: &syn::Ident,
+) -> Option<TokenStream> {
+    match attr {
+        FieldShapeAttr::Infer => Some(
+            quote::quote! { <#ty as ::lpc_model::FieldSlotMut>::slot_field_data_mut(&mut self.#field_ident) },
+        ),
+        FieldShapeAttr::Value(_) | FieldShapeAttr::Leaf(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Value(&mut self.#field_ident) })
         }
-        FieldShapeAttr::Skip => None,
+        FieldShapeAttr::Record => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Record(&mut self.#field_ident) })
+        }
+        FieldShapeAttr::Map { .. } => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Map(&mut self.#field_ident) })
+        }
+        FieldShapeAttr::OptionRef(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Option(&mut self.#field_ident) })
+        }
+    }
+}
+
+pub(crate) fn field_binding_access_tokens(
+    attr: &FieldShapeAttr,
+    ty: &syn::Type,
+    field_ident: &syn::Ident,
+) -> Option<TokenStream> {
+    match attr {
+        FieldShapeAttr::Infer => {
+            Some(quote::quote! { <#ty as ::lpc_model::FieldSlot>::slot_field_data(#field_ident) })
+        }
+        FieldShapeAttr::Value(_) | FieldShapeAttr::Leaf(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataAccess::Value(#field_ident) })
+        }
+        FieldShapeAttr::Record => {
+            Some(quote::quote! { ::lpc_model::SlotDataAccess::Record(#field_ident) })
+        }
+        FieldShapeAttr::Map { .. } => {
+            Some(quote::quote! { ::lpc_model::SlotDataAccess::Map(#field_ident) })
+        }
+        FieldShapeAttr::OptionRef(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataAccess::Option(#field_ident) })
+        }
+    }
+}
+
+pub(crate) fn field_binding_mut_access_tokens(
+    attr: &FieldShapeAttr,
+    ty: &syn::Type,
+    field_ident: &syn::Ident,
+) -> Option<TokenStream> {
+    match attr {
+        FieldShapeAttr::Infer => Some(
+            quote::quote! { <#ty as ::lpc_model::FieldSlotMut>::slot_field_data_mut(#field_ident) },
+        ),
+        FieldShapeAttr::Value(_) | FieldShapeAttr::Leaf(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Value(#field_ident) })
+        }
+        FieldShapeAttr::Record => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Record(#field_ident) })
+        }
+        FieldShapeAttr::Map { .. } => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Map(#field_ident) })
+        }
+        FieldShapeAttr::OptionRef(_) => {
+            Some(quote::quote! { ::lpc_model::SlotDataMutAccess::Option(#field_ident) })
+        }
     }
 }
 

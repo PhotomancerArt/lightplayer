@@ -3,12 +3,16 @@
 //! A slot is a named location owned by a node or bus. A [`ValuePath`] navigates
 //! inside the value exposed at that slot; it is not part of the slot identity.
 
+mod enum_slot;
 mod slot_access;
 mod slot_accessor;
 mod slot_data;
 mod slot_enum_shape;
+mod slot_factory;
 mod slot_lookup;
 mod slot_meta;
+mod slot_mut_access;
+mod slot_mutation;
 mod slot_name;
 mod slot_owner;
 mod slot_path;
@@ -19,9 +23,11 @@ mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
 mod slot_value;
+mod stable_hash;
 mod value_ref;
 mod value_slot;
 
+pub use enum_slot::{EnumSlot, SlottedEnum, SlottedEnumMut};
 pub use slot_access::{
     FieldSlot, MapSlotAccess, SlotAccess, SlotDataAccess, SlotEnumAccess, SlotOptionAccess,
     SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
@@ -29,8 +35,20 @@ pub use slot_access::{
 pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
 pub use slot_enum_shape::SlotEnumShape;
+pub use slot_factory::{
+    DynamicSlotObject, SlotFactory, SlotFactoryError, SlotFactoryFn, create_dynamic_slot_data,
+};
 pub use slot_lookup::{SlotLookupError, lookup_slot_data};
 pub use slot_meta::SlotMeta;
+pub use slot_mut_access::{
+    FieldSlotMut, MapSlotMutAccess, SlotDataMutAccess, SlotEnumDefaultVariant, SlotEnumMutAccess,
+    SlotMapValueMutAccess, SlotMutAccess, SlotMutationError, SlotOptionMutAccess,
+    SlotRecordMutAccess, SlotValueMutAccess,
+};
+pub use slot_mutation::{
+    insert_slot_map_entry_default, set_slot_option_some_default, set_slot_value,
+    set_slot_variant_default, slot_data_revision,
+};
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};
@@ -54,13 +72,10 @@ pub use slot_shape_registry::{
 };
 
 pub use crate::slots::{
-    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, ControlProductSlot,
-    Dim2u, Dim2uSlot, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot, RenderOrderSlot,
-    ResourceRefSlot, SourcePathSlot, VisualProductSlot, XySlot, affine2d_shape,
-    artifact_path_shape, color_order_shape, control_product_shape, dim2u_shape, positive_f32_shape,
-    ratio_shape, relative_node_ref_shape, render_order_shape, resource_ref_shape,
-    runtime_buffer_resource_shape, source_path_shape, u32_list_shape, visual_product_shape,
-    xy_shape,
+    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
+    ControlProductSlot, Dim2u, Dim2uSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot,
+    RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot, SourcePath, SourcePathSlot,
+    VisualProductSlot, Xy, XySlot,
 };
 pub use value_ref::ValueRef;
 pub use value_slot::{MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, ValueSlot};

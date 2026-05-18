@@ -28,7 +28,7 @@ pub trait SlotValue: ToLpValue + FromLpValue {
 /// Shape of one complete value payload at a slot leaf.
 ///
 /// The `id` is a [`SlotShapeId`] so value shapes participate in the same shape
-/// identity space as slot roots. The `ty` validates the portable [`LpValue`]
+/// identity space as registered slot shapes. The `ty` validates the portable [`LpValue`]
 /// storage form. Metadata and editor hints attach to this semantic value
 /// contract, not to arbitrary storage types.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -159,6 +159,12 @@ impl ToLpValue for LpValue {
     }
 }
 
+impl FromLpValue for LpValue {
+    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
+        Ok(value.clone())
+    }
+}
+
 impl ToLpValue for String {
     fn to_lp_value(&self) -> LpValue {
         LpValue::String(self.clone())
@@ -278,6 +284,11 @@ impl_slot_leaf!(
     "slot.leaf.raw_string",
     SlotValueShape::raw(LpType::String)
 );
+impl_slot_leaf!(
+    LpValue,
+    "slot.leaf.raw_any",
+    SlotValueShape::raw(LpType::Any)
+);
 impl_slot_leaf!(i32, "slot.leaf.raw_i32", SlotValueShape::raw(LpType::I32));
 impl_slot_leaf!(u32, "slot.leaf.raw_u32", SlotValueShape::raw(LpType::U32));
 impl_slot_leaf!(f32, "slot.leaf.raw_f32", SlotValueShape::raw(LpType::F32));
@@ -318,9 +329,11 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
         LpType::Mat2x2 => "slot.leaf.raw_mat2x2",
         LpType::Mat3x3 => "slot.leaf.raw_mat3x3",
         LpType::Mat4x4 => "slot.leaf.raw_mat4x4",
+        LpType::Any => "slot.leaf.raw_any",
         LpType::Array(_, _) => "slot.leaf.raw_array",
         LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
+        LpType::Enum { .. } => "slot.leaf.raw_enum",
         LpType::Resource => "slot.leaf.raw_resource",
         LpType::Product(_) => "slot.leaf.raw_product",
     })
@@ -331,28 +344,33 @@ mod tests {
     use super::*;
     use crate::{
         Affine2d, ColorOrderValue, Dim2u, FromLpValue, ResourceRef, RuntimeBufferId, ToLpValue,
-        affine2d_shape, color_order_shape, control_product_shape, dim2u_shape,
-        relative_node_ref_shape, runtime_buffer_resource_shape,
+        runtime_buffer_resource_shape,
     };
 
     #[test]
     fn semantic_leaf_shapes_carry_editor_hints() {
         assert!(matches!(
-            relative_node_ref_shape().editor,
+            crate::RelativeNodeRef::value_shape().editor,
             ValueEditorHint::NodeRef
         ));
-        assert!(matches!(dim2u_shape().editor, ValueEditorHint::Dimensions));
-        assert!(matches!(affine2d_shape().editor, ValueEditorHint::Affine2d));
+        assert!(matches!(
+            Dim2u::value_shape().editor,
+            ValueEditorHint::Dimensions
+        ));
+        assert!(matches!(
+            Affine2d::value_shape().editor,
+            ValueEditorHint::Affine2d
+        ));
         assert!(matches!(
             runtime_buffer_resource_shape().editor,
             ValueEditorHint::RuntimeBufferResource
         ));
         assert!(matches!(
-            control_product_shape().editor,
+            crate::ControlProduct::value_shape().editor,
             ValueEditorHint::ControlProduct
         ));
         assert!(matches!(
-            color_order_shape().editor,
+            ColorOrderValue::value_shape().editor,
             ValueEditorHint::Dropdown { .. }
         ));
     }

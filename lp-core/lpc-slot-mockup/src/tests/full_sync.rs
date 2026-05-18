@@ -1,4 +1,4 @@
-use lpc_model::{LpValue, SlotData, SlotMapKey};
+use lpc_model::{SlotData, SlotMapKey};
 
 use super::fixture::{Harness, assert_map_has_key, select};
 
@@ -27,24 +27,19 @@ fn full_sync_copies_server_roots_to_client() {
     let fixture = harness.client.roots.get("source.fixture").unwrap();
     let ring_lamp_counts = select(
         fixture,
-        "mapping.path_points.path.ring_array.ring_lamp_counts",
+        "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts",
     );
-    let SlotData::Value(value) = ring_lamp_counts else {
-        panic!("ring_lamp_counts should be one slot value");
+    assert_map_has_key(ring_lamp_counts, "", SlotMapKey::U32(0));
+    assert_map_has_key(ring_lamp_counts, "", SlotMapKey::U32(1));
+    let count_zero = select(ring_lamp_counts, "[0]");
+    let SlotData::Value(value) = count_zero else {
+        panic!("ring_lamp_counts[0] should be one slot value");
     };
-    assert_eq!(
-        value.value(),
-        &LpValue::Array(vec![LpValue::U32(1), LpValue::U32(96)])
-    );
-    let semantic_ring_lamp_counts = select(
-        fixture,
-        "mapping.path_points.path.ring_array.semantic_ring_lamp_counts",
-    );
-    let SlotData::Value(value) = semantic_ring_lamp_counts else {
-        panic!("semantic_ring_lamp_counts should be one slot value");
+    assert_eq!(value.value(), &lpc_model::LpValue::U32(1));
+
+    let count_one = select(ring_lamp_counts, "[1]");
+    let SlotData::Value(value) = count_one else {
+        panic!("ring_lamp_counts[1] should be one slot value");
     };
-    assert_eq!(
-        value.value(),
-        &LpValue::Array(vec![LpValue::U32(1), LpValue::U32(96)])
-    );
+    assert_eq!(value.value(), &lpc_model::LpValue::U32(96));
 }
