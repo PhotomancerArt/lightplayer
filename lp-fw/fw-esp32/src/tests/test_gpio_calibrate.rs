@@ -30,32 +30,8 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
     Timer::after(Duration::from_millis(100)).await;
     write_line(&mut serial, "CAL READY target=esp32c6");
 
-    let mut pins = CalibrationPins {
-        gpio0: output(0),
-        gpio1: output(1),
-        gpio2: output(2),
-        gpio3: output(3),
-        gpio4: output(4),
-        gpio5: output(5),
-        gpio6: output(6),
-        gpio7: output(7),
-        gpio8: output(8),
-        gpio9: output(9),
-        gpio10: output(10),
-        gpio11: output(11),
-        gpio13: output(13),
-        gpio14: output(14),
-        gpio15: output(15),
-        gpio16: output(16),
-        gpio17: output(17),
-        gpio18: output(18),
-        gpio19: output(19),
-        gpio20: output(20),
-        gpio21: output(21),
-    };
-
     let mut parser = LineParser::new();
-    let mut active_gpio = None;
+    let mut active_pulse: Option<ActivePulse> = None;
     let mut level_high = false;
     let mut last_toggle = Instant::now();
     let mut last_heartbeat = Instant::now();
@@ -66,15 +42,16 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
                 Command::Hello => write_line(&mut serial, "CAL READY target=esp32c6"),
                 Command::Ping => write_line(&mut serial, "CAL PONG"),
                 Command::Stop => {
-                    if let Some(gpio) = active_gpio.take() {
-                        pins.set_low(gpio);
+                    if let Some(mut pulse) = active_pulse.take() {
+                        pulse.set_low();
+                        let gpio = pulse.gpio();
                         write_line(&mut serial, &format!("CAL STOP gpio={gpio}"));
                     } else {
                         write_line(&mut serial, "CAL STOP");
                     }
                 }
                 Command::Pulse(gpio) => {
-                    if !pins.supports(gpio) {
+                    if !supports_gpio(gpio) {
                         if gpio == 12 {
                             write_line(&mut serial, "CAL ERR blocked-gpio gpio=12");
                         } else {
@@ -83,14 +60,13 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
                                 &format!("CAL ERR unsupported-gpio gpio={gpio}"),
                             );
                         }
-                        active_gpio = None;
+                        active_pulse = None;
                         continue;
                     }
-                    if let Some(previous) = active_gpio {
-                        pins.set_low(previous);
+                    if let Some(mut previous) = active_pulse.take() {
+                        previous.set_low();
                     }
-                    active_gpio = Some(gpio);
-                    pins.set_low(gpio);
+                    active_pulse = Some(ActivePulse::open(gpio));
                     level_high = false;
                     last_toggle = Instant::now();
                     last_heartbeat = Instant::now();
@@ -101,11 +77,12 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
             }
         }
 
-        if let Some(gpio) = active_gpio {
+        if let Some(pulse) = active_pulse.as_mut() {
+            let gpio = pulse.gpio();
             let now = Instant::now();
             if now.duration_since(last_toggle) >= TOGGLE_INTERVAL {
                 level_high = !level_high;
-                pins.set_level(gpio, level_high);
+                pulse.set_level(level_high);
                 last_toggle = now;
             }
             if now.duration_since(last_heartbeat) >= HEARTBEAT_INTERVAL {
@@ -118,80 +95,43 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
     }
 }
 
-fn output(gpio: u8) -> esp_hal::gpio::Output<'static> {
-    // SAFETY: calibration firmware is the only owner of these GPIOs in this test mode. GPIO4 and
-    // GPIO18 are first returned by board init, then dropped before this function steals them.
-    let pin = unsafe { AnyPin::steal(gpio) };
-    let mut output =
-        esp_hal::gpio::Output::new(pin, Level::Low, esp_hal::gpio::OutputConfig::default());
-    output.set_low();
-    output
-}
-
 fn write_line(serial: &mut Esp32UsbSerialIo, line: &str) {
     let _ = serial.write(line.as_bytes());
     let _ = serial.write(b"\n");
 }
 
-struct CalibrationPins {
-    gpio0: esp_hal::gpio::Output<'static>,
-    gpio1: esp_hal::gpio::Output<'static>,
-    gpio2: esp_hal::gpio::Output<'static>,
-    gpio3: esp_hal::gpio::Output<'static>,
-    gpio4: esp_hal::gpio::Output<'static>,
-    gpio5: esp_hal::gpio::Output<'static>,
-    gpio6: esp_hal::gpio::Output<'static>,
-    gpio7: esp_hal::gpio::Output<'static>,
-    gpio8: esp_hal::gpio::Output<'static>,
-    gpio9: esp_hal::gpio::Output<'static>,
-    gpio10: esp_hal::gpio::Output<'static>,
-    gpio11: esp_hal::gpio::Output<'static>,
-    gpio13: esp_hal::gpio::Output<'static>,
-    gpio14: esp_hal::gpio::Output<'static>,
-    gpio15: esp_hal::gpio::Output<'static>,
-    gpio16: esp_hal::gpio::Output<'static>,
-    gpio17: esp_hal::gpio::Output<'static>,
-    gpio18: esp_hal::gpio::Output<'static>,
-    gpio19: esp_hal::gpio::Output<'static>,
-    gpio20: esp_hal::gpio::Output<'static>,
-    gpio21: esp_hal::gpio::Output<'static>,
+fn supports_gpio(gpio: u8) -> bool {
+    matches!(gpio, 0..=11 | 13..=21)
 }
 
-impl CalibrationPins {
-    fn supports(&self, gpio: u8) -> bool {
-        matches!(gpio, 0..=11 | 13..=21)
+struct ActivePulse {
+    gpio: u8,
+    output: esp_hal::gpio::Output<'static>,
+}
+
+impl ActivePulse {
+    fn open(gpio: u8) -> Self {
+        // SAFETY: calibration firmware opens only the currently requested GPIO and drops the
+        // previous output before opening another. GPIO4 and GPIO18 are first returned by board init,
+        // then dropped before a host request can steal them.
+        let pin = unsafe { AnyPin::steal(gpio) };
+        let mut output =
+            esp_hal::gpio::Output::new(pin, Level::Low, esp_hal::gpio::OutputConfig::default());
+        output.set_low();
+        Self { gpio, output }
     }
 
-    fn set_low(&mut self, gpio: u8) {
-        self.set_level(gpio, false);
+    fn gpio(&self) -> u8 {
+        self.gpio
     }
 
-    fn set_level(&mut self, gpio: u8, high: bool) {
+    fn set_low(&mut self) {
+        self.output.set_low();
+    }
+
+    fn set_level(&mut self, high: bool) {
         let level = if high { Level::High } else { Level::Low };
-        match gpio {
-            0 => self.gpio0.set_level(level),
-            1 => self.gpio1.set_level(level),
-            2 => self.gpio2.set_level(level),
-            3 => self.gpio3.set_level(level),
-            4 => self.gpio4.set_level(level),
-            5 => self.gpio5.set_level(level),
-            6 => self.gpio6.set_level(level),
-            7 => self.gpio7.set_level(level),
-            8 => self.gpio8.set_level(level),
-            9 => self.gpio9.set_level(level),
-            10 => self.gpio10.set_level(level),
-            11 => self.gpio11.set_level(level),
-            13 => self.gpio13.set_level(level),
-            14 => self.gpio14.set_level(level),
-            15 => self.gpio15.set_level(level),
-            16 => self.gpio16.set_level(level),
-            17 => self.gpio17.set_level(level),
-            18 => self.gpio18.set_level(level),
-            19 => self.gpio19.set_level(level),
-            20 => self.gpio20.set_level(level),
-            21 => self.gpio21.set_level(level),
-            _ => {}
-        }
+        self.output.set_level(level);
     }
 }
 
