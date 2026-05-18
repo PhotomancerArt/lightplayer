@@ -400,7 +400,24 @@ fwtest-dithering-esp32c6: install-rv32-target
 
 # Run host-driven GPIO calibration firmware on ESP32-C6
 fwtest-gpio-calibrate-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="${ESPFLASH_PORT:-}"
+    if [[ -z "$port" ]]; then
+        candidates=()
+        for pattern in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
+            for candidate in $pattern; do
+                [[ -e "$candidate" ]] && candidates+=("$candidate")
+            done
+        done
+        if [[ "${#candidates[@]}" -eq 0 ]]; then
+            echo "No ESP32 serial port found. Set ESPFLASH_PORT=/dev/..." >&2
+            exit 1
+        fi
+        port="${candidates[0]}"
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
