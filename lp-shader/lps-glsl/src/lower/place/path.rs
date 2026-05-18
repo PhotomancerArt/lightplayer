@@ -9,7 +9,7 @@ use crate::{Diagnostic, Span};
 use super::super::storage::{LocalStorage, is_pointer_param, param_pointer};
 use super::super::{LowerCtx, lower_expr};
 use super::dynamic;
-use super::layout::constant_index;
+use super::layout::{constant_index, scalar_lane_offsets};
 
 #[derive(Clone)]
 pub(super) enum LoweredPlace {
@@ -29,6 +29,7 @@ pub(super) struct MemoryPlace {
     pub(super) base: VReg,
     pub(super) static_offset: u32,
     pub(super) dynamic_offset: Option<VReg>,
+    pub(super) lane_offsets: Vec<u32>,
 }
 
 pub(super) fn lower_place(
@@ -64,6 +65,7 @@ fn root_place(
                     lanes: value.lanes,
                 })),
                 LocalStorage::Slot { ty, addr } => Some(LoweredPlace::Memory(MemoryPlace {
+                    lane_offsets: scalar_lane_offsets(&ty),
                     ty,
                     base: addr,
                     static_offset: 0,
@@ -74,6 +76,7 @@ fn root_place(
         PlaceRoot::Param { param, ty } if is_pointer_param(ctx, *param) => {
             let base = param_pointer(ctx, span, *param)?;
             Some(LoweredPlace::Memory(MemoryPlace {
+                lane_offsets: scalar_lane_offsets(ty),
                 ty: ty.clone(),
                 base,
                 static_offset: 0,
@@ -98,6 +101,7 @@ fn root_place(
         | PlaceRoot::Global {
             byte_offset, ty, ..
         } => Some(LoweredPlace::Memory(MemoryPlace {
+            lane_offsets: scalar_lane_offsets(ty),
             ty: ty.clone(),
             base: ctx.vmctx,
             static_offset: *byte_offset,
@@ -130,7 +134,7 @@ fn apply_field(
     span: Span,
     lane_offset: usize,
     lane_count: usize,
-    byte_offset: usize,
+    _byte_offset: usize,
     ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
     Ok(Some(match place {
@@ -145,9 +149,10 @@ fn apply_field(
             })
         }
         LoweredPlace::Memory(memory) => LoweredPlace::Memory(MemoryPlace {
+            lane_offsets: slice_lane_offsets(span, &memory.lane_offsets, lane_offset, lane_count)?,
             ty: ty.clone(),
             base: memory.base,
-            static_offset: memory.static_offset.saturating_add(byte_offset as u32),
+            static_offset: memory.static_offset,
             dynamic_offset: memory.dynamic_offset,
         }),
     }))
@@ -159,22 +164,42 @@ fn apply_swizzle(
     lanes: &[usize],
     ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
-    let LoweredPlace::Flat(flat) = place else {
-        return Ok(None);
-    };
-    let projected = lanes
-        .iter()
-        .map(|lane| {
-            flat.lanes
-                .get(*lane)
-                .copied()
-                .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Some(LoweredPlace::Flat(FlatPlace {
-        ty: ty.clone(),
-        lanes: projected,
-    })))
+    Ok(Some(match place {
+        LoweredPlace::Flat(flat) => {
+            let projected = lanes
+                .iter()
+                .map(|lane| {
+                    flat.lanes
+                        .get(*lane)
+                        .copied()
+                        .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            LoweredPlace::Flat(FlatPlace {
+                ty: ty.clone(),
+                lanes: projected,
+            })
+        }
+        LoweredPlace::Memory(memory) => {
+            let lane_offsets = lanes
+                .iter()
+                .map(|lane| {
+                    memory
+                        .lane_offsets
+                        .get(*lane)
+                        .copied()
+                        .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            LoweredPlace::Memory(MemoryPlace {
+                lane_offsets,
+                ty: ty.clone(),
+                base: memory.base,
+                static_offset: memory.static_offset,
+                dynamic_offset: memory.dynamic_offset,
+            })
+        }
+    }))
 }
 
 fn apply_index(
@@ -233,6 +258,7 @@ fn apply_array_index(
                     return Ok(None);
                 }
                 return Ok(Some(LoweredPlace::Memory(MemoryPlace {
+                    lane_offsets: scalar_lane_offsets(ty),
                     ty: ty.clone(),
                     base: memory.base,
                     static_offset: memory
@@ -245,6 +271,7 @@ fn apply_array_index(
             let index = dynamic::clamp_index(ctx, span, index, len)?;
             let offset = dynamic::scale_index(ctx, index, stride);
             Ok(Some(LoweredPlace::Memory(MemoryPlace {
+                lane_offsets: scalar_lane_offsets(ty),
                 ty: ty.clone(),
                 base: memory.base,
                 static_offset: memory.static_offset,
@@ -293,4 +320,17 @@ fn place_ty(place: &LoweredPlace) -> LpsType {
         LoweredPlace::Flat(flat) => flat.ty.clone(),
         LoweredPlace::Memory(memory) => memory.ty.clone(),
     }
+}
+
+fn slice_lane_offsets(
+    span: Span,
+    lane_offsets: &[u32],
+    lane_offset: usize,
+    lane_count: usize,
+) -> Result<Vec<u32>, Diagnostic> {
+    let end = lane_offset + lane_count;
+    let Some(offsets) = lane_offsets.get(lane_offset..end) else {
+        return Err(Diagnostic::error(span, "field lane out of range"));
+    };
+    Ok(offsets.to_vec())
 }

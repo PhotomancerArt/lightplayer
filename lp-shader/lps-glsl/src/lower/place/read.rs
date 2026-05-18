@@ -42,14 +42,18 @@ fn load_memory_place(
         memory.base
     };
     let mut lanes = Vec::new();
-    for (index, ir_ty) in ir_types.iter().enumerate() {
+    if ir_types.len() != memory.lane_offsets.len() {
+        return Err(Diagnostic::error(
+            Span::new(0, 0),
+            "memory read lane mismatch",
+        ));
+    }
+    for (offset, ir_ty) in memory.lane_offsets.iter().zip(ir_types.iter()) {
         let dst = ctx.fb.alloc_vreg(*ir_ty);
         ctx.fb.push(LpirOp::Load {
             dst,
             base,
-            offset: memory
-                .static_offset
-                .saturating_add((index as u32).saturating_mul(4)),
+            offset: memory.static_offset.saturating_add(*offset),
         });
         lanes.push(dst);
     }

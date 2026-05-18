@@ -44,6 +44,9 @@ pub(super) fn store_memory_place(
     if crate::hir::scalar_lane_count(&memory.ty) != value.lanes.len() {
         return Err(Diagnostic::error(span, "memory assignment lane mismatch"));
     }
+    if memory.lane_offsets.len() != value.lanes.len() {
+        return Err(Diagnostic::error(span, "memory assignment offset mismatch"));
+    }
     let base = if let Some(dynamic_offset) = memory.dynamic_offset {
         let base = ctx.fb.alloc_vreg(lpir::IrType::I32);
         ctx.fb.push(LpirOp::Iadd {
@@ -55,12 +58,10 @@ pub(super) fn store_memory_place(
     } else {
         memory.base
     };
-    for (index, lane) in value.lanes.iter().enumerate() {
+    for (offset, lane) in memory.lane_offsets.iter().zip(value.lanes.iter()) {
         ctx.fb.push(LpirOp::Store {
             base,
-            offset: memory
-                .static_offset
-                .saturating_add((index as u32).saturating_mul(4)),
+            offset: memory.static_offset.saturating_add(*offset),
             value: *lane,
         });
     }

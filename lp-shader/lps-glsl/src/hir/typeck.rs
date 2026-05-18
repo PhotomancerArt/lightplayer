@@ -359,6 +359,15 @@ impl<'a> TypeCtx<'a> {
                 "initializer list requires declaration type",
             )),
             ParsedExprKind::Swizzle { base, fields } => {
+                if let Ok(place) = self.type_place(expr, AccessMode::Read) {
+                    return Ok(HirExpr {
+                        span: expr.span,
+                        ty: place.ty.clone(),
+                        kind: HirExprKind::PlaceRead {
+                            target: HirAssignTarget { place },
+                        },
+                    });
+                }
                 let base = self.type_expr(base)?;
                 let (lanes, ty) = access_lanes(expr.span, &base.ty, fields)?;
                 Ok(HirExpr {
@@ -385,6 +394,15 @@ impl<'a> TypeCtx<'a> {
                 })
             }
             ParsedExprKind::Index { base, index } => {
+                if let Ok(place) = self.type_place(expr, AccessMode::Read) {
+                    return Ok(HirExpr {
+                        span: expr.span,
+                        ty: place.ty.clone(),
+                        kind: HirExprKind::PlaceRead {
+                            target: HirAssignTarget { place },
+                        },
+                    });
+                }
                 let base = self.type_expr(base)?;
                 let ty = if base.ty.is_matrix() {
                     base.ty

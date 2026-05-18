@@ -279,6 +279,115 @@ void tick() {
 }
 
 #[test]
+fn compile_compute_writes_struct_array_components() {
+    let engine = test_engine();
+    let shader = engine
+        .compile_compute_desc(
+            CompileComputeDesc::new(
+                r#"
+layout(binding = 0) uniform int selected;
+
+struct FluidEmitter {
+    uint id;
+    vec2 pos;
+    vec2 dir;
+    float radius;
+    vec3 color;
+    float velocity;
+    float intensity;
+};
+
+FluidEmitter emitters[4];
+
+void tick() {
+    emitters[0].id = 1u;
+    emitters[0].pos.x = 0.25;
+    emitters[selected].id = 2u;
+    emitters[selected].color.g = 0.5;
+}
+"#,
+                lpir::CompilerConfig::default(),
+            )
+            .with_consumed("selected", LpsType::Int)
+            .with_sentinel_array_output("emitters", fluid_emitter_lps_type(), 4, "id"),
+        )
+        .expect("compile compute");
+
+    shader
+        .tick(&[("selected", LpsValueF32::I32(2))])
+        .expect("tick");
+    let emitters = shader.get_output("emitters").expect("emitters output");
+    let LpsValueF32::Array(items) = emitters else {
+        panic!("expected emitter array, got {emitters:?}");
+    };
+    let LpsValueF32::Struct { fields, .. } = &items[0] else {
+        panic!("expected emitter struct, got {:?}", &items[0]);
+    };
+    assert!(
+        field(fields, "pos")
+            .expect("pos")
+            .approx_eq_default(&LpsValueF32::Vec2([0.25, 0.0]))
+    );
+    let LpsValueF32::Struct { fields, .. } = &items[2] else {
+        panic!("expected emitter struct, got {:?}", &items[2]);
+    };
+    assert!(
+        field(fields, "color")
+            .expect("color")
+            .approx_eq_default(&LpsValueF32::Vec3([0.0, 0.5, 0.0]))
+    );
+}
+
+#[test]
+fn compile_compute_out_writeback_to_struct_array_field() {
+    let engine = test_engine();
+    let shader = engine
+        .compile_compute_desc(
+            CompileComputeDesc::new(
+                r#"
+struct FluidEmitter {
+    uint id;
+    vec2 pos;
+    vec2 dir;
+    float radius;
+    vec3 color;
+    float velocity;
+    float intensity;
+};
+
+FluidEmitter emitters[4];
+
+void set_pos(out vec2 pos) {
+    pos = vec2(0.5, 0.75);
+}
+
+void tick() {
+    emitters[0].id = 1u;
+    set_pos(emitters[0].pos);
+}
+"#,
+                lpir::CompilerConfig::default(),
+            )
+            .with_sentinel_array_output("emitters", fluid_emitter_lps_type(), 4, "id"),
+        )
+        .expect("compile compute");
+
+    shader.tick(&[]).expect("tick");
+    let emitters = shader.get_output("emitters").expect("emitters output");
+    let LpsValueF32::Array(items) = emitters else {
+        panic!("expected emitter array, got {emitters:?}");
+    };
+    let LpsValueF32::Struct { fields, .. } = &items[0] else {
+        panic!("expected emitter struct, got {:?}", &items[0]);
+    };
+    assert!(
+        field(fields, "pos")
+            .expect("pos")
+            .approx_eq_default(&LpsValueF32::Vec2([0.5, 0.75]))
+    );
+}
+
+#[test]
 fn compile_compute_reports_abi_mismatch() {
     let engine = test_engine();
     let result = engine.compile_compute_desc(
