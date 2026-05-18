@@ -5,6 +5,7 @@ use lpir::LpirOp;
 use crate::hir::{HirAssignTarget, PlaceRoot};
 use crate::{Diagnostic, Span};
 
+use super::super::place::try_assign_place_direct;
 use super::super::storage::{
     is_pointer_param, local_is_slot, param_pointer, store_global, store_local, store_local_lanes,
     store_value_to_addr,
@@ -26,6 +27,9 @@ pub(in crate::lower) fn assign_target(
     }
     if let Some(lanes) = place.single_root_lane_path() {
         return assign_root_lanes(ctx, span, &place.root, &lanes, value);
+    }
+    if try_assign_place_direct(ctx, span, target, &value)? {
+        return Ok(());
     }
     let dst = root_value(ctx, span, &place.root)?;
     let dst = assign_segments(ctx, span, dst, &place.segments, value)?;

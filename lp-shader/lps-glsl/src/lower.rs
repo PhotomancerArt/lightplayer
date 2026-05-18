@@ -18,6 +18,7 @@ use crate::hir::{
 use crate::{Diagnostic, Span};
 
 mod ops;
+mod place;
 mod storage;
 
 use ops::{

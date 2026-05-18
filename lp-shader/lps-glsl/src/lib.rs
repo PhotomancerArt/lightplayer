@@ -274,6 +274,142 @@ vec4 sample() {
         assert!(!sample.slots.is_empty());
     }
 
+    #[test]
+    fn constant_index_struct_array_writes_do_not_rebuild_whole_aggregate() {
+        let source = r#"
+struct FluidEmitter {
+    uint id;
+    vec2 pos;
+    vec2 dir;
+    float radius;
+    vec3 color;
+    float velocity;
+    float intensity;
+};
+
+FluidEmitter emitters[4];
+
+void tick() {
+    emitters[0].id = 1u;
+    emitters[0].pos = vec2(0.25, 0.75);
+    emitters[0].color = vec3(1.0, 0.5, 0.25);
+}
+"#;
+        let output = compile(source, &CompileOptions::default()).expect("compile emitters");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        let tick = output
+            .ir
+            .functions
+            .values()
+            .find(|function| function.name == "tick")
+            .expect("tick function");
+        let selects = tick
+            .body
+            .iter()
+            .filter(|op| matches!(op, lpir::LpirOp::Select { .. }))
+            .count();
+        let stores = tick
+            .body
+            .iter()
+            .filter(|op| matches!(op, lpir::LpirOp::Store { .. }))
+            .count();
+
+        assert_eq!(selects, 0);
+        assert_eq!(stores, 6);
+        assert!(
+            tick.body.len() < 40,
+            "unexpected LPIR growth: {}",
+            tick.body.len()
+        );
+    }
+
+    #[test]
+    fn dynamic_index_global_struct_array_write_uses_narrow_store() {
+        let source = r#"
+layout(binding = 0) uniform int selected;
+
+struct Point {
+    float x;
+    float y;
+};
+
+Point points[4];
+
+void tick() {
+    points[selected].y = 2.0;
+}
+"#;
+        let output = compile(source, &CompileOptions::default()).expect("compile dynamic write");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        let tick = output
+            .ir
+            .functions
+            .values()
+            .find(|function| function.name == "tick")
+            .expect("tick function");
+        let stores = tick
+            .body
+            .iter()
+            .filter(|op| matches!(op, lpir::LpirOp::Store { .. }))
+            .count();
+
+        assert_eq!(stores, 1);
+        assert!(
+            tick.body.len() < 30,
+            "unexpected LPIR growth: {}",
+            tick.body.len()
+        );
+    }
+
+    #[test]
+    fn fluid_compute_example_stays_compact_at_lpir() {
+        let source = alloc::format!(
+            r#"
+struct FluidEmitter {{
+    uint id;
+    vec2 pos;
+    vec2 dir;
+    float radius;
+    vec3 color;
+    float velocity;
+    float intensity;
+}};
+
+layout(binding = 0) uniform float time;
+FluidEmitter emitters[4];
+
+{}
+"#,
+            include_str!("../../../examples/fluid/compute.glsl")
+        );
+        let output = compile(&source, &CompileOptions::default()).expect("compile fluid compute");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        let tick = output
+            .ir
+            .functions
+            .values()
+            .find(|function| function.name == "tick")
+            .expect("tick function");
+        let stores = tick
+            .body
+            .iter()
+            .filter(|op| matches!(op, lpir::LpirOp::Store { .. }))
+            .count();
+        let selects = tick
+            .body
+            .iter()
+            .filter(|op| matches!(op, lpir::LpirOp::Select { .. }))
+            .count();
+
+        assert_eq!(stores, 34);
+        assert_eq!(selects, 0);
+        assert!(
+            tick.body.len() < 180,
+            "unexpected LPIR growth: {}",
+            tick.body.len()
+        );
+    }
+
     fn compile_with_single_steps(source: &str) -> CompileOutput {
         let mut job = CompileJob::new(source, CompileOptions::default());
         loop {

@@ -27,6 +27,7 @@ mod typing;
 use array_size::{ArraySizeConsts, eval_array_size_expr};
 use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{HirPlace, PlaceRoot, PlaceSegment};
+pub(crate) use shape::TypeShape;
 use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{

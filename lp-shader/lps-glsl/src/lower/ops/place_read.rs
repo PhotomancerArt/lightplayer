@@ -3,6 +3,7 @@ use alloc::format;
 use crate::hir::{HirAssignTarget, PlaceRoot};
 use crate::{Diagnostic, Span};
 
+use super::super::place::try_read_place_direct;
 use super::super::storage::{
     is_pointer_param, load_value_from_addr, local_value, lower_global_load, param_pointer,
 };
@@ -43,9 +44,12 @@ pub(in crate::lower) fn read_assign_target(
     target: &HirAssignTarget,
 ) -> Result<LowerValue, Diagnostic> {
     let place = &target.place;
-    let value = root_value(ctx, span, &place.root)?;
     if place.segments.is_empty() {
+        return root_value(ctx, span, &place.root);
+    }
+    if let Some(value) = try_read_place_direct(ctx, span, target)? {
         return Ok(value);
     }
+    let value = root_value(ctx, span, &place.root)?;
     read_segments(ctx, span, value, &place.segments)
 }
