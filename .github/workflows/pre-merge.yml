@@ -5,6 +5,17 @@ on:
     branches: ["feature/*"]
   push:
     branches: ["feature/*"]
+  workflow_dispatch:
+    inputs:
+      force_filetests:
+        description: "Run GLSL filetests even if shader-impacting files did not change"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   RUST_BACKTRACE: 1
@@ -104,7 +115,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
+            lp2025/target/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cargo-
@@ -112,8 +123,51 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      - name: Validate
-        run: cd lp2025 && just check build-ci test
+      - name: Check and build
+        run: cd lp2025 && just check build-ci
+
+      - name: Detect filetest-relevant changes
+        id: filetest-changes
+        working-directory: lp2025
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.force_filetests }}" == "true" ]]; then
+            echo "run_filetests=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run requested filetests."
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            echo "run_filetests=true" >> "$GITHUB_OUTPUT"
+            echo "No usable base commit; running filetests."
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "$base"
+          changed="$(git diff --name-only "$base" HEAD)"
+          echo "$changed"
+
+          if echo "$changed" | grep -Eq '^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|justfile|scripts/(build-builtins|filetests)\.sh|\.github/workflows/pre-merge\.yml|third_party/|lp-shader/|lp-riscv/)'; then
+            echo "run_filetests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_filetests=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test
+        if: steps.filetest-changes.outputs.run_filetests == 'true'
+        run: cd lp2025 && just test
+
+      - name: Test without filetests
+        if: steps.filetest-changes.outputs.run_filetests != 'true'
+        run: cd lp2025 && just test-rust
 
   # build-esp32-arm:
   #   name: Build ESP32 (ARM)
