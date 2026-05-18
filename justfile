@@ -419,6 +419,16 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
+# Run the host-side GPIO calibration prompt
+calibrate-gpio board="seeed/xiao-esp32-c6" label="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(hardware calibrate esp32c6 --board "{{ board }}" --port serial:auto)
+    if [[ -n "{{ label }}" ]]; then
+        args+=(--label "{{ label }}")
+    fi
+    cargo run -p lp-cli -- "${args[@]}"
+
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}

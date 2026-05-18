@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow, bail};
-use dialoguer::{Confirm, Input};
+use dialoguer::{Confirm, Input, Select};
 use lpc_shared::hardware::{HardwareManifestFile, HardwareTarget};
 use std::io::{IsTerminal, stdin};
 use std::time::Duration;
 
-use crate::commands::hardware::args::CalibrateArgs;
+use crate::commands::hardware::args::{CalibrateArgs, HardwareTargetArg};
 use crate::commands::hardware::manifest::board_manifest_store::BoardManifestStore;
 
 use super::calibration_command::{CalibrationEvent, PromptCommand};
@@ -15,9 +15,14 @@ use super::calibration_resume::{CalibrationResumeState, load_resume, resume_path
 use super::calibration_serial::{SerialCalibrationTransport, ensure_firmware_ready};
 
 pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
-    let target: HardwareTarget = args.target.into();
     let store = BoardManifestStore::discover(args.repo, args.boards_dir)?;
-    let mut manifest = store.load(&args.board)?;
+    let target_arg = args.target.unwrap_or(HardwareTargetArg::Esp32c6);
+    let target: HardwareTarget = target_arg.into();
+    let board_id = match args.board {
+        Some(board) => board,
+        None => prompt_board(&store, target)?,
+    };
+    let mut manifest = store.load(&board_id)?;
     validate_manifest_target(&manifest, target)?;
 
     let mut label = match args.label {
@@ -27,10 +32,10 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     label = label.trim().to_string();
     validate_board_label(&label)?;
 
-    let resume_path = resume_path(store.repo_root(), &args.board);
+    let resume_path = resume_path(store.repo_root(), &board_id);
     let mut state = load_resume(&resume_path)?
-        .filter(|state| state.board_id == args.board && state.target == target)
-        .unwrap_or_else(|| CalibrationResumeState::new(args.board.clone(), target, label.clone()));
+        .filter(|state| state.board_id == board_id && state.target == target)
+        .unwrap_or_else(|| CalibrationResumeState::new(board_id.clone(), target, label.clone()));
     state.board_label = label.clone();
 
     let mut candidates = gpio_candidates(&manifest);
@@ -142,6 +147,33 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
             }
         }
     }
+}
+
+fn prompt_board(store: &BoardManifestStore, target: HardwareTarget) -> Result<String> {
+    if !stdin().is_terminal() {
+        bail!("--board is required when calibration is not running in an interactive terminal");
+    }
+    let manifests: Vec<_> = store
+        .list()?
+        .into_iter()
+        .filter(|manifest| manifest.target == target.to_string())
+        .collect();
+    if manifests.is_empty() {
+        bail!(
+            "no {target} board manifests found in {}",
+            store.boards_dir().display()
+        );
+    }
+    let items: Vec<_> = manifests
+        .iter()
+        .map(|manifest| format!("{} - {} {}", manifest.id, manifest.vendor, manifest.product))
+        .collect();
+    let choice = Select::new()
+        .with_prompt(format!("Board manifest for {target} calibration"))
+        .items(&items)
+        .default(0)
+        .interact()?;
+    Ok(manifests[choice].id.clone())
 }
 
 pub fn validate_manifest_target(

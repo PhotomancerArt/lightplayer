@@ -90,10 +90,10 @@ pub struct DeleteManifestArgs {
 pub struct CalibrateArgs {
     /// Hardware target running the calibration firmware.
     #[arg(value_enum)]
-    pub target: HardwareTargetArg,
+    pub target: Option<HardwareTargetArg>,
     /// Board manifest id, for example seeed/xiao-esp32-c6.
     #[arg(long)]
-    pub board: String,
+    pub board: Option<String>,
     /// Serial port path, auto, or serial:auto.
     #[arg(long)]
     pub port: Option<String>,
