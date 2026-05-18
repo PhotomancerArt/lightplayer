@@ -15,6 +15,10 @@ pub fn esp32c6_devkit_hardware_manifest() -> HardwareManifest {
         "ESP32-C6 DevKit Provisional",
         esp32c6_devkit_resources(),
     )
+    .with_description(
+        "Provisional ESP32-C6 dev board profile with HAL GPIO identities and hand-entered labels.",
+    )
+    .with_url("https://www.espressif.com/en/products/devkits")
 }
 
 fn esp32c6_devkit_resources() -> Vec<HardwareResource> {

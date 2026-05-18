@@ -49,9 +49,9 @@ Suggested public types:
   `Radio`.
 - `HardwareResource` with address, capabilities, board-profile display label, aliases, optional
   physical location note, and reserved reason.
-- `HardwareManifest` with a board/profile id, human-readable board name, a vector/map of resources,
-  helpers to find resources by address, and helpers to construct a virtual single-RMT board for
-  tests.
+- `HardwareManifest` with a board/profile id, human-readable board name, optional description,
+  optional URL, a vector/map of resources, helpers to find resources by address, and helpers to
+  construct a virtual single-RMT board for tests.
 - `HardwareClaim` with a claimant/debug name and a list of addresses.
 - `HardwareLease` with a lease id and claimed addresses. Prefer explicit registry release APIs over
   making lease drop mutate shared state if that gets lifetime-heavy.

@@ -4,8 +4,9 @@
 
 - Added `lpc_shared::hardware` with stable hardware addresses, capabilities, resources, manifests,
   bundle claims, leases, a `HardwareRegistry`, and hardware-specific errors.
-- Added board-facing metadata fields for display labels, aliases, physical location notes, and
-  reserved reasons while keeping internal identity on addresses like `"/gpio/18"`.
+- Added board-facing metadata fields for manifest description/URL, resource display labels, aliases,
+  physical location notes, and reserved reasons while keeping internal identity on addresses like
+  `"/gpio/18"`.
 - Wired `MemoryOutputProvider` through the hardware registry so WS281x output opens claim GPIO plus
   the virtual single RMT resource atomically.
 - Added engine service tests for duplicate GPIO claims and different GPIOs contending for the same

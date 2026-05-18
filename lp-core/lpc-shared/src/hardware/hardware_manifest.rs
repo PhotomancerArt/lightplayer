@@ -7,6 +7,8 @@ use super::{HardwareAddress, HardwareCapability, HardwareResource};
 pub struct HardwareManifest {
     board_id: String,
     board_name: String,
+    description: Option<String>,
+    url: Option<String>,
     resources: Vec<HardwareResource>,
 }
 
@@ -19,6 +21,8 @@ impl HardwareManifest {
         Self {
             board_id: board_id.into(),
             board_name: board_name.into(),
+            description: None,
+            url: None,
             resources: resources.into(),
         }
     }
@@ -41,6 +45,7 @@ impl HardwareManifest {
             "RMT WS281x 0",
         ));
         Self::new("virtual-single-rmt", "Virtual Single-RMT Board", resources)
+            .with_description("Virtual board profile for tests and emulation with GPIO resources and one shared WS281x/RMT resource.")
     }
 
     pub fn board_id(&self) -> &str {
@@ -51,8 +56,26 @@ impl HardwareManifest {
         &self.board_name
     }
 
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
     pub fn resources(&self) -> &[HardwareResource] {
         &self.resources
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    pub fn with_url(mut self, url: impl Into<String>) -> Self {
+        self.url = Some(url.into());
+        self
     }
 
     pub fn resource(&self, address: &HardwareAddress) -> Option<&HardwareResource> {
@@ -92,5 +115,15 @@ mod tests {
 
         let resource = manifest.resource(&HardwareAddress::gpio(18)).unwrap();
         assert_eq!(resource.display_label(), "D6");
+    }
+
+    #[test]
+    fn stores_optional_board_metadata() {
+        let manifest = HardwareManifest::new("board", "Board", [])
+            .with_description("A board profile")
+            .with_url("https://example.com/board");
+
+        assert_eq!(manifest.description(), Some("A board profile"));
+        assert_eq!(manifest.url(), Some("https://example.com/board"));
     }
 }
