@@ -262,6 +262,10 @@ fn validate_label(label: &str) -> Result<()> {
 }
 
 fn expand_label_token(token: &str, labels: &mut Vec<String>) -> Result<()> {
+    if let Some(expanded) = expand_bracket_range(token) {
+        labels.extend(expanded);
+        return Ok(());
+    }
     if let Some((start, end)) = token.split_once('-') {
         if let Some(expanded) = expand_range(start.trim(), end.trim()) {
             labels.extend(expanded);
@@ -271,6 +275,30 @@ fn expand_label_token(token: &str, labels: &mut Vec<String>) -> Result<()> {
     validate_label(token)?;
     labels.push(token.to_string());
     Ok(())
+}
+
+fn expand_bracket_range(token: &str) -> Option<Vec<String>> {
+    let open = token.find('[')?;
+    let close = token[open + 1..].find(']')? + open + 1;
+    if close + 1 != token.len() {
+        return None;
+    }
+    let prefix = &token[..open];
+    let range = &token[open + 1..close];
+    let (start, end) = range.split_once('-')?;
+    if prefix.is_empty() {
+        return None;
+    }
+    let start: u32 = start.parse().ok()?;
+    let end: u32 = end.parse().ok()?;
+    if start > end {
+        return None;
+    }
+    Some(
+        (start..=end)
+            .map(|number| format!("{prefix}{number}"))
+            .collect(),
+    )
 }
 
 fn expand_range(start: &str, end: &str) -> Option<Vec<String>> {
@@ -312,6 +340,14 @@ mod tests {
         assert_eq!(
             parse_label_list("D0-D3 SDA SCL").unwrap(),
             ["D0", "D1", "D2", "D3", "SDA", "SCL"]
+        );
+    }
+
+    #[test]
+    fn expands_bracket_label_ranges() {
+        assert_eq!(
+            parse_label_list("D[0-3] A[0-1]").unwrap(),
+            ["D0", "D1", "D2", "D3", "A0", "A1"]
         );
     }
 
