@@ -10,6 +10,8 @@ pub struct FwcheckCli {
 pub enum FwcheckCommand {
     /// List known firmware checks.
     List,
+    /// Resolve and print the ESP32 serial port.
+    Port(FwcheckPortArgs),
     /// Build, flash/run, capture, and summarize one firmware check.
     Run(FwcheckRunArgs),
 }
@@ -41,4 +43,11 @@ pub struct FwcheckRunArgs {
     /// Stream raw build, flash, and firmware output while the check runs.
     #[arg(short, long)]
     pub verbose: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct FwcheckPortArgs {
+    /// Optional serial port override.
+    #[arg(long)]
+    pub port: Option<String>,
 }

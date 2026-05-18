@@ -179,7 +179,8 @@ inherits = "release"
 panic = "unwind"
 
 [profile.release-esp32.package.fw-esp32]
-strip = "debuginfo"
+debug = 1
+strip = "none"
 
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).

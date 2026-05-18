@@ -9,6 +9,7 @@ use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::LpGraphics;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
+use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
@@ -140,6 +141,7 @@ fn handle_load_project(
     graphics: Arc<dyn LpGraphics>,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
+    backtrace::set_oom_context("server handler: load project");
     log::info!("Loading project: {}", path.as_str());
     log_memory(memory_stats, "load_project before");
     let handle = project_manager.load_project(
@@ -150,8 +152,12 @@ fn handle_load_project(
         time_provider,
         graphics,
     )?;
+    backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
-    Ok(ServerMessagePayload::LoadProject { handle })
+    backtrace::set_oom_context("server handler: load project response");
+    let response = ServerMessagePayload::LoadProject { handle };
+    backtrace::clear_oom_context();
+    Ok(response)
 }
 
 /// Handle an UnloadProject request

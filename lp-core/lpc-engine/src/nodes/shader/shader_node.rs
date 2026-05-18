@@ -92,12 +92,19 @@ impl ShaderNode {
         #[cfg(feature = "panic-recovery")]
         let compile_result: Result<Box<dyn LpShader>, String> = {
             use core::panic::AssertUnwindSafe;
+            use lpc_shared::backtrace::PanicPayload;
             use unwinding::panic::catch_unwind;
             match catch_unwind(AssertUnwindSafe(|| {
                 graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
             })) {
                 Ok(inner) => inner.map_err(|e| format!("{e}")),
-                Err(_) => Err(String::from("OOM during shader compilation")),
+                Err(payload) => {
+                    if let Some(panic) = payload.downcast_ref::<PanicPayload>() {
+                        Err(panic.format_error())
+                    } else {
+                        Err(String::from("panic during shader compilation"))
+                    }
+                }
             }
         };
         #[cfg(not(feature = "panic-recovery"))]

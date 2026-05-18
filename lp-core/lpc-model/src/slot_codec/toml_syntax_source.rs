@@ -104,10 +104,16 @@ impl<'a> TomlSyntaxSource<'a> {
                 Ok(SyntaxEvent::StartArray { span: None })
             }
             Value::Table(table) => {
-                self.stack.push(TomlFrame::Object {
-                    entries: table.iter().collect(),
-                    index: 0,
-                });
+                let mut entries: Vec<_> = table.iter().collect();
+                entries.sort_by(
+                    |(left, _), (right, _)| match (left.as_str(), right.as_str()) {
+                        ("kind", "kind") => core::cmp::Ordering::Equal,
+                        ("kind", _) => core::cmp::Ordering::Less,
+                        (_, "kind") => core::cmp::Ordering::Greater,
+                        _ => core::cmp::Ordering::Equal,
+                    },
+                );
+                self.stack.push(TomlFrame::Object { entries, index: 0 });
                 Ok(SyntaxEvent::StartObject { span: None })
             }
             Value::Datetime(_) => Err(SyntaxError::new(

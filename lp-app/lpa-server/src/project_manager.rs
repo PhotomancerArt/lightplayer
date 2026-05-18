@@ -17,6 +17,7 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 use lpc_engine::LpGraphics;
 use lpc_model::{LpPath, LpPathBuf};
+use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::WireProjectHandle as ProjectHandle;
@@ -95,12 +96,12 @@ impl ProjectManager {
                 .join(&name)
         };
 
-        // Create project-scoped filesystem using chroot
+        backtrace::set_oom_context("project manager: chroot project fs");
         let project_fs = base_fs
             .chroot(project_path.as_path())
             .map_err(|e| ServerError::Filesystem(format!("Failed to chroot to project: {e}")))?;
 
-        // Create and load a core project runtime from the project-scoped filesystem.
+        backtrace::set_oom_context("project manager: create project");
         let project = Project::new(
             name.clone(),
             project_path.as_path(),
@@ -111,10 +112,12 @@ impl ProjectManager {
             graphics,
         )?;
 
-        // Store mappings
+        backtrace::set_oom_context("project manager: insert project runtime");
         self.projects.insert(handle, project);
         log::info!("Project loaded: {name}");
+        backtrace::set_oom_context("project manager: insert project name");
         self.name_to_handle.insert(name, handle);
+        backtrace::clear_oom_context();
 
         Ok(handle)
     }

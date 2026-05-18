@@ -8,6 +8,7 @@ use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
 use lpc_engine::{Engine, EngineServices, LpGraphics, ProjectLoader};
 use lpc_model::{LpPath, LpPathBuf, TreePath};
+use lpc_shared::backtrace;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpfs::{FsVersion, LpFs};
@@ -39,24 +40,31 @@ impl Project {
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, ServerError> {
         let _ = memory_stats;
+        backtrace::set_oom_context("project new: root path");
         let root_path = project_root_path(&name)?;
+        backtrace::set_oom_context("project new: engine services");
         let mut services = EngineServices::new(root_path);
         services.set_output_provider(Some(Box::new(SharedOutputProvider(output_provider))));
         services.set_time_provider(time_provider);
 
+        backtrace::set_oom_context("project new: load core project");
         let mut runtime = {
             let fs_ref = fs.borrow();
             ProjectLoader::load_from_root(&*fs_ref, services)
                 .map_err(|e| ServerError::Core(format!("Failed to load core project: {e}")))?
         };
+        backtrace::set_oom_context("project new: set graphics");
         runtime.set_graphics(Some(graphics));
 
-        Ok(Self {
+        backtrace::set_oom_context("project new: build wrapper");
+        let project = Self {
             name,
             path: path.to_path_buf(),
             runtime,
             last_fs_version: FsVersion::default(),
-        })
+        };
+        backtrace::clear_oom_context();
+        Ok(project)
     }
 
     /// Get the project name
