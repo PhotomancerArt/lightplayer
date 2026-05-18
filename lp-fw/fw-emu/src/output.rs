@@ -6,14 +6,14 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use lp_riscv_emu_guest::println;
 use lpc_shared::OutputError;
 use lpc_shared::hardware::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareLease, HardwareManifest,
-    HardwareRegistry,
+    HardwareAddress, HardwareCapability, HardwareClaim, HardwareLease, HardwareRegistry,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 
@@ -22,18 +22,15 @@ use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 /// For now, uses print logging to indicate output changes.
 /// Output syscalls will be added later if needed.
 pub struct SyscallOutputProvider {
-    hardware_registry: HardwareRegistry,
+    hardware_registry: Rc<HardwareRegistry>,
     channels: RefCell<BTreeMap<OutputChannelHandle, HardwareLease>>,
     next_handle: RefCell<u32>,
 }
 
 impl SyscallOutputProvider {
-    /// Create a new syscall-based OutputProvider instance
-    pub fn new() -> Self {
+    pub fn new_with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
         Self {
-            hardware_registry: HardwareRegistry::new(
-                HardwareManifest::virtual_single_rmt_gpio_board(),
-            ),
+            hardware_registry,
             channels: RefCell::new(BTreeMap::new()),
             next_handle: RefCell::new(1),
         }

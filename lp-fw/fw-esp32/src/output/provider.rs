@@ -6,6 +6,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
@@ -15,7 +16,6 @@ use lpc_shared::hardware::{
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::{DisplayPipeline, OutputError};
 
-use crate::board::esp32c6::hardware_manifest::esp32c6_devkit_hardware_manifest;
 use crate::output::{LedChannel, LedTransaction};
 use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
@@ -41,7 +41,7 @@ static mut CURRENT_TRANSACTION: Option<LedTransaction<'static>> = None;
 
 /// ESP32 OutputProvider implementation using RMT driver
 pub struct Esp32OutputProvider {
-    hardware_registry: HardwareRegistry,
+    hardware_registry: Rc<HardwareRegistry>,
     /// Map of handle ID to channel state
     channels: RefCell<BTreeMap<i32, ChannelState>>,
     /// Next handle ID to assign
@@ -53,9 +53,9 @@ impl Esp32OutputProvider {
     ///
     /// The hardware registry models all known board GPIO resources, while the current RMT driver
     /// instance is initialized separately for GPIO18 during boot.
-    pub fn new() -> Self {
+    pub fn new(hardware_registry: Rc<HardwareRegistry>) -> Self {
         Self {
-            hardware_registry: HardwareRegistry::new(esp32c6_devkit_hardware_manifest()),
+            hardware_registry,
             channels: RefCell::new(BTreeMap::new()),
             next_handle: RefCell::new(1),
         }

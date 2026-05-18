@@ -159,6 +159,7 @@ mod board;
     feature = "test_dither",
     feature = "test_gpio",
     feature = "test_gpio_calibrate",
+    feature = "test_button",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -168,6 +169,23 @@ mod board;
     feature = "test_espnow",
 )))]
 mod boot;
+#[cfg(any(
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_gpio_calibrate",
+        feature = "test_button",
+        feature = "test_usb",
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
+        feature = "test_espnow",
+    )),
+    feature = "test_button",
+))]
+mod hardware;
 mod jit_fns;
 mod logger;
 #[cfg(any(
@@ -176,6 +194,7 @@ mod logger;
         feature = "test_dither",
         feature = "test_gpio",
         feature = "test_gpio_calibrate",
+        feature = "test_button",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -198,6 +217,7 @@ mod serial;
     feature = "test_dither",
     feature = "test_gpio",
     feature = "test_gpio_calibrate",
+    feature = "test_button",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -212,6 +232,7 @@ mod server_loop;
     feature = "test_dither",
     feature = "test_gpio",
     feature = "test_gpio_calibrate",
+    feature = "test_button",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -228,6 +249,7 @@ mod time;
         feature = "test_dither",
         feature = "test_gpio",
         feature = "test_gpio_calibrate",
+        feature = "test_button",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -246,6 +268,7 @@ mod transport;
         feature = "test_dither",
         feature = "test_gpio",
         feature = "test_gpio_calibrate",
+        feature = "test_button",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -263,6 +286,7 @@ mod flash_storage;
         feature = "test_dither",
         feature = "test_gpio",
         feature = "test_gpio_calibrate",
+        feature = "test_button",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -279,6 +303,7 @@ mod lp_fs_flash;
     feature = "test_dither",
     feature = "test_gpio",
     feature = "test_gpio_calibrate",
+    feature = "test_button",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -293,6 +318,7 @@ use lpfs::lp_path::AsLpPath;
     feature = "test_dither",
     feature = "test_gpio",
     feature = "test_gpio_calibrate",
+    feature = "test_button",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -305,7 +331,9 @@ use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
+    hardware::manifest_loader::load_hardware_manifest,
     lpa_server::{Graphics, LpGraphics, LpServer},
+    lpc_shared::hardware::HardwareRegistry,
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::Esp32OutputProvider,
@@ -332,6 +360,11 @@ mod tests {
 #[cfg(feature = "test_gpio_calibrate")]
 mod tests {
     pub mod test_gpio_calibrate;
+}
+
+#[cfg(feature = "test_button")]
+mod tests {
+    pub mod test_button;
 }
 
 #[cfg(feature = "test_usb")]
@@ -378,6 +411,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     feature = "test_dither",
     feature = "test_gpio",
     feature = "test_gpio_calibrate",
+    feature = "test_button",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -405,6 +439,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_gpio_calibrate::run_gpio_calibration_test;
         run_gpio_calibration_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_button")]
+    {
+        use tests::test_button::run_button_test;
+        run_button_test(spawner).await;
     }
 
     #[cfg(feature = "test_rmt")]
@@ -466,6 +506,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_dither",
         feature = "test_gpio",
         feature = "test_gpio_calibrate",
+        feature = "test_button",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -543,26 +584,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             .expect("Failed to initialize RMT");
         esp_println::println!("[INIT] RMT peripheral initialized");
 
-        // Initialize output provider
-        esp_println::println!("[INIT] Creating output provider...");
-        let output_provider = Esp32OutputProvider::new();
-
-        // Initialize RMT channel with GPIO18 (hardcoded for now)
-        // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
-        const NUM_LEDS: usize = 256;
-        esp_println::println!(
-            "[INIT] Initializing RMT channel with GPIO18, {} LEDs...",
-            NUM_LEDS
-        );
-        Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
-            .expect("Failed to initialize RMT channel");
-        esp_println::println!("[INIT] RMT channel initialized");
-
-        let output_provider: Rc<RefCell<dyn OutputProvider>> =
-            Rc::new(RefCell::new(output_provider));
-        esp_println::println!("[INIT] Output provider created");
-
-        // Create filesystem: in-memory when memory_fs enabled, else flash-backed
+        // Create filesystem before hardware providers so /hardware.toml can override board policy.
         let base_fs: Box<dyn lpfs::LpFs> = {
             #[cfg(not(feature = "memory_fs"))]
             {
@@ -589,6 +611,33 @@ async fn main(spawner: embassy_executor::Spawner) {
         };
         #[cfg(feature = "memory_fs")]
         esp_println::println!("[INIT] In-memory filesystem created");
+
+        let hardware_manifest = load_hardware_manifest(base_fs.as_ref());
+        log::info!(
+            "[fw-esp32] Hardware manifest: {} ({})",
+            hardware_manifest.board_id(),
+            hardware_manifest.board_name()
+        );
+        let hardware_registry = Rc::new(HardwareRegistry::new(hardware_manifest));
+
+        // Initialize output provider
+        esp_println::println!("[INIT] Creating output provider...");
+        let output_provider = Esp32OutputProvider::new(Rc::clone(&hardware_registry));
+
+        // Initialize RMT channel with GPIO18 (hardcoded for now)
+        // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
+        const NUM_LEDS: usize = 256;
+        esp_println::println!(
+            "[INIT] Initializing RMT channel with GPIO18, {} LEDs...",
+            NUM_LEDS
+        );
+        Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
+            .expect("Failed to initialize RMT channel");
+        esp_println::println!("[INIT] RMT channel initialized");
+
+        let output_provider: Rc<RefCell<dyn OutputProvider>> =
+            Rc::new(RefCell::new(output_provider));
+        esp_println::println!("[INIT] Output provider created");
 
         // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
         esp_println::println!("[INIT] Creating LpServer instance...");

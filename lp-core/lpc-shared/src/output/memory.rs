@@ -8,6 +8,7 @@ use crate::output::provider::{
 };
 use alloc::collections::BTreeMap;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -37,7 +38,7 @@ struct MemoryOutputProviderState {
 /// Tracks opened channels, prevents duplicate opens on the same pin,
 /// and stores written data for verification.
 pub struct MemoryOutputProvider {
-    hardware_registry: HardwareRegistry,
+    hardware_registry: Rc<HardwareRegistry>,
     state: RefCell<MemoryOutputProviderState>,
 }
 
@@ -48,8 +49,12 @@ impl MemoryOutputProvider {
     }
 
     pub fn with_hardware_manifest(manifest: HardwareManifest) -> Self {
+        Self::with_hardware_registry(Rc::new(HardwareRegistry::new(manifest)))
+    }
+
+    pub fn with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
         Self {
-            hardware_registry: HardwareRegistry::new(manifest),
+            hardware_registry,
             state: RefCell::new(MemoryOutputProviderState {
                 channels: BTreeMap::new(),
                 next_handle: 0,

@@ -32,6 +32,26 @@
 - **Rejected alternatives:** New crate before the surface is proven; firmware-only types.
 - **Revisit when:** Hardware APIs grow beyond registry/manifest/claim primitives.
 
+#### Firmware Owns The Hardware Registry
+
+- **Decision:** The firmware/app root creates one device-level hardware registry and passes shared
+  access to hardware-facing services such as output, buttons, and future radio.
+- **Why:** Hardware is once-per-device, like transports. Projects and nodes should request IO
+  behavior through services, not own device resources themselves.
+- **Rejected alternatives:** Let each provider own a private registry; attach hardware ownership to
+  individual nodes or projects.
+- **Revisit when:** A server-level hardware introspection API needs to expose active claims.
+
+#### Device Hardware Manifest Override
+
+- **Decision:** ESP32 firmware uses a compiled default board manifest and falls back to it when
+  `/hardware.toml` is absent or invalid.
+- **Why:** The checked-in default keeps boot reliable, while a device-local override gives room for
+  calibration and board-specific policy without reflashing firmware.
+- **Rejected alternatives:** Hardcode the manifest in ESP32 Rust only; fail boot on invalid
+  `/hardware.toml`; make manifests project-local.
+- **Revisit when:** Runtime hardware editing or hot-reload semantics are designed.
+
 #### ESP-NOW Is The First Radio Path
 
 - **Decision:** Promote ESP-NOW from smoke test to reusable tiny-message transport before exploring
