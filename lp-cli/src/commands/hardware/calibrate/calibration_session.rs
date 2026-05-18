@@ -25,6 +25,7 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     let mut manifest = store.load(&board_id)?;
     validate_manifest_target(&manifest, target)?;
 
+    let one_label_run = args.label.is_some();
     let mut label = match args.label {
         Some(label) => label,
         None => prompt_board_label()?,
@@ -87,10 +88,33 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
                     apply_mapping(&mut manifest, candidate.gpio, &label)?;
                     store.save(&manifest, true)?;
                     state.record_mapping(candidate.gpio, &label);
-                    state.current_index = index;
+                    index += 1;
+                    state.current_index = index.min(candidates.len().saturating_sub(1));
                     save_resume(&resume_path, &state)?;
                     println!("Recorded {label} as {}.", candidate.address);
-                    return Ok(());
+                    if one_label_run {
+                        return Ok(());
+                    }
+                    if index >= candidates.len() {
+                        println!("Reached the end of GPIO candidates.");
+                        return Ok(());
+                    }
+                    match prompt_next_board_label()? {
+                        Some(next_label) => {
+                            label = next_label;
+                            state.board_label = label.clone();
+                            state.current_index = index;
+                            save_resume(&resume_path, &state)?;
+                            print_next_label_intro(&label);
+                        }
+                        None => {
+                            println!(
+                                "Calibration paused. Resume state saved to {}.",
+                                resume_path.display()
+                            );
+                            return Ok(());
+                        }
+                    }
                 }
                 PromptCommand::Quit => {
                     transport.send_line("STOP")?;
@@ -200,12 +224,37 @@ fn prompt_board_label() -> Result<String> {
         .interact_text()?)
 }
 
+fn prompt_next_board_label() -> Result<Option<String>> {
+    if !stdin().is_terminal() {
+        return Ok(None);
+    }
+    loop {
+        let label: String = Input::new()
+            .with_prompt("Next board label to calibrate (blank/q to quit)")
+            .allow_empty(true)
+            .interact_text()?;
+        let label = label.trim();
+        if label.is_empty() || label.eq_ignore_ascii_case("q") {
+            return Ok(None);
+        }
+        validate_board_label(label)?;
+        return Ok(Some(label.to_string()));
+    }
+}
+
 fn print_intro(label: &str, manifest: &HardwareManifestFile) {
     println!(
         "Calibrating {} ({}) for board label {label}.",
         manifest.id, manifest.product
     );
     println!("Attach the scope to that board label.");
+    println!(
+        "Press Enter for no/next, y when the square wave is present, p for previous, q to quit."
+    );
+}
+
+fn print_next_label_intro(label: &str) {
+    println!("Move the scope to board label {label}.");
     println!(
         "Press Enter for no/next, y when the square wave is present, p for previous, q to quit."
     );
