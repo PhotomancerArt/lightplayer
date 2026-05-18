@@ -16,6 +16,7 @@ extern crate std;
 pub mod backtrace;
 pub mod error;
 pub mod fps;
+pub mod hardware;
 pub mod stats;
 pub mod util; // Temporarily enabled for Texture
 

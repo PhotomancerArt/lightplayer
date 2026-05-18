@@ -1,5 +1,5 @@
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use lpc_model::NodeKind;
 
 /// Engine error type
@@ -90,6 +90,10 @@ impl From<lpc_shared::OutputError> for Error {
         match err {
             lpc_shared::OutputError::PinAlreadyOpen { pin } => Error::Other {
                 message: format!("Pin {pin} is already open"),
+            },
+            lpc_shared::OutputError::Hardware { error } => Error::InvalidConfig {
+                node_path: String::from("output"),
+                reason: error.to_string(),
             },
             lpc_shared::OutputError::InvalidHandle { handle } => Error::Other {
                 message: format!("Invalid handle: {handle}"),

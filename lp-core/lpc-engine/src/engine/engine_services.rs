@@ -296,6 +296,7 @@ fn ensure_channel_open(
 mod tests {
     use alloc::boxed::Box;
     use alloc::rc::Rc;
+    use alloc::string::ToString;
     use alloc::vec;
 
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
@@ -307,7 +308,7 @@ mod tests {
     };
 
     use super::EngineServices;
-    use crate::resource::{RuntimeBuffer, RuntimeBufferStore};
+    use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 
     #[test]
     fn engine_services_drop_closes_open_output_channels() {
@@ -369,6 +370,62 @@ mod tests {
         let second_handle = provider.get_handle_for_pin(4).expect("second handle");
         assert_ne!(first_handle, second_handle);
         assert_eq!(provider.open_channel_count(), 1);
+    }
+
+    #[test]
+    fn engine_services_duplicate_output_pin_reports_hardware_conflict() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let first = output_buffer(&mut buffers, Revision::new(1));
+        let second = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(first, &OutputDef::new(4));
+        services.register_output_sink(second, &OutputDef::new(4));
+
+        let err = services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect_err("duplicate GPIO should fail");
+
+        assert!(matches!(
+            err,
+            super::OutputFlushError::Provider(OutputError::Hardware { .. })
+        ));
+        assert_eq!(provider.open_channel_count(), 1);
+        assert!(provider.is_pin_open(4));
+    }
+
+    #[test]
+    fn engine_services_different_output_pins_contend_for_single_rmt() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let first = output_buffer(&mut buffers, Revision::new(1));
+        let second = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(first, &OutputDef::new(4));
+        services.register_output_sink(second, &OutputDef::new(5));
+
+        let err = services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect_err("single RMT resource should allow only one output");
+
+        assert!(err.to_string().contains("/rmt/ws281x0"));
+        assert_eq!(provider.open_channel_count(), 1);
+        assert_ne!(provider.is_pin_open(4), provider.is_pin_open(5));
+    }
+
+    fn output_buffer(store: &mut RuntimeBufferStore, revision: Revision) -> RuntimeBufferId {
+        store.insert(WithRevision::new(
+            revision,
+            RuntimeBuffer::output_channels_u16(3, vec![0, 1, 0, 2, 0, 3]),
+        ))
     }
 
     struct SharedMemoryOutputProvider(Rc<MemoryOutputProvider>);

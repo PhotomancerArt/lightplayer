@@ -3,6 +3,8 @@
 use alloc::string::String;
 use core::fmt;
 
+use crate::hardware::HardwareError;
+
 /// Texture error type
 #[derive(Debug, Clone)]
 pub enum TextureError {
@@ -30,6 +32,8 @@ impl fmt::Display for TextureError {
 pub enum OutputError {
     /// Pin is already open
     PinAlreadyOpen { pin: u32 },
+    /// Hardware resource claim failed
+    Hardware { error: HardwareError },
     /// Invalid handle
     InvalidHandle { handle: i32 },
     /// Invalid configuration
@@ -45,6 +49,9 @@ impl fmt::Display for OutputError {
         match self {
             OutputError::PinAlreadyOpen { pin } => {
                 write!(f, "Pin {pin} is already open")
+            }
+            OutputError::Hardware { error } => {
+                write!(f, "Hardware error: {error}")
             }
             OutputError::InvalidHandle { handle } => {
                 write!(f, "Invalid handle: {handle}")

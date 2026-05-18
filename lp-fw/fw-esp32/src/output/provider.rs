@@ -9,9 +9,13 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+use lpc_shared::hardware::{
+    HardwareAddress, HardwareCapability, HardwareClaim, HardwareLease, HardwareRegistry,
+};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::{DisplayPipeline, OutputError};
 
+use crate::board::esp32c6::hardware_manifest::esp32c6_devkit_hardware_manifest;
 use crate::output::{LedChannel, LedTransaction};
 use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
@@ -19,29 +23,27 @@ use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 
 /// Channel state for an opened output channel
 struct ChannelState {
-    pin: u32,
     byte_count: u32,
     #[allow(dead_code, reason = "format field reserved for future validation")]
     format: OutputFormat,
+    lease: HardwareLease,
     pipeline: DisplayPipeline,
     /// Stored for resize: create new pipeline with same options when data grows
     #[allow(dead_code, reason = "reserved for future pipeline resize")]
     options: OutputDriverOptions,
 }
 
-// Unsafe static to store LedChannel (hardcoded to GPIO18 for now)
+// Unsafe static to store the currently initialized GPIO18-backed LED channel.
 // This is needed because LedChannel has lifetime constraints that don't work well
 // with the OutputProvider trait's lifetime model.
-// TODO: Refactor to support multiple channels and proper lifetime management
 static mut LED_CHANNEL: Option<LedChannel<'static>> = None;
 static mut CURRENT_TRANSACTION: Option<LedTransaction<'static>> = None;
 
 /// ESP32 OutputProvider implementation using RMT driver
 pub struct Esp32OutputProvider {
+    hardware_registry: HardwareRegistry,
     /// Map of handle ID to channel state
     channels: RefCell<BTreeMap<i32, ChannelState>>,
-    /// Set of pins that are currently open (to prevent duplicates)
-    open_pins: RefCell<alloc::collections::BTreeSet<u32>>,
     /// Next handle ID to assign
     next_handle: RefCell<i32>,
 }
@@ -49,25 +51,20 @@ pub struct Esp32OutputProvider {
 impl Esp32OutputProvider {
     /// Create a new ESP32 OutputProvider
     ///
-    /// # Arguments
-    /// * `rmt` - RMT peripheral (will be consumed when first channel is opened)
-    /// * `pin` - GPIO pin for LED output (hardcoded to GPIO18 for now)
-    /// * `num_leds` - Number of LEDs (will be set when open() is called)
-    ///
-    /// Note: For now, this is hardcoded to use GPIO18. The RMT and pin are stored
-    /// but the LedChannel is only created when open() is called.
+    /// The hardware registry models all known board GPIO resources, while the current RMT driver
+    /// instance is initialized separately for GPIO18 during boot.
     pub fn new() -> Self {
         Self {
+            hardware_registry: HardwareRegistry::new(esp32c6_devkit_hardware_manifest()),
             channels: RefCell::new(BTreeMap::new()),
-            open_pins: RefCell::new(alloc::collections::BTreeSet::new()),
             next_handle: RefCell::new(1),
         }
     }
 
     /// Initialize RMT channel (called from main.rs after provider is created)
     ///
-    /// This function takes ownership of RMT and GPIO pin and creates a LedChannel.
-    /// For now, hardcoded to GPIO18.
+    /// This function takes ownership of RMT and the boot-selected GPIO pin and creates a
+    /// [`LedChannel`]. Main firmware currently calls it with GPIO18.
     pub fn init_rmt<O>(
         rmt: Rmt<'static, Blocking>,
         pin: O,
@@ -104,12 +101,6 @@ impl OutputProvider for Esp32OutputProvider {
             "Esp32OutputProvider::open: pin={pin}, byte_count={byte_count}, format={format:?}"
         );
 
-        // Check if pin is already open
-        if self.open_pins.borrow().contains(&pin) {
-            log::warn!("Esp32OutputProvider::open: Pin {pin} already open");
-            return Err(OutputError::PinAlreadyOpen { pin });
-        }
-
         // Validate format
         if format != OutputFormat::Ws2811 {
             log::warn!("Esp32OutputProvider::open: Unsupported format: {format:?}");
@@ -129,25 +120,23 @@ impl OutputProvider for Esp32OutputProvider {
             });
         }
 
-        // For now, hardcode to GPIO18 (pin 18)
-        // TODO: Support multiple pins and convert u32 pin numbers to GPIO pin types
-        // const HARDCODED_PIN: u32 = 18;
-        // if pin != HARDCODED_PIN {
-        //     log::warn!(
-        //         "Esp32OutputProvider::open: Pin {} requested, but only pin {} (GPIO18) is supported",
-        //         pin,
-        //         HARDCODED_PIN
-        //     );
-        //     return Err(OutputError::InvalidConfig {
-        //         reason: format!("Only pin {} (GPIO18) is supported for now", HARDCODED_PIN),
-        //     });
-        // }
+        let lease = self.claim_ws281x_output(pin)?;
+
+        if pin != 18 {
+            self.release_lease(&lease);
+            return Err(OutputError::InvalidConfig {
+                reason: format!(
+                    "ESP32 WS281x output currently uses the initialized GPIO18 RMT channel; requested /gpio/{pin}"
+                ),
+            });
+        }
 
         // Check if LedChannel is already initialized
         unsafe {
             let channel_ptr = core::ptr::addr_of!(LED_CHANNEL);
             if (*channel_ptr).is_none() {
                 log::error!("Esp32OutputProvider::open: RMT channel not initialized");
+                self.release_lease(&lease);
                 return Err(OutputError::InvalidConfig {
                     reason: "RMT channel not initialized. Call init_rmt() first.".into(),
                 });
@@ -159,10 +148,12 @@ impl OutputProvider for Esp32OutputProvider {
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id);
 
-        let pipeline =
-            DisplayPipeline::new(num_leds, options.clone()).map_err(|e| OutputError::Other {
+        let pipeline = DisplayPipeline::new(num_leds, options.clone()).map_err(|e| {
+            self.release_lease(&lease);
+            OutputError::Other {
                 message: alloc::format!("DisplayPipeline allocation failed: {e}"),
-            })?;
+            }
+        })?;
 
         log::info!(
             "Esp32OutputProvider::open: Opened channel handle={handle_id}, pin={pin}, byte_count={byte_count}, num_leds={num_leds}"
@@ -171,14 +162,13 @@ impl OutputProvider for Esp32OutputProvider {
         self.channels.borrow_mut().insert(
             handle_id,
             ChannelState {
-                pin,
                 byte_count,
                 format,
+                lease,
                 pipeline,
                 options,
             },
         );
-        self.open_pins.borrow_mut().insert(pin);
 
         Ok(handle)
     }
@@ -270,13 +260,37 @@ impl OutputProvider for Esp32OutputProvider {
         let channel = channels
             .remove(&handle_id)
             .ok_or_else(|| OutputError::InvalidHandle { handle: handle_id })?;
+        drop(channels);
 
-        // Remove pin from open set
-        self.open_pins.borrow_mut().remove(&channel.pin);
-
-        // Channel state is dropped here
-        // TODO: When RMT transaction is stored, it will be dropped here too
+        self.hardware_registry
+            .release(&channel.lease)
+            .map_err(|error| OutputError::Hardware { error })?;
 
         Ok(())
+    }
+}
+
+impl Esp32OutputProvider {
+    fn claim_ws281x_output(&self, pin: u32) -> Result<HardwareLease, OutputError> {
+        let gpio = HardwareAddress::gpio(pin);
+        let rmt = HardwareAddress::rmt_ws281x(0);
+        self.hardware_registry
+            .ensure_capability(&gpio, HardwareCapability::GpioOutput)
+            .map_err(|error| OutputError::Hardware { error })?;
+        self.hardware_registry
+            .ensure_capability(&rmt, HardwareCapability::Rmt)
+            .map_err(|error| OutputError::Hardware { error })?;
+        self.hardware_registry
+            .ensure_capability(&rmt, HardwareCapability::Ws281xOutput)
+            .map_err(|error| OutputError::Hardware { error })?;
+        self.hardware_registry
+            .claim_bundle(HardwareClaim::new("esp32-output", Vec::from([gpio, rmt])))
+            .map_err(|error| OutputError::Hardware { error })
+    }
+
+    fn release_lease(&self, lease: &HardwareLease) {
+        if let Err(error) = self.hardware_registry.release(lease) {
+            log::warn!("Esp32OutputProvider: failed to release hardware lease: {error}");
+        }
     }
 }

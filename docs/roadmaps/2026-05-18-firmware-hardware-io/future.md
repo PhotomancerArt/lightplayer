@@ -6,13 +6,27 @@
   enough to validate the model.
 - **Useful context:** Start from `fw-esp32/src/board/esp32c6` once the static manifest proves useful.
 
-## Pin Scan UI
+## Board Manifest Calibration Tool
 
-- **Idea:** Add a user-facing diagnostic that pulses safe GPIO candidates and helps match board
-  silkscreen labels to HAL GPIO numbers.
-- **Why not now:** The registry and manifest must exist first; the initial roadmap only needs the
-  backend shape and perhaps firmware diagnostics.
-- **Useful context:** `fw-esp32/src/tests/test_gpio.rs` already cycles known GPIO pins.
+- **Idea:** Add a firmware test mode plus `lp-cli` workflow that discovers board-profile pin
+  metadata by pulsing HAL GPIO candidates, prompting the user to confirm which silkscreen label sees
+  the square wave, and recording crashes/resets as reserved/unsafe pins.
+- **Why not now:** This is its own host/firmware workflow. M1 only needs the manifest data model and
+  static board profiles; calibration can follow once `HardwareManifest` has stable fields for
+  internal address, display label, aliases, location, and reserved reason.
+- **Useful context:** `fw-esp32/src/tests/test_gpio.rs` already cycles known GPIO pins. `lp-cli`
+  already has serial port detection in `lp-cli/src/client/serial_port.rs`, and the justfile has
+  ESP32 test-mode recipes such as `test-gpio`, `test-rmt`, and `test-espnow`. Notes are parked in
+  `docs/roadmaps/2026-05-18-firmware-hardware-io/m1.1-board-manifest-calibration/00-notes.md`.
+
+## ESP32 Dynamic LED Pin Dispatch
+
+- **Idea:** Replace the current GPIO18-only RMT LED channel initialization with a small HAL GPIO
+  output dispatch table so validated manifest GPIOs can actually drive WS281x output.
+- **Why not now:** M1 proves resource ownership and clear failures first. ESP HAL GPIO ownership is
+  concrete and would make the registry milestone larger than needed.
+- **Useful context:** M1's ESP32 provider claims requested GPIO resources but only opens output on
+  the boot-initialized GPIO18 RMT channel.
 
 ## IO Expanders And Sensors
 

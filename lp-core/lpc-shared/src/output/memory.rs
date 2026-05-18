@@ -1,8 +1,12 @@
 use crate::error::OutputError;
+use crate::hardware::{
+    HardwareAddress, HardwareCapability, HardwareClaim, HardwareLease, HardwareManifest,
+    HardwareRegistry,
+};
 use crate::output::provider::{
     OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -18,6 +22,7 @@ struct ChannelState {
     byte_count: u32,
     #[allow(dead_code, reason = "Stored for future protocol-specific handling")]
     format: OutputFormat,
+    lease: HardwareLease,
     data: Vec<u16>,
 }
 
@@ -25,7 +30,6 @@ struct ChannelState {
 struct MemoryOutputProviderState {
     channels: BTreeMap<OutputChannelHandle, ChannelState>,
     next_handle: i32,
-    open_pins: BTreeSet<u32>,
 }
 
 /// In-memory output provider for testing
@@ -33,17 +37,22 @@ struct MemoryOutputProviderState {
 /// Tracks opened channels, prevents duplicate opens on the same pin,
 /// and stores written data for verification.
 pub struct MemoryOutputProvider {
+    hardware_registry: HardwareRegistry,
     state: RefCell<MemoryOutputProviderState>,
 }
 
 impl MemoryOutputProvider {
     /// Create a new memory output provider
     pub fn new() -> Self {
+        Self::with_hardware_manifest(HardwareManifest::virtual_single_rmt_gpio_board())
+    }
+
+    pub fn with_hardware_manifest(manifest: HardwareManifest) -> Self {
         Self {
+            hardware_registry: HardwareRegistry::new(manifest),
             state: RefCell::new(MemoryOutputProviderState {
                 channels: BTreeMap::new(),
                 next_handle: 0,
-                open_pins: BTreeSet::new(),
             }),
         }
     }
@@ -64,7 +73,8 @@ impl MemoryOutputProvider {
 
     /// Check if a pin is open
     pub fn is_pin_open(&self, pin: u32) -> bool {
-        self.state.borrow().open_pins.contains(&pin)
+        self.hardware_registry
+            .is_claimed(&HardwareAddress::gpio(pin))
     }
 
     /// Get the handle for a given pin (for testing)
@@ -93,12 +103,6 @@ impl OutputProvider for MemoryOutputProvider {
         options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
         let _ = options;
-        let mut state = self.state.borrow_mut();
-
-        // Check if pin is already open
-        if state.open_pins.contains(&pin) {
-            return Err(OutputError::PinAlreadyOpen { pin });
-        }
 
         // Validate byte_count
         if byte_count == 0 {
@@ -106,6 +110,15 @@ impl OutputProvider for MemoryOutputProvider {
                 reason: format!("byte_count must be > 0, got {byte_count}"),
             });
         }
+        if format != OutputFormat::Ws2811 {
+            return Err(OutputError::InvalidConfig {
+                reason: format!("unsupported output format: {format:?}"),
+            });
+        }
+
+        let lease = self.claim_ws281x_output(pin)?;
+
+        let mut state = self.state.borrow_mut();
 
         // Create handle
         let handle = OutputChannelHandle::new(state.next_handle);
@@ -120,12 +133,12 @@ impl OutputProvider for MemoryOutputProvider {
             pin,
             byte_count,
             format,
+            lease,
             data: vec![0u16; u16_count],
         };
 
         // Store state
         state.channels.insert(handle, channel_state);
-        state.open_pins.insert(pin);
 
         Ok(handle)
     }
@@ -166,22 +179,39 @@ impl OutputProvider for MemoryOutputProvider {
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
         let mut state = self.state.borrow_mut();
 
-        // Check if handle exists and get pin before removing
-        let pin = state
+        // Remove channel from channels
+        let channel = state
             .channels
-            .get(&handle)
+            .remove(&handle)
             .ok_or_else(|| OutputError::InvalidHandle {
                 handle: handle.as_i32(),
-            })?
-            .pin;
+            })?;
+        drop(state);
 
-        // Remove pin from open_pins
-        state.open_pins.remove(&pin);
-
-        // Remove channel from channels
-        state.channels.remove(&handle);
+        self.hardware_registry
+            .release(&channel.lease)
+            .map_err(|error| OutputError::Hardware { error })?;
 
         Ok(())
+    }
+}
+
+impl MemoryOutputProvider {
+    fn claim_ws281x_output(&self, pin: u32) -> Result<HardwareLease, OutputError> {
+        let gpio = HardwareAddress::gpio(pin);
+        let rmt = HardwareAddress::rmt_ws281x(0);
+        self.hardware_registry
+            .ensure_capability(&gpio, HardwareCapability::GpioOutput)
+            .map_err(|error| OutputError::Hardware { error })?;
+        self.hardware_registry
+            .ensure_capability(&rmt, HardwareCapability::Rmt)
+            .map_err(|error| OutputError::Hardware { error })?;
+        self.hardware_registry
+            .ensure_capability(&rmt, HardwareCapability::Ws281xOutput)
+            .map_err(|error| OutputError::Hardware { error })?;
+        self.hardware_registry
+            .claim_bundle(HardwareClaim::new("memory-output", vec![gpio, rmt]))
+            .map_err(|error| OutputError::Hardware { error })
     }
 }
 
@@ -193,5 +223,21 @@ mod tests {
     fn test_memory_provider_creation() {
         let provider = MemoryOutputProvider::new();
         assert_eq!(provider.open_channel_count(), 0);
+    }
+
+    #[test]
+    fn opening_two_outputs_on_different_pins_contends_for_rmt() {
+        let provider = MemoryOutputProvider::new();
+        let first = provider
+            .open(18, 3, OutputFormat::Ws2811, None)
+            .expect("first output opens");
+
+        let result = provider.open(19, 3, OutputFormat::Ws2811, None);
+
+        assert!(matches!(result, Err(OutputError::Hardware { .. })));
+        assert!(provider.is_pin_open(18));
+        assert!(!provider.is_pin_open(19));
+
+        provider.close(first).expect("first output closes");
     }
 }
